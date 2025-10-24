@@ -13,6 +13,15 @@ Note: SuperSonic uses a SharedBuffer to send and receive OSC messages from scsyn
 
 ## Quick Start
 
+If you are familiar with Docker, you can build and run the example using the following commands:
+
+```bash
+docker build -t supersonic .
+docker run --rm -it -p 8002:8002 supersonic
+```
+
+Or to build and run locally follow the instructions below.
+
 ### 1. Build
 
 **Prerequisites:**
