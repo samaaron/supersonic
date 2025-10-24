@@ -1,4 +1,4 @@
-# Supersonic
+# SuperSonic
 
 > **Warning - Super Alpha Status**: Supersonic is currently in active development (v0.1.0). The API is likely to change between releases. Feedback welcome! Also note that loading audio files is not supported yet but planned for the immediate future.
 
