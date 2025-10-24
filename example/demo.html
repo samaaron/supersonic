@@ -1,0 +1,1640 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/favicon.png">
+
+
+    <title>Supersonic - SuperCollider in the Browser</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.min.css"
+    />
+    <style>
+      /* Let Tailwind handle most resets, only reset specific elements */
+      body,
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Cascadia Code", "Cascadia Mono", Consolas, "Courier New",
+          monospace;
+        background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+        color: #1f2937;
+        line-height: 1.6;
+      }
+
+      .container {
+        max-width: 100%;
+        margin: 0 auto;
+        padding: 0.5rem;
+        padding-bottom: 3rem;
+      }
+
+      h1 {
+        font-size: 1.5rem;
+        font-weight: bold;
+        font-style: italic;
+        margin-bottom: 0.25rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      h2 {
+        font-size: 1.125rem;
+        font-weight: bold;
+        font-style: italic;
+        margin-bottom: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      h3 {
+        font-size: 0.875rem;
+        font-weight: bold;
+        font-style: italic;
+        color: #6b7280;
+        margin: 0.75rem 0 0.5rem 0;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .subtitle {
+        font-size: 0.875rem;
+        color: #6b7280;
+      }
+
+      .panel {
+        background: white;
+        border-radius: 0;
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+          0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        border-left: 6px solid #ff1493;
+      }
+
+      .scope-panel,
+      .dark-panel,
+      .logs-section {
+        margin-bottom: 0;
+      }
+
+      .status-panel {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+      }
+
+      .status-left {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .status-badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 0;
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-style: italic;
+        border: 2px solid currentColor;
+      }
+
+      .status-badge.not-init {
+        background: #e5e7eb;
+        color: #374151;
+      }
+
+      .status-badge.initializing {
+        background: #fef3c7;
+        color: #92400e;
+      }
+
+      .status-badge.ready {
+        background: #d1fae5;
+        color: #065f46;
+      }
+
+      .status-badge.error {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
+      .version {
+        font-size: 0.75rem;
+        color: #6b7280;
+      }
+
+      button {
+        padding: 0.5rem 1rem;
+        border-radius: 0;
+        font-size: 0.875rem;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-style: italic;
+        position: relative;
+        overflow: hidden;
+      }
+
+      button::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(255, 255, 255, 0.3),
+          transparent
+        );
+        transition: left 0.5s;
+      }
+
+      button:hover:not(:disabled)::before {
+        left: 100%;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .btn-primary {
+        background: #ff1493;
+        color: white;
+        border-radius: 0;
+      }
+
+      .btn-primary:hover:not(:disabled) {
+        background: #ffd700;
+        color: #000;
+      }
+
+      .btn-secondary {
+        background: #6b7280;
+        color: white;
+        border-radius: 0;
+      }
+
+      .btn-secondary:hover:not(:disabled) {
+        background: #ffd700;
+        color: #000;
+      }
+
+      .btn-synth {
+        background: #ff6600;
+        color: #000;
+        border-radius: 0;
+        padding: 0.35rem 0.65rem;
+        font-size: 0.75rem;
+      }
+
+      .btn-synth:hover:not(:disabled) {
+        background: #ffd700;
+      }
+
+      .btn-purple {
+        background: #666;
+        color: white;
+        transition: background 0.5s ease;
+      }
+
+      .initialized .btn-purple {
+        background: #ff1493;
+      }
+
+      .btn-purple:hover:not(:disabled) {
+        background: #d4117a;
+      }
+
+      .btn-init {
+        background: #ff1493;
+        color: white;
+        padding: 0.75rem 2rem;
+        font-size: 1rem;
+      }
+
+      .btn-init:hover:not(:disabled) {
+        background: #d4117a;
+      }
+
+      .btn-green {
+        background: #ff6600;
+        color: white;
+        border-radius: 0;
+      }
+
+      .btn-green:hover:not(:disabled) {
+        background: #ffd700;
+        color: #000;
+      }
+
+      /* Welcome Guide Styles */
+      .welcome-guide {
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #333;
+      }
+
+      .welcome-guide h2 {
+        color: #ffd700;
+        margin-bottom: 0.75rem;
+      }
+
+      .welcome-guide ol {
+        list-style: none;
+        counter-reset: welcome-counter;
+        margin: 0 0 0.75rem 0;
+        padding: 0;
+        font-size: 0.8125rem;
+      }
+
+      .welcome-guide li {
+        counter-increment: welcome-counter;
+        margin-bottom: 0.75rem;
+        line-height: 1.6;
+        position: relative;
+        padding-left: 1.5rem;
+      }
+
+      .welcome-guide li:last-child {
+        margin-bottom: 0;
+      }
+
+      .welcome-guide li::before {
+        content: counter(welcome-counter) ".";
+        color: #ff6600;
+        position: absolute;
+        left: 0;
+        font-weight: bold;
+      }
+
+      .welcome-label {
+        color: #ff6600;
+        font-weight: bold;
+      }
+
+      .welcome-text {
+        color: #ffd700;
+      }
+
+      .welcome-code {
+        color: #ff6600;
+        font-style: italic;
+      }
+
+      .welcome-code-block {
+        color: #ff6600;
+        background: rgba(255, 102, 0, 0.1);
+        padding: 0.2rem 0.4rem;
+        font-style: italic;
+        display: block;
+        white-space: pre;
+        margin-top: 0.25rem;
+      }
+
+      .welcome-link {
+        color: #1e90ff;
+        text-decoration: none;
+        font-weight: bold;
+      }
+
+      .welcome-quickstart {
+        font-size: 0.8125rem;
+        color: #ffd700;
+      }
+
+      .btn-red {
+        background: #4169e1;
+        color: white;
+      }
+
+      .btn-red:hover:not(:disabled) {
+        background: #3557c7;
+      }
+
+      .btn-small {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+      }
+
+      .btn-group {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .alert {
+        padding: 1rem;
+        border-radius: 0;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: start;
+        gap: 0.75rem;
+        border-left: 4px solid currentColor;
+      }
+
+      .alert-error {
+        background: #ff1493;
+        border-left-color: #ff1493;
+      }
+
+      .alert-warning {
+        background: #fefce8;
+        border: 1px solid #fef08a;
+      }
+
+      .alert-icon {
+        width: 1.25rem;
+        height: 1.25rem;
+        margin-top: 0.125rem;
+      }
+
+      .alert-error .alert-icon {
+        color: white;
+      }
+
+      .alert-warning .alert-icon {
+        color: #ca8a04;
+      }
+
+      .alert-title {
+        font-size: 0.875rem;
+        font-weight: 500;
+      }
+
+      .alert-error .alert-title {
+        color: white;
+        font-size: 1.125rem;
+        font-weight: bold;
+        font-style: italic;
+      }
+
+      .alert-warning .alert-title {
+        color: #854d0e;
+      }
+
+      .alert-text {
+        font-size: 0.875rem;
+        margin-top: 0.25rem;
+        white-space: pre-wrap;
+      }
+
+      .alert-error .alert-text {
+        color: white;
+        font-size: 0.875rem;
+      }
+
+      .alert-warning .alert-text {
+        color: #a16207;
+      }
+
+      .log-panel {
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+      }
+
+      /* Main layout grid */
+      .main-layout-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      @media (min-width: 1024px) {
+        .main-layout-grid {
+          flex-direction: row;
+        }
+      }
+
+      .left-column {
+        display: flex;
+        flex-direction: column;
+        flex: 0 0 60%;
+        min-width: 200px;
+      }
+
+      .right-column {
+        flex: 0 0 40%;
+        min-width: 300px;
+      }
+
+      .logs-section {
+      }
+
+      .divider {
+        display: none;
+        width: 8px;
+        background: #333;
+        cursor: col-resize;
+        position: relative;
+        transition: background 0.2s;
+        z-index: 5;
+        flex-shrink: 0;
+      }
+
+      .divider:hover {
+        background: #ffd700;
+      }
+
+      .divider:active {
+        background: #ff1493;
+      }
+
+      .divider::before {
+        content: "";
+        position: absolute;
+        left: -8px;
+        right: -8px;
+        top: 0;
+        bottom: 0;
+      }
+
+      @media (min-width: 1024px) {
+        .divider {
+          display: block;
+        }
+      }
+
+      /* Logs grid - stacked vertically on right */
+      .logs-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0;
+      }
+
+      .log-container {
+        background: #000;
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
+        border: 1px solid #333;
+        position: relative;
+      }
+
+      .log-container-header {
+        position: absolute;
+        top: 0.25rem;
+        right: 0.5rem;
+        z-index: 5;
+      }
+
+      .log-container-header h2 {
+        color: #999;
+        font-size: 0.75rem;
+        font-weight: normal;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 0.1rem 0.3rem;
+        transition: color 0.5s ease;
+      }
+
+      .initialized .log-container-header h2 {
+        color: #fff;
+      }
+
+      .log-scroll-area {
+        height: 200px;
+        overflow-y: auto;
+        background: #000;
+        border: none;
+        border-radius: 0;
+        padding: 0.25rem;
+        font-family: "Cascadia Code", "Cascadia Mono", Consolas, "Courier New",
+          monospace;
+        font-size: 0.75rem;
+        line-height: 1.1;
+        color: #ffd700;
+      }
+
+      .log-scroll-area pre {
+        white-space: pre-wrap;
+        word-break: break-all;
+        margin: 0;
+        color: #ffd700;
+        line-height: 1.1;
+      }
+
+      .controls-grid {
+        display: grid;
+        gap: 0;
+        grid-template-columns: 1fr;
+      }
+
+      @media (min-width: 1024px) {
+        .controls-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      .form-group {
+        margin-bottom: 1rem;
+      }
+
+      label {
+        display: block;
+        font-size: 0.875rem;
+        font-weight: 500;
+        margin-bottom: 0.5rem;
+      }
+
+      textarea,
+      select,
+      input {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 2px solid #d1d5db;
+        border-radius: 0;
+        font-size: 0.875rem;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        box-sizing: border-box;
+      }
+
+      textarea:focus,
+      select:focus,
+      input:focus {
+        outline: none;
+        border-color: #1e90ff;
+        box-shadow: 0 0 0 3px rgba(30, 144, 255, 0.1);
+      }
+
+      textarea:disabled,
+      select:disabled,
+      input:disabled {
+        background: #f3f4f6;
+        color: #9ca3af;
+      }
+
+      #message-input {
+        border: 2px solid #ff6600;
+        padding: 0.75rem;
+        font-family: "Cascadia Code", "Cascadia Mono", Consolas, "Courier New",
+          monospace;
+        margin: 0.75rem;
+        width: calc(100% - 1.5rem);
+      }
+
+      .char-count {
+        font-size: 0.875rem;
+        color: #6b7280;
+      }
+
+      .message-item {
+        padding: 0.1rem 0;
+        border-bottom: none;
+      }
+
+      .message-item:last-child {
+        border-bottom: none;
+      }
+
+      .message-header {
+        display: inline;
+        font-size: 0.75rem;
+        color: #ffd700;
+        opacity: 0.6;
+        margin-right: 0.5rem;
+      }
+
+      .message-content {
+        display: inline;
+        font-size: 0.75rem;
+        word-break: break-word;
+        line-height: 1.1;
+        color: #ffd700;
+      }
+
+      .message-empty {
+        color: #ffd700;
+        opacity: 0.5;
+        text-align: center;
+        padding: 2rem;
+      }
+
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
+        font-size: 0.875rem;
+      }
+
+      .metrics-section {
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid #e5e7eb;
+        margin-bottom: 0.75rem;
+      }
+
+      .metrics-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+      }
+
+      .metric-value {
+        font-family: "Courier New", monospace;
+        font-weight: 600;
+        color: #1e90ff;
+      }
+
+      .metric-value.error {
+        color: #4169e1;
+      }
+
+      .metric-value.warning {
+        color: #ff6600;
+      }
+
+      .panel.metrics-compact {
+        font-size: 0.7rem;
+      }
+
+      .scope-panel,
+      .dark-panel {
+        background: #000;
+        border: none;
+        border-radius: 0.5rem;
+      }
+
+      .dark-panel .main-layout-grid,
+      .dark-panel #scope-container,
+      .dark-panel > div:last-child {
+        filter: grayscale(100%);
+        transition: filter 1s ease;
+      }
+
+      .initialized .dark-panel .main-layout-grid,
+      .initialized .dark-panel #scope-container,
+      .initialized .dark-panel > div:last-child {
+        filter: grayscale(0%);
+      }
+
+      .dark-panel h2 {
+        color: #999;
+        transition: color 0.5s ease;
+      }
+
+      .initialized .dark-panel h2 {
+        color: #fff;
+      }
+
+      .initialized .metrics-label {
+        color: #fff !important;
+      }
+
+      .dark-panel label {
+        color: #ffd700;
+      }
+
+      .dark-panel textarea,
+      .dark-panel select {
+        background: #000;
+        color: #ffd700;
+        border: none;
+      }
+
+      .dark-panel textarea::placeholder {
+        color: #ffd700;
+        opacity: 0.5;
+      }
+
+      .dark-panel textarea:focus,
+      .dark-panel select:focus {
+        outline: none;
+        border-color: #ffd700;
+        box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.2);
+      }
+
+      .scope-canvas {
+        width: 100%;
+        height: 160px;
+        background: #000;
+        border-radius: 0.375rem;
+        display: block;
+      }
+
+      .progress-bar-container {
+        margin-bottom: 0.5rem;
+      }
+
+      .progress-bar-header {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.875rem;
+        margin-bottom: 0.25rem;
+      }
+
+      .progress-bar-track {
+        width: 100%;
+        background: #e5e7eb;
+        border-radius: 9999px;
+        height: 0.5rem;
+      }
+
+      .progress-bar-fill {
+        height: 0.5rem;
+        border-radius: 9999px;
+        transition: width 0.3s;
+      }
+
+      .progress-bar-fill.blue {
+        background: #1e90ff;
+      }
+
+      .progress-bar-fill.green {
+        background: #00ff00;
+      }
+
+      .osc-color-address {
+        color: #ffd700; /* Gold for OSC addresses like /d_recv, /s_new */
+      }
+
+      .osc-color-float {
+        color: #ff6600; /* Orange for float arguments */
+      }
+
+      .osc-color-int {
+        color: #ff6600; /* Orange for int arguments */
+      }
+
+      .osc-color-string {
+        color: #1e90ff; /* Blue for string values */
+      }
+
+      .osc-color-param {
+        color: #ffd700; /* Gold for parameter names */
+      }
+
+      .osc-color-error {
+        color: #ff1493; /* Pink for error messages */
+      }
+
+      .osc-color-comment {
+        color: #999; /* Light grey for comments */
+      }
+
+      /* Tabs for mobile */
+      .logs-section {
+        background: #000;
+        border: none;
+      }
+
+      .tab-buttons {
+        display: flex;
+        gap: 0.25rem;
+        margin-bottom: 1rem;
+        border-bottom: none;
+      }
+
+      .tab-button {
+        padding: 0.5rem 1rem;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #999;
+        transition: all 0.2s;
+      }
+
+      .tab-button.active {
+        color: #ff1493;
+        border-bottom-color: #ff1493;
+      }
+
+      .tab-button:hover {
+        color: #ff1493;
+      }
+
+      .tab-content {
+        display: none;
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      @media (min-width: 1024px) {
+        .tab-buttons {
+          display: none !important;
+        }
+
+        .tab-content {
+          display: block !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header -->
+      <div style="text-align: center; padding: 50px 0 0 0">
+        <img
+          src="assets/supersonic_light.png"
+          alt="Supersonic"
+          style="
+            max-width: 100%;
+            width: 800px;
+            height: auto;
+            transform: skewY(-11deg);
+            transition: transform 0.3s ease;
+            cursor: pointer;
+          "
+          onmouseover="this.style.transform='skewY(-11deg) scale(1.05)';"
+          onmouseout="this.style.transform='skewY(-11deg) scale(1)';"
+        />
+      </div>
+      <div style="text-align: center; margin-bottom: 2rem">
+        <p
+          style="
+            transform: skewY(-11deg);
+            margin: -10px auto 40px auto;
+            font-size: 16px;
+            background: #ff1493;
+            padding: 12px;
+            display: inline-block;
+            color: white;
+            font-style: italic;
+            font-weight: bold;
+          "
+        >
+          SuperCollider audio goodness baked into your browser
+        </p>
+        <div
+          style="
+            max-width: 800px;
+            margin: 0 auto 1.5rem auto;
+            padding: 3rem 1rem 0 1rem;
+          "
+        >
+          <p
+            style="
+              font-size: 1.3rem;
+              color: #1f2937;
+              line-height: 1.7;
+              margin-bottom: 1.5rem;
+              font-style: italic;
+            "
+          >
+            SuperCollider's powerful scsynth audio synthesis engine in the
+            browser as an AudioWorklet. Zero installation.
+          </p>
+          <div
+            style="
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+              gap: 1rem;
+              font-size: 0.875rem;
+              color: #4b5563;
+            "
+          >
+            <div
+              style="
+                background: white;
+                padding: 1rem;
+                border-left: 6px solid #ff1493;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                position: relative;
+                overflow: hidden;
+              "
+            >
+              <div
+                style="
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 100%;
+                  height: 3px;
+                  background: linear-gradient(101deg, #ff1493 0%, #1e90ff 100%);
+                  transform: skewY(-11deg);
+                  transform-origin: top left;
+                "
+              ></div>
+              <strong
+                style="
+                  color: #ff1493;
+                  text-transform: uppercase;
+                  letter-spacing: 0.05em;
+                  font-style: italic;
+                  font-size: 1rem;
+                "
+                >AudioWorklet</strong
+              ><br />
+              Runs in a dedicated high priority audio thread
+            </div>
+            <div
+              style="
+                background: white;
+                padding: 1rem;
+                border-left: 6px solid #1e90ff;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                position: relative;
+                overflow: hidden;
+              "
+            >
+              <div
+                style="
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 100%;
+                  height: 3px;
+                  background: linear-gradient(101deg, #1e90ff 0%, #ffd700 100%);
+                  transform: skewY(-11deg);
+                  transform-origin: top left;
+                "
+              ></div>
+              <strong
+                style="
+                  color: #1e90ff;
+                  text-transform: uppercase;
+                  letter-spacing: 0.05em;
+                  font-style: italic;
+                  font-size: 1rem;
+                "
+                >WebAssembly</strong
+              ><br />
+              Scsynth's C++ code compiled for the web
+            </div>
+
+            <div
+              style="
+                background: white;
+                padding: 1rem;
+                border-left: 6px solid #ffd700;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                position: relative;
+                overflow: hidden;
+              "
+            >
+              <div
+                style="
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 100%;
+                  height: 3px;
+                  background: linear-gradient(101deg, #ffd700 0%, #ff1493 100%);
+                  transform: skewY(-11deg);
+                  transform-origin: top left;
+                "
+              ></div>
+              <strong
+                style="
+                  color: #d97706;
+                  text-transform: uppercase;
+                  letter-spacing: 0.05em;
+                  font-style: italic;
+                  font-size: 1rem;
+                "
+                >OSC API</strong
+              ><br />
+              Talk to Scsynth's through its native OSC server API
+            </div>
+          </div>
+
+          <div style="text-align: center; margin-top: 2rem; display: flex; flex-direction: column; gap: 1rem; align-items: center;">
+            <a
+              href="#demo"
+              style="
+                display: inline-block;
+                background: linear-gradient(101deg, #ff1493 0%, #1e90ff 100%);
+                color: white;
+                padding: 0.75rem 2.5rem;
+                text-decoration: none;
+                font-weight: bold;
+                font-style: italic;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 6px rgba(255, 20, 147, 0.3);
+                position: relative;
+                overflow: hidden;
+              "
+              onmouseover="this.style.background='linear-gradient(101deg, #ffd700 0%, #ff1493 100%)'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 16px rgba(255, 215, 0, 0.5)';"
+              onmouseout="this.style.background='linear-gradient(101deg, #ff1493 0%, #1e90ff 100%)'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 6px rgba(255, 20, 147, 0.3)';"
+              onclick="event.preventDefault(); document.getElementById('demo').scrollIntoView({behavior: 'smooth', block: 'start'});"
+            >
+              Play with Demo
+            </a>
+            <a
+              href="https://github.com/samaaron/supersonic"
+              target="_blank"
+              rel="noopener"
+              style="
+                display: inline-block;
+                background: linear-gradient(101deg, #1f2937 0%, #374151 100%);
+                color: white;
+                padding: 0.75rem 2.5rem;
+                text-decoration: none;
+                font-weight: bold;
+                font-style: italic;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+                position: relative;
+                overflow: hidden;
+              "
+              onmouseover="this.style.background='linear-gradient(101deg, #ffd700 0%, #ff1493 100%)'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 16px rgba(255, 215, 0, 0.5)';"
+              onmouseout="this.style.background='linear-gradient(101deg, #1f2937 0%, #374151 100%)'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 6px rgba(0, 0, 0, 0.2)';"
+            >
+              Open Source on GitHub
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Getting Started Section -->
+      <div style="background: #1f2937; padding: 3rem 1rem; margin-bottom: 3rem;">
+        <div style="max-width: 1200px; margin: 0 auto;">
+          <p
+            style="
+              font-size: 1.3rem;
+              font-style: italic;
+              margin-bottom: 2.5rem;
+              color: #ffd700;
+              text-align: center;
+              line-height: 1.6;
+            "
+          >
+            Sprinkle the scsynth audio engine onto any web page...
+          </p>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+          <!-- Import Box -->
+          <div>
+            <p style="font-size: 0.95rem; color: #e5e7eb; margin-bottom: 0.75rem;">
+              First, grab the SuperSonic module
+            </p>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 1.25rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ff1493; overflow-x: auto;"><code><span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'./dist/supersonic.js'</span>;</code></pre>
+          </div>
+
+          <!-- Initialize Box -->
+          <div>
+            <p style="font-size: 0.95rem; color: #e5e7eb; margin-bottom: 0.75rem;">
+              Initialize and you're ready to go
+            </p>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 1.25rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #1e90ff; overflow-x: auto;"><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
+<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>();</code></pre>
+          </div>
+        </div>
+
+        <!-- OSC API Box -->
+        <div style="max-width: 650px; margin: 0 auto;">
+          <p style="font-size: 0.95rem; color: #e5e7eb; margin-bottom: 0.75rem; text-align: center;">
+            Access the full OSC API — SuperCollider's scsynth commands
+          </p>
+          <pre style="background: #2d3748; color: #e2e8f0; padding: 1.25rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ffd700; overflow-x: auto;"><code>sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/notify'</span>, <span style="color: #bd93f9;">1</span>);</code></pre>
+        </div>
+
+        <p
+          style="
+            margin-top: 2rem;
+            color: #e5e7eb;
+            font-size: 0.85rem;
+            text-align: center;
+          "
+        >
+          Remember to set <code style="background: #2d3748; color: #ffd700; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">COOP/COEP</code> headers — see README
+        </p>
+        </div>
+      </div>
+
+      <!-- Community Support Section -->
+      <div style="max-width: 800px; margin: 0 auto 3rem auto; padding: 0 1rem">
+        <div
+          style="
+            background: white;
+            padding: 2rem 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+              0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border-left: 6px solid #ff1493;
+            margin-bottom: 0;
+            position: relative;
+            overflow: hidden;
+          "
+        >
+          <div
+            style="
+              position: absolute;
+              top: 0;
+              left: 0;
+              width: 100%;
+              height: 4px;
+              background: linear-gradient(
+                101deg,
+                #ff1493 0%,
+                #1e90ff 50%,
+                #ffd700 100%
+              );
+              transform: skewY(-11deg);
+              transform-origin: top left;
+            "
+          ></div>
+          <div style="text-align: center; margin-bottom: 2rem">
+            <h2
+              style="
+                font-size: 1.3rem;
+                font-weight: bold;
+                font-style: italic;
+                color: #ff1493;
+                margin-bottom: 0.75rem;
+                text-transform: none;
+                letter-spacing: 0.05em;
+              "
+            >
+              Brought to you by Sam Aaron
+            </h2>
+            <p
+              style="
+                font-size: 1rem;
+                color: #4b5563;
+                line-height: 1.6;
+                max-width: 600px;
+                margin: 0 auto;
+              "
+            >
+              Please consider joining the wonderful community of supporters
+              enabling Sam's work on projects like this,
+              <a href="https://sonic-pi.net">Sonic Pi</a> and <a href="https://tau5.live">Tau5</a>.
+            </p>
+          </div>
+
+          <div
+            style="
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+              gap: 2rem;
+              max-width: 600px;
+              margin: 0 auto;
+            "
+          >
+            <div
+              style="
+                text-align: center;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+              "
+            >
+              <a
+                href="https://patreon.com/samaaron"
+                target="_blank"
+                rel="noopener"
+                style="
+                  display: block;
+                  transition: transform 0.3s ease, filter 0.3s ease;
+                "
+                onmouseover="this.style.transform='scale(1.1) rotate(2deg)'; this.style.filter='brightness(1.2) drop-shadow(0 0 20px rgba(255, 20, 147, 0.8))';"
+                onmouseout="this.style.transform='scale(1) rotate(0deg)'; this.style.filter='brightness(1) drop-shadow(0 0 0 transparent)';"
+              >
+                <img
+                  src="assets/patreon-button.png"
+                  alt="Support Sam via Patreon"
+                  style="
+                    width: 200px;
+                    height: 133px;
+                    object-fit: contain;
+                    display: block;
+                  "
+                />
+              </a>
+              <p
+                style="
+                  margin-top: 0.75rem;
+                  font-weight: bold;
+                  font-style: italic;
+                  color: #1f2937;
+                  font-size: 0.85rem;
+                  min-height: 2.5rem;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  text-transform: uppercase;
+                  letter-spacing: 0.05em;
+                "
+              >
+                Support Sam via Patreon
+              </p>
+            </div>
+
+            <div
+              style="
+                text-align: center;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+              "
+            >
+              <a
+                href="https://github.com/sponsors/samaaron"
+                target="_blank"
+                rel="noopener"
+                style="
+                  display: block;
+                  transition: transform 0.3s ease, filter 0.3s ease;
+                "
+                onmouseover="this.style.transform='scale(1.1) rotate(-2deg)'; this.style.filter='brightness(1.2) drop-shadow(0 0 20px rgba(30, 144, 255, 0.8))';"
+                onmouseout="this.style.transform='scale(1) rotate(0deg)'; this.style.filter='brightness(1) drop-shadow(0 0 0 transparent)';"
+              >
+                <img
+                  src="assets/github-sponsors-button.png"
+                  alt="Support via GitHub Sponsors"
+                  style="
+                    width: 200px;
+                    height: 133px;
+                    object-fit: contain;
+                    display: block;
+                  "
+                />
+              </a>
+              <p
+                style="
+                  margin-top: 0.75rem;
+                  font-weight: bold;
+                  font-style: italic;
+                  color: #1f2937;
+                  font-size: 0.85rem;
+                  min-height: 2.5rem;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  text-transform: uppercase;
+                  letter-spacing: 0.05em;
+                "
+              >
+                Support Sam via GitHub Sponsors
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Synth UI Container -->
+      <div id="demo"></div>
+      <div id="synth-ui-container" class="synth-ui-container">
+        <!-- Unified Black Container -->
+        <div
+          class="panel dark-panel"
+          style="padding: 0.75rem; margin-bottom: 0"
+        >
+          <!-- Init Button (spans full width at top) -->
+          <div
+            id="init-button-container"
+            style="
+              height: 160px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              margin-bottom: 0.75rem;
+            "
+          >
+            <button
+              id="init-button"
+              class="btn-init"
+              style="font-size: 1.25rem; padding: 0.75rem 2rem"
+            >
+              Boot
+            </button>
+          </div>
+
+          <!-- Scope Visualizer (spans full width at top) -->
+          <div
+            id="scope-container"
+            style="height: 160px; margin-bottom: 0.75rem; display: none"
+          >
+            <canvas id="scope-canvas" class="scope-canvas"></canvas>
+          </div>
+
+          <div class="main-layout-grid">
+            <!-- Left Column: Send Custom OSC Message -->
+            <div class="left-column">
+              <!-- Error/Warning Messages -->
+              <div id="error-message" class="alert alert-error hidden">
+                <svg
+                  class="alert-icon"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  ></path>
+                </svg>
+                <div>
+                  <h3 class="alert-title">Error</h3>
+                  <p id="error-text" class="alert-text"></p>
+                </div>
+              </div>
+
+              <div id="warning-message" class="alert alert-warning hidden">
+                <svg
+                  class="alert-icon"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  ></path>
+                </svg>
+                <div>
+                  <p id="warning-text" class="alert-text"></p>
+                </div>
+              </div>
+
+              <!-- Welcome Guide -->
+              <div class="welcome-guide">
+                <h2>Welcome to SuperSonic</h2>
+
+                <ol>
+                  <li>
+                    <span class="welcome-text">
+                      <strong>Load synthdefs</strong> — Click "Send Sonic Pi Synthdefs" above to load synths from Sonic Pi (which are scsynth compatible):
+                      <code class="welcome-code-block">sonic-pi-beep, sonic-pi-dsaw, sonic-pi-dpulse, sonic-pi-bnoise, sonic-pi-prophet,
+sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
+                    </span>
+                  </li>
+
+                  <li>
+                    <span class="welcome-text">
+                      <strong>Call the scsynth OSC API</strong> — Use the text area below to write OSC commands from this API:
+                      <a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" class="welcome-link">scsynth OSC Commands</a>
+                    </span>
+                    <code class="welcome-code-block">/s_new sonic-pi-beep -1 0 0 note 72
+/notify 1</code>
+                  </li>
+
+                  <li>
+                    <span class="welcome-text">
+                      <strong>Scheduling</strong> — You can start each OSC API call with a time to schedule sequences:
+                    </span>
+                    <code class="welcome-code-block">0 /s_new sonic-pi-beep -1 0 0 note 60
+0.5 /s_new sonic-pi-beep -1 0 0 note 64</code>
+                  </li>
+                </ol>
+
+                <p class="welcome-quickstart">
+                  <span class="welcome-label">Quick Start:</span>
+                  Click "Load Example" to load up some example API calls then hit "Send".
+                </p>
+              </div>
+
+              <!-- Send Message / OSC API -->
+              <div>
+                <h2>Choose your own OSC...</h2>
+                <form id="message-form">
+                  <div class="form-group" style="margin-bottom: 0.5rem">
+                    <textarea
+                      id="message-input"
+                      placeholder="Single: /s_new sonic-pi-beep 1001 0 0 note 72&#10;Scheduled:&#10;0 /s_new 1 0 0 note 60&#10;0.5 /s_new 2 0 0 note 64"
+                      rows="10"
+                      disabled
+                    ></textarea>
+                  </div>
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      gap: 0.5rem;
+                      margin-bottom: 0.75rem;
+                    "
+                  >
+                    <div style="display: flex; gap: 0.5rem">
+                      <button
+                        type="button"
+                        id="load-all-button"
+                        class="btn-green"
+                        disabled
+                      >
+                        Send Sonic Pi Synthdefs
+                      </button>
+                      <button
+                        type="button"
+                        id="load-example-button"
+                        class="btn-green"
+                        disabled
+                      >
+                        Load Example
+                      </button>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem">
+                      <button
+                        type="button"
+                        id="clear-button"
+                        class="btn-secondary"
+                        disabled
+                      >
+                        Clear
+                      </button>
+                      <button type="submit" class="btn-primary" disabled>
+                        Send
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <!-- End Left Column -->
+
+            <!-- Draggable Divider -->
+            <div class="divider" id="column-divider"></div>
+
+            <!-- Right Column: Logs only -->
+            <div class="right-column">
+              <!-- Logs Section -->
+              <div class="logs-section">
+                <!-- Tab buttons (mobile only) -->
+                <div class="tab-buttons">
+                  <button class="tab-button active" data-tab="debug">
+                    Scsynth Info
+                  </button>
+                  <button class="tab-button" data-tab="osc-out">
+                    OSC to Scsynth
+                  </button>
+                  <button class="tab-button" data-tab="osc-in">
+                    OSC from Scsynth
+                  </button>
+                </div>
+
+                <!-- Logs stacked vertically -->
+                <div class="logs-grid">
+                  <!-- Debug Log -->
+                  <div class="tab-content active" data-tab-content="debug">
+                    <div class="log-container">
+                      <div class="log-container-header">
+                        <h2>Scsynth Info</h2>
+                      </div>
+                      <div class="log-scroll-area">
+                        <pre id="debug-log"></pre>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- OSC to scsynth -->
+                  <div class="tab-content" data-tab-content="osc-out">
+                    <div class="log-container">
+                      <div class="log-container-header">
+                        <h2>OSC to Scsynth</h2>
+                      </div>
+                      <div
+                        id="sent-message-history"
+                        class="message-history log-scroll-area"
+                      >
+                        <p class="message-empty">No messages sent yet</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- OSC from scsynth -->
+                  <div class="tab-content" data-tab-content="osc-in">
+                    <div class="log-container">
+                      <div class="log-container-header">
+                        <h2>OSC from Scsynth</h2>
+                      </div>
+                      <div
+                        id="message-history"
+                        class="message-history log-scroll-area"
+                      >
+                        <p class="message-empty">No messages received yet</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- End Logs Section -->
+
+              <!-- Performance Metrics -->
+          <div
+            style="
+              padding-top: 0.75rem;
+              padding-left: 0.75rem;
+              margin-top: 0.75rem;
+            "
+          >
+            <div
+              style="
+                display: flex;
+                gap: 1.5rem;
+                flex-wrap: wrap;
+                font-size: 0.7rem;
+                color: #ffd700;
+                align-items: center;
+              "
+            >
+              <span
+                >Sent:
+                <span id="metric-sent" class="metric-value">0</span></span
+              >
+              <span
+                >Recv:
+                <span id="metric-received" class="metric-value">0</span></span
+              >
+              <span
+                >Drop:
+                <span id="metric-dropped" class="metric-value error"
+                  >0</span
+                ></span
+              >
+              <span
+                >Proc:
+                <span id="metric-process-count" class="metric-value"
+                  >0</span
+                ></span
+              >
+              <span
+                >Ovr:
+                <span id="metric-overruns" class="metric-value warning"
+                  >0</span
+                ></span
+              >
+              <span style="display: flex; align-items: center; gap: 0.25rem">
+                IN: <span id="metric-in-usage" class="metric-value">0%</span>
+                <div
+                  style="
+                    width: 40px;
+                    height: 4px;
+                    background: #e5e7eb;
+                    border-radius: 2px;
+                    overflow: hidden;
+                  "
+                >
+                  <div
+                    id="metric-in-bar"
+                    style="
+                      height: 100%;
+                      background: #1e90ff;
+                      width: 0%;
+                      transition: width 0.3s;
+                    "
+                  ></div>
+                </div>
+              </span>
+              <span style="display: flex; align-items: center; gap: 0.25rem">
+                OUT: <span id="metric-out-usage" class="metric-value">0%</span>
+                <div
+                  style="
+                    width: 40px;
+                    height: 4px;
+                    background: #e5e7eb;
+                    border-radius: 2px;
+                    overflow: hidden;
+                  "
+                >
+                  <div
+                    id="metric-out-bar"
+                    style="
+                      height: 100%;
+                      background: #00ff00;
+                      width: 0%;
+                      transition: width 0.3s;
+                    "
+                  ></div>
+                </div>
+              </span>
+            </div>
+          </div>
+        </div>
+        <!-- End Unified Black Container -->
+      </div>
+      <!-- End Synth UI Container -->
+    </div>
+
+    <script type="module" src="assets/app.js"></script>
+  </body>
+</html>
