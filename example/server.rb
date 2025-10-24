@@ -56,7 +56,7 @@ server_config = {
       ║                                                            ║
       ║  Server running at: http://localhost:#{port}                  ║
       ║                                                            ║
-      ║  Open in browser:   http://localhost:#{port}/demo.html            ║
+      ║  Open in browser:   http://localhost:#{port}/demo.html        ║
       ║                                                            ║
       ║  COOP/COEP headers enabled for SharedArrayBuffer support   ║
       ║                                                            ║
