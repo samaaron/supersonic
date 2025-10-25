@@ -69,41 +69,14 @@ See `example/server.rb` for a reference implementation.
 
 ```javascript
 import { SuperSonic } from './dist/supersonic.js';
-import { getSynthDefHex } from './dist/etc/synthdefs.js';
 
-// Create and initialize
 const sonic = new SuperSonic();
-
-sonic.onInitialized = () => {
-  console.log('Ready!');
-
-  // Load a synth definition (getSynthDefHex returns hex string, auto-converted to bytes)
-  const synthdefHex = getSynthDefHex('sonic-pi-beep');
-  const loadMsg = {
-    address: '/d_recv',
-    args: [{ type: 'b', value: synthdefHex }]
-  };
-  sonic.send(loadMsg);
-};
-
 await sonic.init();
 
-// Play a sound
-const playMsg = {
-  address: '/s_new',
-  args: [
-    { type: 's', value: 'sonic-pi-beep' },  // synth name
-    { type: 'i', value: -1 },                // auto node ID
-    { type: 'i', value: 0 },                 // add to head
-    { type: 'i', value: 0 },                 // target root node
-    { type: 's', value: 'note' },            // parameter name
-    { type: 'f', value: 60.0 }               // middle C
-  ]
-};
-sonic.send(playMsg);
+sonic.send('/notify', 1);
 ```
 
-See `example/simple.html` for a complete working example.
+See `example/demo.html` for a complete working example.
 
 ### API Reference
 
