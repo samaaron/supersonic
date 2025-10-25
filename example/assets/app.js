@@ -93,6 +93,28 @@ function parseTextToOSC(text) {
 // Track last position we read from debug buffer
 let lastDebugHead = 0;
 
+// Flash tab to indicate update
+function flashTab(tabName) {
+  const tabButton = document.querySelector(`[data-tab="${tabName}"]`);
+  if (!tabButton || tabButton.classList.contains('active')) {
+    return; // Don't flash if tab is active or doesn't exist
+  }
+
+  // Remove flash class if it exists (to restart animation)
+  tabButton.classList.remove('flash');
+
+  // Force reflow to restart animation
+  void tabButton.offsetWidth;
+
+  // Add flash class
+  tabButton.classList.add('flash');
+
+  // Remove flash class after animation completes
+  setTimeout(() => {
+    tabButton.classList.remove('flash');
+  }, 1500);
+}
+
 function updateDebugLog() {
   if (!orchestrator || !orchestrator.wasmMemory || !orchestrator.ringBufferBase) return;
 
@@ -145,6 +167,9 @@ function updateDebugLog() {
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
       }
     }
+
+    // Flash debug tab to indicate update
+    flashTab('debug');
 
     // Also log to browser console for permanent record
     console.log('[Debug]', newText);
@@ -240,6 +265,9 @@ function addMessage(message) {
 }
 
 function renderMessages() {
+  // Flash tab if there are messages (don't flash for empty state)
+  const hasMessages = messages.length > 0;
+
   if (messages.length === 0) {
     messageHistory.innerHTML = '<p class="message-empty">No messages received yet</p>';
   } else {
@@ -308,6 +336,11 @@ function renderMessages() {
 
   // Auto-scroll to bottom (messageHistory has log-scroll-area class, so it's the scroll container)
   messageHistory.scrollTop = messageHistory.scrollHeight;
+
+  // Flash tab to indicate update (only if there are messages)
+  if (hasMessages) {
+    flashTab('osc-in');
+  }
 }
 
 function addSentMessage(oscData, comment = null) {
@@ -319,6 +352,9 @@ function addSentMessage(oscData, comment = null) {
 
 function renderSentMessages() {
   if (!sentMessageHistory) return;  // Element may not exist on all pages
+
+  // Flash tab if there are messages (don't flash for empty state)
+  const hasMessages = sentMessages.length > 0;
 
   if (sentMessages.length === 0) {
     sentMessageHistory.innerHTML = '<p class="message-empty">No messages sent yet</p>';
@@ -434,6 +470,11 @@ function renderSentMessages() {
 
   // Auto-scroll to bottom (sentMessageHistory has log-scroll-area class, so it's the scroll container)
   sentMessageHistory.scrollTop = sentMessageHistory.scrollHeight;
+
+  // Flash tab to indicate update (only if there are messages)
+  if (hasMessages) {
+    flashTab('osc-out');
+  }
 }
 
 // Initialize button
