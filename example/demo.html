@@ -40,6 +40,7 @@
         margin: 0 auto;
         padding: 0.5rem;
         padding-bottom: 3rem;
+        overflow-x: hidden;
       }
 
       h1 {
@@ -311,8 +312,17 @@
         padding: 0.2rem 0.4rem;
         font-style: italic;
         display: block;
-        white-space: pre;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
         margin-top: 0.25rem;
+      }
+
+      @media (max-width: 768px) {
+        .welcome-code-block {
+          font-size: 0.7rem;
+          word-break: break-all;
+        }
       }
 
       .welcome-link {
@@ -532,6 +542,13 @@
         font-size: 0.75rem;
         line-height: 1.1;
         color: #ffd700;
+      }
+
+      /* Mobile adjustments */
+      @media (max-width: 768px) {
+        .log-scroll-area {
+          height: 150px;
+        }
       }
 
       .log-scroll-area pre {
@@ -850,6 +867,148 @@
           display: block !important;
         }
       }
+
+      /* Scrollbar styling for all browsers */
+      .log-scroll-area::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+
+      .log-scroll-area::-webkit-scrollbar-track {
+        background: #1a1a1a;
+        border-radius: 4px;
+      }
+
+      .log-scroll-area::-webkit-scrollbar-thumb {
+        background: #ff6600;
+        border-radius: 4px;
+      }
+
+      .log-scroll-area::-webkit-scrollbar-thumb:hover {
+        background: #ffd700;
+      }
+
+      /* Firefox scrollbar styling */
+      .log-scroll-area {
+        scrollbar-width: thin;
+        scrollbar-color: #ff6600 #1a1a1a;
+      }
+
+      /* Code block overflow handling for mobile */
+      pre code {
+        display: block;
+        overflow-x: auto;
+        max-width: 100%;
+      }
+
+      @media (max-width: 768px) {
+        pre {
+          overflow-x: auto;
+          max-width: 100vw;
+        }
+      }
+
+      /* Button container layout */
+      .button-container {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .button-row {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      .button-row-primary {
+        justify-content: flex-end;
+      }
+
+      .button-row-secondary {
+        justify-content: flex-start;
+      }
+
+      /* Desktop: side-by-side layout */
+      @media (min-width: 769px) {
+        .button-container {
+          flex-direction: row;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .button-row {
+          flex-wrap: nowrap;
+        }
+      }
+
+      /* Mobile button sizing */
+      @media (max-width: 768px) {
+        .button-row button {
+          flex: 1;
+          min-width: 0;
+          font-size: 0.75rem;
+          padding: 0.4rem 0.5rem;
+        }
+      }
+
+      /* Mobile: move scope below welcome message */
+      @media (max-width: 768px) {
+        .dark-panel {
+          display: flex;
+          flex-direction: column;
+        }
+
+        #init-button-container {
+          order: 1;
+        }
+
+        #scope-container {
+          order: 3;
+        }
+
+        .main-layout-grid {
+          order: 2;
+        }
+
+        .left-column {
+          order: 1;
+        }
+
+        .right-column {
+          order: 2;
+        }
+      }
+
+      /* Getting Started code blocks - mobile responsive */
+      .getting-started-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2rem;
+        margin-bottom: 2rem;
+      }
+
+      @media (max-width: 768px) {
+        .getting-started-grid {
+          grid-template-columns: 1fr;
+          gap: 1rem;
+        }
+
+        .getting-started-grid pre {
+          font-size: 0.85rem !important;
+          padding: 0.75rem !important;
+          line-height: 1.5 !important;
+        }
+
+        .welcome-guide {
+          font-size: 0.875rem;
+        }
+
+        .welcome-guide ol {
+          font-size: 0.75rem;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1088,7 +1247,7 @@
             Sprinkle the scsynth audio engine onto any web page...
           </p>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+        <div class="getting-started-grid">
           <!-- Import Box -->
           <div>
             <p style="font-size: 0.95rem; color: #e5e7eb; margin-bottom: 0.75rem;">
@@ -1426,16 +1585,21 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                       disabled
                     ></textarea>
                   </div>
-                  <div
-                    style="
-                      display: flex;
-                      justify-content: space-between;
-                      align-items: center;
-                      gap: 0.5rem;
-                      margin-bottom: 0.75rem;
-                    "
-                  >
-                    <div style="display: flex; gap: 0.5rem">
+                  <div class="button-container">
+                    <div class="button-row button-row-primary">
+                      <button
+                        type="button"
+                        id="clear-button"
+                        class="btn-secondary"
+                        disabled
+                      >
+                        Clear
+                      </button>
+                      <button type="submit" class="btn-primary" disabled>
+                        Send
+                      </button>
+                    </div>
+                    <div class="button-row button-row-secondary">
                       <button
                         type="button"
                         id="load-all-button"
@@ -1451,19 +1615,6 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                         disabled
                       >
                         Load Example
-                      </button>
-                    </div>
-                    <div style="display: flex; gap: 0.5rem">
-                      <button
-                        type="button"
-                        id="clear-button"
-                        class="btn-secondary"
-                        disabled
-                      >
-                        Clear
-                      </button>
-                      <button type="submit" class="btn-primary" disabled>
-                        Send
                       </button>
                     </div>
                   </div>
