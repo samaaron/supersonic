@@ -6,10 +6,10 @@
     <link rel="icon" type="image/png" href="favicon.png">
 
     <!-- Open Graph meta tags -->
-    <meta property="og:title" content="Supersonic - SuperCollider in the Browser">
+    <meta property="og:title" content="SuperSonic - SuperCollider's Synthesis Engine in the Browser">
     <meta property="og:description" content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation.">
     <meta property="og:image" content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png">
-    <meta property="og:image:alt" content="Supersonic logo - SuperCollider's scsynth in the browser">
+    <meta property="og:image:alt" content="SuperSonic logo - SuperCollider's Synthesis Engine in the browser">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:type" content="website">
@@ -17,12 +17,12 @@
 
     <!-- Twitter Card meta tags -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Supersonic - SuperCollider in the Browser">
+    <meta name="twitter:title" content="SuperSonic - SuperCollider in the Browser">
     <meta name="twitter:description" content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation.">
     <meta name="twitter:image" content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png">
-    <meta name="twitter:image:alt" content="Supersonic logo - SuperCollider's scsynth in the browser">
+    <meta name="twitter:image:alt" content="SuperSonic logo - SuperCollider's scsynth in the browser">
 
-    <title>Supersonic - SuperCollider in the Browser</title>
+    <title>SuperSonic - SuperCollider's Synthes Engine in the Browser</title>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.min.css"
@@ -251,10 +251,33 @@
         color: white;
         padding: 0.75rem 2rem;
         font-size: 1rem;
+        animation: pulsate 2.5s ease-in-out infinite;
       }
 
       .btn-init:hover:not(:disabled) {
-        background: #d4117a;
+        background: #ffd700;
+        color: #000;
+      }
+
+      .btn-init:disabled {
+        animation: none;
+      }
+
+      @keyframes pulsate {
+        0%, 100% {
+          transform: scale(1);
+          box-shadow: 0 0 0 0 rgba(255, 20, 147, 1),
+                      0 0 30px rgba(255, 20, 147, 0.6),
+                      0 0 60px rgba(255, 20, 147, 0.3);
+          filter: brightness(1);
+        }
+        50% {
+          transform: scale(1.15);
+          box-shadow: 0 0 30px 15px rgba(255, 20, 147, 0.8),
+                      0 0 60px rgba(255, 20, 147, 0.6),
+                      0 0 90px rgba(255, 20, 147, 0.4);
+          filter: brightness(1.3);
+        }
       }
 
       .btn-green {
@@ -1149,7 +1172,7 @@
       <div style="text-align: center; padding: 50px 0 0 0">
         <img
           src="assets/supersonic_light.png"
-          alt="Supersonic"
+          alt="SuperSonic"
           style="
             max-width: 100%;
             width: 800px;
@@ -1345,32 +1368,58 @@
               onmouseout="this.style.background='linear-gradient(101deg, #ff1493 0%, #1e90ff 100%)'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 6px rgba(255, 20, 147, 0.3)';"
               onclick="event.preventDefault(); document.getElementById('demo').scrollIntoView({behavior: 'smooth', block: 'start'});"
             >
-              Play with Demo
+              Whizz to Demo
             </a>
-            <a
-              href="https://github.com/samaaron/supersonic"
-              target="_blank"
-              rel="noopener"
-              style="
-                display: inline-block;
-                background: linear-gradient(101deg, #1f2937 0%, #374151 100%);
-                color: white;
-                padding: 0.75rem 2.5rem;
-                text-decoration: none;
-                font-weight: bold;
-                font-style: italic;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                transition: all 0.3s ease;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-                position: relative;
-                overflow: hidden;
-              "
-              onmouseover="this.style.background='linear-gradient(101deg, #ffd700 0%, #ff1493 100%)'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 16px rgba(255, 215, 0, 0.5)';"
-              onmouseout="this.style.background='linear-gradient(101deg, #1f2937 0%, #374151 100%)'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 6px rgba(0, 0, 0, 0.2)';"
-            >
-              Open Source on GitHub
-            </a>
+            <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center;">
+              <a
+                href="https://github.com/samaaron/supersonic"
+                target="_blank"
+                rel="noopener"
+                style="
+                  display: inline-block;
+                  background: linear-gradient(101deg, #1f2937 0%, #374151 100%);
+                  color: white;
+                  padding: 0.75rem 2.5rem;
+                  text-decoration: none;
+                  font-weight: bold;
+                  font-style: italic;
+                  text-transform: uppercase;
+                  letter-spacing: 0.05em;
+                  transition: all 0.3s ease;
+                  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+                  position: relative;
+                  overflow: hidden;
+                "
+                onmouseover="this.style.background='linear-gradient(101deg, #ffd700 0%, #ff1493 100%)'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 16px rgba(255, 215, 0, 0.5)';"
+                onmouseout="this.style.background='linear-gradient(101deg, #1f2937 0%, #374151 100%)'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 6px rgba(0, 0, 0, 0.2)';"
+              >
+                Open Source
+              </a>
+              <a
+                href="https://www.patreon.com/posts/introducing-in-141953467"
+                target="_blank"
+                rel="noopener"
+                style="
+                  display: inline-block;
+                  background: linear-gradient(101deg, #1f2937 0%, #374151 100%);
+                  color: white;
+                  padding: 0.75rem 2.5rem;
+                  text-decoration: none;
+                  font-weight: bold;
+                  font-style: italic;
+                  text-transform: uppercase;
+                  letter-spacing: 0.05em;
+                  transition: all 0.3s ease;
+                  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+                  position: relative;
+                  overflow: hidden;
+                "
+                onmouseover="this.style.background='linear-gradient(101deg, #ffd700 0%, #ff1493 100%)'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 16px rgba(255, 215, 0, 0.5)';"
+                onmouseout="this.style.background='linear-gradient(101deg, #1f2937 0%, #374151 100%)'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 6px rgba(0, 0, 0, 0.2)';"
+              >
+                What? How? Why?
+              </a>
+            </div>
           </div>
         </div>
       </div>
@@ -1474,7 +1523,7 @@
                 letter-spacing: 0.05em;
               "
             >
-              Brought to you by Sam Aaron
+              Brought to you by<br/>Sam Aaron
             </h2>
             <p
               style="
@@ -1485,8 +1534,8 @@
                 margin: 0 auto;
               "
             >
-              Please consider joining the wonderful<br/>
-              community of supporters enabling Sam's work on<br/>
+              Please consider joining the wonderful community<br/>
+              of supporters enabling Sam's work on<br/>
               creative coding projects like this,<br/>
               <a href="https://sonic-pi.net">Sonic Pi</a> and <a href="https://tau5.live">Tau5</a>.
             </p>
@@ -1688,7 +1737,7 @@
                 <ol>
                   <li>
                     <span class="welcome-text">
-                      <strong>Load synthdefs</strong> — Click "Send Sonic Pi Synthdefs" above to load synths from Sonic Pi (which are scsynth compatible):
+                      <strong>Load synthdefs</strong> — Click "Send Sonic Pi Synthdefs" below to load these synths from Sonic Pi (which are scsynth compatible):
                       <code class="welcome-code-block">sonic-pi-beep, sonic-pi-dsaw, sonic-pi-dpulse, sonic-pi-bnoise, sonic-pi-prophet,
 sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                     </span>
