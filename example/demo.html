@@ -1047,23 +1047,82 @@
         }
       }
 
-      /* Getting Started code blocks - mobile responsive */
-      .getting-started-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
+      /* Getting Started code blocks - staggered layout */
+      .code-snippets-container {
+        display: flex;
+        flex-direction: column;
         gap: 2rem;
         margin-bottom: 2rem;
       }
 
-      @media (max-width: 768px) {
-        .getting-started-grid {
-          grid-template-columns: 1fr;
-          gap: 1rem;
+      .code-snippet {
+        max-width: 1000px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        justify-content: center;
+      }
+
+      .code-snippet pre {
+        width: 550px;
+        max-width: 550px;
+        margin: 0;
+      }
+
+      .code-snippet .code-comment {
+        flex: 1;
+        margin: 0;
+        font-style: italic;
+        line-height: 1.5;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        white-space: normal;
+        min-width: 0;
+        max-width: 100%;
+      }
+
+      /* Wide screens - keep aligned with fixed widths */
+      @media (min-width: 1024px) {
+        .code-snippet {
+          gap: 1.5rem;
         }
 
-        .getting-started-grid pre,
-        .getting-started-grid + div pre {
-          font-size: 0.8rem !important;
+        .code-snippet pre {
+          min-width: 500px;
+          width: 500px;
+        }
+
+        .code-snippet .code-comment {
+          width: 350px;
+          max-width: 350px;
+          flex-shrink: 0;
+          white-space: normal;
+          word-wrap: break-word;
+          text-align: right;
+        }
+      }
+
+      /* Mobile: smaller font, proper padding */
+      @media (max-width: 768px) {
+        .code-snippets-container {
+          gap: 1.5rem;
+        }
+
+        .code-snippet {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 0.75rem;
+          transform: none !important;
+        }
+
+        .code-snippet pre {
+          font-size: 0.75rem !important;
+          padding: 0.6rem !important;
+        }
+
+        .code-snippet .code-comment {
+          font-size: 0.85rem !important;
         }
 
         .welcome-guide {
@@ -1324,31 +1383,31 @@
             Sprinkle the scsynth audio engine onto any web page...
           </p>
 
-        <div class="getting-started-grid">
+        <div class="code-snippets-container">
           <!-- Import Box -->
-          <div>
-            <p style="font-size: 0.95rem; color: #e5e7eb; margin-bottom: 0.75rem;">
+          <div class="code-snippet">
+            <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
               First, grab the SuperSonic module
             </p>
             <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ff1493; overflow-x: auto;"><code><span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'./dist/supersonic.js'</span>;</code></pre>
           </div>
 
           <!-- Initialize Box -->
-          <div>
-            <p style="font-size: 0.95rem; color: #e5e7eb; margin-bottom: 0.75rem;">
+          <div class="code-snippet">
+            <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
               Initialize and you're ready to go
             </p>
             <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #1e90ff; overflow-x: auto;"><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>();</code></pre>
           </div>
-        </div>
 
-        <!-- OSC API Box -->
-        <div style="max-width: 650px; margin: 0 auto;">
-          <p style="font-size: 0.95rem; color: #e5e7eb; margin-bottom: 0.75rem; text-align: center;">
-            Access the full OSC API — <a href="https://supercollider.github.io/" target="_blank" rel="noopener" style="color: #ff1493; text-decoration: none; transition: all 0.3s ease; display: inline-block;" onmouseover="this.style.color='#ffd700'; this.style.transform='translateY(-2px)';" onmouseout="this.style.color='#ff1493'; this.style.transform='translateY(0)';">SuperCollider</a>'s scsynth commands
-          </p>
-          <pre style="background: #2d3748; color: #e2e8f0; padding: 1.25rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ffd700; overflow-x: auto;"><code>sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/notify'</span>, <span style="color: #bd93f9;">1</span>);</code></pre>
+          <!-- OSC API Box -->
+          <div class="code-snippet">
+            <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
+              Access the full OSC API:<br/><a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" rel="noopener" style="color: #ff1493; text-decoration: none; transition: all 0.3s ease; display: inline;" onmouseover="this.style.color='#ffd700';" onmouseout="this.style.color='#ff1493';">SuperCollider's Scsynth Commands</a>
+            </p>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ffd700; overflow-x: auto;"><code>sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/notify'</span>, <span style="color: #bd93f9;">1</span>);</code></pre>
+          </div>
         </div>
 
         <p
