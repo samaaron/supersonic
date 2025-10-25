@@ -199,7 +199,7 @@
       }
 
       .btn-primary {
-        background: #ff1493;
+        background: #1e90ff;
         color: white;
         border-radius: 0;
       }
@@ -964,6 +964,7 @@
 
       .button-row-primary {
         justify-content: flex-end;
+        padding-right: 0.75rem;
       }
 
       .button-row-secondary {
@@ -1060,10 +1061,9 @@
           gap: 1rem;
         }
 
-        .getting-started-grid pre {
-          font-size: 0.85rem !important;
-          padding: 0.75rem !important;
-          line-height: 1.5 !important;
+        .getting-started-grid pre,
+        .getting-started-grid + div pre {
+          font-size: 0.8rem !important;
         }
 
         .welcome-guide {
@@ -1330,7 +1330,7 @@
             <p style="font-size: 0.95rem; color: #e5e7eb; margin-bottom: 0.75rem;">
               First, grab the SuperSonic module
             </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 1.25rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ff1493; overflow-x: auto;"><code><span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'./dist/supersonic.js'</span>;</code></pre>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ff1493; overflow-x: auto;"><code><span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'./dist/supersonic.js'</span>;</code></pre>
           </div>
 
           <!-- Initialize Box -->
@@ -1338,7 +1338,7 @@
             <p style="font-size: 0.95rem; color: #e5e7eb; margin-bottom: 0.75rem;">
               Initialize and you're ready to go
             </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 1.25rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #1e90ff; overflow-x: auto;"><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; font-size: 1rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #1e90ff; overflow-x: auto;"><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>();</code></pre>
           </div>
         </div>
@@ -1668,19 +1668,6 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                     ></textarea>
                   </div>
                   <div class="button-container">
-                    <div class="button-row button-row-primary">
-                      <button
-                        type="button"
-                        id="clear-button"
-                        class="btn-secondary"
-                        disabled
-                      >
-                        Clear
-                      </button>
-                      <button type="submit" class="btn-primary" disabled>
-                        Send
-                      </button>
-                    </div>
                     <div class="button-row button-row-secondary">
                       <button
                         type="button"
@@ -1697,6 +1684,19 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                         disabled
                       >
                         Load Example
+                      </button>
+                    </div>
+                    <div class="button-row button-row-primary">
+                      <button
+                        type="button"
+                        id="clear-button"
+                        class="btn-secondary"
+                        disabled
+                      >
+                        Clear
+                      </button>
+                      <button type="submit" class="btn-primary" disabled>
+                        Send
                       </button>
                     </div>
                   </div>
@@ -1822,7 +1822,7 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                   style="
                     width: 40px;
                     height: 4px;
-                    background: #e5e7eb;
+                    background: #ff6600;
                     border-radius: 2px;
                     overflow: hidden;
                   "
@@ -1844,7 +1844,7 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                   style="
                     width: 40px;
                     height: 4px;
-                    background: #e5e7eb;
+                    background: #ff6600;
                     border-radius: 2px;
                     overflow: hidden;
                   "
