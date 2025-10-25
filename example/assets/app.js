@@ -11,7 +11,7 @@ let messagesReceived = 0;
 let messages = [];
 let sentMessages = [];
 
-// Scope visualizer
+// Scope visualiser
 let analyser = null;
 let scopeCanvas = null;
 let scopeCtx = null;
@@ -501,7 +501,7 @@ initButton.addEventListener('click', async () => {
         orchestrator.workletNode.port.postMessage({ type: 'getVersion' });
       }
 
-      // Setup scope visualizer
+      // Setup scope visualiser
       setupScope();
     };
 
@@ -589,7 +589,7 @@ initButton.addEventListener('click', async () => {
 });
 
 
-// Scope visualization functions
+// Scope visualisation functions
 function setupScope() {
   if (!orchestrator || !orchestrator.audioContext || !orchestrator.workletNode) return;
 
