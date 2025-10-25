@@ -839,6 +839,7 @@
         font-weight: 500;
         color: #999;
         transition: all 0.2s;
+        position: relative;
       }
 
       .tab-button.active {
@@ -848,6 +849,30 @@
 
       .tab-button:hover {
         color: #ff1493;
+      }
+
+      /* Flash animation for tab updates */
+      @keyframes tabFlash {
+        0% {
+          background-color: transparent;
+          color: #999;
+        }
+        8% {
+          background-color: rgba(255, 102, 0, 0.5);
+          color: #ffd700;
+        }
+        100% {
+          background-color: transparent;
+          color: #999;
+        }
+      }
+
+      .tab-button.flash {
+        animation: tabFlash 1.5s ease-in-out;
+      }
+
+      .tab-button.active.flash {
+        animation: none;
       }
 
       .tab-content {
@@ -913,7 +938,6 @@
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
-        margin-bottom: 0.75rem;
       }
 
       .button-row {
@@ -936,6 +960,7 @@
           flex-direction: row;
           justify-content: space-between;
           align-items: center;
+          margin-bottom: 0.75rem;
         }
 
         .button-row {
@@ -950,6 +975,30 @@
           min-width: 0;
           font-size: 0.75rem;
           padding: 0.4rem 0.5rem;
+        }
+
+        /* Reorder form elements on mobile: secondary buttons, textarea, primary buttons */
+        #message-form {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .button-row-secondary {
+          order: 1;
+          margin-bottom: 0.5rem;
+        }
+
+        .form-group {
+          order: 2;
+          margin-bottom: 0.5rem !important;
+        }
+
+        .button-row-primary {
+          order: 3;
+        }
+
+        .button-container {
+          display: contents;
         }
       }
 
@@ -1059,11 +1108,23 @@
               color: #1f2937;
               line-height: 1.7;
               margin-bottom: 1.5rem;
+              font-style: normal;
+            "
+          >
+            SuperCollider's powerful audio synthesis engine <emph>scsynth</emph> running in the
+            browser as an AudioWorklet.
+
+          </p>
+          <p
+            style="
+              font-size: 1.3rem;
+              color: #1f2937;
+              line-height: 1.7;
+              margin-bottom: 1.5rem;
               font-style: italic;
             "
           >
-            SuperCollider's powerful scsynth audio synthesis engine in the
-            browser as an AudioWorklet. Zero installation.
+          Zero installation.
           </p>
           <div
             style="
@@ -1175,7 +1236,7 @@
                 "
                 >OSC API</strong
               ><br />
-              Talk to Scsynth's through its native OSC server API
+              Talk to the Scsynth server through its native OSC API
             </div>
           </div>
 
