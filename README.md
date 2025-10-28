@@ -13,6 +13,13 @@ Note: SuperSonic uses a SharedBuffer to send and receive OSC messages from scsyn
 
 ## Quick Start
 
+The 'nightly' (i.e. for every new commit) pre-built distribution files are published here:
+
+https://samaaron.github.io/supersonic/supersonic-dist.zip
+
+
+## Building from Source
+
 If you are familiar with Docker, you can build and run the example using the following commands:
 
 ```bash
