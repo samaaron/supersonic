@@ -30,12 +30,13 @@ export default class ScsynthOSC {
         this.initialized = false;
         this.sharedBuffer = null;
         this.ringBufferBase = null;
+        this.bufferConstants = null;
     }
 
     /**
      * Initialize all workers with SharedArrayBuffer
      */
-    async init(sharedBuffer, ringBufferBase) {
+    async init(sharedBuffer, ringBufferBase, bufferConstants) {
         if (this.initialized) {
             console.warn('[ScsynthOSC] Already initialized');
             return;
@@ -43,6 +44,7 @@ export default class ScsynthOSC {
 
         this.sharedBuffer = sharedBuffer;
         this.ringBufferBase = ringBufferBase;
+        this.bufferConstants = bufferConstants;
 
         try {
             // Create all three workers
@@ -105,7 +107,8 @@ export default class ScsynthOSC {
             worker.postMessage({
                 type: 'init',
                 sharedBuffer: this.sharedBuffer,
-                ringBufferBase: this.ringBufferBase
+                ringBufferBase: this.ringBufferBase,
+                bufferConstants: this.bufferConstants
             });
         });
     }

@@ -34,6 +34,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.uint8View = null;
         this.dataView = null;
 
+        // Buffer constants (loaded from WASM at initialization)
+        this.bufferConstants = null;
+
         // Control region indices (Int32Array indices) - will be calculated dynamically
         this.CONTROL_INDICES = null;
 
@@ -53,17 +56,61 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.port.onmessage = this.handleMessage.bind(this);
     }
 
-    // Calculate buffer indices based on dynamic ring buffer base address
-    calculateBufferIndices(ringBufferBase) {
-        // Ring buffer layout (relative offsets from base):
-        // IN_BUFFER:    0 - 8192
-        // OUT_BUFFER:   8192 - 16384
-        // DEBUG_BUFFER: 16384 - 20480
-        // CONTROL:      20480 - 20512 (32 bytes = 8 int32s)
-        // METRICS:      20512 - 20544 (32 bytes = 8 int32s)
+    // Load buffer constants from WASM module
+    // Reads the BufferLayout struct exported by C++
+    loadBufferConstants() {
+        if (!this.wasmInstance || !this.wasmInstance.exports.get_buffer_layout) {
+            throw new Error('WASM instance does not export get_buffer_layout');
+        }
 
-        const CONTROL_START = 20480;
-        const METRICS_START = 20512;
+        // Get pointer to BufferLayout struct
+        const layoutPtr = this.wasmInstance.exports.get_buffer_layout();
+
+        // Get WASM memory (imported, not exported - stored in this.wasmMemory)
+        const memory = this.wasmMemory;
+        if (!memory) {
+            throw new Error('WASM memory not available');
+        }
+
+        // Read the struct (14 uint32_t fields + 1 uint8_t + 3 padding bytes)
+        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 15);
+        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 60);
+
+        // Extract constants (order matches BufferLayout struct in shared_memory.h)
+        this.bufferConstants = {
+            IN_BUFFER_START: uint32View[0],
+            IN_BUFFER_SIZE: uint32View[1],
+            OUT_BUFFER_START: uint32View[2],
+            OUT_BUFFER_SIZE: uint32View[3],
+            DEBUG_BUFFER_START: uint32View[4],
+            DEBUG_BUFFER_SIZE: uint32View[5],
+            CONTROL_START: uint32View[6],
+            CONTROL_SIZE: uint32View[7],
+            METRICS_START: uint32View[8],
+            METRICS_SIZE: uint32View[9],
+            TOTAL_BUFFER_SIZE: uint32View[10],
+            MAX_MESSAGE_SIZE: uint32View[11],
+            MESSAGE_MAGIC: uint32View[12],
+            PADDING_MAGIC: uint32View[13],
+            DEBUG_PADDING_MARKER: uint8View[56],
+            MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - fixed
+        };
+
+        // Validate
+        if (this.bufferConstants.MESSAGE_MAGIC !== 0xDEADBEEF) {
+            throw new Error('Invalid buffer constants from WASM');
+        }
+    }
+
+    // Calculate buffer indices based on dynamic ring buffer base address
+    // Uses constants loaded from WASM via loadBufferConstants()
+    calculateBufferIndices(ringBufferBase) {
+        if (!this.bufferConstants) {
+            throw new Error('Buffer constants not loaded. Call loadBufferConstants() first.');
+        }
+
+        const CONTROL_START = this.bufferConstants.CONTROL_START;
+        const METRICS_START = this.bufferConstants.METRICS_START;
 
         // Calculate Int32Array indices (divide byte offsets by 4)
         this.CONTROL_INDICES = {
@@ -92,9 +139,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         }
 
         try {
-            const DEBUG_BUFFER_START = 16384;
-            const DEBUG_BUFFER_SIZE = 4096;
-            const DEBUG_PADDING_MARKER = 0xFF;
+            // Use constants from WASM
+            const DEBUG_BUFFER_START = this.bufferConstants.DEBUG_BUFFER_START;
+            const DEBUG_BUFFER_SIZE = this.bufferConstants.DEBUG_BUFFER_SIZE;
+            const DEBUG_PADDING_MARKER = this.bufferConstants.DEBUG_PADDING_MARKER;
 
             const prefixedMessage = '[JS] ' + message + '\n';
             const encoder = new TextEncoder();
@@ -206,6 +254,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     // Get the ring buffer base address from WASM
                     if (this.wasmInstance.exports.get_ring_buffer_base) {
                         this.ringBufferBase = this.wasmInstance.exports.get_ring_buffer_base();
+
+                        // Load buffer constants from WASM (single source of truth)
+                        this.loadBufferConstants();
+
                         this.calculateBufferIndices(this.ringBufferBase);
 
                         // Initialize WASM memory
@@ -223,6 +275,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                                 type: 'initialized',
                                 success: true,
                                 ringBufferBase: this.ringBufferBase,
+                                bufferConstants: this.bufferConstants,
                                 exports: Object.keys(this.wasmInstance.exports)
                             });
                         }
@@ -234,6 +287,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     // Get the ring buffer base address from WASM
                     if (this.wasmInstance.exports.get_ring_buffer_base) {
                         this.ringBufferBase = this.wasmInstance.exports.get_ring_buffer_base();
+
+                        // Load buffer constants from WASM (single source of truth)
+                        this.loadBufferConstants();
+
                         this.calculateBufferIndices(this.ringBufferBase);
 
                         // Initialize WASM memory
@@ -251,6 +308,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                                 type: 'initialized',
                                 success: true,
                                 ringBufferBase: this.ringBufferBase,
+                                bufferConstants: this.bufferConstants,
                                 exports: Object.keys(this.wasmInstance.exports)
                             });
                         }
@@ -260,11 +318,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
             if (data.type === 'getMetrics') {
                 // Return current metrics (only if initialized)
-                if (this.atomicView && this.METRICS_INDICES && this.CONTROL_INDICES) {
-                    // Calculate buffer usage percentages
-                    const IN_BUFFER_SIZE = 8192;
-                    const OUT_BUFFER_SIZE = 8192;
-                    const DEBUG_BUFFER_SIZE = 1024;
+                if (this.atomicView && this.METRICS_INDICES && this.CONTROL_INDICES && this.bufferConstants) {
+                    // Calculate buffer usage percentages (use constants from WASM)
+                    const IN_BUFFER_SIZE = this.bufferConstants.IN_BUFFER_SIZE;
+                    const OUT_BUFFER_SIZE = this.bufferConstants.OUT_BUFFER_SIZE;
+                    const DEBUG_BUFFER_SIZE = this.bufferConstants.DEBUG_BUFFER_SIZE;
 
                     const inHead = Atomics.load(this.atomicView, this.CONTROL_INDICES.IN_HEAD);
                     const inTail = Atomics.load(this.atomicView, this.CONTROL_INDICES.IN_TAIL);

@@ -20,13 +20,8 @@ var atomicView = null;
 var dataView = null;
 var uint8View = null;
 
-// Ring buffer layout constants
-var CONTROL_START = 20480;
-var IN_BUFFER_START = 0;
-var IN_BUFFER_SIZE = 8192;
-var MESSAGE_MAGIC = 0xDEADBEEF;
-var PADDING_MAGIC = 0xBADDCAFE;  // Marks padding at end of buffer
-var MESSAGE_HEADER_SIZE = 16;
+// Ring buffer layout constants (loaded from WASM at initialization)
+var bufferConstants = null;
 
 // Control indices (calculated after init)
 var CONTROL_INDICES = {};
@@ -57,17 +52,18 @@ var stats = {
 /**
  * Initialize ring buffer access
  */
-function initRingBuffer(buffer, base) {
+function initRingBuffer(buffer, base, constants) {
     sharedBuffer = buffer;
     ringBufferBase = base;
+    bufferConstants = constants;
     atomicView = new Int32Array(sharedBuffer);
     dataView = new DataView(sharedBuffer);
     uint8View = new Uint8Array(sharedBuffer);
 
-    // Calculate control indices
+    // Calculate control indices using constants from WASM
     CONTROL_INDICES = {
-        IN_HEAD: (ringBufferBase + CONTROL_START + 0) / 4,
-        IN_TAIL: (ringBufferBase + CONTROL_START + 4) / 4
+        IN_HEAD: (ringBufferBase + bufferConstants.CONTROL_START + 0) / 4,
+        IN_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 4) / 4
     };
 }
 
@@ -147,11 +143,11 @@ function writeToRingBufferBlocking(oscMessage) {
     }
 
     var payloadSize = oscMessage.length;
-    var totalSize = MESSAGE_HEADER_SIZE + payloadSize;
+    var totalSize = bufferConstants.MESSAGE_HEADER_SIZE + payloadSize;
 
     // Check if message fits in buffer at all (account for padding at wrap)
-    if (totalSize > IN_BUFFER_SIZE - MESSAGE_HEADER_SIZE) {
-        console.error('[OSCOutWorker] Message too large:', totalSize, 'max:', IN_BUFFER_SIZE - MESSAGE_HEADER_SIZE);
+    if (totalSize > bufferConstants.IN_BUFFER_SIZE - bufferConstants.MESSAGE_HEADER_SIZE) {
+        console.error('[OSCOutWorker] Message too large:', totalSize, 'max:', bufferConstants.IN_BUFFER_SIZE - bufferConstants.MESSAGE_HEADER_SIZE);
         return false;
     }
 
@@ -161,16 +157,16 @@ function writeToRingBufferBlocking(oscMessage) {
         var tail = Atomics.load(atomicView, CONTROL_INDICES.IN_TAIL);
 
         // Check available space
-        var available = (IN_BUFFER_SIZE - 1 - head + tail) % IN_BUFFER_SIZE;
+        var available = (bufferConstants.IN_BUFFER_SIZE - 1 - head + tail) % bufferConstants.IN_BUFFER_SIZE;
 
         if (available >= totalSize) {
             // Check if message fits contiguously, otherwise write padding and wrap
-            var spaceToEnd = IN_BUFFER_SIZE - head;
+            var spaceToEnd = bufferConstants.IN_BUFFER_SIZE - head;
 
             if (totalSize > spaceToEnd) {
                 // Message won't fit at end - write padding marker and wrap to beginning
-                var paddingPos = ringBufferBase + IN_BUFFER_START + head;
-                dataView.setUint32(paddingPos, PADDING_MAGIC, true);
+                var paddingPos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
+                dataView.setUint32(paddingPos, bufferConstants.PADDING_MAGIC, true);
                 dataView.setUint32(paddingPos + 4, 0, true);
                 dataView.setUint32(paddingPos + 8, 0, true);
                 dataView.setUint32(paddingPos + 12, 0, true);
@@ -180,19 +176,19 @@ function writeToRingBufferBlocking(oscMessage) {
             }
 
             // We have space! Write the message (now guaranteed contiguous)
-            var writePos = ringBufferBase + IN_BUFFER_START + head;
+            var writePos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
 
             // Write message header
-            dataView.setUint32(writePos, MESSAGE_MAGIC, true);
+            dataView.setUint32(writePos, bufferConstants.MESSAGE_MAGIC, true);
             dataView.setUint32(writePos + 4, totalSize, true);
             dataView.setUint32(writePos + 8, 1, true); // type=OSC
             dataView.setUint32(writePos + 12, stats.bundlesWritten, true); // sequence
 
             // Write payload
-            uint8View.set(oscMessage, writePos + MESSAGE_HEADER_SIZE);
+            uint8View.set(oscMessage, writePos + bufferConstants.MESSAGE_HEADER_SIZE);
 
             // Update head pointer (publish message)
-            var newHead = (head + totalSize) % IN_BUFFER_SIZE;
+            var newHead = (head + totalSize) % bufferConstants.IN_BUFFER_SIZE;
             Atomics.store(atomicView, CONTROL_INDICES.IN_HEAD, newHead);
 
             stats.bundlesWritten++;
@@ -473,7 +469,7 @@ self.onmessage = function(event) {
     try {
         switch (data.type) {
             case 'init':
-                initRingBuffer(data.sharedBuffer, data.ringBufferBase);
+                initRingBuffer(data.sharedBuffer, data.ringBufferBase, data.bufferConstants);
                 self.postMessage({ type: 'initialized' });
                 break;
 

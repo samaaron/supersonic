@@ -22,6 +22,7 @@ struct ReplyAddress;
 extern "C" {
     // Static ring buffer (allocated in WASM data segment)
     // This is separate from scsynth heap, preventing memory conflicts
+    // Size must be >= TOTAL_BUFFER_SIZE from shared_memory.h
     extern uint8_t ring_buffer_storage[32768];
 
     // Global state
@@ -33,6 +34,7 @@ extern "C" {
 
     // Exported functions
     EMSCRIPTEN_KEEPALIVE int get_ring_buffer_base();
+    EMSCRIPTEN_KEEPALIVE const BufferLayout* get_buffer_layout();
     EMSCRIPTEN_KEEPALIVE void init_memory(double sample_rate);
     EMSCRIPTEN_KEEPALIVE bool process_audio(double current_time, double unix_seconds);
     EMSCRIPTEN_KEEPALIVE int worklet_debug(const char* fmt, ...);
