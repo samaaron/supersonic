@@ -26,7 +26,7 @@
 // ============================================================================
 
 // User-configurable buffer sizes
-constexpr uint32_t IN_BUFFER_SIZE     = 8192;  // OSC messages from JS to scsynth
+constexpr uint32_t IN_BUFFER_SIZE     = 32768; // OSC messages from JS to scsynth
 constexpr uint32_t OUT_BUFFER_SIZE    = 8192;  // OSC replies from scsynth to JS
 constexpr uint32_t DEBUG_BUFFER_SIZE  = 4096;  // Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 32;    // Atomic control pointers & flags

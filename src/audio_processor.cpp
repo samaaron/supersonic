@@ -74,7 +74,7 @@ static const int SUPERSONIC_VERSION_PATCH = 0;
 extern "C" {
     // Static ring buffer allocated in WASM data segment
     // This ensures no conflicts with scsynth heap allocations
-    alignas(4) uint8_t ring_buffer_storage[32768];
+    alignas(4) uint8_t ring_buffer_storage[65536];
 
     // Validate at compile time that buffer layout fits in allocated storage
     static_assert(TOTAL_BUFFER_SIZE <= sizeof(ring_buffer_storage),
