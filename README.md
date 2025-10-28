@@ -136,8 +136,9 @@ dist/
 │   ├── ring_buffer.js            # SharedArrayBuffer ring buffer
 │   └── scsynth_osc.js            # OSC orchestration
 └── etc/
-    └── synthdefs.js              # Pre-compiled synth definitions
-                                  # from Sonic Pi
+    └── synthdefs/                # Binary synth definitions (.scsyndef)
+        ├── manifest.json         # List of available synthdefs
+        └── *.scsyndef            # 120 synthdefs from Sonic Pi
 ```
 
 ### Path Requirements
