@@ -613,4 +613,70 @@ export class SuperSonic {
 
         console.log('[SuperSonic] Destroyed');
     }
+
+    /**
+     * Load a binary synthdef file and send it to scsynth
+     * @param {string} path - Path or URL to the .scsyndef file
+     * @returns {Promise<void>}
+     * @example
+     * await sonic.loadSynthDef('./etc/synthdefs/sonic-pi-beep.scsyndef');
+     */
+    async loadSynthDef(path) {
+        if (!this.initialized) {
+            throw new Error('SuperSonic not initialized. Call init() first.');
+        }
+
+        try {
+            const response = await fetch(path);
+
+            if (!response.ok) {
+                throw new Error(`Failed to load synthdef from ${path}: ${response.status} ${response.statusText}`);
+            }
+
+            const arrayBuffer = await response.arrayBuffer();
+            const synthdefData = new Uint8Array(arrayBuffer);
+
+            // Send via /d_recv OSC message
+            this.send('/d_recv', synthdefData);
+
+            console.log(`[SuperSonic] Loaded synthdef from ${path} (${synthdefData.length} bytes)`);
+        } catch (error) {
+            console.error('[SuperSonic] Failed to load synthdef:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Load multiple synthdefs from a directory
+     * @param {string[]} names - Array of synthdef names (without .scsyndef extension)
+     * @param {string} baseUrl - Base URL for synthdef files (default: './etc/synthdefs/')
+     * @returns {Promise<Object>} Map of name -> success/error
+     * @example
+     * const results = await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
+     */
+    async loadSynthDefs(names, baseUrl = './etc/synthdefs/') {
+        if (!this.initialized) {
+            throw new Error('SuperSonic not initialized. Call init() first.');
+        }
+
+        const results = {};
+
+        await Promise.all(
+            names.map(async (name) => {
+                try {
+                    const path = `${baseUrl}${name}.scsyndef`;
+                    await this.loadSynthDef(path);
+                    results[name] = { success: true };
+                } catch (error) {
+                    console.error(`[SuperSonic] Failed to load ${name}:`, error);
+                    results[name] = { success: false, error: error.message };
+                }
+            })
+        );
+
+        const successCount = Object.values(results).filter(r => r.success).length;
+        console.log(`[SuperSonic] Loaded ${successCount}/${names.length} synthdefs`);
+
+        return results;
+    }
 }

@@ -1,9 +1,5 @@
 
 import { SuperSonic } from '../dist/supersonic.js';
-import { getSynthDef, getSynthDefHex, listSynthDefs } from '../dist/etc/synthdefs.js';
-
-// Log available synthdefs
-console.log('[SynthDefs] Available:', listSynthDefs());
 
 let orchestrator = null;
 let messagesSent = 0;
@@ -887,24 +883,18 @@ tabButtons.forEach(button => {
   });
 });
 
-// Fill Synth Hex buttons
+// Fill Synth buttons - load binary synthdef directly
 const fillSynthButtons = document.querySelectorAll('.fill-synth-button');
 fillSynthButtons.forEach(button => {
-  button.addEventListener('click', () => {
+  button.addEventListener('click', async () => {
     try {
       const synthName = button.getAttribute('data-synth');
-      const synthdefHex = getSynthDefHex(synthName);
-      if (!synthdefHex) {
-        throw new Error(`Synthdef '${synthName}' not found`);
-      }
-
-      // Format as /d_recv with hex data
-      messageInput.value = `/d_recv ${synthdefHex}`;
-
-      console.log('[App] Filled textarea with', synthName, 'synthdef hex');
+      console.log('[App] Loading', synthName, 'synthdef...');
+      await orchestrator.loadSynthDef(`../dist/etc/synthdefs/${synthName}.scsyndef`);
+      console.log('[App] Loaded', synthName, 'synthdef');
     } catch (error) {
       console.error('[App] Fill synth error:', error);
-      showError('Failed to get synthdef: ' + error.message);
+      showError('Failed to load synthdef: ' + error.message);
     }
   });
 });
@@ -918,32 +908,18 @@ if (clearButton) {
   });
 }
 
-// Load All button
+// Load All button - load binary synthdefs using new API
 const loadAllButton = document.getElementById('load-all-button');
 if (loadAllButton) {
-  loadAllButton.addEventListener('click', () => {
+  loadAllButton.addEventListener('click', async () => {
     try {
-      const synthNames = ['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-chiplead', 'sonic-pi-dsaw', 'sonic-pi-dpulse', 'sonic-pi-bnoise', 'sonic-pi-prophet', 'sonic-pi-fm'];
-      let loadedCount = 0;
+      const synthNames = ['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-chiplead', 'sonic-pi-dsaw', 'sonic-pi-dpulse', 'sonic-pi-bnoise', 'sonic-pi-prophet', 'sonic-pi-fm', 'sonic-pi-stereo_player'];
 
-      synthNames.forEach(synthName => {
-        const synthdefHex = getSynthDefHex(synthName);
-        if (synthdefHex) {
-          // Convert hex string to Uint8Array blob
-          const hexBytes = new Uint8Array(synthdefHex.length / 2);
-          for (let i = 0; i < synthdefHex.length; i += 2) {
-            hexBytes[i / 2] = parseInt(synthdefHex.substr(i, 2), 16);
-          }
-          // Use new simple send API
-          orchestrator.send('/d_recv', hexBytes);
-          loadedCount++;
-          console.log('[App] Loaded synthdef:', synthName);
-        } else {
-          console.warn('[App] Synthdef not found:', synthName);
-        }
-      });
+      console.log('[App] Loading', synthNames.length, 'synthdefs...');
+      const results = await orchestrator.loadSynthDefs(synthNames, '../dist/etc/synthdefs/');
 
-      console.log(`[App] Loaded ${loadedCount} synthdefs`);
+      const successCount = Object.values(results).filter(r => r.success).length;
+      console.log(`[App] Loaded ${successCount}/${synthNames.length} synthdefs`);
     } catch (error) {
       console.error('[App] Load all error:', error);
       showError('Failed to load synthdefs: ' + error.message);
