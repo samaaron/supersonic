@@ -28,6 +28,7 @@ export class SuperSonic {
         // Core components
         this.sharedBuffer = null;
         this.ringBufferBase = null;
+        this.bufferConstants = null;
         this.audioContext = null;
         this.workletNode = null;
         this.osc = null;  // ScsynthOSC instance for OSC communication
@@ -263,8 +264,8 @@ export class SuperSonic {
             }
         });
 
-        // Initialize ScsynthOSC with SharedArrayBuffer and ring buffer base
-        await this.osc.init(this.sharedBuffer, this.ringBufferBase);
+        // Initialize ScsynthOSC with SharedArrayBuffer, ring buffer base, and buffer constants
+        await this.osc.init(this.sharedBuffer, this.ringBufferBase, this.bufferConstants);
     }
 
     /**
@@ -354,11 +355,17 @@ export class SuperSonic {
                     this.workletNode.port.removeEventListener('message', messageHandler);
 
                     if (event.data.success) {
-                        // Store the ring buffer base address from WASM
+                        // Store the ring buffer base address and constants from WASM
                         if (event.data.ringBufferBase !== undefined) {
                             this.ringBufferBase = event.data.ringBufferBase;
                         } else {
                             console.warn('[SuperSonic] Warning: ringBufferBase not provided by worklet');
+                        }
+
+                        if (event.data.bufferConstants !== undefined) {
+                            this.bufferConstants = event.data.bufferConstants;
+                        } else {
+                            console.warn('[SuperSonic] Warning: bufferConstants not provided by worklet');
                         }
 
                         resolve();

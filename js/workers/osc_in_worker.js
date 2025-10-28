@@ -20,13 +20,8 @@ var atomicView = null;
 var dataView = null;
 var uint8View = null;
 
-// Ring buffer layout constants
-var CONTROL_START = 20480;
-var OUT_BUFFER_START = 8192;
-var OUT_BUFFER_SIZE = 8192;
-var MESSAGE_MAGIC = 0xDEADBEEF;
-var PADDING_MAGIC = 0xBADDCAFE;  // Marks padding at end of buffer
-var MESSAGE_HEADER_SIZE = 16;
+// Ring buffer layout constants (loaded from WASM at initialization)
+var bufferConstants = null;
 
 // Control indices (calculated after init)
 var CONTROL_INDICES = {};
@@ -46,17 +41,18 @@ var stats = {
 /**
  * Initialize ring buffer access
  */
-function initRingBuffer(buffer, base) {
+function initRingBuffer(buffer, base, constants) {
     sharedBuffer = buffer;
     ringBufferBase = base;
+    bufferConstants = constants;
     atomicView = new Int32Array(sharedBuffer);
     dataView = new DataView(sharedBuffer);
     uint8View = new Uint8Array(sharedBuffer);
 
-    // Calculate control indices
+    // Calculate control indices using constants from WASM
     CONTROL_INDICES = {
-        OUT_HEAD: (ringBufferBase + CONTROL_START + 8) / 4,
-        OUT_TAIL: (ringBufferBase + CONTROL_START + 12) / 4
+        OUT_HEAD: (ringBufferBase + bufferConstants.CONTROL_START + 8) / 4,
+        OUT_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 12) / 4
     };
 }
 
@@ -82,22 +78,22 @@ function readMessages() {
     var maxMessages = 10;
 
     while (currentTail !== head && messagesRead < maxMessages) {
-        var readPos = ringBufferBase + OUT_BUFFER_START + currentTail;
+        var readPos = ringBufferBase + bufferConstants.OUT_BUFFER_START + currentTail;
 
         // Read message header (now always contiguous due to padding)
         var magic = dataView.getUint32(readPos, true);
 
         // Check for padding marker - skip to beginning
-        if (magic === PADDING_MAGIC) {
+        if (magic === bufferConstants.PADDING_MAGIC) {
             currentTail = 0;
             continue;
         }
 
-        if (magic !== MESSAGE_MAGIC) {
+        if (magic !== bufferConstants.MESSAGE_MAGIC) {
             console.error('[OSCInWorker] Corrupted message at position', currentTail);
             stats.droppedMessages++;
             // Skip this byte and continue
-            currentTail = (currentTail + 1) % OUT_BUFFER_SIZE;
+            currentTail = (currentTail + 1) % bufferConstants.OUT_BUFFER_SIZE;
             continue;
         }
 
@@ -106,10 +102,10 @@ function readMessages() {
         var sequence = dataView.getUint32(readPos + 12, true);
 
         // Validate message length
-        if (length < MESSAGE_HEADER_SIZE || length > OUT_BUFFER_SIZE) {
+        if (length < bufferConstants.MESSAGE_HEADER_SIZE || length > bufferConstants.OUT_BUFFER_SIZE) {
             console.error('[OSCInWorker] Invalid message length:', length);
             stats.droppedMessages++;
-            currentTail = (currentTail + 1) % OUT_BUFFER_SIZE;
+            currentTail = (currentTail + 1) % bufferConstants.OUT_BUFFER_SIZE;
             continue;
         }
 
@@ -127,8 +123,8 @@ function readMessages() {
         stats.lastSequenceReceived = sequence;
 
         // Read payload (OSC binary data) - now contiguous due to padding
-        var payloadLength = length - MESSAGE_HEADER_SIZE;
-        var payloadStart = readPos + MESSAGE_HEADER_SIZE;
+        var payloadLength = length - bufferConstants.MESSAGE_HEADER_SIZE;
+        var payloadStart = readPos + bufferConstants.MESSAGE_HEADER_SIZE;
 
         // Create a proper copy (not a view into SharedArrayBuffer)
         var payload = new Uint8Array(payloadLength);
@@ -143,7 +139,7 @@ function readMessages() {
         });
 
         // Move to next message
-        currentTail = (currentTail + length) % OUT_BUFFER_SIZE;
+        currentTail = (currentTail + length) % bufferConstants.OUT_BUFFER_SIZE;
         messagesRead++;
         stats.messagesReceived++;
     }
@@ -245,7 +241,7 @@ self.onmessage = function(event) {
     try {
         switch (data.type) {
             case 'init':
-                initRingBuffer(data.sharedBuffer, data.ringBufferBase);
+                initRingBuffer(data.sharedBuffer, data.ringBufferBase, data.bufferConstants);
                 self.postMessage({ type: 'initialized' });
                 break;
 

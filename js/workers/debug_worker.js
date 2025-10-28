@@ -20,11 +20,8 @@ var atomicView = null;
 var dataView = null;
 var uint8View = null;
 
-// Ring buffer layout constants
-var CONTROL_START = 20480;
-var DEBUG_BUFFER_START = 16384;
-var DEBUG_BUFFER_SIZE = 4096;
-var DEBUG_PADDING_MARKER = 0xFF;
+// Ring buffer layout constants (loaded from WASM at initialization)
+var bufferConstants = null;
 
 // Control indices (calculated after init)
 var CONTROL_INDICES = {};
@@ -43,17 +40,18 @@ var stats = {
 /**
  * Initialize ring buffer access
  */
-function initRingBuffer(buffer, base) {
+function initRingBuffer(buffer, base, constants) {
     sharedBuffer = buffer;
     ringBufferBase = base;
+    bufferConstants = constants;
     atomicView = new Int32Array(sharedBuffer);
     dataView = new DataView(sharedBuffer);
     uint8View = new Uint8Array(sharedBuffer);
 
-    // Calculate control indices
+    // Calculate control indices using constants from WASM
     CONTROL_INDICES = {
-        DEBUG_HEAD: (ringBufferBase + CONTROL_START + 16) / 4,
-        DEBUG_TAIL: (ringBufferBase + CONTROL_START + 20) / 4
+        DEBUG_HEAD: (ringBufferBase + bufferConstants.CONTROL_START + 16) / 4,
+        DEBUG_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 20) / 4
     };
 }
 
@@ -69,7 +67,7 @@ function readDebugMessages() {
     }
 
     // Calculate available bytes
-    var available = (head - tail + DEBUG_BUFFER_SIZE) % DEBUG_BUFFER_SIZE;
+    var available = (head - tail + bufferConstants.DEBUG_BUFFER_SIZE) % bufferConstants.DEBUG_BUFFER_SIZE;
     if (available === 0) {
         return null;
     }
@@ -81,11 +79,11 @@ function readDebugMessages() {
     var bytesRead = 0;
 
     while (currentTail !== head && bytesRead < available) {
-        var readPos = ringBufferBase + DEBUG_BUFFER_START + currentTail;
+        var readPos = ringBufferBase + bufferConstants.DEBUG_BUFFER_START + currentTail;
         var byte = uint8View[readPos];
 
         // Check for padding marker - skip to beginning
-        if (byte === DEBUG_PADDING_MARKER) {
+        if (byte === bufferConstants.DEBUG_PADDING_MARKER) {
             currentTail = 0;
             bytesRead = 0; // Reset to start reading from position 0
             continue;
@@ -111,7 +109,7 @@ function readDebugMessages() {
             currentMessage.push(byte);
         }
 
-        currentTail = (currentTail + 1) % DEBUG_BUFFER_SIZE;
+        currentTail = (currentTail + 1) % bufferConstants.DEBUG_BUFFER_SIZE;
         bytesRead++;
     }
 
@@ -224,7 +222,7 @@ self.onmessage = function(event) {
     try {
         switch (data.type) {
             case 'init':
-                initRingBuffer(data.sharedBuffer, data.ringBufferBase);
+                initRingBuffer(data.sharedBuffer, data.ringBufferBase, data.bufferConstants);
                 self.postMessage({ type: 'initialized' });
                 break;
 

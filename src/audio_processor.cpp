@@ -76,6 +76,10 @@ extern "C" {
     // This ensures no conflicts with scsynth heap allocations
     alignas(4) uint8_t ring_buffer_storage[32768];
 
+    // Validate at compile time that buffer layout fits in allocated storage
+    static_assert(TOTAL_BUFFER_SIZE <= sizeof(ring_buffer_storage),
+                  "Buffer layout exceeds allocated storage!");
+
     // Static audio bus buffer (128 channels * 128 samples * 4 bytes = 64KB)
     // Pre-allocated to avoid malloc in critical audio path
     alignas(16) float static_audio_bus[128 * 128];
@@ -103,6 +107,14 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     int get_ring_buffer_base() {
         return reinterpret_cast<int>(ring_buffer_storage);
+    }
+
+    // Return the buffer layout configuration
+    // JavaScript calls this once at initialization to get all buffer constants
+    // This ensures JS and C++ stay in sync - single source of truth in C++
+    EMSCRIPTEN_KEEPALIVE
+    const BufferLayout* get_buffer_layout() {
+        return &BUFFER_LAYOUT;
     }
 
     // Set time offset from JavaScript (AudioContext → NTP conversion)
