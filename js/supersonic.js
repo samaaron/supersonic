@@ -54,6 +54,7 @@ export class SuperSonic {
         this.config = {
             wasmUrl: './dist/wasm/scsynth-nrt.wasm',
             workletUrl: './dist/workers/scsynth_audio_worklet.js',
+            development: false,  // Use cache-busted WASM files (for dev/testing)
             audioContextOptions: {
                 latencyHint: 'interactive',
                 sampleRate: 48000
@@ -185,9 +186,36 @@ export class SuperSonic {
     }
 
     /**
+     * Load WASM manifest to get the current hashed filename
+     */
+    async #loadWasmManifest() {
+        try {
+            const manifestUrl = './dist/wasm/manifest.json';
+            const response = await fetch(manifestUrl);
+            if (response.ok) {
+                const manifest = await response.json();
+
+                // Use versioned file for development (cache-busted)
+                // Use stable file for production (with Cache-Control headers)
+                const wasmFile = this.config.development ? manifest.wasmFile : manifest.wasmFileStable;
+
+                this.config.wasmUrl = `./dist/wasm/${wasmFile}`;
+                console.log(`[SuperSonic] Using WASM build: ${wasmFile}`);
+                console.log(`[SuperSonic] Build: ${manifest.buildId} (git: ${manifest.gitHash})`);
+            }
+        } catch (error) {
+            // Fallback to non-hashed filename if manifest not found
+            console.warn('[SuperSonic] WASM manifest not found, using default filename');
+        }
+    }
+
+    /**
      * Load WASM binary from network
      */
     async #loadWasm() {
+        // Load manifest first to get the hashed filename
+        await this.#loadWasmManifest();
+
         const wasmResponse = await fetch(this.config.wasmUrl);
         if (!wasmResponse.ok) {
             throw new Error(`Failed to load WASM: ${wasmResponse.status} ${wasmResponse.statusText}`);
@@ -288,8 +316,13 @@ export class SuperSonic {
 
     /**
      * Initialize the audio worklet system
+     * @param {Object} config - Optional configuration overrides
+     * @param {boolean} config.development - Use cache-busted WASM files (default: false)
+     * @param {string} config.wasmUrl - Custom WASM URL
+     * @param {string} config.workletUrl - Custom worklet URL
+     * @param {Object} config.audioContextOptions - AudioContext options
      */
-    async init() {
+    async init(config = {}) {
         if (this.initialized) {
             console.warn('[SuperSonic] Already initialized');
             return;
@@ -299,6 +332,16 @@ export class SuperSonic {
             console.warn('[SuperSonic] Initialization already in progress');
             return;
         }
+
+        // Merge config with defaults
+        this.config = {
+            ...this.config,
+            ...config,
+            audioContextOptions: {
+                ...this.config.audioContextOptions,
+                ...(config.audioContextOptions || {})
+            }
+        };
 
         this.initializing = true;
         this.stats.initStartTime = performance.now();
