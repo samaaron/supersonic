@@ -100,8 +100,8 @@ echo "Generating WASM hash for cache busting..."
 WASM_HASH=$(sha256sum "$OUTPUT_DIR/wasm/scsynth-nrt.wasm" | cut -c1-8)
 WASM_FILENAME_VERSIONED="scsynth-nrt.$WASM_HASH.wasm"
 
-# Copy to hashed filename (for dev/example - forces cache refresh)
-cp "$OUTPUT_DIR/wasm/scsynth-nrt.wasm" "$OUTPUT_DIR/wasm/$WASM_FILENAME_VERSIONED"
+# Create symlink to hashed filename (for dev/example - forces cache refresh)
+ln -sf "scsynth-nrt.wasm" "$OUTPUT_DIR/wasm/$WASM_FILENAME_VERSIONED"
 
 # Create manifest with both file options
 cat > "$OUTPUT_DIR/wasm/manifest.json" << EOF
