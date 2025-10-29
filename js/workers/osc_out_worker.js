@@ -181,8 +181,8 @@ function writeToRingBufferBlocking(oscMessage) {
             // Write message header
             dataView.setUint32(writePos, bufferConstants.MESSAGE_MAGIC, true);
             dataView.setUint32(writePos + 4, totalSize, true);
-            dataView.setUint32(writePos + 8, 1, true); // type=OSC
-            dataView.setUint32(writePos + 12, stats.bundlesWritten, true); // sequence
+            dataView.setUint32(writePos + 8, stats.bundlesWritten, true); // sequence
+            dataView.setUint32(writePos + 12, 0, true); // padding
 
             // Write payload
             uint8View.set(oscMessage, writePos + bufferConstants.MESSAGE_HEADER_SIZE);

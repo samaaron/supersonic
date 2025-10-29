@@ -98,8 +98,8 @@ function readMessages() {
         }
 
         var length = dataView.getUint32(readPos + 4, true);
-        var type = dataView.getUint32(readPos + 8, true);
-        var sequence = dataView.getUint32(readPos + 12, true);
+        var sequence = dataView.getUint32(readPos + 8, true);
+        var padding = dataView.getUint32(readPos + 12, true);  // unused padding field
 
         // Validate message length
         if (length < bufferConstants.MESSAGE_HEADER_SIZE || length > bufferConstants.OUT_BUFFER_SIZE) {
@@ -134,7 +134,6 @@ function readMessages() {
 
         messages.push({
             oscData: payload,
-            type: type,
             sequence: sequence
         });
 
