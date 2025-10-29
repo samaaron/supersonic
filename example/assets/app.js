@@ -86,9 +86,6 @@ function parseTextToOSC(text) {
   return { address, args };
 }
 
-// Track last position we read from debug buffer
-let lastDebugHead = 0;
-
 // Flash tab to indicate update
 function flashTab(tabName) {
   const tabButton = document.querySelector(`[data-tab="${tabName}"]`);
@@ -109,70 +106,6 @@ function flashTab(tabName) {
   setTimeout(() => {
     tabButton.classList.remove('flash');
   }, 1500);
-}
-
-function updateDebugLog() {
-  if (!orchestrator || !orchestrator.wasmMemory || !orchestrator.ringBufferBase) return;
-
-  const buffer = orchestrator.wasmMemory.buffer;
-  const atomicView = new Int32Array(buffer);
-  const uint8View = new Uint8Array(buffer);
-
-  // Memory layout constants (RELATIVE offsets from ring buffer base)
-  const DEBUG_BUFFER_START = 16384;
-  const DEBUG_BUFFER_SIZE = 4096;
-  const CONTROL_START = 20480;
-  const DEBUG_HEAD_OFFSET_IN_CONTROL = 16;  // debug_head is 5th field in ControlPointers (4 int32s = 16 bytes)
-
-  // Calculate ABSOLUTE addresses by adding ring buffer base
-  const debugBufferAbsoluteStart = orchestrator.ringBufferBase + DEBUG_BUFFER_START;
-  const debugHeadByteOffset = orchestrator.ringBufferBase + CONTROL_START + DEBUG_HEAD_OFFSET_IN_CONTROL;
-  const debugHeadIndex = debugHeadByteOffset / 4;  // Convert byte offset to Int32Array index
-
-  const head = Atomics.load(atomicView, debugHeadIndex);
-
-  // Only read if there's new data (head changed) and within valid range
-  if (head === lastDebugHead || head <= 0 || head > DEBUG_BUFFER_SIZE) {
-    return; // No new data or invalid head position
-  }
-
-  // Detect buffer wrap: WASM resets head to 0 when buffer fills
-  // When head < lastDebugHead, the buffer wrapped and overwrote old content
-  // We read ONLY the NEW content from 0 to head (never re-reading old data)
-  const bufferWrapped = head < lastDebugHead;
-  const startPos = bufferWrapped ? 0 : lastDebugHead;
-
-  if (bufferWrapped) {
-    console.log('[Debug] Buffer wrapped - old content overwritten, reading fresh from 0');
-  }
-
-  // Read ONLY new content: from where we last read (or 0 after wrap) to current head
-  const debugBytes = uint8View.slice(
-    debugBufferAbsoluteStart + startPos,
-    debugBufferAbsoluteStart + head
-  );
-  const decoder = new TextDecoder();
-  const newText = decoder.decode(debugBytes);
-
-  if (newText) {
-    // Append all logs to Debug Log
-    debugLog.textContent += newText + '\n';
-    if (window.debugAutoScroll !== false) {
-      const scrollContainer = debugLog.parentElement;
-      if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-      }
-    }
-
-    // Flash debug tab to indicate update
-    flashTab('debug');
-
-    // Also log to browser console for permanent record
-    console.log('[Debug]', newText);
-  }
-
-  // Update last read position - we've now consumed up to 'head'
-  lastDebugHead = head;
 }
 
 // Helper functions
@@ -541,13 +474,24 @@ initButton.addEventListener('click', async () => {
       metricsWithUsage.messages_sent = orchestrator.stats.messagesSent || 0;
 
       updateMetrics(metricsWithUsage);
-      updateDebugLog(); // Update debug log every time metrics update
     };
 
     orchestrator.onError = (error) => {
       console.error('[App] Error:', error);
       showError(error.message);
       updateStatus('error');
+    };
+
+    orchestrator.onDebugMessage = (msg) => {
+      // Display debug messages from debug worker
+      debugLog.textContent += msg.text + '\n';
+      if (window.debugAutoScroll !== false) {
+        const scrollContainer = debugLog.parentElement;
+        if (scrollContainer) {
+          scrollContainer.scrollTop = scrollContainer.scrollHeight;
+        }
+      }
+      flashTab('debug');
     };
 
     orchestrator.onSendError = (error) => {

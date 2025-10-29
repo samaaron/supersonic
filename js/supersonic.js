@@ -54,7 +54,7 @@ export class SuperSonic {
         this.config = {
             wasmUrl: './dist/wasm/scsynth-nrt.wasm',
             workletUrl: './dist/workers/scsynth_audio_worklet.js',
-            development: false,  // Use cache-busted WASM files (for dev/testing)
+            development: false,
             audioContextOptions: {
                 latencyHint: 'interactive',
                 sampleRate: 48000
@@ -195,8 +195,8 @@ export class SuperSonic {
             if (response.ok) {
                 const manifest = await response.json();
 
-                // Use versioned file for development (cache-busted)
-                // Use stable file for production (with Cache-Control headers)
+                // Use versioned file for development (cache-bypass)
+                // Use stable file for production
                 const wasmFile = this.config.development ? manifest.wasmFile : manifest.wasmFileStable;
 
                 this.config.wasmUrl = `./dist/wasm/${wasmFile}`;
