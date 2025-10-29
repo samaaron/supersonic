@@ -66,57 +66,71 @@ function readDebugMessages() {
         return null; // No messages
     }
 
-    // Calculate available bytes
-    var available = (head - tail + bufferConstants.DEBUG_BUFFER_SIZE) % bufferConstants.DEBUG_BUFFER_SIZE;
-    if (available === 0) {
-        return null;
-    }
-
-    // Read all available debug text
     var messages = [];
-    var currentMessage = [];
     var currentTail = tail;
-    var bytesRead = 0;
+    var messagesRead = 0;
+    var maxMessages = 10; // Process up to 10 messages per wake
 
-    while (currentTail !== head && bytesRead < available) {
+    while (currentTail !== head && messagesRead < maxMessages) {
         var readPos = ringBufferBase + bufferConstants.DEBUG_BUFFER_START + currentTail;
-        var byte = uint8View[readPos];
+
+        // Read message header (now always contiguous due to padding)
+        var magic = dataView.getUint32(readPos, true);
 
         // Check for padding marker - skip to beginning
-        if (byte === bufferConstants.DEBUG_PADDING_MARKER) {
+        if (magic === bufferConstants.PADDING_MAGIC) {
             currentTail = 0;
-            bytesRead = 0; // Reset to start reading from position 0
             continue;
         }
 
-        if (byte === 10) { // newline (messages are always complete now due to padding)
-            if (currentMessage.length > 0) {
-                // Convert accumulated bytes to string
-                var messageText = '';
-                for (var i = 0; i < currentMessage.length; i++) {
-                    messageText += String.fromCharCode(currentMessage[i]);
-                }
-
-                messages.push({
-                    text: messageText,
-                    timestamp: performance.now()
-                });
-
-                currentMessage = [];
-                stats.messagesReceived++;
-            }
-        } else {
-            currentMessage.push(byte);
+        // Validate message magic
+        if (magic !== bufferConstants.MESSAGE_MAGIC) {
+            console.error('[DebugWorker] Corrupted message at position', currentTail);
+            // Skip this byte and continue
+            currentTail = (currentTail + 1) % bufferConstants.DEBUG_BUFFER_SIZE;
+            continue;
         }
 
-        currentTail = (currentTail + 1) % bufferConstants.DEBUG_BUFFER_SIZE;
-        bytesRead++;
+        var length = dataView.getUint32(readPos + 4, true);
+        var sequence = dataView.getUint32(readPos + 8, true);
+
+        // Validate message length
+        if (length < bufferConstants.MESSAGE_HEADER_SIZE || length > bufferConstants.DEBUG_BUFFER_SIZE) {
+            console.error('[DebugWorker] Invalid message length:', length);
+            currentTail = (currentTail + 1) % bufferConstants.DEBUG_BUFFER_SIZE;
+            continue;
+        }
+
+        // Read payload (debug text) - now contiguous due to padding
+        var payloadLength = length - bufferConstants.MESSAGE_HEADER_SIZE;
+        var payloadStart = readPos + bufferConstants.MESSAGE_HEADER_SIZE;
+
+        // Convert bytes to string using TextDecoder for proper UTF-8 handling
+        var payloadBytes = uint8View.slice(payloadStart, payloadStart + payloadLength);
+        var decoder = new TextDecoder('utf-8');
+        var messageText = decoder.decode(payloadBytes);
+
+        // Remove trailing newline if present
+        if (messageText.endsWith('\n')) {
+            messageText = messageText.slice(0, -1);
+        }
+
+        messages.push({
+            text: messageText,
+            timestamp: performance.now(),
+            sequence: sequence
+        });
+
+        // Move to next message
+        currentTail = (currentTail + length) % bufferConstants.DEBUG_BUFFER_SIZE;
+        messagesRead++;
+        stats.messagesReceived++;
     }
 
     // Update tail pointer (consume messages)
-    if (bytesRead > 0) {
+    if (messagesRead > 0) {
         Atomics.store(atomicView, CONTROL_INDICES.DEBUG_TAIL, currentTail);
-        stats.bytesRead += bytesRead;
+        stats.bytesRead += messagesRead;
     }
 
     return messages.length > 0 ? messages : null;

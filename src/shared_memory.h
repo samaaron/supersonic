@@ -46,9 +46,9 @@ constexpr uint32_t TOTAL_BUFFER_SIZE  = METRICS_START + METRICS_SIZE;
 struct alignas(4) Message {
     uint32_t magic;       // 0xDEADBEEF for validation
     uint32_t length;      // Total message size including header
-    uint32_t type;        // Message type (OSC=1, DEBUG=2)
     uint32_t sequence;    // Sequence number for ordering
-    // payload follows (OSC binary data for type=1, UTF-8 text for type=2)
+    uint32_t _padding;    // Padding to maintain 16-byte size for now
+    // payload follows (binary data - OSC or text depending on buffer)
 };
 
 // Control pointers structure (4-byte aligned for atomics)

@@ -7,6 +7,7 @@
 */
 
 #include "audio_processor.h"
+#include "build_info.h"  // Build hash and timestamp
 #include <emscripten/webaudio.h>
 #include <algorithm>
 #include <cstring>
@@ -45,6 +46,18 @@ void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
 namespace scsynth {
     bool UnrollOSCPacket(World* inWorld, int inSize, char* inData, OSC_Packet* inPacket);
 }
+
+// Forward declare ring buffer write function (defined after namespace)
+bool ring_buffer_write(
+    uint8_t* buffer_start,
+    uint32_t buffer_size,
+    uint32_t buffer_start_offset,
+    std::atomic<int32_t>* head,
+    std::atomic<int32_t>* tail,
+    const void* data,
+    uint32_t data_size,
+    PerformanceMetrics* metrics
+);
 
 // Forward declare table initialization functions
 // These must be called manually in standalone WASM builds (no static constructors)
@@ -294,7 +307,7 @@ extern "C" {
         worklet_debug("░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀");
         worklet_debug("░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░");
         worklet_debug("░▀▀▀░▀▀▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀");
-        worklet_debug("scsynth-nrt ready: %.0fHz, %d channels", sample_rate, options.mNumOutputBusChannels);
+        worklet_debug("scsynth-nrt ready: %.0fHz, %d channels (build: %s)", sample_rate, options.mNumOutputBusChannels, BUILD_HASH);
     }
 
     // Main audio processing function - called every audio frame (128 samples)
@@ -518,36 +531,29 @@ extern "C" {
         char buffer[1024];
         int result = vsnprintf(buffer, sizeof(buffer), fmt, args);
 
-        // Get current head position
-        int32_t head = control->debug_head.load(std::memory_order_acquire);
-
-        // Calculate message length
+        // Calculate message length (including newline)
         uint32_t msg_len = 0;
         while (buffer[msg_len] != '\0' && msg_len < sizeof(buffer)) {
             msg_len++;
         }
 
-        // Check if message fits contiguously (leave room for newline)
-        uint32_t total_size = msg_len + 1; // message + newline
-        uint32_t space_to_end = DEBUG_BUFFER_SIZE - head;
-
-        if (total_size > space_to_end) {
-            // Message won't fit - write padding marker and wrap to beginning
-            shared_memory[DEBUG_BUFFER_START + head] = DEBUG_PADDING_MARKER;
-            head = 0;
+        // Add newline to buffer
+        if (msg_len < sizeof(buffer) - 1) {
+            buffer[msg_len] = '\n';
+            msg_len++;
         }
 
-        // Write message (now guaranteed to fit contiguously)
-        uint32_t offset = DEBUG_BUFFER_START + head;
-        for (uint32_t i = 0; i < msg_len; i++) {
-            shared_memory[offset + i] = buffer[i];
-        }
-
-        // Add newline
-        shared_memory[offset + msg_len] = '\n';
-
-        // Update head pointer (publish message)
-        control->debug_head.store(head + msg_len + 1, std::memory_order_release);
+        // Use unified ring buffer write with full protection (:: for global scope)
+        ::ring_buffer_write(
+            shared_memory,              // buffer_start
+            DEBUG_BUFFER_SIZE,          // buffer_size
+            DEBUG_BUFFER_START,         // buffer_start_offset
+            &control->debug_head,       // head
+            &control->debug_tail,       // tail
+            buffer,                     // data
+            msg_len,                    // data_size
+            nullptr                     // metrics (not tracked for debug currently)
+        );
 
         return result;
     }
@@ -633,7 +639,12 @@ extern "C" {
         }
         return gSineWavetable[index];
     }
-}
+
+} // namespace scsynth
+
+// ============================================================================
+// RING BUFFER HELPER FUNCTIONS (outside namespace for C++ linkage)
+// ============================================================================
 
 // Ring buffer helper: get next index with wrap
 inline uint32_t next_index(uint32_t idx, uint32_t buffer_size) {
@@ -650,55 +661,108 @@ inline bool is_buffer_full(uint32_t head, uint32_t tail, uint32_t buffer_size) {
     return next_index(head, buffer_size) == tail;
 }
 
-// Get current time in microseconds
-
-// OSC reply callback for scsynth
-// This is called by scsynth when it needs to send OSC replies (e.g., /done, /n_go, etc.)
-void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
-    if (!control || !shared_memory) return;
+/**
+ * Unified ring buffer write function with full corruption protection.
+ *
+ * This function implements a lock-free SPSC (Single Producer Single Consumer) ring buffer
+ * with the following guarantees:
+ * - Messages are always written contiguously (no wrapping mid-message)
+ * - Automatic padding insertion when wrapping is needed
+ * - Buffer overflow detection with graceful message dropping
+ * - Atomic memory operations for thread safety
+ * - Metrics tracking for dropped messages and overruns
+ *
+ * @param buffer_start Physical memory address of the buffer
+ * @param buffer_size Total size of the ring buffer in bytes
+ * @param buffer_start_offset Offset within shared memory where buffer starts
+ * @param head Atomic pointer to head position (producer writes here)
+ * @param tail Atomic pointer to tail position (consumer reads from here)
+ * @param data Payload data to write
+ * @param data_size Size of payload in bytes
+ * @param metrics Optional metrics structure for tracking drops/overruns
+ * @return true if message written successfully, false if dropped due to insufficient space
+ */
+bool ring_buffer_write(
+    uint8_t* buffer_start,
+    uint32_t buffer_size,
+    uint32_t buffer_start_offset,
+    std::atomic<int32_t>* head,
+    std::atomic<int32_t>* tail,
+    const void* data,
+    uint32_t data_size,
+    PerformanceMetrics* metrics
+) {
+    using namespace scsynth;  // Access globals from scsynth namespace
 
     // Create message header
     Message header;
     header.magic = MESSAGE_MAGIC;
-    header.length = sizeof(Message) + size;
-    header.type = 1; // OSC message
+    header.length = sizeof(Message) + data_size;
     header.sequence = control->sequence.fetch_add(1, std::memory_order_relaxed);
 
-    // Check if there's enough space in OUT buffer
-    int32_t out_head = control->out_head.load(std::memory_order_acquire);
-    int32_t out_tail = control->out_tail.load(std::memory_order_acquire);
-    uint32_t out_available = (OUT_BUFFER_SIZE - 1 - out_head + out_tail) % OUT_BUFFER_SIZE;
+    // Load head and tail with acquire semantics
+    int32_t current_head = head->load(std::memory_order_acquire);
+    int32_t current_tail = tail->load(std::memory_order_acquire);
 
-    if (out_available < header.length) {
-        // Not enough space - drop the reply
-        metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
-        metrics->buffer_overruns.fetch_add(1, std::memory_order_relaxed);
-        control->status_flags.fetch_or(STATUS_BUFFER_FULL, std::memory_order_relaxed);
-        return;
+    // Calculate available space in the buffer
+    uint32_t available = (buffer_size - 1 - current_head + current_tail) % buffer_size;
+
+    // Check if there's enough space for the message
+    if (available < header.length) {
+        // Not enough space - drop the message and track metrics
+        if (metrics) {
+            metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
+            metrics->buffer_overruns.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (control) {
+            control->status_flags.fetch_or(STATUS_BUFFER_FULL, std::memory_order_relaxed);
+        }
+        return false;
     }
 
     // Check if message fits contiguously, otherwise write padding and wrap
-    uint32_t space_to_end = OUT_BUFFER_SIZE - out_head;
+    uint32_t space_to_end = buffer_size - current_head;
     if (header.length > space_to_end) {
         // Write padding marker to fill remaining space
         Message padding;
         padding.magic = PADDING_MAGIC;
         padding.length = 0;
-        padding.type = 0;
         padding.sequence = 0;
 
-        std::memcpy(shared_memory + OUT_BUFFER_START + out_head, &padding, sizeof(Message));
+        std::memcpy(buffer_start + buffer_start_offset + current_head, &padding, sizeof(Message));
 
         // Wrap head to beginning
-        out_head = 0;
+        current_head = 0;
     }
 
-    // Write header to OUT buffer (now contiguous)
-    std::memcpy(shared_memory + OUT_BUFFER_START + out_head, &header, sizeof(Message));
+    // Write message header (now contiguous)
+    std::memcpy(buffer_start + buffer_start_offset + current_head, &header, sizeof(Message));
 
-    // Write OSC payload (contiguous)
-    std::memcpy(shared_memory + OUT_BUFFER_START + out_head + sizeof(Message), msg, size);
+    // Write payload (contiguous)
+    std::memcpy(buffer_start + buffer_start_offset + current_head + sizeof(Message), data, data_size);
 
-    // Update OUT head (publish message)
-    control->out_head.store((out_head + header.length) % OUT_BUFFER_SIZE, std::memory_order_release);
+    // Update head pointer with release semantics (publish message)
+    head->store((current_head + header.length) % buffer_size, std::memory_order_release);
+
+    return true;
+}
+
+// OSC reply callback for scsynth
+// This is called by scsynth when it needs to send OSC replies (e.g., /done, /n_go, etc.)
+void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
+    using namespace scsynth;  // Access globals from scsynth namespace
+
+    if (!control || !shared_memory) return;
+
+    // Use unified ring buffer write with full protection
+    ring_buffer_write(
+        shared_memory,              // buffer_start
+        OUT_BUFFER_SIZE,            // buffer_size
+        OUT_BUFFER_START,           // buffer_start_offset
+        &control->out_head,         // head
+        &control->out_tail,         // tail
+        msg,                        // data
+        size,                       // data_size
+        metrics                     // metrics
+    );
 }
