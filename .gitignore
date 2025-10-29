@@ -1,2 +1,3 @@
 .history
 dist/
+src/build_info.h
