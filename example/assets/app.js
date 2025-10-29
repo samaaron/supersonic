@@ -572,7 +572,7 @@ initButton.addEventListener('click', async () => {
 
     // Check capabilities and initialize
     await orchestrator.checkCapabilities();
-    await orchestrator.init();
+    await orchestrator.init({ development: true });
 
     // Expose for debugging
     window.testOrchestrator = orchestrator;
