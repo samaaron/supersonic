@@ -100,6 +100,11 @@ extern HashTable<PlugInCmd, Malloc>* gPlugInCmds;
 
 extern "C" {
 
+#ifdef __EMSCRIPTEN__
+// Forward declare worklet_debug for UGen Print() debugging
+int worklet_debug(const char* fmt, ...);
+#endif
+
 #ifdef NO_LIBSNDFILE
 struct SF_INFO {};
 #endif
@@ -217,10 +222,13 @@ void InterfaceTable_Init() {
     ft->mSineSize = kSineSize;
     ft->mSineWavetable = gSineWavetable;
 
-    // fPrint set to nullptr - variadic functions cannot work through function pointers in WASM
-    // UGens that try to Print() will get a null pointer, which should be safer than
-    // a signature mismatch error
+    // Enable Print() debugging for UGens via worklet_debug
+    // This writes to the debug ring buffer that JavaScript can read
+#ifdef __EMSCRIPTEN__
+    ft->fPrint = &worklet_debug;
+#else
     ft->fPrint = nullptr;
+#endif
 
     ft->fRanSeed = &server_timeseed;
 
