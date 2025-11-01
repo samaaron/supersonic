@@ -29,6 +29,11 @@
 
 using namespace std; // for math functions
 
+#ifdef __EMSCRIPTEN__
+extern "C" {
+    int worklet_debug(const char* fmt, ...);
+}
+#endif
 
 const int kMAXMEDIANSIZE = 32;
 
@@ -234,22 +239,29 @@ void NumRunningSynths_Ctor(Unit* unit, int inNumSamples);
 void NumRunningSynths_next(Unit* unit, int inNumSamples);
 
 void BufSampleRate_next(BufInfoUnit* unit, int inNumSamples);
-void BufSampleRate_Ctor(BufInfoUnit* unit, int inNumSamples);
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+// See docs/wasm-function-signature-fix.md for details.
+void BufSampleRate_Ctor(BufInfoUnit* unit);
 
 void BufFrames_next(BufInfoUnit* unit, int inNumSamples);
-void BufFrames_Ctor(BufInfoUnit* unit, int inNumSamples);
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+void BufFrames_Ctor(BufInfoUnit* unit);
 
 void BufDur_next(BufInfoUnit* unit, int inNumSamples);
-void BufDur_Ctor(BufInfoUnit* unit, int inNumSamples);
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+void BufDur_Ctor(BufInfoUnit* unit);
 
 void BufChannels_next(BufInfoUnit* unit, int inNumSamples);
-void BufChannels_Ctor(BufInfoUnit* unit, int inNumSamples);
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+void BufChannels_Ctor(BufInfoUnit* unit);
 
 void BufSamples_next(BufInfoUnit* unit, int inNumSamples);
-void BufSamples_Ctor(BufInfoUnit* unit, int inNumSamples);
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+void BufSamples_Ctor(BufInfoUnit* unit);
 
 void BufRateScale_next(BufInfoUnit* unit, int inNumSamples);
-void BufRateScale_Ctor(BufInfoUnit* unit, int inNumSamples);
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+void BufRateScale_Ctor(BufInfoUnit* unit);
 
 void PlayBuf_next_aa(PlayBuf* unit, int inNumSamples);
 void PlayBuf_next_ak(PlayBuf* unit, int inNumSamples);
@@ -497,7 +509,12 @@ void BufSampleRate_next(BufInfoUnit* unit, int inNumSamples) {
     ZOUT0(0) = buf->samplerate;
 }
 
-void BufSampleRate_Ctor(BufInfoUnit* unit, int inNumSamples) {
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter.
+// Original SuperCollider has this parameter but never uses it. In native builds, the unused
+// parameter gets garbage from a register but causes no harm. In WebAssembly, the signature
+// mismatch with UnitCtorFunc typedef causes function table corruption, resulting in infinite
+// recursion. See docs/wasm-function-signature-fix.md for full analysis.
+void BufSampleRate_Ctor(BufInfoUnit* unit) {
     SETCALC(BufSampleRate_next);
     CTOR_GET_BUF
     unit->m_fbufnum = fbufnum;
@@ -511,7 +528,9 @@ void BufFrames_next(BufInfoUnit* unit, int inNumSamples) {
     ZOUT0(0) = buf->frames;
 }
 
-void BufFrames_Ctor(BufInfoUnit* unit, int inNumSamples) {
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+// See docs/wasm-function-signature-fix.md for details.
+void BufFrames_Ctor(BufInfoUnit* unit) {
     SETCALC(BufFrames_next);
     CTOR_GET_BUF
     unit->m_fbufnum = fbufnum;
@@ -525,12 +544,30 @@ void BufDur_next(BufInfoUnit* unit, int inNumSamples) {
     ZOUT0(0) = buf->frames * buf->sampledur;
 }
 
-void BufDur_Ctor(BufInfoUnit* unit, int inNumSamples) {
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+// This was the primary constructor that triggered infinite recursion due to WASM function table
+// corruption caused by signature mismatch. See docs/wasm-function-signature-fix.md for details.
+void BufDur_Ctor(BufInfoUnit* unit) {
+#ifdef __EMSCRIPTEN__
+    worklet_debug("[BufDur_Ctor] STEP 1: About to SETCALC");
+#endif
     SETCALC(BufDur_next);
+#ifdef __EMSCRIPTEN__
+    worklet_debug("[BufDur_Ctor] STEP 2: About to read ZIN0(0)");
+#endif
     CTOR_GET_BUF
+#ifdef __EMSCRIPTEN__
+    worklet_debug("[BufDur_Ctor] STEP 3: CTOR_GET_BUF complete, fbufnum=%f, buf=%p", fbufnum, buf);
+#endif
     unit->m_fbufnum = fbufnum;
     unit->m_buf = buf;
+#ifdef __EMSCRIPTEN__
+    worklet_debug("[BufDur_Ctor] STEP 4: About to write ZOUT0(0)");
+#endif
     ZOUT0(0) = buf->frames * buf->sampledur;
+#ifdef __EMSCRIPTEN__
+    worklet_debug("[BufDur_Ctor] STEP 5: BufDur_Ctor complete");
+#endif
 }
 
 
@@ -539,7 +576,9 @@ void BufChannels_next(BufInfoUnit* unit, int inNumSamples) {
     ZOUT0(0) = buf->channels;
 }
 
-void BufChannels_Ctor(BufInfoUnit* unit, int inNumSamples) {
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+// See docs/wasm-function-signature-fix.md for details.
+void BufChannels_Ctor(BufInfoUnit* unit) {
     SETCALC(BufChannels_next);
     CTOR_GET_BUF
     unit->m_fbufnum = fbufnum;
@@ -553,7 +592,9 @@ void BufSamples_next(BufInfoUnit* unit, int inNumSamples) {
     ZOUT0(0) = buf->samples;
 }
 
-void BufSamples_Ctor(BufInfoUnit* unit, int inNumSamples) {
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+// See docs/wasm-function-signature-fix.md for details.
+void BufSamples_Ctor(BufInfoUnit* unit) {
     SETCALC(BufSamples_next);
     CTOR_GET_BUF
     unit->m_fbufnum = fbufnum;
@@ -567,7 +608,9 @@ void BufRateScale_next(BufInfoUnit* unit, int inNumSamples) {
     ZOUT0(0) = buf->samplerate * FULLSAMPLEDUR;
 }
 
-void BufRateScale_Ctor(BufInfoUnit* unit, int inNumSamples) {
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+// See docs/wasm-function-signature-fix.md for details.
+void BufRateScale_Ctor(BufInfoUnit* unit) {
     SETCALC(BufRateScale_next);
     CTOR_GET_BUF
     unit->m_fbufnum = fbufnum;
