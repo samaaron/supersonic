@@ -13,14 +13,14 @@ const sonic = new SuperSonic();
 await sonic.init();
 
 // Load a single synthdef
-await sonic.loadSynthDef('./dist/etc/synthdefs/sonic-pi-beep.scsyndef');
+await sonic.loadSynthDef('./dist/extra/synthdefs/sonic-pi-beep.scsyndef');
 
 // Load multiple synthdefs
 const results = await sonic.loadSynthDefs([
     'sonic-pi-beep',
     'sonic-pi-tb303',
     'sonic-pi-dsaw'
-], './dist/etc/synthdefs/');
+], './dist/extra/synthdefs/');
 ```
 
 This is the clean, standard approach for loading synthdefs in production.
@@ -29,8 +29,8 @@ This is the clean, standard approach for loading synthdefs in production.
 
 The build script (`build.sh`) automatically:
 
-1. Copies all `.scsyndef` files from `etc/synthdefs/` (source) to `dist/etc/synthdefs/` (build output)
-2. Generates `dist/etc/synthdefs/manifest.json` with a list of all available synthdefs (120 files)
+1. Copies all `.scsyndef` files from `extra/synthdefs/` (source) to `dist/extra/synthdefs/` (build output)
+2. Generates `dist/extra/synthdefs/manifest.json` with a list of all available synthdefs (120 files)
 
 The 120 synthdefs are included in the repository (sourced from Sonic Pi) so anyone cloning the repo can build and run the examples immediately.
 
@@ -43,7 +43,7 @@ dist/
 │   └── scsynth-nrt.wasm            # WASM engine
 ├── workers/
 │   └── ...                          # Worker threads
-└── etc/
+└── extra/
     └── synthdefs/
         ├── manifest.json            # List of available synthdefs
         ├── sonic-pi-beep.scsyndef
@@ -94,7 +94,7 @@ Load multiple synthdefs in parallel.
 
 **Parameters:**
 - `names` (string[]): Array of synthdef names (without `.scsyndef` extension)
-- `baseUrl` (string): Base URL for synthdef files (default: `'./etc/synthdefs/'`)
+- `baseUrl` (string): Base URL for synthdef files (default: `'./extra/synthdefs/'`)
 
 **Returns:** `Promise<Object>` - Map of name → `{success: boolean, error?: string}`
 

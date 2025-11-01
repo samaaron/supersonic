@@ -64,7 +64,7 @@ export class SuperSonic {
         };
 
         // Buffer loading configuration
-        this.audioBaseURL = options.audioBaseURL || '../etc/samples/';
+        this.audioBaseURL = options.audioBaseURL || 'dist/extra/samples/';
         this.audioPathMap = options.audioPathMap || {};
 
         // Track allocated buffers for cleanup
@@ -962,7 +962,7 @@ export class SuperSonic {
      * @param {string} path - Path or URL to the .scsyndef file
      * @returns {Promise<void>}
      * @example
-     * await sonic.loadSynthDef('./etc/synthdefs/sonic-pi-beep.scsyndef');
+     * await sonic.loadSynthDef('./extra/synthdefs/sonic-pi-beep.scsyndef');
      */
     async loadSynthDef(path) {
         if (!this.initialized) {
@@ -992,12 +992,12 @@ export class SuperSonic {
     /**
      * Load multiple synthdefs from a directory
      * @param {string[]} names - Array of synthdef names (without .scsyndef extension)
-     * @param {string} baseUrl - Base URL for synthdef files (default: './etc/synthdefs/')
+     * @param {string} baseUrl - Base URL for synthdef files (default: './extra/synthdefs/')
      * @returns {Promise<Object>} Map of name -> success/error
      * @example
      * const results = await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
      */
-    async loadSynthDefs(names, baseUrl = './etc/synthdefs/') {
+    async loadSynthDefs(names, baseUrl = './extra/synthdefs/') {
         if (!this.initialized) {
             throw new Error('SuperSonic not initialized. Call init() first.');
         }

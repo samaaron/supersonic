@@ -20,11 +20,11 @@ These synthdefs are part of Sonic Pi and are licensed under the GPL v3 or later.
 
 ## Usage
 
-These files are automatically copied to `dist/etc/synthdefs/` during the build process and can be loaded using the SuperSonic API:
+These files are automatically copied to `dist/extra/synthdefs/` during the build process and can be loaded using the SuperSonic API:
 
 ```javascript
 // Load a single synthdef
-await sonic.loadSynthDef('./dist/etc/synthdefs/sonic-pi-beep.scsyndef');
+await sonic.loadSynthDef('./dist/extra/synthdefs/sonic-pi-beep.scsyndef');
 
 // Load multiple synthdefs
 await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
