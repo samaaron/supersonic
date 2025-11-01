@@ -121,10 +121,16 @@ echo "  Production:  scsynth-nrt.wasm (use with Cache-Control headers)"
 echo "  Development: $WASM_FILENAME_VERSIONED (cache-busted)"
 echo "Build: $BUILD_ID (git: $GIT_HASH)"
 
+# Check if node_modules exists and install dependencies if needed
+if [ ! -d "$PROJECT_ROOT/node_modules" ]; then
+    echo "Installing npm dependencies..."
+    npm install
+fi
+
 # Check if esbuild is available
 if ! command -v esbuild &> /dev/null; then
     echo "Error: esbuild not found!"
-    echo "Please install esbuild: npm install -g esbuild"
+    echo "Please install esbuild: npm install"
     exit 1
 fi
 
