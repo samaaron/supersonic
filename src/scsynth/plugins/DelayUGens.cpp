@@ -223,19 +223,22 @@ struct DelTapRd : public Unit {
 
 extern "C" {
 
-void SampleRate_Ctor(Unit* unit, int inNumSamples);
-void ControlRate_Ctor(Unit* unit, int inNumSamples);
-void SampleDur_Ctor(Unit* unit, int inNumSamples);
-void ControlDur_Ctor(Unit* unit, int inNumSamples);
-void SubsampleOffset_Ctor(Unit* unit, int inNumSamples);
-void RadiansPerSample_Ctor(Unit* unit, int inNumSamples);
-void NumInputBuses_Ctor(Unit* unit, int inNumSamples);
-void NumOutputBuses_Ctor(Unit* unit, int inNumSamples);
-void NumAudioBuses_Ctor(Unit* unit, int inNumSamples);
-void NumControlBuses_Ctor(Unit* unit, int inNumSamples);
-void NumBuffers_Ctor(Unit* unit, int inNumSamples);
-void NodeID_Ctor(Unit* unit, int inNumSamples);
-void NumRunningSynths_Ctor(Unit* unit, int inNumSamples);
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+// These Info UGens had the same signature mismatch as BufInfo UGens (fixed in bf8aa70).
+// The parameter was never used in any of these constructors. See docs/wasm-function-signature-fix.md
+void SampleRate_Ctor(Unit* unit);
+void ControlRate_Ctor(Unit* unit);
+void SampleDur_Ctor(Unit* unit);
+void ControlDur_Ctor(Unit* unit);
+void SubsampleOffset_Ctor(Unit* unit);
+void RadiansPerSample_Ctor(Unit* unit);
+void NumInputBuses_Ctor(Unit* unit);
+void NumOutputBuses_Ctor(Unit* unit);
+void NumAudioBuses_Ctor(Unit* unit);
+void NumControlBuses_Ctor(Unit* unit);
+void NumBuffers_Ctor(Unit* unit);
+void NodeID_Ctor(Unit* unit);
+void NumRunningSynths_Ctor(Unit* unit);
 void NumRunningSynths_next(Unit* unit, int inNumSamples);
 
 void BufSampleRate_next(BufInfoUnit* unit, int inNumSamples);
@@ -443,36 +446,44 @@ void DelTapRd_next4_k(DelTapRd* unit, int inNumSamples);
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
-void SampleRate_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = FULLRATE; }
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter from all Info UGen constructors.
+// Original SuperCollider has this parameter but never uses it. In native builds, the unused
+// parameter gets garbage from a register but causes no harm. In WebAssembly, the signature
+// mismatch with UnitCtorFunc typedef causes function table corruption, potentially resulting in
+// infinite recursion (as seen with BufInfo UGens in commit bf8aa70).
 
-void ControlRate_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = BUFRATE; }
+void SampleRate_Ctor(Unit* unit) { ZOUT0(0) = FULLRATE; }
 
-void SampleDur_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = FULLSAMPLEDUR; }
+void ControlRate_Ctor(Unit* unit) { ZOUT0(0) = BUFRATE; }
 
-void ControlDur_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = BUFDUR; }
+void SampleDur_Ctor(Unit* unit) { ZOUT0(0) = FULLSAMPLEDUR; }
 
-void RadiansPerSample_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = unit->mWorld->mFullRate.mRadiansPerSample; }
+void ControlDur_Ctor(Unit* unit) { ZOUT0(0) = BUFDUR; }
 
-void BlockSize_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = FULLBUFLENGTH; }
+void RadiansPerSample_Ctor(Unit* unit) { ZOUT0(0) = unit->mWorld->mFullRate.mRadiansPerSample; }
 
-void SubsampleOffset_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = unit->mParent->mSubsampleOffset; }
+void BlockSize_Ctor(Unit* unit) { ZOUT0(0) = FULLBUFLENGTH; }
+
+void SubsampleOffset_Ctor(Unit* unit) { ZOUT0(0) = unit->mParent->mSubsampleOffset; }
 
 
-void NumInputBuses_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = unit->mWorld->mNumInputs; }
+void NumInputBuses_Ctor(Unit* unit) { ZOUT0(0) = unit->mWorld->mNumInputs; }
 
-void NumOutputBuses_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = unit->mWorld->mNumOutputs; }
+void NumOutputBuses_Ctor(Unit* unit) { ZOUT0(0) = unit->mWorld->mNumOutputs; }
 
-void NumAudioBuses_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = unit->mWorld->mNumAudioBusChannels; }
+void NumAudioBuses_Ctor(Unit* unit) { ZOUT0(0) = unit->mWorld->mNumAudioBusChannels; }
 
-void NumControlBuses_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = unit->mWorld->mNumControlBusChannels; }
+void NumControlBuses_Ctor(Unit* unit) { ZOUT0(0) = unit->mWorld->mNumControlBusChannels; }
 
-void NumBuffers_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = unit->mWorld->mNumSndBufs; }
+void NumBuffers_Ctor(Unit* unit) { ZOUT0(0) = unit->mWorld->mNumSndBufs; }
 
-void NodeID_Ctor(Unit* unit, int inNumSamples) { ZOUT0(0) = (float)unit->mParent->mNode.mID; }
+void NodeID_Ctor(Unit* unit) { ZOUT0(0) = (float)unit->mParent->mNode.mID; }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
-void NumRunningSynths_Ctor(Unit* unit, int inNumSamples) {
+// SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
+// See comment above for details on why this fix is necessary for WebAssembly builds.
+void NumRunningSynths_Ctor(Unit* unit) {
     if (INRATE(0) != calc_ScalarRate) {
         SETCALC(NumRunningSynths_next);
     }
