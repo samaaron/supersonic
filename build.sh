@@ -143,27 +143,33 @@ echo "Copying worker files..."
 mkdir -p "$OUTPUT_DIR/workers"
 cp "$JS_DIR/workers/"* "$OUTPUT_DIR/workers/"
 
-# Copy binary synthdefs
-SYNTHDEFS_SRC="$PROJECT_ROOT/etc/synthdefs"
-if [ -d "$SYNTHDEFS_SRC" ]; then
-    echo "Copying binary synthdefs..."
-    mkdir -p "$OUTPUT_DIR/etc/synthdefs"
-    cp "$SYNTHDEFS_SRC/"*.scsyndef "$OUTPUT_DIR/etc/synthdefs/" 2>/dev/null || true
+# Copy extra directory (synthdefs and samples)
+EXTRA_SRC="$PROJECT_ROOT/extra"
+if [ -d "$EXTRA_SRC" ]; then
+    echo "Copying extra directory (synthdefs, samples, etc.)..."
+    mkdir -p "$OUTPUT_DIR/extra"
+    cp -r "$EXTRA_SRC/"* "$OUTPUT_DIR/extra/" 2>/dev/null || true
 
     # Generate manifest.json with list of available synthdefs
-    echo "Generating synthdef manifest..."
-    echo '{' > "$OUTPUT_DIR/etc/synthdefs/manifest.json"
-    echo '  "synthdefs": [' >> "$OUTPUT_DIR/etc/synthdefs/manifest.json"
-    ls "$OUTPUT_DIR/etc/synthdefs/"*.scsyndef 2>/dev/null | \
-        sed 's|.*/||; s|\.scsyndef$||' | \
-        awk '{printf "    \"%s\"%s\n", $0, (NR==1?",":",")}' | \
-        sed '$ s/,$//' >> "$OUTPUT_DIR/etc/synthdefs/manifest.json" 2>/dev/null || echo '    "sonic-pi-beep"' >> "$OUTPUT_DIR/etc/synthdefs/manifest.json"
-    echo '  ]' >> "$OUTPUT_DIR/etc/synthdefs/manifest.json"
-    echo '}' >> "$OUTPUT_DIR/etc/synthdefs/manifest.json"
+    if [ -d "$OUTPUT_DIR/extra/synthdefs" ]; then
+        echo "Generating synthdef manifest..."
+        echo '{' > "$OUTPUT_DIR/extra/synthdefs/manifest.json"
+        echo '  "synthdefs": [' >> "$OUTPUT_DIR/extra/synthdefs/manifest.json"
+        ls "$OUTPUT_DIR/extra/synthdefs/"*.scsyndef 2>/dev/null | \
+            sed 's|.*/||; s|\.scsyndef$||' | \
+            awk '{printf "    \"%s\"%s\n", $0, (NR==1?",":",")}' | \
+            sed '$ s/,$//' >> "$OUTPUT_DIR/extra/synthdefs/manifest.json" 2>/dev/null || echo '    "sonic-pi-beep"' >> "$OUTPUT_DIR/extra/synthdefs/manifest.json"
+        echo '  ]' >> "$OUTPUT_DIR/extra/synthdefs/manifest.json"
+        echo '}' >> "$OUTPUT_DIR/extra/synthdefs/manifest.json"
 
-    echo "Copied $(ls -1 "$OUTPUT_DIR/etc/synthdefs/"*.scsyndef 2>/dev/null | wc -l) synthdef files"
+        echo "Copied $(ls -1 "$OUTPUT_DIR/extra/synthdefs/"*.scsyndef 2>/dev/null | wc -l) synthdef files"
+    fi
+
+    if [ -d "$OUTPUT_DIR/extra/samples" ]; then
+        echo "Copied $(ls -1 "$OUTPUT_DIR/extra/samples/" 2>/dev/null | wc -l) sample files"
+    fi
 else
-    echo "Warning: Synthdefs not found at $SYNTHDEFS_SRC"
+    echo "Warning: extra directory not found at $EXTRA_SRC"
 fi
 
 echo "Build complete!"

@@ -865,7 +865,7 @@ fillSynthButtons.forEach(button => {
     try {
       const synthName = button.getAttribute('data-synth');
       console.log('[App] Loading', synthName, 'synthdef...');
-      await orchestrator.loadSynthDef(`../dist/etc/synthdefs/${synthName}.scsyndef`);
+      await orchestrator.loadSynthDef(`../dist/extra/synthdefs/${synthName}.scsyndef`);
       console.log('[App] Loaded', synthName, 'synthdef');
     } catch (error) {
       console.error('[App] Fill synth error:', error);
@@ -891,7 +891,7 @@ if (loadAllButton) {
       const synthNames = ['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-chiplead', 'sonic-pi-dsaw', 'sonic-pi-dpulse', 'sonic-pi-bnoise', 'sonic-pi-prophet', 'sonic-pi-fm', 'sonic-pi-stereo_player'];
 
       console.log('[App] Loading', synthNames.length, 'synthdefs...');
-      const results = await orchestrator.loadSynthDefs(synthNames, '../dist/etc/synthdefs/');
+      const results = await orchestrator.loadSynthDefs(synthNames, '../dist/extra/synthdefs/');
 
       const successCount = Object.values(results).filter(r => r.success).length;
       console.log(`[App] Loaded ${successCount}/${synthNames.length} synthdefs`);
