@@ -117,5 +117,12 @@ enum {
 
     cmd_rtMemoryStatus = 65,
 
+#ifdef __EMSCRIPTEN__
+    // WebAssembly-specific buffer commands
+    cmd_b_allocPtr = 66,
+
+    NUMBER_OF_COMMANDS = 67
+#else
     NUMBER_OF_COMMANDS = 66
+#endif
 };

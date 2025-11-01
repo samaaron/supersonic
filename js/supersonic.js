@@ -13,6 +13,7 @@
 
 import ScsynthOSC from './lib/scsynth_osc.js';
 import oscLib from './vendor/osc.js/osc.js';
+import { MemPool } from '@thi.ng/malloc';
 
 export class SuperSonic {
     // Expose OSC utilities as static methods
@@ -20,7 +21,7 @@ export class SuperSonic {
         encode: (message) => oscLib.writePacket(message),
         decode: (data, options = { metadata: false }) => oscLib.readPacket(data, options)
     };
-    constructor() {
+    constructor(options = {}) {
         this.initialized = false;
         this.initializing = false;
         this.capabilities = {};
@@ -34,6 +35,7 @@ export class SuperSonic {
         this.osc = null;  // ScsynthOSC instance for OSC communication
         this.wasmModule = null;
         this.wasmInstance = null;
+        this.bufferPool = null;  // MemPool for audio buffer allocation
 
         // Time offset (AudioContext → NTP conversion)
         this.wasmTimeOffset = null;
@@ -60,6 +62,13 @@ export class SuperSonic {
                 sampleRate: 48000
             }
         };
+
+        // Buffer loading configuration
+        this.audioBaseURL = options.audioBaseURL || '../etc/samples/';
+        this.audioPathMap = options.audioPathMap || {};
+
+        // Track allocated buffers for cleanup
+        this.allocatedBuffers = new Map();  // bufnum -> { ptr, size }
 
         // Stats
         this.stats = {
@@ -119,12 +128,31 @@ export class SuperSonic {
      * Initialize shared WebAssembly memory
      */
     #initializeSharedMemory() {
+        // Memory layout:
+        // 0-32MB:     Emscripten heap (scsynth objects, stack)
+        // 32-64MB:    Ring buffers (OSC in/out, debug, control)
+        // 64-192MB:   Buffer pool (128MB for audio buffers)
+        const TOTAL_PAGES = 3072;  // 3072 pages = 192MB
+
         this.wasmMemory = new WebAssembly.Memory({
-            initial: 512,  // 512 pages = 32MB (for scsynth + ring buffers)
-            maximum: 512,
+            initial: TOTAL_PAGES,
+            maximum: TOTAL_PAGES,
             shared: true
         });
         this.sharedBuffer = this.wasmMemory.buffer;
+
+        // Initialize buffer pool (64MB offset, 128MB size)
+        const BUFFER_POOL_OFFSET = 64 * 1024 * 1024;  // 64MB
+        const BUFFER_POOL_SIZE = 128 * 1024 * 1024;   // 128MB
+
+        this.bufferPool = new MemPool({
+            buf: this.sharedBuffer,
+            start: BUFFER_POOL_OFFSET,
+            size: BUFFER_POOL_SIZE,
+            align: 8  // 8-byte alignment (minimum required by MemPool)
+        });
+
+        console.log('[SuperSonic] Buffer pool initialized: 128MB at offset 64MB');
     }
 
     /**
@@ -272,6 +300,11 @@ export class SuperSonic {
 
         // Set up ScsynthOSC callbacks
         this.osc.onOSCMessage((msg) => {
+            // Handle internal buffer cleanup messages
+            if (msg.address === '/buffer/freed') {
+                this._handleBufferFreed(msg.args);
+            }
+
             if (this.onMessageReceived) {
                 this.stats.messagesReceived++;
                 this.onMessageReceived(msg);
@@ -517,12 +550,17 @@ export class SuperSonic {
      * sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0);
      * sonic.send('/n_set', 1000, 'freq', 440.0, 'amp', 0.5);
      */
-    send(address, ...args) {
+    async send(address, ...args) {
         if (!this.initialized) {
             throw new Error('SuperSonic not initialized. Call init() first.');
         }
 
-        // Auto-detect types
+        // Intercept buffer allocation commands BEFORE OSC encoding
+        if (this._isBufferAllocationCommand(address)) {
+            return await this._handleBufferCommand(address, args);
+        }
+
+        // Auto-detect types for normal commands
         const oscArgs = args.map(arg => {
             if (typeof arg === 'string') {
                 return { type: 's', value: arg };
@@ -545,6 +583,268 @@ export class SuperSonic {
 
         // Use sendOSC to send the encoded bytes
         this.sendOSC(oscData);
+    }
+
+    _isBufferAllocationCommand(address) {
+        return [
+            '/b_allocRead',
+            '/b_allocReadChannel',
+            '/b_read',
+            '/b_readChannel'
+            // NOTE: /b_alloc and /b_free are NOT intercepted
+        ].includes(address);
+    }
+
+    async _handleBufferCommand(address, args) {
+        switch (address) {
+            case '/b_allocRead':
+                return await this._allocReadBuffer(...args);
+            case '/b_allocReadChannel':
+                return await this._allocReadChannelBuffer(...args);
+            case '/b_read':
+                return await this._readBuffer(...args);
+            case '/b_readChannel':
+                return await this._readChannelBuffer(...args);
+        }
+    }
+
+    /**
+     * /b_allocRead bufnum path [startFrame numFrames completion]
+     */
+    async _allocReadBuffer(bufnum, path, startFrame = 0, numFrames = 0, completionMsg = null) {
+        let allocatedPtr = null;
+        const GUARD_BEFORE = 3;
+        const GUARD_AFTER = 1;
+
+        try {
+            // 1. Resolve path to URL
+            const url = this._resolveAudioPath(path);
+
+            // 2. Fetch audio file
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+
+            // 3. Decode audio
+            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+            // 4. Extract frame range
+            const actualStartFrame = startFrame || 0;
+            const actualNumFrames = numFrames || (audioBuffer.length - actualStartFrame);
+            const framesToRead = Math.min(actualNumFrames, audioBuffer.length - actualStartFrame);
+
+            if (framesToRead <= 0) {
+                throw new Error(`Invalid frame range: start=${actualStartFrame}, numFrames=${actualNumFrames}, fileLength=${audioBuffer.length}`);
+            }
+
+            // 5. Interleave channels (SuperCollider expects interleaved format)
+            const numChannels = audioBuffer.numberOfChannels;
+            const guardSamples = (GUARD_BEFORE + GUARD_AFTER) * numChannels;
+            const interleavedData = new Float32Array((framesToRead * numChannels) + guardSamples);
+
+            // Write actual audio data (offset by GUARD_BEFORE samples)
+            const dataOffset = GUARD_BEFORE * numChannels;
+            for (let frame = 0; frame < framesToRead; frame++) {
+                for (let ch = 0; ch < numChannels; ch++) {
+                    const channelData = audioBuffer.getChannelData(ch);
+                    interleavedData[dataOffset + (frame * numChannels) + ch] =
+                        channelData[actualStartFrame + frame];
+                }
+            }
+
+            // Guard samples are left as zeros (silence)
+            // Front guards: indices 0 to (GUARD_BEFORE * numChannels - 1)
+            // Back guards: indices (dataOffset + framesToRead * numChannels) to end
+
+            // 6. Allocate buffer memory
+            const bytesNeeded = interleavedData.length * 4;  // Float32 = 4 bytes
+            allocatedPtr = this.bufferPool.malloc(bytesNeeded);
+
+            if (allocatedPtr === 0) {
+                throw new Error('Buffer pool allocation failed (out of memory)');
+            }
+
+            // 7. Write audio data to SharedArrayBuffer
+            const wasmHeap = new Float32Array(
+                this.sharedBuffer,
+                allocatedPtr,
+                interleavedData.length
+            );
+            wasmHeap.set(interleavedData);
+
+            // 8. Track allocation for cleanup
+            this.allocatedBuffers.set(bufnum, {
+                ptr: allocatedPtr,
+                size: bytesNeeded
+            });
+
+            // 9. Send pointer command to WASM
+            await this.send('/b_allocPtr', bufnum, allocatedPtr, framesToRead,
+                           numChannels, audioBuffer.sampleRate);
+
+            // 10. Handle completion message if provided
+            if (completionMsg) {
+                // TODO: Handle completion message
+            }
+
+        } catch (error) {
+            // Clean up allocated memory on error
+            if (allocatedPtr) {
+                this.bufferPool.free(allocatedPtr);
+                this.allocatedBuffers.delete(bufnum);
+            }
+
+            console.error(`[SuperSonic] Buffer ${bufnum} load failed:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Resolve audio file path to full URL
+     */
+    _resolveAudioPath(scPath) {
+        // Explicit mapping takes precedence
+        if (this.audioPathMap[scPath]) {
+            return this.audioPathMap[scPath];
+        }
+        // Otherwise prepend base URL
+        return this.audioBaseURL + scPath;
+    }
+
+    /**
+     * Handle /buffer/freed message from WASM
+     */
+    _handleBufferFreed(args) {
+        if (args.length < 2) {
+            console.warn('[SuperSonic] Invalid /buffer/freed message:', args);
+            return;
+        }
+
+        const bufnum = args[0];
+        const offset = args[1];
+
+        const bufferInfo = this.allocatedBuffers.get(bufnum);
+        if (bufferInfo) {
+            this.bufferPool.free(bufferInfo.ptr);
+            this.allocatedBuffers.delete(bufnum);
+        }
+    }
+
+    /**
+     * /b_allocReadChannel bufnum path [startFrame numFrames channel1 channel2 ... completion]
+     * Load specific channels from an audio file
+     */
+    async _allocReadChannelBuffer(bufnum, path, startFrame = 0, numFrames = 0, ...channelsAndCompletion) {
+        let allocatedPtr = null;
+        const GUARD_BEFORE = 3;
+        const GUARD_AFTER = 1;
+
+        try {
+            // Parse channel numbers (all numeric args until we hit a non-number or end)
+            const channels = [];
+            let completionMsg = null;
+            for (let i = 0; i < channelsAndCompletion.length; i++) {
+                if (typeof channelsAndCompletion[i] === 'number' && Number.isInteger(channelsAndCompletion[i])) {
+                    channels.push(channelsAndCompletion[i]);
+                } else {
+                    completionMsg = channelsAndCompletion[i];
+                    break;
+                }
+            }
+
+            // 1. Resolve path and fetch
+            const url = this._resolveAudioPath(path);
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+
+            // 2. Decode audio
+            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+            // 3. Extract frame range
+            const actualStartFrame = startFrame || 0;
+            const actualNumFrames = numFrames || (audioBuffer.length - actualStartFrame);
+            const framesToRead = Math.min(actualNumFrames, audioBuffer.length - actualStartFrame);
+
+            if (framesToRead <= 0) {
+                throw new Error(`Invalid frame range: start=${actualStartFrame}, numFrames=${actualNumFrames}, fileLength=${audioBuffer.length}`);
+            }
+
+            // 4. Validate and default channels
+            const fileChannels = audioBuffer.numberOfChannels;
+            const selectedChannels = channels.length > 0 ? channels : Array.from({length: fileChannels}, (_, i) => i);
+
+            // Validate channel indices
+            for (const ch of selectedChannels) {
+                if (ch < 0 || ch >= fileChannels) {
+                    throw new Error(`Invalid channel ${ch} (file has ${fileChannels} channels)`);
+                }
+            }
+
+            const numChannels = selectedChannels.length;
+
+            // 5. Interleave selected channels
+            const guardSamples = (GUARD_BEFORE + GUARD_AFTER) * numChannels;
+            const interleavedData = new Float32Array((framesToRead * numChannels) + guardSamples);
+            const dataOffset = GUARD_BEFORE * numChannels;
+
+            for (let frame = 0; frame < framesToRead; frame++) {
+                for (let ch = 0; ch < numChannels; ch++) {
+                    const fileChannel = selectedChannels[ch];
+                    const channelData = audioBuffer.getChannelData(fileChannel);
+                    interleavedData[dataOffset + (frame * numChannels) + ch] =
+                        channelData[actualStartFrame + frame];
+                }
+            }
+
+            // 6. Allocate and write
+            const bytesNeeded = interleavedData.length * 4;
+            allocatedPtr = this.bufferPool.malloc(bytesNeeded);
+            if (allocatedPtr === 0) {
+                throw new Error('Buffer pool allocation failed (out of memory)');
+            }
+
+            const wasmHeap = new Float32Array(this.sharedBuffer, allocatedPtr, interleavedData.length);
+            wasmHeap.set(interleavedData);
+
+            // 7. Track and send
+            this.allocatedBuffers.set(bufnum, { ptr: allocatedPtr, size: bytesNeeded });
+            await this.send('/b_allocPtr', bufnum, allocatedPtr, framesToRead, numChannels, audioBuffer.sampleRate);
+
+            if (completionMsg) {
+                // TODO: Handle completion message
+            }
+
+        } catch (error) {
+            if (allocatedPtr) {
+                this.bufferPool.free(allocatedPtr);
+                this.allocatedBuffers.delete(bufnum);
+            }
+            console.error(`[SuperSonic] Buffer ${bufnum} load failed:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * /b_read bufnum path [startFrame numFrames bufStartFrame leaveOpen completion]
+     * Read file into existing buffer
+     */
+    async _readBuffer(bufnum, path, startFrame = 0, numFrames = 0, bufStartFrame = 0, leaveOpen = 0, completionMsg = null) {
+        console.warn('[SuperSonic] /b_read requires pre-allocated buffer - not yet implemented');
+        throw new Error('/b_read not yet implemented (requires /b_alloc first)');
+    }
+
+    /**
+     * /b_readChannel bufnum path [startFrame numFrames bufStartFrame leaveOpen channel1 channel2 ... completion]
+     * Read specific channels into existing buffer
+     */
+    async _readChannelBuffer(bufnum, path, startFrame = 0, numFrames = 0, bufStartFrame = 0, leaveOpen = 0, ...channelsAndCompletion) {
+        console.warn('[SuperSonic] /b_readChannel requires pre-allocated buffer - not yet implemented');
+        throw new Error('/b_readChannel not yet implemented (requires /b_alloc first)');
     }
 
     /**
@@ -721,5 +1021,74 @@ export class SuperSonic {
         console.log(`[SuperSonic] Loaded ${successCount}/${names.length} synthdefs`);
 
         return results;
+    }
+
+    /**
+     * Allocate memory for an audio buffer (includes guard samples)
+     * @param {number} numSamples - Number of Float32 samples to allocate
+     * @returns {number} Byte offset into SharedArrayBuffer, or 0 if allocation failed
+     * @example
+     * const bufferAddr = sonic.allocBuffer(44100);  // Allocate 1 second at 44.1kHz
+     */
+    allocBuffer(numSamples) {
+        if (!this.initialized) {
+            throw new Error('SuperSonic not initialized. Call init() first.');
+        }
+
+        const sizeBytes = numSamples * 4;  // 4 bytes per Float32
+        const addr = this.bufferPool.malloc(sizeBytes);
+
+        if (addr === 0) {
+            console.error(`[SuperSonic] Buffer allocation failed: ${numSamples} samples (${sizeBytes} bytes)`);
+        }
+
+        return addr;
+    }
+
+    /**
+     * Free a previously allocated buffer
+     * @param {number} addr - Buffer address returned by allocBuffer()
+     * @returns {boolean} true if freed successfully
+     * @example
+     * sonic.freeBuffer(bufferAddr);
+     */
+    freeBuffer(addr) {
+        if (!this.initialized) {
+            throw new Error('SuperSonic not initialized. Call init() first.');
+        }
+
+        return this.bufferPool.free(addr);
+    }
+
+    /**
+     * Get a Float32Array view of an allocated buffer
+     * @param {number} addr - Buffer address returned by allocBuffer()
+     * @param {number} numSamples - Number of Float32 samples
+     * @returns {Float32Array} Typed array view into the buffer
+     * @example
+     * const view = sonic.getBufferView(bufferAddr, 44100);
+     * view[0] = 1.0;  // Write to buffer
+     */
+    getBufferView(addr, numSamples) {
+        if (!this.initialized) {
+            throw new Error('SuperSonic not initialized. Call init() first.');
+        }
+
+        return new Float32Array(this.sharedBuffer, addr, numSamples);
+    }
+
+    /**
+     * Get buffer pool statistics
+     * @returns {Object} Stats including total, available, used, etc.
+     * @example
+     * const stats = sonic.getBufferPoolStats();
+     * console.log(`Available: ${stats.available} bytes`);
+     */
+    getBufferPoolStats() {
+        if (!this.initialized) {
+            throw new Error('SuperSonic not initialized. Call init() first.');
+        }
+
+        return this.bufferPool.stats();
     }
 }

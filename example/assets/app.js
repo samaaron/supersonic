@@ -419,6 +419,12 @@ initButton.addEventListener('click', async () => {
       console.log('[App] System initialized', data);
       updateStatus('ready');
 
+      // Expose to global scope for console access (development only)
+      if (orchestrator.config.development) {
+        window.orchestrator = orchestrator;
+        console.log('[App] orchestrator exposed to window for dev console access');
+      }
+
       // Enable synth controls
       const fillSynthBtns = document.querySelectorAll('.fill-synth-button');
       fillSynthBtns.forEach(btn => btn.disabled = false);
@@ -436,6 +442,7 @@ initButton.addEventListener('click', async () => {
 
     orchestrator.onMessageReceived = (message) => {
       addMessage(message);
+      // Also log to console in development mode
       if (orchestrator.config.development && message.oscData) {
         try {
           const decoded = SuperSonic.osc.decode(message.oscData);
@@ -449,6 +456,7 @@ initButton.addEventListener('click', async () => {
 
     orchestrator.onMessageSent = (oscData) => {
       addSentMessage(oscData);
+      // Also log to console in development mode
       if (orchestrator.config.development) {
         try {
           const decoded = SuperSonic.osc.decode(oscData);
@@ -511,6 +519,7 @@ initButton.addEventListener('click', async () => {
         }
       }
       flashTab('debug');
+      // Also log to console in development mode
       if (orchestrator.config.development) {
         console.log(`[WASM] ${msg.text}`);
       }
