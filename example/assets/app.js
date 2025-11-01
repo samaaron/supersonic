@@ -436,10 +436,29 @@ initButton.addEventListener('click', async () => {
 
     orchestrator.onMessageReceived = (message) => {
       addMessage(message);
+      if (orchestrator.config.development && message.oscData) {
+        try {
+          const decoded = SuperSonic.osc.decode(message.oscData);
+          const args = decoded.args ? decoded.args.map(a => a.value !== undefined ? a.value : a).join(' ') : '';
+          console.log(`[OSC ←] ${decoded.address} ${args}`);
+        } catch (e) {
+          console.log(`[OSC ←] <decode error: ${e.message}>`);
+        }
+      }
     };
 
     orchestrator.onMessageSent = (oscData) => {
       addSentMessage(oscData);
+      if (orchestrator.config.development) {
+        try {
+          const decoded = SuperSonic.osc.decode(oscData);
+          const args = decoded.args ? decoded.args.map(a => a.value !== undefined ? a.value : a).join(' ') : '';
+          console.log(`[OSC →] ${decoded.address} ${args}`);
+        } catch (e) {
+          // Bundles can't be easily decoded, skip
+          console.log('[OSC →] <bundle>');
+        }
+      }
     };
 
     orchestrator.onMetricsUpdate = (metrics) => {
@@ -492,6 +511,9 @@ initButton.addEventListener('click', async () => {
         }
       }
       flashTab('debug');
+      if (orchestrator.config.development) {
+        console.log(`[WASM] ${msg.text}`);
+      }
     };
 
     orchestrator.onSendError = (error) => {
