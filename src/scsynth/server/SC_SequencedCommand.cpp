@@ -414,7 +414,26 @@ bool BufFreeCmd::Stage3() {
 }
 
 void BufFreeCmd::Stage4() {
+#ifdef __EMSCRIPTEN__
+    // In WebAssembly, buffers are managed by JavaScript
+    // Send /buffer/freed message so JavaScript can free from the buffer pool
+    if (mFreeData) {
+        small_scpacket packet;
+        packet.adds("/buffer/freed");
+        packet.maketags(3);
+        packet.addtag(',');
+        packet.addtag('i');  // buffer number
+        packet.addtag('i');  // offset as integer
+        packet.addi(mBufIndex);
+        packet.addi((uintptr_t)mFreeData);
+
+        ReplyAddress reply = mReplyAddress;
+        SendReply(&reply, packet.data(), packet.size());
+    }
+#else
+    // Native SuperCollider: use regular free
     zfree(mFreeData);
+#endif
     SendDoneWithIntValue("/b_free", mBufIndex);
 }
 

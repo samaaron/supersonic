@@ -1,0 +1,47 @@
+{
+  "name": "supersonic-scsynth",
+  "version": "0.1.0",
+  "description": "SuperCollider scsynth WebAssembly port for AudioWorklet - Run SuperCollider synthesis in the browser",
+  "main": "dist/supersonic.js",
+  "type": "module",
+  "scripts": {
+    "build": "./build.sh",
+    "clean": "./clean.sh",
+    "dev": "cd example && ruby server.rb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/samaaron/supersonic.git"
+  },
+  "keywords": [
+    "supercollider",
+    "scsynth",
+    "audio",
+    "synthesis",
+    "webassembly",
+    "audioworklet",
+    "wasm",
+    "music",
+    "sound"
+  ],
+  "author": "Sam Aaron",
+  "license": "GPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/samaaron/supersonic/issues"
+  },
+  "homepage": "https://github.com/samaaron/supersonic#readme",
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@thi.ng/malloc": "^6.1.128"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

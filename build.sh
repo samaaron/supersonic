@@ -57,6 +57,7 @@ SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" 2>/dev/nu
 
 # Compile audio processor with all scsynth sources and oscpack (standalone WASM for AudioWorklet)
 emcc "$SRC_DIR/audio_processor.cpp" \
+    "$SRC_DIR/buffer_commands.cpp" \
     "$SRC_DIR/scsynth/server/SC_OscUnroll.cpp" \
     $SCSYNTH_SERVER_SOURCES \
     $SCSYNTH_COMMON_SOURCES \
@@ -83,7 +84,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -sENVIRONMENT=worker \
     -pthread \
     -sALLOW_MEMORY_GROWTH=0 \
-    -sINITIAL_MEMORY=33554432 \
+    -sINITIAL_MEMORY=201326592 \
     -sEXPORTED_FUNCTIONS="['___wasm_call_ctors','_get_ring_buffer_base','_get_buffer_layout','_init_memory','_process_audio','_get_audio_output_bus','_get_audio_buffer_samples','_get_supersonic_version_string','_set_time_offset','_get_time_offset','_worklet_debug','_worklet_debug_va','_get_process_count','_get_messages_processed','_get_messages_dropped','_get_status_flags']" \
     --no-entry \
     -Wl,--import-memory,--shared-memory,--allow-multiple-definition \
