@@ -39,8 +39,8 @@ jobs:
       - name: Verify Emscripten installation
         run: emcc --version
 
-      - name: Run build script
-        run: ./build.sh
+      - name: Run build script (release mode)
+        run: ./build.sh --release
 
       - name: Replace symlinks with actual files for distribution
         run: |

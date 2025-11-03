@@ -8,8 +8,10 @@
   "type": "module",
   "scripts": {
     "build": "./build.sh",
+    "build:release": "./build.sh --release",
     "clean": "./clean.sh",
-    "dev": "cd example && ruby server.rb"
+    "dev": "cd example && ruby server.rb",
+    "prepublishOnly": "./build.sh --release"
   },
   "repository": {
     "type": "git",

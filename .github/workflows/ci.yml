@@ -27,7 +27,7 @@ jobs:
       - name: Verify Emscripten installation
         run: emcc --version
 
-      - name: Run build script
+      - name: Run build script (dev mode for testing)
         run: ./build.sh
 
       - name: Verify build output
