@@ -16,7 +16,7 @@ Note: SuperSonic uses a SharedBuffer to send and receive OSC messages from scsyn
 ### Option 1: npm Package (Recommended)
 
 ```bash
-# Core engine only (~2MB)
+# Core engine only (~450KB)
 npm install supersonic-scsynth
 
 # Or install everything (engine + synthdefs + samples)
@@ -60,7 +60,7 @@ This includes:
 SuperSonic is published as multiple npm packages to keep the core engine small:
 
 ### Core Package
-- **`supersonic-scsynth`** (~2MB) - The WebAssembly scsynth engine
+- **`supersonic-scsynth`** (~450KB) - The WebAssembly scsynth engine
   - GPL-3.0-or-later license
 
 ### Resource Packages
@@ -102,7 +102,7 @@ source ~/path/to/emsdk_env.sh
 ./build.sh
 ```
 
-Outputs to `dist/` directory (~1.5MB WASM + ~80KB JS).
+Outputs to `dist/` directory (~1.5MB WASM + ~76KB JS + symlinks to synthdefs/samples).
 
 ### 2. Serve Demo
 
@@ -285,23 +285,14 @@ await sonic.loadSynthDefs(
 );
 ```
 
-**Engine Paths (Default):**
+**Engine Paths:**
 
 The core engine expects these files relative to your HTML:
 - WASM: `./dist/wasm/scsynth-nrt.wasm`
 - AudioWorklet: `./dist/workers/scsynth_audio_worklet.js`
 - Workers: `./dist/workers/osc_out_worker.js`, `osc_in_worker.js`, `debug_worker.js`
 
-**Custom Engine Paths:**
-
-```javascript
-const sonic = new SuperSonic();
-sonic.config.wasmUrl = '/custom/path/scsynth-nrt.wasm';
-sonic.config.workletUrl = '/custom/path/scsynth_audio_worklet.js';
-await sonic.init();
-```
-
-**Note:** Worker paths are currently hardcoded to `./dist/workers/` and cannot be configured.
+These paths are currently not configurable.
 
 
 ## License
