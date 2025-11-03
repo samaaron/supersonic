@@ -5,6 +5,16 @@
 
 set -e
 
+# Check for release mode flag
+RELEASE_MODE=false
+if [ "$1" = "--release" ]; then
+    RELEASE_MODE=true
+    echo "Building in RELEASE mode (no cache-busted WASM)"
+else
+    echo "Building in DEV mode (includes cache-busted WASM for local development)"
+fi
+echo ""
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 SRC_DIR="$PROJECT_ROOT/src"
@@ -96,16 +106,21 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -sERROR_ON_UNDEFINED_SYMBOLS=0 \
     -o "$OUTPUT_DIR/wasm/scsynth-nrt.wasm"
 
-# Generate WASM file hash for cache busting (dev/example use)
-echo "Generating WASM hash for cache busting..."
-WASM_HASH=$(sha256sum "$OUTPUT_DIR/wasm/scsynth-nrt.wasm" | cut -c1-8)
-WASM_FILENAME_VERSIONED="scsynth-nrt.$WASM_HASH.wasm"
+# Generate WASM file hash for cache busting (dev mode only)
+if [ "$RELEASE_MODE" = false ]; then
+    echo "Generating WASM hash for cache busting..."
 
-# Create symlink to hashed filename (for dev/example - forces cache refresh)
-ln -sf "scsynth-nrt.wasm" "$OUTPUT_DIR/wasm/$WASM_FILENAME_VERSIONED"
+    # Clean up old cache-busted symlinks (8-char hash pattern)
+    find "$OUTPUT_DIR/wasm" -type l -name "scsynth-nrt.????????.wasm" -delete 2>/dev/null || true
 
-# Create manifest with both file options
-cat > "$OUTPUT_DIR/wasm/manifest.json" << EOF
+    WASM_HASH=$(sha256sum "$OUTPUT_DIR/wasm/scsynth-nrt.wasm" | cut -c1-8)
+    WASM_FILENAME_VERSIONED="scsynth-nrt.$WASM_HASH.wasm"
+
+    # Create symlink to hashed filename (for dev/example - forces cache refresh)
+    ln -sf "scsynth-nrt.wasm" "$OUTPUT_DIR/wasm/$WASM_FILENAME_VERSIONED"
+
+    # Create manifest with both file options
+    cat > "$OUTPUT_DIR/wasm/manifest.json" << EOF
 {
   "wasmFile": "$WASM_FILENAME_VERSIONED",
   "wasmFileStable": "scsynth-nrt.wasm",
@@ -116,9 +131,23 @@ cat > "$OUTPUT_DIR/wasm/manifest.json" << EOF
 }
 EOF
 
-echo "WASM files:"
-echo "  Production:  scsynth-nrt.wasm (use with Cache-Control headers)"
-echo "  Development: $WASM_FILENAME_VERSIONED (cache-busted)"
+    echo "WASM files:"
+    echo "  Production:  scsynth-nrt.wasm (use with Cache-Control headers)"
+    echo "  Development: $WASM_FILENAME_VERSIONED (cache-busted)"
+else
+    # Release mode - only create stable manifest
+    cat > "$OUTPUT_DIR/wasm/manifest.json" << EOF
+{
+  "wasmFile": "scsynth-nrt.wasm",
+  "buildId": "$BUILD_ID",
+  "buildTime": "$BUILD_TIME",
+  "gitHash": "$GIT_HASH"
+}
+EOF
+
+    echo "WASM file:"
+    echo "  scsynth-nrt.wasm (release build)"
+fi
 echo "Build: $BUILD_ID (git: $GIT_HASH)"
 
 # Check if node_modules exists and install dependencies if needed
