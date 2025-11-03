@@ -86,9 +86,9 @@ else
     echo -e "${GREEN}All 4 packages published successfully! 🎉${NC}"
     echo ""
     echo "Packages available on CDN:"
-    echo "  - https://unpkg.com/supersonic-scsynth@0.1.0"
-    echo "  - https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0"
-    echo "  - https://unpkg.com/supersonic-scsynth-samples@0.1.0"
-    echo "  - https://unpkg.com/supersonic-scsynth-bundle@0.1.0"
+    echo "  - https://unpkg.com/supersonic-scsynth@0.1.1"
+    echo "  - https://unpkg.com/supersonic-scsynth-synthdefs@0.1.1"
+    echo "  - https://unpkg.com/supersonic-scsynth-samples@0.1.1"
+    echo "  - https://unpkg.com/supersonic-scsynth-bundle@0.1.1"
 fi
 echo "========================================"

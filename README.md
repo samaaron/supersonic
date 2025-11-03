@@ -1,6 +1,6 @@
 # SuperSonic
 
-> **Warning - Super Alpha Status**: SuperSonic is currently in active development (v0.1.0). The API is likely to change between releases. Feedback welcome!
+> **Warning - Super Alpha Status**: SuperSonic is currently in active development (v0.1.1). The API is likely to change between releases. Feedback welcome!
 
 This is a WebAssembly port of SuperCollider's highly flexible and powerful synthesis engine scsynth.
 
@@ -27,10 +27,10 @@ npm install supersonic-scsynth-bundle
 
 ```html
 <script type="module">
-  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.0';
+  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.1';
 
   const sonic = new SuperSonic({
-    audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.0/samples/'
+    audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.1/samples/'
   });
 
   await sonic.init();
@@ -38,7 +38,7 @@ npm install supersonic-scsynth-bundle
   // Load synthdefs from CDN
   await sonic.loadSynthDefs(
     ['sonic-pi-beep'],
-    'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/'
+    'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.1/synthdefs/'
   );
 </script>
 ```
@@ -154,11 +154,11 @@ sonic.send('/notify', 1);
 ### With Synthdefs and Samples (npm/CDN)
 
 ```javascript
-import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.0';
+import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.1';
 
 // Configure sample path (required for buffer loading)
 const sonic = new SuperSonic({
-  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.0/samples/'
+  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.1/samples/'
 });
 
 await sonic.init();
@@ -166,7 +166,7 @@ await sonic.init();
 // Load synthdefs (baseUrl is required)
 await sonic.loadSynthDefs(
   ['sonic-pi-beep', 'sonic-pi-tb303'],
-  'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/'
+  'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.1/synthdefs/'
 );
 
 // Play a synth
@@ -236,16 +236,16 @@ Then use via CDN in your HTML:
 
 ```html
 <script type="module">
-  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.0';
+  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.1';
 
   const sonic = new SuperSonic({
-    audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.0/samples/'
+    audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.1/samples/'
   });
 
   await sonic.init();
   await sonic.loadSynthDefs(
     ['sonic-pi-beep'],
-    'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/'
+    'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.1/synthdefs/'
   );
 </script>
 ```
@@ -276,12 +276,12 @@ Sample and synthdef paths must be explicitly configured:
 
 ```javascript
 const sonic = new SuperSonic({
-  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.0/samples/'
+  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.1/samples/'
 });
 
 await sonic.loadSynthDefs(
   ['sonic-pi-beep'],
-  'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/'
+  'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.1/synthdefs/'
 );
 ```
 
