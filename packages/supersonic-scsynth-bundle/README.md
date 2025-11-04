@@ -26,14 +26,12 @@ Same API as using the packages separately:
 import { SuperSonic } from 'supersonic-scsynth-bundle';
 
 const sonic = new SuperSonic({
-  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/'
+  sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/',
+  synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/'
 });
 
 await sonic.init();
-await sonic.loadSynthDefs(
-  ['sonic-pi-beep', 'sonic-pi-tb303'],
-  'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/'
-);
+await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
 ```
 
 ## When to Use This
