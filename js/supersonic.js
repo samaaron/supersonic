@@ -230,9 +230,8 @@ export class SuperSonic {
             if (response.ok) {
                 const manifest = await response.json();
 
-                // Use versioned file for development (cache-bypass)
-                // Use stable file for production
-                const wasmFile = this.config.development ? manifest.wasmFile : manifest.wasmFileStable;
+                // Use the WASM file specified in manifest
+                const wasmFile = manifest.wasmFile;
 
                 this.config.wasmUrl = new URL(`wasm/${wasmFile}`, this.basePath).href;
                 console.log(`[SuperSonic] Using WASM build: ${wasmFile}`);
