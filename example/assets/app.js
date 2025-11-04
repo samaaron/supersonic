@@ -114,7 +114,8 @@ function updateStatus(status) {
   const scopeContainer = document.getElementById('scope-container');
   const synthUIContainer = document.getElementById('synth-ui-container');
   const clearButton = document.getElementById('clear-button');
-  const loadAllButton = document.getElementById('load-all-button');
+  const loadSynthdefsButton = document.getElementById('load-synthdefs-button');
+  const loadSamplesButton = document.getElementById('load-samples-button');
   const loadExampleButton = document.getElementById('load-example-button');
 
   // Update UI visibility based on status
@@ -139,7 +140,8 @@ function updateStatus(status) {
     messageInput.disabled = false;
     messageForm.querySelector('button[type="submit"]').disabled = false;
     if (clearButton) clearButton.disabled = false;
-    if (loadAllButton) loadAllButton.disabled = false;
+    if (loadSynthdefsButton) loadSynthdefsButton.disabled = false;
+    if (loadSamplesButton) loadSamplesButton.disabled = false;
     if (loadExampleButton) loadExampleButton.disabled = false;
   }
 }
@@ -412,7 +414,9 @@ initButton.addEventListener('click', async () => {
     updateStatus('initializing');
     hideError();
 
-    orchestrator = new SuperSonic();
+    orchestrator = new SuperSonic({
+      audioBaseURL: 'dist/samples/'
+    });
 
     // Set up callbacks
     orchestrator.onInitialized = (data) => {
@@ -428,8 +432,10 @@ initButton.addEventListener('click', async () => {
       // Enable synth controls
       const fillSynthBtns = document.querySelectorAll('.fill-synth-button');
       fillSynthBtns.forEach(btn => btn.disabled = false);
-      const loadAllBtn = document.getElementById('load-all-button');
-      if (loadAllBtn) loadAllBtn.disabled = false;
+      const loadSynthdefsBtn = document.getElementById('load-synthdefs-button');
+      if (loadSynthdefsBtn) loadSynthdefsBtn.disabled = false;
+      const loadSamplesBtn = document.getElementById('load-samples-button');
+      if (loadSamplesBtn) loadSamplesBtn.disabled = false;
 
       // Display WASM version
       if (orchestrator.workletNode && orchestrator.workletNode.port) {
@@ -883,21 +889,47 @@ if (clearButton) {
   });
 }
 
-// Load All button - load binary synthdefs using new API
-const loadAllButton = document.getElementById('load-all-button');
-if (loadAllButton) {
-  loadAllButton.addEventListener('click', async () => {
+// Load Synthdefs button - load binary synthdefs using new API
+const loadSynthdefsButton = document.getElementById('load-synthdefs-button');
+if (loadSynthdefsButton) {
+  loadSynthdefsButton.addEventListener('click', async () => {
     try {
       const synthNames = ['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-chiplead', 'sonic-pi-dsaw', 'sonic-pi-dpulse', 'sonic-pi-bnoise', 'sonic-pi-prophet', 'sonic-pi-fm', 'sonic-pi-stereo_player'];
 
       console.log('[App] Loading', synthNames.length, 'synthdefs...');
-      const results = await orchestrator.loadSynthDefs(synthNames, '../dist/extra/synthdefs/');
+      const results = await orchestrator.loadSynthDefs(synthNames, 'dist/synthdefs/');
 
       const successCount = Object.values(results).filter(r => r.success).length;
       console.log(`[App] Loaded ${successCount}/${synthNames.length} synthdefs`);
     } catch (error) {
-      console.error('[App] Load all error:', error);
+      console.error('[App] Load synthdefs error:', error);
       showError('Failed to load synthdefs: ' + error.message);
+    }
+  });
+}
+
+// Load Samples button - load audio samples into buffers
+const loadSamplesButton = document.getElementById('load-samples-button');
+if (loadSamplesButton) {
+  loadSamplesButton.addEventListener('click', async () => {
+    try {
+      const samples = [
+        { bufnum: 0, filename: 'loop_amen.flac' },
+        { bufnum: 1, filename: 'ambi_choir.flac' },
+        { bufnum: 2, filename: 'bd_haus.flac' }
+      ];
+
+      console.log('[App] Loading', samples.length, 'samples...');
+
+      for (const sample of samples) {
+        console.log(`[App] Loading buffer ${sample.bufnum}: ${sample.filename}`);
+        await orchestrator.send('/b_allocRead', sample.bufnum, sample.filename);
+      }
+
+      console.log(`[App] Loaded ${samples.length} samples into buffers 0-2`);
+    } catch (error) {
+      console.error('[App] Load samples error:', error);
+      showError('Failed to load samples: ' + error.message);
     }
   });
 }

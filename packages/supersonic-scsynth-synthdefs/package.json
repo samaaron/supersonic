@@ -1,0 +1,33 @@
+{
+  "name": "supersonic-scsynth-synthdefs",
+  "version": "0.1.0",
+  "description": "All Sonic Pi synthdefs for SuperSonic scsynth",
+  "main": "index.js",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/samaaron/supersonic.git",
+    "directory": "packages/supersonic-scsynth-synthdefs"
+  },
+  "keywords": [
+    "supercollider",
+    "scsynth",
+    "sonic-pi",
+    "synthdefs",
+    "audio",
+    "synthesis",
+    "supersonic"
+  ],
+  "author": "Sam Aaron",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/samaaron/supersonic/issues"
+  },
+  "homepage": "https://github.com/samaaron/supersonic/tree/main/packages/supersonic-scsynth-synthdefs#readme",
+  "files": [
+    "synthdefs/",
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ]
+}

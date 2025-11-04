@@ -64,7 +64,7 @@ export class SuperSonic {
         };
 
         // Buffer loading configuration
-        this.audioBaseURL = options.audioBaseURL || 'dist/extra/samples/';
+        this.audioBaseURL = options.audioBaseURL || null;
         this.audioPathMap = options.audioPathMap || {};
 
         // Track allocated buffers for cleanup
@@ -709,6 +709,16 @@ export class SuperSonic {
         if (this.audioPathMap[scPath]) {
             return this.audioPathMap[scPath];
         }
+
+        // Check if audioBaseURL is configured
+        if (!this.audioBaseURL) {
+            throw new Error(
+                'audioBaseURL not configured. Please set it in SuperSonic constructor options.\n' +
+                'Example: new SuperSonic({ audioBaseURL: "https://unpkg.com/supersonic-scsynth-samples-bd@0.1.0/samples/" })\n' +
+                'Or install sample packages: npm install supersonic-scsynth-samples-bd'
+            );
+        }
+
         // Otherwise prepend base URL
         return this.audioBaseURL + scPath;
     }
@@ -992,14 +1002,25 @@ export class SuperSonic {
     /**
      * Load multiple synthdefs from a directory
      * @param {string[]} names - Array of synthdef names (without .scsyndef extension)
-     * @param {string} baseUrl - Base URL for synthdef files (default: './extra/synthdefs/')
+     * @param {string} baseUrl - Base URL for synthdef files (required)
      * @returns {Promise<Object>} Map of name -> success/error
      * @example
-     * const results = await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
+     * const results = await sonic.loadSynthDefs(
+     *   ['sonic-pi-beep', 'sonic-pi-tb303'],
+     *   'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/'
+     * );
      */
-    async loadSynthDefs(names, baseUrl = './extra/synthdefs/') {
+    async loadSynthDefs(names, baseUrl) {
         if (!this.initialized) {
             throw new Error('SuperSonic not initialized. Call init() first.');
+        }
+
+        if (!baseUrl) {
+            throw new Error(
+                'baseUrl is required. Please specify the URL to your synthdefs.\n' +
+                'Example: await sonic.loadSynthDefs(["sonic-pi-beep"], "https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/")\n' +
+                'Or install: npm install supersonic-scsynth-synthdefs'
+            );
         }
 
         const results = {};

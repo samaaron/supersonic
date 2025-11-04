@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "description": "SuperCollider scsynth WebAssembly port for AudioWorklet - Run SuperCollider synthesis in the browser",
   "main": "dist/supersonic.js",
+  "unpkg": "dist/supersonic.js",
+  "jsdelivr": "dist/supersonic.js",
   "type": "module",
   "scripts": {
     "build": "./build.sh",
@@ -31,7 +33,9 @@
   },
   "homepage": "https://github.com/samaaron/supersonic#readme",
   "files": [
-    "dist/",
+    "dist/supersonic.js",
+    "dist/wasm/",
+    "dist/workers/",
     "README.md",
     "LICENSE"
   ],
