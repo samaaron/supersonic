@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SuperSonic Simple Demo</title>
+</head>
+<body>
+    <h1>SuperSonic</h1>
+    <button id="play">Play Sound</button>
+
+    <script type="module">
+        import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
+
+        const button = document.getElementById('play');
+        let sonic = null;
+
+        button.onclick = async () => {
+            if (!sonic) {
+                // Boot
+                sonic = new SuperSonic({
+                    sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/',
+                    synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/'
+                });
+                await sonic.init();
+                await sonic.loadSynthDefs(['sonic-pi-basic_mono_player']);
+                button.textContent = 'Booted! Click again';
+            } else {
+                // Play
+                sonic.send('/b_allocRead', 0, 'loop_amen.flac');
+                sonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 1, 'buf', 0);
+            }
+        };
+    </script>
+</body>
+</html>

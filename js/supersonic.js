@@ -52,10 +52,15 @@ export class SuperSonic {
         this.onInitialized = null;
         this.onError = null;
 
-        // Configuration
+        // Configuration - resolve paths relative to this module
+        const moduleUrl = new URL(import.meta.url);
+        const basePath = moduleUrl.pathname.includes('/dist/')
+            ? new URL('.', moduleUrl).href  // Loaded from dist/ (e.g., unpkg)
+            : './dist/';  // Loaded from source
+
         this.config = {
-            wasmUrl: './dist/wasm/scsynth-nrt.wasm',
-            workletUrl: './dist/workers/scsynth_audio_worklet.js',
+            wasmUrl: new URL('wasm/scsynth-nrt.wasm', basePath).href,
+            workletUrl: new URL('workers/scsynth_audio_worklet.js', basePath).href,
             development: false,
             audioContextOptions: {
                 latencyHint: 'interactive',
