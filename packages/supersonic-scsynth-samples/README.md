@@ -16,7 +16,7 @@ npm install supersonic-scsynth-samples
 import { SuperSonic } from 'supersonic-scsynth';
 
 const sonic = new SuperSonic({
-  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/'
+  sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/'
 });
 
 await sonic.init();
@@ -37,7 +37,7 @@ import { SuperSonic } from 'supersonic-scsynth';
 import { SAMPLES_DIR } from 'supersonic-scsynth-samples';
 
 const sonic = new SuperSonic({
-  audioBaseURL: SAMPLES_DIR + '/'
+  sampleBaseURL: SAMPLES_DIR + '/'
 });
 ```
 

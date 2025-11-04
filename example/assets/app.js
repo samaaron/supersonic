@@ -415,7 +415,8 @@ initButton.addEventListener('click', async () => {
     hideError();
 
     orchestrator = new SuperSonic({
-      audioBaseURL: 'dist/samples/'
+      sampleBaseURL: 'dist/samples/',
+      synthdefBaseURL: 'dist/synthdefs/'
     });
 
     // Set up callbacks
@@ -897,7 +898,7 @@ if (loadSynthdefsButton) {
       const synthNames = ['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-chiplead', 'sonic-pi-dsaw', 'sonic-pi-dpulse', 'sonic-pi-bnoise', 'sonic-pi-prophet', 'sonic-pi-fm', 'sonic-pi-stereo_player'];
 
       console.log('[App] Loading', synthNames.length, 'synthdefs...');
-      const results = await orchestrator.loadSynthDefs(synthNames, 'dist/synthdefs/');
+      const results = await orchestrator.loadSynthDefs(synthNames);
 
       const successCount = Object.values(results).filter(r => r.success).length;
       console.log(`[App] Loaded ${successCount}/${synthNames.length} synthdefs`);
