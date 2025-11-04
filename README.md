@@ -30,7 +30,7 @@ npm install supersonic-scsynth-bundle
   import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.0';
 
   const sonic = new SuperSonic({
-    audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples-bd@0.1.0/samples/'
+    audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.0/samples/'
   });
 
   await sonic.init();
@@ -58,25 +58,14 @@ SuperSonic is published as multiple npm packages to keep the core engine small:
   - GPL-3.0-or-later license
 
 ### Resource Packages
-- **`supersonic-scsynth-synthdefs`** (~7MB) - All 120 Sonic Pi synthdefs
+- **`supersonic-scsynth-synthdefs`** (~67KB) - All 120 Sonic Pi synthdefs
   - MIT license
   - From [Sonic Pi](https://github.com/sonic-pi-net/sonic-pi)
 
-- **`supersonic-scsynth-samples`** - Meta-package for all Sonic Pi samples
+- **`supersonic-scsynth-samples`** (~34MB) - All 206 Sonic Pi samples
   - CC0-1.0 license (public domain)
-  - Includes 18 category packages (install individually to save space):
-    - `supersonic-scsynth-samples-bd` - Bass drums
-    - `supersonic-scsynth-samples-sn` - Snares
-    - `supersonic-scsynth-samples-hat` - Hi-hats
-    - `supersonic-scsynth-samples-loop` - Drum loops
-    - `supersonic-scsynth-samples-ambi` - Ambient sounds
-    - `supersonic-scsynth-samples-bass` - Bass sounds
-    - `supersonic-scsynth-samples-elec` - Electronic sounds
-    - `supersonic-scsynth-samples-glitch` - Glitch sounds
-    - `supersonic-scsynth-samples-guit` - Guitar sounds
-    - `supersonic-scsynth-samples-perc` - Percussion
-    - `supersonic-scsynth-samples-misc` - Miscellaneous
-    - Plus: arovane, drum, mehackit, ride, tabla, tbd, vinyl
+  - Categories: ambient, bass, drums, electronic, glitch, guitar, hi-hats, loops, percussion, snares, tabla, vinyl, and more
+  - From [Sonic Pi](https://github.com/sonic-pi-net/sonic-pi)
 
 ### Convenience Package
 - **`supersonic-scsynth-bundle`** - Includes core + synthdefs + all samples
@@ -163,7 +152,7 @@ import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.0';
 
 // Configure sample path (required for buffer loading)
 const sonic = new SuperSonic({
-  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples-bd@0.1.0/samples/'
+  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.0/samples/'
 });
 
 await sonic.init();
@@ -230,9 +219,8 @@ npm install supersonic-scsynth
 # Synthdefs (optional)
 npm install supersonic-scsynth-synthdefs
 
-# Individual sample categories (optional)
-npm install supersonic-scsynth-samples-bd
-npm install supersonic-scsynth-samples-loop
+# Samples (optional)
+npm install supersonic-scsynth-samples
 
 # Or everything at once
 npm install supersonic-scsynth-bundle
@@ -245,7 +233,7 @@ Then use via CDN in your HTML:
   import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.0';
 
   const sonic = new SuperSonic({
-    audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples-bd@0.1.0/samples/'
+    audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.0/samples/'
   });
 
   await sonic.init();
@@ -282,7 +270,7 @@ Sample and synthdef paths must be explicitly configured:
 
 ```javascript
 const sonic = new SuperSonic({
-  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples-bd@0.1.0/samples/'
+  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.0/samples/'
 });
 
 await sonic.loadSynthDefs(

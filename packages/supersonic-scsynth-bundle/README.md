@@ -6,8 +6,9 @@ Complete SuperSonic bundle with everything included.
 
 This is a convenience meta-package that includes:
 
-- **[supersonic-scsynth](https://www.npmjs.com/package/supersonic-scsynth)** - The core scsynth WASM engine (~2MB)
-- **[supersonic-scsynth-extra](https://www.npmjs.com/package/supersonic-scsynth-extra)** - Sonic Pi synthdefs and samples (~8MB)
+- **[supersonic-scsynth](https://www.npmjs.com/package/supersonic-scsynth)** - The core scsynth WASM engine (~450KB)
+- **[supersonic-scsynth-synthdefs](https://www.npmjs.com/package/supersonic-scsynth-synthdefs)** - All 120 Sonic Pi synthdefs (~67KB)
+- **[supersonic-scsynth-samples](https://www.npmjs.com/package/supersonic-scsynth-samples)** - All 206 Sonic Pi samples (~34MB)
 
 ## Installation
 
@@ -15,21 +16,24 @@ This is a convenience meta-package that includes:
 npm install supersonic-scsynth-bundle
 ```
 
-This installs both packages as dependencies.
+This installs all three packages as dependencies.
 
 ## Usage
 
 Same API as using the packages separately:
 
 ```javascript
-import { SuperSonic, SAMPLES_CDN, SYNTHDEFS_CDN } from 'supersonic-scsynth-bundle';
+import { SuperSonic } from 'supersonic-scsynth-bundle';
 
 const sonic = new SuperSonic({
-  audioBaseURL: SAMPLES_CDN
+  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.0/samples/'
 });
 
 await sonic.init();
-await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303'], SYNTHDEFS_CDN);
+await sonic.loadSynthDefs(
+  ['sonic-pi-beep', 'sonic-pi-tb303'],
+  'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/'
+);
 ```
 
 ## When to Use This
@@ -48,9 +52,10 @@ await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303'], SYNTHDEFS_CDN);
 
 | Package | Size | Contains |
 |---------|------|----------|
-| `supersonic-scsynth` | ~2MB | Core engine only |
-| `supersonic-scsynth-extra` | ~8MB | Synthdefs + samples |
-| `supersonic-scsynth-bundle` | ~10KB | Meta-package (depends on both) |
+| `supersonic-scsynth` | ~450KB | Core WASM engine |
+| `supersonic-scsynth-synthdefs` | ~67KB | 120 Sonic Pi synthdefs |
+| `supersonic-scsynth-samples` | ~34MB | 206 Sonic Pi samples |
+| `supersonic-scsynth-bundle` | ~2KB | Meta-package (depends on all three) |
 
 ## Documentation
 
