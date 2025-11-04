@@ -1,0 +1,142 @@
+#!/bin/bash
+set -e
+
+# SuperSonic Version Bump Script
+#
+# This script updates version numbers in exactly 10 locations:
+#
+# Package.json version fields (4):
+#   1. package.json
+#   2. packages/supersonic-scsynth-synthdefs/package.json
+#   3. packages/supersonic-scsynth-samples/package.json
+#   4. packages/supersonic-scsynth-bundle/package.json
+#
+# Bundle dependencies (3):
+#   5. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth dependency
+#   6. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-synthdefs dependency
+#   7. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-samples dependency
+#
+# CDN constants in index.js (3):
+#   8. packages/supersonic-scsynth-synthdefs/index.js - CDN_BASE constant
+#   9. packages/supersonic-scsynth-samples/index.js - UNPKG_BASE constant
+#  10. packages/supersonic-scsynth-samples/index.js - JSDELIVR_BASE constant
+#
+# Note: READMEs and error messages use @latest and don't need version updates
+
+# Color output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Check if version argument provided
+if [ -z "$1" ]; then
+    echo -e "${RED}Error: Version number required${NC}"
+    echo "Usage: ./bump-version.sh <version>"
+    echo "Example: ./bump-version.sh 0.1.2"
+    exit 1
+fi
+
+NEW_VERSION=$1
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Validate version format (basic check)
+if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo -e "${RED}Error: Invalid version format${NC}"
+    echo "Version must be in format: X.Y.Z (e.g., 0.1.2)"
+    exit 1
+fi
+
+echo "========================================"
+echo "  SuperSonic Version Bump"
+echo "========================================"
+echo ""
+echo -e "${YELLOW}New version: $NEW_VERSION${NC}"
+echo ""
+
+# Get current version for reference
+CURRENT_VERSION=$(node -p "require('./package.json').version")
+echo "Current version: $CURRENT_VERSION"
+echo ""
+
+# Confirm
+read -p "Continue with version bump? (y/n) " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 0
+fi
+
+echo ""
+echo "Step 1: Updating package.json files..."
+echo "---------------------------------------"
+
+# Update 4 package.json version fields
+sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PROJECT_ROOT/package.json"
+echo "✓ Updated package.json"
+
+sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-synthdefs/package.json"
+echo "✓ Updated packages/supersonic-scsynth-synthdefs/package.json"
+
+sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-samples/package.json"
+echo "✓ Updated packages/supersonic-scsynth-samples/package.json"
+
+sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-bundle/package.json"
+echo "✓ Updated packages/supersonic-scsynth-bundle/package.json"
+
+echo ""
+echo "Step 2: Updating bundle dependencies..."
+echo "----------------------------------------"
+
+# Update 3 bundle dependencies (use caret dependencies)
+sed -i "s/\"supersonic-scsynth\": \"\\^$CURRENT_VERSION\"/\"supersonic-scsynth\": \"^$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-bundle/package.json"
+echo "✓ Updated supersonic-scsynth dependency"
+
+sed -i "s/\"supersonic-scsynth-synthdefs\": \"\\^$CURRENT_VERSION\"/\"supersonic-scsynth-synthdefs\": \"^$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-bundle/package.json"
+echo "✓ Updated supersonic-scsynth-synthdefs dependency"
+
+sed -i "s/\"supersonic-scsynth-samples\": \"\\^$CURRENT_VERSION\"/\"supersonic-scsynth-samples\": \"^$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-bundle/package.json"
+echo "✓ Updated supersonic-scsynth-samples dependency"
+
+echo ""
+echo "Step 3: Updating CDN constants in index.js files..."
+echo "----------------------------------------------------"
+
+# Update 3 CDN constants
+sed -i "s|supersonic-scsynth-synthdefs@$CURRENT_VERSION|supersonic-scsynth-synthdefs@$NEW_VERSION|g" "$PROJECT_ROOT/packages/supersonic-scsynth-synthdefs/index.js"
+echo "✓ Updated packages/supersonic-scsynth-synthdefs/index.js"
+
+sed -i "s|supersonic-scsynth-samples@$CURRENT_VERSION|supersonic-scsynth-samples@$NEW_VERSION|g" "$PROJECT_ROOT/packages/supersonic-scsynth-samples/index.js"
+echo "✓ Updated packages/supersonic-scsynth-samples/index.js"
+
+echo ""
+echo "Step 4: Rebuilding distribution..."
+echo "-----------------------------------"
+
+# Run build with --release flag
+./build.sh --release
+echo "✓ Build complete"
+
+echo ""
+echo "Step 5: Committing changes..."
+echo "------------------------------"
+
+# Stage all changes
+git add -A
+
+# Create commit
+git commit -m "Version - $NEW_VERSION"
+echo "✓ Changes committed"
+
+echo ""
+echo -e "${GREEN}========================================"
+echo "Version bump complete! 🎉"
+echo "========================================${NC}"
+echo ""
+echo "New version: $NEW_VERSION"
+echo ""
+echo "Next steps:"
+echo "  1. Review changes: git show"
+echo "  2. Push to remote: git push"
+echo "  3. Publish to npm: ./publish.sh"
+echo ""
