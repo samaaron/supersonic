@@ -56,6 +56,9 @@ export class SuperSonic {
         const moduleUrl = new URL(import.meta.url);
         const basePath = new URL('.', moduleUrl).href;
 
+        // Store basePath for use in methods
+        this.basePath = basePath;
+
         this.config = {
             wasmUrl: new URL('wasm/scsynth-nrt.wasm', basePath).href,
             workletUrl: new URL('workers/scsynth_audio_worklet.js', basePath).href,
@@ -222,7 +225,7 @@ export class SuperSonic {
      */
     async #loadWasmManifest() {
         try {
-            const manifestUrl = './dist/wasm/manifest.json';
+            const manifestUrl = new URL('wasm/manifest.json', this.basePath).href;
             const response = await fetch(manifestUrl);
             if (response.ok) {
                 const manifest = await response.json();
@@ -231,7 +234,7 @@ export class SuperSonic {
                 // Use stable file for production
                 const wasmFile = this.config.development ? manifest.wasmFile : manifest.wasmFileStable;
 
-                this.config.wasmUrl = `./dist/wasm/${wasmFile}`;
+                this.config.wasmUrl = new URL(`wasm/${wasmFile}`, this.basePath).href;
                 console.log(`[SuperSonic] Using WASM build: ${wasmFile}`);
                 console.log(`[SuperSonic] Build: ${manifest.buildId} (git: ${manifest.gitHash})`);
             }
