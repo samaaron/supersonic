@@ -28,13 +28,16 @@ publish_package() {
         npm pack --dry-run
         echo -e "${GREEN}✓ $name (dry-run)${NC}"
     else
-        if npm publish --access public 2>&1 | tee /tmp/npm-publish.log; then
+        npm publish --access public 2>&1 | tee /tmp/npm-publish.log
+        local exit_code=${PIPESTATUS[0]}
+
+        if [ $exit_code -eq 0 ]; then
             echo -e "${GREEN}✓ $name published${NC}"
         else
             if grep -q "cannot publish over the previously published" /tmp/npm-publish.log || grep -q "You cannot publish over" /tmp/npm-publish.log; then
                 echo -e "${YELLOW}⊙ $name already published, skipping${NC}"
             else
-                echo -e "${RED}✗ $name failed${NC}"
+                echo -e "${RED}✗ $name failed (exit code: $exit_code)${NC}"
                 cat /tmp/npm-publish.log
                 return 1
             fi
