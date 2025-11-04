@@ -83,12 +83,15 @@ if [ "$DRY_RUN" = true ]; then
     echo ""
     echo "To publish for real, run: ./publish.sh"
 else
+    # Read version from package.json
+    VERSION=$(node -p "require('./package.json').version")
+
     echo -e "${GREEN}All 4 packages published successfully! 🎉${NC}"
     echo ""
     echo "Packages available on CDN:"
-    echo "  - https://unpkg.com/supersonic-scsynth@0.1.1"
-    echo "  - https://unpkg.com/supersonic-scsynth-synthdefs@0.1.1"
-    echo "  - https://unpkg.com/supersonic-scsynth-samples@0.1.1"
-    echo "  - https://unpkg.com/supersonic-scsynth-bundle@0.1.1"
+    echo "  - https://unpkg.com/supersonic-scsynth@$VERSION"
+    echo "  - https://unpkg.com/supersonic-scsynth-synthdefs@$VERSION"
+    echo "  - https://unpkg.com/supersonic-scsynth-samples@$VERSION"
+    echo "  - https://unpkg.com/supersonic-scsynth-bundle@$VERSION"
 fi
 echo "========================================"
