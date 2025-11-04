@@ -54,9 +54,7 @@ export class SuperSonic {
 
         // Configuration - resolve paths relative to this module
         const moduleUrl = new URL(import.meta.url);
-        const basePath = moduleUrl.pathname.includes('/dist/')
-            ? new URL('.', moduleUrl).href  // Loaded from dist/ (e.g., unpkg)
-            : './dist/';  // Loaded from source
+        const basePath = new URL('.', moduleUrl).href;
 
         this.config = {
             wasmUrl: new URL('wasm/scsynth-nrt.wasm', basePath).href,
