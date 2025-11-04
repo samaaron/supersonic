@@ -49,6 +49,12 @@ The 'nightly' (i.e. for every new commit) pre-built distribution files are publi
 
 https://samaaron.github.io/supersonic/supersonic-dist.zip
 
+This includes:
+- Core engine (WASM + JS)
+- All 120 synthdefs
+- All 206 samples
+- Size: ~35MB
+
 ## Package Structure
 
 SuperSonic is published as multiple npm packages to keep the core engine small:

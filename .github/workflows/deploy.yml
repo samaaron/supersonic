@@ -42,6 +42,21 @@ jobs:
       - name: Run build script
         run: ./build.sh
 
+      - name: Replace symlinks with actual files for distribution
+        run: |
+          echo "Removing symlinks and copying actual files..."
+          rm -f dist/synthdefs dist/samples
+
+          echo "Copying all 120 synthdefs..."
+          mkdir -p dist/synthdefs
+          cp -r packages/supersonic-scsynth-synthdefs/synthdefs/* dist/synthdefs/
+          echo "Copied $(ls -1 dist/synthdefs/*.scsyndef | wc -l) synthdef files"
+
+          echo "Copying all 206 samples..."
+          mkdir -p dist/samples
+          cp -r packages/supersonic-scsynth-samples/samples/* dist/samples/
+          echo "Copied $(ls -1 dist/samples/ | wc -l) sample files"
+
       - name: Create zip archive of dist
         run: |
           cd dist

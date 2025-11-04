@@ -149,40 +149,24 @@ echo "Copying worker files..."
 mkdir -p "$OUTPUT_DIR/workers"
 cp "$JS_DIR/workers/"* "$OUTPUT_DIR/workers/"
 
-# Copy synthdefs and samples from packages
+# Create symlinks to synthdefs and samples from packages
 SYNTHDEFS_SRC="$PROJECT_ROOT/packages/supersonic-scsynth-synthdefs/synthdefs"
 SAMPLES_SRC="$PROJECT_ROOT/packages/supersonic-scsynth-samples/samples"
 
 if [ -d "$SYNTHDEFS_SRC" ]; then
-    echo "Copying synthdefs from packages..."
-    mkdir -p "$OUTPUT_DIR/synthdefs"
-    cp -r "$SYNTHDEFS_SRC/"*.scsyndef "$OUTPUT_DIR/synthdefs/" 2>/dev/null || true
-
-    # Generate manifest.json with list of available synthdefs
-    echo "Generating synthdef manifest..."
-    echo '{' > "$OUTPUT_DIR/synthdefs/manifest.json"
-    echo '  "synthdefs": [' >> "$OUTPUT_DIR/synthdefs/manifest.json"
-    ls "$OUTPUT_DIR/synthdefs/"*.scsyndef 2>/dev/null | \
-        sed 's|.*/||; s|\.scsyndef$||' | \
-        awk '{printf "    \"%s\"%s\n", $0, (NR==1?",":",")}' | \
-        sed '$ s/,$//' >> "$OUTPUT_DIR/synthdefs/manifest.json" 2>/dev/null || echo '    "sonic-pi-beep"' >> "$OUTPUT_DIR/synthdefs/manifest.json"
-    echo '  ]' >> "$OUTPUT_DIR/synthdefs/manifest.json"
-    echo '}' >> "$OUTPUT_DIR/synthdefs/manifest.json"
-
-    echo "Copied $(ls -1 "$OUTPUT_DIR/synthdefs/"*.scsyndef 2>/dev/null | wc -l) synthdef files"
+    echo "Creating symlink to synthdefs..."
+    rm -rf "$OUTPUT_DIR/synthdefs"
+    ln -s "$SYNTHDEFS_SRC" "$OUTPUT_DIR/synthdefs"
+    echo "Linked to $(ls -1 "$SYNTHDEFS_SRC/"*.scsyndef 2>/dev/null | wc -l) synthdef files"
 else
     echo "Warning: synthdefs not found at $SYNTHDEFS_SRC"
 fi
 
 if [ -d "$SAMPLES_SRC" ]; then
-    echo "Copying samples from packages..."
-    mkdir -p "$OUTPUT_DIR/samples"
-    # Only copy a few sample files for demo (full 34MB would be too large)
-    cp "$SAMPLES_SRC/bd_haus.flac" "$OUTPUT_DIR/samples/" 2>/dev/null || true
-    cp "$SAMPLES_SRC/loop_amen.flac" "$OUTPUT_DIR/samples/" 2>/dev/null || true
-    cp "$SAMPLES_SRC/ambi_choir.flac" "$OUTPUT_DIR/samples/" 2>/dev/null || true
-
-    echo "Copied $(ls -1 "$OUTPUT_DIR/samples/" 2>/dev/null | wc -l) sample files (subset for demo)"
+    echo "Creating symlink to samples..."
+    rm -rf "$OUTPUT_DIR/samples"
+    ln -s "$SAMPLES_SRC" "$OUTPUT_DIR/samples"
+    echo "Linked to $(ls -1 "$SAMPLES_SRC/" 2>/dev/null | wc -l) sample files"
 else
     echo "Warning: samples not found at $SAMPLES_SRC"
 fi
