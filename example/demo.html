@@ -1737,9 +1737,16 @@
                 <ol>
                   <li>
                     <span class="welcome-text">
-                      <strong>Load synthdefs</strong> — Click "Send Sonic Pi Synthdefs" below to load these synths from Sonic Pi (which are scsynth compatible):
+                      <strong>Load synthdefs</strong> — Click "Load Synthdefs" below to load these synths from Sonic Pi (which are scsynth compatible):
                       <code class="welcome-code-block">sonic-pi-beep, sonic-pi-dsaw, sonic-pi-dpulse, sonic-pi-bnoise, sonic-pi-prophet,
 sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
+                    </span>
+                  </li>
+
+                  <li>
+                    <span class="welcome-text">
+                      <strong>Load samples</strong> — Click "Load Samples" to load audio files into buffers:
+                      <code class="welcome-code-block">loop_amen.flac, ambi_choir.flac, bd_haus.flac</code>
                     </span>
                   </li>
 
@@ -1749,7 +1756,8 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                       <a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" class="welcome-link">scsynth OSC Commands</a>
                     </span>
                     <code class="welcome-code-block">/s_new sonic-pi-beep -1 0 0 note 72
-/notify 1</code>
+/b_allocRead 10 loop_amen.flac
+/s_new bufrd 1000 0 0 bufnum 10</code>
                   </li>
 
                   <li>
@@ -1787,11 +1795,19 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                     <div class="button-row button-row-secondary">
                       <button
                         type="button"
-                        id="load-all-button"
+                        id="load-synthdefs-button"
                         class="btn-green"
                         disabled
                       >
-                        Send Sonic Pi Synthdefs
+                        Load Synthdefs
+                      </button>
+                      <button
+                        type="button"
+                        id="load-samples-button"
+                        class="btn-green"
+                        disabled
+                      >
+                        Load Samples
                       </button>
                       <button
                         type="button"

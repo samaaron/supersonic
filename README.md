@@ -11,12 +11,76 @@ The main API for SuperSonic is scsynth's OSC API with support for immediate and 
 Note: SuperSonic uses a SharedBuffer to send and receive OSC messages from scsynth which requires specific COOP/COEP headers to be set in your web browser (see below).
 
 
-## Quick Start
+## Installation
+
+### Option 1: npm Package (Recommended)
+
+```bash
+# Core engine only (~2MB)
+npm install supersonic-scsynth
+
+# Or install everything (engine + synthdefs + samples)
+npm install supersonic-scsynth-bundle
+```
+
+### Option 2: CDN (No build required)
+
+```html
+<script type="module">
+  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.0';
+
+  const sonic = new SuperSonic({
+    audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples-bd@0.1.0/samples/'
+  });
+
+  await sonic.init();
+
+  // Load synthdefs from CDN
+  await sonic.loadSynthDefs(
+    ['sonic-pi-beep'],
+    'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/'
+  );
+</script>
+```
+
+### Option 3: Pre-built Distribution
 
 The 'nightly' (i.e. for every new commit) pre-built distribution files are published here:
 
 https://samaaron.github.io/supersonic/supersonic-dist.zip
 
+## Package Structure
+
+SuperSonic is published as multiple npm packages to keep the core engine small:
+
+### Core Package
+- **`supersonic-scsynth`** (~2MB) - The WebAssembly scsynth engine
+  - GPL-3.0-or-later license
+
+### Resource Packages
+- **`supersonic-scsynth-synthdefs`** (~7MB) - All 120 Sonic Pi synthdefs
+  - MIT license
+  - From [Sonic Pi](https://github.com/sonic-pi-net/sonic-pi)
+
+- **`supersonic-scsynth-samples`** - Meta-package for all Sonic Pi samples
+  - CC0-1.0 license (public domain)
+  - Includes 18 category packages (install individually to save space):
+    - `supersonic-scsynth-samples-bd` - Bass drums
+    - `supersonic-scsynth-samples-sn` - Snares
+    - `supersonic-scsynth-samples-hat` - Hi-hats
+    - `supersonic-scsynth-samples-loop` - Drum loops
+    - `supersonic-scsynth-samples-ambi` - Ambient sounds
+    - `supersonic-scsynth-samples-bass` - Bass sounds
+    - `supersonic-scsynth-samples-elec` - Electronic sounds
+    - `supersonic-scsynth-samples-glitch` - Glitch sounds
+    - `supersonic-scsynth-samples-guit` - Guitar sounds
+    - `supersonic-scsynth-samples-perc` - Percussion
+    - `supersonic-scsynth-samples-misc` - Miscellaneous
+    - Plus: arovane, drum, mehackit, ride, tabla, tbd, vinyl
+
+### Convenience Package
+- **`supersonic-scsynth-bundle`** - Includes core + synthdefs + all samples
+  - Install this to get everything in one command
 
 ## Building from Source
 
@@ -81,7 +145,7 @@ See `example/server.rb` for a reference implementation.
 
 ## Basic Usage
 
-### Minimal Example
+### Minimal Example (Core Only)
 
 ```javascript
 import { SuperSonic } from './dist/supersonic.js';
@@ -92,13 +156,43 @@ await sonic.init();
 sonic.send('/notify', 1);
 ```
 
+### With Synthdefs and Samples (npm/CDN)
+
+```javascript
+import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.0';
+
+// Configure sample path (required for buffer loading)
+const sonic = new SuperSonic({
+  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples-bd@0.1.0/samples/'
+});
+
+await sonic.init();
+
+// Load synthdefs (baseUrl is required)
+await sonic.loadSynthDefs(
+  ['sonic-pi-beep', 'sonic-pi-tb303'],
+  'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/'
+);
+
+// Play a synth
+sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 1, 'note', 60);
+
+// Load and play a sample
+await sonic.allocReadBuffer(0, 'bd_haus.flac');
+sonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 1, 'buf', 0);
+```
+
 See `example/demo.html` for a complete working example.
 
 ### API Reference
 
 **SuperSonic Class:**
-- `new SuperSonic()` - Create instance
+- `new SuperSonic(options)` - Create instance
+  - `options.audioBaseURL` - Base URL for sample files (required for buffer loading)
+  - `options.audioPathMap` - Custom mapping of sample names to URLs
 - `async init()` - Initialize audio engine
+- `async loadSynthDefs(names, baseUrl)` - Load synth definitions (baseUrl required)
+- `async allocReadBuffer(bufnum, filename)` - Load audio file into buffer
 - `send(address, ...args)` - Send OSC message (auto-detects types)
 - `sendOSC(oscBytes, options)` - Send pre-encoded OSC bytes
 - `onInitialized` - Callback when ready
@@ -125,41 +219,86 @@ See [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Se
 
 ## Integration Guide
 
-### Required Files
+### Recommended: npm Packages
 
-To integrate into your project, copy these from `dist/`:
+Install the core package and any resources you need:
+
+```bash
+# Core engine
+npm install supersonic-scsynth
+
+# Synthdefs (optional)
+npm install supersonic-scsynth-synthdefs
+
+# Individual sample categories (optional)
+npm install supersonic-scsynth-samples-bd
+npm install supersonic-scsynth-samples-loop
+
+# Or everything at once
+npm install supersonic-scsynth-bundle
+```
+
+Then use via CDN in your HTML:
+
+```html
+<script type="module">
+  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@0.1.0';
+
+  const sonic = new SuperSonic({
+    audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples-bd@0.1.0/samples/'
+  });
+
+  await sonic.init();
+  await sonic.loadSynthDefs(
+    ['sonic-pi-beep'],
+    'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/'
+  );
+</script>
+```
+
+### Alternative: Manual File Integration
+
+If you're building from source or need local files, copy these from `dist/`:
 
 ```
 dist/
 ├── supersonic.js                 # Main entry point (ES module)
 ├── wasm/
 │   └── scsynth-nrt.wasm          # Audio engine (~1.5MB)
-├── workers/
-│   ├── osc_in_worker.js          # OSC input handling
-│   ├── osc_out_worker.js         # OSC output handling
-│   ├── debug_worker.js           # Debug logging
-│   └── scsynth_audio_worklet.js  # AudioWorklet processor
-├── lib/
-│   ├── ring_buffer.js            # SharedArrayBuffer ring buffer
-│   └── scsynth_osc.js            # OSC orchestration
-└── etc/
-    └── synthdefs/                # Binary synth definitions (.scsyndef)
-        ├── manifest.json         # List of available synthdefs
-        └── *.scsyndef            # 120 synthdefs from Sonic Pi
+└── workers/
+    ├── osc_in_worker.js          # OSC input handling
+    ├── osc_out_worker.js         # OSC output handling
+    ├── debug_worker.js           # Debug logging
+    └── scsynth_audio_worklet.js  # AudioWorklet processor
 ```
 
-### Path Requirements
+Resources (synthdefs/samples) are available separately via npm packages.
 
-**Default Paths:**
+### Path Configuration
 
-By default, Supersonic expects files to be served from `./dist/` relative to your HTML file:
+**Required Configuration:**
+
+Sample and synthdef paths must be explicitly configured:
+
+```javascript
+const sonic = new SuperSonic({
+  audioBaseURL: 'https://unpkg.com/supersonic-scsynth-samples-bd@0.1.0/samples/'
+});
+
+await sonic.loadSynthDefs(
+  ['sonic-pi-beep'],
+  'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.0/synthdefs/'
+);
+```
+
+**Engine Paths (Default):**
+
+The core engine expects these files relative to your HTML:
 - WASM: `./dist/wasm/scsynth-nrt.wasm`
 - AudioWorklet: `./dist/workers/scsynth_audio_worklet.js`
 - Workers: `./dist/workers/osc_out_worker.js`, `osc_in_worker.js`, `debug_worker.js`
 
-**Custom Paths:**
-
-You can configure WASM and AudioWorklet paths when creating a SuperSonic instance:
+**Custom Engine Paths:**
 
 ```javascript
 const sonic = new SuperSonic();
@@ -168,7 +307,7 @@ sonic.config.workletUrl = '/custom/path/scsynth_audio_worklet.js';
 await sonic.init();
 ```
 
-**Note:** Worker paths (`osc_out_worker.js`, `osc_in_worker.js`, `debug_worker.js`) are currently hardcoded to `./dist/workers/` and cannot be configured. Keep these files in the default location.
+**Note:** Worker paths are currently hardcoded to `./dist/workers/` and cannot be configured.
 
 
 ## License

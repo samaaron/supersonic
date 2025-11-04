@@ -1,0 +1,38 @@
+{
+  "name": "supersonic-scsynth-bundle",
+  "version": "0.1.0",
+  "description": "Complete SuperSonic bundle: scsynth engine + Sonic Pi synthdefs and samples",
+  "main": "index.js",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/samaaron/supersonic.git",
+    "directory": "packages/supersonic-scsynth-bundle"
+  },
+  "keywords": [
+    "supercollider",
+    "scsynth",
+    "sonic-pi",
+    "audio",
+    "synthesis",
+    "webassembly",
+    "supersonic",
+    "bundle"
+  ],
+  "author": "Sam Aaron",
+  "license": "GPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/samaaron/supersonic/issues"
+  },
+  "homepage": "https://github.com/samaaron/supersonic/tree/main/packages/supersonic-scsynth-bundle#readme",
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "supersonic-scsynth": "^0.1.0",
+    "supersonic-scsynth-synthdefs": "^0.1.0",
+    "supersonic-scsynth-samples": "^0.1.0"
+  }
+}

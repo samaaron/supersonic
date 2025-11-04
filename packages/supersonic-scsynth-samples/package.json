@@ -1,0 +1,34 @@
+{
+  "name": "supersonic-scsynth-samples",
+  "version": "0.1.0",
+  "description": "All 206 Sonic Pi audio samples for SuperSonic scsynth",
+  "main": "index.js",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/samaaron/supersonic.git",
+    "directory": "packages/supersonic-scsynth-samples"
+  },
+  "keywords": [
+    "supercollider",
+    "scsynth",
+    "sonic-pi",
+    "samples",
+    "audio",
+    "supersonic",
+    "flac"
+  ],
+  "author": "Sam Aaron",
+  "license": "CC0-1.0",
+  "bugs": {
+    "url": "https://github.com/samaaron/supersonic/issues"
+  },
+  "homepage": "https://github.com/samaaron/supersonic/tree/main/packages/supersonic-scsynth-samples#readme",
+  "files": [
+    "samples/",
+    "index.js",
+    "README.md",
+    "PROVENANCE.md",
+    "LICENSE"
+  ]
+}
