@@ -11,8 +11,8 @@ const __dirname = dirname(__filename);
 export const SAMPLES_DIR = join(__dirname, 'samples');
 
 // CDN URLs for convenience
-export const UNPKG_BASE = 'https://unpkg.com/supersonic-scsynth-samples@0.1.2/samples/';
-export const JSDELIVR_BASE = 'https://cdn.jsdelivr.net/npm/supersonic-scsynth-samples@0.1.2/samples/';
+export const UNPKG_BASE = 'https://unpkg.com/supersonic-scsynth-samples@0.1.3/samples/';
+export const JSDELIVR_BASE = 'https://cdn.jsdelivr.net/npm/supersonic-scsynth-samples@0.1.3/samples/';
 
 // Helper to get sample path
 export function getSamplePath(filename) {
