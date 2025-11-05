@@ -6,6 +6,8 @@
     GPL v3 or later
 */
 
+import osc from '../vendor/osc.js/osc.js';
+
 /**
  * ScsynthOSC - OSC communication layer for scsynth
  * Manages OSC IN, OSC OUT, and DEBUG workers
@@ -124,7 +126,19 @@ export default class ScsynthOSC {
                 case 'messages':
                     if (this.callbacks.onOSCMessage) {
                         data.messages.forEach(msg => {
-                            this.callbacks.onOSCMessage(msg);
+                            // The worker sends raw OSC bytes in msg.oscData
+                            // We need to decode them to get address and args
+                            if (msg.oscData) {
+                                try {
+                                    // Use custom options to ensure args is always an array
+                                    const options = { metadata: false, unpackSingleArgs: false };
+                                    const decoded = osc.readPacket(msg.oscData, options);
+                                    // Pass the decoded message with address and args
+                                    this.callbacks.onOSCMessage(decoded);
+                                } catch (e) {
+                                    console.error('[ScsynthOSC] Failed to decode OSC message:', e, msg);
+                                }
+                            }
                         });
                     }
                     break;
