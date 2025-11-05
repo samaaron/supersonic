@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>SuperSonic Simple Demo</title>
+    <title>SuperSonic Simple Demo (CDN)</title>
   </head>
   <body>
-    <h1>SuperSimple SuperSonic</h1>
+    <h1>SuperSimple SuperSonic (CDN)</h1>
     <button id="play">Play Amen Break</button>
 
     <script type="module">
-      import { SuperSonic } from "../dist/supersonic.js";
+      import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
 
       const button = document.getElementById("play");
       let sonic = null;
@@ -18,8 +18,10 @@
           button.textContent = "Booting scsynth...";
 
           sonic = new SuperSonic({
-            sampleBaseURL: "../dist/samples/",
-            synthdefBaseURL: "../dist/synthdefs/",
+            sampleBaseURL:
+              "https://unpkg.com/supersonic-scsynth-samples@latest/samples/",
+            synthdefBaseURL:
+              "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
           });
           await sonic.init();
           await sonic.loadSynthDefs(["sonic-pi-basic_stereo_player"]);
