@@ -71,11 +71,7 @@ function readMessages() {
 
     var currentTail = tail;
     var messagesRead = 0;
-    // Process up to 10 messages per wake to balance:
-    // - Low latency (don't block too long processing)
-    // - Efficiency (batch processing when busy)
-    // - Prevents starvation of other tasks
-    var maxMessages = 10;
+    var maxMessages = 100;
 
     while (currentTail !== head && messagesRead < maxMessages) {
         var readPos = ringBufferBase + bufferConstants.OUT_BUFFER_START + currentTail;
@@ -115,7 +111,7 @@ function readMessages() {
             if (sequence !== expectedSeq) {
                 var dropped = (sequence - expectedSeq + 0x100000000) & 0xFFFFFFFF;
                 if (dropped < 1000) { // Sanity check
-                    console.warn('[OSCInWorker] Detected', dropped, 'dropped messages');
+                    console.warn('[OSCInWorker] Detected', dropped, 'dropped messages (expected seq', expectedSeq, 'got', sequence, ')');
                     stats.droppedMessages += dropped;
                 }
             }
