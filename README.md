@@ -21,11 +21,11 @@ A WebAssembly port of SuperCollider's scsynth audio synthesis engine for the bro
   await sonic.loadSynthDefs(['sonic-pi-beep']);
 
   // Trigger the synth
-  sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 1, 'note', 60);
+  sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60);
 
   // Load and play a sample
   sonic.send('/b_allocRead', 0, 'bd_haus.flac');
-  sonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 1, 'buf', 0);
+  sonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 0, 'buf', 0);
 </script>
 ```
 
@@ -90,7 +90,7 @@ const sonic = new SuperSonic({
 **Common OSC commands:**
 ```javascript
 sonic.send('/notify', 1);                              // Enable notifications
-sonic.send('/s_new', 'synth-name', -1, 0, 1);         // Create synth
+sonic.send('/s_new', 'synth-name', -1, 0, 0);         // Create synth
 sonic.send('/n_set', 1000, 'freq', 440.0, 'amp', 0.5); // Set parameters
 sonic.send('/n_free', 1000);                            // Free node
 sonic.send('/b_allocRead', 0, 'sample.flac');          // Load audio buffer
