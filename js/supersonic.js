@@ -37,6 +37,9 @@ export class SuperSonic {
         this.wasmInstance = null;
         this.bufferPool = null;  // MemPool for audio buffer allocation
 
+        // Pending buffer operations map for UUID correlation
+        this.pendingBufferOps = new Map();  // UUID -> {resolve, reject, timeout}
+
         // Time offset (AudioContext → NTP conversion)
         this.wasmTimeOffset = null;
         this._timeOffsetPromise = null;
@@ -306,11 +309,15 @@ export class SuperSonic {
 
         // Set up ScsynthOSC callbacks
         this.osc.onOSCMessage((msg) => {
-            // Handle internal buffer cleanup messages
+            // Handle internal messages
             if (msg.address === '/buffer/freed') {
                 this._handleBufferFreed(msg.args);
+            } else if (msg.address === '/buffer/allocated') {
+                // Handle buffer allocation completion with UUID correlation
+                this._handleBufferAllocated(msg.args);
             }
 
+            // Always forward to onMessageReceived (including internal messages)
             if (this.onMessageReceived) {
                 this.stats.messagesReceived++;
                 this.onMessageReceived(msg);
@@ -686,11 +693,26 @@ export class SuperSonic {
                 size: bytesNeeded
             });
 
-            // 9. Send pointer command to WASM
-            await this.send('/b_allocPtr', bufnum, allocatedPtr, framesToRead,
-                           numChannels, audioBuffer.sampleRate);
+            // 9. Generate UUID for correlation
+            const uuid = crypto.randomUUID();
 
-            // 10. Handle completion message if provided
+            // 10. Set up promise to wait for allocation confirmation
+            const allocationComplete = new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    this.pendingBufferOps.delete(uuid);
+                    reject(new Error(`Timeout waiting for buffer ${bufnum} allocation`));
+                }, 5000);
+                this.pendingBufferOps.set(uuid, { resolve, reject, timeout });
+            });
+
+            // 11. Send pointer command to WASM with UUID
+            await this.send('/b_allocPtr', bufnum, allocatedPtr, framesToRead,
+                           numChannels, audioBuffer.sampleRate, uuid);
+
+            // 12. Wait for allocation confirmation
+            await allocationComplete;
+
+            // 13. Handle completion message if provided
             if (completionMsg) {
                 // TODO: Handle completion message
             }
@@ -733,11 +755,6 @@ export class SuperSonic {
      * Handle /buffer/freed message from WASM
      */
     _handleBufferFreed(args) {
-        if (args.length < 2) {
-            console.warn('[SuperSonic] Invalid /buffer/freed message:', args);
-            return;
-        }
-
         const bufnum = args[0];
         const offset = args[1];
 
@@ -745,6 +762,22 @@ export class SuperSonic {
         if (bufferInfo) {
             this.bufferPool.free(bufferInfo.ptr);
             this.allocatedBuffers.delete(bufnum);
+        }
+    }
+
+    /**
+     * Handle /buffer/allocated message with UUID correlation
+     */
+    _handleBufferAllocated(args) {
+        const uuid = args[0];  // UUID string
+        const bufnum = args[1]; // Buffer number
+
+        // Find and resolve the pending operation
+        const pending = this.pendingBufferOps.get(uuid);
+        if (pending) {
+            clearTimeout(pending.timeout);
+            pending.resolve({ bufnum });
+            this.pendingBufferOps.delete(uuid);
         }
     }
 
@@ -971,6 +1004,21 @@ export class SuperSonic {
         this.initialized = false;
 
         console.log('[SuperSonic] Destroyed');
+    }
+
+    /**
+     * Load a sample into a buffer and wait for confirmation
+     * @param {number} bufnum - Buffer number
+     * @param {string} path - Audio file path
+     * @returns {Promise} Resolves when buffer is ready
+     */
+    async loadSample(bufnum, path, startFrame = 0, numFrames = 0) {
+        if (!this.initialized) {
+            throw new Error('SuperSonic not initialized. Call init() first.');
+        }
+
+        // Use the internal _allocReadBuffer which handles everything including UUID correlation
+        await this._allocReadBuffer(bufnum, path, startFrame, numFrames);
     }
 
     /**
