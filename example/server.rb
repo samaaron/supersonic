@@ -51,12 +51,14 @@ server_config = {
     puts <<~BANNER
 
       ╔════════════════════════════════════════════════════════════╗
-      ║                 scsynth_wasm Example Server                ║
+      ║                 SuperSonic Example Server                  ║
       ╠════════════════════════════════════════════════════════════╣
       ║                                                            ║
       ║  Server running at: http://localhost:#{port}                  ║
       ║                                                            ║
       ║  Open in browser:   http://localhost:#{port}/demo.html        ║
+      ║                     http://localhost:#{port}/simple.html      ║
+      ║                     http://localhost:#{port}/simple-cdn.html  ║
       ║                                                            ║
       ║  COOP/COEP headers enabled for SharedArrayBuffer support   ║
       ║                                                            ║
