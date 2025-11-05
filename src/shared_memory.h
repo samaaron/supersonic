@@ -59,7 +59,8 @@ struct alignas(4) ControlPointers {
     std::atomic<int32_t> out_tail;
     std::atomic<int32_t> debug_head;
     std::atomic<int32_t> debug_tail;
-    std::atomic<int32_t> sequence;
+    std::atomic<int32_t> out_sequence;    // Sequence counter for OUT buffer
+    std::atomic<int32_t> debug_sequence;  // Sequence counter for DEBUG buffer
     std::atomic<uint32_t> status_flags;
 };
 
