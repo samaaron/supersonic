@@ -206,7 +206,8 @@ extern "C" {
         control->out_tail.store(0, std::memory_order_relaxed);
         control->debug_head.store(0, std::memory_order_relaxed);
         control->debug_tail.store(0, std::memory_order_relaxed);
-        control->sequence.store(0, std::memory_order_relaxed);
+        control->out_sequence.store(0, std::memory_order_relaxed);
+        control->debug_sequence.store(0, std::memory_order_relaxed);
         control->status_flags.store(STATUS_OK, std::memory_order_relaxed);
 
         // Initialize metrics
@@ -698,7 +699,15 @@ bool ring_buffer_write(
     Message header;
     header.magic = MESSAGE_MAGIC;
     header.length = sizeof(Message) + data_size;
-    header.sequence = control->sequence.fetch_add(1, std::memory_order_relaxed);
+
+    // Use appropriate sequence counter based on which buffer we're writing to
+    // This prevents false "dropped message" detection when debug and OSC messages interleave
+    if (buffer_start_offset == OUT_BUFFER_START) {
+        header.sequence = control->out_sequence.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        // DEBUG_BUFFER_START
+        header.sequence = control->debug_sequence.fetch_add(1, std::memory_order_relaxed);
+    }
 
     // Load head and tail with acquire semantics
     int32_t current_head = head->load(std::memory_order_acquire);
