@@ -174,7 +174,7 @@ extern "C" {
     int worklet_debug(const char* fmt, ...);
 }
 
-// /b_allocPtr bufnum dataPtr numFrames numChannels sampleRate [completion]
+// /b_allocPtr bufnum dataPtr numFrames numChannels sampleRate uuid [completion]
 // Set buffer to point to pre-allocated memory (includes guard samples)
 SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
@@ -185,6 +185,7 @@ SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* in
     int numFrames = msg.geti();
     int numChannels = msg.geti();
     float sampleRate = msg.getf();
+    const char* uuid = msg.gets();  // UUID for correlation
 
     // Convert offset to pointer
     float* data = (float*)dataPtr;
@@ -194,6 +195,19 @@ SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* in
 
     if (result == 0) {
         SendDoneWithIntValue(inReply, "/b_allocPtr", bufnum);
+
+        // Send internal message for JavaScript to track buffer allocation
+        small_scpacket packet;
+        packet.adds("/buffer/allocated");
+        packet.maketags(3);
+        packet.addtag(',');
+        packet.addtag('s');  // UUID string
+        packet.addtag('i');  // buffer number
+        packet.adds(uuid);
+        packet.addi(bufnum);
+
+        // Send to the internal reply mechanism
+        SendReply(inReply, packet.data(), packet.size());
     } else {
         SendFailureWithIntValue(inReply, "/b_allocPtr", "Buffer allocation failed", bufnum);
     }
