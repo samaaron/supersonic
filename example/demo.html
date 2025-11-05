@@ -1088,10 +1088,10 @@
       }
 
       .code-snippet pre {
-        width: 550px;
-        max-width: 550px;
+        width: 650px;
+        max-width: 650px;
         margin: 0;
-        font-size: 1rem;
+        font-size: 0.9rem;
       }
 
       .code-snippet .code-comment {
@@ -1114,13 +1114,13 @@
         }
 
         .code-snippet pre {
-          min-width: 500px;
-          width: 500px;
+          min-width: 650px;
+          width: 650px;
         }
 
         .code-snippet .code-comment {
-          width: 350px;
-          max-width: 350px;
+          width: 225px;
+          max-width: 225px;
           flex-shrink: 0;
           white-space: normal;
           word-wrap: break-word;
@@ -1149,6 +1149,11 @@
           padding: 0.5rem !important;
           width: 100% !important;
           max-width: 100% !important;
+        }
+
+        /* Even smaller font for the import statement on mobile */
+        .code-snippet:first-child pre {
+          font-size: 0.6rem !important;
         }
 
         .code-snippet .code-comment {
@@ -1446,7 +1451,7 @@
             <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
               First, grab the SuperSonic module
             </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ff1493; overflow-x: auto;"><code><span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'./dist/supersonic.js'</span>;</code></pre>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ff1493; overflow-x: auto;"><code><span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'https://unpkg.com/supersonic-scsynth@latest'</span>;</code></pre>
           </div>
 
           <!-- Initialize Box -->
@@ -1454,16 +1459,32 @@
             <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
               Initialize and you're ready to go
             </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #1e90ff; overflow-x: auto;"><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
-<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>();</code></pre>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #1e90ff; overflow-x: auto;"><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">cdn</span> = <span style="color: #ffd700;">'https://unpkg.com'</span>;
+<span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
+<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>({
+  <span style="color: #66d9ef;">synthdefsPath</span>: cdn + <span style="color: #ffd700;">'/supersonic-scsynth-synthdefs@latest'</span>,
+  <span style="color: #66d9ef;">samplesPath</span>: cdn + <span style="color: #ffd700;">'/supersonic-scsynth-samples@latest'</span>
+});</code></pre>
           </div>
 
-          <!-- OSC API Box -->
+          <!-- Play Synth Box -->
           <div class="code-snippet">
             <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
-              Access the full OSC API:<br/><a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" rel="noopener" style="color: #ff1493; text-decoration: none; transition: all 0.3s ease; display: inline;" onmouseover="this.style.color='#ffd700';" onmouseout="this.style.color='#ff1493';">SuperCollider's Scsynth Commands</a>
+              Load and play a synth
             </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ffd700; overflow-x: auto;"><code>sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/notify'</span>, <span style="color: #bd93f9;">1</span>);</code></pre>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #50fa7b; overflow-x: auto;"><code><span style="color: #75715e;">// Load synthdef, then play synth with ID 1000 in group 0</span>
+<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSynthDef</span>(<span style="color: #ffd700;">'sonic-pi-prophet'</span>);
+sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-prophet'</span>, <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>,<span style="color: #ffd700;">'note'</span>, <span style="color: #bd93f9;">60</span>);</code></pre>
+          </div>
+
+          <!-- Load Sample Box -->
+          <div class="code-snippet">
+            <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
+              Load and play a sample
+            </p>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ffd700; overflow-x: auto;"><code><span style="color: #75715e;">// Load sample into buffer 0</span>
+<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSample</span>(<span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'bd_haus.flac'</span>);
+sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>,<span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'buf'</span>, <span style="color: #bd93f9;">0</span>);</code></pre>
           </div>
         </div>
 
@@ -1475,7 +1496,7 @@
             text-align: center;
           "
         >
-          Remember to set <code style="background: #2d3748; color: #ffd700; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">COOP/COEP</code> headers — see README
+         Note: <code style="background: #2d3748; color: #ffd700; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">COOP/COEP</code> headers are required — see <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener" style="color: #ff1493; text-decoration: none; transition: all 0.3s ease;" onmouseover="this.style.color='#ffd700';" onmouseout="this.style.color='#ff1493';">README</a>
         </p>
         </div>
       </div>
