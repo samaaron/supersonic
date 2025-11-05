@@ -4,7 +4,7 @@
     <title>SuperSonic Simple Demo</title>
 </head>
 <body>
-    <h1>SuperSonic</h1>
+    <h1>SuperSimple SuperSonic</h1>
     <button id="play">Play Sound</button>
 
     <script type="module">
@@ -26,7 +26,7 @@
             } else {
                 // Play
                 sonic.send('/b_allocRead', 0, 'loop_amen.flac');
-                sonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 1, 'buf', 0);
+                sonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 0, 'buf', 0);
             }
         };
     </script>
