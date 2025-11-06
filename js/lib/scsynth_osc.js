@@ -23,7 +23,8 @@ export default class ScsynthOSC {
         };
 
         this.callbacks = {
-            onOSCMessage: null,
+            onRawOSC: null,         // Raw binary OSC callback
+            onParsedOSC: null,      // Parsed OSC callback
             onDebugMessage: null,
             onError: null,
             onInitialized: null
@@ -124,23 +125,30 @@ export default class ScsynthOSC {
             const data = event.data;
             switch (data.type) {
                 case 'messages':
-                    if (this.callbacks.onOSCMessage) {
-                        data.messages.forEach(msg => {
-                            // The worker sends raw OSC bytes in msg.oscData
-                            // We need to decode them to get address and args
-                            if (msg.oscData) {
-                                try {
-                                    // Use custom options to ensure args is always an array
-                                    const options = { metadata: false, unpackSingleArgs: false };
-                                    const decoded = osc.readPacket(msg.oscData, options);
-                                    // Pass the decoded message with address and args
-                                    this.callbacks.onOSCMessage(decoded);
-                                } catch (e) {
-                                    console.error('[ScsynthOSC] Failed to decode OSC message:', e, msg);
-                                }
+                    data.messages.forEach(msg => {
+                        if (!msg.oscData) return;
+
+                        // First, fire raw OSC callback if registered
+                        if (this.callbacks.onRawOSC) {
+                            this.callbacks.onRawOSC({
+                                oscData: msg.oscData,
+                                sequence: msg.sequence
+                            });
+                        }
+
+                        // Then, parse and fire parsed OSC callback if registered
+                        if (this.callbacks.onParsedOSC) {
+                            try {
+                                // Use custom options to ensure args is always an array
+                                const options = { metadata: false, unpackSingleArgs: false };
+                                const decoded = osc.readPacket(msg.oscData, options);
+                                // Pass the decoded message with address and args
+                                this.callbacks.onParsedOSC(decoded);
+                            } catch (e) {
+                                console.error('[ScsynthOSC] Failed to decode OSC message:', e, msg);
                             }
-                        });
-                    }
+                        }
+                    });
                     break;
                 case 'error':
                     console.error('[ScsynthOSC] OSC IN error:', data.error);
@@ -324,10 +332,17 @@ export default class ScsynthOSC {
     }
 
     /**
-     * Set callback for OSC messages received from scsynth
+     * Set callback for raw binary OSC messages received from scsynth
      */
-    onOSCMessage(callback) {
-        this.callbacks.onOSCMessage = callback;
+    onRawOSC(callback) {
+        this.callbacks.onRawOSC = callback;
+    }
+
+    /**
+     * Set callback for parsed OSC messages received from scsynth
+     */
+    onParsedOSC(callback) {
+        this.callbacks.onParsedOSC = callback;
     }
 
     /**
