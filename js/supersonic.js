@@ -46,7 +46,8 @@ export class SuperSonic {
         this._resolveTimeOffset = null;
 
         // Callbacks
-        this.onMessageReceived = null;
+        this.onOSC = null;              // Raw binary OSC from scsynth (for display/logging)
+        this.onMessage = null;          // Parsed OSC messages from scsynth (for application logic)
         this.onMessageSent = null;
         this.onMetricsUpdate = null;
         this.onStatusUpdate = null;
@@ -308,7 +309,14 @@ export class SuperSonic {
         this.osc = new ScsynthOSC();
 
         // Set up ScsynthOSC callbacks
-        this.osc.onOSCMessage((msg) => {
+        this.osc.onRawOSC((msg) => {
+            // Forward raw binary OSC to onOSC callback (for display/logging)
+            if (this.onOSC) {
+                this.onOSC(msg);
+            }
+        });
+
+        this.osc.onParsedOSC((msg) => {
             // Handle internal messages
             if (msg.address === '/buffer/freed') {
                 this._handleBufferFreed(msg.args);
@@ -317,10 +325,10 @@ export class SuperSonic {
                 this._handleBufferAllocated(msg.args);
             }
 
-            // Always forward to onMessageReceived (including internal messages)
-            if (this.onMessageReceived) {
+            // Always forward to onMessage (including internal messages)
+            if (this.onMessage) {
                 this.stats.messagesReceived++;
-                this.onMessageReceived(msg);
+                this.onMessage(msg);
             }
         });
 

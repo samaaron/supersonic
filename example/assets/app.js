@@ -447,7 +447,7 @@ initButton.addEventListener('click', async () => {
       setupScope();
     };
 
-    orchestrator.onMessageReceived = (message) => {
+    orchestrator.onOSC = (message) => {
       addMessage(message);
       // Also log to console in development mode
       if (orchestrator.config.development && message.oscData) {
