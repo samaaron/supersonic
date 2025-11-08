@@ -895,7 +895,7 @@ const loadSynthdefsButton = document.getElementById('load-synthdefs-button');
 if (loadSynthdefsButton) {
   loadSynthdefsButton.addEventListener('click', async () => {
     try {
-      const synthNames = ['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-chiplead', 'sonic-pi-dsaw', 'sonic-pi-dpulse', 'sonic-pi-bnoise', 'sonic-pi-prophet', 'sonic-pi-fm', 'sonic-pi-stereo_player'];
+      const synthNames = ['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-chiplead', 'sonic-pi-dsaw', 'sonic-pi-dpulse', 'sonic-pi-bnoise', 'sonic-pi-prophet', 'sonic-pi-fm', 'sonic-pi-stereo_player', 'sonic-pi-basic_stereo_player'];
 
       console.log('[App] Loading', synthNames.length, 'synthdefs...');
       const results = await orchestrator.loadSynthDefs(synthNames);
