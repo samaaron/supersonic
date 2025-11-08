@@ -7,24 +7,14 @@
 */
 
 /**
- * OSC OUT Worker - Scheduler for sending OSC bundles to scsynth
- * Handles timed bundles with priority queue scheduling
- * Writes directly to SharedArrayBuffer ring buffer
+ * OSC OUT Worker - Scheduler for OSC bundles
+ * Handles timed bundles and forwards them to the writer worker
+ * NO LONGER writes to ring buffer directly - all writes go through osc_writer_worker.js
  * ES5-compatible for Qt WebEngine
  */
 
-// Ring buffer configuration
-var sharedBuffer = null;
-var ringBufferBase = null;
-var atomicView = null;
-var dataView = null;
-var uint8View = null;
-
-// Ring buffer layout constants (loaded from WASM at initialization)
-var bufferConstants = null;
-
-// Control indices (calculated after init)
-var CONTROL_INDICES = {};
+// Reference to the writer worker
+var writerWorker = null;
 
 // Scheduling state
 var scheduledEvents = [];
@@ -33,181 +23,36 @@ var cachedTimeDelta = null;
 var minimumScheduleRequirementS = 0.002; // 2ms for audio precision
 var latencyS = 0.05; // 50ms latency compensation for scsynth
 
-// Message queue for handling backpressure
-var immediateQueue = []; // Queue of messages waiting to be written
-var isWriting = false; // Flag to prevent concurrent write attempts
-var writeRetryTimer = null;
-
 // Statistics
 var stats = {
     bundlesScheduled: 0,
-    bundlesWritten: 0,
-    bundlesDropped: 0,
-    bufferOverruns: 0,
-    retries: 0,
-    queueDepth: 0,
-    maxQueueDepth: 0
+    bundlesSentToWriter: 0
 };
 
 /**
- * Initialize ring buffer access
+ * Initialize scheduler
  */
-function initRingBuffer(buffer, base, constants) {
-    sharedBuffer = buffer;
-    ringBufferBase = base;
-    bufferConstants = constants;
-    atomicView = new Int32Array(sharedBuffer);
-    dataView = new DataView(sharedBuffer);
-    uint8View = new Uint8Array(sharedBuffer);
-
-    // Calculate control indices using constants from WASM
-    CONTROL_INDICES = {
-        IN_HEAD: (ringBufferBase + bufferConstants.CONTROL_START + 0) / 4,
-        IN_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 4) / 4
-    };
+function init(buffer, base, constants) {
+    // We don't need the ring buffer anymore, but keep the params for compatibility
+    console.log('[OSCSchedulerWorker] Initialized (scheduler only, no ring buffer access)');
 }
 
 /**
- * Queue a message for writing (handles backpressure)
+ * Send message to writer worker
  */
-function queueMessage(oscMessage) {
-    immediateQueue.push(oscMessage);
-    stats.queueDepth = immediateQueue.length;
-
-    if (stats.queueDepth > stats.maxQueueDepth) {
-        stats.maxQueueDepth = stats.queueDepth;
-    }
-
-    // Start processing if not already running
-    if (!isWriting) {
-        processQueue();
-    }
-}
-
-/**
- * Process the message queue - blocks until space is available
- */
-function processQueue() {
-    if (isWriting || immediateQueue.length === 0) {
+function sendToWriter(oscMessage) {
+    if (!writerWorker) {
+        console.error('[OSCSchedulerWorker] Writer worker not set');
         return;
     }
 
-    isWriting = true;
+    // Send to writer worker via postMessage
+    writerWorker.postMessage({
+        type: 'write',
+        oscData: oscMessage
+    });
 
-    function processNext() {
-        if (immediateQueue.length === 0) {
-            isWriting = false;
-            stats.queueDepth = 0;
-            return;
-        }
-
-        var message = immediateQueue[0]; // Peek at first message
-
-        // Block until there's space, then write
-        var success = writeToRingBufferBlocking(message);
-
-        if (success) {
-            // Success! Remove from queue
-            immediateQueue.shift();
-            stats.queueDepth = immediateQueue.length;
-
-            // Process next message
-            if (immediateQueue.length > 0) {
-                setTimeout(processNext, 0);
-            } else {
-                isWriting = false;
-            }
-        } else {
-            // Fatal error (message too large or not initialized)
-            console.error('[OSCOutWorker] Fatal error, dropping message');
-            immediateQueue.shift(); // Remove bad message
-            stats.bundlesDropped++;
-            stats.queueDepth = immediateQueue.length;
-
-            // Continue with next message
-            setTimeout(processNext, 0);
-        }
-    }
-
-    processNext();
-}
-
-/**
- * Write OSC message to ring buffer - blocks until space available
- * Returns true on success, false on fatal error (message too large)
- */
-function writeToRingBufferBlocking(oscMessage) {
-    if (!sharedBuffer) {
-        console.error('[OSCOutWorker] Not initialized');
-        return false;
-    }
-
-    var payloadSize = oscMessage.length;
-    var totalSize = bufferConstants.MESSAGE_HEADER_SIZE + payloadSize;
-
-    // Check if message fits in buffer at all (account for padding at wrap)
-    if (totalSize > bufferConstants.IN_BUFFER_SIZE - bufferConstants.MESSAGE_HEADER_SIZE) {
-        console.error('[OSCOutWorker] Message too large:', totalSize, 'max:', bufferConstants.IN_BUFFER_SIZE - bufferConstants.MESSAGE_HEADER_SIZE);
-        return false;
-    }
-
-    // Keep trying until we have space
-    while (true) {
-        var head = Atomics.load(atomicView, CONTROL_INDICES.IN_HEAD);
-        var tail = Atomics.load(atomicView, CONTROL_INDICES.IN_TAIL);
-
-        // Check available space
-        var available = (bufferConstants.IN_BUFFER_SIZE - 1 - head + tail) % bufferConstants.IN_BUFFER_SIZE;
-
-        if (available >= totalSize) {
-            // Check if message fits contiguously, otherwise write padding and wrap
-            var spaceToEnd = bufferConstants.IN_BUFFER_SIZE - head;
-
-            if (totalSize > spaceToEnd) {
-                // Message won't fit at end - write padding marker and wrap to beginning
-                var paddingPos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
-                dataView.setUint32(paddingPos, bufferConstants.PADDING_MAGIC, true);
-                dataView.setUint32(paddingPos + 4, 0, true);
-                dataView.setUint32(paddingPos + 8, 0, true);
-                dataView.setUint32(paddingPos + 12, 0, true);
-
-                // Wrap head to beginning
-                head = 0;
-            }
-
-            // We have space! Write the message (now guaranteed contiguous)
-            var writePos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
-
-            // Write message header
-            dataView.setUint32(writePos, bufferConstants.MESSAGE_MAGIC, true);
-            dataView.setUint32(writePos + 4, totalSize, true);
-            dataView.setUint32(writePos + 8, stats.bundlesWritten, true); // sequence
-            dataView.setUint32(writePos + 12, 0, true); // padding
-
-            // Write payload
-            uint8View.set(oscMessage, writePos + bufferConstants.MESSAGE_HEADER_SIZE);
-
-            // Update head pointer (publish message)
-            var newHead = (head + totalSize) % bufferConstants.IN_BUFFER_SIZE;
-            Atomics.store(atomicView, CONTROL_INDICES.IN_HEAD, newHead);
-
-            stats.bundlesWritten++;
-            return true;
-        }
-
-        // Buffer is full - wait for tail to move (scsynth to consume)
-        stats.bufferOverruns++;
-
-        // Wait on the tail pointer - will wake when scsynth consumes data
-        // Timeout after 100ms to check if worker should stop
-        var result = Atomics.wait(atomicView, CONTROL_INDICES.IN_TAIL, tail, 100);
-
-        if (result === 'ok' || result === 'not-equal') {
-            // Tail moved! Loop will retry
-            stats.retries++;
-        }
-        // On timeout, loop continues to retry (allows checking for stop signal)
-    }
+    stats.bundlesSentToWriter++;
 }
 
 /**
@@ -308,7 +153,7 @@ function extractMessagesFromBundle(data) {
 
 /**
  * Process incoming OSC data (message or bundle)
- * Pre-scheduler: waits for calculated time then sends to ring buffer
+ * Pre-scheduler: waits for calculated time then sends to writer
  * waitTimeMs is calculated by SuperSonic based on AudioContext time
  */
 function processOSC(oscData, editorId, runTag, waitTimeMs) {
@@ -316,13 +161,13 @@ function processOSC(oscData, editorId, runTag, waitTimeMs) {
 
     // If no wait time provided, or wait time is 0 or negative, send immediately
     if (waitTimeMs === null || waitTimeMs === undefined || waitTimeMs <= 0) {
-        queueMessage(oscData);
+        sendToWriter(oscData);
         return;
     }
 
     // Schedule to send after waitTimeMs
     setTimeout(function() {
-        queueMessage(oscData);
+        sendToWriter(oscData);
     }, waitTimeMs);
 }
 
@@ -338,11 +183,11 @@ function processImmediate(oscData) {
         // Send each message individually for immediate execution
         var messages = extractMessagesFromBundle(oscData);
         for (var i = 0; i < messages.length; i++) {
-            queueMessage(messages[i]);
+            sendToWriter(messages[i]);
         }
     } else {
         // Regular message - send as-is
-        queueMessage(oscData);
+        sendToWriter(oscData);
     }
 }
 
@@ -420,7 +265,7 @@ function runNextEvent() {
     var data = event[2];
 
     // Send the complete bundle unchanged (with original timestamp)
-    queueMessage(data);
+    sendToWriter(data);
 
     scheduleNextEvent();
 }
@@ -469,8 +314,14 @@ self.onmessage = function(event) {
     try {
         switch (data.type) {
             case 'init':
-                initRingBuffer(data.sharedBuffer, data.ringBufferBase, data.bufferConstants);
+                init(data.sharedBuffer, data.ringBufferBase, data.bufferConstants);
                 self.postMessage({ type: 'initialized' });
+                break;
+
+            case 'setWriterWorker':
+                // Set reference to writer worker (passed as MessagePort)
+                writerWorker = data.port;
+                console.log('[OSCSchedulerWorker] Writer worker connected');
                 break;
 
             case 'send':
@@ -516,4 +367,4 @@ self.onmessage = function(event) {
     }
 };
 
-console.log('[OSCOutWorker] Script loaded');
+console.log('[OSCSchedulerWorker] Script loaded - scheduler only, delegates to writer worker');

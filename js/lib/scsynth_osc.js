@@ -17,7 +17,8 @@ import osc from '../vendor/osc.js/osc.js';
 export default class ScsynthOSC {
     constructor() {
         this.workers = {
-            oscOut: null,
+            oscOut: null,      // Scheduler worker
+            oscWriter: null,   // NEW: Writer worker (only one that writes to ring buffer)
             oscIn: null,
             debug: null
         };
@@ -50,27 +51,47 @@ export default class ScsynthOSC {
         this.bufferConstants = bufferConstants;
 
         try {
-            // Create all three workers
-            // osc_out_worker.js handles sending OSC messages to scsynth
+            // Create all workers
+            // osc_out_worker.js is now just a scheduler
+            // osc_writer_worker.js is the ONLY worker that writes to the ring buffer
             // osc_in_worker.js handles receiving OSC messages from scsynth
             // debug_worker.js handles receiving debug messages from scsynth
             this.workers.oscOut = new Worker('./dist/workers/osc_out_worker.js');
+            this.workers.oscWriter = new Worker('./dist/workers/osc_writer_worker.js');
             this.workers.oscIn = new Worker('./dist/workers/osc_in_worker.js');
             this.workers.debug = new Worker('./dist/workers/debug_worker.js');
+
+            // Create MessageChannel to connect scheduler and writer
+            const channel = new MessageChannel();
+
+            // Give scheduler worker port1 (to send messages to writer)
+            this.workers.oscOut.postMessage(
+                { type: 'setWriterWorker', port: channel.port1 },
+                [channel.port1]  // Transfer ownership
+            );
+
+            // Give writer worker port2 (to receive messages from scheduler)
+            // Messages now go directly: scheduler → writer (no main thread hop)
+            this.workers.oscWriter.postMessage(
+                { type: 'setSchedulerPort', port: channel.port2 },
+                [channel.port2]  // Transfer ownership
+            );
 
             // Set up worker message handlers
             this.setupWorkerHandlers();
 
             // Initialize all workers with SharedArrayBuffer
             const initPromises = [
-                this.initWorker(this.workers.oscOut, 'OSC OUT'),
+                this.initWorker(this.workers.oscOut, 'OSC SCHEDULER'),
+                this.initWorker(this.workers.oscWriter, 'OSC WRITER'),
                 this.initWorker(this.workers.oscIn, 'OSC IN'),
                 this.initWorker(this.workers.debug, 'DEBUG')
             ];
 
             await Promise.all(initPromises);
 
-            // Start the receiving workers (they use Atomics.wait)
+            // Start the workers
+            this.workers.oscWriter.postMessage({ type: 'start' });  // Start writer
             this.workers.oscIn.postMessage({ type: 'start' });
             this.workers.debug.postMessage({ type: 'start' });
 
@@ -375,6 +396,11 @@ export default class ScsynthOSC {
             this.workers.oscOut.terminate();
         }
 
+        if (this.workers.oscWriter) {
+            this.workers.oscWriter.postMessage({ type: 'stop' });
+            this.workers.oscWriter.terminate();
+        }
+
         if (this.workers.oscIn) {
             this.workers.oscIn.postMessage({ type: 'stop' });
             this.workers.oscIn.terminate();
@@ -387,6 +413,7 @@ export default class ScsynthOSC {
 
         this.workers = {
             oscOut: null,
+            oscWriter: null,
             oscIn: null,
             debug: null
         };
