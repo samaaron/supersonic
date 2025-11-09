@@ -215,8 +215,8 @@ function enqueue(oscData) {
 
     // Start processing if not already
     if (!isProcessing) {
-        // Use setTimeout to allow other messages to be processed
-        setTimeout(processQueue, 0);
+        // Process immediately - queue drains all messages in while loop
+        processQueue();
     }
 }
 
