@@ -217,10 +217,10 @@ export default class ScsynthOSC {
     /**
      * Send OSC data (message or bundle)
      * - OSC messages are sent immediately
-     * - OSC bundles are scheduled based on waitTimeMs (calculated by SuperSonic)
+     * - OSC bundles are scheduled based on audioTimeS (target audio time)
      *
      * @param {Uint8Array} oscData - Binary OSC data (message or bundle)
-     * @param {Object} options - Optional metadata (editorId, runTag, waitTimeMs)
+     * @param {Object} options - Optional metadata (editorId, runTag, audioTimeS, currentTimeS)
      */
     send(oscData, options = {}) {
         if (!this.initialized) {
@@ -228,14 +228,15 @@ export default class ScsynthOSC {
             return;
         }
 
-        const { editorId = 0, runTag = '', waitTimeMs = null } = options;
+        const { editorId = 0, runTag = '', audioTimeS = null, currentTimeS = null } = options;
 
         this.workers.oscOut.postMessage({
             type: 'send',
             oscData: oscData,
             editorId: editorId,
             runTag: runTag,
-            waitTimeMs: waitTimeMs
+            audioTimeS: audioTimeS,
+            currentTimeS: currentTimeS
         });
     }
 

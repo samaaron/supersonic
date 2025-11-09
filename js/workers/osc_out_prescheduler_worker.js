@@ -367,11 +367,27 @@ self.onmessage = function(event) {
 
             case 'send':
                 var sendStart = performance.now();
-                if (data.waitTimeMs === null || data.waitTimeMs === undefined || data.waitTimeMs <= 0) {
+
+                // Handle both old (waitTimeMs) and new (audioTimeS) formats for backwards compatibility
+                var waitTimeMs = data.waitTimeMs;
+
+                if (data.audioTimeS !== null && data.audioTimeS !== undefined && data.currentTimeS !== null && data.currentTimeS !== undefined) {
+                    // New format: calculate wait time from audio times
+                    var deltaS = data.audioTimeS - data.currentTimeS;
+                    var lookaheadS = 0.100; // 100ms lookahead (web-audio-scheduler default)
+                    waitTimeMs = (deltaS - lookaheadS) * 1000;
+
+                    // Ensure we don't schedule in the past
+                    if (waitTimeMs < 0) {
+                        waitTimeMs = 0;
+                    }
+                }
+
+                if (waitTimeMs === null || waitTimeMs === undefined || waitTimeMs <= 0) {
                     processImmediate(data.oscData);
                 } else {
                     scheduleEvent(
-                        data.waitTimeMs,
+                        waitTimeMs,
                         data.editorId || 0,
                         data.runTag || '',
                         data.oscData
