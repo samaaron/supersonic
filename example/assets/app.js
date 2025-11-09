@@ -86,6 +86,19 @@ function parseTextToOSC(text) {
   return { address, args };
 }
 
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const precision = value < 10 && unit > 0 ? 2 : unit > 0 ? 1 : 0;
+  return `${value.toFixed(precision)} ${units[unit]}`;
+}
+
 // Flash tab to indicate update
 function flashTab(tabName) {
   const tabButton = document.querySelector(`[data-tab="${tabName}"]`);
@@ -189,6 +202,39 @@ function updateMetrics(metrics) {
   if (metrics.debug_buffer_usage !== undefined) {
     document.getElementById('metric-debug-usage').textContent = metrics.debug_buffer_usage + '%';
     document.getElementById('metric-debug-bar').style.width = metrics.debug_buffer_usage + '%';
+  }
+
+  if (metrics.buffer_allocated_count !== undefined) {
+    document.getElementById('metric-buffer-count').textContent = metrics.buffer_allocated_count;
+  }
+  if (metrics.buffer_pending !== undefined) {
+    document.getElementById('metric-buffer-pending').textContent = metrics.buffer_pending;
+  }
+  if (metrics.buffer_bytes_active !== undefined) {
+    document.getElementById('metric-buffer-used').textContent = formatBytes(metrics.buffer_bytes_active);
+  }
+  if (metrics.buffer_pool_total !== undefined) {
+    document.getElementById('metric-buffer-total').textContent = formatBytes(metrics.buffer_pool_total);
+  }
+  if (metrics.buffer_pool_available !== undefined) {
+    document.getElementById('metric-buffer-free').textContent = formatBytes(metrics.buffer_pool_available);
+  }
+  if (metrics.synthdef_count !== undefined) {
+    document.getElementById('metric-synthdefs').textContent = metrics.synthdef_count;
+  }
+
+  // Scheduler metrics
+  const schedulerDepth = metrics.scheduler_queue_depth ?? metrics.schedulerQueueDepth;
+  if (schedulerDepth !== undefined) {
+    document.getElementById('metric-scheduler-depth').textContent = schedulerDepth;
+  }
+  const schedulerPeak = metrics.scheduler_queue_max ?? metrics.schedulerQueueMax;
+  if (schedulerPeak !== undefined) {
+    document.getElementById('metric-scheduler-peak').textContent = schedulerPeak;
+  }
+  const schedulerDropped = metrics.scheduler_queue_dropped ?? metrics.schedulerQueueDropped;
+  if (schedulerDropped !== undefined) {
+    document.getElementById('metric-scheduler-dropped').textContent = schedulerDropped;
   }
 }
 
@@ -594,8 +640,37 @@ initButton.addEventListener('click', async () => {
       if (metrics.pollInterval !== undefined) {
         metricsWithUsage.poll_interval = metrics.pollInterval;
       }
+      if (metrics.schedulerQueueDepth !== undefined || metrics.scheduler_queue_depth !== undefined) {
+        metricsWithUsage.scheduler_queue_depth = metrics.schedulerQueueDepth ?? metrics.scheduler_queue_depth;
+      }
+      if (metrics.schedulerQueueMax !== undefined || metrics.scheduler_queue_max !== undefined) {
+        metricsWithUsage.scheduler_queue_max = metrics.schedulerQueueMax ?? metrics.scheduler_queue_max;
+      }
+      if (metrics.schedulerQueueDropped !== undefined || metrics.scheduler_queue_dropped !== undefined) {
+        metricsWithUsage.scheduler_queue_dropped = metrics.schedulerQueueDropped ?? metrics.scheduler_queue_dropped;
+      }
 
       metricsWithUsage.messages_sent = orchestrator.stats.messagesSent || 0;
+
+      if (typeof orchestrator.getDiagnostics === 'function') {
+        try {
+          const diagnostics = orchestrator.getDiagnostics();
+          if (diagnostics?.buffers) {
+            metricsWithUsage.buffer_allocated_count = diagnostics.buffers.active;
+            metricsWithUsage.buffer_pending = diagnostics.buffers.pending;
+            metricsWithUsage.buffer_bytes_active = diagnostics.buffers.bytesActive;
+            if (diagnostics.buffers.pool) {
+              metricsWithUsage.buffer_pool_total = diagnostics.buffers.pool.total;
+              metricsWithUsage.buffer_pool_available = diagnostics.buffers.pool.available;
+            }
+          }
+          if (diagnostics?.synthdefs) {
+            metricsWithUsage.synthdef_count = diagnostics.synthdefs.count;
+          }
+        } catch (diagError) {
+          console.warn('[App] Diagnostics fetch failed', diagError);
+        }
+      }
 
       updateMetrics(metricsWithUsage);
     };
