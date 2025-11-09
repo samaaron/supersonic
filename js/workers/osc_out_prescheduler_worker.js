@@ -19,6 +19,7 @@ var bufferConstants = null;
 var eventHeap = [];
 var nextTimer = null;
 var sequenceCounter = 0;
+var isDispatching = false;  // Prevent reentrancy into dispatch loop
 
 // Statistics
 var stats = {
@@ -26,7 +27,13 @@ var stats = {
     bundlesSentToWriter: 0,
     eventsPending: 0,
     maxEventsPending: 0,
-    eventsCancelled: 0
+    eventsCancelled: 0,
+    totalDispatches: 0,
+    totalLateDispatchMs: 0,
+    maxLateDispatchMs: 0,
+    totalSendTasks: 0,
+    totalSendProcessMs: 0,
+    maxSendProcessMs: 0
 };
 
 // Minimum time window before dispatch (ms) - dispatch immediately when ready
@@ -40,10 +47,27 @@ function schedulerLog() {
     }
 }
 
+function getBundleTimestamp(oscMessage) {
+    if (oscMessage.length >= 16 && oscMessage[0] === 0x23) {
+        var view = new DataView(oscMessage.buffer, oscMessage.byteOffset);
+        var ntpSeconds = view.getUint32(8, false);
+        var ntpFraction = view.getUint32(12, false);
+        return ntpSeconds + ntpFraction / 0x100000000;
+    }
+    return null;
+}
+
 function sendToWriter(oscMessage) {
     if (!writerWorker) {
         console.error('[OSCPreSchedulerWorker] Writer worker not set');
         return;
+    }
+
+    var bundleTimestamp = getBundleTimestamp(oscMessage);
+    var sendTime = performance.now();
+
+    if (bundleTimestamp !== null) {
+        console.log(`[PreScheduler] Dispatching bundle NTP=${bundleTimestamp.toFixed(3)} at perf=${sendTime.toFixed(2)}ms`);
     }
 
     writerWorker.postMessage({
@@ -56,6 +80,7 @@ function sendToWriter(oscMessage) {
 
 function scheduleEvent(waitTimeMs, editorId, runTag, oscData) {
     var targetTimeMs = performance.now() + waitTimeMs;
+    var bundleTimestamp = getBundleTimestamp(oscData);
     var event = {
         timeMs: targetTimeMs,
         seq: sequenceCounter++,
@@ -64,12 +89,19 @@ function scheduleEvent(waitTimeMs, editorId, runTag, oscData) {
         oscData: oscData
     };
 
+    var wasEmpty = eventHeap.length === 0;
     heapPush(event);
 
     stats.bundlesScheduled++;
     stats.eventsPending = eventHeap.length;
     if (stats.eventsPending > stats.maxEventsPending) {
         stats.maxEventsPending = stats.eventsPending;
+    }
+
+    if (bundleTimestamp !== null) {
+        console.log(`[PreScheduler] Scheduled bundle NTP=${bundleTimestamp.toFixed(3)} for perf=${targetTimeMs.toFixed(2)}ms (+${waitTimeMs.toFixed(0)}ms), queue=${stats.eventsPending}`);
+    } else if (wasEmpty || stats.eventsPending % 10 === 0) {
+        console.log(`[PreScheduler] Scheduled event for +${waitTimeMs.toFixed(0)}ms, queue now ${stats.eventsPending} events`);
     }
 
     scheduleNextDispatch();
@@ -143,6 +175,12 @@ function swap(i, j) {
 }
 
 function scheduleNextDispatch() {
+    // Don't reschedule while dispatch is running - it will reschedule itself when done
+    if (isDispatching) {
+        return;
+    }
+
+    var wasTimerSet = nextTimer !== null;
     if (nextTimer) {
         clearTimeout(nextTimer);
         nextTimer = null;
@@ -157,15 +195,25 @@ function scheduleNextDispatch() {
     var delay = nextEvent.timeMs - now;
 
     if (delay <= DISPATCH_LEEWAY_MS) {
+        if (wasTimerSet) {
+            console.log(`[PreScheduler] Timer was active, now dispatching immediately (${delay.toFixed(2)}ms early/late)`);
+        }
         dispatchDueEvents();
     } else {
         nextTimer = setTimeout(dispatchDueEvents, delay);
+        if (wasTimerSet) {
+            console.log(`[PreScheduler] Rescheduled timer for +${delay.toFixed(0)}ms`);
+        }
     }
 }
 
 function dispatchDueEvents() {
     nextTimer = null;
+    isDispatching = true;  // Set flag to prevent reentrancy
+
     var now = performance.now();
+    var dispatchCount = 0;
+    var dispatchStart = now;
 
     while (eventHeap.length > 0) {
         var nextEvent = heapPeek();
@@ -175,9 +223,25 @@ function dispatchDueEvents() {
 
         heapPop();
         stats.eventsPending = eventHeap.length;
+        var lateness = now - nextEvent.timeMs;
+        if (lateness < 0) {
+            lateness = 0;
+        }
+        stats.totalDispatches++;
+        stats.totalLateDispatchMs += lateness;
+        if (lateness > stats.maxLateDispatchMs) {
+            stats.maxLateDispatchMs = lateness;
+        }
         sendToWriter(nextEvent.oscData);
+        dispatchCount++;
     }
 
+    var dispatchDuration = performance.now() - dispatchStart;
+    if (dispatchCount > 0) {
+        console.log(`[PreScheduler] Dispatched ${dispatchCount} events in ${dispatchDuration.toFixed(2)}ms, ${eventHeap.length} remaining`);
+    }
+
+    isDispatching = false;  // Clear flag before rescheduling
     scheduleNextDispatch();
 }
 
@@ -302,6 +366,7 @@ self.onmessage = function(event) {
                 break;
 
             case 'send':
+                var sendStart = performance.now();
                 if (data.waitTimeMs === null || data.waitTimeMs === undefined || data.waitTimeMs <= 0) {
                     processImmediate(data.oscData);
                 } else {
@@ -311,6 +376,12 @@ self.onmessage = function(event) {
                         data.runTag || '',
                         data.oscData
                     );
+                }
+                var sendDuration = performance.now() - sendStart;
+                stats.totalSendTasks++;
+                stats.totalSendProcessMs += sendDuration;
+                if (sendDuration > stats.maxSendProcessMs) {
+                    stats.maxSendProcessMs = sendDuration;
                 }
                 break;
 
@@ -340,7 +411,13 @@ self.onmessage = function(event) {
                         bundlesSentToWriter: stats.bundlesSentToWriter,
                         eventsPending: stats.eventsPending,
                         maxEventsPending: stats.maxEventsPending,
-                        eventsCancelled: stats.eventsCancelled
+                        eventsCancelled: stats.eventsCancelled,
+                        totalDispatches: stats.totalDispatches,
+                        totalLateDispatchMs: stats.totalLateDispatchMs,
+                        maxLateDispatchMs: stats.maxLateDispatchMs,
+                        totalSendTasks: stats.totalSendTasks,
+                        totalSendProcessMs: stats.totalSendProcessMs,
+                        maxSendProcessMs: stats.maxSendProcessMs
                     }
                 });
                 break;

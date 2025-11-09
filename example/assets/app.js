@@ -602,10 +602,23 @@ initButton.addEventListener('click', async () => {
         try {
           const decoded = SuperSonic.osc.decode(oscData);
           const args = decoded.args ? decoded.args.map(a => a.value !== undefined ? a.value : a).join(' ') : '';
-          console.log(`[OSC →] ${decoded.address} ${args}`);
+          const currentTime = orchestrator.audioContext ? orchestrator.audioContext.currentTime.toFixed(3) : 'N/A';
+          const perfTime = performance.now().toFixed(2);
+          console.log(`[OSC → t=${currentTime}s perf=${perfTime}ms] ${decoded.address} ${args}`);
         } catch (e) {
-          // Bundles can't be easily decoded, skip
-          console.log('[OSC →] <bundle>');
+          // Bundles can't be easily decoded, skip logging individual messages
+          // But we can extract the bundle timestamp
+          const view = new DataView(oscData.buffer, oscData.byteOffset);
+          if (oscData.length >= 16 && oscData[0] === 0x23) {
+            const ntpSeconds = view.getUint32(8, false);
+            const ntpFraction = view.getUint32(12, false);
+            const ntpTime = ntpSeconds + ntpFraction / 0x100000000;
+            const currentTime = orchestrator.audioContext ? orchestrator.audioContext.currentTime.toFixed(3) : 'N/A';
+            const perfTime = performance.now().toFixed(2);
+            console.log(`[OSC → t=${currentTime}s perf=${perfTime}ms] <bundle @ NTP ${ntpTime.toFixed(3)}>`);
+          } else {
+            console.log('[OSC →] <bundle>');
+          }
         }
       }
     };
@@ -824,6 +837,9 @@ messageForm.addEventListener('submit', async (e) => {
     }
 
     const runTag = `demo-run-${Date.now()}-${++runCounter}`;
+    const submitTime = orchestrator.audioContext.currentTime;
+    const submitPerf = performance.now();
+    console.log(`[SEND] Submitting ${parsed.scheduled.size} scheduled bundles + ${parsed.immediate.length} immediate messages at t=${submitTime.toFixed(3)}s perf=${submitPerf.toFixed(2)}ms`);
 
     // Log comments immediately so the history shows them in order
     parsed.comments.forEach(comment => addSentMessage(null, comment));
@@ -882,11 +898,14 @@ messageForm.addEventListener('submit', async (e) => {
         const messagesAtTime = parsed.scheduled.get(timestamp);
         const targetTimeS = now + timestamp + 0.02; // small safety margin
         const bundle = createOSCBundle(targetTimeS, messagesAtTime);
+        console.log(`[SCHEDULE] Scheduling ${messagesAtTime.length} messages for t=${targetTimeS.toFixed(3)}s (offset=${timestamp.toFixed(3)}s from now=${now.toFixed(3)}s)`);
         bundlePromises.push(orchestrator.sendOSC(bundle, { runTag }));
         sendsThisRound += messagesAtTime.length;
       }
 
       await Promise.all(bundlePromises);
+      const afterSend = orchestrator.audioContext.currentTime;
+      console.log(`[SEND] All bundles sent. Time elapsed: ${((afterSend - now) * 1000).toFixed(2)}ms`);
     }
 
     // Immediate OSC commands
