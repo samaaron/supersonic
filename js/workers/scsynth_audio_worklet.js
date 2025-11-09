@@ -128,7 +128,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             PROCESS_COUNT: (ringBufferBase + METRICS_START + 0) / 4,
             BUFFER_OVERRUNS: (ringBufferBase + METRICS_START + 4) / 4,
             MESSAGES_PROCESSED: (ringBufferBase + METRICS_START + 8) / 4,
-            MESSAGES_DROPPED: (ringBufferBase + METRICS_START + 12) / 4
+            MESSAGES_DROPPED: (ringBufferBase + METRICS_START + 12) / 4,
+            SCHEDULER_QUEUE_DEPTH: (ringBufferBase + METRICS_START + 16) / 4,
+            SCHEDULER_QUEUE_MAX: (ringBufferBase + METRICS_START + 20) / 4,
+            SCHEDULER_QUEUE_DROPPED: (ringBufferBase + METRICS_START + 24) / 4
         };
     }
 
@@ -344,6 +347,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         bufferOverruns: Atomics.load(this.atomicView, this.METRICS_INDICES.BUFFER_OVERRUNS),
                         messagesProcessed: Atomics.load(this.atomicView, this.METRICS_INDICES.MESSAGES_PROCESSED),
                         messagesDropped: Atomics.load(this.atomicView, this.METRICS_INDICES.MESSAGES_DROPPED),
+                        schedulerQueueDepth: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_DEPTH),
+                        schedulerQueueMax: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_MAX),
+                        schedulerQueueDropped: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_DROPPED),
                         statusFlags: Atomics.load(this.atomicView, this.CONTROL_INDICES.STATUS_FLAGS),
                         inBufferUsed: {
                             bytes: inUsed,
@@ -510,7 +516,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 processCount: Atomics.load(this.atomicView, this.METRICS_INDICES.PROCESS_COUNT),
                 messagesProcessed: Atomics.load(this.atomicView, this.METRICS_INDICES.MESSAGES_PROCESSED),
                 messagesDropped: Atomics.load(this.atomicView, this.METRICS_INDICES.MESSAGES_DROPPED),
-                bufferOverruns: Atomics.load(this.atomicView, this.METRICS_INDICES.BUFFER_OVERRUNS)
+                bufferOverruns: Atomics.load(this.atomicView, this.METRICS_INDICES.BUFFER_OVERRUNS),
+                schedulerQueueDepth: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_DEPTH),
+                schedulerQueueMax: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_MAX),
+                schedulerQueueDropped: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_DROPPED)
             };
 
             this.port.postMessage({

@@ -30,7 +30,7 @@ constexpr uint32_t IN_BUFFER_SIZE     = 32768; // OSC messages from JS to scsynt
 constexpr uint32_t OUT_BUFFER_SIZE    = 8192;  // OSC replies from scsynth to JS
 constexpr uint32_t DEBUG_BUFFER_SIZE  = 4096;  // Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 32;    // Atomic control pointers & flags
-constexpr uint32_t METRICS_SIZE       = 32;    // Performance metrics
+constexpr uint32_t METRICS_SIZE       = 48;    // Performance metrics
 
 // Auto-calculated offsets (DO NOT MODIFY - computed from sizes above)
 constexpr uint32_t IN_BUFFER_START    = 0;
@@ -70,6 +70,9 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> buffer_overruns;
     std::atomic<uint32_t> messages_processed;
     std::atomic<uint32_t> messages_dropped;
+    std::atomic<uint32_t> scheduler_queue_depth;
+    std::atomic<uint32_t> scheduler_queue_max;
+    std::atomic<uint32_t> scheduler_queue_dropped;
 };
 
 // Status flags

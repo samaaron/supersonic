@@ -154,6 +154,29 @@ extern "C" {
         return timetag;
     }
 
+    // Helper: Update scheduler depth metric and peak tracking
+    static inline void update_scheduler_depth_metric(uint32_t depth) {
+        if (!metrics) {
+            return;
+        }
+
+        metrics->scheduler_queue_depth.store(depth, std::memory_order_relaxed);
+
+        uint32_t observed = metrics->scheduler_queue_max.load(std::memory_order_relaxed);
+        while (depth > observed &&
+               !metrics->scheduler_queue_max.compare_exchange_weak(
+                   observed, depth, std::memory_order_relaxed, std::memory_order_relaxed)) {
+            // observed updated with current value by compare_exchange_weak
+        }
+    }
+
+    static inline void increment_scheduler_drop_metric() {
+        if (!metrics) {
+            return;
+        }
+        metrics->scheduler_queue_dropped.fetch_add(1, std::memory_order_relaxed);
+    }
+
     // Convert AudioContext time (double) to OSC/NTP time (int64)
     int64_t audio_to_osc_time(double audio_time) {
         double osc_seconds = audio_time + g_time_zero_osc;
@@ -179,8 +202,12 @@ extern "C" {
         // Add to scheduler (copies event into queue)
         if (!g_scheduler.Add(event)) {
             worklet_debug("ERROR: Scheduler queue full (%d events)", g_scheduler.Size());
+            increment_scheduler_drop_metric();
+            update_scheduler_depth_metric(g_scheduler.Size());
             return false;
         }
+
+        update_scheduler_depth_metric(g_scheduler.Size());
 
         // Debug timing logs (commented out - enable for scheduler debugging)
         // int64_t time_diff_osc = ntp_time - current_osc_time;
@@ -215,6 +242,9 @@ extern "C" {
         metrics->buffer_overruns.store(0, std::memory_order_relaxed);
         metrics->messages_processed.store(0, std::memory_order_relaxed);
         metrics->messages_dropped.store(0, std::memory_order_relaxed);
+        metrics->scheduler_queue_depth.store(0, std::memory_order_relaxed);
+        metrics->scheduler_queue_max.store(0, std::memory_order_relaxed);
+        metrics->scheduler_queue_dropped.store(0, std::memory_order_relaxed);
 
         // Enable worklet_debug
         memory_initialized = true;
@@ -301,6 +331,7 @@ extern "C" {
 
         // Clear scheduler
         g_scheduler.Empty();
+        update_scheduler_depth_metric(0);
 
         worklet_debug("Scheduler initialized: buf=%d samples, osc_inc=%lld",
                      buf_length, (long long)g_osc_increment);
@@ -473,6 +504,7 @@ extern "C" {
                     g_world->mSampleOffset = g_world->mBufLength - 1;
 
                 SC_ScheduledEvent event = g_scheduler.Remove();
+                update_scheduler_depth_metric(g_scheduler.Size());
 
                 // Late bundle detection - warn when timing is broken
                 int64_t time_diff_osc = schedTime - currentOscTime;
