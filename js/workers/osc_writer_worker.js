@@ -95,15 +95,24 @@ function writeToRingBuffer(oscMessage) {
             var spaceToEnd = bufferConstants.IN_BUFFER_SIZE - head;
 
             if (totalSize > spaceToEnd) {
-                // Write padding marker and wrap
-                var paddingPos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
-                dataView.setUint32(paddingPos, bufferConstants.PADDING_MAGIC, true);
-                dataView.setUint32(paddingPos + 4, 0, true);
-                dataView.setUint32(paddingPos + 8, 0, true);
-                dataView.setUint32(paddingPos + 12, 0, true);
+                if (spaceToEnd >= bufferConstants.MESSAGE_HEADER_SIZE) {
+                    // Write padding marker and wrap
+                    var paddingPos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
+                    dataView.setUint32(paddingPos, bufferConstants.PADDING_MAGIC, true);
+                    dataView.setUint32(paddingPos + 4, 0, true);
+                    dataView.setUint32(paddingPos + 8, 0, true);
+                    dataView.setUint32(paddingPos + 12, 0, true);
+                } else if (spaceToEnd > 0) {
+                    // Not enough room for a padding header - clear remaining bytes
+                    var padStart = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
+                    for (var i = 0; i < spaceToEnd; i++) {
+                        uint8View[padStart + i] = 0;
+                    }
+                }
 
                 // Wrap to beginning
                 head = 0;
+                spaceToEnd = bufferConstants.IN_BUFFER_SIZE; // subsequent writes use full buffer
             }
 
             // Write message
