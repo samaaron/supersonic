@@ -14,9 +14,9 @@ var sharedBuffer = null;
 var ringBufferBase = null;
 var bufferConstants = null;
 
-// Priority queue (sorted array) of scheduled events
-// Each entry: { timeMs, seq, editorId, runTag, oscData }
-var scheduledEvents = [];
+// Priority queue implemented as binary min-heap
+// Entries: { timeMs, seq, editorId, runTag, oscData }
+var eventHeap = [];
 var nextTimer = null;
 var sequenceCounter = 0;
 
@@ -64,11 +64,10 @@ function scheduleEvent(waitTimeMs, editorId, runTag, oscData) {
         oscData: oscData
     };
 
-    scheduledEvents.push(event);
-    scheduledEvents.sort(eventComparator);
+    heapPush(event);
 
     stats.bundlesScheduled++;
-    stats.eventsPending = scheduledEvents.length;
+    stats.eventsPending = eventHeap.length;
     if (stats.eventsPending > stats.maxEventsPending) {
         stats.maxEventsPending = stats.eventsPending;
     }
@@ -76,11 +75,71 @@ function scheduleEvent(waitTimeMs, editorId, runTag, oscData) {
     scheduleNextDispatch();
 }
 
-function eventComparator(a, b) {
+function heapPush(event) {
+    eventHeap.push(event);
+    siftUp(eventHeap.length - 1);
+}
+
+function heapPeek() {
+    return eventHeap.length > 0 ? eventHeap[0] : null;
+}
+
+function heapPop() {
+    if (eventHeap.length === 0) {
+        return null;
+    }
+    var top = eventHeap[0];
+    var last = eventHeap.pop();
+    if (eventHeap.length > 0) {
+        eventHeap[0] = last;
+        siftDown(0);
+    }
+    return top;
+}
+
+function siftUp(index) {
+    while (index > 0) {
+        var parent = Math.floor((index - 1) / 2);
+        if (compareEvents(eventHeap[index], eventHeap[parent]) >= 0) {
+            break;
+        }
+        swap(index, parent);
+        index = parent;
+    }
+}
+
+function siftDown(index) {
+    var length = eventHeap.length;
+    while (true) {
+        var left = 2 * index + 1;
+        var right = 2 * index + 2;
+        var smallest = index;
+
+        if (left < length && compareEvents(eventHeap[left], eventHeap[smallest]) < 0) {
+            smallest = left;
+        }
+        if (right < length && compareEvents(eventHeap[right], eventHeap[smallest]) < 0) {
+            smallest = right;
+        }
+        if (smallest === index) {
+            break;
+        }
+        swap(index, smallest);
+        index = smallest;
+    }
+}
+
+function compareEvents(a, b) {
     if (a.timeMs === b.timeMs) {
         return a.seq - b.seq;
     }
     return a.timeMs - b.timeMs;
+}
+
+function swap(i, j) {
+    var tmp = eventHeap[i];
+    eventHeap[i] = eventHeap[j];
+    eventHeap[j] = tmp;
 }
 
 function scheduleNextDispatch() {
@@ -89,12 +148,12 @@ function scheduleNextDispatch() {
         nextTimer = null;
     }
 
-    if (scheduledEvents.length === 0) {
+    if (eventHeap.length === 0) {
         return;
     }
 
     var now = performance.now();
-    var nextEvent = scheduledEvents[0];
+    var nextEvent = heapPeek();
     var delay = nextEvent.timeMs - now;
 
     if (delay <= DISPATCH_LEEWAY_MS) {
@@ -108,14 +167,14 @@ function dispatchDueEvents() {
     nextTimer = null;
     var now = performance.now();
 
-    while (scheduledEvents.length > 0) {
-        var nextEvent = scheduledEvents[0];
+    while (eventHeap.length > 0) {
+        var nextEvent = heapPeek();
         if (nextEvent.timeMs - now > DISPATCH_LEEWAY_MS) {
             break;
         }
 
-        scheduledEvents.shift();
-        stats.eventsPending = scheduledEvents.length;
+        heapPop();
+        stats.eventsPending = eventHeap.length;
         sendToWriter(nextEvent.oscData);
     }
 
@@ -123,20 +182,33 @@ function dispatchDueEvents() {
 }
 
 function cancelBy(predicate) {
-    if (scheduledEvents.length === 0) {
+    if (eventHeap.length === 0) {
         return;
     }
 
-    var before = scheduledEvents.length;
-    scheduledEvents = scheduledEvents.filter(function(event) {
-        return !predicate(event);
-    });
-    var removed = before - scheduledEvents.length;
+    var before = eventHeap.length;
+    var remaining = [];
 
+    for (var i = 0; i < eventHeap.length; i++) {
+        var event = eventHeap[i];
+        if (!predicate(event)) {
+            remaining.push(event);
+        }
+    }
+
+    var removed = before - remaining.length;
     if (removed > 0) {
+        eventHeap = remaining;
+        heapify();
         stats.eventsCancelled += removed;
-        stats.eventsPending = scheduledEvents.length;
+        stats.eventsPending = eventHeap.length;
         scheduleNextDispatch();
+    }
+}
+
+function heapify() {
+    for (var i = Math.floor(eventHeap.length / 2) - 1; i >= 0; i--) {
+        siftDown(i);
     }
 }
 
@@ -153,11 +225,11 @@ function cancelEditor(editorId) {
 }
 
 function cancelAllTags() {
-    if (scheduledEvents.length === 0) {
+    if (eventHeap.length === 0) {
         return;
     }
-    stats.eventsCancelled += scheduledEvents.length;
-    scheduledEvents = [];
+    stats.eventsCancelled += eventHeap.length;
+    eventHeap = [];
     stats.eventsPending = 0;
     if (nextTimer) {
         clearTimeout(nextTimer);
