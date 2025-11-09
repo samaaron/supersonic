@@ -6,6 +6,7 @@ let messagesSent = 0;
 let messagesReceived = 0;
 let messages = [];
 let sentMessages = [];
+let runCounter = 0;
 
 // Scope visualiser
 let analyser = null;
@@ -822,6 +823,8 @@ messageForm.addEventListener('submit', async (e) => {
       return;
     }
 
+    const runTag = `demo-run-${Date.now()}-${++runCounter}`;
+
     // Log comments immediately so the history shows them in order
     parsed.comments.forEach(comment => addSentMessage(null, comment));
 
@@ -879,7 +882,7 @@ messageForm.addEventListener('submit', async (e) => {
         const messagesAtTime = parsed.scheduled.get(timestamp);
         const targetTimeS = now + timestamp + 0.02; // small safety margin
         const bundle = createOSCBundle(targetTimeS, messagesAtTime);
-        bundlePromises.push(orchestrator.sendOSC(bundle));
+        bundlePromises.push(orchestrator.sendOSC(bundle, { runTag }));
         sendsThisRound += messagesAtTime.length;
       }
 

@@ -52,11 +52,11 @@ export default class ScsynthOSC {
 
         try {
             // Create all workers
-            // osc_out_worker.js is now just a scheduler
+            // osc_out_prescheduler_worker.js handles scheduling/tag cancellation
             // osc_writer_worker.js is the ONLY worker that writes to the ring buffer
             // osc_in_worker.js handles receiving OSC messages from scsynth
             // debug_worker.js handles receiving debug messages from scsynth
-            this.workers.oscOut = new Worker('./dist/workers/osc_out_worker.js');
+            this.workers.oscOut = new Worker('./dist/workers/osc_out_prescheduler_worker.js');
             this.workers.oscWriter = new Worker('./dist/workers/osc_writer_worker.js');
             this.workers.oscIn = new Worker('./dist/workers/osc_in_worker.js');
             this.workers.debug = new Worker('./dist/workers/debug_worker.js');

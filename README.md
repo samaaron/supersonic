@@ -163,7 +163,7 @@ dist/
 └── workers/
     ├── scsynth_audio_worklet.js  # AudioWorklet processor
     ├── osc_in_worker.js          # OSC input handler
-    ├── osc_out_worker.js         # OSC output handler
+    ├── osc_out_prescheduler_worker.js # OSC pre-scheduler (timers & tag cancellation)
     └── debug_worker.js           # Debug logger
 ```
 
