@@ -69,12 +69,18 @@ function readDebugMessages() {
     var messages = [];
     var currentTail = tail;
     var messagesRead = 0;
-    var maxMessages = 10; // Process up to 10 messages per wake
+    var maxMessages = 1000; // Process up to 1000 messages per wake
 
     while (currentTail !== head && messagesRead < maxMessages) {
+        var bytesToEnd = bufferConstants.DEBUG_BUFFER_SIZE - currentTail;
+        if (bytesToEnd < bufferConstants.MESSAGE_HEADER_SIZE) {
+            currentTail = 0;
+            continue;
+        }
+
         var readPos = ringBufferBase + bufferConstants.DEBUG_BUFFER_START + currentTail;
 
-        // Read message header (now always contiguous due to padding)
+        // Read message header (now contiguous or wrapped)
         var magic = dataView.getUint32(readPos, true);
 
         // Check for padding marker - skip to beginning

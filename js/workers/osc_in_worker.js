@@ -74,9 +74,15 @@ function readMessages() {
     var maxMessages = 100;
 
     while (currentTail !== head && messagesRead < maxMessages) {
+        var bytesToEnd = bufferConstants.OUT_BUFFER_SIZE - currentTail;
+        if (bytesToEnd < bufferConstants.MESSAGE_HEADER_SIZE) {
+            currentTail = 0;
+            continue;
+        }
+
         var readPos = ringBufferBase + bufferConstants.OUT_BUFFER_START + currentTail;
 
-        // Read message header (now always contiguous due to padding)
+        // Read message header (now contiguous or wrapped)
         var magic = dataView.getUint32(readPos, true);
 
         // Check for padding marker - skip to beginning

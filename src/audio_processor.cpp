@@ -334,10 +334,17 @@ extern "C" {
 
             // Process all available messages
             while (in_head != in_tail) {
-                // Read message header - now always contiguous due to padding
                 uint32_t msg_offset = IN_BUFFER_START + in_tail;
                 uint32_t space_to_end = IN_BUFFER_SIZE - in_tail;
 
+                // If there isn't enough space left for a full header, wrap tail
+                if (space_to_end < sizeof(Message)) {
+                    control->in_tail.store(0, std::memory_order_release);
+                    in_tail = 0;
+                    continue;
+                }
+
+                // Read message header (either padding marker or actual message)
                 Message header;
                 std::memcpy(&header, shared_memory + msg_offset, sizeof(Message));
 
@@ -729,16 +736,21 @@ bool ring_buffer_write(
         return false;
     }
 
-    // Check if message fits contiguously, otherwise write padding and wrap
+    // Check if message fits contiguously, otherwise write padding (if possible) and wrap
     uint32_t space_to_end = buffer_size - current_head;
     if (header.length > space_to_end) {
-        // Write padding marker to fill remaining space
-        Message padding;
-        padding.magic = PADDING_MAGIC;
-        padding.length = 0;
-        padding.sequence = 0;
+        if (space_to_end >= sizeof(Message)) {
+            // Write padding marker to fill remaining space
+            Message padding;
+            padding.magic = PADDING_MAGIC;
+            padding.length = 0;
+            padding.sequence = 0;
 
-        std::memcpy(buffer_start + buffer_start_offset + current_head, &padding, sizeof(Message));
+            std::memcpy(buffer_start + buffer_start_offset + current_head, &padding, sizeof(Message));
+        } else if (space_to_end > 0) {
+            // Not enough room for padding header – clear remaining bytes
+            std::memset(buffer_start + buffer_start_offset + current_head, 0, space_to_end);
+        }
 
         // Wrap head to beginning
         current_head = 0;
