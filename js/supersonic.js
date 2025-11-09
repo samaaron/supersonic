@@ -15,6 +15,349 @@ import ScsynthOSC from './lib/scsynth_osc.js';
 import oscLib from './vendor/osc.js/osc.js';
 import { MemPool } from '@thi.ng/malloc';
 
+class BufferManager {
+    constructor(options) {
+        const {
+            audioContext,
+            sharedBuffer,
+            bufferPool,
+            allocatedBuffers,
+            resolveAudioPath,
+            registerPendingOp
+        } = options;
+
+        this.audioContext = audioContext;
+        this.sharedBuffer = sharedBuffer;
+        this.bufferPool = bufferPool;
+        this.allocatedBuffers = allocatedBuffers;
+        this.resolveAudioPath = resolveAudioPath;
+        this.registerPendingOp = registerPendingOp;
+        this.bufferLocks = new Map(); // bufnum -> promise chain tail
+
+        // Guard samples prevent interpolation artifacts at buffer boundaries.
+        // SuperCollider uses 3 samples before and 1 sample after for cubic interpolation.
+        this.GUARD_BEFORE = 3;
+        this.GUARD_AFTER = 1;
+
+        // SuperCollider default buffer limit
+        this.MAX_BUFFERS = 1024;
+    }
+
+    #validateBufferNumber(bufnum) {
+        if (!Number.isInteger(bufnum) || bufnum < 0 || bufnum >= this.MAX_BUFFERS) {
+            throw new Error(`Invalid buffer number ${bufnum} (must be 0-${this.MAX_BUFFERS - 1})`);
+        }
+    }
+
+    async prepareFromFile(params) {
+        const {
+            bufnum,
+            path,
+            startFrame = 0,
+            numFrames = 0,
+            channels = null
+        } = params;
+
+        this.#validateBufferNumber(bufnum);
+
+        let allocatedPtr = null;
+        let pendingToken = null;
+        let allocationRegistered = false;
+
+        const releaseLock = await this.#acquireBufferLock(bufnum);
+        let lockReleased = false;
+
+        try {
+            await this.#awaitPendingReplacement(bufnum);
+
+            const resolvedPath = this.resolveAudioPath(path);
+            const response = await fetch(resolvedPath);
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch ${resolvedPath}: ${response.status} ${response.statusText}`);
+            }
+
+            const arrayBuffer = await response.arrayBuffer();
+            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+
+            const start = Math.max(0, Math.floor(startFrame || 0));
+            const availableFrames = audioBuffer.length - start;
+            const framesRequested = numFrames && numFrames > 0
+                ? Math.min(Math.floor(numFrames), availableFrames)
+                : availableFrames;
+
+            if (framesRequested <= 0) {
+                throw new Error(`No audio frames available for buffer ${bufnum} from ${path}`);
+            }
+
+            const selectedChannels = this.#normalizeChannels(channels, audioBuffer.numberOfChannels);
+            const numChannels = selectedChannels.length;
+
+            const totalSamples = (framesRequested * numChannels) +
+                ((this.GUARD_BEFORE + this.GUARD_AFTER) * numChannels);
+
+            allocatedPtr = this.#malloc(totalSamples);
+            const interleaved = new Float32Array(totalSamples);
+            const dataOffset = this.GUARD_BEFORE * numChannels;
+
+            for (let frame = 0; frame < framesRequested; frame++) {
+                for (let ch = 0; ch < numChannels; ch++) {
+                    const sourceChannel = selectedChannels[ch];
+                    const channelData = audioBuffer.getChannelData(sourceChannel);
+                    interleaved[dataOffset + (frame * numChannels) + ch] =
+                        channelData[start + frame];
+                }
+            }
+
+            this.#writeToSharedBuffer(allocatedPtr, interleaved);
+            const sizeBytes = interleaved.length * 4;
+
+            const { uuid, allocationComplete } = this.#registerPending(bufnum);
+            pendingToken = uuid;
+            this.#recordAllocation(bufnum, allocatedPtr, sizeBytes, uuid, allocationComplete);
+            allocationRegistered = true;
+            const managedCompletion = this.#attachFinalizer(bufnum, uuid, allocationComplete);
+            releaseLock();
+            lockReleased = true;
+
+            return {
+                ptr: allocatedPtr,
+                numFrames: framesRequested,
+                numChannels,
+                sampleRate: audioBuffer.sampleRate,
+                uuid,
+                allocationComplete: managedCompletion
+            };
+        } catch (error) {
+            if (allocationRegistered && pendingToken) {
+                this.#finalizeReplacement(bufnum, pendingToken, false);
+            } else if (allocatedPtr) {
+                this.bufferPool.free(allocatedPtr);
+            }
+            throw error;
+        } finally {
+            if (!lockReleased) {
+                releaseLock();
+            }
+        }
+    }
+
+    async prepareEmpty(params) {
+        const {
+            bufnum,
+            numFrames,
+            numChannels = 1,
+            sampleRate = null
+        } = params;
+
+        this.#validateBufferNumber(bufnum);
+
+        let allocationRegistered = false;
+        let pendingToken = null;
+        let allocatedPtr = null;
+
+        if (!Number.isFinite(numFrames) || numFrames <= 0) {
+            throw new Error(`/b_alloc requires a positive number of frames (got ${numFrames})`);
+        }
+
+        if (!Number.isFinite(numChannels) || numChannels <= 0) {
+            throw new Error(`/b_alloc requires a positive channel count (got ${numChannels})`);
+        }
+
+        const roundedFrames = Math.floor(numFrames);
+        const roundedChannels = Math.floor(numChannels);
+        const totalSamples = (roundedFrames * roundedChannels) +
+            ((this.GUARD_BEFORE + this.GUARD_AFTER) * roundedChannels);
+
+        const releaseLock = await this.#acquireBufferLock(bufnum);
+        let lockReleased = false;
+
+        try {
+            await this.#awaitPendingReplacement(bufnum);
+
+            allocatedPtr = this.#malloc(totalSamples);
+            const interleaved = new Float32Array(totalSamples);
+            this.#writeToSharedBuffer(allocatedPtr, interleaved);
+            const sizeBytes = interleaved.length * 4;
+
+            const { uuid, allocationComplete } = this.#registerPending(bufnum);
+            pendingToken = uuid;
+            this.#recordAllocation(bufnum, allocatedPtr, sizeBytes, uuid, allocationComplete);
+            allocationRegistered = true;
+            const managedCompletion = this.#attachFinalizer(bufnum, uuid, allocationComplete);
+            releaseLock();
+            lockReleased = true;
+
+            return {
+                ptr: allocatedPtr,
+                numFrames: roundedFrames,
+                numChannels: roundedChannels,
+                sampleRate: sampleRate || this.audioContext.sampleRate,
+                uuid,
+                allocationComplete: managedCompletion
+            };
+        } catch (error) {
+            if (allocationRegistered && pendingToken) {
+                this.#finalizeReplacement(bufnum, pendingToken, false);
+            } else if (allocatedPtr) {
+                this.bufferPool.free(allocatedPtr);
+            }
+            throw error;
+        } finally {
+            if (!lockReleased) {
+                releaseLock();
+            }
+        }
+    }
+
+    #normalizeChannels(requestedChannels, fileChannels) {
+        if (!requestedChannels || requestedChannels.length === 0) {
+            return Array.from({ length: fileChannels }, (_, i) => i);
+        }
+
+        requestedChannels.forEach((channel) => {
+            if (!Number.isInteger(channel) || channel < 0 || channel >= fileChannels) {
+                throw new Error(`Channel ${channel} is out of range (file has ${fileChannels} channels)`);
+            }
+        });
+
+        return requestedChannels;
+    }
+
+    #malloc(totalSamples) {
+        const bytesNeeded = totalSamples * 4;
+        const ptr = this.bufferPool.malloc(bytesNeeded);
+
+        if (ptr === 0) {
+            const stats = this.bufferPool.stats();
+            const availableMB = ((stats.available || 0) / (1024 * 1024)).toFixed(2);
+            const totalMB = ((stats.total || 0) / (1024 * 1024)).toFixed(2);
+            const requestedMB = (bytesNeeded / (1024 * 1024)).toFixed(2);
+            throw new Error(
+                `Buffer pool allocation failed: requested ${requestedMB}MB, ` +
+                `available ${availableMB}MB of ${totalMB}MB total`
+            );
+        }
+
+        return ptr;
+    }
+
+    #writeToSharedBuffer(ptr, data) {
+        const heap = new Float32Array(this.sharedBuffer, ptr, data.length);
+        heap.set(data);
+    }
+
+    #registerPending(bufnum) {
+        if (!this.registerPendingOp) {
+            return {
+                uuid: crypto.randomUUID(),
+                allocationComplete: Promise.resolve()
+            };
+        }
+
+        const uuid = crypto.randomUUID();
+        const allocationComplete = this.registerPendingOp(uuid, bufnum);
+        return { uuid, allocationComplete };
+    }
+
+    async #acquireBufferLock(bufnum) {
+        const prev = this.bufferLocks.get(bufnum) || Promise.resolve();
+        let releaseLock;
+        const current = new Promise((resolve) => {
+            releaseLock = resolve;
+        });
+        this.bufferLocks.set(bufnum, prev.then(() => current));
+        await prev;
+
+        return () => {
+            if (releaseLock) {
+                releaseLock();
+                releaseLock = null;
+            }
+            if (this.bufferLocks.get(bufnum) === current) {
+                this.bufferLocks.delete(bufnum);
+            }
+        };
+    }
+
+    #recordAllocation(bufnum, ptr, sizeBytes, pendingToken, pendingPromise) {
+        const previousEntry = this.allocatedBuffers.get(bufnum);
+        const entry = {
+            ptr,
+            size: sizeBytes,
+            pendingToken,
+            pendingPromise,
+            previousAllocation: previousEntry
+                ? { ptr: previousEntry.ptr, size: previousEntry.size }
+                : null
+        };
+        this.allocatedBuffers.set(bufnum, entry);
+        return entry;
+    }
+
+    async #awaitPendingReplacement(bufnum) {
+        const existing = this.allocatedBuffers.get(bufnum);
+        if (existing && existing.pendingToken && existing.pendingPromise) {
+            try {
+                await existing.pendingPromise;
+            } catch {
+                // Ignore failures; finalizer already handled cleanup
+            }
+        }
+    }
+
+    #attachFinalizer(bufnum, pendingToken, promise) {
+        if (!promise || typeof promise.then !== 'function') {
+            this.#finalizeReplacement(bufnum, pendingToken, true);
+            return Promise.resolve();
+        }
+
+        return promise.then((value) => {
+            this.#finalizeReplacement(bufnum, pendingToken, true);
+            return value;
+        }).catch((error) => {
+            this.#finalizeReplacement(bufnum, pendingToken, false);
+            throw error;
+        });
+    }
+
+    #finalizeReplacement(bufnum, pendingToken, success) {
+        const entry = this.allocatedBuffers.get(bufnum);
+        if (!entry || entry.pendingToken !== pendingToken) {
+            return;
+        }
+
+        const previous = entry.previousAllocation;
+
+        if (success) {
+            entry.pendingToken = null;
+            entry.pendingPromise = null;
+            entry.previousAllocation = null;
+            if (previous?.ptr) {
+                this.bufferPool.free(previous.ptr);
+            }
+            return;
+        }
+
+        if (entry.ptr) {
+            this.bufferPool.free(entry.ptr);
+        }
+
+        entry.pendingPromise = null;
+
+        if (previous?.ptr) {
+            this.allocatedBuffers.set(bufnum, {
+                ptr: previous.ptr,
+                size: previous.size,
+                pendingToken: null,
+                previousAllocation: null
+            });
+        } else {
+            this.allocatedBuffers.delete(bufnum);
+        }
+    }
+}
+
 export class SuperSonic {
     // Expose OSC utilities as static methods
     static osc = {
@@ -36,6 +379,8 @@ export class SuperSonic {
         this.wasmModule = null;
         this.wasmInstance = null;
         this.bufferPool = null;  // MemPool for audio buffer allocation
+        this.bufferManager = null;
+        this.loadedSynthDefs = new Set();
 
         // Pending buffer operations map for UUID correlation
         this.pendingBufferOps = new Map();  // UUID -> {resolve, reject, timeout}
@@ -222,6 +567,20 @@ export class SuperSonic {
         if (this.audioContext.state === 'running') {
             this.#calculateTimeOffset();
         }
+
+        return this.audioContext;
+    }
+
+    #initializeBufferManager() {
+        this.bufferManager = new BufferManager({
+            audioContext: this.audioContext,
+            sharedBuffer: this.sharedBuffer,
+            bufferPool: this.bufferPool,
+            allocatedBuffers: this.allocatedBuffers,
+            resolveAudioPath: (path) => this._resolveAudioPath(path),
+            registerPendingOp: (uuid, bufnum, timeoutMs) =>
+                this.#createPendingBufferOperation(uuid, bufnum, timeoutMs)
+        });
     }
 
     /**
@@ -404,6 +763,7 @@ export class SuperSonic {
             this.checkCapabilities();
             this.#initializeSharedMemory();
             this.#initializeAudioContext();
+            this.#initializeBufferManager();
             const wasmBytes = await this.#loadWasm();
             await this.#initializeAudioWorklet(wasmBytes);
             await this.#initializeOSC();
@@ -572,17 +932,9 @@ export class SuperSonic {
      * sonic.send('/n_set', 1000, 'freq', 440.0, 'amp', 0.5);
      */
     async send(address, ...args) {
-        if (!this.initialized) {
-            throw new Error('SuperSonic not initialized. Call init() first.');
-        }
+        this.#ensureInitialized('send OSC messages');
 
-        // Intercept buffer allocation commands BEFORE OSC encoding
-        if (this._isBufferAllocationCommand(address)) {
-            return await this._handleBufferCommand(address, args);
-        }
-
-        // Auto-detect types for normal commands
-        const oscArgs = args.map(arg => {
+        const oscArgs = args.map((arg) => {
             if (typeof arg === 'string') {
                 return { type: 's', value: arg };
             } else if (typeof arg === 'number') {
@@ -594,147 +946,9 @@ export class SuperSonic {
             }
         });
 
-        const message = {
-            address: address,
-            args: oscArgs
-        };
-
-        // Encode the message to OSC bytes
-        const oscData = oscLib.writePacket(message);
-
-        // Use sendOSC to send the encoded bytes
-        this.sendOSC(oscData);
-    }
-
-    _isBufferAllocationCommand(address) {
-        return [
-            '/b_allocRead',
-            '/b_allocReadChannel',
-            '/b_read',
-            '/b_readChannel'
-            // NOTE: /b_alloc and /b_free are NOT intercepted
-        ].includes(address);
-    }
-
-    async _handleBufferCommand(address, args) {
-        switch (address) {
-            case '/b_allocRead':
-                return await this._allocReadBuffer(...args);
-            case '/b_allocReadChannel':
-                return await this._allocReadChannelBuffer(...args);
-            case '/b_read':
-                return await this._readBuffer(...args);
-            case '/b_readChannel':
-                return await this._readChannelBuffer(...args);
-        }
-    }
-
-    /**
-     * /b_allocRead bufnum path [startFrame numFrames completion]
-     */
-    async _allocReadBuffer(bufnum, path, startFrame = 0, numFrames = 0, completionMsg = null) {
-        let allocatedPtr = null;
-        const GUARD_BEFORE = 3;
-        const GUARD_AFTER = 1;
-
-        try {
-            // 1. Resolve path to URL
-            const url = this._resolveAudioPath(path);
-
-            // 2. Fetch audio file
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            const arrayBuffer = await response.arrayBuffer();
-
-            // 3. Decode audio
-            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-
-            // 4. Extract frame range
-            const actualStartFrame = startFrame || 0;
-            const actualNumFrames = numFrames || (audioBuffer.length - actualStartFrame);
-            const framesToRead = Math.min(actualNumFrames, audioBuffer.length - actualStartFrame);
-
-            if (framesToRead <= 0) {
-                throw new Error(`Invalid frame range: start=${actualStartFrame}, numFrames=${actualNumFrames}, fileLength=${audioBuffer.length}`);
-            }
-
-            // 5. Interleave channels (SuperCollider expects interleaved format)
-            const numChannels = audioBuffer.numberOfChannels;
-            const guardSamples = (GUARD_BEFORE + GUARD_AFTER) * numChannels;
-            const interleavedData = new Float32Array((framesToRead * numChannels) + guardSamples);
-
-            // Write actual audio data (offset by GUARD_BEFORE samples)
-            const dataOffset = GUARD_BEFORE * numChannels;
-            for (let frame = 0; frame < framesToRead; frame++) {
-                for (let ch = 0; ch < numChannels; ch++) {
-                    const channelData = audioBuffer.getChannelData(ch);
-                    interleavedData[dataOffset + (frame * numChannels) + ch] =
-                        channelData[actualStartFrame + frame];
-                }
-            }
-
-            // Guard samples are left as zeros (silence)
-            // Front guards: indices 0 to (GUARD_BEFORE * numChannels - 1)
-            // Back guards: indices (dataOffset + framesToRead * numChannels) to end
-
-            // 6. Allocate buffer memory
-            const bytesNeeded = interleavedData.length * 4;  // Float32 = 4 bytes
-            allocatedPtr = this.bufferPool.malloc(bytesNeeded);
-
-            if (allocatedPtr === 0) {
-                throw new Error('Buffer pool allocation failed (out of memory)');
-            }
-
-            // 7. Write audio data to SharedArrayBuffer
-            const wasmHeap = new Float32Array(
-                this.sharedBuffer,
-                allocatedPtr,
-                interleavedData.length
-            );
-            wasmHeap.set(interleavedData);
-
-            // 8. Track allocation for cleanup
-            this.allocatedBuffers.set(bufnum, {
-                ptr: allocatedPtr,
-                size: bytesNeeded
-            });
-
-            // 9. Generate UUID for correlation
-            const uuid = crypto.randomUUID();
-
-            // 10. Set up promise to wait for allocation confirmation
-            const allocationComplete = new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    this.pendingBufferOps.delete(uuid);
-                    reject(new Error(`Timeout waiting for buffer ${bufnum} allocation`));
-                }, 5000);
-                this.pendingBufferOps.set(uuid, { resolve, reject, timeout });
-            });
-
-            // 11. Send pointer command to WASM with UUID
-            await this.send('/b_allocPtr', bufnum, allocatedPtr, framesToRead,
-                           numChannels, audioBuffer.sampleRate, uuid);
-
-            // 12. Wait for allocation confirmation
-            await allocationComplete;
-
-            // 13. Handle completion message if provided
-            if (completionMsg) {
-                // TODO: Handle completion message
-            }
-
-        } catch (error) {
-            // Clean up allocated memory on error
-            if (allocatedPtr) {
-                this.bufferPool.free(allocatedPtr);
-                this.allocatedBuffers.delete(bufnum);
-            }
-
-            console.error(`[SuperSonic] Buffer ${bufnum} load failed:`, error);
-            throw error;
-        }
+        const message = { address, args: oscArgs };
+        const oscData = SuperSonic.osc.encode(message);
+        return this.sendOSC(oscData);
     }
 
     /**
@@ -759,18 +973,58 @@ export class SuperSonic {
         return this.sampleBaseURL + scPath;
     }
 
+    #ensureInitialized(actionDescription = 'perform this operation') {
+        if (!this.initialized) {
+            throw new Error(`SuperSonic not initialized. Call init() before attempting to ${actionDescription}.`);
+        }
+    }
+
+    #createPendingBufferOperation(uuid, bufnum, timeoutMs = 30000) {
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                this.pendingBufferOps.delete(uuid);
+                reject(new Error(`Buffer ${bufnum} allocation timeout (${timeoutMs}ms)`));
+            }, timeoutMs);
+
+            this.pendingBufferOps.set(uuid, { resolve, reject, timeout });
+        });
+    }
+
     /**
      * Handle /buffer/freed message from WASM
      */
     _handleBufferFreed(args) {
         const bufnum = args[0];
-        const offset = args[1];
+        const freedPtr = args[1];
 
         const bufferInfo = this.allocatedBuffers.get(bufnum);
-        if (bufferInfo) {
+
+        if (!bufferInfo) {
+            if (typeof freedPtr === 'number' && freedPtr !== 0) {
+                this.bufferPool.free(freedPtr);
+            }
+            return;
+        }
+
+        if (typeof freedPtr === 'number' && freedPtr === bufferInfo.ptr) {
             this.bufferPool.free(bufferInfo.ptr);
             this.allocatedBuffers.delete(bufnum);
+            return;
         }
+
+        if (
+            typeof freedPtr === 'number' &&
+            bufferInfo.previousAllocation &&
+            bufferInfo.previousAllocation.ptr === freedPtr
+        ) {
+            this.bufferPool.free(freedPtr);
+            bufferInfo.previousAllocation = null;
+            return;
+        }
+
+        // Fallback: free whichever pointer we're tracking and clear the entry
+        this.bufferPool.free(bufferInfo.ptr);
+        this.allocatedBuffers.delete(bufnum);
     }
 
     /**
@@ -790,189 +1044,24 @@ export class SuperSonic {
     }
 
     /**
-     * /b_allocReadChannel bufnum path [startFrame numFrames channel1 channel2 ... completion]
-     * Load specific channels from an audio file
-     */
-    async _allocReadChannelBuffer(bufnum, path, startFrame = 0, numFrames = 0, ...channelsAndCompletion) {
-        let allocatedPtr = null;
-        const GUARD_BEFORE = 3;
-        const GUARD_AFTER = 1;
-
-        try {
-            // Parse channel numbers (all numeric args until we hit a non-number or end)
-            const channels = [];
-            let completionMsg = null;
-            for (let i = 0; i < channelsAndCompletion.length; i++) {
-                if (typeof channelsAndCompletion[i] === 'number' && Number.isInteger(channelsAndCompletion[i])) {
-                    channels.push(channelsAndCompletion[i]);
-                } else {
-                    completionMsg = channelsAndCompletion[i];
-                    break;
-                }
-            }
-
-            // 1. Resolve path and fetch
-            const url = this._resolveAudioPath(path);
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            const arrayBuffer = await response.arrayBuffer();
-
-            // 2. Decode audio
-            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-
-            // 3. Extract frame range
-            const actualStartFrame = startFrame || 0;
-            const actualNumFrames = numFrames || (audioBuffer.length - actualStartFrame);
-            const framesToRead = Math.min(actualNumFrames, audioBuffer.length - actualStartFrame);
-
-            if (framesToRead <= 0) {
-                throw new Error(`Invalid frame range: start=${actualStartFrame}, numFrames=${actualNumFrames}, fileLength=${audioBuffer.length}`);
-            }
-
-            // 4. Validate and default channels
-            const fileChannels = audioBuffer.numberOfChannels;
-            const selectedChannels = channels.length > 0 ? channels : Array.from({length: fileChannels}, (_, i) => i);
-
-            // Validate channel indices
-            for (const ch of selectedChannels) {
-                if (ch < 0 || ch >= fileChannels) {
-                    throw new Error(`Invalid channel ${ch} (file has ${fileChannels} channels)`);
-                }
-            }
-
-            const numChannels = selectedChannels.length;
-
-            // 5. Interleave selected channels
-            const guardSamples = (GUARD_BEFORE + GUARD_AFTER) * numChannels;
-            const interleavedData = new Float32Array((framesToRead * numChannels) + guardSamples);
-            const dataOffset = GUARD_BEFORE * numChannels;
-
-            for (let frame = 0; frame < framesToRead; frame++) {
-                for (let ch = 0; ch < numChannels; ch++) {
-                    const fileChannel = selectedChannels[ch];
-                    const channelData = audioBuffer.getChannelData(fileChannel);
-                    interleavedData[dataOffset + (frame * numChannels) + ch] =
-                        channelData[actualStartFrame + frame];
-                }
-            }
-
-            // 6. Allocate and write
-            const bytesNeeded = interleavedData.length * 4;
-            allocatedPtr = this.bufferPool.malloc(bytesNeeded);
-            if (allocatedPtr === 0) {
-                throw new Error('Buffer pool allocation failed (out of memory)');
-            }
-
-            const wasmHeap = new Float32Array(this.sharedBuffer, allocatedPtr, interleavedData.length);
-            wasmHeap.set(interleavedData);
-
-            // 7. Track and send
-            this.allocatedBuffers.set(bufnum, { ptr: allocatedPtr, size: bytesNeeded });
-            await this.send('/b_allocPtr', bufnum, allocatedPtr, framesToRead, numChannels, audioBuffer.sampleRate);
-
-            if (completionMsg) {
-                // TODO: Handle completion message
-            }
-
-        } catch (error) {
-            if (allocatedPtr) {
-                this.bufferPool.free(allocatedPtr);
-                this.allocatedBuffers.delete(bufnum);
-            }
-            console.error(`[SuperSonic] Buffer ${bufnum} load failed:`, error);
-            throw error;
-        }
-    }
-
-    /**
-     * /b_read bufnum path [startFrame numFrames bufStartFrame leaveOpen completion]
-     * Read file into existing buffer
-     */
-    async _readBuffer(bufnum, path, startFrame = 0, numFrames = 0, bufStartFrame = 0, leaveOpen = 0, completionMsg = null) {
-        console.warn('[SuperSonic] /b_read requires pre-allocated buffer - not yet implemented');
-        throw new Error('/b_read not yet implemented (requires /b_alloc first)');
-    }
-
-    /**
-     * /b_readChannel bufnum path [startFrame numFrames bufStartFrame leaveOpen channel1 channel2 ... completion]
-     * Read specific channels into existing buffer
-     */
-    async _readChannelBuffer(bufnum, path, startFrame = 0, numFrames = 0, bufStartFrame = 0, leaveOpen = 0, ...channelsAndCompletion) {
-        console.warn('[SuperSonic] /b_readChannel requires pre-allocated buffer - not yet implemented');
-        throw new Error('/b_readChannel not yet implemented (requires /b_alloc first)');
-    }
-
-    /**
      * Send pre-encoded OSC bytes to scsynth
      * @param {ArrayBuffer|Uint8Array} oscData - Pre-encoded OSC data
      * @param {Object} options - Send options
      */
-    sendOSC(oscData, options = {}) {
-        if (!this.initialized) {
-            throw new Error('Not initialized. Call init() first.');
-        }
+    async sendOSC(oscData, options = {}) {
+        this.#ensureInitialized('send OSC data');
 
-        // Convert ArrayBuffer to Uint8Array if needed
-        let uint8Data;
-        if (oscData instanceof ArrayBuffer) {
-            uint8Data = new Uint8Array(oscData);
-        } else if (oscData instanceof Uint8Array) {
-            uint8Data = oscData;
-        } else {
-            throw new Error('oscData must be ArrayBuffer or Uint8Array');
-        }
+        const uint8Data = this.#toUint8Array(oscData);
+        const preparedData = await this.#prepareOutboundPacket(uint8Data);
 
         this.stats.messagesSent++;
 
-        // Notify callback before sending
         if (this.onMessageSent) {
-            this.onMessageSent(uint8Data);
+            this.onMessageSent(preparedData);
         }
 
-        // Calculate wait time for bundles
-        let waitTimeMs = null;
-
-        // Check if this is a bundle (starts with "#bundle\0")
-        if (uint8Data.length >= 16) {
-            const header = String.fromCharCode.apply(null, uint8Data.slice(0, 8));
-            if (header === '#bundle\0') {
-                // Ensure time offset is calculated (fallback if statechange didn't fire)
-                if (this.wasmTimeOffset === null) {
-                    console.warn('[SuperSonic] Time offset not yet calculated, calculating now');
-                    this.#calculateTimeOffset();
-                }
-
-                // Extract NTP timetag (8 bytes at offset 8, big-endian)
-                const view = new DataView(uint8Data.buffer, uint8Data.byteOffset);
-                const ntpSeconds = view.getUint32(8, false);
-                const ntpFraction = view.getUint32(12, false);
-
-                // Check for immediate execution (timetag == 0 or 1)
-                if (!(ntpSeconds === 0 && (ntpFraction === 0 || ntpFraction === 1))) {
-                    // Convert NTP to seconds
-                    const ntpTimeS = ntpSeconds + (ntpFraction / 0x100000000);
-
-                    // Convert NTP to AudioContext time using WASM offset
-                    const audioTimeS = ntpTimeS - this.wasmTimeOffset;
-
-                    // Calculate wait time (target - current - 50ms latency compensation)
-                    const currentAudioTimeS = this.audioContext.currentTime;
-                    const latencyS = 0.050; // 50ms latency compensation
-                    waitTimeMs = (audioTimeS - currentAudioTimeS - latencyS) * 1000;
-
-                    // Debug bundle timing (commented out - enable for scheduler debugging)
-                    // console.log('[SuperSonic] Bundle timing - NTP:', ntpTimeS.toFixed(3),
-                    //            'AudioTime:', audioTimeS.toFixed(3),
-                    //            'Current:', currentAudioTimeS.toFixed(3),
-                    //            'Wait:', waitTimeMs.toFixed(2), 'ms');
-                }
-            }
-        }
-
-        // Use ScsynthOSC's send method with calculated wait time
-        this.osc.send(uint8Data, { ...options, waitTimeMs });
+        const waitTimeMs = this.#calculateBundleWait(preparedData);
+        this.osc.send(preparedData, { ...options, waitTimeMs });
     }
 
     /**
@@ -1008,10 +1097,40 @@ export class SuperSonic {
             this.audioContext = null;
         }
 
+        // Cancel all pending buffer operations and their timeouts
+        for (const [uuid, pending] of this.pendingBufferOps.entries()) {
+            clearTimeout(pending.timeout);
+            pending.reject(new Error('SuperSonic instance destroyed'));
+        }
+        this.pendingBufferOps.clear();
+
         this.sharedBuffer = null;
         this.initialized = false;
+        this.bufferManager = null;
+        this.allocatedBuffers.clear();
+        this.loadedSynthDefs.clear();
 
         console.log('[SuperSonic] Destroyed');
+    }
+
+    /**
+     * Wait until the AudioContext ↔ NTP offset has been established.
+     * Useful for callers that need accurate bundle timestamps.
+     */
+    async waitForTimeSync() {
+        if (this.wasmTimeOffset !== null) {
+            return this.wasmTimeOffset;
+        }
+
+        if (!this._timeOffsetPromise) {
+            this._timeOffsetPromise = new Promise((resolve) => {
+                this._resolveTimeOffset = resolve;
+            });
+        }
+
+        const offset = await this._timeOffsetPromise;
+        this.wasmTimeOffset = offset;
+        return offset;
     }
 
     /**
@@ -1021,12 +1140,26 @@ export class SuperSonic {
      * @returns {Promise} Resolves when buffer is ready
      */
     async loadSample(bufnum, path, startFrame = 0, numFrames = 0) {
-        if (!this.initialized) {
-            throw new Error('SuperSonic not initialized. Call init() first.');
-        }
+        this.#ensureInitialized('load samples');
 
-        // Use the internal _allocReadBuffer which handles everything including UUID correlation
-        await this._allocReadBuffer(bufnum, path, startFrame, numFrames);
+        const bufferInfo = await this.#requireBufferManager().prepareFromFile({
+            bufnum,
+            path,
+            startFrame,
+            numFrames
+        });
+
+        await this.send(
+            '/b_allocPtr',
+            bufnum,
+            bufferInfo.ptr,
+            bufferInfo.numFrames,
+            bufferInfo.numChannels,
+            bufferInfo.sampleRate,
+            bufferInfo.uuid
+        );
+
+        return bufferInfo.allocationComplete;
     }
 
     /**
@@ -1052,7 +1185,12 @@ export class SuperSonic {
             const synthdefData = new Uint8Array(arrayBuffer);
 
             // Send via /d_recv OSC message
-            this.send('/d_recv', synthdefData);
+            await this.send('/d_recv', synthdefData);
+
+            const synthName = this.#extractSynthDefName(path);
+            if (synthName) {
+                this.loadedSynthDefs.add(synthName);
+            }
 
             console.log(`[SuperSonic] Loaded synthdef from ${path} (${synthdefData.length} bytes)`);
         } catch (error) {
@@ -1169,5 +1307,331 @@ export class SuperSonic {
         }
 
         return this.bufferPool.stats();
+    }
+
+    getDiagnostics() {
+        this.#ensureInitialized('get diagnostics');
+
+        const poolStats = this.bufferPool?.stats ? this.bufferPool.stats() : null;
+        let bytesActive = 0;
+        let pendingCount = 0;
+
+        for (const entry of this.allocatedBuffers.values()) {
+            if (!entry) continue;
+            bytesActive += entry.size || 0;
+            if (entry.pendingToken) {
+                pendingCount++;
+            }
+        }
+
+        return {
+            buffers: {
+                active: this.allocatedBuffers.size,
+                pending: pendingCount,
+                bytesActive,
+                pool: poolStats
+                    ? {
+                        total: poolStats.total || 0,
+                        available: poolStats.available || 0,
+                        freeBytes: poolStats.free?.size || 0,
+                        freeBlocks: poolStats.free?.count || 0,
+                        usedBytes: poolStats.used?.size || 0,
+                        usedBlocks: poolStats.used?.count || 0
+                    }
+                    : null
+            },
+            synthdefs: {
+                count: this.loadedSynthDefs.size
+            }
+        };
+    }
+
+    #extractSynthDefName(path) {
+        if (!path || typeof path !== 'string') {
+            return null;
+        }
+        const lastSegment = path.split('/').filter(Boolean).pop() || path;
+        return lastSegment.replace(/\.scsyndef$/i, '');
+    }
+
+    #toUint8Array(data) {
+        if (data instanceof Uint8Array) {
+            return data;
+        }
+        if (data instanceof ArrayBuffer) {
+            return new Uint8Array(data);
+        }
+        throw new Error('oscData must be ArrayBuffer or Uint8Array');
+    }
+
+    async #prepareOutboundPacket(uint8Data) {
+        const decodeOptions = { metadata: true, unpackSingleArgs: false };
+        try {
+            const decodedPacket = SuperSonic.osc.decode(uint8Data, decodeOptions);
+            const { packet, changed } = await this.#rewritePacket(decodedPacket);
+            if (!changed) {
+                return uint8Data;
+            }
+            return SuperSonic.osc.encode(packet);
+        } catch (error) {
+            console.error('[SuperSonic] Failed to prepare OSC packet:', error);
+            throw error;
+        }
+    }
+
+    async #rewritePacket(packet) {
+        if (packet && packet.address) {
+            const { message, changed } = await this.#rewriteMessage(packet);
+            return { packet: message, changed };
+        }
+
+        if (this.#isBundle(packet)) {
+            const subResults = await Promise.all(
+                packet.packets.map((subPacket) => this.#rewritePacket(subPacket))
+            );
+
+            const changed = subResults.some(result => result.changed);
+
+            if (!changed) {
+                return { packet, changed: false };
+            }
+
+            const rewrittenPackets = subResults.map(result => result.packet);
+
+            return {
+                packet: {
+                    timeTag: packet.timeTag,
+                    packets: rewrittenPackets
+                },
+                changed: true
+            };
+        }
+
+        return { packet, changed: false };
+    }
+
+    async #rewriteMessage(message) {
+        switch (message.address) {
+            case '/b_alloc':
+                return {
+                    message: await this.#rewriteAlloc(message),
+                    changed: true
+                };
+            case '/b_allocRead':
+                return {
+                    message: await this.#rewriteAllocRead(message),
+                    changed: true
+                };
+            case '/b_allocReadChannel':
+                return {
+                    message: await this.#rewriteAllocReadChannel(message),
+                    changed: true
+                };
+            default:
+                return { message, changed: false };
+        }
+    }
+
+    async #rewriteAllocRead(message) {
+        const bufferManager = this.#requireBufferManager();
+        const bufnum = this.#requireIntArg(message.args, 0, '/b_allocRead requires a buffer number');
+        const path = this.#requireStringArg(message.args, 1, '/b_allocRead requires a file path');
+        const startFrame = this.#optionalIntArg(message.args, 2, 0);
+        const numFrames = this.#optionalIntArg(message.args, 3, 0);
+
+        const bufferInfo = await bufferManager.prepareFromFile({
+            bufnum,
+            path,
+            startFrame,
+            numFrames
+        });
+
+        this.#detachAllocationPromise(bufferInfo.allocationComplete, `/b_allocRead ${bufnum}`);
+        return this.#buildAllocPtrMessage(bufnum, bufferInfo);
+    }
+
+    async #rewriteAllocReadChannel(message) {
+        const bufferManager = this.#requireBufferManager();
+        const bufnum = this.#requireIntArg(message.args, 0, '/b_allocReadChannel requires a buffer number');
+        const path = this.#requireStringArg(message.args, 1, '/b_allocReadChannel requires a file path');
+        const startFrame = this.#optionalIntArg(message.args, 2, 0);
+        const numFrames = this.#optionalIntArg(message.args, 3, 0);
+
+        const channels = [];
+        for (let i = 4; i < (message.args?.length || 0); i++) {
+            if (!this.#isNumericArg(message.args[i])) {
+                break;
+            }
+            channels.push(Math.floor(this.#getArgValue(message.args[i])));
+        }
+
+        const bufferInfo = await bufferManager.prepareFromFile({
+            bufnum,
+            path,
+            startFrame,
+            numFrames,
+            channels: channels.length > 0 ? channels : null
+        });
+
+        this.#detachAllocationPromise(bufferInfo.allocationComplete, `/b_allocReadChannel ${bufnum}`);
+        return this.#buildAllocPtrMessage(bufnum, bufferInfo);
+    }
+
+    async #rewriteAlloc(message) {
+        const bufferManager = this.#requireBufferManager();
+        const bufnum = this.#requireIntArg(message.args, 0, '/b_alloc requires a buffer number');
+        const numFrames = this.#requireIntArg(message.args, 1, '/b_alloc requires a frame count');
+
+        let argIndex = 2;
+        let numChannels = 1;
+        let sampleRate = this.audioContext?.sampleRate || 44100;
+
+        if (this.#isNumericArg(this.#argAt(message.args, argIndex))) {
+            numChannels = Math.max(1, this.#optionalIntArg(message.args, argIndex, 1));
+            argIndex++;
+        }
+
+        if (this.#argAt(message.args, argIndex)?.type === 'b') {
+            argIndex++;
+        }
+
+        if (this.#isNumericArg(this.#argAt(message.args, argIndex))) {
+            sampleRate = this.#getArgValue(this.#argAt(message.args, argIndex));
+        }
+
+        const bufferInfo = await bufferManager.prepareEmpty({
+            bufnum,
+            numFrames,
+            numChannels,
+            sampleRate
+        });
+
+        this.#detachAllocationPromise(bufferInfo.allocationComplete, `/b_alloc ${bufnum}`);
+        return this.#buildAllocPtrMessage(bufnum, bufferInfo);
+    }
+
+    #buildAllocPtrMessage(bufnum, bufferInfo) {
+        return {
+            address: '/b_allocPtr',
+            args: [
+                this.#intArg(bufnum),
+                this.#intArg(bufferInfo.ptr),
+                this.#intArg(bufferInfo.numFrames),
+                this.#intArg(bufferInfo.numChannels),
+                this.#floatArg(bufferInfo.sampleRate),
+                this.#stringArg(bufferInfo.uuid)
+            ]
+        };
+    }
+
+    #intArg(value) {
+        return { type: 'i', value: Math.floor(value) };
+    }
+
+    #floatArg(value) {
+        return { type: 'f', value };
+    }
+
+    #stringArg(value) {
+        return { type: 's', value: String(value) };
+    }
+
+    #argAt(args, index) {
+        if (!Array.isArray(args)) {
+            return undefined;
+        }
+        return args[index];
+    }
+
+    #getArgValue(arg) {
+        if (arg === undefined || arg === null) {
+            return undefined;
+        }
+        return typeof arg === 'object' && Object.prototype.hasOwnProperty.call(arg, 'value')
+            ? arg.value
+            : arg;
+    }
+
+    #requireIntArg(args, index, errorMessage) {
+        const value = this.#getArgValue(this.#argAt(args, index));
+        if (!Number.isFinite(value)) {
+            throw new Error(errorMessage);
+        }
+        return Math.floor(value);
+    }
+
+    #optionalIntArg(args, index, defaultValue = 0) {
+        const value = this.#getArgValue(this.#argAt(args, index));
+        if (!Number.isFinite(value)) {
+            return defaultValue;
+        }
+        return Math.floor(value);
+    }
+
+    #requireStringArg(args, index, errorMessage) {
+        const value = this.#getArgValue(this.#argAt(args, index));
+        if (typeof value !== 'string') {
+            throw new Error(errorMessage);
+        }
+        return value;
+    }
+
+    #isNumericArg(arg) {
+        if (!arg) {
+            return false;
+        }
+        const value = this.#getArgValue(arg);
+        return Number.isFinite(value);
+    }
+
+    #detachAllocationPromise(promise, context) {
+        if (!promise || typeof promise.catch !== 'function') {
+            return;
+        }
+
+        promise.catch((error) => {
+            console.error(`[SuperSonic] ${context} allocation failed:`, error);
+        });
+    }
+
+    #requireBufferManager() {
+        if (!this.bufferManager) {
+            throw new Error('Buffer manager not ready. Call init() before issuing buffer commands.');
+        }
+        return this.bufferManager;
+    }
+
+    #isBundle(packet) {
+        return packet && packet.timeTag !== undefined && Array.isArray(packet.packets);
+    }
+
+    #calculateBundleWait(uint8Data) {
+        if (uint8Data.length < 16) {
+            return null;
+        }
+
+        const header = String.fromCharCode.apply(null, uint8Data.slice(0, 8));
+        if (header !== '#bundle\0') {
+            return null;
+        }
+
+        if (this.wasmTimeOffset === null) {
+            this.#calculateTimeOffset();
+        }
+
+        const view = new DataView(uint8Data.buffer, uint8Data.byteOffset);
+        const ntpSeconds = view.getUint32(8, false);
+        const ntpFraction = view.getUint32(12, false);
+
+        if (ntpSeconds === 0 && (ntpFraction === 0 || ntpFraction === 1)) {
+            return null;
+        }
+
+        const ntpTimeS = ntpSeconds + (ntpFraction / 0x100000000);
+        const audioTimeS = ntpTimeS - this.wasmTimeOffset;
+        const currentAudioTimeS = this.audioContext.currentTime;
+        const latencyS = 0.050;
+
+        return (audioTimeS - currentAudioTimeS - latencyS) * 1000;
     }
 }
