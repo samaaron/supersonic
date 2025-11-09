@@ -27,6 +27,13 @@ var CONTROL_INDICES = {};
 var messageQueue = [];
 var isProcessing = false;
 
+var DEBUG_WRITER_LOGS = false;
+function writerLog() {
+    if (DEBUG_WRITER_LOGS) {
+        console.log.apply(console, arguments);
+    }
+}
+
 // Statistics
 var stats = {
     messagesWritten: 0,
@@ -59,7 +66,7 @@ function initRingBuffer(buffer, base, constants) {
         IN_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 4) / 4
     };
 
-    console.log('[OSCWriterWorker] Ring buffer initialized');
+    writerLog('[OSCWriterWorker] Ring buffer initialized');
 }
 
 /**
@@ -215,17 +222,17 @@ self.onmessage = function(event) {
                         enqueue(msg.oscData);
                     }
                 };
-                console.log('[OSCWriterWorker] Scheduler port connected');
+                writerLog('[OSCWriterWorker] Scheduler port connected');
                 break;
 
             case 'start':
                 running = true;
-                console.log('[OSCWriterWorker] Started');
+                writerLog('[OSCWriterWorker] Started');
                 break;
 
             case 'stop':
                 running = false;
-                console.log('[OSCWriterWorker] Stopped');
+                writerLog('[OSCWriterWorker] Stopped');
                 break;
 
             case 'write':
@@ -252,4 +259,4 @@ self.onmessage = function(event) {
     }
 };
 
-console.log('[OSCWriterWorker] Script loaded');
+writerLog('[OSCWriterWorker] Script loaded');

@@ -23,6 +23,18 @@ var cachedTimeDelta = null;
 var minimumScheduleRequirementS = 0.002; // 2ms for audio precision
 var latencyS = 0.05; // 50ms latency compensation for scsynth
 
+var DEBUG_SCHED_LOGS = false;
+function schedulerLog() {
+    if (DEBUG_SCHED_LOGS) {
+        console.log.apply(console, arguments);
+    }
+}
+function schedulerWarn() {
+    if (DEBUG_SCHED_LOGS) {
+        console.warn.apply(console, arguments);
+    }
+}
+
 // Statistics
 var stats = {
     bundlesScheduled: 0,
@@ -34,7 +46,7 @@ var stats = {
  */
 function init(buffer, base, constants) {
     // We don't need the ring buffer anymore, but keep the params for compatibility
-    console.log('[OSCSchedulerWorker] Initialized (scheduler only, no ring buffer access)');
+    schedulerLog('[OSCSchedulerWorker] Initialized (scheduler only, no ring buffer access)');
 }
 
 /**
@@ -321,7 +333,7 @@ self.onmessage = function(event) {
             case 'setWriterWorker':
                 // Set reference to writer worker (passed as MessagePort)
                 writerWorker = data.port;
-                console.log('[OSCSchedulerWorker] Writer worker connected');
+                schedulerLog('[OSCSchedulerWorker] Writer worker connected');
                 break;
 
             case 'send':
@@ -356,7 +368,7 @@ self.onmessage = function(event) {
                 break;
 
             default:
-                console.warn('[OSCOutWorker] Unknown message type:', data.type);
+                schedulerWarn('[OSCOutWorker] Unknown message type:', data.type);
         }
     } catch (error) {
         console.error('[OSCOutWorker] Error:', error);
@@ -367,4 +379,4 @@ self.onmessage = function(event) {
     }
 };
 
-console.log('[OSCSchedulerWorker] Script loaded - scheduler only, delegates to writer worker');
+schedulerLog('[OSCSchedulerWorker] Script loaded - scheduler only, delegates to writer worker');

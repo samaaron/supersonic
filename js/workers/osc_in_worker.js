@@ -29,6 +29,13 @@ var CONTROL_INDICES = {};
 // Worker state
 var running = false;
 
+var DEBUG_OSCIN_LOGS = false;
+function oscInLog() {
+    if (DEBUG_OSCIN_LOGS) {
+        console.log.apply(console, arguments);
+    }
+}
+
 // Statistics
 var stats = {
     messagesReceived: 0,
@@ -273,4 +280,4 @@ self.onmessage = function(event) {
     }
 };
 
-console.log('[OSCInWorker] Script loaded');
+oscInLog('[OSCInWorker] Script loaded');

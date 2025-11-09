@@ -607,7 +607,6 @@ initButton.addEventListener('click', async () => {
     };
 
     orchestrator.onDebugMessage = (msg) => {
-      // Display debug messages from debug worker
       debugLog.textContent += msg.text + '\n';
       if (window.debugAutoScroll !== false) {
         const scrollContainer = debugLog.parentElement;
@@ -616,10 +615,6 @@ initButton.addEventListener('click', async () => {
         }
       }
       flashTab('debug');
-      // Also log to console in development mode
-      if (orchestrator.config.development) {
-        console.log(`[WASM] ${msg.text}`);
-      }
     };
 
     orchestrator.onSendError = (error) => {
@@ -834,6 +829,7 @@ messageForm.addEventListener('submit', async (e) => {
 
 // Auto-scroll enabled by default
 window.debugAutoScroll = true;
+window.debugLogWasm = false;
 
 // Draggable divider functionality
 const divider = document.getElementById('column-divider');
