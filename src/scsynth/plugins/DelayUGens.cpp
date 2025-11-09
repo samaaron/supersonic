@@ -559,26 +559,11 @@ void BufDur_next(BufInfoUnit* unit, int inNumSamples) {
 // This was the primary constructor that triggered infinite recursion due to WASM function table
 // corruption caused by signature mismatch. See docs/wasm-function-signature-fix.md for details.
 void BufDur_Ctor(BufInfoUnit* unit) {
-#ifdef __EMSCRIPTEN__
-    worklet_debug("[BufDur_Ctor] STEP 1: About to SETCALC");
-#endif
     SETCALC(BufDur_next);
-#ifdef __EMSCRIPTEN__
-    worklet_debug("[BufDur_Ctor] STEP 2: About to read ZIN0(0)");
-#endif
     CTOR_GET_BUF
-#ifdef __EMSCRIPTEN__
-    worklet_debug("[BufDur_Ctor] STEP 3: CTOR_GET_BUF complete, fbufnum=%f, buf=%p", fbufnum, buf);
-#endif
     unit->m_fbufnum = fbufnum;
     unit->m_buf = buf;
-#ifdef __EMSCRIPTEN__
-    worklet_debug("[BufDur_Ctor] STEP 4: About to write ZOUT0(0)");
-#endif
     ZOUT0(0) = buf->frames * buf->sampledur;
-#ifdef __EMSCRIPTEN__
-    worklet_debug("[BufDur_Ctor] STEP 5: BufDur_Ctor complete");
-#endif
 }
 
 

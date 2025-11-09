@@ -29,6 +29,13 @@ var CONTROL_INDICES = {};
 // Worker state
 var running = false;
 
+var DEBUG_DEBUGWORKER_LOGS = false;
+function debugWorkerLog() {
+    if (DEBUG_DEBUGWORKER_LOGS) {
+        console.log.apply(console, arguments);
+    }
+}
+
 // Statistics
 var stats = {
     messagesReceived: 0,
@@ -277,4 +284,4 @@ self.onmessage = function(event) {
     }
 };
 
-console.log('[DebugWorker] Script loaded');
+debugWorkerLog('[DebugWorker] Script loaded');
