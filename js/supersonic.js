@@ -514,12 +514,22 @@ export class SuperSonic {
     /**
      * Calculate time offset (AudioContext → NTP conversion)
      * Called when AudioContext is in 'running' state to ensure accurate timing
+     *
+     * IMPORTANT: Uses performance.timeOrigin + performance.now() instead of Date.now()
+     * to avoid Safari clock drift issues. performance.now() is monotonic and stable.
      */
     #calculateTimeOffset() {
         const SECONDS_1900_TO_1970 = 2208988800;
         const audioContextTime = this.audioContext.currentTime;
-        const unixSeconds = Date.now() / 1000;
+
+        // Use performance.timeOrigin (epoch time when page loaded) + performance.now() (monotonic time since load)
+        // This is more stable than Date.now() which can drift or be adjusted by system clock/NTP
+        const unixMillis = performance.timeOrigin + performance.now();
+        const unixSeconds = unixMillis / 1000;
+
         this.wasmTimeOffset = (SECONDS_1900_TO_1970 + unixSeconds) - audioContextTime;
+
+        console.log(`[TimeOffset] Calculated offset=${this.wasmTimeOffset.toFixed(3)}s (audioContext=${audioContextTime.toFixed(3)}s, perfTime=${unixSeconds.toFixed(3)}s)`);
 
         // Resolve the promise if it hasn't been resolved yet
         if (this._resolveTimeOffset) {
@@ -1060,8 +1070,15 @@ export class SuperSonic {
             this.onMessageSent(preparedData);
         }
 
-        const waitTimeMs = this.#calculateBundleWait(preparedData);
-        this.osc.send(preparedData, { ...options, waitTimeMs });
+        const timing = this.#calculateBundleWait(preparedData);
+        const sendOptions = { ...options };
+
+        if (timing) {
+            sendOptions.audioTimeS = timing.audioTimeS;
+            sendOptions.currentTimeS = timing.currentTimeS;
+        }
+
+        this.osc.send(preparedData, sendOptions);
     }
 
     /**
@@ -1629,9 +1646,14 @@ export class SuperSonic {
 
         const ntpTimeS = ntpSeconds + (ntpFraction / 0x100000000);
         const audioTimeS = ntpTimeS - this.wasmTimeOffset;
-        const currentAudioTimeS = this.audioContext.currentTime;
-        const latencyS = 0.050;
+        const currentTimeS = this.audioContext.currentTime;
+        const deltaS = audioTimeS - currentTimeS;
 
-        return (audioTimeS - currentAudioTimeS - latencyS) * 1000;
+        // DEBUG: Log timing information to diagnose Safari issues
+        console.log(`[Timing] NTP=${ntpTimeS.toFixed(3)}s, wasmOffset=${this.wasmTimeOffset.toFixed(3)}s, audioTime=${audioTimeS.toFixed(3)}s, currentTime=${currentTimeS.toFixed(3)}s, delta=${deltaS.toFixed(3)}s (${(deltaS*1000).toFixed(0)}ms)`);
+
+        // Return the target audio time, not the wait time
+        // The scheduler will handle lookahead scheduling
+        return { audioTimeS, currentTimeS };
     }
 }
