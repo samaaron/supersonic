@@ -70,6 +70,19 @@ function initRingBuffer(buffer, base, constants) {
 }
 
 /**
+ * Extract bundle timestamp for logging
+ */
+function getBundleTimestamp(oscMessage) {
+    if (oscMessage.length >= 16 && oscMessage[0] === 0x23) {
+        var view = new DataView(oscMessage.buffer, oscMessage.byteOffset);
+        var ntpSeconds = view.getUint32(8, false);
+        var ntpFraction = view.getUint32(12, false);
+        return ntpSeconds + ntpFraction / 0x100000000;
+    }
+    return null;
+}
+
+/**
  * Write message to ring buffer - blocks until space is available
  * This is the ONLY function that writes to the ring buffer
  */
@@ -78,6 +91,9 @@ function writeToRingBuffer(oscMessage) {
         console.error('[OSCWriterWorker] Not initialized');
         return false;
     }
+
+    var bundleTimestamp = getBundleTimestamp(oscMessage);
+    var enterWriter = performance.now();
 
     var payloadSize = oscMessage.length;
     var totalSize = bufferConstants.MESSAGE_HEADER_SIZE + payloadSize;
@@ -137,6 +153,11 @@ function writeToRingBuffer(oscMessage) {
             // Update head pointer (publish message)
             var newHead = (head + totalSize) % bufferConstants.IN_BUFFER_SIZE;
             Atomics.store(atomicView, CONTROL_INDICES.IN_HEAD, newHead);
+
+            var writerDuration = performance.now() - enterWriter;
+            if (bundleTimestamp !== null) {
+                console.log(`[Writer] Bundle NTP=${bundleTimestamp.toFixed(3)} → WASM in ${writerDuration.toFixed(2)}ms`);
+            }
 
             stats.messagesWritten++;
             return true;
