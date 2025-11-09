@@ -186,6 +186,10 @@ function updateMetrics(metrics) {
     document.getElementById('metric-out-usage').textContent = metrics.out_buffer_usage + '%';
     document.getElementById('metric-out-bar').style.width = metrics.out_buffer_usage + '%';
   }
+  if (metrics.debug_buffer_usage !== undefined) {
+    document.getElementById('metric-debug-usage').textContent = metrics.debug_buffer_usage + '%';
+    document.getElementById('metric-debug-bar').style.width = metrics.debug_buffer_usage + '%';
+  }
 }
 
 function addMessage(message) {
@@ -501,6 +505,9 @@ initButton.addEventListener('click', async () => {
       if (metrics.outBufferUsed?.percentage !== undefined) {
         metricsWithUsage.out_buffer_usage = metrics.outBufferUsed.percentage;
       }
+      if (metrics.debugBufferUsed?.percentage !== undefined) {
+        metricsWithUsage.debug_buffer_usage = metrics.debugBufferUsed.percentage;
+      }
       if (metrics.pollInterval !== undefined) {
         metricsWithUsage.poll_interval = metrics.pollInterval;
       }
@@ -645,7 +652,7 @@ function stopScope() {
 
 // Message form input handler removed - no character counter
 
-messageForm.addEventListener('submit', (e) => {
+messageForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const message = messageInput.value.trim();
 
@@ -701,6 +708,15 @@ messageForm.addEventListener('submit', (e) => {
         messagesByTime.get(timestamp).push(oscMessage);
       }
 
+      // Ensure AudioContext ↔ NTP offset is ready before encoding bundles
+      let wasmOffset;
+      try {
+        wasmOffset = await orchestrator.waitForTimeSync();
+      } catch (err) {
+        showError(`Failed to synchronise clocks: ${err.message || err}`);
+        return;
+      }
+
       // Send bundles in timestamp order (messages with same timestamp go in same bundle)
       const sortedTimes = Array.from(messagesByTime.keys()).sort((a, b) => a - b);
 
@@ -708,8 +724,6 @@ messageForm.addEventListener('submit', (e) => {
       // Takes AudioContext time and converts to NTP using WASM's offset
       function createOSCBundle(audioTimeS, messages) {
         const NTP_EPOCH_OFFSET = 2208988800;
-        // Get WASM's time offset (AudioContext → NTP conversion)
-        const wasmOffset = orchestrator.wasmTimeOffset || 0;
         // Debug logs (commented out - enable for timing debugging)
         // console.log('[Bundle] Creating bundle - audioTime:', audioTimeS, 'wasmOffset:', wasmOffset);
         const ntpTimeS = audioTimeS + wasmOffset;
@@ -952,4 +966,3 @@ if (loadExampleButton) {
     console.log('[App] Loaded example code into textarea');
   });
 }
-
