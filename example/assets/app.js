@@ -278,6 +278,89 @@ function renderMessages() {
   }
 }
 
+/**
+ * Parse the multiline OSC text area into scheduled and immediate commands.
+ * Supports comments anywhere (# ...), optional timestamps, and plain text lines.
+ */
+function parseOscTextInput(rawText) {
+  const scheduled = new Map(); // timestamp -> osc messages
+  const immediate = [];
+  const comments = [];
+  const errors = [];
+
+  const lines = rawText.split(/\r?\n/);
+  let currentBundleTimestamp = null;
+
+  for (const originalLine of lines) {
+    const line = originalLine.trim();
+    if (!line) continue;
+
+    if (line.startsWith('#')) {
+      comments.push(line);
+      continue;
+    }
+
+    if (line.startsWith('-')) {
+      if (currentBundleTimestamp === null) {
+        errors.push('Bundle continuation (-) found before any timestamped bundle');
+        continue;
+      }
+      const commandText = line.slice(1).trim();
+      if (!commandText.startsWith('/')) {
+        errors.push('Bundle continuation must contain a valid OSC command');
+        continue;
+      }
+      try {
+        const oscMessage = parseTextToOSC(commandText);
+        scheduled.get(currentBundleTimestamp).push(oscMessage);
+      } catch (err) {
+        errors.push(err.message || `Failed to parse line: ${line}`);
+      }
+      continue;
+    }
+
+    const timestampMatch = line.match(/^(-?\d+(?:\.\d+)?)\s+(\/.*)$/);
+    if (timestampMatch) {
+      const timestamp = parseFloat(timestampMatch[1]);
+      if (Number.isNaN(timestamp)) {
+        errors.push(`Invalid timestamp: ${timestampMatch[1]}`);
+        continue;
+      }
+      const commandText = timestampMatch[2];
+      if (!commandText.startsWith('/')) {
+        errors.push(`Invalid OSC command: ${commandText}`);
+        continue;
+      }
+      try {
+        const oscMessage = parseTextToOSC(commandText);
+        if (!scheduled.has(timestamp)) {
+          scheduled.set(timestamp, []);
+        }
+        scheduled.get(timestamp).push(oscMessage);
+        currentBundleTimestamp = timestamp;
+      } catch (err) {
+        errors.push(err.message || `Failed to parse line: ${line}`);
+      }
+      continue;
+    }
+
+    if (line.startsWith('/')) {
+      try {
+        const oscMessage = parseTextToOSC(line);
+        immediate.push(oscMessage);
+      } catch (err) {
+        errors.push(err.message || `Failed to parse line: ${line}`);
+      }
+      currentBundleTimestamp = null;
+      continue;
+    }
+
+    errors.push(`Unrecognised line: ${line}`);
+  }
+
+  return { scheduled, immediate, comments, errors };
+}
+
 function addSentMessage(oscData, comment = null) {
   sentMessages.unshift({ oscData, timestamp: Date.now(), comment });
   if (sentMessages.length > 50) sentMessages = sentMessages.slice(0, 50);
@@ -662,52 +745,20 @@ messageForm.addEventListener('submit', async (e) => {
   hideError();
 
   try {
-    // Check if this is a multi-line scheduled message format
-    const allLines = message.split('\n').map(l => l.trim()).filter(l => l);
-    const lines = allLines.filter(l => !l.startsWith('#'));
+    const parsed = parseOscTextInput(message);
 
-    // Check if first line starts with a number (timestamp)
-    const firstTokenMatch = lines[0].match(/^([\d.]+)\s+(.+)$/);
-    const hasTimestamps = firstTokenMatch && firstTokenMatch[2].startsWith('/');
+    if (parsed.errors.length > 0) {
+      showError(parsed.errors[0]);
+      return;
+    }
 
-    if (hasTimestamps && lines.length > 0) {
-      // First, log any comments
-      allLines.filter(l => l.startsWith('#')).forEach(comment => {
-        addSentMessage(null, comment);
-      });
+    // Log comments immediately so the history shows them in order
+    parsed.comments.forEach(comment => addSentMessage(null, comment));
 
-      // Parse scheduled messages and group by timestamp
-      const now = orchestrator.audioContext.currentTime; // AudioContext time in seconds
-      const messagesByTime = new Map();
+    let sendsThisRound = 0;
 
-      for (const line of lines) {
-        const match = line.match(/^([\d.]+)\s+(.+)$/);
-        if (!match) {
-          showError(`Invalid format: ${line}`);
-          return;
-        }
-
-        const timestamp = parseFloat(match[1]);
-        const oscCommand = match[2];
-
-        if (isNaN(timestamp)) {
-          showError(`Invalid timestamp: ${match[1]}`);
-          return;
-        }
-
-        if (!oscCommand.startsWith('/')) {
-          showError(`Invalid OSC command: ${oscCommand}`);
-          return;
-        }
-
-        const oscMessage = parseTextToOSC(oscCommand);
-
-        if (!messagesByTime.has(timestamp)) {
-          messagesByTime.set(timestamp, []);
-        }
-        messagesByTime.get(timestamp).push(oscMessage);
-      }
-
+    // Handle scheduled bundles if any timestamps were provided
+    if (parsed.scheduled.size > 0) {
       // Ensure AudioContext ↔ NTP offset is ready before encoding bundles
       let wasmOffset;
       try {
@@ -717,46 +768,30 @@ messageForm.addEventListener('submit', async (e) => {
         return;
       }
 
-      // Send bundles in timestamp order (messages with same timestamp go in same bundle)
-      const sortedTimes = Array.from(messagesByTime.keys()).sort((a, b) => a - b);
+      const now = orchestrator.audioContext.currentTime;
 
-      // Helper to manually create OSC bundle with correct NTP timestamp
-      // Takes AudioContext time and converts to NTP using WASM's offset
       function createOSCBundle(audioTimeS, messages) {
-        const NTP_EPOCH_OFFSET = 2208988800;
-        // Debug logs (commented out - enable for timing debugging)
-        // console.log('[Bundle] Creating bundle - audioTime:', audioTimeS, 'wasmOffset:', wasmOffset);
         const ntpTimeS = audioTimeS + wasmOffset;
         const ntpSeconds = Math.floor(ntpTimeS);
         const ntpFraction = Math.floor((ntpTimeS % 1) * 0x100000000);
-        // console.log('[Bundle] NTP time:', ntpTimeS, 'seconds:', ntpSeconds, 'fraction:', ntpFraction);
-        // console.log('[Bundle] Creating - NTP seconds:', ntpSeconds, 'fraction:', ntpFraction);
-
-        // Encode each message
         const encodedMessages = messages.map(msg => SuperSonic.osc.encode(msg));
 
-        // Calculate total bundle size
-        let bundleSize = 8 + 8; // "#bundle\0" + NTP timestamp
+        let bundleSize = 8 + 8;
         encodedMessages.forEach(msg => {
-          bundleSize += 4 + msg.byteLength; // size prefix + message
+          bundleSize += 4 + msg.byteLength;
         });
 
-        // Create bundle buffer
         const bundle = new Uint8Array(bundleSize);
         const view = new DataView(bundle.buffer);
         let offset = 0;
 
-        // Write "#bundle\0"
         bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], offset);
         offset += 8;
-
-        // Write NTP timestamp (big-endian)
         view.setUint32(offset, ntpSeconds, false);
         offset += 4;
         view.setUint32(offset, ntpFraction, false);
         offset += 4;
 
-        // Write messages
         encodedMessages.forEach(msg => {
           view.setInt32(offset, msg.byteLength, false);
           offset += 4;
@@ -767,39 +802,29 @@ messageForm.addEventListener('submit', async (e) => {
         return bundle;
       }
 
-      // Debug logs (commented out - enable for scheduling debugging)
-      // console.log('[Schedule] Sending', sortedTimes.length, 'bundles');
+      const sortedTimes = Array.from(parsed.scheduled.keys()).sort((a, b) => a - b);
+      const bundlePromises = [];
+
       for (const timestamp of sortedTimes) {
-        const messages = messagesByTime.get(timestamp);
-        const targetTimeS = now + timestamp + 0.02; // Add 20ms safety margin for execution time
-        // console.log('[Schedule] Bundle at', timestamp, 's with', messages.length, 'messages');
-        // console.log('[Schedule] Target AudioContext time (s):', targetTimeS);
-        const oscData = createOSCBundle(targetTimeS, messages);
-        // console.log('[Schedule] Bundle encoded, size:', oscData.byteLength, 'bytes');
-        orchestrator.sendOSC(oscData);
-        messagesSent++;
+        const messagesAtTime = parsed.scheduled.get(timestamp);
+        const targetTimeS = now + timestamp + 0.02; // small safety margin
+        const bundle = createOSCBundle(targetTimeS, messagesAtTime);
+        bundlePromises.push(orchestrator.sendOSC(bundle));
+        sendsThisRound += messagesAtTime.length;
       }
 
-      updateMetrics({ messages_sent: messagesSent });
+      await Promise.all(bundlePromises);
+    }
 
-    } else {
-      // Original single message handling
-      // First, log any comments
-      allLines.filter(l => l.startsWith('#')).forEach(comment => {
-        addSentMessage(null, comment);
-      });
+    // Immediate OSC commands
+    for (const oscMessage of parsed.immediate) {
+      const args = oscMessage.args.map(arg => arg.value);
+      orchestrator.send(oscMessage.address, ...args);
+      sendsThisRound++;
+    }
 
-      if (message.startsWith('/')) {
-        // Parse as OSC command: /address arg1 arg2...
-        const oscMessage = parseTextToOSC(message);
-        const args = oscMessage.args.map(arg => arg.value);
-        orchestrator.send(oscMessage.address, ...args);
-      } else if (!message.startsWith('#')) {
-        // Wrap in /echo (but not if it's a comment)
-        orchestrator.send('/echo', message);
-      }
-
-      messagesSent++;
+    if (sendsThisRound > 0) {
+      messagesSent += sendsThisRound;
       updateMetrics({ messages_sent: messagesSent });
     }
   } catch (error) {
