@@ -154,11 +154,6 @@ function writeToRingBuffer(oscMessage) {
             var newHead = (head + totalSize) % bufferConstants.IN_BUFFER_SIZE;
             Atomics.store(atomicView, CONTROL_INDICES.IN_HEAD, newHead);
 
-            var writerDuration = performance.now() - enterWriter;
-            if (bundleTimestamp !== null) {
-                console.log(`[Writer] Bundle NTP=${bundleTimestamp.toFixed(3)} → WASM in ${writerDuration.toFixed(2)}ms`);
-            }
-
             stats.messagesWritten++;
             return true;
         }

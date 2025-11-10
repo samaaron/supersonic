@@ -101,6 +101,7 @@ extern "C" {
     ControlPointers* control = nullptr;
     PerformanceMetrics* metrics = nullptr;
     double* global_timing_offset = nullptr;
+    double* local_clock_offset = nullptr;
     bool memory_initialized = false;
     World* g_world = nullptr;
 
@@ -210,13 +211,6 @@ extern "C" {
 
         update_scheduler_depth_metric(g_scheduler.Size());
 
-        // Debug timing logs (commented out - enable for scheduler debugging)
-        // int64_t time_diff_osc = ntp_time - current_osc_time;
-        // double time_diff_ms = ((double)time_diff_osc / 4294967296.0) * 1000.0;
-        // worklet_debug("SCHED: Bundle scheduled - timetag=%llu current=%llu diff=%.2fms size=%d queue=%d",
-        //              (unsigned long long)ntp_time, (unsigned long long)current_osc_time,
-        //              time_diff_ms, size, g_scheduler.Size());
-
         return true;
     }
 
@@ -227,9 +221,13 @@ extern "C" {
         control = reinterpret_cast<ControlPointers*>(shared_memory + CONTROL_START);
         metrics = reinterpret_cast<PerformanceMetrics*>(shared_memory + METRICS_START);
         global_timing_offset = reinterpret_cast<double*>(shared_memory + GLOBAL_TIMING_START);
+        local_clock_offset = reinterpret_cast<double*>(shared_memory + LOCAL_CLOCK_OFFSET_START);
 
         // Initialize global timing offset to 0.0 (local time, no sync)
         *global_timing_offset = 0.0;
+
+        // Initialize local clock offset to 0.0 (will be set by JavaScript)
+        *local_clock_offset = 0.0;
 
         // Initialize all atomics to 0
         control->in_head.store(0, std::memory_order_relaxed);
@@ -348,8 +346,10 @@ extern "C" {
     }
 
     // Main audio processing function - called every audio frame (128 samples)
+    // current_time: AudioContext.currentTime (for reference, may not be used)
+    // current_ntp: Current NTP time from performance.now() (drift-free)
     EMSCRIPTEN_KEEPALIVE
-    bool process_audio(double current_time, double unix_seconds) {
+    bool process_audio(double current_time, double current_ntp) {
         if (!memory_initialized) {
             return true; // Keep alive but do nothing if not initialized
         }
@@ -358,14 +358,10 @@ extern "C" {
             return false;
         }
 
-        // Read global timing offset from SharedArrayBuffer
-        double offset = *global_timing_offset;
+        // Read timing offsets from SharedArrayBuffer
+        // Total offset = local (AudioContext → NTP drift correction) + global (multi-system sync)
+        double offset = *local_clock_offset + *global_timing_offset;
 
-        // Debug: Print offset value every 1000 frames (~every 5.8 seconds at 44.1kHz)
-        static uint32_t frame_counter = 0;
-        if ((frame_counter++ % 1000) == 0) {
-            worklet_debug("Global timing offset: %.6f", offset);
-        }
 
         // Time offset is set by JavaScript via set_time_offset()
         // No longer calculated here to avoid timing discrepancies
@@ -376,6 +372,7 @@ extern "C" {
         if (g_world) {
             int32_t in_head = control->in_head.load(std::memory_order_acquire);
             int32_t in_tail = control->in_tail.load(std::memory_order_acquire);
+
 
             // Process all available messages
             while (in_head != in_tail) {
@@ -442,10 +439,6 @@ extern "C" {
 
                 bool is_bundle_msg = is_bundle(osc_buffer, payload_size);
 
-                // Debug: Log what type of message we received (commented out - enable for message debugging)
-                // worklet_debug("MSG: Received %s (size=%d)",
-                //              is_bundle_msg ? "BUNDLE" : "MESSAGE", payload_size);
-
                 if (is_bundle_msg) {
                     // Extract timetag
                     uint64_t timetag = extract_timetag(osc_buffer);
@@ -453,7 +446,6 @@ extern "C" {
                     // Check if immediate execution (timetag == 0 or 1)
                     if (timetag == 0 || timetag == 1) {
                         // Immediate bundle - execute now
-                        worklet_debug("BUNDLE: Immediate execution (timetag=%llu)", (unsigned long long)timetag);
                         OSC_Packet packet;
                         packet.mData = osc_buffer;
                         packet.mSize = payload_size;
@@ -463,9 +455,12 @@ extern "C" {
                         PerformOSCBundle(g_world, &packet);
                     } else {
                         // Future bundle - schedule it (RT-safe, no malloc!)
-                        // Calculate current OSC time for logging
-                        int64_t current_osc_time = audio_to_osc_time(current_time);
-                        // Cast uint64_t to int64 for scheduler (SC uses signed int64)
+                        // Convert current NTP time to OSC timetag format (int64)
+                        uint32_t seconds = (uint32_t)current_ntp;
+                        uint32_t fraction = (uint32_t)((current_ntp - seconds) * 4294967296.0);
+                        uint64_t current_osc_time_u = ((uint64_t)seconds << 32) | fraction;
+                        int64_t current_osc_time = (int64_t)current_osc_time_u;
+
                         if (!schedule_bundle(g_world, (int64_t)timetag, current_osc_time, osc_buffer, payload_size, reply_addr)) {
                             worklet_debug("ERROR: Failed to schedule bundle");
                         }
@@ -498,8 +493,11 @@ extern "C" {
             g_world->mBufCounter++;
 
             // EXECUTE SCHEDULED BUNDLES (from SC_CoreAudio.cpp:1388-1401)
-            // Convert current time to OSC/NTP format
-            int64_t currentOscTime = audio_to_osc_time(current_time);
+            // Convert current NTP time to OSC timetag format
+            uint32_t seconds = (uint32_t)current_ntp;
+            uint32_t fraction = (uint32_t)((current_ntp - seconds) * 4294967296.0);
+            uint64_t currentOscTime_u = ((uint64_t)seconds << 32) | fraction;
+            int64_t currentOscTime = (int64_t)currentOscTime_u;
             int64_t nextOscTime = currentOscTime + g_osc_increment;
 
             // Execute all bundles that are due within this buffer

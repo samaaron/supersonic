@@ -15,9 +15,9 @@ var ringBufferBase = null;
 var bufferConstants = null;
 
 // Priority queue implemented as binary min-heap
-// Entries: { timeMs, seq, editorId, runTag, oscData }
+// Entries: { ntpTime, seq, editorId, runTag, oscData }
 var eventHeap = [];
-var nextTimer = null;
+var periodicTimer = null;    // Single periodic timer (25ms interval)
 var sequenceCounter = 0;
 var isDispatching = false;  // Prevent reentrancy into dispatch loop
 
@@ -36,8 +36,10 @@ var stats = {
     maxSendProcessMs: 0
 };
 
-// Minimum time window before dispatch (ms) - dispatch immediately when ready
-var DISPATCH_LEEWAY_MS = 0.0;
+// Timing constants
+var NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
+var POLL_INTERVAL_MS = 25;           // Check every 25ms
+var LOOKAHEAD_S = 0.100;             // 100ms lookahead window
 
 function schedulerLog() {
     // Toggle to true for verbose diagnostics
@@ -47,9 +49,28 @@ function schedulerLog() {
     }
 }
 
-function getBundleTimestamp(oscMessage) {
-    if (oscMessage.length >= 16 && oscMessage[0] === 0x23) {
-        var view = new DataView(oscMessage.buffer, oscMessage.byteOffset);
+// ============================================================================
+// NTP TIME HELPERS
+// ============================================================================
+
+/**
+ * Get current NTP time from performance.now()
+ * Includes global timing offset for multi-system sync
+ */
+function getCurrentNTP() {
+    var perfTimeMs = performance.timeOrigin + performance.now();
+    var perfTimeS = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+    var globalOffset = offsetView ? offsetView[0] : 0;
+    return perfTimeS + globalOffset;
+}
+
+/**
+ * Extract NTP timestamp from OSC bundle
+ * Returns NTP time in seconds (double), or null if not a bundle
+ */
+function extractNTPFromBundle(oscData) {
+    if (oscData.length >= 16 && oscData[0] === 0x23) {  // '#bundle'
+        var view = new DataView(oscData.buffer, oscData.byteOffset);
         var ntpSeconds = view.getUint32(8, false);
         var ntpFraction = view.getUint32(12, false);
         return ntpSeconds + ntpFraction / 0x100000000;
@@ -57,17 +78,42 @@ function getBundleTimestamp(oscMessage) {
     return null;
 }
 
+/**
+ * Legacy wrapper for backwards compatibility
+ */
+function getBundleTimestamp(oscMessage) {
+    return extractNTPFromBundle(oscMessage);
+}
+
+// ============================================================================
+// SHARED ARRAY BUFFER ACCESS
+// ============================================================================
+
+var offsetView = null;  // Float64Array for reading global timing offset
+
+/**
+ * Initialize SharedArrayBuffer views including offset
+ */
+function initSharedBuffer() {
+    if (!sharedBuffer || !bufferConstants) {
+        console.error('[PreScheduler] Cannot init - missing buffer or constants');
+        return;
+    }
+
+    // Create view for reading global timing offset (multi-system sync)
+    offsetView = new Float64Array(
+        sharedBuffer,
+        bufferConstants.GLOBAL_TIMING_START,
+        1
+    );
+
+    console.log('[PreScheduler] SharedArrayBuffer initialized, offset=' + offsetView[0].toFixed(6));
+}
+
 function sendToWriter(oscMessage) {
     if (!writerWorker) {
         console.error('[OSCPreSchedulerWorker] Writer worker not set');
         return;
-    }
-
-    var bundleTimestamp = getBundleTimestamp(oscMessage);
-    var sendTime = performance.now();
-
-    if (bundleTimestamp !== null) {
-        console.log(`[PreScheduler] Dispatching bundle NTP=${bundleTimestamp.toFixed(3)} at perf=${sendTime.toFixed(2)}ms`);
     }
 
     writerWorker.postMessage({
@@ -78,18 +124,29 @@ function sendToWriter(oscMessage) {
     stats.bundlesSentToWriter++;
 }
 
-function scheduleEvent(waitTimeMs, editorId, runTag, oscData) {
-    var targetTimeMs = performance.now() + waitTimeMs;
-    var bundleTimestamp = getBundleTimestamp(oscData);
+/**
+ * Schedule an OSC bundle by its NTP timestamp
+ * Non-bundles or bundles without timestamps are dispatched immediately
+ */
+function scheduleEvent(oscData, editorId, runTag) {
+    var ntpTime = extractNTPFromBundle(oscData);
+
+    if (ntpTime === null) {
+        // Not a bundle - dispatch immediately to writer
+        console.log('[PreScheduler] Non-bundle message, dispatching immediately');
+        sendToWriter(oscData);
+        return;
+    }
+
+    // Create event with NTP timestamp
     var event = {
-        timeMs: targetTimeMs,
+        ntpTime: ntpTime,
         seq: sequenceCounter++,
-        editorId: editorId,
+        editorId: editorId || 0,
         runTag: runTag || '',
         oscData: oscData
     };
 
-    var wasEmpty = eventHeap.length === 0;
     heapPush(event);
 
     stats.bundlesScheduled++;
@@ -97,14 +154,6 @@ function scheduleEvent(waitTimeMs, editorId, runTag, oscData) {
     if (stats.eventsPending > stats.maxEventsPending) {
         stats.maxEventsPending = stats.eventsPending;
     }
-
-    if (bundleTimestamp !== null) {
-        console.log(`[PreScheduler] Scheduled bundle NTP=${bundleTimestamp.toFixed(3)} for perf=${targetTimeMs.toFixed(2)}ms (+${waitTimeMs.toFixed(0)}ms), queue=${stats.eventsPending}`);
-    } else if (wasEmpty || stats.eventsPending % 10 === 0) {
-        console.log(`[PreScheduler] Scheduled event for +${waitTimeMs.toFixed(0)}ms, queue now ${stats.eventsPending} events`);
-    }
-
-    scheduleNextDispatch();
 }
 
 function heapPush(event) {
@@ -162,10 +211,10 @@ function siftDown(index) {
 }
 
 function compareEvents(a, b) {
-    if (a.timeMs === b.timeMs) {
+    if (a.ntpTime === b.ntpTime) {
         return a.seq - b.seq;
     }
-    return a.timeMs - b.timeMs;
+    return a.ntpTime - b.ntpTime;
 }
 
 function swap(i, j) {
@@ -174,75 +223,73 @@ function swap(i, j) {
     eventHeap[j] = tmp;
 }
 
-function scheduleNextDispatch() {
-    // Don't reschedule while dispatch is running - it will reschedule itself when done
-    if (isDispatching) {
+/**
+ * Start periodic polling (called once on init)
+ */
+function startPeriodicPolling() {
+    if (periodicTimer !== null) {
+        console.warn('[PreScheduler] Polling already started');
         return;
     }
 
-    var wasTimerSet = nextTimer !== null;
-    if (nextTimer) {
-        clearTimeout(nextTimer);
-        nextTimer = null;
-    }
+    console.log('[PreScheduler] Starting periodic polling (every ' + POLL_INTERVAL_MS + 'ms)');
+    checkAndDispatch();  // Start immediately
+}
 
-    if (eventHeap.length === 0) {
-        return;
-    }
-
-    var now = performance.now();
-    var nextEvent = heapPeek();
-    var delay = nextEvent.timeMs - now;
-
-    if (delay <= DISPATCH_LEEWAY_MS) {
-        if (wasTimerSet) {
-            console.log(`[PreScheduler] Timer was active, now dispatching immediately (${delay.toFixed(2)}ms early/late)`);
-        }
-        dispatchDueEvents();
-    } else {
-        nextTimer = setTimeout(dispatchDueEvents, delay);
-        if (wasTimerSet) {
-            console.log(`[PreScheduler] Rescheduled timer for +${delay.toFixed(0)}ms`);
-        }
+/**
+ * Stop periodic polling
+ */
+function stopPeriodicPolling() {
+    if (periodicTimer !== null) {
+        clearTimeout(periodicTimer);
+        periodicTimer = null;
+        console.log('[PreScheduler] Stopped periodic polling');
     }
 }
 
-function dispatchDueEvents() {
-    nextTimer = null;
-    isDispatching = true;  // Set flag to prevent reentrancy
+/**
+ * Periodic check and dispatch function
+ * Uses NTP timestamps and global offset for drift-free timing
+ */
+function checkAndDispatch() {
+    isDispatching = true;
 
-    var now = performance.now();
+    if (!offsetView) {
+        console.error('[PreScheduler] offsetView not initialized!');
+        isDispatching = false;
+        periodicTimer = setTimeout(checkAndDispatch, POLL_INTERVAL_MS);
+        return;
+    }
+
+    var currentNTP = getCurrentNTP();
+    var lookaheadTime = currentNTP + LOOKAHEAD_S;
     var dispatchCount = 0;
-    var dispatchStart = now;
+    var dispatchStart = performance.now();
 
+    // Dispatch all bundles that are ready
     while (eventHeap.length > 0) {
         var nextEvent = heapPeek();
-        if (nextEvent.timeMs - now > DISPATCH_LEEWAY_MS) {
+
+        if (nextEvent.ntpTime <= lookaheadTime) {
+            // Ready to dispatch
+            heapPop();
+            stats.eventsPending = eventHeap.length;
+
+            var timeUntilExec = nextEvent.ntpTime - currentNTP;
+            stats.totalDispatches++;
+
+            sendToWriter(nextEvent.oscData);
+            dispatchCount++;
+        } else {
+            // Rest aren't ready yet (heap is sorted)
             break;
         }
-
-        heapPop();
-        stats.eventsPending = eventHeap.length;
-        var lateness = now - nextEvent.timeMs;
-        if (lateness < 0) {
-            lateness = 0;
-        }
-        stats.totalDispatches++;
-        stats.totalLateDispatchMs += lateness;
-        if (lateness > stats.maxLateDispatchMs) {
-            stats.maxLateDispatchMs = lateness;
-        }
-        sendToWriter(nextEvent.oscData);
-        dispatchCount++;
     }
 
-    var dispatchDuration = performance.now() - dispatchStart;
-    if (dispatchCount > 0) {
-        console.log(`[PreScheduler] Dispatched ${dispatchCount} events in ${dispatchDuration.toFixed(2)}ms, ${eventHeap.length} remaining`);
-    }
+    isDispatching = false;
 
-    isDispatching = false;  // Clear flag before rescheduling
-    scheduleNextDispatch();
+    // Reschedule for next check (fixed interval)
+    periodicTimer = setTimeout(checkAndDispatch, POLL_INTERVAL_MS);
 }
 
 function cancelBy(predicate) {
@@ -266,7 +313,7 @@ function cancelBy(predicate) {
         heapify();
         stats.eventsCancelled += removed;
         stats.eventsPending = eventHeap.length;
-        scheduleNextDispatch();
+        console.log('[PreScheduler] Cancelled ' + removed + ' events, ' + eventHeap.length + ' remaining');
     }
 }
 
@@ -292,13 +339,12 @@ function cancelAllTags() {
     if (eventHeap.length === 0) {
         return;
     }
-    stats.eventsCancelled += eventHeap.length;
+    var cancelled = eventHeap.length;
+    stats.eventsCancelled += cancelled;
     eventHeap = [];
     stats.eventsPending = 0;
-    if (nextTimer) {
-        clearTimeout(nextTimer);
-        nextTimer = null;
-    }
+    console.log('[PreScheduler] Cancelled all ' + cancelled + ' events');
+    // Note: Periodic timer continues running (it will just find empty queue)
 }
 
 // Helpers reused from legacy worker for immediate send
@@ -356,7 +402,14 @@ self.onmessage = function(event) {
                 sharedBuffer = data.sharedBuffer;
                 ringBufferBase = data.ringBufferBase;
                 bufferConstants = data.bufferConstants;
-                schedulerLog('[OSCPreSchedulerWorker] Initialized');
+
+                // Initialize SharedArrayBuffer views (including offset)
+                initSharedBuffer();
+
+                // Start periodic polling
+                startPeriodicPolling();
+
+                schedulerLog('[OSCPreSchedulerWorker] Initialized with NTP-based scheduling');
                 self.postMessage({ type: 'initialized' });
                 break;
 
@@ -368,31 +421,14 @@ self.onmessage = function(event) {
             case 'send':
                 var sendStart = performance.now();
 
-                // Handle both old (waitTimeMs) and new (audioTimeS) formats for backwards compatibility
-                var waitTimeMs = data.waitTimeMs;
+                // New NTP-based scheduling: extract NTP from bundle
+                // scheduleEvent() will dispatch immediately if not a bundle
+                scheduleEvent(
+                    data.oscData,
+                    data.editorId || 0,
+                    data.runTag || ''
+                );
 
-                if (data.audioTimeS !== null && data.audioTimeS !== undefined && data.currentTimeS !== null && data.currentTimeS !== undefined) {
-                    // New format: calculate wait time from audio times
-                    var deltaS = data.audioTimeS - data.currentTimeS;
-                    var lookaheadS = 0.100; // 100ms lookahead (web-audio-scheduler default)
-                    waitTimeMs = (deltaS - lookaheadS) * 1000;
-
-                    // Ensure we don't schedule in the past
-                    if (waitTimeMs < 0) {
-                        waitTimeMs = 0;
-                    }
-                }
-
-                if (waitTimeMs === null || waitTimeMs === undefined || waitTimeMs <= 0) {
-                    processImmediate(data.oscData);
-                } else {
-                    scheduleEvent(
-                        waitTimeMs,
-                        data.editorId || 0,
-                        data.runTag || '',
-                        data.oscData
-                    );
-                }
                 var sendDuration = performance.now() - sendStart;
                 stats.totalSendTasks++;
                 stats.totalSendProcessMs += sendDuration;
