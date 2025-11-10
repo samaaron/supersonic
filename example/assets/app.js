@@ -837,10 +837,6 @@ messageForm.addEventListener('submit', async (e) => {
     }
 
     const runTag = `demo-run-${Date.now()}-${++runCounter}`;
-    const submitTime = orchestrator.audioContext.currentTime;
-    const submitPerf = performance.now();
-    console.log(`[SEND] Submitting ${parsed.scheduled.size} scheduled bundles + ${parsed.immediate.length} immediate messages at t=${submitTime.toFixed(3)}s perf=${submitPerf.toFixed(2)}ms`);
-
     // Log comments immediately so the history shows them in order
     parsed.comments.forEach(comment => addSentMessage(null, comment));
 
@@ -898,14 +894,11 @@ messageForm.addEventListener('submit', async (e) => {
         const messagesAtTime = parsed.scheduled.get(timestamp);
         const targetTimeS = now + timestamp + 0.02; // small safety margin
         const bundle = createOSCBundle(targetTimeS, messagesAtTime);
-        console.log(`[SCHEDULE] Scheduling ${messagesAtTime.length} messages for t=${targetTimeS.toFixed(3)}s (offset=${timestamp.toFixed(3)}s from now=${now.toFixed(3)}s)`);
         bundlePromises.push(orchestrator.sendOSC(bundle, { runTag }));
         sendsThisRound += messagesAtTime.length;
       }
 
       await Promise.all(bundlePromises);
-      const afterSend = orchestrator.audioContext.currentTime;
-      console.log(`[SEND] All bundles sent. Time elapsed: ${((afterSend - now) * 1000).toFixed(2)}ms`);
     }
 
     // Immediate OSC commands

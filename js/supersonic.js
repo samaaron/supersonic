@@ -385,10 +385,10 @@ export class SuperSonic {
         // Pending buffer operations map for UUID correlation
         this.pendingBufferOps = new Map();  // UUID -> {resolve, reject, timeout}
 
-        // Time offset (AudioContext → NTP conversion)
-        this.wasmTimeOffset = null;
+        // Time offset promise (resolves when buffer constants are initialized)
         this._timeOffsetPromise = null;
         this._resolveTimeOffset = null;
+        this._localClockOffsetTimer = null;  // Timer for periodic drift correction
 
         // Callbacks
         this.onOSC = null;              // Raw binary OSC from scsynth (for display/logging)
@@ -511,34 +511,6 @@ export class SuperSonic {
         console.log('[SuperSonic] Buffer pool initialized: 128MB at offset 64MB');
     }
 
-    /**
-     * Calculate time offset (AudioContext → NTP conversion)
-     * Called when AudioContext is in 'running' state to ensure accurate timing
-     *
-     * IMPORTANT: Uses performance.timeOrigin + performance.now() instead of Date.now()
-     * to avoid Safari clock drift issues. performance.now() is monotonic and stable.
-     */
-    #calculateTimeOffset() {
-        const SECONDS_1900_TO_1970 = 2208988800;
-        const audioContextTime = this.audioContext.currentTime;
-
-        // Use performance.timeOrigin (epoch time when page loaded) + performance.now() (monotonic time since load)
-        // This is more stable than Date.now() which can drift or be adjusted by system clock/NTP
-        const unixMillis = performance.timeOrigin + performance.now();
-        const unixSeconds = unixMillis / 1000;
-
-        this.wasmTimeOffset = (SECONDS_1900_TO_1970 + unixSeconds) - audioContextTime;
-
-        console.log(`[TimeOffset] Calculated offset=${this.wasmTimeOffset.toFixed(3)}s (audioContext=${audioContextTime.toFixed(3)}s, perfTime=${unixSeconds.toFixed(3)}s)`);
-
-        // Resolve the promise if it hasn't been resolved yet
-        if (this._resolveTimeOffset) {
-            this._resolveTimeOffset(this.wasmTimeOffset);
-            this._resolveTimeOffset = null;
-        }
-
-        return this.wasmTimeOffset;
-    }
 
     /**
      * Initialize AudioContext and set up time offset calculation
@@ -548,7 +520,8 @@ export class SuperSonic {
             this.config.audioContextOptions
         );
 
-        // Create promise that will resolve when time offset is calculated
+        // Create promise that will resolve when buffer constants are initialized
+        // and local clock offset is set up (happens in worklet initialization)
         this._timeOffsetPromise = new Promise((resolve) => {
             this._resolveTimeOffset = resolve;
         });
@@ -564,18 +537,6 @@ export class SuperSonic {
 
             document.addEventListener('click', resumeContext, { once: true });
             document.addEventListener('touchstart', resumeContext, { once: true });
-        }
-
-        // Listen for state changes to calculate offset when running
-        this.audioContext.addEventListener('statechange', () => {
-            if (this.audioContext.state === 'running' && this._resolveTimeOffset) {
-                this.#calculateTimeOffset();
-            }
-        });
-
-        // If already running, calculate immediately
-        if (this.audioContext.state === 'running') {
-            this.#calculateTimeOffset();
         }
 
         return this.audioContext;
@@ -655,15 +616,11 @@ export class SuperSonic {
             sharedBuffer: this.sharedBuffer
         });
 
-        // Wait for time offset to be calculated (when AudioContext is running)
-        const timeOffset = await this._timeOffsetPromise;
-
-        // Send WASM bytes, memory, and time offset
+        // Send WASM bytes and memory
         this.workletNode.port.postMessage({
             type: 'loadWasm',
             wasmBytes: wasmBytes,
-            wasmMemory: this.wasmMemory,
-            timeOffset: timeOffset
+            wasmMemory: this.wasmMemory
         });
 
         // Wait for worklet initialization
@@ -830,15 +787,33 @@ export class SuperSonic {
                         }
 
                         if (event.data.bufferConstants !== undefined) {
+                            console.log('[SuperSonic] Received bufferConstants from worklet');
                             this.bufferConstants = event.data.bufferConstants;
 
                             // Initialize global timing offset to 0.0 (local time, no sync)
                             // Note: WASM also initializes this, but we set it here for clarity
+                            console.log('[SuperSonic] Setting global timing offset to 0.0');
                             this.setGlobalTimingOffset(0.0);
+
+                            // Initialize local clock offset (AudioContext → NTP)
+                            console.log('[SuperSonic] Calculating local clock offset');
+                            this.updateLocalClockOffset();
+
+                            // Start periodic updates to handle drift between AudioContext and performance.now()
+                            // Both are monotonic but can drift relative to each other
+                            this.#startLocalClockOffsetTimer();
+
+                            // Resolve time offset promise now that local clock offset is initialized
+                            console.log('[SuperSonic] Resolving time offset promise, _resolveTimeOffset=', this._resolveTimeOffset);
+                            if (this._resolveTimeOffset) {
+                                this._resolveTimeOffset();
+                                this._resolveTimeOffset = null;
+                            }
                         } else {
                             console.warn('[SuperSonic] Warning: bufferConstants not provided by worklet');
                         }
 
+                        console.log('[SuperSonic] Calling resolve() for worklet initialization');
                         resolve();
                     } else {
                         reject(new Error(event.data.error || 'AudioWorklet initialization failed'));
@@ -1103,6 +1078,9 @@ export class SuperSonic {
     async destroy() {
         console.log('[SuperSonic] Destroying...');
 
+        // Stop local clock offset drift correction timer
+        this.#stopLocalClockOffsetTimer();
+
         if (this.osc) {
             this.osc.terminate();
             this.osc = null;
@@ -1139,19 +1117,18 @@ export class SuperSonic {
      * Useful for callers that need accurate bundle timestamps.
      */
     async waitForTimeSync() {
-        if (this.wasmTimeOffset !== null) {
-            return this.wasmTimeOffset;
+        // Wait for buffer constants to be initialized (which includes local clock offset setup)
+        if (!this.bufferConstants) {
+            // Wait for the promise that was created in #initializeAudioContext()
+            // and will be resolved when bufferConstants are initialized
+            if (this._timeOffsetPromise) {
+                await this._timeOffsetPromise;
+            }
         }
 
-        if (!this._timeOffsetPromise) {
-            this._timeOffsetPromise = new Promise((resolve) => {
-                this._resolveTimeOffset = resolve;
-            });
-        }
-
-        const offset = await this._timeOffsetPromise;
-        this.wasmTimeOffset = offset;
-        return offset;
+        // Return total offset: local (drift correction) + global (multi-system sync)
+        // This is used to convert AudioContext time to NTP time for bundle timestamps
+        return this.getLocalClockOffset() + this.getGlobalTimingOffset();
     }
 
     /**
@@ -1413,6 +1390,79 @@ export class SuperSonic {
             1
         );
         return offsetView[0];
+    }
+
+    /**
+     * Update local clock offset (AudioContext → NTP conversion)
+     * Tracks drift between AudioContext.currentTime and performance.now()
+     * @private
+     */
+    updateLocalClockOffset() {
+        if (!this.bufferConstants || !this.audioContext) {
+            return;
+        }
+
+        // Calculate current NTP time from performance.now()
+        const NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
+        const perfTimeMs = performance.timeOrigin + performance.now();
+        const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+
+        // Calculate offset: NTP - AudioContext time
+        const localOffset = currentNTP - this.audioContext.currentTime;
+
+        // Write to SharedArrayBuffer
+        const offsetView = new Float64Array(
+            this.sharedBuffer,
+            this.bufferConstants.LOCAL_CLOCK_OFFSET_START,
+            1
+        );
+        offsetView[0] = localOffset;
+
+        console.log(`[SuperSonic] Local clock offset updated: ${localOffset.toFixed(6)}s (NTP=${currentNTP.toFixed(3)}, AudioCtx=${this.audioContext.currentTime.toFixed(3)})`);
+    }
+
+    /**
+     * Get current local clock offset
+     * @returns {number} Current offset in seconds
+     */
+    getLocalClockOffset() {
+        if (!this.bufferConstants) {
+            return 0.0;
+        }
+
+        const offsetView = new Float64Array(
+            this.sharedBuffer,
+            this.bufferConstants.LOCAL_CLOCK_OFFSET_START,
+            1
+        );
+        return offsetView[0];
+    }
+
+    /**
+     * Start periodic local clock offset updates (every 15 seconds)
+     * @private
+     */
+    #startLocalClockOffsetTimer() {
+        // Clear any existing timer
+        this.#stopLocalClockOffsetTimer();
+
+        // Update every 15 seconds to track drift between AudioContext and performance.now()
+        this._localClockOffsetTimer = setInterval(() => {
+            this.updateLocalClockOffset();
+        }, 15000);
+
+        console.log('[SuperSonic] Started local clock offset drift correction (every 15s)');
+    }
+
+    /**
+     * Stop periodic local clock offset updates
+     * @private
+     */
+    #stopLocalClockOffsetTimer() {
+        if (this._localClockOffsetTimer) {
+            clearInterval(this._localClockOffsetTimer);
+            this._localClockOffsetTimer = null;
+        }
     }
 
     #extractSynthDefName(path) {
@@ -1684,9 +1734,14 @@ export class SuperSonic {
             return null;
         }
 
-        if (this.wasmTimeOffset === null) {
-            this.#calculateTimeOffset();
+        const localClockOffset = this.getLocalClockOffset();
+        if (localClockOffset === 0) {
+            console.warn('[SuperSonic] Local clock offset not yet initialized');
+            return null;
         }
+
+        const globalTimingOffset = this.getGlobalTimingOffset();
+        const totalOffset = localClockOffset + globalTimingOffset;
 
         const view = new DataView(uint8Data.buffer, uint8Data.byteOffset);
         const ntpSeconds = view.getUint32(8, false);
@@ -1697,12 +1752,8 @@ export class SuperSonic {
         }
 
         const ntpTimeS = ntpSeconds + (ntpFraction / 0x100000000);
-        const audioTimeS = ntpTimeS - this.wasmTimeOffset;
+        const audioTimeS = ntpTimeS - totalOffset;
         const currentTimeS = this.audioContext.currentTime;
-        const deltaS = audioTimeS - currentTimeS;
-
-        // DEBUG: Log timing information to diagnose Safari issues
-        console.log(`[Timing] NTP=${ntpTimeS.toFixed(3)}s, wasmOffset=${this.wasmTimeOffset.toFixed(3)}s, audioTime=${audioTimeS.toFixed(3)}s, currentTime=${currentTimeS.toFixed(3)}s, delta=${deltaS.toFixed(3)}s (${(deltaS*1000).toFixed(0)}ms)`);
 
         // Return the target audio time, not the wait time
         // The scheduler will handle lookahead scheduling

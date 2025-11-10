@@ -33,6 +33,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.atomicView = null;
         this.uint8View = null;
         this.dataView = null;
+        this.localClockOffsetView = null;  // Float64Array for reading local clock offset
 
         // Buffer constants (loaded from WASM at initialization)
         this.bufferConstants = null;
@@ -72,9 +73,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             throw new Error('WASM memory not available');
         }
 
-        // Read the struct (16 uint32_t fields + 1 uint8_t + 3 padding bytes)
-        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 17);
-        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 68);
+        // Read the struct (18 uint32_t fields + 1 uint8_t + 3 padding bytes)
+        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 19);
+        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 76);
 
         // Extract constants (order matches BufferLayout struct in shared_memory.h)
         this.bufferConstants = {
@@ -90,11 +91,13 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             METRICS_SIZE: uint32View[9],
             GLOBAL_TIMING_START: uint32View[10],
             GLOBAL_TIMING_SIZE: uint32View[11],
-            TOTAL_BUFFER_SIZE: uint32View[12],
-            MAX_MESSAGE_SIZE: uint32View[13],
-            MESSAGE_MAGIC: uint32View[14],
-            PADDING_MAGIC: uint32View[15],
-            DEBUG_PADDING_MARKER: uint8View[64],
+            LOCAL_CLOCK_OFFSET_START: uint32View[12],
+            LOCAL_CLOCK_OFFSET_SIZE: uint32View[13],
+            TOTAL_BUFFER_SIZE: uint32View[14],
+            MAX_MESSAGE_SIZE: uint32View[15],
+            MESSAGE_MAGIC: uint32View[16],
+            PADDING_MAGIC: uint32View[17],
+            DEBUG_PADDING_MARKER: uint8View[72],
             MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, padding)
         };
 
@@ -135,6 +138,24 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             SCHEDULER_QUEUE_MAX: (ringBufferBase + METRICS_START + 20) / 4,
             SCHEDULER_QUEUE_DROPPED: (ringBufferBase + METRICS_START + 24) / 4
         };
+
+        // Create Float64Array views for timing offsets
+        // Note: Don't add ringBufferBase - these offsets are already absolute
+        const LOCAL_CLOCK_OFFSET_START = this.bufferConstants.LOCAL_CLOCK_OFFSET_START;
+        this.localClockOffsetView = new Float64Array(
+            this.sharedBuffer,
+            LOCAL_CLOCK_OFFSET_START,
+            1
+        );
+        console.log('[AudioWorklet] Local clock offset view initialized at byte offset:', LOCAL_CLOCK_OFFSET_START);
+
+        const GLOBAL_TIMING_START = this.bufferConstants.GLOBAL_TIMING_START;
+        this.globalTimingOffsetView = new Float64Array(
+            this.sharedBuffer,
+            GLOBAL_TIMING_START,
+            1
+        );
+        console.log('[AudioWorklet] Global timing offset view initialized at byte offset:', GLOBAL_TIMING_START);
     }
 
     // Write debug message to SharedArrayBuffer DEBUG ring buffer
@@ -269,11 +290,6 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         if (this.wasmInstance.exports.init_memory) {
                             this.wasmInstance.exports.init_memory(48000.0);
 
-                            // Set time offset from JavaScript
-                            if (this.wasmInstance.exports.set_time_offset && data.timeOffset) {
-                                this.wasmInstance.exports.set_time_offset(data.timeOffset);
-                            }
-
                             this.isInitialized = true;
 
                             this.port.postMessage({
@@ -301,11 +317,6 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         // Initialize WASM memory
                         if (this.wasmInstance.exports.init_memory) {
                             this.wasmInstance.exports.init_memory(48000.0);
-
-                            // Set time offset from JavaScript
-                            if (this.wasmInstance.exports.set_time_offset && data.timeOffset) {
-                                this.wasmInstance.exports.set_time_offset(data.timeOffset);
-                            }
 
                             this.isInitialized = true;
 
@@ -424,6 +435,12 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     }
 
     process(inputs, outputs, parameters) {
+        // DEBUG: Log first call
+        if (!this._everCalled) {
+            this._everCalled = true;
+            console.log('[AudioWorklet] process() called for first time');
+        }
+
         if (!this.isInitialized) {
             return true;
         }
@@ -434,8 +451,15 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 // In AudioWorkletGlobalScope, currentTime is a bare global variable (not on globalThis)
                 // We use a different variable name to avoid shadowing
                 const audioContextTime = currentTime;  // Access the global currentTime directly
-                const unixSeconds = Date.now() / 1000;  // Current Unix time in seconds
-                const keepAlive = this.wasmInstance.exports.process_audio(audioContextTime, unixSeconds);
+
+                // Read timing offsets from SharedArrayBuffer (updated periodically by main thread)
+                // Total offset = local (drift correction) + global (multi-system sync)
+                const localOffset = this.localClockOffsetView ? this.localClockOffsetView[0] : 0;
+                const globalOffset = this.globalTimingOffsetView ? this.globalTimingOffsetView[0] : 0;
+                const totalOffset = localOffset + globalOffset;
+                const currentNTP = audioContextTime + totalOffset;
+
+                const keepAlive = this.wasmInstance.exports.process_audio(audioContextTime, currentNTP);
 
                 // Copy scsynth audio output to AudioWorklet outputs
                 if (this.wasmInstance.exports.get_audio_output_bus && outputs[0] && outputs[0].length >= 2) {
@@ -492,6 +516,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 return keepAlive !== 0;
             }
         } catch (error) {
+            console.error('[AudioWorklet] process() error:', error);
+            console.error('[AudioWorklet] Stack:', error.stack);
             if (this.atomicView) {
                 Atomics.or(this.atomicView, this.CONTROL_INDICES.STATUS_FLAGS, this.STATUS_FLAGS.WASM_ERROR);
             }
