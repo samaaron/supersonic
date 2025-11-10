@@ -100,6 +100,7 @@ extern "C" {
     uint8_t* shared_memory = nullptr;
     ControlPointers* control = nullptr;
     PerformanceMetrics* metrics = nullptr;
+    double* global_timing_offset = nullptr;
     bool memory_initialized = false;
     World* g_world = nullptr;
 
@@ -225,6 +226,10 @@ extern "C" {
         shared_memory = ring_buffer_storage;
         control = reinterpret_cast<ControlPointers*>(shared_memory + CONTROL_START);
         metrics = reinterpret_cast<PerformanceMetrics*>(shared_memory + METRICS_START);
+        global_timing_offset = reinterpret_cast<double*>(shared_memory + GLOBAL_TIMING_START);
+
+        // Initialize global timing offset to 0.0 (local time, no sync)
+        *global_timing_offset = 0.0;
 
         // Initialize all atomics to 0
         control->in_head.store(0, std::memory_order_relaxed);
@@ -351,6 +356,15 @@ extern "C" {
 
         if (!metrics) {
             return false;
+        }
+
+        // Read global timing offset from SharedArrayBuffer
+        double offset = *global_timing_offset;
+
+        // Debug: Print offset value every 1000 frames (~every 5.8 seconds at 44.1kHz)
+        static uint32_t frame_counter = 0;
+        if ((frame_counter++ % 1000) == 0) {
+            worklet_debug("Global timing offset: %.6f", offset);
         }
 
         // Time offset is set by JavaScript via set_time_offset()

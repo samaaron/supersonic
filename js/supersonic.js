@@ -831,6 +831,10 @@ export class SuperSonic {
 
                         if (event.data.bufferConstants !== undefined) {
                             this.bufferConstants = event.data.bufferConstants;
+
+                            // Initialize global timing offset to 0.0 (local time, no sync)
+                            // Note: WASM also initializes this, but we set it here for clarity
+                            this.setGlobalTimingOffset(0.0);
                         } else {
                             console.warn('[SuperSonic] Warning: bufferConstants not provided by worklet');
                         }
@@ -1361,6 +1365,54 @@ export class SuperSonic {
                 count: this.loadedSynthDefs.size
             }
         };
+    }
+
+    /**
+     * Set global timing offset for multi-system synchronization
+     * @param {number} offsetSeconds - Offset in seconds (0.0 = local time, no sync)
+     *                                  Positive values shift execution time forward
+     *                                  Negative values shift execution time backward
+     * @example
+     * // For NTP sync: offset = ntp_time - local_time
+     * // For Ableton Link: offset = link_time - local_time
+     * supersonic.setGlobalTimingOffset(0.0);
+     */
+    setGlobalTimingOffset(offsetSeconds) {
+        if (!this.bufferConstants) {
+            console.warn('[SuperSonic] Cannot set timing offset - buffer constants not available');
+            return;
+        }
+
+        if (typeof offsetSeconds !== 'number' || !isFinite(offsetSeconds)) {
+            throw new Error('Offset must be a finite number');
+        }
+
+        const offsetView = new Float64Array(
+            this.sharedBuffer,
+            this.bufferConstants.GLOBAL_TIMING_START,
+            1
+        );
+        offsetView[0] = offsetSeconds;
+
+        console.log(`[SuperSonic] Global timing offset set to ${offsetSeconds.toFixed(6)}s`);
+    }
+
+    /**
+     * Get current global timing offset
+     * @returns {number} Current offset in seconds
+     */
+    getGlobalTimingOffset() {
+        if (!this.bufferConstants) {
+            console.warn('[SuperSonic] Cannot get timing offset - buffer constants not available');
+            return 0.0;
+        }
+
+        const offsetView = new Float64Array(
+            this.sharedBuffer,
+            this.bufferConstants.GLOBAL_TIMING_START,
+            1
+        );
+        return offsetView[0];
     }
 
     #extractSynthDefName(path) {
