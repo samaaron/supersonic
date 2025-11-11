@@ -696,6 +696,12 @@ initButton.addEventListener('click', async () => {
     };
 
     orchestrator.onDebugMessage = (msg) => {
+      // Log to console in dev mode (easier to copy/paste full logs)
+      if (orchestrator.config.development) {
+        console.log(msg.text);
+      }
+
+      // Also log to UI debug panel
       debugLog.textContent += msg.text + '\n';
       if (window.debugAutoScroll !== false) {
         const scrollContainer = debugLog.parentElement;
