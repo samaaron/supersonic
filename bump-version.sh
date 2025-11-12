@@ -3,7 +3,7 @@ set -e
 
 # SuperSonic Version Bump Script
 #
-# This script updates version numbers in exactly 10 locations:
+# This script updates version numbers in exactly 11 locations:
 #
 # Package.json version fields (4):
 #   1. package.json
@@ -20,6 +20,9 @@ set -e
 #   8. packages/supersonic-scsynth-synthdefs/index.js - CDN_BASE constant
 #   9. packages/supersonic-scsynth-samples/index.js - UNPKG_BASE constant
 #  10. packages/supersonic-scsynth-samples/index.js - JSDELIVR_BASE constant
+#
+# C++ version constants (1):
+#  11. src/audio_processor.cpp - SUPERSONIC_VERSION_MINOR constant
 #
 # Note: READMEs and error messages use @latest and don't need version updates
 
@@ -110,7 +113,21 @@ sed -i "s|supersonic-scsynth-samples@$CURRENT_VERSION|supersonic-scsynth-samples
 echo "✓ Updated packages/supersonic-scsynth-samples/index.js"
 
 echo ""
-echo "Step 4: Rebuilding distribution..."
+echo "Step 4: Updating C++ version constants..."
+echo "------------------------------------------"
+
+# Parse new version into components
+IFS='.' read -r NEW_MAJOR NEW_MINOR NEW_PATCH <<< "$NEW_VERSION"
+
+# Get current C++ version
+CURRENT_CPP_MINOR=$(grep "SUPERSONIC_VERSION_MINOR" "$PROJECT_ROOT/src/audio_processor.cpp" | grep -o '[0-9]\+')
+
+# Update C++ version (only MINOR changes, assuming MAJOR=0 and PATCH=0 for now)
+sed -i "s/static const int SUPERSONIC_VERSION_MINOR = $CURRENT_CPP_MINOR;/static const int SUPERSONIC_VERSION_MINOR = $NEW_MINOR;/" "$PROJECT_ROOT/src/audio_processor.cpp"
+echo "✓ Updated src/audio_processor.cpp (0.$CURRENT_CPP_MINOR.0 → $NEW_VERSION)"
+
+echo ""
+echo "Step 5: Rebuilding distribution..."
 echo "-----------------------------------"
 
 # Run build with --release flag
@@ -118,7 +135,7 @@ echo "-----------------------------------"
 echo "✓ Build complete"
 
 echo ""
-echo "Step 5: Committing changes..."
+echo "Step 6: Committing changes..."
 echo "------------------------------"
 
 # Stage all changes
