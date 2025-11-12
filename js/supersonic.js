@@ -1126,7 +1126,7 @@ export class SuperSonic {
         // Return the NTP start time for bundle creation
         // This is the NTP timestamp when AudioContext.currentTime was 0
         // Bundles should have timestamp = audioContextTime + ntpStartTime
-        const ntpStartView = new Float64Array(this.sharedBuffer, this.bufferConstants.NTP_START_TIME_START, 1);
+        const ntpStartView = new Float64Array(this.sharedBuffer, this.ringBufferBase + this.bufferConstants.NTP_START_TIME_START, 1);
         return ntpStartView[0];
     }
 
@@ -1364,7 +1364,7 @@ export class SuperSonic {
         // Write to SharedArrayBuffer (write-once)
         const ntpStartView = new Float64Array(
             this.sharedBuffer,
-            this.bufferConstants.NTP_START_TIME_START,
+            this.ringBufferBase + this.bufferConstants.NTP_START_TIME_START,
             1
         );
         ntpStartView[0] = ntpStartTime;
@@ -1372,7 +1372,7 @@ export class SuperSonic {
         // Store for drift calculation
         this._initialNTPStartTime = ntpStartTime;
 
-        console.log(`[SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(6)}s (current NTP=${currentNTP.toFixed(3)}, AudioCtx=${currentAudioCtx.toFixed(3)})`);
+        console.log(`[SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(6)}s (current NTP=${currentNTP.toFixed(3)}, AudioCtx=${currentAudioCtx.toFixed(3)}), ringBufferBase=${this.ringBufferBase}`);
     }
 
     /**
@@ -1399,7 +1399,7 @@ export class SuperSonic {
         // Write to SharedArrayBuffer (REPLACE value, don't accumulate)
         const driftView = new Int32Array(
             this.sharedBuffer,
-            this.bufferConstants.DRIFT_OFFSET_START,
+            this.ringBufferBase + this.bufferConstants.DRIFT_OFFSET_START,
             1
         );
         Atomics.store(driftView, 0, driftMs);
@@ -1418,7 +1418,7 @@ export class SuperSonic {
 
         const driftView = new Int32Array(
             this.sharedBuffer,
-            this.bufferConstants.DRIFT_OFFSET_START,
+            this.ringBufferBase + this.bufferConstants.DRIFT_OFFSET_START,
             1
         );
         return Atomics.load(driftView, 0);
@@ -1721,7 +1721,7 @@ export class SuperSonic {
         }
 
         // Read NTP start time (write-once value)
-        const ntpStartView = new Float64Array(this.sharedBuffer, this.bufferConstants.NTP_START_TIME_START, 1);
+        const ntpStartView = new Float64Array(this.sharedBuffer, this.ringBufferBase + this.bufferConstants.NTP_START_TIME_START, 1);
         const ntpStartTime = ntpStartView[0];
 
         if (ntpStartTime === 0) {
@@ -1730,12 +1730,12 @@ export class SuperSonic {
         }
 
         // Read current drift offset (milliseconds)
-        const driftView = new Int32Array(this.sharedBuffer, this.bufferConstants.DRIFT_OFFSET_START, 1);
+        const driftView = new Int32Array(this.sharedBuffer, this.ringBufferBase + this.bufferConstants.DRIFT_OFFSET_START, 1);
         const driftMs = Atomics.load(driftView, 0);
         const driftSeconds = driftMs / 1000.0;
 
         // Read global offset (milliseconds)
-        const globalView = new Int32Array(this.sharedBuffer, this.bufferConstants.GLOBAL_OFFSET_START, 1);
+        const globalView = new Int32Array(this.sharedBuffer, this.ringBufferBase + this.bufferConstants.GLOBAL_OFFSET_START, 1);
         const globalMs = Atomics.load(globalView, 0);
         const globalSeconds = globalMs / 1000.0;
 

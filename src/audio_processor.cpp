@@ -88,7 +88,8 @@ static const int SUPERSONIC_VERSION_PATCH = 0;
 extern "C" {
     // Static ring buffer allocated in WASM data segment
     // This ensures no conflicts with scsynth heap allocations
-    alignas(4) uint8_t ring_buffer_storage[65536];
+    // IMPORTANT: Must be 8-byte aligned for Float64Array access from JavaScript
+    alignas(8) uint8_t ring_buffer_storage[65536];
 
     // Validate at compile time that buffer layout fits in allocated storage
     static_assert(TOTAL_BUFFER_SIZE <= sizeof(ring_buffer_storage),
@@ -228,8 +229,8 @@ extern "C" {
         drift_offset = reinterpret_cast<std::atomic<int32_t>*>(shared_memory + DRIFT_OFFSET_START);
         global_offset = reinterpret_cast<std::atomic<int32_t>*>(shared_memory + GLOBAL_OFFSET_START);
 
-        // Initialize timing
-        *ntp_start_time = 0.0;
+        // Initialize timing (NTP_START_TIME is write-once from JavaScript, don't touch it)
+        // *ntp_start_time is written by JavaScript after AudioContext starts
         drift_offset->store(0, std::memory_order_relaxed);
         global_offset->store(0, std::memory_order_relaxed);
 
@@ -380,6 +381,14 @@ extern "C" {
         double ntp_start = cached_ntp_start;
         double drift_seconds = drift_offset ? (drift_offset->load(std::memory_order_relaxed) / 1000.0) : 0.0;
         double global_seconds = global_offset ? (global_offset->load(std::memory_order_relaxed) / 1000.0) : 0.0;
+
+        // Debug: Log first time ntp_start is cached
+        static bool logged_once = false;
+        if (!logged_once && ntp_start != 0.0) {
+            worklet_debug("NTP timing: ntp_start=%.6f drift=%.3fms global=%.3fms",
+                         ntp_start, drift_seconds * 1000.0, global_seconds * 1000.0);
+            logged_once = true;
+        }
 
         double current_ntp = current_time + ntp_start + drift_seconds + global_seconds;
 
