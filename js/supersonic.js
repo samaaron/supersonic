@@ -14,6 +14,7 @@
 import ScsynthOSC from './lib/scsynth_osc.js';
 import oscLib from './vendor/osc.js/osc.js';
 import { MemPool } from '@thi.ng/malloc';
+import { NTP_EPOCH_OFFSET, DRIFT_UPDATE_INTERVAL_MS } from './timing_constants.js';
 
 class BufferManager {
     constructor(options) {
@@ -790,18 +791,13 @@ export class SuperSonic {
                             console.log('[SuperSonic] Received bufferConstants from worklet');
                             this.bufferConstants = event.data.bufferConstants;
 
-                            // Initialize global timing offset to 0.0 (local time, no sync)
-                            // Note: WASM also initializes this, but we set it here for clarity
-                            console.log('[SuperSonic] Setting global timing offset to 0.0');
-                            this.setGlobalTimingOffset(0.0);
+                            // Initialize NTP timing (write-once: NTP time at AudioContext start)
+                            console.log('[SuperSonic] Initializing NTP timing');
+                            this.initializeNTPTiming();
 
-                            // Initialize local clock offset (AudioContext → NTP)
-                            console.log('[SuperSonic] Calculating local clock offset');
-                            this.updateLocalClockOffset();
-
-                            // Start periodic updates to handle drift between AudioContext and performance.now()
-                            // Both are monotonic but can drift relative to each other
-                            this.#startLocalClockOffsetTimer();
+                            // Start periodic drift offset updates (small millisecond adjustments)
+                            // Measures drift from initial baseline, replaces value (doesn't accumulate)
+                            this.#startDriftOffsetTimer();
 
                             // Resolve time offset promise now that local clock offset is initialized
                             console.log('[SuperSonic] Resolving time offset promise, _resolveTimeOffset=', this._resolveTimeOffset);
@@ -1078,8 +1074,8 @@ export class SuperSonic {
     async destroy() {
         console.log('[SuperSonic] Destroying...');
 
-        // Stop local clock offset drift correction timer
-        this.#stopLocalClockOffsetTimer();
+        // Stop drift offset timer
+        this.#stopDriftOffsetTimer();
 
         if (this.osc) {
             this.osc.terminate();
@@ -1113,11 +1109,12 @@ export class SuperSonic {
     }
 
     /**
-     * Wait until the AudioContext ↔ NTP offset has been established.
-     * Useful for callers that need accurate bundle timestamps.
+     * Wait until NTP timing has been established.
+     * Note: NTP calculation is now done internally in C++ process_audio().
+     * Returns 0 for backward compatibility.
      */
     async waitForTimeSync() {
-        // Wait for buffer constants to be initialized (which includes local clock offset setup)
+        // Wait for buffer constants to be initialized (which includes NTP timing setup)
         if (!this.bufferConstants) {
             // Wait for the promise that was created in #initializeAudioContext()
             // and will be resolved when bufferConstants are initialized
@@ -1126,9 +1123,11 @@ export class SuperSonic {
             }
         }
 
-        // Return total offset: local (drift correction) + global (multi-system sync)
-        // This is used to convert AudioContext time to NTP time for bundle timestamps
-        return this.getLocalClockOffset() + this.getGlobalTimingOffset();
+        // Return the NTP start time for bundle creation
+        // This is the NTP timestamp when AudioContext.currentTime was 0
+        // Bundles should have timestamp = audioContextTime + ntpStartTime
+        const ntpStartView = new Float64Array(this.sharedBuffer, this.bufferConstants.NTP_START_TIME_START, 1);
+        return ntpStartView[0];
     }
 
     /**
@@ -1345,123 +1344,110 @@ export class SuperSonic {
     }
 
     /**
-     * Set global timing offset for multi-system synchronization
-     * @param {number} offsetSeconds - Offset in seconds (0.0 = local time, no sync)
-     *                                  Positive values shift execution time forward
-     *                                  Negative values shift execution time backward
-     * @example
-     * // For NTP sync: offset = ntp_time - local_time
-     * // For Ableton Link: offset = link_time - local_time
-     * supersonic.setGlobalTimingOffset(0.0);
-     */
-    setGlobalTimingOffset(offsetSeconds) {
-        if (!this.bufferConstants) {
-            console.warn('[SuperSonic] Cannot set timing offset - buffer constants not available');
-            return;
-        }
-
-        if (typeof offsetSeconds !== 'number' || !isFinite(offsetSeconds)) {
-            throw new Error('Offset must be a finite number');
-        }
-
-        const offsetView = new Float64Array(
-            this.sharedBuffer,
-            this.bufferConstants.GLOBAL_TIMING_START,
-            1
-        );
-        offsetView[0] = offsetSeconds;
-
-        console.log(`[SuperSonic] Global timing offset set to ${offsetSeconds.toFixed(6)}s`);
-    }
-
-    /**
-     * Get current global timing offset
-     * @returns {number} Current offset in seconds
-     */
-    getGlobalTimingOffset() {
-        if (!this.bufferConstants) {
-            console.warn('[SuperSonic] Cannot get timing offset - buffer constants not available');
-            return 0.0;
-        }
-
-        const offsetView = new Float64Array(
-            this.sharedBuffer,
-            this.bufferConstants.GLOBAL_TIMING_START,
-            1
-        );
-        return offsetView[0];
-    }
-
-    /**
-     * Update local clock offset (AudioContext → NTP conversion)
-     * Tracks drift between AudioContext.currentTime and performance.now()
+     * Initialize NTP timing (write-once)
+     * Sets the NTP start time when AudioContext started
      * @private
      */
-    updateLocalClockOffset() {
+    initializeNTPTiming() {
         if (!this.bufferConstants || !this.audioContext) {
             return;
         }
 
-        // Calculate current NTP time from performance.now()
-        const NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
+        // Calculate NTP time when AudioContext started (currentTime = 0)
         const perfTimeMs = performance.timeOrigin + performance.now();
         const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+        const currentAudioCtx = this.audioContext.currentTime;
 
-        // Calculate offset: NTP - AudioContext time
-        const localOffset = currentNTP - this.audioContext.currentTime;
+        // NTP time at AudioContext start = current NTP - current AudioContext time
+        const ntpStartTime = currentNTP - currentAudioCtx;
 
-        // Write to SharedArrayBuffer
-        const offsetView = new Float64Array(
+        // Write to SharedArrayBuffer (write-once)
+        const ntpStartView = new Float64Array(
             this.sharedBuffer,
-            this.bufferConstants.LOCAL_CLOCK_OFFSET_START,
+            this.bufferConstants.NTP_START_TIME_START,
             1
         );
-        offsetView[0] = localOffset;
+        ntpStartView[0] = ntpStartTime;
 
-        console.log(`[SuperSonic] Local clock offset updated: ${localOffset.toFixed(6)}s (NTP=${currentNTP.toFixed(3)}, AudioCtx=${this.audioContext.currentTime.toFixed(3)})`);
+        // Store for drift calculation
+        this._initialNTPStartTime = ntpStartTime;
+
+        console.log(`[SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(6)}s (current NTP=${currentNTP.toFixed(3)}, AudioCtx=${currentAudioCtx.toFixed(3)})`);
     }
 
     /**
-     * Get current local clock offset
-     * @returns {number} Current offset in seconds
+     * Update drift offset (AudioContext → NTP drift correction)
+     * CRITICAL: This REPLACES the drift value, does not accumulate
+     * @private
      */
-    getLocalClockOffset() {
-        if (!this.bufferConstants) {
-            return 0.0;
+    updateDriftOffset() {
+        if (!this.bufferConstants || !this.audioContext || this._initialNTPStartTime === undefined) {
+            return;
         }
 
-        const offsetView = new Float64Array(
+        // Calculate current NTP time from performance.now()
+        const perfTimeMs = performance.timeOrigin + performance.now();
+        const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+        const currentAudioCtx = this.audioContext.currentTime;
+
+        // Measure drift: current NTP start time vs initial baseline
+        // CORRECT: This measures drift from initial baseline, not interval drift
+        const currentNTPStartTime = currentNTP - currentAudioCtx;
+        const driftSeconds = currentNTPStartTime - this._initialNTPStartTime;
+        const driftMs = Math.round(driftSeconds * 1000);
+
+        // Write to SharedArrayBuffer (REPLACE value, don't accumulate)
+        const driftView = new Int32Array(
             this.sharedBuffer,
-            this.bufferConstants.LOCAL_CLOCK_OFFSET_START,
+            this.bufferConstants.DRIFT_OFFSET_START,
             1
         );
-        return offsetView[0];
+        Atomics.store(driftView, 0, driftMs);
+
+        console.log(`[SuperSonic] Drift offset updated: ${driftMs}ms (current NTP start=${currentNTPStartTime.toFixed(6)}, initial=${this._initialNTPStartTime.toFixed(6)})`);
     }
 
     /**
-     * Start periodic local clock offset updates (every 15 seconds)
+     * Get current drift offset in milliseconds
+     * @returns {number} Current drift in milliseconds
+     */
+    getDriftOffset() {
+        if (!this.bufferConstants) {
+            return 0;
+        }
+
+        const driftView = new Int32Array(
+            this.sharedBuffer,
+            this.bufferConstants.DRIFT_OFFSET_START,
+            1
+        );
+        return Atomics.load(driftView, 0);
+    }
+
+    /**
+     * Start periodic drift offset updates
      * @private
      */
-    #startLocalClockOffsetTimer() {
+    #startDriftOffsetTimer() {
         // Clear any existing timer
-        this.#stopLocalClockOffsetTimer();
+        this.#stopDriftOffsetTimer();
 
-        // Update every 15 seconds to track drift between AudioContext and performance.now()
-        this._localClockOffsetTimer = setInterval(() => {
-            this.updateLocalClockOffset();
-        }, 15000);
+        // Update every DRIFT_UPDATE_INTERVAL_MS to track drift between AudioContext and performance.now()
+        this._driftOffsetTimer = setInterval(() => {
+            this.updateDriftOffset();
+        }, DRIFT_UPDATE_INTERVAL_MS);
 
-        console.log('[SuperSonic] Started local clock offset drift correction (every 15s)');
+        console.log(`[SuperSonic] Started drift offset correction (every ${DRIFT_UPDATE_INTERVAL_MS}ms)`);
     }
 
     /**
-     * Stop periodic local clock offset updates
+     * Stop periodic drift offset updates
      * @private
      */
-    #stopLocalClockOffsetTimer() {
-        if (this._localClockOffsetTimer) {
-            clearInterval(this._localClockOffsetTimer);
-            this._localClockOffsetTimer = null;
+    #stopDriftOffsetTimer() {
+        if (this._driftOffsetTimer) {
+            clearInterval(this._driftOffsetTimer);
+            this._driftOffsetTimer = null;
         }
     }
 
@@ -1734,14 +1720,26 @@ export class SuperSonic {
             return null;
         }
 
-        const localClockOffset = this.getLocalClockOffset();
-        if (localClockOffset === 0) {
-            console.warn('[SuperSonic] Local clock offset not yet initialized');
+        // Read NTP start time (write-once value)
+        const ntpStartView = new Float64Array(this.sharedBuffer, this.bufferConstants.NTP_START_TIME_START, 1);
+        const ntpStartTime = ntpStartView[0];
+
+        if (ntpStartTime === 0) {
+            console.warn('[SuperSonic] NTP start time not yet initialized');
             return null;
         }
 
-        const globalTimingOffset = this.getGlobalTimingOffset();
-        const totalOffset = localClockOffset + globalTimingOffset;
+        // Read current drift offset (milliseconds)
+        const driftView = new Int32Array(this.sharedBuffer, this.bufferConstants.DRIFT_OFFSET_START, 1);
+        const driftMs = Atomics.load(driftView, 0);
+        const driftSeconds = driftMs / 1000.0;
+
+        // Read global offset (milliseconds)
+        const globalView = new Int32Array(this.sharedBuffer, this.bufferConstants.GLOBAL_OFFSET_START, 1);
+        const globalMs = Atomics.load(globalView, 0);
+        const globalSeconds = globalMs / 1000.0;
+
+        const totalOffset = ntpStartTime + driftSeconds + globalSeconds;
 
         const view = new DataView(uint8Data.buffer, uint8Data.byteOffset);
         const ntpSeconds = view.getUint32(8, false);

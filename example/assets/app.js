@@ -128,6 +128,7 @@ function updateStatus(status) {
   const scopeContainer = document.getElementById('scope-container');
   const synthUIContainer = document.getElementById('synth-ui-container');
   const clearButton = document.getElementById('clear-button');
+  const loadAllButton = document.getElementById('load-all-button');
   const loadSynthdefsButton = document.getElementById('load-synthdefs-button');
   const loadSamplesButton = document.getElementById('load-samples-button');
   const loadExampleButton = document.getElementById('load-example-button');
@@ -236,6 +237,17 @@ function updateMetrics(metrics) {
   const schedulerDropped = metrics.scheduler_queue_dropped ?? metrics.schedulerQueueDropped;
   if (schedulerDropped !== undefined) {
     document.getElementById('metric-scheduler-dropped').textContent = schedulerDropped;
+  }
+
+  // Prescheduler metrics
+  if (metrics.prescheduler_pending !== undefined) {
+    document.getElementById('metric-prescheduler-pending').textContent = metrics.prescheduler_pending;
+  }
+  if (metrics.prescheduler_peak !== undefined) {
+    document.getElementById('metric-prescheduler-peak').textContent = metrics.prescheduler_peak;
+  }
+  if (metrics.prescheduler_sent !== undefined) {
+    document.getElementById('metric-prescheduler-sent').textContent = metrics.prescheduler_sent;
   }
 }
 
@@ -666,6 +678,20 @@ initButton.addEventListener('click', async () => {
 
       metricsWithUsage.messages_sent = orchestrator.stats.messagesSent || 0;
 
+      // Collect OSC worker stats (prescheduler, etc.)
+      if (typeof orchestrator.osc?.getStats === 'function') {
+        orchestrator.osc.getStats().then(oscStats => {
+          if (oscStats?.oscOut) {
+            metricsWithUsage.prescheduler_pending = oscStats.oscOut.eventsPending || 0;
+            metricsWithUsage.prescheduler_peak = oscStats.oscOut.maxEventsPending || 0;
+            metricsWithUsage.prescheduler_sent = oscStats.oscOut.bundlesSentToWriter || 0;
+            updateMetrics(metricsWithUsage);
+          }
+        }).catch(err => {
+          console.warn('[App] Failed to get OSC stats', err);
+        });
+      }
+
       if (typeof orchestrator.getDiagnostics === 'function') {
         try {
           const diagnostics = orchestrator.getDiagnostics();
@@ -850,19 +876,16 @@ messageForm.addEventListener('submit', async (e) => {
 
     // Handle scheduled bundles if any timestamps were provided
     if (parsed.scheduled.size > 0) {
-      // Ensure AudioContext ↔ NTP offset is ready before encoding bundles
-      let wasmOffset;
-      try {
-        wasmOffset = await orchestrator.waitForTimeSync();
-      } catch (err) {
-        showError(`Failed to synchronise clocks: ${err.message || err}`);
-        return;
-      }
+      // NTP epoch offset (seconds from 1900-01-01 to 1970-01-01)
+      const NTP_EPOCH_OFFSET = 2208988800;
 
-      const now = orchestrator.audioContext.currentTime;
+      // Get current system time in NTP
+      const perfTimeMs = performance.timeOrigin + performance.now();
+      const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
 
-      function createOSCBundle(audioTimeS, messages) {
-        const ntpTimeS = audioTimeS + wasmOffset;
+      function createOSCBundle(relativeTimeS, messages) {
+        // Bundle timestamp = current system NTP + relative time + small safety margin
+        const ntpTimeS = currentNTP + relativeTimeS + 0.02;
         const ntpSeconds = Math.floor(ntpTimeS);
         const ntpFraction = Math.floor((ntpTimeS % 1) * 0x100000000);
         const encodedMessages = messages.map(msg => SuperSonic.osc.encode(msg));
@@ -898,8 +921,8 @@ messageForm.addEventListener('submit', async (e) => {
 
       for (const timestamp of sortedTimes) {
         const messagesAtTime = parsed.scheduled.get(timestamp);
-        const targetTimeS = now + timestamp + 0.02; // small safety margin
-        const bundle = createOSCBundle(targetTimeS, messagesAtTime);
+        // Pass relative timestamp directly (safety margin added in createOSCBundle)
+        const bundle = createOSCBundle(timestamp, messagesAtTime);
         bundlePromises.push(orchestrator.sendOSC(bundle, { runTag }));
         sendsThisRound += messagesAtTime.length;
       }

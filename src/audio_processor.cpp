@@ -15,6 +15,7 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cmath>
+#include <limits>
 
 #ifdef __wasm_simd128__
 #include <wasm_simd128.h>
@@ -100,8 +101,9 @@ extern "C" {
     uint8_t* shared_memory = nullptr;
     ControlPointers* control = nullptr;
     PerformanceMetrics* metrics = nullptr;
-    double* global_timing_offset = nullptr;
-    double* local_clock_offset = nullptr;
+    double* ntp_start_time = nullptr;        // NEW
+    std::atomic<int32_t>* drift_offset = nullptr;  // NEW
+    std::atomic<int32_t>* global_offset = nullptr; // NEW
     bool memory_initialized = false;
     World* g_world = nullptr;
 
@@ -220,14 +222,16 @@ extern "C" {
         shared_memory = ring_buffer_storage;
         control = reinterpret_cast<ControlPointers*>(shared_memory + CONTROL_START);
         metrics = reinterpret_cast<PerformanceMetrics*>(shared_memory + METRICS_START);
-        global_timing_offset = reinterpret_cast<double*>(shared_memory + GLOBAL_TIMING_START);
-        local_clock_offset = reinterpret_cast<double*>(shared_memory + LOCAL_CLOCK_OFFSET_START);
 
-        // Initialize global timing offset to 0.0 (local time, no sync)
-        *global_timing_offset = 0.0;
+        // Timing pointers
+        ntp_start_time = reinterpret_cast<double*>(shared_memory + NTP_START_TIME_START);
+        drift_offset = reinterpret_cast<std::atomic<int32_t>*>(shared_memory + DRIFT_OFFSET_START);
+        global_offset = reinterpret_cast<std::atomic<int32_t>*>(shared_memory + GLOBAL_OFFSET_START);
 
-        // Initialize local clock offset to 0.0 (will be set by JavaScript)
-        *local_clock_offset = 0.0;
+        // Initialize timing
+        *ntp_start_time = 0.0;
+        drift_offset->store(0, std::memory_order_relaxed);
+        global_offset->store(0, std::memory_order_relaxed);
 
         // Initialize all atomics to 0
         control->in_head.store(0, std::memory_order_relaxed);
@@ -349,7 +353,7 @@ extern "C" {
     // current_time: AudioContext.currentTime (for reference, may not be used)
     // current_ntp: Current NTP time from performance.now() (drift-free)
     EMSCRIPTEN_KEEPALIVE
-    bool process_audio(double current_time, double current_ntp) {
+    bool process_audio(double current_time) {
         if (!memory_initialized) {
             return true; // Keep alive but do nothing if not initialized
         }
@@ -358,13 +362,26 @@ extern "C" {
             return false;
         }
 
-        // Read timing offsets from SharedArrayBuffer
-        // Total offset = local (AudioContext → NTP drift correction) + global (multi-system sync)
-        double offset = *local_clock_offset + *global_timing_offset;
+        // Calculate current NTP time from components
+        // currentNTP = audioContextTime + ntp_start + (drift_ms/1000) + (global_ms/1000)
+        // Cache ntp_start_time: keep trying until non-zero, then refresh every 15s
+        static double cached_ntp_start = 0.0;
+        static uint32_t last_cache_update = 0;
+        uint32_t current_frame = metrics->process_count.load(std::memory_order_relaxed);
 
+        // Update cache: every frame if still 0.0, else every 15s (720000 frames at 48kHz)
+        bool should_update = (cached_ntp_start == 0.0) ||
+                            (current_frame - last_cache_update >= 720000);
+        if (should_update) {
+            cached_ntp_start = (ntp_start_time && *ntp_start_time != 0.0) ? *ntp_start_time : 0.0;
+            last_cache_update = current_frame;
+        }
 
-        // Time offset is set by JavaScript via set_time_offset()
-        // No longer calculated here to avoid timing discrepancies
+        double ntp_start = cached_ntp_start;
+        double drift_seconds = drift_offset ? (drift_offset->load(std::memory_order_relaxed) / 1000.0) : 0.0;
+        double global_seconds = global_offset ? (global_offset->load(std::memory_order_relaxed) / 1000.0) : 0.0;
+
+        double current_ntp = current_time + ntp_start + drift_seconds + global_seconds;
 
         metrics->process_count.fetch_add(1, std::memory_order_relaxed);
 

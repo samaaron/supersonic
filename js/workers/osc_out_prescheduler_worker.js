@@ -43,7 +43,7 @@ var LOOKAHEAD_S = 0.100;             // 100ms lookahead window
 
 function schedulerLog() {
     // Toggle to true for verbose diagnostics
-    var DEBUG = false;
+    var DEBUG = true;  // Enable for debugging
     if (DEBUG) {
         console.log.apply(console, arguments);
     }
@@ -54,14 +54,18 @@ function schedulerLog() {
 // ============================================================================
 
 /**
- * Get current NTP time from performance.now()
- * Includes global timing offset for multi-system sync
+ * Get current NTP time from system clock
+ *
+ * Bundles contain full NTP timestamps. We just need to compare them against
+ * current NTP time (system clock) to know when to dispatch.
+ *
+ * AudioContext timing, drift correction, etc. are handled by the C++ side.
+ * The prescheduler only needs to know "what time is it now in NTP?"
  */
 function getCurrentNTP() {
+    // Convert current system time to NTP
     var perfTimeMs = performance.timeOrigin + performance.now();
-    var perfTimeS = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
-    var globalOffset = offsetView ? offsetView[0] : 0;
-    return perfTimeS + globalOffset;
+    return (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
 }
 
 /**
@@ -89,10 +93,8 @@ function getBundleTimestamp(oscMessage) {
 // SHARED ARRAY BUFFER ACCESS
 // ============================================================================
 
-var offsetView = null;  // Float64Array for reading global timing offset
-
 /**
- * Initialize SharedArrayBuffer views including offset
+ * Initialize SharedArrayBuffer (kept for compatibility but not used for timing)
  */
 function initSharedBuffer() {
     if (!sharedBuffer || !bufferConstants) {
@@ -100,14 +102,7 @@ function initSharedBuffer() {
         return;
     }
 
-    // Create view for reading global timing offset (multi-system sync)
-    offsetView = new Float64Array(
-        sharedBuffer,
-        bufferConstants.GLOBAL_TIMING_START,
-        1
-    );
-
-    console.log('[PreScheduler] SharedArrayBuffer initialized, offset=' + offsetView[0].toFixed(6));
+    console.log('[PreScheduler] SharedArrayBuffer initialized');
 }
 
 function sendToWriter(oscMessage) {
@@ -133,10 +128,13 @@ function scheduleEvent(oscData, editorId, runTag) {
 
     if (ntpTime === null) {
         // Not a bundle - dispatch immediately to writer
-        console.log('[PreScheduler] Non-bundle message, dispatching immediately');
+        schedulerLog('[PreScheduler] Non-bundle message, dispatching immediately');
         sendToWriter(oscData);
         return;
     }
+
+    var currentNTP = getCurrentNTP();
+    var timeUntilExec = ntpTime - currentNTP;
 
     // Create event with NTP timestamp
     var event = {
@@ -154,6 +152,12 @@ function scheduleEvent(oscData, editorId, runTag) {
     if (stats.eventsPending > stats.maxEventsPending) {
         stats.maxEventsPending = stats.eventsPending;
     }
+
+    schedulerLog('[PreScheduler] Scheduled bundle:',
+                 'NTP=' + ntpTime.toFixed(3),
+                 'current=' + currentNTP.toFixed(3),
+                 'wait=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
+                 'pending=' + stats.eventsPending);
 }
 
 function heapPush(event) {
@@ -254,13 +258,6 @@ function stopPeriodicPolling() {
 function checkAndDispatch() {
     isDispatching = true;
 
-    if (!offsetView) {
-        console.error('[PreScheduler] offsetView not initialized!');
-        isDispatching = false;
-        periodicTimer = setTimeout(checkAndDispatch, POLL_INTERVAL_MS);
-        return;
-    }
-
     var currentNTP = getCurrentNTP();
     var lookaheadTime = currentNTP + LOOKAHEAD_S;
     var dispatchCount = 0;
@@ -278,12 +275,24 @@ function checkAndDispatch() {
             var timeUntilExec = nextEvent.ntpTime - currentNTP;
             stats.totalDispatches++;
 
+            schedulerLog('[PreScheduler] Dispatching bundle:',
+                        'NTP=' + nextEvent.ntpTime.toFixed(3),
+                        'current=' + currentNTP.toFixed(3),
+                        'early=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
+                        'remaining=' + stats.eventsPending);
+
             sendToWriter(nextEvent.oscData);
             dispatchCount++;
         } else {
             // Rest aren't ready yet (heap is sorted)
             break;
         }
+    }
+
+    if (dispatchCount > 0 || eventHeap.length > 0) {
+        schedulerLog('[PreScheduler] Dispatch cycle complete:',
+                    'dispatched=' + dispatchCount,
+                    'pending=' + eventHeap.length);
     }
 
     isDispatching = false;

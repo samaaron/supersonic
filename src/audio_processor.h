@@ -36,7 +36,7 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE int get_ring_buffer_base();
     EMSCRIPTEN_KEEPALIVE const BufferLayout* get_buffer_layout();
     EMSCRIPTEN_KEEPALIVE void init_memory(double sample_rate);
-    EMSCRIPTEN_KEEPALIVE bool process_audio(double current_time, double unix_seconds);
+    EMSCRIPTEN_KEEPALIVE bool process_audio(double current_time);
     EMSCRIPTEN_KEEPALIVE int worklet_debug(const char* fmt, ...);
     EMSCRIPTEN_KEEPALIVE int worklet_debug_va(const char* fmt, va_list args);
     EMSCRIPTEN_KEEPALIVE uint32_t get_process_count();

@@ -73,9 +73,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             throw new Error('WASM memory not available');
         }
 
-        // Read the struct (18 uint32_t fields + 1 uint8_t + 3 padding bytes)
-        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 19);
-        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 76);
+        // Read the struct (20 uint32_t fields + 1 uint8_t + 3 padding bytes)
+        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 21);
+        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 84);
 
         // Extract constants (order matches BufferLayout struct in shared_memory.h)
         this.bufferConstants = {
@@ -89,15 +89,17 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             CONTROL_SIZE: uint32View[7],
             METRICS_START: uint32View[8],
             METRICS_SIZE: uint32View[9],
-            GLOBAL_TIMING_START: uint32View[10],
-            GLOBAL_TIMING_SIZE: uint32View[11],
-            LOCAL_CLOCK_OFFSET_START: uint32View[12],
-            LOCAL_CLOCK_OFFSET_SIZE: uint32View[13],
-            TOTAL_BUFFER_SIZE: uint32View[14],
-            MAX_MESSAGE_SIZE: uint32View[15],
-            MESSAGE_MAGIC: uint32View[16],
-            PADDING_MAGIC: uint32View[17],
-            DEBUG_PADDING_MARKER: uint8View[72],
+            NTP_START_TIME_START: uint32View[10],
+            NTP_START_TIME_SIZE: uint32View[11],
+            DRIFT_OFFSET_START: uint32View[12],
+            DRIFT_OFFSET_SIZE: uint32View[13],
+            GLOBAL_OFFSET_START: uint32View[14],
+            GLOBAL_OFFSET_SIZE: uint32View[15],
+            TOTAL_BUFFER_SIZE: uint32View[16],
+            MAX_MESSAGE_SIZE: uint32View[17],
+            MESSAGE_MAGIC: uint32View[18],
+            PADDING_MAGIC: uint32View[19],
+            DEBUG_PADDING_MARKER: uint8View[80],
             MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, padding)
         };
 
@@ -139,23 +141,6 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             SCHEDULER_QUEUE_DROPPED: (ringBufferBase + METRICS_START + 24) / 4
         };
 
-        // Create Float64Array views for timing offsets
-        // Note: Don't add ringBufferBase - these offsets are already absolute
-        const LOCAL_CLOCK_OFFSET_START = this.bufferConstants.LOCAL_CLOCK_OFFSET_START;
-        this.localClockOffsetView = new Float64Array(
-            this.sharedBuffer,
-            LOCAL_CLOCK_OFFSET_START,
-            1
-        );
-        console.log('[AudioWorklet] Local clock offset view initialized at byte offset:', LOCAL_CLOCK_OFFSET_START);
-
-        const GLOBAL_TIMING_START = this.bufferConstants.GLOBAL_TIMING_START;
-        this.globalTimingOffsetView = new Float64Array(
-            this.sharedBuffer,
-            GLOBAL_TIMING_START,
-            1
-        );
-        console.log('[AudioWorklet] Global timing offset view initialized at byte offset:', GLOBAL_TIMING_START);
     }
 
     // Write debug message to SharedArrayBuffer DEBUG ring buffer
@@ -452,14 +437,13 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 // We use a different variable name to avoid shadowing
                 const audioContextTime = currentTime;  // Access the global currentTime directly
 
-                // Read timing offsets from SharedArrayBuffer (updated periodically by main thread)
-                // Total offset = local (drift correction) + global (multi-system sync)
-                const localOffset = this.localClockOffsetView ? this.localClockOffsetView[0] : 0;
-                const globalOffset = this.globalTimingOffsetView ? this.globalTimingOffsetView[0] : 0;
-                const totalOffset = localOffset + globalOffset;
-                const currentNTP = audioContextTime + totalOffset;
+                // C++ process_audio() now calculates NTP time internally from:
+                // - NTP_START_TIME (write-once, set during initialization)
+                // - DRIFT_OFFSET (updated every 15s by main thread)
+                // - GLOBAL_OFFSET (for future multi-system sync)
+                // DEPRECATED: Legacy timing offset views kept in memory for compatibility but unused
 
-                const keepAlive = this.wasmInstance.exports.process_audio(audioContextTime, currentNTP);
+                const keepAlive = this.wasmInstance.exports.process_audio(audioContextTime);
 
                 // Copy scsynth audio output to AudioWorklet outputs
                 if (this.wasmInstance.exports.get_audio_output_bus && outputs[0] && outputs[0].length >= 2) {
