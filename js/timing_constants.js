@@ -1,0 +1,17 @@
+/*
+    SuperSonic - SuperCollider AudioWorklet WebAssembly port
+    Copyright (c) 2025 Sam Aaron
+
+    Based on SuperCollider by James McCartney and community
+    GPL v3 or later
+*/
+
+/**
+ * Timing Constants for NTP and Drift Calculation
+ */
+
+// NTP epoch offset: seconds between 1900-01-01 (NTP epoch) and 1970-01-01 (Unix epoch)
+export const NTP_EPOCH_OFFSET = 2208988800;
+
+// Drift offset update interval in milliseconds
+export const DRIFT_UPDATE_INTERVAL_MS = 15000;

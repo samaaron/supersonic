@@ -31,8 +31,9 @@ constexpr uint32_t OUT_BUFFER_SIZE    = 8192;  // OSC replies from scsynth to JS
 constexpr uint32_t DEBUG_BUFFER_SIZE  = 4096;  // Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 40;    // Atomic control pointers & flags (36 bytes + 4 padding for 8-byte alignment)
 constexpr uint32_t METRICS_SIZE       = 48;    // Performance metrics
-constexpr uint32_t GLOBAL_TIMING_SIZE = 8;     // Global timing offset (double, 8-byte aligned)
-constexpr uint32_t LOCAL_CLOCK_OFFSET_SIZE = 8; // Local clock offset: AudioContext → NTP (double, 8-byte aligned)
+constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
+constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in milliseconds (int32, atomic)
+constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
 
 // Auto-calculated offsets (DO NOT MODIFY - computed from sizes above)
 constexpr uint32_t IN_BUFFER_START    = 0;
@@ -40,11 +41,12 @@ constexpr uint32_t OUT_BUFFER_START   = IN_BUFFER_START + IN_BUFFER_SIZE;
 constexpr uint32_t DEBUG_BUFFER_START = OUT_BUFFER_START + OUT_BUFFER_SIZE;
 constexpr uint32_t CONTROL_START      = DEBUG_BUFFER_START + DEBUG_BUFFER_SIZE;
 constexpr uint32_t METRICS_START      = CONTROL_START + CONTROL_SIZE;
-constexpr uint32_t GLOBAL_TIMING_START = METRICS_START + METRICS_SIZE;
-constexpr uint32_t LOCAL_CLOCK_OFFSET_START = GLOBAL_TIMING_START + GLOBAL_TIMING_SIZE;
+constexpr uint32_t NTP_START_TIME_START = METRICS_START + METRICS_SIZE;
+constexpr uint32_t DRIFT_OFFSET_START = NTP_START_TIME_START + NTP_START_TIME_SIZE;
+constexpr uint32_t GLOBAL_OFFSET_START = DRIFT_OFFSET_START + DRIFT_OFFSET_SIZE;
 
 // Total buffer size (for validation)
-constexpr uint32_t TOTAL_BUFFER_SIZE  = LOCAL_CLOCK_OFFSET_START + LOCAL_CLOCK_OFFSET_SIZE;
+constexpr uint32_t TOTAL_BUFFER_SIZE  = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
 
 // Message structure
 struct alignas(4) Message {
@@ -111,10 +113,12 @@ struct BufferLayout {
     uint32_t control_size;
     uint32_t metrics_start;
     uint32_t metrics_size;
-    uint32_t global_timing_start;
-    uint32_t global_timing_size;
-    uint32_t local_clock_offset_start;
-    uint32_t local_clock_offset_size;
+    uint32_t ntp_start_time_start;
+    uint32_t ntp_start_time_size;
+    uint32_t drift_offset_start;
+    uint32_t drift_offset_size;
+    uint32_t global_offset_start;
+    uint32_t global_offset_size;
     uint32_t total_buffer_size;
     uint32_t max_message_size;
     uint32_t message_magic;
@@ -135,10 +139,12 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     CONTROL_SIZE,
     METRICS_START,
     METRICS_SIZE,
-    GLOBAL_TIMING_START,
-    GLOBAL_TIMING_SIZE,
-    LOCAL_CLOCK_OFFSET_START,
-    LOCAL_CLOCK_OFFSET_SIZE,
+    NTP_START_TIME_START,
+    NTP_START_TIME_SIZE,
+    DRIFT_OFFSET_START,
+    DRIFT_OFFSET_SIZE,
+    GLOBAL_OFFSET_START,
+    GLOBAL_OFFSET_SIZE,
     TOTAL_BUFFER_SIZE,
     MAX_MESSAGE_SIZE,
     MESSAGE_MAGIC,
