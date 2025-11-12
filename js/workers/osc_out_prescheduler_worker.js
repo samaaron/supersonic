@@ -6,13 +6,16 @@
     - Tag-based cancellation to drop pending runs before they hit WASM
 */
 
-// Writer worker port (MessagePort from main thread)
-var writerWorker = null;
-
-// State propagated for backwards compatibility (not used directly here)
+// Shared memory for ring buffer writing
 var sharedBuffer = null;
 var ringBufferBase = null;
 var bufferConstants = null;
+var atomicView = null;
+var dataView = null;
+var uint8View = null;
+
+// Ring buffer control indices
+var CONTROL_INDICES = {};
 
 // Priority queue implemented as binary min-heap
 // Entries: { ntpTime, seq, editorId, runTag, oscData }
@@ -24,7 +27,9 @@ var isDispatching = false;  // Prevent reentrancy into dispatch loop
 // Statistics
 var stats = {
     bundlesScheduled: 0,
-    bundlesSentToWriter: 0,
+    bundlesWritten: 0,
+    bundlesDropped: 0,
+    bufferOverruns: 0,
     eventsPending: 0,
     maxEventsPending: 0,
     eventsCancelled: 0,
@@ -94,7 +99,7 @@ function getBundleTimestamp(oscMessage) {
 // ============================================================================
 
 /**
- * Initialize SharedArrayBuffer (kept for compatibility but not used for timing)
+ * Initialize ring buffer access for writing directly to SharedArrayBuffer
  */
 function initSharedBuffer() {
     if (!sharedBuffer || !bufferConstants) {
@@ -102,21 +107,96 @@ function initSharedBuffer() {
         return;
     }
 
-    console.log('[PreScheduler] SharedArrayBuffer initialized');
+    atomicView = new Int32Array(sharedBuffer);
+    dataView = new DataView(sharedBuffer);
+    uint8View = new Uint8Array(sharedBuffer);
+
+    // Calculate control indices for ring buffer
+    CONTROL_INDICES = {
+        IN_HEAD: (ringBufferBase + bufferConstants.CONTROL_START + 0) / 4,
+        IN_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 4) / 4
+    };
+
+    console.log('[PreScheduler] SharedArrayBuffer initialized with direct ring buffer writing');
 }
 
-function sendToWriter(oscMessage) {
-    if (!writerWorker) {
-        console.error('[OSCPreSchedulerWorker] Writer worker not set');
-        return;
+/**
+ * Write OSC message directly to ring buffer (replaces MessagePort to writer worker)
+ * This is now the ONLY place that writes to the ring buffer
+ */
+function writeToRingBuffer(oscMessage) {
+    if (!sharedBuffer || !atomicView) {
+        console.error('[PreScheduler] Not initialized for ring buffer writing');
+        stats.bundlesDropped++;
+        return false;
     }
 
-    writerWorker.postMessage({
-        type: 'write',
-        oscData: oscMessage
-    });
+    var payloadSize = oscMessage.length;
+    var totalSize = bufferConstants.MESSAGE_HEADER_SIZE + payloadSize;
 
-    stats.bundlesSentToWriter++;
+    // Check if message fits in buffer at all
+    if (totalSize > bufferConstants.IN_BUFFER_SIZE - bufferConstants.MESSAGE_HEADER_SIZE) {
+        console.error('[PreScheduler] Message too large:', totalSize);
+        stats.bundlesDropped++;
+        return false;
+    }
+
+    // Try to write (non-blocking, single attempt)
+    var head = Atomics.load(atomicView, CONTROL_INDICES.IN_HEAD);
+    var tail = Atomics.load(atomicView, CONTROL_INDICES.IN_TAIL);
+
+    // Calculate available space
+    var available = (bufferConstants.IN_BUFFER_SIZE - 1 - head + tail) % bufferConstants.IN_BUFFER_SIZE;
+
+    if (available < totalSize) {
+        // Buffer full - drop message (prescheduler should not block)
+        stats.bufferOverruns++;
+        stats.bundlesDropped++;
+        console.warn('[PreScheduler] Ring buffer full, dropping message');
+        return false;
+    }
+
+    // Check if message fits contiguously
+    var spaceToEnd = bufferConstants.IN_BUFFER_SIZE - head;
+
+    if (totalSize > spaceToEnd) {
+        if (spaceToEnd >= bufferConstants.MESSAGE_HEADER_SIZE) {
+            // Write padding marker and wrap
+            var paddingPos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
+            dataView.setUint32(paddingPos, bufferConstants.PADDING_MAGIC, true);
+            dataView.setUint32(paddingPos + 4, 0, true);
+            dataView.setUint32(paddingPos + 8, 0, true);
+            dataView.setUint32(paddingPos + 12, 0, true);
+        } else if (spaceToEnd > 0) {
+            // Not enough room for a padding header - clear remaining bytes
+            var padStart = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
+            for (var i = 0; i < spaceToEnd; i++) {
+                uint8View[padStart + i] = 0;
+            }
+        }
+
+        // Wrap to beginning
+        head = 0;
+    }
+
+    // Write message
+    var writePos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
+
+    // Write header
+    dataView.setUint32(writePos, bufferConstants.MESSAGE_MAGIC, true);
+    dataView.setUint32(writePos + 4, totalSize, true);
+    dataView.setUint32(writePos + 8, stats.bundlesWritten, true); // sequence
+    dataView.setUint32(writePos + 12, 0, true); // padding
+
+    // Write payload
+    uint8View.set(oscMessage, writePos + bufferConstants.MESSAGE_HEADER_SIZE);
+
+    // Update head pointer (publish message)
+    var newHead = (head + totalSize) % bufferConstants.IN_BUFFER_SIZE;
+    Atomics.store(atomicView, CONTROL_INDICES.IN_HEAD, newHead);
+
+    stats.bundlesWritten++;
+    return true;
 }
 
 /**
@@ -127,9 +207,9 @@ function scheduleEvent(oscData, editorId, runTag) {
     var ntpTime = extractNTPFromBundle(oscData);
 
     if (ntpTime === null) {
-        // Not a bundle - dispatch immediately to writer
+        // Not a bundle - dispatch immediately to ring buffer
         schedulerLog('[PreScheduler] Non-bundle message, dispatching immediately');
-        sendToWriter(oscData);
+        writeToRingBuffer(oscData);
         return;
     }
 
@@ -281,7 +361,7 @@ function checkAndDispatch() {
                         'early=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
                         'remaining=' + stats.eventsPending);
 
-            sendToWriter(nextEvent.oscData);
+            writeToRingBuffer(nextEvent.oscData);
             dispatchCount++;
         } else {
             // Rest aren't ready yet (heap is sorted)
@@ -394,10 +474,10 @@ function processImmediate(oscData) {
     if (isBundle(oscData)) {
         var messages = extractMessagesFromBundle(oscData);
         for (var i = 0; i < messages.length; i++) {
-            sendToWriter(messages[i]);
+            writeToRingBuffer(messages[i]);
         }
     } else {
-        sendToWriter(oscData);
+        writeToRingBuffer(oscData);
     }
 }
 
@@ -418,13 +498,8 @@ self.onmessage = function(event) {
                 // Start periodic polling
                 startPeriodicPolling();
 
-                schedulerLog('[OSCPreSchedulerWorker] Initialized with NTP-based scheduling');
+                schedulerLog('[OSCPreSchedulerWorker] Initialized with NTP-based scheduling and direct ring buffer writing');
                 self.postMessage({ type: 'initialized' });
-                break;
-
-            case 'setWriterWorker':
-                writerWorker = data.port;
-                schedulerLog('[OSCPreSchedulerWorker] Writer worker connected');
                 break;
 
             case 'send':
@@ -469,7 +544,9 @@ self.onmessage = function(event) {
                     type: 'stats',
                     stats: {
                         bundlesScheduled: stats.bundlesScheduled,
-                        bundlesSentToWriter: stats.bundlesSentToWriter,
+                        bundlesWritten: stats.bundlesWritten,
+                        bundlesDropped: stats.bundlesDropped,
+                        bufferOverruns: stats.bufferOverruns,
                         eventsPending: stats.eventsPending,
                         maxEventsPending: stats.maxEventsPending,
                         eventsCancelled: stats.eventsCancelled,

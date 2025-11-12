@@ -709,7 +709,7 @@ initButton.addEventListener('click', async () => {
           if (oscStats?.oscOut) {
             metricsWithUsage.prescheduler_pending = oscStats.oscOut.eventsPending || 0;
             metricsWithUsage.prescheduler_peak = oscStats.oscOut.maxEventsPending || 0;
-            metricsWithUsage.prescheduler_sent = oscStats.oscOut.bundlesSentToWriter || 0;
+            metricsWithUsage.prescheduler_sent = oscStats.oscOut.bundlesWritten || 0;
             updateMetrics(metricsWithUsage);
           }
         }).catch(err => {
