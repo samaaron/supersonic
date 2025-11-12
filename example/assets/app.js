@@ -420,83 +420,28 @@ function parseOscTextInput(rawText) {
   return { scheduled, immediate, comments, errors };
 }
 
-function addSentMessage(oscData, comment = null) {
-  sentMessages.unshift({ oscData, timestamp: Date.now(), comment });
-  if (sentMessages.length > 50) sentMessages = sentMessages.slice(0, 50);
+// Build HTML for a single message (extracted from renderSentMessages)
+function buildMessageHTML(msg) {
+  let content = '';
 
-  renderSentMessages();
-}
-
-function renderSentMessages() {
-  if (!sentMessageHistory) return;  // Element may not exist on all pages
-
-  // Flash tab if there are messages (don't flash for empty state)
-  const hasMessages = sentMessages.length > 0;
-
-  if (sentMessages.length === 0) {
-    sentMessageHistory.innerHTML = '<p class="message-empty">No messages sent yet</p>';
+  // Check if it's a comment
+  if (msg.comment) {
+    content = `<span class="osc-color-comment">${msg.comment}</span>`;
   } else {
-    sentMessageHistory.innerHTML = sentMessages.map(msg => {
-      let content = '';
+    // Decode OSC message or bundle
+    try {
+      const oscMsg = SuperSonic.osc.decode(msg.oscData);
 
-      // Check if it's a comment
-      if (msg.comment) {
-        content = `<span class="osc-color-comment">${msg.comment}</span>`;
-      } else {
-        // Decode OSC message or bundle
-        try {
-        const oscMsg = SuperSonic.osc.decode(msg.oscData);
-
-        // Check if it's a bundle
-        if (oscMsg.packets && Array.isArray(oscMsg.packets)) {
-          // It's a bundle - show all messages
-          const bundleContent = oscMsg.packets.map(packet => {
-            let args = '';
-
-            if (Array.isArray(packet.args)) {
-              const isSnew = packet.address === '/s_new';
-
-              args = packet.args.map((arg, index) => {
-                let value = arg;
-                let type = null;
-                if (typeof arg === 'object' && arg.value !== undefined) {
-                  value = arg.value;
-                  type = arg.type;
-                }
-
-                const isParamName = isSnew && index >= 4 && (index - 4) % 2 === 0 && typeof value === 'string';
-                const isSynthdefName = isSnew && index === 0 && typeof value === 'string';
-
-                // Color by type
-                if (type === 'b' || value instanceof Uint8Array || value instanceof ArrayBuffer ||
-                    (Array.isArray(value) && value.length > 20)) {
-                  const size = value.length || value.byteLength || '?';
-                  return `<span class="osc-color-string">&lt;binary ${size} bytes&gt;</span>`;
-                } else if (type === 'f' || (type === null && typeof value === 'number' && !Number.isInteger(value))) {
-                  return `<span class="osc-color-float">${value}</span>`;
-                } else if (type === 'i' || (type === null && Number.isInteger(value))) {
-                  return `<span class="osc-color-int">${value}</span>`;
-                } else if (isParamName) {
-                  return `<span class="osc-color-param">${value}</span>`;
-                } else if (isSynthdefName) {
-                  return `<span class="osc-color-string">${value}</span>`;
-                } else {
-                  return `<span class="osc-color-string">${value}</span>`;
-                }
-              }).join(' ');
-            }
-
-            return `<span class="osc-color-address">${packet.address}</span>${args ? ' ' + args : ''}`;
-          }).join('<br>');
-          content = `<span class="osc-color-string">Bundle (${oscMsg.packets.length})</span><br>${bundleContent}`;
-        } else {
-          // It's a single message
+      // Check if it's a bundle
+      if (oscMsg.packets && Array.isArray(oscMsg.packets)) {
+        // It's a bundle - show all messages
+        const bundleContent = oscMsg.packets.map(packet => {
           let args = '';
 
-          if (Array.isArray(oscMsg.args)) {
-            const isSnew = oscMsg.address === '/s_new';
+          if (Array.isArray(packet.args)) {
+            const isSnew = packet.address === '/s_new';
 
-            args = oscMsg.args.map((arg, index) => {
+            args = packet.args.map((arg, index) => {
               let value = arg;
               let type = null;
               if (typeof arg === 'object' && arg.value !== undefined) {
@@ -524,32 +469,112 @@ function renderSentMessages() {
                 return `<span class="osc-color-string">${value}</span>`;
               }
             }).join(' ');
-          } else {
-            args = oscMsg.args || '';
           }
 
-          content = `<span class="osc-color-address">${oscMsg.address}</span>${args ? ' ' + args : ''}`;
-        }
-        } catch (e) {
-          console.error('[OSC Decode Error]', e);
-          content = `<span class="osc-color-error">Failed to decode OSC: ${e.message || e}</span>`;
-        }
-      }
+          return `<span class="osc-color-address">${packet.address}</span>${args ? ' ' + args : ''}`;
+        }).join('<br>');
+        content = `<span class="osc-color-string">Bundle (${oscMsg.packets.length})</span><br>${bundleContent}`;
+      } else {
+        // It's a single message
+        let args = '';
 
-      const time = new Date(msg.timestamp).toLocaleTimeString();
-      return `
-        <div class="message-item">
-          <span class="message-header">[${time}]</span><span class="message-content">${content}</span>
-        </div>
-      `;
-    }).join('');
+        if (Array.isArray(oscMsg.args)) {
+          const isSnew = oscMsg.address === '/s_new';
+
+          args = oscMsg.args.map((arg, index) => {
+            let value = arg;
+            let type = null;
+            if (typeof arg === 'object' && arg.value !== undefined) {
+              value = arg.value;
+              type = arg.type;
+            }
+
+            const isParamName = isSnew && index >= 4 && (index - 4) % 2 === 0 && typeof value === 'string';
+            const isSynthdefName = isSnew && index === 0 && typeof value === 'string';
+
+            // Color by type
+            if (type === 'b' || value instanceof Uint8Array || value instanceof ArrayBuffer ||
+                (Array.isArray(value) && value.length > 20)) {
+              const size = value.length || value.byteLength || '?';
+              return `<span class="osc-color-string">&lt;binary ${size} bytes&gt;</span>`;
+            } else if (type === 'f' || (type === null && typeof value === 'number' && !Number.isInteger(value))) {
+              return `<span class="osc-color-float">${value}</span>`;
+            } else if (type === 'i' || (type === null && Number.isInteger(value))) {
+              return `<span class="osc-color-int">${value}</span>`;
+            } else if (isParamName) {
+              return `<span class="osc-color-param">${value}</span>`;
+            } else if (isSynthdefName) {
+              return `<span class="osc-color-string">${value}</span>`;
+            } else {
+              return `<span class="osc-color-string">${value}</span>`;
+            }
+          }).join(' ');
+        } else {
+          args = oscMsg.args || '';
+        }
+
+        content = `<span class="osc-color-address">${oscMsg.address}</span>${args ? ' ' + args : ''}`;
+      }
+    } catch (e) {
+      console.error('[OSC Decode Error]', e);
+      content = `<span class="osc-color-error">Failed to decode OSC: ${e.message || e}</span>`;
+    }
   }
 
-  // Auto-scroll to bottom (sentMessageHistory has log-scroll-area class, so it's the scroll container)
+  const time = new Date(msg.timestamp).toLocaleTimeString();
+  return `
+    <div class="message-item">
+      <span class="message-header">[${time}]</span><span class="message-content">${content}</span>
+    </div>
+  `;
+}
+
+function addSentMessage(oscData, comment = null) {
+  if (!sentMessageHistory) return;  // Element may not exist
+
+  const msg = { oscData, timestamp: Date.now(), comment };
+  sentMessages.unshift(msg);
+
+  // Build HTML for just this one new message
+  const messageHtml = buildMessageHTML(msg);
+
+  // Remove empty state message if present
+  const emptyMessage = sentMessageHistory.querySelector('.message-empty');
+  if (emptyMessage) {
+    emptyMessage.remove();
+  }
+
+  // Insert at the top (prepend)
+  sentMessageHistory.insertAdjacentHTML('afterbegin', messageHtml);
+
+  // Remove oldest message if over limit
+  if (sentMessages.length > 50) {
+    sentMessages.pop();
+    sentMessageHistory.lastElementChild?.remove();
+  }
+
+  // Auto-scroll to bottom
+  sentMessageHistory.scrollTop = sentMessageHistory.scrollHeight;
+
+  // Flash tab to indicate update
+  flashTab('osc-out');
+}
+
+function renderSentMessages() {
+  if (!sentMessageHistory) return;  // Element may not exist on all pages
+
+  // Full re-render using buildMessageHTML (used on initial load or full refresh)
+  if (sentMessages.length === 0) {
+    sentMessageHistory.innerHTML = '<p class="message-empty">No messages sent yet</p>';
+  } else {
+    sentMessageHistory.innerHTML = sentMessages.map(msg => buildMessageHTML(msg)).join('');
+  }
+
+  // Auto-scroll to bottom
   sentMessageHistory.scrollTop = sentMessageHistory.scrollHeight;
 
   // Flash tab to indicate update (only if there are messages)
-  if (hasMessages) {
+  if (sentMessages.length > 0) {
     flashTab('osc-out');
   }
 }
@@ -883,11 +908,28 @@ messageForm.addEventListener('submit', async (e) => {
       const perfTimeMs = performance.timeOrigin + performance.now();
       const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
 
-      function createOSCBundle(relativeTimeS, messages) {
-        // Bundle timestamp = current system NTP + relative time + small safety margin
-        const ntpTimeS = currentNTP + relativeTimeS + 0.02;
+      console.log(`[APP] Bundle scheduling starting at currentNTP=${currentNTP.toFixed(6)}s`);
+
+      function createOSCBundle(relativeTimeS, messages, isFirstBundle = false) {
+        // Bundle timestamp = current system NTP + relative time + safety margin for processing overhead
+        const ntpTimeS = currentNTP + relativeTimeS + 0.100;
         const ntpSeconds = Math.floor(ntpTimeS);
         const ntpFraction = Math.floor((ntpTimeS % 1) * 0x100000000);
+
+        // DIAGNOSTIC LOGGING
+        if (isFirstBundle) {
+          const timetag64 = (BigInt(ntpSeconds) << 32n) | BigInt(ntpFraction);
+          console.log(`[APP] FIRST BUNDLE CREATION:
+  Current system NTP: ${currentNTP.toFixed(6)}s
+  Relative time: ${relativeTimeS}s
+  Safety margin: 0.100s
+  Target NTP time: ${ntpTimeS.toFixed(6)}s
+  Encoded seconds: ${ntpSeconds}
+  Encoded fraction: ${ntpFraction}
+  Combined timetag: ${timetag64}
+  Delta (target - current): ${(ntpTimeS - currentNTP).toFixed(6)}s`);
+        }
+
         const encodedMessages = messages.map(msg => SuperSonic.osc.encode(msg));
 
         let bundleSize = 8 + 8;
@@ -919,10 +961,12 @@ messageForm.addEventListener('submit', async (e) => {
       const sortedTimes = Array.from(parsed.scheduled.keys()).sort((a, b) => a - b);
       const bundlePromises = [];
 
-      for (const timestamp of sortedTimes) {
+      for (let i = 0; i < sortedTimes.length; i++) {
+        const timestamp = sortedTimes[i];
         const messagesAtTime = parsed.scheduled.get(timestamp);
         // Pass relative timestamp directly (safety margin added in createOSCBundle)
-        const bundle = createOSCBundle(timestamp, messagesAtTime);
+        const isFirstBundle = (i === 0);
+        const bundle = createOSCBundle(timestamp, messagesAtTime, isFirstBundle);
         bundlePromises.push(orchestrator.sendOSC(bundle, { runTag }));
         sendsThisRound += messagesAtTime.length;
       }
