@@ -43,12 +43,71 @@
         box-sizing: border-box;
       }
 
+      /* Scrollbar styling for the entire page */
+      html,
+      body,
+      ::-webkit-scrollbar {
+        scrollbar-width: thin !important;
+        scrollbar-color: #ff8c00 transparent !important;
+      }
+
+      ::-webkit-scrollbar {
+        width: 8px !important;
+        height: 8px !important;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: transparent !important;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #ff8c00 !important;
+        border-radius: 4px !important;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #ff6600 !important;
+      }
+
+      /* Scrollbar styling for demo content only */
+      .container * {
+        scrollbar-width: thin !important;
+        scrollbar-color: #ff8c00 transparent !important;
+      }
+
+      .container *::-webkit-scrollbar {
+        width: 4px !important;
+        height: 4px !important;
+      }
+
+      .container *::-webkit-scrollbar-track {
+        background: transparent !important;
+      }
+
+      .container *::-webkit-scrollbar-thumb {
+        background: #ff8c00 !important;
+        border-radius: 2px !important;
+      }
+
+      .container *::-webkit-scrollbar-thumb:hover {
+        background: #ff6600 !important;
+      }
+
+      html {
+        overflow-y: hidden;
+        height: 100%;
+        accent-color: #ff8c00;
+      }
+
       body {
         font-family: "Cascadia Code", "Cascadia Mono", Consolas, "Courier New",
           monospace;
         background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
         color: #1f2937;
         line-height: 1.6;
+        overflow-y: auto;
+        height: 100%;
+        accent-color: #ff8c00;
       }
 
       .container {
@@ -75,6 +134,7 @@
         margin-bottom: 0.75rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
+        color: #ff8c00;
       }
 
       h3 {
@@ -199,29 +259,29 @@
       }
 
       .btn-primary {
-        background: #1e90ff;
+        background: #ff8c00;
         color: white;
         border-radius: 0;
       }
 
       .btn-primary:hover:not(:disabled) {
-        background: #ffd700;
+        background: #ff8c00;
         color: #000;
       }
 
       .btn-secondary {
-        background: #6b7280;
+        background: #d97706;
         color: white;
         border-radius: 0;
       }
 
       .btn-secondary:hover:not(:disabled) {
-        background: #ffd700;
+        background: #ff8c00;
         color: #000;
       }
 
       .btn-synth {
-        background: #ff6600;
+        background: #ff1493;
         color: #000;
         border-radius: 0;
         padding: 0.35rem 0.65rem;
@@ -247,7 +307,7 @@
       }
 
       .btn-init {
-        background: #ff1493;
+        background: #ff6600;
         color: white;
         padding: 0.75rem 2rem;
         font-size: 1rem;
@@ -265,29 +325,27 @@
 
       @keyframes pulsate {
         0%, 100% {
-          transform: scale(1);
-          box-shadow: 0 0 0 0 rgba(255, 20, 147, 1),
-                      0 0 30px rgba(255, 20, 147, 0.6),
-                      0 0 60px rgba(255, 20, 147, 0.3);
+          box-shadow: 0 0 0 0 rgba(255, 102, 0, 1),
+                      0 0 30px rgba(255, 102, 0, 0.6),
+                      0 0 60px rgba(255, 102, 0, 0.3);
           filter: brightness(1);
         }
         50% {
-          transform: scale(1.15);
-          box-shadow: 0 0 30px 15px rgba(255, 20, 147, 0.8),
-                      0 0 60px rgba(255, 20, 147, 0.6),
-                      0 0 90px rgba(255, 20, 147, 0.4);
+          box-shadow: 0 0 30px 15px rgba(255, 102, 0, 0.8),
+                      0 0 60px rgba(255, 102, 0, 0.6),
+                      0 0 90px rgba(255, 102, 0, 0.4);
           filter: brightness(1.3);
         }
       }
 
       .btn-green {
-        background: #ff6600;
+        background: #ff8c00;
         color: white;
         border-radius: 0;
       }
 
       .btn-green:hover:not(:disabled) {
-        background: #ffd700;
+        background: #ff8c00;
         color: #000;
       }
 
@@ -295,7 +353,29 @@
       .welcome-guide {
         margin-bottom: 1.5rem;
         padding-bottom: 1rem;
+        padding-right: 0.5rem;
         border-bottom: 1px solid #333;
+        max-height: 300px;
+        overflow-y: scroll;
+        scrollbar-width: thin;
+        scrollbar-color: #ff8c00 transparent;
+      }
+
+      .welcome-guide::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      .welcome-guide::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .welcome-guide::-webkit-scrollbar-thumb {
+        background: #ff8c00;
+        border-radius: 2px;
+      }
+
+      .welcome-guide::-webkit-scrollbar-thumb:hover {
+        background: #ff8c00;
       }
 
       .welcome-guide h2 {
@@ -325,14 +405,14 @@
 
       .welcome-guide li::before {
         content: counter(welcome-counter) ".";
-        color: #ff6600;
+        color: #ff8c00;
         position: absolute;
         left: 0;
         font-weight: bold;
       }
 
       .welcome-label {
-        color: #ff6600;
+        color: #ff8c00;
         font-weight: bold;
       }
 
@@ -340,16 +420,23 @@
         color: #ffd700;
       }
 
+      .welcome-text strong {
+        color: #ff8c00;
+        font-weight: 700;
+      }
+
       .welcome-code {
-        color: #ff6600;
-        font-style: italic;
+        color: #ff8c00;
+        font-weight: 600;
       }
 
       .welcome-code-block {
-        color: #ff6600;
-        background: rgba(255, 102, 0, 0.1);
-        padding: 0.2rem 0.4rem;
-        font-style: italic;
+        color: #ff8c00;
+        background: rgba(255, 140, 0, 0.15);
+        padding: 0.3rem 0.5rem;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 140, 0, 0.3);
+        font-family: 'Courier New', monospace;
         display: block;
         white-space: pre-wrap;
         word-wrap: break-word;
@@ -481,22 +568,48 @@
       @media (min-width: 1024px) {
         .main-layout-grid {
           flex-direction: row;
+          flex-wrap: nowrap;
+        }
+
+        .left-column {
+          flex: 60 1 0;
+        }
+
+        .right-column {
+          flex: 40 1 0;
         }
       }
 
       .left-column {
         display: flex;
         flex-direction: column;
-        flex: 0 0 60%;
         min-width: 200px;
       }
 
       .right-column {
-        flex: 0 0 40%;
         min-width: 300px;
       }
 
       .logs-section {
+        scrollbar-width: thin;
+        scrollbar-color: #ff8c00 transparent;
+      }
+
+      .logs-section::-webkit-scrollbar {
+        width: 4px !important;
+      }
+
+      .logs-section::-webkit-scrollbar-track {
+        background: transparent !important;
+      }
+
+      .logs-section::-webkit-scrollbar-thumb {
+        background: #ff8c00 !important;
+        border-radius: 2px !important;
+      }
+
+      .logs-section::-webkit-scrollbar-thumb:hover {
+        background: #ff6600 !important;
       }
 
       .divider {
@@ -649,7 +762,7 @@
       }
 
       #message-input {
-        border: 2px solid #ff6600;
+        border: 2px solid #ff8c00;
         padding: 0.75rem;
         font-family: "Cascadia Code", "Cascadia Mono", Consolas, "Courier New",
           monospace;
@@ -723,7 +836,7 @@
       }
 
       .metric-value.warning {
-        color: #ff6600;
+        color: #ff1493;
       }
 
       .panel.metrics-compact {
@@ -839,7 +952,7 @@
       }
 
       .osc-color-string {
-        color: #1e90ff; /* Blue for string values */
+        color: #ff8c00; /* Light orange for string values */
       }
 
       .osc-color-param {
@@ -847,7 +960,7 @@
       }
 
       .osc-color-error {
-        color: #ff1493; /* Pink for error messages */
+        color: #ff6600; /* Orange for error messages */
       }
 
       .osc-color-comment {
@@ -934,28 +1047,34 @@
 
       /* Scrollbar styling for all browsers */
       .log-scroll-area::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+        width: 4px;
+        height: 4px;
       }
 
       .log-scroll-area::-webkit-scrollbar-track {
-        background: #1a1a1a;
-        border-radius: 4px;
+        background: transparent;
+        border-radius: 2px;
       }
 
       .log-scroll-area::-webkit-scrollbar-thumb {
-        background: #ff6600;
-        border-radius: 4px;
+        background: #ff8c00;
+        border-radius: 2px;
       }
 
       .log-scroll-area::-webkit-scrollbar-thumb:hover {
-        background: #ffd700;
+        background: #ff6600;
       }
 
       /* Firefox scrollbar styling */
       .log-scroll-area {
         scrollbar-width: thin;
-        scrollbar-color: #ff6600 #1a1a1a;
+        scrollbar-color: #ff8c00 transparent;
+        accent-color: #ff8c00;
+      }
+
+      /* Hue rotate filter for demo section */
+      .synth-ui-container {
+        filter: hue-rotate(200deg) saturate(2);
       }
 
       /* Code block overflow handling for mobile */
@@ -1067,6 +1186,419 @@
 
         .right-column {
           order: 2;
+        }
+      }
+
+      /* ===== INTERACTIVE UI STYLES ===== */
+
+      /* 2D Synth Pad (Trackpad) */
+      .synth-pad-section {
+        margin-bottom: 1.5rem;
+      }
+
+      .synth-pad-container {
+        margin: 0 auto;
+        max-width: 600px;
+      }
+
+      .synth-pad {
+        width: 100%;
+        aspect-ratio: 5 / 3;
+        max-height: 360px;
+        margin: 0 auto;
+        background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0f0f1a 100%);
+        border: 4px solid #ff6600;
+        border-radius: 12px;
+        cursor: crosshair;
+        position: relative;
+        overflow: hidden;
+        touch-action: none;
+        user-select: none;
+        box-shadow:
+          0 0 30px rgba(255, 20, 147, 0.3),
+          inset 0 0 60px rgba(0, 0, 0, 0.5);
+        transition: box-shadow 0.3s ease;
+      }
+
+      .synth-pad:hover {
+        box-shadow:
+          0 0 40px rgba(255, 20, 147, 0.5),
+          inset 0 0 60px rgba(0, 0, 0, 0.5);
+      }
+
+      .synth-pad.active {
+        border-color: #ffd700;
+        box-shadow:
+          0 0 50px rgba(255, 215, 0, 0.6),
+          inset 0 0 60px rgba(0, 0, 0, 0.5);
+      }
+
+      .synth-pad-touch {
+        position: absolute;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #ffd700 0%, #ff6600 70%, transparent 100%);
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        opacity: 0;
+        transition: opacity 0.15s ease-out;
+        box-shadow:
+          0 0 30px #ffd700,
+          0 0 60px #ff6600;
+        animation: pulse-touch 1s ease-in-out infinite;
+        z-index: 4;
+      }
+
+      @keyframes pulse-touch {
+        0%, 100% {
+          transform: translate(-50%, -50%) scale(1);
+        }
+        50% {
+          transform: translate(-50%, -50%) scale(1.1);
+        }
+      }
+
+      @keyframes beat-pulse {
+        0% {
+          transform: translate(-50%, -50%) scale(1);
+          box-shadow:
+            0 0 30px #ffd700,
+            0 0 60px #ff6600;
+        }
+        50% {
+          transform: translate(-50%, -50%) scale(1.3);
+          box-shadow:
+            0 0 50px #ffd700,
+            0 0 100px #ff6600,
+            0 0 150px rgba(255, 215, 0, 0.5);
+        }
+        100% {
+          transform: translate(-50%, -50%) scale(1);
+          box-shadow:
+            0 0 30px #ffd700,
+            0 0 60px #ff6600;
+        }
+      }
+
+      .synth-pad-touch.beat-pulse {
+        animation: beat-pulse 0.125s ease-out;
+      }
+
+      .synth-pad-touch.active {
+        opacity: 1;
+      }
+
+      .trail-canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 1;
+      }
+
+      .synth-pad-grid {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(0deg, rgba(255, 20, 147, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(30, 144, 255, 0.08) 1px, transparent 1px);
+        background-size: 60px 60px;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      .synth-pad-crosshair {
+        position: absolute;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        z-index: 3;
+      }
+
+      .synth-pad-crosshair.active {
+        opacity: 1;
+      }
+
+      .synth-pad-crosshair-h {
+        position: absolute;
+        width: 100%;
+        height: 2px;
+        background: linear-gradient(90deg,
+          rgba(255, 215, 0, 0) 0%,
+          rgba(255, 215, 0, 0.2) 20%,
+          rgba(255, 215, 0, 0.6) 50%,
+          rgba(255, 215, 0, 0.2) 80%,
+          rgba(255, 215, 0, 0) 100%
+        );
+        left: 0;
+        box-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
+      }
+
+      .synth-pad-crosshair-v {
+        position: absolute;
+        width: 2px;
+        height: 100%;
+        background: linear-gradient(0deg,
+          rgba(255, 215, 0, 0) 0%,
+          rgba(255, 215, 0, 0.2) 20%,
+          rgba(255, 215, 0, 0.6) 50%,
+          rgba(255, 215, 0, 0.2) 80%,
+          rgba(255, 215, 0, 0) 100%
+        );
+        top: 0;
+        box-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
+      }
+
+      .synth-pad-prompt {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #ff6600;
+        text-shadow: 0 0 10px rgba(255, 102, 0, 0.8);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        user-select: none;
+        z-index: 3;
+      }
+
+      .synth-pad.ready .synth-pad-prompt {
+        opacity: 1;
+      }
+
+      .synth-pad.active .synth-pad-prompt {
+        opacity: 0;
+      }
+
+      .synth-pad.disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+
+      .synth-pad-coords {
+        position: absolute;
+        bottom: 8px;
+        right: 12px;
+        font-size: 0.75rem;
+        font-family: 'Courier New', monospace;
+        color: #ffd700;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 6px 10px;
+        border-radius: 4px;
+        pointer-events: none;
+        opacity: 0.8;
+        z-index: 5;
+        display: grid;
+        grid-template-columns: auto auto;
+        gap: 4px 12px;
+      }
+
+      .synth-pad-coords > div {
+        text-align: right;
+      }
+
+      /* Slider Controls */
+      .slider-controls-section {
+        margin-bottom: 1.5rem;
+      }
+
+      .slider-controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.5rem;
+      }
+
+      .slider-control {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .slider-control label {
+        color: #ffd700;
+        font-size: 0.875rem;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .slider-value {
+        color: #ff6600;
+        font-family: 'Courier New', monospace;
+        font-size: 0.875rem;
+        font-weight: normal;
+      }
+
+      .slider-control input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 4px;
+        background: #333;
+        border-radius: 2px;
+        outline: none;
+        border: none;
+        transition: all 0.2s ease;
+        cursor: pointer;
+      }
+
+      .slider-control input[type="range"]:hover {
+        background: #444;
+      }
+
+      .slider-control input[type="range"]:focus {
+        outline: none;
+        background: #555;
+      }
+
+      /* Range thumb styles */
+      .slider-control input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        background: #ff6600;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .slider-control input[type="range"]::-webkit-slider-thumb:hover {
+        background: #ffd700;
+      }
+
+      .slider-control input[type="range"]::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        background: #ff6600;
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+        transition: all 0.2s ease;
+      }
+
+      .slider-control input[type="range"]::-moz-range-thumb:hover {
+        background: #ffd700;
+      }
+
+      .slider-control select {
+        background: #1a1a2e;
+        color: #ffd700;
+        border: 2px solid #ff6600;
+        border-radius: 4px;
+        padding: 0.5rem;
+        font-size: 0.875rem;
+        cursor: pointer;
+        box-shadow: 0 0 10px rgba(255, 20, 147, 0.3);
+        transition: all 0.3s ease;
+      }
+
+      .slider-control select:hover {
+        border-color: #ffd700;
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.4);
+      }
+
+      .slider-control select:focus {
+        outline: none;
+        border-color: #ffd700;
+        box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+      }
+
+      .slider-control .toggle-button {
+        background: #1a1a2e;
+        color: #666;
+        border: 2px solid #444;
+        border-radius: 4px;
+        padding: 0.4rem 0.8rem;
+        font-size: 0.75rem;
+        font-weight: bold;
+        font-family: 'Courier New', monospace;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        width: auto;
+        display: inline-block;
+      }
+
+      .slider-control .toggle-button:hover {
+        border-color: #666;
+        color: #999;
+      }
+
+      .slider-control .toggle-button[data-active="true"] {
+        background: #ff6600;
+        color: #000;
+        border-color: #ff6600;
+      }
+
+      /* Section headers for UI sections */
+      .ui-section-header {
+        color: #ffd700;
+        font-size: 1rem;
+        font-weight: bold;
+        font-style: italic;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #ff6600;
+      }
+
+      /* Main Content Tabs */
+      .main-tabs {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        border-bottom: 3px solid #333;
+        padding: 0 0.75rem;
+      }
+
+      .main-tab-button {
+        padding: 0.75rem 2rem;
+        background: transparent;
+        border: none;
+        border-bottom: 4px solid transparent;
+        margin-bottom: -3px;
+        cursor: pointer;
+        font-size: 1.125rem;
+        font-weight: bold;
+        font-style: italic;
+        color: #666;
+        transition: all 0.3s;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .main-tab-button.active {
+        color: #ff6600;
+        border-bottom-color: #ff6600;
+      }
+
+      .main-tab-button:hover:not(.active) {
+        color: #ffd700;
+      }
+
+      .main-tab-content {
+        display: none;
+      }
+
+      .main-tab-content.active {
+        display: block;
+      }
+
+      /* Adjust mobile for main tabs */
+      @media (max-width: 768px) {
+        .main-tab-button {
+          padding: 0.5rem 1rem;
+          font-size: 0.875rem;
         }
       }
 
@@ -1709,10 +2241,129 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
           </div>
 
           <div class="main-layout-grid">
-            <!-- Left Column: Send Custom OSC Message -->
+            <!-- Left Column: Tabs (Playground / OSC API) -->
             <div class="left-column">
-              <!-- Error/Warning Messages -->
-              <div id="error-message" class="alert alert-error hidden">
+              <!-- Main Content Tabs -->
+              <div class="main-tabs" style="padding: 0; margin-bottom: 1rem;">
+                <button class="main-tab-button active" data-main-tab="playground">Playground</button>
+                <button class="main-tab-button" data-main-tab="osc-api">OSC API</button>
+              </div>
+
+              <!-- Playground Tab Content -->
+              <div class="main-tab-content active" data-main-tab-content="playground">
+                <!-- 2D Synth Pad -->
+                <div class="synth-pad-section">
+                  <div class="synth-pad-container">
+                    <div id="synth-pad" class="synth-pad">
+                      <div class="synth-pad-grid"></div>
+                      <canvas id="trail-canvas" class="trail-canvas"></canvas>
+                      <div id="synth-pad-prompt" class="synth-pad-prompt">Click/Tap & Drag</div>
+                      <div id="synth-pad-crosshair" class="synth-pad-crosshair">
+                        <div id="synth-pad-crosshair-h" class="synth-pad-crosshair-h"></div>
+                        <div id="synth-pad-crosshair-v" class="synth-pad-crosshair-v"></div>
+                      </div>
+                      <div id="synth-pad-touch" class="synth-pad-touch"></div>
+                      <div id="synth-pad-coords" class="synth-pad-coords">
+                        <div>X: <span id="pad-x-value">0.00</span></div>
+                        <div>Y: <span id="pad-y-value">0.00</span></div>
+                        <div>Cutoff: <span id="fx-cutoff-value">130</span></div>
+                        <div>Reverb: <span id="fx-mix-value">0.30</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Slider Controls -->
+                <div class="slider-controls-section">
+                  <div class="slider-controls">
+                    <div class="slider-control">
+                      <label>
+                        Synth
+                        <span id="synth-value" class="slider-value">beep</span>
+                      </label>
+                      <select id="synth-select">
+                        <option value="beep">Beep</option>
+                        <option value="prophet">Prophet</option>
+                        <option value="tb303">TB-303</option>
+                        <option value="dsaw">DSaw</option>
+                        <option value="dpulse">DPulse</option>
+                        <option value="fm">FM</option>
+                        <option value="chiplead">ChipLead</option>
+                      </select>
+                    </div>
+
+                    <div class="slider-control">
+                      <label>Random Arp</label>
+                      <button id="random-arp-toggle" class="toggle-button" data-active="true">On</button>
+                    </div>
+
+                    <div class="slider-control">
+                      <label>
+                        Root Note
+                        <span id="root-note-value" class="slider-value">60</span>
+                      </label>
+                      <input
+                        type="range"
+                        id="root-note-slider"
+                        min="24"
+                        max="96"
+                        value="60"
+                        step="1"
+                      />
+                    </div>
+
+                    <div class="slider-control">
+                      <label>
+                        Octaves
+                        <span id="octaves-value" class="slider-value">2</span>
+                      </label>
+                      <input
+                        type="range"
+                        id="octaves-slider"
+                        min="1"
+                        max="5"
+                        value="2"
+                        step="1"
+                      />
+                    </div>
+
+                    <div class="slider-control">
+                      <label>
+                        Attack
+                        <span id="attack-value" class="slider-value">0.00</span>
+                      </label>
+                      <input
+                        type="range"
+                        id="attack-slider"
+                        min="0"
+                        max="2"
+                        value="0"
+                        step="0.01"
+                      />
+                    </div>
+
+                    <div class="slider-control">
+                      <label>
+                        Release
+                        <span id="release-value" class="slider-value">0.10</span>
+                      </label>
+                      <input
+                        type="range"
+                        id="release-slider"
+                        min="0"
+                        max="5"
+                        value="0.1"
+                        step="0.01"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- OSC API Tab Content -->
+              <div class="main-tab-content" data-main-tab-content="osc-api">
+                <!-- Error/Warning Messages -->
+                <div id="error-message" class="alert alert-error hidden">
                 <svg
                   class="alert-icon"
                   fill="none"
@@ -1751,55 +2402,79 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 </div>
               </div>
 
-              <!-- Welcome Guide -->
-              <div class="welcome-guide">
-                <h2>Welcome to SuperSonic</h2>
+                <!-- Welcome Guide -->
+                <div class="welcome-guide">
+                  <h2>Welcome to SuperSonic</h2>
 
-                <ol>
-                  <li>
-                    <span class="welcome-text">
-                      <strong>Load synthdefs</strong> — Click "Load Synthdefs" below to load these synths from Sonic Pi (which are scsynth compatible):
-                      <code class="welcome-code-block">sonic-pi-beep, sonic-pi-dsaw, sonic-pi-dpulse, sonic-pi-bnoise, sonic-pi-prophet,
-sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
-                    </span>
-                  </li>
+                  <ol>
+                    <li>
+                      <span class="welcome-text">
+                        <strong>Load Synths</strong> — First, click "Load Synthdefs" to get some awesome synths!
+                        <code class="welcome-code-block">sonic-pi-beep, sonic-pi-dsaw, sonic-pi-prophet, sonic-pi-tb303, sonic-pi-fm...</code>
+                      </span>
+                    </li>
 
-                  <li>
-                    <span class="welcome-text">
-                      <strong>Load samples</strong> — Click "Load Samples" to load audio files into buffers:
-                      <code class="welcome-code-block">loop_amen.flac, ambi_choir.flac, bd_haus.flac</code>
-                    </span>
-                  </li>
+                    <li>
+                      <span class="welcome-text">
+                        <strong>Play a Synth</strong> — Create a synth using <span class="welcome-code">/s_new</span>:
+                      </span>
+                      <code class="welcome-code-block">/s_new sonic-pi-beep -1 0 0 note 72</code>
+                      <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
+                        The <span class="welcome-code">-1</span> auto-assigns a node ID, <span class="welcome-code">note</span> sets the MIDI pitch
+                      </span>
+                    </li>
 
-                  <li>
-                    <span class="welcome-text">
-                      <strong>Call the scsynth OSC API</strong> — Use the text area below to write OSC commands from this API:
-                      <a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" class="welcome-link">scsynth OSC Commands</a>
-                    </span>
-                    <code class="welcome-code-block">/s_new sonic-pi-beep -1 0 0 note 72
-/b_allocRead 10 loop_amen.flac
-/s_new bufrd 1000 0 0 bufnum 10</code>
-                  </li>
+                    <li>
+                      <span class="welcome-text">
+                        <strong>Load Samples</strong> — Click "Load Samples" or load specific samples into buffers:
+                      </span>
+                      <code class="welcome-code-block">/b_allocRead 0 loop_amen.flac
+/b_allocRead 1 ambi_choir.flac
+/b_allocRead 2 bd_haus.flac</code>
+                      <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
+                        The first number is the buffer ID (0, 1, 2...)
+                      </span>
+                    </li>
 
-                  <li>
-                    <span class="welcome-text">
-                      <strong>Scheduling</strong> — You can start each OSC API call with a time to schedule sequences:
-                    </span>
-                    <code class="welcome-code-block">0 /s_new sonic-pi-beep -1 0 0 note 60
-0.5 /s_new sonic-pi-beep -1 0 0 note 64</code>
-                  </li>
-                </ol>
+                    <li>
+                      <span class="welcome-text">
+                        <strong>Trigger Samples</strong> — Play samples using the stereo or mono player:
+                      </span>
+                      <code class="welcome-code-block">/s_new sonic-pi-basic_stereo_player -1 0 0 buf 0
+/s_new sonic-pi-basic_mono_player -1 0 0 buf 1 rate 1.5</code>
+                      <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
+                        <span class="welcome-code">buf</span> matches the buffer ID from <span class="welcome-code">/b_allocRead</span>, <span class="welcome-code">rate</span> changes playback speed
+                      </span>
+                    </li>
 
-                <p class="welcome-quickstart">
-                  <span class="welcome-label">Quick Start:</span>
-                  Click "Load Example" to load up some example API calls then hit "Send".
-                </p>
-              </div>
+                    <li>
+                      <span class="welcome-text">
+                        <strong>Schedule Sequences</strong> — Add times at the start to create rhythms:
+                      </span>
+                      <code class="welcome-code-block">0.0 /s_new sonic-pi-beep -1 0 0 note 60
+0.5 /s_new sonic-pi-beep -1 0 0 note 64
+1.0 /s_new sonic-pi-beep -1 0 0 note 67</code>
+                    </li>
 
-              <!-- Send Message / OSC API -->
-              <div>
-                <h2>Choose your own OSC...</h2>
-                <form id="message-form">
+                    <li>
+                      <span class="welcome-text">
+                        <strong>Explore!</strong> — Check out the
+                        <a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" class="welcome-link">scsynth OSC docs</a>
+                        or switch to the Playground tab to jam with the interactive synth pad!
+                      </span>
+                    </li>
+                  </ol>
+
+                  <p class="welcome-quickstart">
+                    <span class="welcome-label">Quick Start:</span>
+                    Click "Load Example" to load up some example API calls then hit "Send".
+                  </p>
+                </div>
+
+                <!-- Send Message / OSC API -->
+                <div>
+                  <h2>Choose your own OSC...</h2>
+                  <form id="message-form">
                   <div class="form-group" style="margin-bottom: 0.5rem">
                     <textarea
                       id="message-input"
@@ -1821,14 +2496,6 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                         disabled
                       >
                         Load Synthdefs
-                      </button>
-                      <button
-                        type="button"
-                        id="load-samples-button"
-                        class="btn-green"
-                        disabled
-                      >
-                        Load Samples
                       </button>
                       <button
                         type="button"
@@ -1855,13 +2522,17 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
                   </div>
                 </form>
               </div>
+              <!-- End Send Message / OSC API div -->
+              </div>
+              <!-- End OSC API Tab Content -->
+
             </div>
             <!-- End Left Column -->
 
             <!-- Draggable Divider -->
             <div class="divider" id="column-divider"></div>
 
-            <!-- Right Column: Logs only -->
+            <!-- Right Column: Logs (Always Visible) -->
             <div class="right-column">
               <!-- Logs Section -->
               <div class="logs-section">
@@ -2067,6 +2738,27 @@ sonic-pi-tb303, sonic-pi-chiplead, sonic-pi-fm</code>
               </span>
             </div>
           </div>
+
+          <!-- Hue Control -->
+          <div style="padding: 0.75rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem;">
+            <label for="hue-slider" style="color: #ffd700; min-width: 35px;">Hue</label>
+            <input
+              type="range"
+              id="hue-slider"
+              min="0"
+              max="360"
+              value="200"
+              step="1"
+              style="flex: 1; height: 4px;"
+            />
+            <span id="hue-value" style="color: #ffd700; min-width: 30px; text-align: right;">200</span>
+          </div>
+
+            </div>
+            <!-- End Right Column -->
+          </div>
+          <!-- End Main Layout Grid -->
+
         </div>
         <!-- End Unified Black Container -->
       </div>
