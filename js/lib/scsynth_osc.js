@@ -54,9 +54,10 @@ export default class ScsynthOSC {
             // osc_out_prescheduler_worker.js handles scheduling/tag cancellation AND writes directly to ring buffer
             // osc_in_worker.js handles receiving OSC messages from scsynth
             // debug_worker.js handles receiving debug messages from scsynth
-            this.workers.oscOut = new Worker('./dist/workers/osc_out_prescheduler_worker.js');
-            this.workers.oscIn = new Worker('./dist/workers/osc_in_worker.js');
-            this.workers.debug = new Worker('./dist/workers/debug_worker.js');
+            // Use import.meta.url to resolve worker paths relative to the module location (works with CDN)
+            this.workers.oscOut = new Worker(new URL('./workers/osc_out_prescheduler_worker.js', import.meta.url));
+            this.workers.oscIn = new Worker(new URL('./workers/osc_in_worker.js', import.meta.url));
+            this.workers.debug = new Worker(new URL('./workers/debug_worker.js', import.meta.url));
 
             // Set up worker message handlers
             this.setupWorkerHandlers();
