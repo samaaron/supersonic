@@ -8,11 +8,40 @@ let messages = [];
 let sentMessages = [];
 let runCounter = 0;
 
+// Central UI State Object
+const uiState = {
+  // Trackpad state
+  padX: 0.5,
+  padY: 0.5,
+  padActive: false,
+
+  // Slider values
+  synth: 'beep',
+  rootNote: 60,
+  octaves: 2,
+  amplitude: 0.5,
+  attack: 0,
+  release: 0.1,
+  randomArp: true
+};
+
+// Make uiState globally accessible for debugging and audio algorithm access
+window.uiState = uiState;
+
 // Scope visualiser
 let analyser = null;
 let scopeCanvas = null;
 let scopeCtx = null;
 let scopeAnimationId = null;
+
+// Trail effect
+let trailCanvas = null;
+let trailCtx = null;
+let trailParticles = [];
+let trailAnimationId = null;
+let lastTrailX = null;
+let lastTrailY = null;
+let trailReleaseTime = null;
 
 // DOM elements
 const initButton = document.getElementById('init-button');
@@ -31,6 +60,22 @@ const debugLog = document.getElementById('debug-log');
 // Scope canvas
 scopeCanvas = document.getElementById('scope-canvas');
 scopeCtx = scopeCanvas.getContext('2d');
+
+// Trail canvas
+trailCanvas = document.getElementById('trail-canvas');
+if (trailCanvas) {
+  trailCtx = trailCanvas.getContext('2d');
+  // Set canvas size to match container
+  const pad = document.getElementById('synth-pad');
+  if (pad) {
+    const resizeTrailCanvas = () => {
+      trailCanvas.width = pad.offsetWidth;
+      trailCanvas.height = pad.offsetHeight;
+    };
+    resizeTrailCanvas();
+    window.addEventListener('resize', resizeTrailCanvas);
+  }
+}
 
 // Helper functions
 // Parse text to OSC message
@@ -132,6 +177,8 @@ function updateStatus(status) {
   const loadSynthdefsButton = document.getElementById('load-synthdefs-button');
   const loadSamplesButton = document.getElementById('load-samples-button');
   const loadExampleButton = document.getElementById('load-example-button');
+  const welcomeLoadSynthdefsButton = document.getElementById('welcome-load-synthdefs-button');
+  const welcomeLoadSamplesButton = document.getElementById('welcome-load-samples-button');
 
   // Update UI visibility based on status
   if (status === 'not_initialized' || status === 'error') {
@@ -145,6 +192,8 @@ function updateStatus(status) {
     if (clearButton) clearButton.disabled = true;
     if (loadAllButton) loadAllButton.disabled = true;
     if (loadExampleButton) loadExampleButton.disabled = true;
+    if (welcomeLoadSynthdefsButton) welcomeLoadSynthdefsButton.disabled = true;
+    if (welcomeLoadSamplesButton) welcomeLoadSamplesButton.disabled = true;
   } else if (status === 'initializing') {
     initButton.textContent = 'Booting...';
     initButton.disabled = true;
@@ -158,6 +207,8 @@ function updateStatus(status) {
     if (loadSynthdefsButton) loadSynthdefsButton.disabled = false;
     if (loadSamplesButton) loadSamplesButton.disabled = false;
     if (loadExampleButton) loadExampleButton.disabled = false;
+    if (welcomeLoadSynthdefsButton) welcomeLoadSynthdefsButton.disabled = false;
+    if (welcomeLoadSamplesButton) welcomeLoadSamplesButton.disabled = false;
   }
 }
 
@@ -609,6 +660,20 @@ initButton.addEventListener('click', async () => {
       const loadSamplesBtn = document.getElementById('load-samples-button');
       if (loadSamplesBtn) loadSamplesBtn.disabled = false;
 
+      // Enable the synth pad
+      const synthPad = document.getElementById('synth-pad');
+      if (synthPad) {
+        synthPad.classList.remove('disabled');
+        synthPad.classList.add('ready');
+        console.log('[UI] Synth pad enabled');
+      }
+
+      // Initialize FX parameter display with default values
+      const cutoffDisplay = document.getElementById('fx-cutoff-value');
+      const mixDisplay = document.getElementById('fx-mix-value');
+      if (cutoffDisplay) cutoffDisplay.textContent = '130.0';
+      if (mixDisplay) mixDisplay.textContent = '0.30';
+
       // Display WASM version
       if (orchestrator.workletNode && orchestrator.workletNode.port) {
         orchestrator.workletNode.port.postMessage({ type: 'getVersion' });
@@ -1042,7 +1107,30 @@ if (divider && leftColumn && rightColumn) {
   console.error('[Divider] Elements not found:', { divider, leftColumn, rightColumn });
 }
 
-// Tab functionality for mobile
+// Main Tab functionality (Playground / OSC API)
+const mainTabButtons = document.querySelectorAll('.main-tab-button');
+const mainTabContents = document.querySelectorAll('.main-tab-content');
+
+mainTabButtons.forEach(button => {
+  button.addEventListener('click', () => {
+    const tabName = button.dataset.mainTab;
+
+    // Remove active class from all buttons and contents
+    mainTabButtons.forEach(btn => btn.classList.remove('active'));
+    mainTabContents.forEach(content => content.classList.remove('active'));
+
+    // Add active class to clicked button and corresponding content
+    button.classList.add('active');
+    const targetContent = document.querySelector(`[data-main-tab-content="${tabName}"]`);
+    if (targetContent) {
+      targetContent.classList.add('active');
+    }
+
+    console.log('[UI] Switched to tab:', tabName);
+  });
+});
+
+// Log tab functionality for mobile (OSC In/Out/Debug)
 const tabButtons = document.querySelectorAll('.tab-button');
 const tabContents = document.querySelectorAll('.tab-content');
 
@@ -1090,47 +1178,74 @@ if (clearButton) {
 
 // Load Synthdefs button - load binary synthdefs using new API
 const loadSynthdefsButton = document.getElementById('load-synthdefs-button');
+const welcomeLoadSynthdefsButton = document.getElementById('welcome-load-synthdefs-button');
+
+async function loadAllSynthdefs() {
+  try {
+    const synthNames = [
+      'sonic-pi-beep',
+      'sonic-pi-tb303',
+      'sonic-pi-chiplead',
+      'sonic-pi-dsaw',
+      'sonic-pi-dpulse',
+      'sonic-pi-bnoise',
+      'sonic-pi-prophet',
+      'sonic-pi-fm',
+      'sonic-pi-stereo_player',
+      'sonic-pi-basic_stereo_player'
+    ];
+
+    console.log('[App] Loading', synthNames.length, 'synthdefs...');
+    const results = await orchestrator.loadSynthDefs(synthNames);
+
+    const successCount = Object.values(results).filter(r => r.success).length;
+    console.log(`[App] Loaded ${successCount}/${synthNames.length} synthdefs`);
+  } catch (error) {
+    console.error('[App] Load synthdefs error:', error);
+    showError('Failed to load synthdefs: ' + error.message);
+  }
+}
+
 if (loadSynthdefsButton) {
-  loadSynthdefsButton.addEventListener('click', async () => {
-    try {
-      const synthNames = ['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-chiplead', 'sonic-pi-dsaw', 'sonic-pi-dpulse', 'sonic-pi-bnoise', 'sonic-pi-prophet', 'sonic-pi-fm', 'sonic-pi-stereo_player', 'sonic-pi-basic_stereo_player'];
+  loadSynthdefsButton.addEventListener('click', loadAllSynthdefs);
+}
 
-      console.log('[App] Loading', synthNames.length, 'synthdefs...');
-      const results = await orchestrator.loadSynthDefs(synthNames);
-
-      const successCount = Object.values(results).filter(r => r.success).length;
-      console.log(`[App] Loaded ${successCount}/${synthNames.length} synthdefs`);
-    } catch (error) {
-      console.error('[App] Load synthdefs error:', error);
-      showError('Failed to load synthdefs: ' + error.message);
-    }
-  });
+if (welcomeLoadSynthdefsButton) {
+  welcomeLoadSynthdefsButton.addEventListener('click', loadAllSynthdefs);
 }
 
 // Load Samples button - load audio samples into buffers
 const loadSamplesButton = document.getElementById('load-samples-button');
-if (loadSamplesButton) {
-  loadSamplesButton.addEventListener('click', async () => {
-    try {
-      const samples = [
-        { bufnum: 0, filename: 'loop_amen.flac' },
-        { bufnum: 1, filename: 'ambi_choir.flac' },
-        { bufnum: 2, filename: 'bd_haus.flac' }
-      ];
+const welcomeLoadSamplesButton = document.getElementById('welcome-load-samples-button');
 
-      console.log('[App] Loading', samples.length, 'samples...');
+async function loadAllSamples() {
+  try {
+    const samples = [
+      { bufnum: 0, filename: 'loop_amen.flac' },
+      { bufnum: 1, filename: 'ambi_choir.flac' },
+      { bufnum: 2, filename: 'bd_haus.flac' }
+    ];
 
-      for (const sample of samples) {
-        console.log(`[App] Loading buffer ${sample.bufnum}: ${sample.filename}`);
-        await orchestrator.send('/b_allocRead', sample.bufnum, sample.filename);
-      }
+    console.log('[App] Loading', samples.length, 'samples...');
 
-      console.log(`[App] Loaded ${samples.length} samples into buffers 0-2`);
-    } catch (error) {
-      console.error('[App] Load samples error:', error);
-      showError('Failed to load samples: ' + error.message);
+    for (const sample of samples) {
+      console.log(`[App] Loading buffer ${sample.bufnum}: ${sample.filename}`);
+      await orchestrator.send('/b_allocRead', sample.bufnum, sample.filename);
     }
-  });
+
+    console.log(`[App] Loaded ${samples.length} samples into buffers 0-2`);
+  } catch (error) {
+    console.error('[App] Load samples error:', error);
+    showError('Failed to load samples: ' + error.message);
+  }
+}
+
+if (loadSamplesButton) {
+  loadSamplesButton.addEventListener('click', loadAllSamples);
+}
+
+if (welcomeLoadSamplesButton) {
+  welcomeLoadSamplesButton.addEventListener('click', loadAllSamples);
 }
 
 // Load Example button
@@ -1150,3 +1265,1106 @@ if (loadExampleButton) {
     console.log('[App] Loaded example code into textarea');
   });
 }
+
+// ===== INTERACTIVE UI CONTROLS =====
+
+// Synth Pad (Trackpad) Setup
+const synthPad = document.getElementById('synth-pad');
+const synthPadTouch = document.getElementById('synth-pad-touch');
+const synthPadCrosshair = document.getElementById('synth-pad-crosshair');
+const synthPadCrosshairH = document.getElementById('synth-pad-crosshair-h');
+const synthPadCrosshairV = document.getElementById('synth-pad-crosshair-v');
+const synthPadCoords = document.getElementById('synth-pad-coords');
+
+if (synthPad) {
+  // Initially disable the pad until system is booted
+  synthPad.classList.add('disabled');
+
+  let isPadActive = false;
+
+  function updatePadPosition(clientX, clientY) {
+    const rect = synthPad.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height)); // Invert Y
+
+    // Update state
+    uiState.padX = x;
+    uiState.padY = y;
+    uiState.padActive = isPadActive;
+
+    // Update visual elements
+    const pixelX = x * rect.width;
+    const pixelY = (1 - y) * rect.height;
+
+    synthPadTouch.style.left = pixelX + 'px';
+    synthPadTouch.style.top = pixelY + 'px';
+
+    synthPadCrosshairH.style.top = pixelY + 'px';
+    synthPadCrosshairV.style.left = pixelX + 'px';
+
+    // Update X and Y display values
+    const padXValue = document.getElementById('pad-x-value');
+    const padYValue = document.getElementById('pad-y-value');
+    if (padXValue) padXValue.textContent = x.toFixed(2);
+    if (padYValue) padYValue.textContent = y.toFixed(2);
+
+    // Update FX parameters if available
+    if (typeof updateFXParameters === 'function') {
+      updateFXParameters(x, y);
+    }
+
+    console.log('[UI] Pad position:', { x: x.toFixed(3), y: y.toFixed(3), active: isPadActive });
+  }
+
+  function activatePad(clientX, clientY) {
+    // Don't activate if the pad is disabled (not booted yet)
+    if (synthPad.classList.contains('disabled')) {
+      return;
+    }
+
+    isPadActive = true;
+    synthPad.classList.add('active');
+    synthPadTouch.classList.add('active');
+    synthPadCrosshair.classList.add('active');
+    updatePadPosition(clientX, clientY);
+
+    // Start trail animation
+    if (typeof startTrailAnimation === 'function') {
+      startTrailAnimation();
+    }
+
+    // Start arpeggiator if available
+    if (typeof startArpeggiator === 'function' && typeof arpeggiatorRunning !== 'undefined' && !arpeggiatorRunning) {
+      startArpeggiator();
+    }
+
+    // Start kick if available
+    if (typeof startKickLoop === 'function' && typeof kickRunning !== 'undefined' && !kickRunning) {
+      startKickLoop();
+    }
+
+    // Start amen if available
+    if (typeof startAmenLoop === 'function' && typeof amenRunning !== 'undefined' && !amenRunning) {
+      startAmenLoop();
+    }
+  }
+
+  function deactivatePad() {
+    isPadActive = false;
+    uiState.padActive = false;
+    synthPad.classList.remove('active');
+    synthPadTouch.classList.remove('active');
+    synthPadCrosshair.classList.remove('active');
+    console.log('[UI] Pad deactivated');
+
+    // Stop trail animation
+    if (typeof stopTrailAnimation === 'function') {
+      stopTrailAnimation();
+    }
+
+    // Stop arpeggiator if available
+    if (typeof stopArpeggiator === 'function' && typeof arpeggiatorRunning !== 'undefined' && arpeggiatorRunning) {
+      stopArpeggiator();
+    }
+
+    // Stop kick if available
+    if (typeof stopKickLoop === 'function' && typeof kickRunning !== 'undefined' && kickRunning) {
+      stopKickLoop();
+    }
+
+    // Stop amen if available
+    if (typeof stopAmenLoop === 'function' && typeof amenRunning !== 'undefined' && amenRunning) {
+      stopAmenLoop();
+    }
+  }
+
+  // Mouse events
+  synthPad.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    activatePad(e.clientX, e.clientY);
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (isPadActive) {
+      updatePadPosition(e.clientX, e.clientY);
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isPadActive) {
+      deactivatePad();
+    }
+  });
+
+  // Touch events
+  synthPad.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    activatePad(touch.clientX, touch.clientY);
+  });
+
+  synthPad.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (isPadActive && e.touches.length > 0) {
+      const touch = e.touches[0];
+      updatePadPosition(touch.clientX, touch.clientY);
+    }
+  });
+
+  synthPad.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    deactivatePad();
+  });
+
+  synthPad.addEventListener('touchcancel', (e) => {
+    e.preventDefault();
+    deactivatePad();
+  });
+
+  console.log('[UI] Synth pad initialized');
+}
+
+// Slider Controls Setup
+function setupSlider(sliderId, valueId, stateKey, formatter = (v) => v) {
+  const slider = document.getElementById(sliderId);
+  const valueDisplay = document.getElementById(valueId);
+
+  if (slider && valueDisplay) {
+    slider.addEventListener('input', (e) => {
+      const value = parseFloat(e.target.value);
+      uiState[stateKey] = value;
+      valueDisplay.textContent = formatter(value);
+      console.log(`[UI] ${stateKey}:`, value);
+    });
+
+    console.log(`[UI] Slider ${stateKey} initialized`);
+  }
+}
+
+// Synth selector
+const synthSelect = document.getElementById('synth-select');
+const synthValue = document.getElementById('synth-value');
+
+if (synthSelect && synthValue) {
+  synthSelect.addEventListener('change', (e) => {
+    uiState.synth = e.target.value;
+    synthValue.textContent = e.target.value;
+    console.log('[UI] synth:', e.target.value);
+  });
+
+  console.log('[UI] Synth selector initialized');
+}
+
+// Setup all sliders
+setupSlider('root-note-slider', 'root-note-value', 'rootNote', (v) => Math.round(v));
+setupSlider('octaves-slider', 'octaves-value', 'octaves', (v) => Math.round(v));
+setupSlider('attack-slider', 'attack-value', 'attack', (v) => v.toFixed(2));
+setupSlider('release-slider', 'release-value', 'release', (v) => v.toFixed(2));
+
+// Hue slider with custom handler to update CSS filter
+const hueSlider = document.getElementById('hue-slider');
+const hueValue = document.getElementById('hue-value');
+const synthUIContainer = document.getElementById('synth-ui-container');
+
+if (hueSlider && hueValue && synthUIContainer) {
+  hueSlider.addEventListener('input', (e) => {
+    const value = parseInt(e.target.value);
+    hueValue.textContent = value;
+    synthUIContainer.style.filter = `hue-rotate(${value}deg) saturate(2)`;
+  });
+  console.log('[UI] Hue slider initialized');
+}
+
+// Random Arp toggle button
+const randomArpToggle = document.getElementById('random-arp-toggle');
+
+if (randomArpToggle) {
+  randomArpToggle.addEventListener('click', () => {
+    uiState.randomArp = !uiState.randomArp;
+    randomArpToggle.setAttribute('data-active', uiState.randomArp.toString());
+    randomArpToggle.textContent = uiState.randomArp ? 'On' : 'Off';
+    console.log('[UI] randomArp:', uiState.randomArp);
+  });
+
+  console.log('[UI] Random Arp toggle initialized');
+}
+
+console.log('[UI] All interactive controls initialized');
+console.log('[UI] Access current state via window.uiState');
+
+// ===== ARPEGGIATOR & FX CHAIN =====
+
+// Constants for FX chain
+const NTP_EPOCH_OFFSET = 2208988800;
+const GROUP_SOURCE = 100;
+const GROUP_FX = 101;
+const FX_BUS_SYNTH_TO_LPF = 20;
+const FX_BUS_LPF_TO_REVERB = 21;
+const FX_BUS_OUTPUT = 0;
+const FX_LPF_NODE = 2000;
+const FX_REVERB_NODE = 2001;
+
+// State
+let fxChainInitialized = false;
+let fxChainInitializing = null; // Promise to prevent concurrent initialization
+let fxSynthdefsLoaded = false;
+let instrumentSynthdefsLoaded = false;
+let arpeggiatorRunning = false;
+let arpeggiatorBeatCounter = 0;
+let kickRunning = false;
+let kickBeatCounter = 0;
+let kickCurrentTime = null; // Current time threaded through for kick loop
+let kickSampleLoaded = false;
+let amenRunning = false;
+let amenBeatCounter = 0;
+let amenSampleLoaded = false;
+let amenCurrentTime = null; // Current time threaded through for amen loop
+let playbackStartNTP = null;
+let currentPatternIndex = 0;
+let beatPulseInterval = null;
+
+/**
+ * Load instrument synthdefs (called by startArpeggiator)
+ */
+async function loadInstrumentSynthdefs() {
+  if (instrumentSynthdefsLoaded) return;
+
+  const instrumentSynthdefs = [
+    'sonic-pi-beep',
+    'sonic-pi-tb303',
+    'sonic-pi-chiplead',
+    'sonic-pi-dsaw',
+    'sonic-pi-dpulse',
+    'sonic-pi-bnoise',
+    'sonic-pi-prophet',
+    'sonic-pi-fm'
+  ];
+
+  console.log('[Arp] Loading instrument synthdefs:', instrumentSynthdefs);
+  try {
+    const results = await orchestrator.loadSynthDefs(instrumentSynthdefs);
+    const successCount = Object.values(results).filter(r => r.success).length;
+    console.log(`[Arp] Loaded ${successCount}/${instrumentSynthdefs.length} instrument synthdefs`);
+    instrumentSynthdefsLoaded = true;
+  } catch (error) {
+    console.error('[Arp] Failed to load instrument synthdefs:', error);
+    throw error;
+  }
+}
+
+/**
+ * Load FX synthdefs (called by initFXChain)
+ */
+async function loadFXSynthdefs() {
+  if (fxSynthdefsLoaded) return;
+
+  const fxSynthdefs = ['sonic-pi-fx_lpf', 'sonic-pi-fx_reverb', 'sonic-pi-basic_stereo_player'];
+
+  console.log('[FX] Loading FX synthdefs:', fxSynthdefs);
+  try {
+    const results = await orchestrator.loadSynthDefs(fxSynthdefs);
+    const successCount = Object.values(results).filter(r => r.success).length;
+    console.log(`[FX] Loaded ${successCount}/${fxSynthdefs.length} FX synthdefs`);
+    fxSynthdefsLoaded = true;
+  } catch (error) {
+    console.error('[FX] Failed to load FX synthdefs:', error);
+    throw error;
+  }
+}
+
+/**
+ * Initialize FX chain (LPF -> Reverb)
+ * Uses promise-based guard to prevent concurrent initialization
+ */
+async function initFXChain() {
+  if (!orchestrator) return;
+
+  // If already initialized, return immediately
+  if (fxChainInitialized) {
+    console.log('[FX] FX chain already initialized');
+    return;
+  }
+
+  // If currently initializing, wait for the existing initialization to complete
+  if (fxChainInitializing) {
+    console.log('[FX] Waiting for existing initialization to complete...');
+    return await fxChainInitializing;
+  }
+
+  // Create the initialization promise
+  fxChainInitializing = (async () => {
+    console.log('[FX] Initializing FX chain...');
+
+    try {
+      // Load FX synthdefs first
+      await loadFXSynthdefs();
+
+      // Create groups
+      await orchestrator.send('/g_new', GROUP_SOURCE, 0, 0);
+      await orchestrator.send('/g_new', GROUP_FX, 3, GROUP_SOURCE);
+
+      // Create LPF in FX group
+      await orchestrator.send('/s_new', 'sonic-pi-fx_lpf', FX_LPF_NODE, 0, GROUP_FX,
+        'in_bus', FX_BUS_SYNTH_TO_LPF,
+        'out_bus', FX_BUS_LPF_TO_REVERB,
+        'cutoff', 130.0,
+        'res', 0.5);
+
+      // Create Reverb after LPF
+      await orchestrator.send('/s_new', 'sonic-pi-fx_reverb', FX_REVERB_NODE, 3, FX_LPF_NODE,
+        'in_bus', FX_BUS_LPF_TO_REVERB,
+        'out_bus', FX_BUS_OUTPUT,
+        'mix', 0.3,
+        'room', 1.0);
+
+      // Give the server time to create the nodes
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Mark as initialized only after successful completion
+      fxChainInitialized = true;
+      console.log('[FX] FX chain initialized successfully');
+    } catch (error) {
+      console.error('[FX] Failed to initialize FX chain:', error);
+      console.error('[FX] Make sure fx_lpf and fx_reverb synthdefs are loaded!');
+      throw error; // Re-throw to indicate failure
+    } finally {
+      // Clear the initializing promise
+      fxChainInitializing = null;
+    }
+  })();
+
+  return await fxChainInitializing;
+}
+
+/**
+ * Update FX parameters based on trackpad position
+ */
+function updateFXParameters(x, y) {
+  // X axis = reverb mix (0 = dry, 1 = wet)
+  const reverbMix = x;
+
+  // Y axis = LPF cutoff (MIDI: 30 = low, 130 = high)
+  const cutoff = 30 + y * 100;
+
+  // Always update UI display
+  const cutoffDisplay = document.getElementById('fx-cutoff-value');
+  const mixDisplay = document.getElementById('fx-mix-value');
+  if (cutoffDisplay) cutoffDisplay.textContent = cutoff.toFixed(1);
+  if (mixDisplay) mixDisplay.textContent = reverbMix.toFixed(2);
+
+  // Send to audio engine if initialized
+  if (fxChainInitialized && orchestrator) {
+    try {
+      orchestrator.send('/n_set', FX_LPF_NODE, 'cutoff', cutoff);
+      orchestrator.send('/n_set', FX_REVERB_NODE, 'mix', reverbMix);
+    } catch (error) {
+      console.warn('[FX] Error updating FX parameters:', error);
+    }
+  }
+}
+
+/**
+ * Generate minor pentatonic scale from root note
+ * Minor pentatonic intervals: 0, 3, 5, 7, 10, 12 (root, m3, P4, P5, m7, octave)
+ */
+function getMinorPentatonicScale(rootNote, octaves) {
+  const intervals = [0, 3, 5, 7, 10];
+  const scale = [];
+
+  for (let oct = 0; oct < octaves; oct++) {
+    for (let interval of intervals) {
+      scale.push(rootNote + interval + (oct * 12));
+    }
+  }
+
+  return scale;
+}
+
+/**
+ * Start arpeggiator
+ */
+async function startArpeggiator() {
+  if (!orchestrator) return;
+
+  // Load instrument synthdefs first
+  if (!instrumentSynthdefsLoaded) {
+    await loadInstrumentSynthdefs();
+  }
+
+  // Initialize FX chain if needed
+  if (!fxChainInitialized) {
+    await initFXChain();
+  }
+
+  if (arpeggiatorRunning) return;
+  arpeggiatorRunning = true;
+
+  const NOTE_INTERVAL = 0.125; // Must match scheduleArpeggiatorBatch
+  const GRID_INTERVAL = 0.5;   // Snap to 0.5s grid
+
+  // Get current time
+  const perfTimeMs = performance.timeOrigin + performance.now();
+  const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+
+  // Find the next 0.5s grid boundary
+  const nextGridBoundary = Math.ceil(currentNTP / GRID_INTERVAL) * GRID_INTERVAL;
+
+  // Initialize the global timeline to the next grid boundary (only if not set)
+  if (playbackStartNTP === null) {
+    playbackStartNTP = nextGridBoundary;
+    arpeggiatorBeatCounter = 0;
+    currentPatternIndex = 0;
+  } else {
+    // Calculate which beat we should start from relative to the global grid
+    const elapsed = currentNTP - playbackStartNTP;
+    arpeggiatorBeatCounter = Math.ceil(elapsed / NOTE_INTERVAL);
+    currentPatternIndex = 0;
+  }
+
+  // Calculate delay until our start beat
+  const startTime = playbackStartNTP + (arpeggiatorBeatCounter * NOTE_INTERVAL);
+  const delayUntilStart = (startTime - currentNTP) * 1000; // Convert to ms
+
+  console.log(`[Arp] Starting at beat ${arpeggiatorBeatCounter}, NTP=${startTime.toFixed(3)}s (delay: ${delayUntilStart.toFixed(1)}ms)`);
+
+  // Wait until the start time before scheduling
+  setTimeout(() => {
+    if (arpeggiatorRunning) {
+      scheduleArpeggiatorBatch();
+    }
+  }, Math.max(0, delayUntilStart));
+
+  // Start beat pulse visual
+  startBeatPulse();
+}
+
+/**
+ * Schedule next batch of 4 notes
+ */
+function scheduleArpeggiatorBatch() {
+  if (!arpeggiatorRunning) return;
+
+  const NOTE_INTERVAL = 0.125; // 0.5s per note (120 BPM half notes)
+  const NOTES_PER_BATCH = 4;
+
+  // Get current scale from uiState
+  const scale = getMinorPentatonicScale(uiState.rootNote, uiState.octaves);
+  const synthName = `sonic-pi-${uiState.synth}`;
+
+  // Schedule 4 notes
+  for (let i = 0; i < NOTES_PER_BATCH; i++) {
+    const beatNumber = arpeggiatorBeatCounter + i;
+    const targetNTP = playbackStartNTP + (beatNumber * NOTE_INTERVAL);
+
+    // Pick note: random or sequential
+    let note;
+    if (uiState.randomArp) {
+      note = scale[Math.floor(Math.random() * scale.length)];
+    } else {
+      note = scale[currentPatternIndex % scale.length];
+      currentPatternIndex++;
+    }
+
+    // Create OSC message
+    const message = {
+      address: '/s_new',
+      args: [
+        { type: 's', value: synthName },
+        { type: 'i', value: -1 }, // Auto-assign node ID (we don't need to track)
+        { type: 'i', value: 0 }, // addAction: add to head
+        { type: 'i', value: GROUP_SOURCE },
+        { type: 's', value: 'note' },
+        { type: 'i', value: note },
+        { type: 's', value: 'out_bus' },
+        { type: 'i', value: FX_BUS_SYNTH_TO_LPF },
+        { type: 's', value: 'amp' },
+        { type: 'f', value: uiState.amplitude * 0.5 }, // Scale down to prevent clipping
+        { type: 's', value: 'attack' },
+        { type: 'f', value: uiState.attack },
+        { type: 's', value: 'release' },
+        { type: 'f', value: uiState.release }
+      ]
+    };
+
+    // Create OSC bundle with NTP timestamp
+    const ntpSeconds = Math.floor(targetNTP);
+    const ntpFraction = Math.floor((targetNTP % 1) * 0x100000000);
+
+    const encodedMessage = SuperSonic.osc.encode(message);
+    const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
+    const bundle = new Uint8Array(bundleSize);
+    const view = new DataView(bundle.buffer);
+    let offset = 0;
+
+    // Write "#bundle\0"
+    bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], offset);
+    offset += 8;
+
+    // Write NTP timestamp
+    view.setUint32(offset, ntpSeconds, false);
+    offset += 4;
+    view.setUint32(offset, ntpFraction, false);
+    offset += 4;
+
+    // Write message size
+    view.setInt32(offset, encodedMessage.byteLength, false);
+    offset += 4;
+
+    // Write message data
+    bundle.set(encodedMessage, offset);
+
+    orchestrator.sendOSC(bundle);
+  }
+
+  // Advance counter
+  arpeggiatorBeatCounter += NOTES_PER_BATCH;
+
+  // Calculate when to schedule next batch (500ms before it's needed)
+  const nextBatchStartTime = playbackStartNTP + (arpeggiatorBeatCounter * NOTE_INTERVAL);
+  const perfTimeMs = performance.timeOrigin + performance.now();
+  const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+  const timeUntilNextBatch = (nextBatchStartTime - currentNTP) * 1000;
+  const scheduleDelay = Math.max(0, timeUntilNextBatch - 500);
+
+  setTimeout(() => {
+    if (arpeggiatorRunning) {
+      scheduleArpeggiatorBatch();
+    }
+  }, scheduleDelay);
+}
+
+/**
+ * Stop arpeggiator
+ */
+function stopArpeggiator() {
+  arpeggiatorRunning = false;
+
+  // Stop beat pulse visual
+  stopBeatPulse();
+
+  // Only reset playback time if kick and amen are also stopped
+  if (!kickRunning && !amenRunning) {
+    playbackStartNTP = null;
+  }
+
+  console.log('[Arp] Stopped');
+}
+
+/**
+ * Start visual beat pulse on pad touch indicator
+ */
+function startBeatPulse() {
+  const NOTE_INTERVAL = 0.125; // Match arp timing
+  const touchElement = document.getElementById('synth-pad-touch');
+
+  if (!touchElement) return;
+
+  // Calculate time until next beat
+  const perfTimeMs = performance.timeOrigin + performance.now();
+  const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+  const timeSinceStart = currentNTP - playbackStartNTP;
+  const nextBeatIn = NOTE_INTERVAL - (timeSinceStart % NOTE_INTERVAL);
+
+  // Start pulsing at the next beat
+  setTimeout(() => {
+    triggerBeatPulse();
+    beatPulseInterval = setInterval(triggerBeatPulse, NOTE_INTERVAL * 1000);
+  }, nextBeatIn * 1000);
+}
+
+/**
+ * Stop visual beat pulse
+ */
+function stopBeatPulse() {
+  if (beatPulseInterval) {
+    clearInterval(beatPulseInterval);
+    beatPulseInterval = null;
+  }
+}
+
+/**
+ * Trigger one beat pulse animation
+ */
+function triggerBeatPulse() {
+  const touchElement = document.getElementById('synth-pad-touch');
+  if (!touchElement) return;
+
+  // Remove class and force reflow to restart animation
+  touchElement.classList.remove('beat-pulse');
+  void touchElement.offsetWidth; // Force reflow
+  touchElement.classList.add('beat-pulse');
+
+  // Spawn trail particle
+  spawnTrailParticle();
+}
+
+/**
+ * Spawn a new trail particle at the current dot position
+ */
+function spawnTrailParticle(force = false) {
+  if (!trailCanvas || !uiState.padActive) return;
+
+  const x = uiState.padX * trailCanvas.width;
+  const y = (1 - uiState.padY) * trailCanvas.height;
+
+  // Spawn multiple small particles for smoother effect
+  for (let i = 0; i < 3; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 0.3 + Math.random() * 0.5;
+
+    trailParticles.push({
+      x: x + (Math.random() - 0.5) * 10,
+      y: y + (Math.random() - 0.5) * 10,
+      vx: Math.cos(angle) * speed * 0.2,
+      vy: Math.sin(angle) * speed * 0.2,
+      life: 1.0,
+      maxLife: 0.6 + Math.random() * 0.4, // Variable lifetime
+      size: 8 + Math.random() * 8
+    });
+  }
+}
+
+/**
+ * Update and render trail particles
+ */
+function updateTrail() {
+  if (!trailCtx || !trailCanvas) return;
+
+  const now = performance.now();
+
+  // Check if we're in the release phase (continuing after pad release)
+  const inRelease = !uiState.padActive && trailReleaseTime !== null;
+  const releaseElapsed = inRelease ? (now - trailReleaseTime) / 1000 : 0;
+  const releaseComplete = releaseElapsed > (uiState.release || 0.1);
+
+  // Spawn particles while active OR during release period
+  const shouldSpawn = uiState.padActive || (inRelease && !releaseComplete);
+
+  if (shouldSpawn) {
+    // Fade during release
+    const spawnIntensity = inRelease ? Math.max(0, 1 - releaseElapsed / (uiState.release || 0.1)) : 1.0;
+
+    // Reduce spawning during release
+    if (Math.random() < spawnIntensity) {
+      spawnTrailParticle();
+    }
+  }
+
+  // If no particles and spawn is done, clear completely and stop
+  if (trailParticles.length === 0 && !shouldSpawn) {
+    trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
+    trailAnimationId = null;
+    trailReleaseTime = null;
+    return;
+  }
+
+  // Clear with slight fade for smoother effect
+  trailCtx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+  trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
+
+  const dt = 16.67; // Assume 60fps
+
+  // Update and draw particles
+  trailCtx.globalCompositeOperation = 'lighter';
+
+  trailParticles = trailParticles.filter(particle => {
+    // Update particle
+    particle.life -= dt / (particle.maxLife * 1000);
+
+    if (particle.life <= 0) return false;
+
+    // Move particle (slow drift)
+    particle.x += particle.vx;
+    particle.y += particle.vy;
+
+    // Slow down over time
+    particle.vx *= 0.98;
+    particle.vy *= 0.98;
+
+    // Draw particle
+    const alpha = particle.life;
+    const size = particle.size * (0.5 + particle.life * 0.5);
+
+    const gradient = trailCtx.createRadialGradient(
+      particle.x, particle.y, 0,
+      particle.x, particle.y, size
+    );
+
+    gradient.addColorStop(0, `rgba(255, 215, 0, ${alpha * 0.9})`);
+    gradient.addColorStop(0.5, `rgba(255, 160, 0, ${alpha * 0.7})`);
+    gradient.addColorStop(0.8, `rgba(255, 102, 0, ${alpha * 0.4})`);
+    gradient.addColorStop(1, 'rgba(255, 102, 0, 0)');
+
+    trailCtx.fillStyle = gradient;
+    trailCtx.beginPath();
+    trailCtx.arc(particle.x, particle.y, size, 0, Math.PI * 2);
+    trailCtx.fill();
+
+    return true;
+  });
+
+  trailCtx.globalCompositeOperation = 'source-over';
+
+  // Continue animation
+  trailAnimationId = requestAnimationFrame(updateTrail);
+}
+
+/**
+ * Start trail animation loop
+ */
+function startTrailAnimation() {
+  trailReleaseTime = null; // Reset release time
+  if (!trailAnimationId) {
+    trailAnimationId = requestAnimationFrame(updateTrail);
+  }
+}
+
+/**
+ * Stop trail animation loop
+ */
+function stopTrailAnimation() {
+  // Mark when release started to continue trail during audio release
+  trailReleaseTime = performance.now();
+  lastTrailX = null;
+  lastTrailY = null;
+  // Animation will continue during release period, then stop and clear
+}
+
+/**
+ * Load kick sample
+ */
+async function loadKickSample() {
+  if (kickSampleLoaded) return;
+
+  console.log('[Kick] Loading bd_haus sample...');
+  await orchestrator.send('/b_allocRead', 0, 'bd_haus.flac');
+  kickSampleLoaded = true;
+  console.log('[Kick] bd_haus sample loaded to buffer 0');
+}
+
+/**
+ * Start kick drum loop
+ */
+async function startKickLoop() {
+  if (!orchestrator) return;
+
+  // Initialize FX chain if needed
+  if (!fxChainInitialized) {
+    await initFXChain();
+  }
+
+  // Load sample if needed
+  if (!kickSampleLoaded) {
+    await loadKickSample();
+  }
+
+  if (kickRunning) return;
+  kickRunning = true;
+
+  const KICK_INTERVAL = 0.5; // Must match scheduleKickBatch
+  const GRID_INTERVAL = 0.5; // Snap to 0.5s grid
+
+  // Get current time
+  const perfTimeMs = performance.timeOrigin + performance.now();
+  const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+
+  // Find the next 0.5s grid boundary
+  const nextGridBoundary = Math.ceil(currentNTP / GRID_INTERVAL) * GRID_INTERVAL;
+
+  // Initialize the global timeline to the next grid boundary (only if not set)
+  if (playbackStartNTP === null) {
+    playbackStartNTP = nextGridBoundary;
+    kickBeatCounter = 0;
+    kickCurrentTime = playbackStartNTP;
+  } else {
+    // Calculate which beat we should start from relative to the global grid
+    const elapsed = currentNTP - playbackStartNTP;
+    kickBeatCounter = Math.ceil(elapsed / KICK_INTERVAL);
+    kickCurrentTime = playbackStartNTP + (kickBeatCounter * KICK_INTERVAL);
+  }
+
+  // Calculate delay until our start beat
+  const startTime = kickCurrentTime;
+  const delayUntilStart = (startTime - currentNTP) * 1000; // Convert to ms
+
+  console.log(`[Kick] Starting at beat ${kickBeatCounter}, NTP=${startTime.toFixed(3)}s (delay: ${delayUntilStart.toFixed(1)}ms)`);
+
+  // Wait until the start time before scheduling
+  setTimeout(() => {
+    if (kickRunning) {
+      scheduleKickBatch();
+    }
+  }, Math.max(0, delayUntilStart));
+}
+
+/**
+ * Schedule next batch of kick drums
+ */
+function scheduleKickBatch() {
+  if (!kickRunning) return;
+
+  const KICK_INTERVAL = 0.5; // 0.5s per kick (matches 4 arp notes)
+  const KICKS_PER_BATCH = 4;
+
+  // Schedule 4 kicks
+  for (let i = 0; i < KICKS_PER_BATCH; i++) {
+    // Thread time through - use current time and increment
+    const targetNTP = kickCurrentTime;
+    kickCurrentTime += KICK_INTERVAL;
+
+    // Create OSC message for kick
+    const message = {
+      address: '/s_new',
+      args: [
+        { type: 's', value: 'sonic-pi-basic_stereo_player' },
+        { type: 'i', value: -1 }, // Auto-assign node ID
+        { type: 'i', value: 0 }, // addAction: add to head
+        { type: 'i', value: GROUP_SOURCE },
+        { type: 's', value: 'buf' },
+        { type: 'i', value: 0 }, // buffer 0 (bd_haus)
+        { type: 's', value: 'out_bus' },
+        { type: 'i', value: FX_BUS_SYNTH_TO_LPF },
+        { type: 's', value: 'amp' },
+        { type: 'f', value: 0.3 }
+      ]
+    };
+
+    // Create OSC bundle with NTP timestamp
+    const ntpSeconds = Math.floor(targetNTP);
+    const ntpFraction = Math.floor((targetNTP % 1) * 0x100000000);
+
+    const encodedMessage = SuperSonic.osc.encode(message);
+    const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
+    const bundle = new Uint8Array(bundleSize);
+    const view = new DataView(bundle.buffer);
+    let offset = 0;
+
+    // Write "#bundle\0"
+    bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], offset);
+    offset += 8;
+
+    // Write NTP timestamp
+    view.setUint32(offset, ntpSeconds, false);
+    offset += 4;
+    view.setUint32(offset, ntpFraction, false);
+    offset += 4;
+
+    // Write message size
+    view.setInt32(offset, encodedMessage.byteLength, false);
+    offset += 4;
+
+    // Write message data
+    bundle.set(encodedMessage, offset);
+
+    orchestrator.sendOSC(bundle);
+  }
+
+  // Advance counter
+  kickBeatCounter += KICKS_PER_BATCH;
+
+  // Calculate when to schedule next batch (500ms before the first event in next batch)
+  const perfTimeMs = performance.timeOrigin + performance.now();
+  const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+  const timeUntilNextBatch = (kickCurrentTime - currentNTP) * 1000;
+  const scheduleDelay = Math.max(0, timeUntilNextBatch - 500);
+
+  setTimeout(() => {
+    if (kickRunning) {
+      scheduleKickBatch();
+    }
+  }, scheduleDelay);
+}
+
+/**
+ * Stop kick drum loop
+ */
+function stopKickLoop() {
+  kickRunning = false;
+  kickCurrentTime = null;
+
+  // Only reset playback time if arpeggiator and amen are also stopped
+  if (!arpeggiatorRunning && !amenRunning) {
+    playbackStartNTP = null;
+  }
+
+  console.log('[Kick] Stopped');
+}
+
+/**
+ * Load amen sample
+ */
+async function loadAmenSample() {
+  if (amenSampleLoaded) return;
+
+  console.log('[Amen] Loading loop_amen sample...');
+  await orchestrator.send('/b_allocRead', 1, 'loop_amen.flac');
+  amenSampleLoaded = true;
+  console.log('[Amen] loop_amen sample loaded to buffer 1');
+}
+
+/**
+ * Start amen break loop
+ */
+async function startAmenLoop() {
+  if (!orchestrator) return;
+
+  // Initialize FX chain if needed
+  if (!fxChainInitialized) {
+    await initFXChain();
+  }
+
+  // Load sample if needed
+  if (!amenSampleLoaded) {
+    await loadAmenSample();
+  }
+
+  if (amenRunning) return;
+  amenRunning = true;
+
+  const AMEN_INTERVAL = 2.0; // Must match scheduleAmenBatch
+  const GRID_INTERVAL = 0.5; // Snap to 0.5s grid
+
+  // Get current time
+  const perfTimeMs = performance.timeOrigin + performance.now();
+  const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+
+  // Find the next 0.5s grid boundary
+  const nextGridBoundary = Math.ceil(currentNTP / GRID_INTERVAL) * GRID_INTERVAL;
+
+  // Initialize the global timeline to the next grid boundary (only if not set)
+  if (playbackStartNTP === null) {
+    playbackStartNTP = nextGridBoundary;
+    amenBeatCounter = 0;
+    amenCurrentTime = playbackStartNTP;
+  } else {
+    // Calculate which beat we should start from relative to the global grid
+    const elapsed = currentNTP - playbackStartNTP;
+    amenBeatCounter = Math.ceil(elapsed / AMEN_INTERVAL);
+    amenCurrentTime = playbackStartNTP + (amenBeatCounter * AMEN_INTERVAL);
+  }
+
+  // Calculate delay until our start beat
+  const startTime = amenCurrentTime;
+  const delayUntilStart = (startTime - currentNTP) * 1000; // Convert to ms
+
+  console.log(`[Amen] Starting at beat ${amenBeatCounter}, NTP=${startTime.toFixed(3)}s (delay: ${delayUntilStart.toFixed(1)}ms)`);
+
+  // Wait until the start time before scheduling
+  setTimeout(() => {
+    if (amenRunning) {
+      scheduleAmenBatch();
+    }
+  }, Math.max(0, delayUntilStart));
+}
+
+/**
+ * Schedule next batch of amen breaks
+ */
+function scheduleAmenBatch() {
+  if (!amenRunning || !orchestrator) return;
+
+  const AMEN_RATE = 0.8767; // Rate chosen to make the loop last exactly 2s
+  const AMEN_INTERVAL = 2.0; // 2 second loop duration
+  const AMEN_PER_BATCH = 1; // Schedule 1 at a time (only 2 seconds ahead for faster stop)
+
+  console.log(`[Amen] Scheduling batch starting at beat ${amenBeatCounter}`);
+
+  for (let i = 0; i < AMEN_PER_BATCH; i++) {
+    // Thread time through - use current time and increment
+    const targetNTP = amenCurrentTime;
+    amenCurrentTime += AMEN_INTERVAL;
+
+    // Create OSC message for amen
+    const message = {
+      address: '/s_new',
+      args: [
+        { type: 's', value: 'sonic-pi-basic_stereo_player' },
+        { type: 'i', value: -1 },
+        { type: 'i', value: 0 },
+        { type: 'i', value: GROUP_SOURCE },
+        { type: 's', value: 'buf' },
+        { type: 'i', value: 1 },
+        { type: 's', value: 'amp' },
+        { type: 'f', value: 0.5 },
+        { type: 's', value: 'rate' },
+        { type: 'f', value: AMEN_RATE },
+        { type: 's', value: 'out_bus' },
+        { type: 'i', value: FX_BUS_SYNTH_TO_LPF }
+      ]
+    };
+
+    const encodedMessage = SuperSonic.osc.encode(message);
+
+    // Build bundle manually with NTP timestamp
+    const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
+    const bundle = new Uint8Array(bundleSize);
+    const view = new DataView(bundle.buffer);
+
+    let offset = 0;
+
+    // Write bundle tag "#bundle\0"
+    bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], offset);
+    offset += 8;
+
+    // Write NTP timestamp
+    const ntpSeconds = Math.floor(targetNTP);
+    const ntpFraction = Math.floor((targetNTP % 1) * 0x100000000);
+
+    view.setUint32(offset, ntpSeconds, false);
+    offset += 4;
+    view.setUint32(offset, ntpFraction, false);
+    offset += 4;
+
+    // Write message size
+    view.setInt32(offset, encodedMessage.byteLength, false);
+    offset += 4;
+
+    // Write message data
+    bundle.set(encodedMessage, offset);
+
+    orchestrator.sendOSC(bundle);
+  }
+
+  // Advance counter
+  amenBeatCounter += AMEN_PER_BATCH;
+
+  // Calculate when to schedule next batch (500ms before the first event in next batch)
+  const perfTimeMs = performance.timeOrigin + performance.now();
+  const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+  const timeUntilNextBatch = (amenCurrentTime - currentNTP) * 1000;
+  const scheduleDelay = Math.max(0, timeUntilNextBatch - 500);
+
+  setTimeout(() => {
+    if (amenRunning) {
+      scheduleAmenBatch();
+    }
+  }, scheduleDelay);
+}
+
+/**
+ * Stop amen break loop
+ */
+function stopAmenLoop() {
+  amenRunning = false;
+  amenCurrentTime = null;
+
+  // Only reset playback time if arpeggiator and kick are also stopped
+  if (!arpeggiatorRunning && !kickRunning) {
+    playbackStartNTP = null;
+  }
+
+  console.log('[Amen] Stopped');
+}
+
+// Expose functions globally for debugging and event handlers
+window.startArpeggiator = startArpeggiator;
+window.stopArpeggiator = stopArpeggiator;
+window.startKickLoop = startKickLoop;
+window.stopKickLoop = stopKickLoop;
+window.startAmenLoop = startAmenLoop;
+window.stopAmenLoop = stopAmenLoop;
+window.arpeggiatorRunning = arpeggiatorRunning;
+window.kickRunning = kickRunning;
+window.amenRunning = amenRunning;
+
+console.log('[Arp] Arpeggiator, kick drum, and amen break system initialized');
