@@ -482,7 +482,7 @@ function processImmediate(oscData) {
 }
 
 // Message handling
-self.onmessage = function(event) {
+self.addEventListener('message', function(event) {
     var data = event.data;
 
     try {
@@ -570,6 +570,6 @@ self.onmessage = function(event) {
             error: error.message
         });
     }
-};
+});
 
 schedulerLog('[OSCPreSchedulerWorker] Script loaded');

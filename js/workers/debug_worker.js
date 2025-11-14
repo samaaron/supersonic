@@ -243,7 +243,7 @@ function clear() {
 /**
  * Handle messages from main thread
  */
-self.onmessage = function(event) {
+self.addEventListener('message', function(event) {
     var data = event.data;
 
     try {
@@ -282,6 +282,6 @@ self.onmessage = function(event) {
             error: error.message
         });
     }
-};
+});
 
 debugWorkerLog('[DebugWorker] Script loaded');
