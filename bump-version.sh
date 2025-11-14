@@ -119,12 +119,16 @@ echo "------------------------------------------"
 # Parse new version into components
 IFS='.' read -r NEW_MAJOR NEW_MINOR NEW_PATCH <<< "$NEW_VERSION"
 
-# Get current C++ version
+# Get current C++ version components
+CURRENT_CPP_MAJOR=$(grep "SUPERSONIC_VERSION_MAJOR" "$PROJECT_ROOT/src/audio_processor.cpp" | grep -o '[0-9]\+')
 CURRENT_CPP_MINOR=$(grep "SUPERSONIC_VERSION_MINOR" "$PROJECT_ROOT/src/audio_processor.cpp" | grep -o '[0-9]\+')
+CURRENT_CPP_PATCH=$(grep "SUPERSONIC_VERSION_PATCH" "$PROJECT_ROOT/src/audio_processor.cpp" | grep -o '[0-9]\+')
 
-# Update C++ version (only MINOR changes, assuming MAJOR=0 and PATCH=0 for now)
+# Update C++ version (all three components)
+sed -i "s/static const int SUPERSONIC_VERSION_MAJOR = $CURRENT_CPP_MAJOR;/static const int SUPERSONIC_VERSION_MAJOR = $NEW_MAJOR;/" "$PROJECT_ROOT/src/audio_processor.cpp"
 sed -i "s/static const int SUPERSONIC_VERSION_MINOR = $CURRENT_CPP_MINOR;/static const int SUPERSONIC_VERSION_MINOR = $NEW_MINOR;/" "$PROJECT_ROOT/src/audio_processor.cpp"
-echo "✓ Updated src/audio_processor.cpp (0.$CURRENT_CPP_MINOR.0 → $NEW_VERSION)"
+sed -i "s/static const int SUPERSONIC_VERSION_PATCH = $CURRENT_CPP_PATCH;/static const int SUPERSONIC_VERSION_PATCH = $NEW_PATCH;/" "$PROJECT_ROOT/src/audio_processor.cpp"
+echo "✓ Updated src/audio_processor.cpp ($CURRENT_CPP_MAJOR.$CURRENT_CPP_MINOR.$CURRENT_CPP_PATCH → $NEW_VERSION)"
 
 echo ""
 echo "Step 5: Rebuilding distribution..."
