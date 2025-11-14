@@ -1974,16 +1974,17 @@
               line-height: 1.6;
             "
           >
-            Sprinkle the scsynth audio engine onto any web page...
+            Sprinkle the scsynth audio engine onto your web page...
           </p>
 
         <div class="code-snippets-container">
           <!-- Import Box -->
           <div class="code-snippet">
             <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
-              First, grab the SuperSonic module
+              First, install via npm and import locally
             </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ff1493; overflow-x: auto;"><code><span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'https://unpkg.com/supersonic-scsynth@latest'</span>;</code></pre>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ff1493; overflow-x: auto;"><code><span style="color: #75715e;">// npm install supersonic-scsynth</span>
+<span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'supersonic-scsynth'</span>;</code></pre>
           </div>
 
           <!-- Initialize Box -->
@@ -1991,12 +1992,8 @@
             <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
               Initialize and you're ready to go
             </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #1e90ff; overflow-x: auto;"><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">cdn</span> = <span style="color: #ffd700;">'https://unpkg.com'</span>;
-<span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
-<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>({
-  <span style="color: #66d9ef;">synthdefsPath</span>: cdn + <span style="color: #ffd700;">'/supersonic-scsynth-synthdefs@latest'</span>,
-  <span style="color: #66d9ef;">samplesPath</span>: cdn + <span style="color: #ffd700;">'/supersonic-scsynth-samples@latest'</span>
-});</code></pre>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #1e90ff; overflow-x: auto;"><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
+<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>();</code></pre>
           </div>
 
           <!-- Play Synth Box -->
@@ -2028,7 +2025,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
             text-align: center;
           "
         >
-         Note: <code style="background: #2d3748; color: #ffd700; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">COOP/COEP</code> headers are required — see <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener" style="color: #ff1493; text-decoration: none; transition: all 0.3s ease;" onmouseover="this.style.color='#ffd700';" onmouseout="this.style.color='#ff1493';">README</a>
+         Note: Self-hosting required (CDN not supported) + <code style="background: #2d3748; color: #ffd700; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">COOP/COEP</code> headers — see <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener" style="color: #ff1493; text-decoration: none; transition: all 0.3s ease;" onmouseover="this.style.color='#ffd700';" onmouseout="this.style.color='#ff1493';">README</a>
         </p>
         </div>
       </div>

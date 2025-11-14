@@ -8,11 +8,11 @@ A WebAssembly port of SuperCollider's scsynth audio synthesis engine for the bro
 
 ```html
 <script type="module">
-  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
+  import { SuperSonic } from './dist/supersonic.js';
 
   const sonic = new SuperSonic({
-    sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/',
-    synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/'
+    sampleBaseURL: './dist/samples/',
+    synthdefBaseURL: './dist/synthdefs/'
   });
 
   await sonic.init();
@@ -29,11 +29,11 @@ A WebAssembly port of SuperCollider's scsynth audio synthesis engine for the bro
 </script>
 ```
 
-**Note:** Requires specific HTTP headers (COOP/COEP) for SharedArrayBuffer support. See [Browser Requirements](#browser-requirements) below.
+**Important:** SuperSonic requires self-hosting (cannot load from CDN). See [CDN Limitations](#cdn-limitations) below.
 
 ## Installation
 
-**Via npm:**
+**Via npm (for local bundling):**
 ```bash
 # Core engine only (~450KB)
 npm install supersonic-scsynth
@@ -42,14 +42,14 @@ npm install supersonic-scsynth
 npm install supersonic-scsynth-bundle
 ```
 
-**Via CDN:**
-```javascript
-import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
-```
-
-**Pre-built distribution:**
-Download the 'nightly' build (~35MB with all synthdefs and samples):
+**Pre-built distribution (recommended):**
+Download the pre-built package (~35MB with all synthdefs and samples) and serve from your own domain:
 https://samaaron.github.io/supersonic/supersonic-dist.zip
+
+Extract to your web server and import as:
+```javascript
+import { SuperSonic } from './dist/supersonic.js';
+```
 
 ## Packages
 
@@ -120,6 +120,26 @@ Cross-Origin-Resource-Policy: cross-origin
 ```
 
 See `example/server.rb` for a reference implementation.
+
+## CDN Limitations
+
+**SuperSonic cannot be loaded from CDNs** (unpkg, jsdelivr, etc.) due to browser security restrictions.
+
+**Why CDN doesn't work:**
+- SuperSonic uses `SharedArrayBuffer` for real-time audio performance
+- Web Workers that use `SharedArrayBuffer` must be loaded from the **same origin** as the page
+- Even with proper COOP/COEP headers, browsers block cross-origin workers with shared memory
+- This is a fundamental browser security requirement (Spectre attack mitigation)
+
+**What this means:**
+- ✗ Cannot use `import { SuperSonic } from 'https://unpkg.com/...'`
+- ✓ Must download and self-host on your own domain
+- ✓ npm packages exist for convenience but must be bundled/deployed to your server
+
+**Recommended approach:**
+1. Download the pre-built distribution or install via npm
+2. Host all files on your own server with COOP/COEP headers
+3. Import as: `import { SuperSonic } from './dist/supersonic.js'`
 
 ## Building from Source
 
