@@ -1,5 +1,5 @@
 
-import { SuperSonic } from '../dist/supersonic.js';
+import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
 
 let orchestrator = null;
 let messagesSent = 0;
@@ -637,8 +637,8 @@ initButton.addEventListener('click', async () => {
     hideError();
 
     orchestrator = new SuperSonic({
-      sampleBaseURL: 'dist/samples/',
-      synthdefBaseURL: 'dist/synthdefs/'
+      sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/',
+      synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/'
     });
 
     // Set up callbacks
