@@ -10,10 +10,13 @@ npm install supersonic-scsynth-samples
 
 ## Usage
 
-### Via CDN (Recommended)
+**Important:** SuperSonic cannot be loaded from a CDN. You must self-host the core library and serve it with COOP/COEP headers. Samples can be loaded from a CDN.
+
+### Self-hosted core with CDN samples
 
 ```javascript
-import { SuperSonic } from 'supersonic-scsynth';
+// Self-hosted core library
+import { SuperSonic } from './dist/supersonic.js';
 
 const sonic = new SuperSonic({
   sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/'
@@ -30,14 +33,15 @@ await sonic.allocReadBuffer(2, 'ambi_choir.flac');
 sonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 1, 'buf', 0);
 ```
 
-### Via npm install
+### Self-hosted core and samples
+
+Copy samples to your public directory and reference them locally:
 
 ```javascript
-import { SuperSonic } from 'supersonic-scsynth';
-import { SAMPLES_DIR } from 'supersonic-scsynth-samples';
+import { SuperSonic } from './dist/supersonic.js';
 
 const sonic = new SuperSonic({
-  sampleBaseURL: SAMPLES_DIR + '/'
+  sampleBaseURL: './samples/'
 });
 ```
 

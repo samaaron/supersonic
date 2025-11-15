@@ -949,8 +949,9 @@ export class SuperSonic {
         if (!this.sampleBaseURL) {
             throw new Error(
                 'sampleBaseURL not configured. Please set it in SuperSonic constructor options.\n' +
-                'Example: new SuperSonic({ sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/" })\n' +
-                'Or install sample packages: npm install supersonic-scsynth-samples'
+                'Example: new SuperSonic({ sampleBaseURL: "./dist/samples/" })\n' +
+                'Or use CDN: new SuperSonic({ sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/" })\n' +
+                'Or install: npm install supersonic-scsynth-samples'
             );
         }
 
@@ -1211,7 +1212,8 @@ export class SuperSonic {
         if (!this.synthdefBaseURL) {
             throw new Error(
                 'synthdefBaseURL not configured. Please set it in SuperSonic constructor options.\n' +
-                'Example: new SuperSonic({ synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/" })\n' +
+                'Example: new SuperSonic({ synthdefBaseURL: "./dist/synthdefs/" })\n' +
+                'Or use CDN: new SuperSonic({ synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/" })\n' +
                 'Or install: npm install supersonic-scsynth-synthdefs'
             );
         }

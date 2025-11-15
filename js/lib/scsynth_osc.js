@@ -55,7 +55,6 @@ export default class ScsynthOSC {
             // osc_in_worker.js handles receiving OSC messages from scsynth
             // debug_worker.js handles receiving debug messages from scsynth
             // Use import.meta.url to resolve worker paths relative to the module location
-            // Module workers (type: 'module') support cross-origin loading for CDN deployment
             this.workers.oscOut = new Worker(new URL('./workers/osc_out_prescheduler_worker.js', import.meta.url), {type: 'module'});
             this.workers.oscIn = new Worker(new URL('./workers/osc_in_worker.js', import.meta.url), {type: 'module'});
             this.workers.debug = new Worker(new URL('./workers/debug_worker.js', import.meta.url), {type: 'module'});
