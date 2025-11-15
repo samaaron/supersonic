@@ -1499,7 +1499,7 @@ const NTP_EPOCH_OFFSET = 2208988800;
 const GROUP_SOURCE = 100;
 const GROUP_FX = 101;
 const FX_BUS_SYNTH_TO_LPF = 20;
-const FX_BUS_LPF_TO_REVERB = 21;
+const FX_BUS_LPF_TO_REVERB = 22;
 const FX_BUS_OUTPUT = 0;
 const FX_LPF_NODE = 2000;
 const FX_REVERB_NODE = 2001;
@@ -1599,26 +1599,13 @@ async function initFXChain() {
       // Load FX synthdefs first
       await loadFXSynthdefs();
 
-      // Create groups
-      await orchestrator.send('/g_new', GROUP_SOURCE, 0, 0);
-      await orchestrator.send('/g_new', GROUP_FX, 3, GROUP_SOURCE);
-
-      // Create LPF in FX group
-      await orchestrator.send('/s_new', 'sonic-pi-fx_lpf', FX_LPF_NODE, 0, GROUP_FX,
-        'in_bus', FX_BUS_SYNTH_TO_LPF,
-        'out_bus', FX_BUS_LPF_TO_REVERB,
-        'cutoff', 130.0,
-        'res', 0.5);
-
-      // Create Reverb after LPF
-      await orchestrator.send('/s_new', 'sonic-pi-fx_reverb', FX_REVERB_NODE, 3, FX_LPF_NODE,
-        'in_bus', FX_BUS_LPF_TO_REVERB,
-        'out_bus', FX_BUS_OUTPUT,
-        'mix', 0.3,
-        'room', 1.0);
-
-      // Give the server time to create the nodes
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Send all messages immediately (no await - fire and forget)
+      orchestrator.send('/g_new', GROUP_SOURCE, 0, 0);
+      orchestrator.send('/g_new', GROUP_FX, 3, GROUP_SOURCE);
+      orchestrator.send('/s_new', 'sonic-pi-fx_lpf', FX_LPF_NODE, 0, GROUP_FX,
+        'in_bus', FX_BUS_SYNTH_TO_LPF, 'out_bus', FX_BUS_LPF_TO_REVERB, 'cutoff', 130.0, 'res', 0.5);
+      orchestrator.send('/s_new', 'sonic-pi-fx_reverb', FX_REVERB_NODE, 3, FX_LPF_NODE,
+        'in_bus', FX_BUS_LPF_TO_REVERB, 'out_bus', FX_BUS_OUTPUT, 'mix', 0.3, 'room', 0.6);
 
       // Mark as initialized only after successful completion
       fxChainInitialized = true;
