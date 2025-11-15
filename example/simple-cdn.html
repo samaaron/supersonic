@@ -8,7 +8,8 @@
     <button id="play">Play Amen Break</button>
 
     <script type="module">
-      import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
+      // Self-hosted core library
+      import { SuperSonic } from "../dist/supersonic.js";
 
       const button = document.getElementById("play");
       let sonic = null;
@@ -17,6 +18,7 @@
         if (!sonic) {
           button.textContent = "Booting scsynth...";
 
+          // CDN-hosted synthdefs and samples
           sonic = new SuperSonic({
             sampleBaseURL:
               "https://unpkg.com/supersonic-scsynth-samples@latest/samples/",

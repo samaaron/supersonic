@@ -29,7 +29,7 @@ A WebAssembly port of SuperCollider's scsynth audio synthesis engine for the bro
 </script>
 ```
 
-**Important:** SuperSonic requires self-hosting (cannot load from CDN). See [CDN Limitations](#cdn-limitations) below.
+**Important:** SuperSonic requires self-hosting (cannot load from CDN). See [CDN Usage](#cdn-usage) below.
 
 ## Installation
 
@@ -69,8 +69,8 @@ All synthdefs and samples are from [Sonic Pi](https://github.com/sonic-pi-net/so
 **Creating an instance:**
 ```javascript
 const sonic = new SuperSonic({
-  sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/',
-  synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/',
+  sampleBaseURL: './dist/samples/',
+  synthdefBaseURL: './dist/synthdefs/',
   audioPathMap: { /* optional custom path mappings */ }
 });
 ```
@@ -121,25 +121,40 @@ Cross-Origin-Resource-Policy: cross-origin
 
 See `example/server.rb` for a reference implementation.
 
-## CDN Limitations
+## CDN Usage
 
-**SuperSonic cannot be loaded from CDNs** (unpkg, jsdelivr, etc.) due to browser security restrictions.
+SuperSonic cannot be loaded from a CDN. The core library must be self-hosted on your domain.
 
-**Why CDN doesn't work:**
-- SuperSonic uses `SharedArrayBuffer` for real-time audio performance
-- Web Workers that use `SharedArrayBuffer` must be loaded from the **same origin** as the page
-- Even with proper COOP/COEP headers, browsers block cross-origin workers with shared memory
-- This is a fundamental browser security requirement (Spectre attack mitigation)
+### Why Self-Hosting is Required
 
-**What this means:**
-- ✗ Cannot use `import { SuperSonic } from 'https://unpkg.com/...'`
-- ✓ Must download and self-host on your own domain
-- ✓ npm packages exist for convenience but must be bundled/deployed to your server
+SuperSonic uses `SharedArrayBuffer` for real-time audio performance. Browsers require workers that use `SharedArrayBuffer` to come from the same origin as the page. Even with proper COOP/COEP headers, cross-origin workers with shared memory are blocked. This is a fundamental browser security requirement stemming from Spectre attack mitigation.
 
-**Recommended approach:**
-1. Download the pre-built distribution or install via npm
-2. Host all files on your own server with COOP/COEP headers
-3. Import as: `import { SuperSonic } from './dist/supersonic.js'`
+What this means:
+- You cannot use `import { SuperSonic } from 'https://unpkg.com/supersonic/...'`
+- You must download and self-host the core library on your own domain
+- The npm packages exist for convenience but must be bundled and deployed to your server
+
+### Synthdefs and Samples Can Use CDN
+
+Pre-compiled synthdefs and audio samples can be loaded from CDNs. They're just data files, not workers.
+
+```javascript
+// Self-hosted core library
+import { SuperSonic } from './dist/supersonic.js';
+
+// CDN-hosted synthdefs and samples work fine
+const sonic = new SuperSonic({
+  sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.6/samples/',
+  synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.6/synthdefs/'
+});
+
+await sonic.init();
+await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
+```
+
+### Hybrid Approach
+
+Self-host the SuperSonic core (JS, WASM, workers) with COOP/COEP headers. Use CDN for synthdefs and samples to save bandwidth. See `example/simple-cdn.html` for a working example.
 
 ## Building from Source
 

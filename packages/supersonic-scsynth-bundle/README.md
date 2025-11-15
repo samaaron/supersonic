@@ -20,11 +20,12 @@ This installs all three packages as dependencies.
 
 ## Usage
 
-Same API as using the packages separately:
+**Important:** SuperSonic cannot be loaded from a CDN. You must self-host the core library and serve it with COOP/COEP headers. See the [main README](https://github.com/samaaron/supersonic#cdn-usage) for details.
 
 ```javascript
-import { SuperSonic } from 'supersonic-scsynth-bundle';
+import { SuperSonic } from './dist/supersonic.js';
 
+// Synthdefs and samples can use CDN
 const sonic = new SuperSonic({
   sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/',
   synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/'
