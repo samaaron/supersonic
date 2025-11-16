@@ -397,10 +397,10 @@ void prepareArgsForExecute(VMGlobals* g, PyrBlock* block, PyrFrame* callFrame, s
     int keywordArgumentSize = 0;
 
     const auto findKeywordArgIndex = [=](const PyrSymbol* argName) -> std::optional<uint32_t> {
-        for (size_t namei = 0; namei < methNumNormArgs; ++namei) {
-            const auto indexOffsetFromThis = namei + (isMethod ? 1 : 0);
-            if (methArgNames[indexOffsetFromThis] == argName)
-                return indexOffsetFromThis;
+        for (size_t namei = (isMethod ? 1 : 0); namei < methNumNormArgs; ++namei) {
+            const auto considering = methArgNames[namei];
+            if (considering == argName)
+                return namei;
         }
         return std::nullopt;
     };
