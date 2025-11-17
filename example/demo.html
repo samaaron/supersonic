@@ -2467,7 +2467,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
 
                     <li>
                       <span class="welcome-text">
-                        <strong>Pre-loaded Loop Samples</strong> — These samples are loaded automatically on boot:
+                        <strong>Load Loop Samples</strong> — Click "Load Samples" to load these pre-configured loops into buffers 1-6:
                       </span>
                       <code class="welcome-code-block">Buffer 1: loop_amen.flac
 Buffer 2: loop_breakbeat.flac
@@ -2476,7 +2476,7 @@ Buffer 4: loop_garzul.flac
 Buffer 5: loop_industrial.flac
 Buffer 6: loop_tabla.flac</code>
                       <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
-                        Use these buffer IDs directly - no need to load them manually
+                        After loading, use these buffer IDs (1-6) to play the loops
                       </span>
                     </li>
 
@@ -2484,11 +2484,11 @@ Buffer 6: loop_tabla.flac</code>
                       <span class="welcome-text">
                         <strong>Load Additional Samples</strong> — Click "Load Samples" for API samples, or load custom ones:
                       </span>
-                      <code class="welcome-code-block">/b_allocRead 0 loop_amen.flac
-/b_allocRead 10 ambi_choir.flac
-/b_allocRead 11 bd_haus.flac</code>
+                      <code class="welcome-code-block">/b_allocRead 10 ambi_choir.flac
+/b_allocRead 11 bd_haus.flac
+/b_allocRead 12 elec_ping.flac</code>
                       <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
-                        The first number is the buffer ID (avoid 1-6 which are reserved for loops)
+                        The first number is the buffer ID (use 10+ to avoid 1-6 which are reserved for pre-loaded loops)
                       </span>
                     </li>
 
