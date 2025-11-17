@@ -114,13 +114,23 @@ leave:
 
 static void hexdump(int size, char* data) {
     char ascii[20];
-    int padsize = (size + 15) & -16;
-    scprintf("size %d\n", size);
+    // Limit hexdump output to first 256 bytes to avoid flooding debug log
+    const int MAX_DUMP_SIZE = 256;
+    int truncated_size = (size > MAX_DUMP_SIZE) ? MAX_DUMP_SIZE : size;
+    int padsize = (truncated_size + 15) & -16;
+
+    scprintf("size %d", size);
+    if (size > MAX_DUMP_SIZE) {
+        scprintf(" (showing first %d bytes)\n", MAX_DUMP_SIZE);
+    } else {
+        scprintf("\n");
+    }
+
     for (int i = 0; i < padsize; ++i) {
         if ((i & 15) == 0) {
             scprintf("%4d   ", i);
         }
-        if (i >= size) {
+        if (i >= truncated_size) {
             scprintf("   ");
             ascii[i & 15] = 0;
         } else {
@@ -137,6 +147,10 @@ static void hexdump(int size, char* data) {
         } else if ((i & 3) == 3) {
             scprintf(" ");
         }
+    }
+
+    if (size > MAX_DUMP_SIZE) {
+        scprintf("... (%d bytes truncated)\n", size - MAX_DUMP_SIZE);
     }
     scprintf("\n");
 }
