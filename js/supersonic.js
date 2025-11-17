@@ -409,9 +409,15 @@ export class SuperSonic {
         // Store basePath for use in methods
         this.basePath = basePath;
 
+        // Support custom base URLs for bundled/vendored environments
+        // Falls back to module-relative paths for standalone usage
+        const workerBaseURL = options.workerBaseURL || new URL('workers/', basePath).href;
+        const wasmBaseURL = options.wasmBaseURL || new URL('wasm/', basePath).href;
+
         this.config = {
-            wasmUrl: new URL('wasm/scsynth-nrt.wasm', basePath).href,
-            workletUrl: new URL('workers/scsynth_audio_worklet.js', basePath).href,
+            wasmUrl: options.wasmUrl || new URL('scsynth-nrt.wasm', wasmBaseURL).href,
+            workletUrl: options.workletUrl || new URL('scsynth_audio_worklet.js', workerBaseURL).href,
+            workerBaseURL: workerBaseURL,  // Store for worker creation
             development: false,
             audioContextOptions: {
                 latencyHint: 'interactive',
@@ -632,8 +638,8 @@ export class SuperSonic {
      * Initialize OSC communication layer
      */
     async #initializeOSC() {
-        // Create ScsynthOSC instance
-        this.osc = new ScsynthOSC();
+        // Create ScsynthOSC instance with custom worker base URL if provided
+        this.osc = new ScsynthOSC(this.config.workerBaseURL);
 
         // Set up ScsynthOSC callbacks
         this.osc.onRawOSC((msg) => {
