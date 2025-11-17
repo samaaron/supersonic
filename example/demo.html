@@ -1161,7 +1161,7 @@
         }
       }
 
-      /* Mobile: move scope below welcome message */
+      /* Mobile: move scope to top */
       @media (max-width: 768px) {
         .dark-panel {
           display: flex;
@@ -1173,11 +1173,11 @@
         }
 
         #scope-container {
-          order: 3;
+          order: 2;
         }
 
         .main-layout-grid {
-          order: 2;
+          order: 3;
         }
 
         .left-column {
@@ -1987,10 +1987,10 @@
 <span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'supersonic-scsynth'</span>;</code></pre>
           </div>
 
-          <!-- Initialize Box -->
+          <!-- Initialise Box -->
           <div class="code-snippet">
             <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
-              Initialize and you're ready to go
+              Initialise and you're ready to go
             </p>
             <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #1e90ff; overflow-x: auto;"><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>();</code></pre>
@@ -2001,9 +2001,11 @@
             <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
               Load and play a synth
             </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #50fa7b; overflow-x: auto;"><code><span style="color: #75715e;">// Load synthdef, then play synth with ID 1000 in group 0</span>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; font-size: 0.9rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #50fa7b; overflow-x: auto;"><code><span style="color: #75715e;">// Load synthdef, then play synth</span>
+<span style="color: #75715e;">// with ID 1000 in group 0</span>
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSynthDef</span>(<span style="color: #ffd700;">'sonic-pi-prophet'</span>);
-sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-prophet'</span>, <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>,<span style="color: #ffd700;">'note'</span>, <span style="color: #bd93f9;">60</span>);</code></pre>
+sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-prophet'</span>, <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>,
+             <span style="color: #ffd700;">'note'</span>, <span style="color: #bd93f9;">60</span>);</code></pre>
           </div>
 
           <!-- Load Sample Box -->
@@ -2011,21 +2013,22 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
             <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
               Load and play a sample
             </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ffd700; overflow-x: auto;"><code><span style="color: #75715e;">// Load sample into buffer 0</span>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; font-size: 0.9rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ffd700; overflow-x: auto;"><code><span style="color: #75715e;">// Load sample into buffer 0</span>
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSample</span>(<span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'bd_haus.flac'</span>);
-sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>,<span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'buf'</span>, <span style="color: #bd93f9;">0</span>);</code></pre>
+sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>,
+             <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'buf'</span>, <span style="color: #bd93f9;">0</span>);</code></pre>
           </div>
         </div>
 
         <p
           style="
-            margin-top: 2rem;
-            color: #e5e7eb;
-            font-size: 0.85rem;
+            margin-top: 3rem;
+            color: #a0aec0;
+            font-size: 0.75rem;
             text-align: center;
           "
         >
-         Note: Self-hosting required (CDN not supported) + <code style="background: #2d3748; color: #ffd700; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">COOP/COEP</code> headers — see <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener" style="color: #ff1493; text-decoration: none; transition: all 0.3s ease;" onmouseover="this.style.color='#ffd700';" onmouseout="this.style.color='#ff1493';">README</a>
+         Note: Self-hosting required + <code style="background: #2d3748; color: #ffd700; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem;">COOP/COEP</code> headers — see <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener" style="color: #ff1493; text-decoration: none; transition: all 0.3s ease;" onmouseover="this.style.color='#ffd700';" onmouseout="this.style.color='#ff1493';">README</a>
         </p>
         </div>
       </div>
@@ -2450,7 +2453,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                   <ol>
                     <li>
                       <span class="welcome-text">
-                        <strong>Load Synths</strong> — First, click "Load Synthdefs" to get some awesome synths!
+                        <strong>Available Synths</strong> — Many synths are pre-loaded and ready to use:
                         <code class="welcome-code-block">sonic-pi-beep, sonic-pi-dsaw, sonic-pi-prophet, sonic-pi-tb303, sonic-pi-fm...</code>
                       </span>
                     </li>
@@ -2545,14 +2548,6 @@ Buffer 6: loop_tabla.flac</code>
                   </div>
                   <div class="button-container">
                     <div class="button-row button-row-secondary">
-                      <button
-                        type="button"
-                        id="load-synthdefs-button"
-                        class="btn-green"
-                        disabled
-                      >
-                        Load Synthdefs
-                      </button>
                       <button
                         type="button"
                         id="load-example-button"

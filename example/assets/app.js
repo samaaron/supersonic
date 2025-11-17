@@ -195,11 +195,7 @@ function updateStatus(status) {
   const synthUIContainer = document.getElementById('synth-ui-container');
   const clearButton = document.getElementById('clear-button');
   const loadAllButton = document.getElementById('load-all-button');
-  const loadSynthdefsButton = document.getElementById('load-synthdefs-button');
-  const loadSamplesButton = document.getElementById('load-samples-button');
   const loadExampleButton = document.getElementById('load-example-button');
-  const welcomeLoadSynthdefsButton = document.getElementById('welcome-load-synthdefs-button');
-  const welcomeLoadSamplesButton = document.getElementById('welcome-load-samples-button');
 
   // Update UI visibility based on status
   if (status === 'not_initialized' || status === 'error') {
@@ -213,8 +209,6 @@ function updateStatus(status) {
     if (clearButton) clearButton.disabled = true;
     if (loadAllButton) loadAllButton.disabled = true;
     if (loadExampleButton) loadExampleButton.disabled = true;
-    if (welcomeLoadSynthdefsButton) welcomeLoadSynthdefsButton.disabled = true;
-    if (welcomeLoadSamplesButton) welcomeLoadSamplesButton.disabled = true;
   } else if (status === 'initializing') {
     initButton.textContent = 'Booting...';
     initButton.disabled = true;
@@ -225,11 +219,7 @@ function updateStatus(status) {
     messageInput.disabled = false;
     messageForm.querySelector('button[type="submit"]').disabled = false;
     if (clearButton) clearButton.disabled = false;
-    if (loadSynthdefsButton) loadSynthdefsButton.disabled = false;
-    if (loadSamplesButton) loadSamplesButton.disabled = false;
     if (loadExampleButton) loadExampleButton.disabled = false;
-    if (welcomeLoadSynthdefsButton) welcomeLoadSynthdefsButton.disabled = false;
-    if (welcomeLoadSamplesButton) welcomeLoadSamplesButton.disabled = false;
   }
 }
 
@@ -657,7 +647,7 @@ function renderSentMessages() {
   }
 }
 
-// Initialize button
+// Initialise button
 initButton.addEventListener('click', async () => {
   try {
     updateStatus('initializing');
@@ -672,7 +662,7 @@ initButton.addEventListener('click', async () => {
 
     // Set up callbacks
     orchestrator.onInitialized = async (data) => {
-      console.log('[App] System initialized', data);
+      console.log('[App] System initialised', data);
       updateStatus('ready');
 
       // Expose to global scope for console access (development only)
@@ -688,10 +678,6 @@ initButton.addEventListener('click', async () => {
       // Enable synth controls
       const fillSynthBtns = document.querySelectorAll('.fill-synth-button');
       fillSynthBtns.forEach(btn => btn.disabled = false);
-      const loadSynthdefsBtn = document.getElementById('load-synthdefs-button');
-      if (loadSynthdefsBtn) loadSynthdefsBtn.disabled = false;
-      const loadSamplesBtn = document.getElementById('load-samples-button');
-      if (loadSamplesBtn) loadSamplesBtn.disabled = false;
 
       // Enable the synth pad
       const synthPad = document.getElementById('synth-pad');
@@ -701,7 +687,7 @@ initButton.addEventListener('click', async () => {
         console.log('[UI] Synth pad enabled');
       }
 
-      // Initialize FX parameter display with default values
+      // Initialise FX parameter display with default values
       const cutoffDisplay = document.getElementById('fx-cutoff-value');
       const mixDisplay = document.getElementById('fx-mix-value');
       if (cutoffDisplay) cutoffDisplay.textContent = '130.0';
@@ -895,7 +881,7 @@ initButton.addEventListener('click', async () => {
       // Version display removed from UI
     };
 
-    // Check capabilities and initialize
+    // Check capabilities and initialise
     await orchestrator.checkCapabilities();
     await orchestrator.init({ development: true });
 
@@ -1114,7 +1100,7 @@ const rightColumn = document.querySelector('.right-column');
 if (divider && leftColumn && rightColumn) {
   let isDragging = false;
 
-  console.log('[Divider] Initialized', { divider, leftColumn, rightColumn });
+  console.log('[Divider] Initialised', { divider, leftColumn, rightColumn });
 
   divider.addEventListener('mousedown', (e) => {
     e.preventDefault();
@@ -1223,83 +1209,17 @@ if (clearButton) {
   });
 }
 
-// Load Synthdefs button - load binary synthdefs using new API
-const loadSynthdefsButton = document.getElementById('load-synthdefs-button');
-const welcomeLoadSynthdefsButton = document.getElementById('welcome-load-synthdefs-button');
-
-async function loadAllSynthdefs() {
-  try {
-    const synthNames = [
-      'sonic-pi-beep',
-      'sonic-pi-tb303',
-      'sonic-pi-chiplead',
-      'sonic-pi-dsaw',
-      'sonic-pi-dpulse',
-      'sonic-pi-bnoise',
-      'sonic-pi-prophet',
-      'sonic-pi-fm',
-      'sonic-pi-stereo_player',
-      'sonic-pi-basic_stereo_player'
-    ];
-
-    console.log('[App] Loading', synthNames.length, 'synthdefs...');
-    const results = await orchestrator.loadSynthDefs(synthNames);
-
-    const successCount = Object.values(results).filter(r => r.success).length;
-    console.log(`[App] Loaded ${successCount}/${synthNames.length} synthdefs`);
-  } catch (error) {
-    console.error('[App] Load synthdefs error:', error);
-    showError('Failed to load synthdefs: ' + error.message);
-  }
-}
-
-if (loadSynthdefsButton) {
-  loadSynthdefsButton.addEventListener('click', loadAllSynthdefs);
-}
-
-if (welcomeLoadSynthdefsButton) {
-  welcomeLoadSynthdefsButton.addEventListener('click', loadAllSynthdefs);
-}
-
-// Load Samples button - load audio samples into buffers
-const loadSamplesButton = document.getElementById('load-samples-button');
-const welcomeLoadSamplesButton = document.getElementById('welcome-load-samples-button');
-
-async function loadAllSamples() {
-  try {
-    const samples = [
-      { bufnum: 0, filename: 'loop_amen.flac' },
-      { bufnum: 1, filename: 'ambi_choir.flac' },
-      { bufnum: 2, filename: 'bd_haus.flac' }
-    ];
-
-    console.log('[App] Loading', samples.length, 'samples...');
-
-    for (const sample of samples) {
-      console.log(`[App] Loading buffer ${sample.bufnum}: ${sample.filename}`);
-      await orchestrator.send('/b_allocRead', sample.bufnum, sample.filename);
-    }
-
-    console.log(`[App] Loaded ${samples.length} samples into buffers 0-2`);
-  } catch (error) {
-    console.error('[App] Load samples error:', error);
-    showError('Failed to load samples: ' + error.message);
-  }
-}
-
-if (loadSamplesButton) {
-  loadSamplesButton.addEventListener('click', loadAllSamples);
-}
-
-if (welcomeLoadSamplesButton) {
-  welcomeLoadSamplesButton.addEventListener('click', loadAllSamples);
-}
-
 // Load Example button
 const loadExampleButton = document.getElementById('load-example-button');
 if (loadExampleButton) {
-  loadExampleButton.addEventListener('click', () => {
-    const exampleCode = `# Cinematic DSaw Pad @ 120 BPM
+  loadExampleButton.addEventListener('click', async () => {
+    try {
+      // Load the synthdef required by the example
+      console.log('[App] Loading sonic-pi-dsaw synthdef for example...');
+      await orchestrator.loadSynthDefs(['sonic-pi-dsaw']);
+      console.log('[App] Loaded sonic-pi-dsaw synthdef');
+
+      const exampleCode = `# Cinematic DSaw Pad @ 120 BPM
 0.0   /s_new sonic-pi-dsaw -1 0 0 note 52 amp 0.45 attack 0.4 release 3 detune 0.18 cutoff 95 pan -0.2
 0.5   /s_new sonic-pi-dsaw -1 0 0 note 55 amp 0.40 attack 0.4 release 3 detune 0.22 cutoff 92 pan 0.2
 1.0   /s_new sonic-pi-dsaw -1 0 0 note 59 amp 0.38 attack 0.4 release 3 detune 0.16 cutoff 90 pan -0.15
@@ -1308,8 +1228,12 @@ if (loadExampleButton) {
 12.0  /s_new sonic-pi-dsaw -1 0 0 note 52 amp 0.45 attack 0.4 release 4 detune 0.18 cutoff 95 pan 0.1
 12.0  /s_new sonic-pi-dsaw -1 0 0 note 28 amp 0.45 attack 0.4 release 5 detune 0.18 cutoff 85 pan 0.1`;
 
-    messageInput.value = exampleCode;
-    console.log('[App] Loaded example code into textarea');
+      messageInput.value = exampleCode;
+      console.log('[App] Loaded example code into textarea');
+    } catch (error) {
+      console.error('[App] Load example error:', error);
+      showError('Failed to load example synthdef: ' + error.message);
+    }
   });
 }
 
@@ -1468,7 +1392,7 @@ if (synthPad) {
     deactivatePad();
   });
 
-  console.log('[UI] Synth pad initialized');
+  console.log('[UI] Synth pad initialised');
 }
 
 // Slider Controls Setup
@@ -1484,7 +1408,7 @@ function setupSlider(sliderId, valueId, stateKey, formatter = (v) => v) {
       console.log(`[UI] ${stateKey}:`, value);
     });
 
-    console.log(`[UI] Slider ${stateKey} initialized`);
+    console.log(`[UI] Slider ${stateKey} initialised`);
   }
 }
 
@@ -1499,7 +1423,7 @@ if (synthSelect && synthValue) {
     console.log('[UI] synth:', e.target.value);
   });
 
-  console.log('[UI] Synth selector initialized');
+  console.log('[UI] Synth selector initialised');
 }
 
 // Loop sample selector
@@ -1518,7 +1442,7 @@ if (loopSelect && loopValue) {
     amenSampleLoaded = false;
   });
 
-  console.log('[UI] Loop selector initialized');
+  console.log('[UI] Loop selector initialised');
 }
 
 // Setup all sliders
@@ -1538,7 +1462,7 @@ if (hueSlider && hueValue && synthUIContainer) {
     hueValue.textContent = value;
     synthUIContainer.style.filter = `hue-rotate(${value}deg) saturate(2)`;
   });
-  console.log('[UI] Hue slider initialized');
+  console.log('[UI] Hue slider initialised');
 }
 
 // Random Arp toggle button
@@ -1552,10 +1476,10 @@ if (randomArpToggle) {
     console.log('[UI] randomArp:', uiState.randomArp);
   });
 
-  console.log('[UI] Random Arp toggle initialized');
+  console.log('[UI] Random Arp toggle initialised');
 }
 
-console.log('[UI] All interactive controls initialized');
+console.log('[UI] All interactive controls initialised');
 console.log('[UI] Access current state via window.uiState');
 
 // ===== ARPEGGIATOR & FX CHAIN =====
@@ -1671,7 +1595,7 @@ async function loadFXSynthdefs() {
 }
 
 /**
- * Initialize FX chain (LPF -> Reverb)
+ * Initialise FX chain (LPF -> Reverb)
  * Uses promise-based guard to prevent concurrent initialization
  */
 async function initFXChain() {
@@ -1709,9 +1633,9 @@ async function initFXChain() {
 
       // Mark as initialized only after successful completion
       fxChainInitialized = true;
-      console.log('[FX] FX chain initialized successfully');
+      console.log('[FX] FX chain initialised successfully');
     } catch (error) {
-      console.error('[FX] Failed to initialize FX chain:', error);
+      console.error('[FX] Failed to initialise FX chain:', error);
       console.error('[FX] Make sure fx_lpf and fx_reverb synthdefs are loaded!');
       throw error; // Re-throw to indicate failure
     } finally {
@@ -1778,7 +1702,7 @@ async function startArpeggiator() {
     await loadInstrumentSynthdefs();
   }
 
-  // Initialize FX chain if needed
+  // Initialise FX chain if needed
   if (!fxChainInitialized) {
     await initFXChain();
   }
@@ -1796,7 +1720,7 @@ async function startArpeggiator() {
   // Find the next 0.5s grid boundary
   const nextGridBoundary = Math.ceil(currentNTP / GRID_INTERVAL) * GRID_INTERVAL;
 
-  // Initialize the global timeline to the next grid boundary (only if not set)
+  // Initialise the global timeline to the next grid boundary (only if not set)
   if (playbackStartNTP === null) {
     playbackStartNTP = nextGridBoundary;
     arpeggiatorBeatCounter = 0;
@@ -2135,7 +2059,7 @@ async function loadKickSample() {
 async function startKickLoop() {
   if (!orchestrator) return;
 
-  // Initialize FX chain if needed
+  // Initialise FX chain if needed
   if (!fxChainInitialized) {
     await initFXChain();
   }
@@ -2158,7 +2082,7 @@ async function startKickLoop() {
   // Find the next 0.5s grid boundary
   const nextGridBoundary = Math.ceil(currentNTP / GRID_INTERVAL) * GRID_INTERVAL;
 
-  // Initialize the global timeline to the next grid boundary (only if not set)
+  // Initialise the global timeline to the next grid boundary (only if not set)
   if (playbackStartNTP === null) {
     playbackStartNTP = nextGridBoundary;
     kickBeatCounter = 0;
@@ -2304,7 +2228,7 @@ async function loadAllLoopSamples() {
 async function startAmenLoop() {
   if (!orchestrator) return;
 
-  // Initialize FX chain if needed
+  // Initialise FX chain if needed
   if (!fxChainInitialized) {
     await initFXChain();
   }
@@ -2327,7 +2251,7 @@ async function startAmenLoop() {
   // Find the next 0.5s grid boundary
   const nextGridBoundary = Math.ceil(currentNTP / GRID_INTERVAL) * GRID_INTERVAL;
 
-  // Initialize the global timeline to the next grid boundary (only if not set)
+  // Initialise the global timeline to the next grid boundary (only if not set)
   if (playbackStartNTP === null) {
     playbackStartNTP = nextGridBoundary;
     amenBeatCounter = 0;
@@ -2471,4 +2395,4 @@ window.arpeggiatorRunning = arpeggiatorRunning;
 window.kickRunning = kickRunning;
 window.amenRunning = amenRunning;
 
-console.log('[Arp] Arpeggiator, kick drum, and amen break system initialized');
+console.log('[Arp] Arpeggiator, kick drum, and amen break system initialised');
