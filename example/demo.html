@@ -2279,13 +2279,57 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                         <span id="synth-value" class="slider-value">beep</span>
                       </label>
                       <select id="synth-select">
-                        <option value="beep">Beep</option>
-                        <option value="prophet">Prophet</option>
-                        <option value="tb303">TB-303</option>
-                        <option value="dsaw">DSaw</option>
-                        <option value="dpulse">DPulse</option>
-                        <option value="fm">FM</option>
+                        <option value="bass_foundation">Bass Foundation</option>
+                        <option value="beep" selected>Beep</option>
+                        <option value="blade">Blade</option>
+                        <option value="bnoise">BNoise</option>
+                        <option value="chipbass">Chipbass</option>
                         <option value="chiplead">ChipLead</option>
+                        <option value="dark_ambience">Dark Ambience</option>
+                        <option value="dpulse">DPulse</option>
+                        <option value="dsaw">DSaw</option>
+                        <option value="dtri">DTri</option>
+                        <option value="fm">FM</option>
+                        <option value="gabberkick">Gabberkick</option>
+                        <option value="hollow">Hollow</option>
+                        <option value="mod_dsaw">Mod DSaw</option>
+                        <option value="mod_fm">Mod FM</option>
+                        <option value="mod_pulse">Mod Pulse</option>
+                        <option value="mod_saw">Mod Saw</option>
+                        <option value="mod_sine">Mod Sine</option>
+                        <option value="mod_tri">Mod Tri</option>
+                        <option value="noise">Noise</option>
+                        <option value="organ_tonewheel">Organ Tonewheel</option>
+                        <option value="pluck">Pluck</option>
+                        <option value="pretty_bell">Pretty Bell</option>
+                        <option value="prophet">Prophet</option>
+                        <option value="pulse">Pulse</option>
+                        <option value="rhodey">Rhodey</option>
+                        <option value="rodeo">Rodeo</option>
+                        <option value="saw">Saw</option>
+                        <option value="square">Square</option>
+                        <option value="subpulse">Subpulse</option>
+                        <option value="supersaw">Supersaw</option>
+                        <option value="tb303">TB-303</option>
+                        <option value="tech_saws">Tech Saws</option>
+                        <option value="tri">Tri</option>
+                        <option value="winwood_lead">Winwood Lead</option>
+                        <option value="zawa">Zawa</option>
+                      </select>
+                    </div>
+
+                    <div class="slider-control">
+                      <label>
+                        Loop Sample
+                        <span id="loop-value" class="slider-value">amen</span>
+                      </label>
+                      <select id="loop-select">
+                        <option value="loop_amen" selected>Amen</option>
+                        <option value="loop_breakbeat">Breakbeat</option>
+                        <option value="loop_compus">Compus</option>
+                        <option value="loop_garzul">Garzul</option>
+                        <option value="loop_industrial">Industrial</option>
+                        <option value="loop_tabla">Tabla</option>
                       </select>
                     </div>
 
@@ -2423,13 +2467,28 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
 
                     <li>
                       <span class="welcome-text">
-                        <strong>Load Samples</strong> — Click "Load Samples" or load specific samples into buffers:
+                        <strong>Pre-loaded Loop Samples</strong> — These samples are loaded automatically on boot:
+                      </span>
+                      <code class="welcome-code-block">Buffer 1: loop_amen.flac
+Buffer 2: loop_breakbeat.flac
+Buffer 3: loop_compus.flac
+Buffer 4: loop_garzul.flac
+Buffer 5: loop_industrial.flac
+Buffer 6: loop_tabla.flac</code>
+                      <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
+                        Use these buffer IDs directly - no need to load them manually
+                      </span>
+                    </li>
+
+                    <li>
+                      <span class="welcome-text">
+                        <strong>Load Additional Samples</strong> — Click "Load Samples" for API samples, or load custom ones:
                       </span>
                       <code class="welcome-code-block">/b_allocRead 0 loop_amen.flac
-/b_allocRead 1 ambi_choir.flac
-/b_allocRead 2 bd_haus.flac</code>
+/b_allocRead 10 ambi_choir.flac
+/b_allocRead 11 bd_haus.flac</code>
                       <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
-                        The first number is the buffer ID (0, 1, 2...)
+                        The first number is the buffer ID (avoid 1-6 which are reserved for loops)
                       </span>
                     </li>
 
@@ -2437,10 +2496,10 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                       <span class="welcome-text">
                         <strong>Trigger Samples</strong> — Play samples using the stereo or mono player:
                       </span>
-                      <code class="welcome-code-block">/s_new sonic-pi-basic_stereo_player -1 0 0 buf 0
-/s_new sonic-pi-basic_mono_player -1 0 0 buf 1 rate 1.5</code>
+                      <code class="welcome-code-block">/s_new sonic-pi-basic_stereo_player -1 0 0 buf 1
+/s_new sonic-pi-basic_stereo_player -1 0 0 buf 3 rate 1.2</code>
                       <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
-                        <span class="welcome-code">buf</span> matches the buffer ID from <span class="welcome-code">/b_allocRead</span>, <span class="welcome-code">rate</span> changes playback speed
+                        <span class="welcome-code">buf</span> uses the buffer ID (1-6 for pre-loaded loops), <span class="welcome-code">rate</span> changes playback speed
                       </span>
                     </li>
 
@@ -2713,7 +2772,9 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 PreSched:
                 <span id="metric-prescheduler-pending" class="metric-value">0</span> pend /
                 <span id="metric-prescheduler-peak" class="metric-value">0</span> peak · sent
-                <span id="metric-prescheduler-sent" class="metric-value">0</span>
+                <span id="metric-prescheduler-sent" class="metric-value">0</span> · retry
+                <span id="metric-prescheduler-retries-succeeded" class="metric-value success">0</span> /
+                <span id="metric-prescheduler-retries-failed" class="metric-value warning">0</span>
               </span>
               <span>
                 Buffers:
