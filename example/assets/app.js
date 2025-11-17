@@ -736,7 +736,18 @@ initButton.addEventListener('click', async () => {
       if (orchestrator.config.development) {
         try {
           const decoded = SuperSonic.osc.decode(oscData);
-          const args = decoded.args ? decoded.args.map(a => a.value !== undefined ? a.value : a).join(' ') : '';
+          // Truncate large binary arguments to avoid flooding console
+          const args = decoded.args ? decoded.args.map(a => {
+            const val = a.value !== undefined ? a.value : a;
+            // If it's a Uint8Array (binary blob), truncate it
+            if (val instanceof Uint8Array) {
+              if (val.length > 64) {
+                return `<binary ${val.length} bytes>`;
+              }
+              return `<binary ${val.length}b: ${Array.from(val.slice(0, 16)).join(',')}>`;
+            }
+            return val;
+          }).join(' ') : '';
           const currentTime = orchestrator.audioContext ? orchestrator.audioContext.currentTime.toFixed(3) : 'N/A';
           const perfTime = performance.now().toFixed(2);
           console.log(`[OSC → t=${currentTime}s perf=${perfTime}ms] ${decoded.address} ${args}`);

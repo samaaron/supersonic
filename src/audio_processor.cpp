@@ -423,8 +423,24 @@ extern "C" {
                     continue;
                 }
 
+                // Check for zero-filled padding (when < 16 bytes at end)
+                // JavaScript writes zeros when there's not enough space for a full padding header
+                if (header.magic == 0 && header.length == 0 && header.sequence == 0) {
+                    worklet_debug("Detected zero-padding at tail=%d, wrapping to 0", in_tail);
+                    control->in_tail.store(0, std::memory_order_release);
+                    in_tail = 0;
+                    continue;
+                }
+
                 // Validate message
                 if (header.magic != MESSAGE_MAGIC) {
+                    // Log first few corruption events for diagnostics
+                    static uint32_t corruption_count = 0;
+                    if (corruption_count < 5) {
+                        worklet_debug("ERROR: Invalid magic at tail=%d head=%d: got 0x%08X expected 0x%08X (len=%u seq=%u)",
+                                     in_tail, in_head, header.magic, MESSAGE_MAGIC, header.length, header.sequence);
+                        corruption_count++;
+                    }
                     control->in_tail.store((in_tail + 1) % IN_BUFFER_SIZE, std::memory_order_release);
                     metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
                     in_tail = control->in_tail.load(std::memory_order_acquire);
