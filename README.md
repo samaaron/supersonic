@@ -11,6 +11,8 @@ A WebAssembly port of SuperCollider's scsynth audio synthesis engine for the bro
   import { SuperSonic } from './dist/supersonic.js';
 
   const sonic = new SuperSonic({
+    workerBaseURL: './dist/workers/',
+    wasmBaseURL: './dist/wasm/',
     sampleBaseURL: './dist/samples/',
     synthdefBaseURL: './dist/synthdefs/'
   });
@@ -69,8 +71,10 @@ All synthdefs and samples are from [Sonic Pi](https://github.com/sonic-pi-net/so
 **Creating an instance:**
 ```javascript
 const sonic = new SuperSonic({
-  sampleBaseURL: './dist/samples/',
-  synthdefBaseURL: './dist/synthdefs/',
+  workerBaseURL: './dist/workers/',  // Required: Path to worker files
+  wasmBaseURL: './dist/wasm/',       // Required: Path to WASM files
+  sampleBaseURL: './dist/samples/',  // Optional: Path to audio samples
+  synthdefBaseURL: './dist/synthdefs/', // Optional: Path to synthdefs
   audioPathMap: { /* optional custom path mappings */ }
 });
 ```
@@ -144,6 +148,8 @@ import { SuperSonic } from './dist/supersonic.js';
 
 // CDN-hosted synthdefs and samples work fine
 const sonic = new SuperSonic({
+  workerBaseURL: './dist/workers/',  // Must be self-hosted
+  wasmBaseURL: './dist/wasm/',       // Must be self-hosted
   sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@0.1.6/samples/',
   synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@0.1.6/synthdefs/'
 });
@@ -202,7 +208,7 @@ dist/
     └── debug_worker.js           # Debug logger
 ```
 
-The engine expects these files at `./dist/` relative to your HTML. Paths are currently not configurable.
+You must specify the paths to `workers/` and `wasm/` directories when creating a SuperSonic instance using the `workerBaseURL` and `wasmBaseURL` options.
 
 ## License
 

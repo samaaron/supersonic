@@ -402,21 +402,22 @@ export class SuperSonic {
         this.onInitialized = null;
         this.onError = null;
 
-        // Configuration - resolve paths relative to this module
-        const moduleUrl = new URL(import.meta.url);
-        const basePath = new URL('.', moduleUrl).href;
+        // Configuration - require explicit base URLs for workers and WASM
+        // This ensures SuperSonic works correctly in bundled/vendored environments
+        if (!options.workerBaseURL || !options.wasmBaseURL) {
+            throw new Error('SuperSonic requires workerBaseURL and wasmBaseURL options. Example:\n' +
+                'new SuperSonic({\n' +
+                '  workerBaseURL: "/supersonic/workers/",\n' +
+                '  wasmBaseURL: "/supersonic/wasm/"\n' +
+                '})');
+        }
 
-        // Store basePath for use in methods
-        this.basePath = basePath;
-
-        // Support custom base URLs for bundled/vendored environments
-        // Falls back to module-relative paths for standalone usage
-        const workerBaseURL = options.workerBaseURL || new URL('workers/', basePath).href;
-        const wasmBaseURL = options.wasmBaseURL || new URL('wasm/', basePath).href;
+        const workerBaseURL = options.workerBaseURL;
+        const wasmBaseURL = options.wasmBaseURL;
 
         this.config = {
-            wasmUrl: options.wasmUrl || new URL('scsynth-nrt.wasm', wasmBaseURL).href,
-            workletUrl: options.workletUrl || new URL('scsynth_audio_worklet.js', workerBaseURL).href,
+            wasmUrl: options.wasmUrl || wasmBaseURL + 'scsynth-nrt.wasm',
+            workletUrl: options.workletUrl || workerBaseURL + 'scsynth_audio_worklet.js',
             workerBaseURL: workerBaseURL,  // Store for worker creation
             development: false,
             audioContextOptions: {
@@ -566,7 +567,8 @@ export class SuperSonic {
      */
     async #loadWasmManifest() {
         try {
-            const manifestUrl = new URL('wasm/manifest.json', this.basePath).href;
+            const wasmBaseURL = this.config.workerBaseURL.replace('/workers/', '/wasm/');
+            const manifestUrl = wasmBaseURL + 'manifest.json';
             const response = await fetch(manifestUrl);
             if (response.ok) {
                 const manifest = await response.json();
@@ -574,7 +576,7 @@ export class SuperSonic {
                 // Use the WASM file specified in manifest
                 const wasmFile = manifest.wasmFile;
 
-                this.config.wasmUrl = new URL(`wasm/${wasmFile}`, this.basePath).href;
+                this.config.wasmUrl = wasmBaseURL + wasmFile;
                 console.log(`[SuperSonic] Using WASM build: ${wasmFile}`);
                 console.log(`[SuperSonic] Build: ${manifest.buildId} (git: ${manifest.gitHash})`);
             }
