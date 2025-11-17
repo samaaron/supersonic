@@ -20,6 +20,8 @@
 
           // CDN-hosted synthdefs and samples
           sonic = new SuperSonic({
+            workerBaseURL: "../dist/workers/",
+            wasmBaseURL: "../dist/wasm/",
             sampleBaseURL:
               "https://unpkg.com/supersonic-scsynth-samples@latest/samples/",
             synthdefBaseURL:

@@ -18,6 +18,8 @@
           button.textContent = "Booting scsynth...";
 
           sonic = new SuperSonic({
+            workerBaseURL: "../dist/workers/",
+            wasmBaseURL: "../dist/wasm/",
             sampleBaseURL: "../dist/samples/",
             synthdefBaseURL: "../dist/synthdefs/",
           });
