@@ -8,6 +8,26 @@ let messages = [];
 let sentMessages = [];
 let runCounter = 0;
 
+// Loop sample configuration: rate and duration for each sample
+const LOOP_CONFIG = {
+  'loop_amen': { rate: 0.8767, duration: 2.0 },
+  'loop_breakbeat': { rate: 0.9524, duration: 2.0 },
+  'loop_compus': { rate: 0.8108, duration: 8.0 },
+  'loop_garzul': { rate: 1.0, duration: 8.0 },
+  'loop_industrial': { rate: 0.8837, duration: 1.0 },
+  'loop_tabla': { rate: 1.3342, duration: 8.0 }
+};
+
+// Buffer assignments for loop samples
+const LOOP_BUFFERS = {
+  'loop_amen': 1,
+  'loop_breakbeat': 2,
+  'loop_compus': 3,
+  'loop_garzul': 4,
+  'loop_industrial': 5,
+  'loop_tabla': 6
+};
+
 // Central UI State Object
 const uiState = {
   // Trackpad state
@@ -17,6 +37,7 @@ const uiState = {
 
   // Slider values
   synth: 'beep',
+  loopSample: 'loop_amen',
   rootNote: 60,
   octaves: 2,
   amplitude: 0.5,
@@ -299,6 +320,12 @@ function updateMetrics(metrics) {
   }
   if (metrics.prescheduler_sent !== undefined) {
     document.getElementById('metric-prescheduler-sent').textContent = metrics.prescheduler_sent;
+  }
+  if (metrics.prescheduler_retries_succeeded !== undefined) {
+    document.getElementById('metric-prescheduler-retries-succeeded').textContent = metrics.prescheduler_retries_succeeded;
+  }
+  if (metrics.prescheduler_retries_failed !== undefined) {
+    document.getElementById('metric-prescheduler-retries-failed').textContent = metrics.prescheduler_retries_failed;
   }
 }
 
@@ -637,12 +664,14 @@ initButton.addEventListener('click', async () => {
     hideError();
 
     orchestrator = new SuperSonic({
+      workerBaseURL: 'dist/workers/',
+      wasmBaseURL: 'dist/wasm/',
       sampleBaseURL: 'dist/samples/',
       synthdefBaseURL: 'dist/synthdefs/'
     });
 
     // Set up callbacks
-    orchestrator.onInitialized = (data) => {
+    orchestrator.onInitialized = async (data) => {
       console.log('[App] System initialized', data);
       updateStatus('ready');
 
@@ -651,6 +680,10 @@ initButton.addEventListener('click', async () => {
         window.orchestrator = orchestrator;
         console.log('[App] orchestrator exposed to window for dev console access');
       }
+
+      // Preload all loop samples on boot
+      await loadAllLoopSamples();
+      console.log('[App] Loop samples preloaded on boot');
 
       // Enable synth controls
       const fillSynthBtns = document.querySelectorAll('.fill-synth-button');
@@ -775,6 +808,9 @@ initButton.addEventListener('click', async () => {
             metricsWithUsage.prescheduler_pending = oscStats.oscOut.eventsPending || 0;
             metricsWithUsage.prescheduler_peak = oscStats.oscOut.maxEventsPending || 0;
             metricsWithUsage.prescheduler_sent = oscStats.oscOut.bundlesWritten || 0;
+            metricsWithUsage.scheduler_queue_dropped = oscStats.oscOut.bundlesDropped || 0;
+            metricsWithUsage.prescheduler_retries_succeeded = oscStats.oscOut.retriesSucceeded || 0;
+            metricsWithUsage.prescheduler_retries_failed = oscStats.oscOut.retriesFailed || 0;
             updateMetrics(metricsWithUsage);
           }
         }).catch(err => {
@@ -1455,6 +1491,25 @@ if (synthSelect && synthValue) {
   console.log('[UI] Synth selector initialized');
 }
 
+// Loop sample selector
+const loopSelect = document.getElementById('loop-select');
+const loopValue = document.getElementById('loop-value');
+
+if (loopSelect && loopValue) {
+  loopSelect.addEventListener('change', (e) => {
+    uiState.loopSample = e.target.value;
+    // Update display to show just the name without "loop_" prefix
+    const displayName = e.target.value.replace('loop_', '');
+    loopValue.textContent = displayName;
+    console.log('[UI] loop sample:', e.target.value);
+
+    // Mark sample as not loaded so it will be reloaded with new selection
+    amenSampleLoaded = false;
+  });
+
+  console.log('[UI] Loop selector initialized');
+}
+
 // Setup all sliders
 setupSlider('root-note-slider', 'root-note-value', 'rootNote', (v) => Math.round(v));
 setupSlider('octaves-slider', 'octaves-value', 'octaves', (v) => Math.round(v));
@@ -1494,10 +1549,14 @@ console.log('[UI] Access current state via window.uiState');
 
 // ===== ARPEGGIATOR & FX CHAIN =====
 
-// Constants for FX chain
+// Constants for FX chain and scheduling
 const NTP_EPOCH_OFFSET = 2208988800;
-const GROUP_SOURCE = 100;
+const LOOKAHEAD = 0.1; // 100ms lookahead to prevent late messages
+const GROUP_SOURCE = 100; // Legacy/general
+const GROUP_ARP = 100; // Arpeggiator notes
 const GROUP_FX = 101;
+const GROUP_LOOPS = 102; // Loop samples
+const GROUP_KICK = 103; // Kick drum
 const FX_BUS_SYNTH_TO_LPF = 20;
 const FX_BUS_LPF_TO_REVERB = 22;
 const FX_BUS_OUTPUT = 0;
@@ -1530,14 +1589,42 @@ async function loadInstrumentSynthdefs() {
   if (instrumentSynthdefsLoaded) return;
 
   const instrumentSynthdefs = [
+    'sonic-pi-bass_foundation',
     'sonic-pi-beep',
-    'sonic-pi-tb303',
-    'sonic-pi-chiplead',
-    'sonic-pi-dsaw',
-    'sonic-pi-dpulse',
+    'sonic-pi-blade',
     'sonic-pi-bnoise',
+    'sonic-pi-chipbass',
+    'sonic-pi-chiplead',
+    'sonic-pi-dark_ambience',
+    'sonic-pi-dpulse',
+    'sonic-pi-dsaw',
+    'sonic-pi-dtri',
+    'sonic-pi-fm',
+    'sonic-pi-gabberkick',
+    'sonic-pi-hollow',
+    'sonic-pi-mod_dsaw',
+    'sonic-pi-mod_fm',
+    'sonic-pi-mod_pulse',
+    'sonic-pi-mod_saw',
+    'sonic-pi-mod_sine',
+    'sonic-pi-mod_tri',
+    'sonic-pi-noise',
+    'sonic-pi-organ_tonewheel',
+    'sonic-pi-pluck',
+    'sonic-pi-pretty_bell',
     'sonic-pi-prophet',
-    'sonic-pi-fm'
+    'sonic-pi-pulse',
+    'sonic-pi-rhodey',
+    'sonic-pi-rodeo',
+    'sonic-pi-saw',
+    'sonic-pi-square',
+    'sonic-pi-subpulse',
+    'sonic-pi-supersaw',
+    'sonic-pi-tb303',
+    'sonic-pi-tech_saws',
+    'sonic-pi-tri',
+    'sonic-pi-winwood_lead',
+    'sonic-pi-zawa'
   ];
 
   console.log('[Arp] Loading instrument synthdefs:', instrumentSynthdefs);
@@ -1602,6 +1689,8 @@ async function initFXChain() {
       // Send all messages immediately (no await - fire and forget)
       orchestrator.send('/g_new', GROUP_SOURCE, 0, 0);
       orchestrator.send('/g_new', GROUP_FX, 3, GROUP_SOURCE);
+      orchestrator.send('/g_new', GROUP_LOOPS, 0, 0);
+      orchestrator.send('/g_new', GROUP_KICK, 0, 0);
       orchestrator.send('/s_new', 'sonic-pi-fx_lpf', FX_LPF_NODE, 0, GROUP_FX,
         'in_bus', FX_BUS_SYNTH_TO_LPF, 'out_bus', FX_BUS_LPF_TO_REVERB, 'cutoff', 130.0, 'res', 0.5);
       orchestrator.send('/s_new', 'sonic-pi-fx_reverb', FX_REVERB_NODE, 3, FX_LPF_NODE,
@@ -1741,7 +1830,7 @@ function scheduleArpeggiatorBatch() {
   // Schedule 4 notes
   for (let i = 0; i < NOTES_PER_BATCH; i++) {
     const beatNumber = arpeggiatorBeatCounter + i;
-    const targetNTP = playbackStartNTP + (beatNumber * NOTE_INTERVAL);
+    const targetNTP = playbackStartNTP + (beatNumber * NOTE_INTERVAL) + LOOKAHEAD;
 
     // Pick note: random or sequential
     let note;
@@ -2096,7 +2185,7 @@ function scheduleKickBatch() {
   // Schedule 4 kicks
   for (let i = 0; i < KICKS_PER_BATCH; i++) {
     // Thread time through - use current time and increment
-    const targetNTP = kickCurrentTime;
+    const targetNTP = kickCurrentTime + LOOKAHEAD;
     kickCurrentTime += KICK_INTERVAL;
 
     // Create OSC message for kick
@@ -2178,15 +2267,24 @@ function stopKickLoop() {
 }
 
 /**
- * Load amen sample
+ * Load all loop samples into buffers
  */
-async function loadAmenSample() {
+async function loadAllLoopSamples() {
   if (amenSampleLoaded) return;
+  if (!orchestrator) return;
 
-  console.log('[Amen] Loading loop_amen sample...');
-  await orchestrator.send('/b_allocRead', 1, 'loop_amen.flac');
+  console.log('[Samples] Loading all loop samples...');
+  const loopNames = Object.keys(LOOP_BUFFERS);
+
+  for (const loopName of loopNames) {
+    const bufNum = LOOP_BUFFERS[loopName];
+    const fileName = `${loopName}.flac`;
+    console.log(`[Samples] Loading ${fileName} to buffer ${bufNum}`);
+    await orchestrator.send('/b_allocRead', bufNum, fileName);
+  }
+
   amenSampleLoaded = true;
-  console.log('[Amen] loop_amen sample loaded to buffer 1');
+  console.log(`[Samples] Loaded ${loopNames.length} loop samples`);
 }
 
 /**
@@ -2200,9 +2298,9 @@ async function startAmenLoop() {
     await initFXChain();
   }
 
-  // Load sample if needed
+  // Load samples if needed
   if (!amenSampleLoaded) {
-    await loadAmenSample();
+    await loadAllLoopSamples();
   }
 
   if (amenRunning) return;
@@ -2250,27 +2348,29 @@ async function startAmenLoop() {
 function scheduleAmenBatch() {
   if (!amenRunning || !orchestrator) return;
 
-  const AMEN_RATE = 0.8767; // Rate chosen to make the loop last exactly 2s
-  const AMEN_INTERVAL = 2.0; // 2 second loop duration
-  const AMEN_PER_BATCH = 1; // Schedule 1 at a time (only 2 seconds ahead for faster stop)
+  // Get the config for the currently selected loop sample
+  const loopConfig = LOOP_CONFIG[uiState.loopSample] || { rate: 1.0, duration: 2.0 };
+  const AMEN_RATE = loopConfig.rate;
+  const AMEN_INTERVAL = loopConfig.duration;
+  const AMEN_PER_BATCH = 1; // Schedule 1 at a time for faster stop
 
   console.log(`[Amen] Scheduling batch starting at beat ${amenBeatCounter}`);
 
   for (let i = 0; i < AMEN_PER_BATCH; i++) {
     // Thread time through - use current time and increment
-    const targetNTP = amenCurrentTime;
+    const targetNTP = amenCurrentTime + LOOKAHEAD;
     amenCurrentTime += AMEN_INTERVAL;
 
-    // Create OSC message for amen
+    // Create OSC message for loop sample
     const message = {
       address: '/s_new',
       args: [
         { type: 's', value: 'sonic-pi-basic_stereo_player' },
         { type: 'i', value: -1 },
         { type: 'i', value: 0 },
-        { type: 'i', value: GROUP_SOURCE },
+        { type: 'i', value: GROUP_LOOPS },
         { type: 's', value: 'buf' },
-        { type: 'i', value: 1 },
+        { type: 'i', value: LOOP_BUFFERS[uiState.loopSample] || 1 },
         { type: 's', value: 'amp' },
         { type: 'f', value: 0.5 },
         { type: 's', value: 'rate' },
@@ -2334,6 +2434,12 @@ function scheduleAmenBatch() {
 function stopAmenLoop() {
   amenRunning = false;
   amenCurrentTime = null;
+
+  // Free all loop samples immediately to prevent 8s tail
+  if (orchestrator) {
+    orchestrator.send('/g_freeAll', GROUP_LOOPS);
+    console.log('[Amen] Freed all loop samples');
+  }
 
   // Only reset playback time if arpeggiator and kick are also stopped
   if (!arpeggiatorRunning && !kickRunning) {
