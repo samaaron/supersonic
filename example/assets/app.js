@@ -675,6 +675,11 @@ initButton.addEventListener('click', async () => {
       await loadAllLoopSamples();
       console.log('[App] Loop samples preloaded on boot');
 
+      // Initialize FX chain BEFORE enabling synth pad
+      // This prevents race conditions where pad sends /n_set before nodes exist
+      await initFXChain();
+      console.log('[App] FX chain initialized on boot');
+
       // Enable synth controls
       const fillSynthBtns = document.querySelectorAll('.fill-synth-button');
       fillSynthBtns.forEach(btn => btn.disabled = false);
