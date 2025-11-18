@@ -405,31 +405,17 @@ extern "C" {
                 uint32_t msg_offset = IN_BUFFER_START + in_tail;
                 uint32_t space_to_end = IN_BUFFER_SIZE - in_tail;
 
-                // If there isn't enough space left for a full header, wrap tail
-                if (space_to_end < sizeof(Message)) {
-                    control->in_tail.store(0, std::memory_order_release);
-                    in_tail = 0;
-                    continue;
-                }
-
-                // Read message header (either padding marker or actual message)
+                // ringbuf.js approach: no padding markers, handle split reads
+                // Read message header (may be split across wrap boundary)
                 Message header;
-                std::memcpy(&header, shared_memory + msg_offset, sizeof(Message));
 
-                // Check for padding marker - skip to beginning
-                if (header.magic == PADDING_MAGIC) {
-                    control->in_tail.store(0, std::memory_order_release);
-                    in_tail = 0;
-                    continue;
-                }
-
-                // Check for zero-filled padding (when < 16 bytes at end)
-                // JavaScript writes zeros when there's not enough space for a full padding header
-                if (header.magic == 0 && header.length == 0 && header.sequence == 0) {
-                    worklet_debug("Detected zero-padding at tail=%d, wrapping to 0", in_tail);
-                    control->in_tail.store(0, std::memory_order_release);
-                    in_tail = 0;
-                    continue;
+                if (space_to_end >= sizeof(Message)) {
+                    // Header fits contiguously
+                    std::memcpy(&header, shared_memory + msg_offset, sizeof(Message));
+                } else {
+                    // Header is split - read in two parts
+                    std::memcpy(&header, shared_memory + msg_offset, space_to_end);
+                    std::memcpy((char*)&header + space_to_end, shared_memory + IN_BUFFER_START, sizeof(Message) - space_to_end);
                 }
 
                 // Validate message
@@ -468,9 +454,19 @@ extern "C" {
 
                 char osc_buffer[MAX_MESSAGE_SIZE];
 
-                // Copy OSC payload from ring buffer (contiguous due to padding)
-                uint32_t payload_offset = IN_BUFFER_START + in_tail + sizeof(Message);
-                std::memcpy(osc_buffer, shared_memory + payload_offset, payload_size);
+                // Copy OSC payload from ring buffer (may be split across wrap boundary)
+                uint32_t payload_start = (in_tail + sizeof(Message)) % IN_BUFFER_SIZE;
+                uint32_t payload_offset = IN_BUFFER_START + payload_start;
+                uint32_t bytes_to_end = IN_BUFFER_SIZE - payload_start;
+
+                if (payload_size <= bytes_to_end) {
+                    // Payload fits contiguously
+                    std::memcpy(osc_buffer, shared_memory + payload_offset, payload_size);
+                } else {
+                    // Payload is split - read in two parts
+                    std::memcpy(osc_buffer, shared_memory + payload_offset, bytes_to_end);
+                    std::memcpy(osc_buffer + bytes_to_end, shared_memory + IN_BUFFER_START, payload_size - bytes_to_end);
+                }
 
                 // RT-SAFE message processing - no malloc!
                 // Setup reply address
