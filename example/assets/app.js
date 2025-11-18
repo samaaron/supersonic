@@ -1566,6 +1566,10 @@ async function loadInstrumentSynthdefs() {
   try {
     const results = await orchestrator.loadSynthDefs(instrumentSynthdefs);
     const successCount = Object.values(results).filter(r => r.success).length;
+    console.log(`[Arp] Sent ${successCount}/${instrumentSynthdefs.length} instrument synthdef loads`);
+    // Wait for scsynth to process them
+    const syncId = Math.floor(Math.random() * 1000000);
+    await orchestrator.sync(syncId);
     console.log(`[Arp] Loaded ${successCount}/${instrumentSynthdefs.length} instrument synthdefs`);
     instrumentSynthdefsLoaded = true;
   } catch (error) {
@@ -1586,6 +1590,10 @@ async function loadFXSynthdefs() {
   try {
     const results = await orchestrator.loadSynthDefs(fxSynthdefs);
     const successCount = Object.values(results).filter(r => r.success).length;
+    console.log(`[FX] Sent ${successCount}/${fxSynthdefs.length} FX synthdef loads`);
+    // Wait for scsynth to process them
+    const syncId = Math.floor(Math.random() * 1000000);
+    await orchestrator.sync(syncId);
     console.log(`[FX] Loaded ${successCount}/${fxSynthdefs.length} FX synthdefs`);
     fxSynthdefsLoaded = true;
   } catch (error) {
@@ -1618,10 +1626,10 @@ async function initFXChain() {
     console.log('[FX] Initializing FX chain...');
 
     try {
-      // Load FX synthdefs first
+      // Load FX synthdefs first - this now waits for /done /d_recv responses
       await loadFXSynthdefs();
 
-      // Send all messages immediately (no await - fire and forget)
+      // Create groups and synth nodes
       orchestrator.send('/g_new', GROUP_SOURCE, 0, 0);
       orchestrator.send('/g_new', GROUP_FX, 3, GROUP_SOURCE);
       orchestrator.send('/g_new', GROUP_LOOPS, 0, 0);
