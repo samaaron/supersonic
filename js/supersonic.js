@@ -658,6 +658,13 @@ export class SuperSonic {
             } else if (msg.address === '/buffer/allocated') {
                 // Handle buffer allocation completion with UUID correlation
                 this._handleBufferAllocated(msg.args);
+            } else if (msg.address === '/synced' && msg.args.length > 0) {
+                // Handle /synced responses for sync operations
+                const syncId = msg.args[0];  // Integer sync ID
+                if (this._syncListeners && this._syncListeners.has(syncId)) {
+                    const listener = this._syncListeners.get(syncId);
+                    listener(msg);
+                }
             }
 
             // Always forward to onMessage (including internal messages)
@@ -1190,7 +1197,7 @@ export class SuperSonic {
             const arrayBuffer = await response.arrayBuffer();
             const synthdefData = new Uint8Array(arrayBuffer);
 
-            // Send via /d_recv OSC message
+            // Send via /d_recv OSC message (fire and forget - will be synced by caller)
             await this.send('/d_recv', synthdefData);
 
             const synthName = this.#extractSynthDefName(path);
@@ -1198,7 +1205,7 @@ export class SuperSonic {
                 this.loadedSynthDefs.add(synthName);
             }
 
-            console.log(`[SuperSonic] Loaded synthdef from ${path} (${synthdefData.length} bytes)`);
+            console.log(`[SuperSonic] Sent synthdef from ${path} (${synthdefData.length} bytes)`);
         } catch (error) {
             console.error('[SuperSonic] Failed to load synthdef:', error);
             throw error;
@@ -1228,6 +1235,7 @@ export class SuperSonic {
 
         const results = {};
 
+        // Send all /d_recv commands in parallel
         await Promise.all(
             names.map(async (name) => {
                 try {
@@ -1242,9 +1250,58 @@ export class SuperSonic {
         );
 
         const successCount = Object.values(results).filter(r => r.success).length;
-        console.log(`[SuperSonic] Loaded ${successCount}/${names.length} synthdefs`);
+        console.log(`[SuperSonic] Sent ${successCount}/${names.length} synthdef loads`);
 
         return results;
+    }
+
+    /**
+     * Send /sync command and wait for /synced response
+     * Use this to ensure all previous asynchronous commands have completed
+     * @param {number} syncId - Unique integer identifier for this sync operation
+     * @returns {Promise<void>}
+     * @example
+     * await sonic.loadSynthDefs(['synth1', 'synth2']);
+     * await sonic.sync(12345); // Wait for all synthdefs to be processed
+     */
+    async sync(syncId) {
+        if (!this.initialized) {
+            throw new Error('SuperSonic not initialized. Call init() first.');
+        }
+
+        if (!Number.isInteger(syncId)) {
+            throw new Error('sync() requires an integer syncId parameter');
+        }
+
+        const syncPromise = new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                // Clean up listener on timeout
+                if (this._syncListeners) {
+                    this._syncListeners.delete(syncId);
+                }
+                reject(new Error('Timeout waiting for /synced response'));
+            }, 10000); // 10 second timeout
+
+            // Create a one-time message listener for this specific sync ID
+            const messageHandler = (msg) => {
+                clearTimeout(timeout);
+                // Remove this specific listener
+                this._syncListeners.delete(syncId);
+                resolve();
+            };
+
+            // Store the listener in a map keyed by sync ID
+            if (!this._syncListeners) {
+                this._syncListeners = new Map();
+            }
+            this._syncListeners.set(syncId, messageHandler);
+        });
+
+        // Send /sync command
+        await this.send('/sync', syncId);
+
+        // Wait for /synced response
+        await syncPromise;
     }
 
     /**
