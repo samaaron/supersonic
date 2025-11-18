@@ -829,6 +829,9 @@
         font-family: "Courier New", monospace;
         font-weight: 600;
         color: #1e90ff;
+        display: inline-block;
+        min-width: 3ch;
+        text-align: right;
       }
 
       .metric-value.error {
@@ -837,6 +840,23 @@
 
       .metric-value.warning {
         color: #ff1493;
+      }
+
+      .metric-value.success {
+        color: #00ff00;
+      }
+
+      /* Wider widths for specific metrics */
+      .metric-value-wide {
+        min-width: 5ch;
+      }
+
+      .metric-value-xwide {
+        min-width: 8ch;
+      }
+
+      .metric-value-percent {
+        min-width: 4ch;
       }
 
       .panel.metrics-compact {
@@ -2647,31 +2667,37 @@ Buffer 6: loop_tabla.flac</code>
               </div>
               <!-- End Logs Section -->
 
-              <!-- Performance Metrics -->
+            </div>
+            <!-- End Right Column -->
+          </div>
+          <!-- End Main Layout Grid -->
+
+          <!-- Performance Metrics (Full Width) -->
           <div
             style="
-              padding-top: 0.75rem;
-              padding-left: 0.75rem;
-              margin-top: 0.75rem;
+              padding: 0.75rem;
+              margin-top: 0;
+              border-top: 1px solid #333;
             "
           >
             <div
               style="
                 display: flex;
-                gap: 1.5rem;
+                gap: 1rem;
                 flex-wrap: wrap;
                 font-size: 0.7rem;
                 color: #ffd700;
                 align-items: center;
+                justify-content: flex-start;
               "
             >
               <span
                 >Sent:
-                <span id="metric-sent" class="metric-value">0</span></span
+                <span id="metric-sent" class="metric-value metric-value-wide">0</span></span
               >
               <span
                 >Recv:
-                <span id="metric-received" class="metric-value">0</span></span
+                <span id="metric-received" class="metric-value metric-value-wide">0</span></span
               >
               <span
                 >Drop:
@@ -2681,7 +2707,7 @@ Buffer 6: loop_tabla.flac</code>
               >
               <span
                 >Proc:
-                <span id="metric-process-count" class="metric-value"
+                <span id="metric-process-count" class="metric-value metric-value-xwide"
                   >0</span
                 ></span
               >
@@ -2692,7 +2718,7 @@ Buffer 6: loop_tabla.flac</code>
                 ></span
               >
               <span style="display: flex; align-items: center; gap: 0.25rem">
-                IN: <span id="metric-in-usage" class="metric-value">0%</span>
+                IN: <span id="metric-in-usage" class="metric-value metric-value-percent">0%</span>
                 <div
                   style="
                     width: 40px;
@@ -2714,7 +2740,7 @@ Buffer 6: loop_tabla.flac</code>
                 </div>
               </span>
               <span style="display: flex; align-items: center; gap: 0.25rem">
-                OUT: <span id="metric-out-usage" class="metric-value">0%</span>
+                OUT: <span id="metric-out-usage" class="metric-value metric-value-percent">0%</span>
                 <div
                   style="
                     width: 40px;
@@ -2736,7 +2762,7 @@ Buffer 6: loop_tabla.flac</code>
                 </div>
               </span>
               <span style="display: flex; align-items: center; gap: 0.25rem">
-                DBG: <span id="metric-debug-usage" class="metric-value">0%</span>
+                DBG: <span id="metric-debug-usage" class="metric-value metric-value-percent">0%</span>
                 <div
                   style="
                     width: 40px;
@@ -2759,41 +2785,41 @@ Buffer 6: loop_tabla.flac</code>
               </span>
               <span>
                 Sched:
-                <span id="metric-scheduler-depth" class="metric-value">0</span> cur /
-                <span id="metric-scheduler-peak" class="metric-value">0</span> peak · drop
-                <span id="metric-scheduler-dropped" class="metric-value warning">0</span>
+                <span id="metric-scheduler-depth" class="metric-value metric-value-wide">0</span> cur /
+                <span id="metric-scheduler-peak" class="metric-value metric-value-wide">0</span> peak · drop
+                <span id="metric-scheduler-dropped" class="metric-value warning metric-value-wide">0</span>
               </span>
               <span>
                 PreSched:
-                <span id="metric-prescheduler-pending" class="metric-value">0</span> pend /
-                <span id="metric-prescheduler-peak" class="metric-value">0</span> peak · sent
-                <span id="metric-prescheduler-sent" class="metric-value">0</span> · retry
-                <span id="metric-prescheduler-retries-succeeded" class="metric-value success">0</span> /
-                <span id="metric-prescheduler-retries-failed" class="metric-value warning">0</span>
+                <span id="metric-prescheduler-pending" class="metric-value metric-value-wide">0</span> pend /
+                <span id="metric-prescheduler-peak" class="metric-value metric-value-wide">0</span> peak · sent
+                <span id="metric-prescheduler-sent" class="metric-value metric-value-wide">0</span> · retry
+                <span id="metric-prescheduler-retries-succeeded" class="metric-value success metric-value-wide">0</span> /
+                <span id="metric-prescheduler-retries-failed" class="metric-value warning metric-value-wide">0</span>
               </span>
               <span>
                 Buffers:
-                <span id="metric-buffer-count" class="metric-value">0</span>
+                <span id="metric-buffer-count" class="metric-value metric-value-wide">0</span>
                 (<span id="metric-buffer-pending" class="metric-value warning">0</span> pend)
               </span>
               <span>
                 Buf Mem:
-                <span id="metric-buffer-used" class="metric-value">0 B</span> /
-                <span id="metric-buffer-total" class="metric-value">0 B</span>
+                <span id="metric-buffer-used" class="metric-value metric-value-xwide">0 B</span> /
+                <span id="metric-buffer-total" class="metric-value metric-value-xwide">0 B</span>
               </span>
               <span>
                 Free:
-                <span id="metric-buffer-free" class="metric-value">0 B</span>
+                <span id="metric-buffer-free" class="metric-value metric-value-xwide">0 B</span>
               </span>
               <span>
                 Synthdefs:
-                <span id="metric-synthdefs" class="metric-value">0</span>
+                <span id="metric-synthdefs" class="metric-value metric-value-wide">0</span>
               </span>
             </div>
           </div>
 
-          <!-- Hue Control -->
-          <div style="padding: 0.75rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem;">
+          <!-- Hue Control (Full Width) -->
+          <div style="padding: 0.75rem; padding-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; border-bottom: 1px solid #333;">
             <label for="hue-slider" style="color: #ffd700; min-width: 35px;">Hue</label>
             <input
               type="range"
@@ -2802,15 +2828,10 @@ Buffer 6: loop_tabla.flac</code>
               max="360"
               value="200"
               step="1"
-              style="flex: 1; height: 4px;"
+              style="flex: 1; height: 4px; max-width: 300px;"
             />
             <span id="hue-value" style="color: #ffd700; min-width: 30px; text-align: right;">200</span>
           </div>
-
-            </div>
-            <!-- End Right Column -->
-          </div>
-          <!-- End Main Layout Grid -->
 
         </div>
         <!-- End Unified Black Container -->
