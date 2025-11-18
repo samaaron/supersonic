@@ -171,40 +171,55 @@ function writeToRingBuffer(oscMessage, isRetry) {
         return false;
     }
 
-    // Check if message fits contiguously
+    // ringbuf.js approach: split writes across wrap boundary
+    // No padding markers - just split the write into two parts if it wraps
+
     var spaceToEnd = bufferConstants.IN_BUFFER_SIZE - head;
 
     if (totalSize > spaceToEnd) {
+        // Message will wrap - write in two parts
+        // Create header as byte array to simplify split writes
+        var headerBytes = new Uint8Array(bufferConstants.MESSAGE_HEADER_SIZE);
+        var headerView = new DataView(headerBytes.buffer);
+        headerView.setUint32(0, bufferConstants.MESSAGE_MAGIC, true);
+        headerView.setUint32(4, totalSize, true);
+        headerView.setUint32(8, stats.bundlesWritten, true);
+        headerView.setUint32(12, 0, true);
+
+        var writePos1 = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
+        var writePos2 = ringBufferBase + bufferConstants.IN_BUFFER_START;
+
+        // Write header (may be split)
         if (spaceToEnd >= bufferConstants.MESSAGE_HEADER_SIZE) {
-            // Write padding marker and wrap
-            var paddingPos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
-            dataView.setUint32(paddingPos, bufferConstants.PADDING_MAGIC, true);
-            dataView.setUint32(paddingPos + 4, 0, true);
-            dataView.setUint32(paddingPos + 8, 0, true);
-            dataView.setUint32(paddingPos + 12, 0, true);
-        } else if (spaceToEnd > 0) {
-            // Not enough room for a padding header - clear remaining bytes
-            var padStart = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
-            for (var i = 0; i < spaceToEnd; i++) {
-                uint8View[padStart + i] = 0;
-            }
+            // Header fits contiguously
+            uint8View.set(headerBytes, writePos1);
+
+            // Write payload (split across boundary)
+            var payloadBytesInFirstPart = spaceToEnd - bufferConstants.MESSAGE_HEADER_SIZE;
+            uint8View.set(oscMessage.subarray(0, payloadBytesInFirstPart), writePos1 + bufferConstants.MESSAGE_HEADER_SIZE);
+            uint8View.set(oscMessage.subarray(payloadBytesInFirstPart), writePos2);
+        } else {
+            // Header is split across boundary
+            uint8View.set(headerBytes.subarray(0, spaceToEnd), writePos1);
+            uint8View.set(headerBytes.subarray(spaceToEnd), writePos2);
+
+            // All payload goes at beginning
+            var payloadOffset = bufferConstants.MESSAGE_HEADER_SIZE - spaceToEnd;
+            uint8View.set(oscMessage, writePos2 + payloadOffset);
         }
+    } else {
+        // Message fits contiguously - write normally
+        var writePos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
 
-        // Wrap to beginning
-        head = 0;
+        // Write header
+        dataView.setUint32(writePos, bufferConstants.MESSAGE_MAGIC, true);
+        dataView.setUint32(writePos + 4, totalSize, true);
+        dataView.setUint32(writePos + 8, stats.bundlesWritten, true);
+        dataView.setUint32(writePos + 12, 0, true);
+
+        // Write payload
+        uint8View.set(oscMessage, writePos + bufferConstants.MESSAGE_HEADER_SIZE);
     }
-
-    // Write message
-    var writePos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
-
-    // Write header
-    dataView.setUint32(writePos, bufferConstants.MESSAGE_MAGIC, true);
-    dataView.setUint32(writePos + 4, totalSize, true);
-    dataView.setUint32(writePos + 8, stats.bundlesWritten, true); // sequence
-    dataView.setUint32(writePos + 12, 0, true); // padding
-
-    // Write payload
-    uint8View.set(oscMessage, writePos + bufferConstants.MESSAGE_HEADER_SIZE);
 
     // Diagnostic: Log first few writes
     if (stats.bundlesWritten < 5) {
