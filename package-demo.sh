@@ -57,9 +57,10 @@ echo "Copying distribution files..."
 cp "$PROJECT_ROOT/dist/supersonic.js" "$TEMP_DIR/dist/"
 
 # Copy WASM files (following symlinks)
+# Note: We only copy the stable (non-hashed) WASM file, not the manifest
+# This ensures the demo uses the stable filename instead of trying to load a hashed version
 echo "Copying WASM files..."
 cp -L "$PROJECT_ROOT/dist/wasm/scsynth-nrt.wasm" "$TEMP_DIR/dist/wasm/"
-cp "$PROJECT_ROOT/dist/wasm/manifest.json" "$TEMP_DIR/dist/wasm/"
 
 # Copy workers
 echo "Copying worker files..."
