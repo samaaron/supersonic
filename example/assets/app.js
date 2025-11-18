@@ -1591,10 +1591,6 @@ async function loadFXSynthdefs() {
     const results = await orchestrator.loadSynthDefs(fxSynthdefs);
     const successCount = Object.values(results).filter(r => r.success).length;
     console.log(`[FX] Sent ${successCount}/${fxSynthdefs.length} FX synthdef loads`);
-    // Wait for scsynth to process them
-    const syncId = Math.floor(Math.random() * 1000000);
-    await orchestrator.sync(syncId);
-    console.log(`[FX] Loaded ${successCount}/${fxSynthdefs.length} FX synthdefs`);
     fxSynthdefsLoaded = true;
   } catch (error) {
     console.error('[FX] Failed to load FX synthdefs:', error);
@@ -1626,7 +1622,6 @@ async function initFXChain() {
     console.log('[FX] Initializing FX chain...');
 
     try {
-      // Load FX synthdefs first - this now waits for /done /d_recv responses
       await loadFXSynthdefs();
 
       // Create groups and synth nodes
@@ -1638,6 +1633,11 @@ async function initFXChain() {
         'in_bus', FX_BUS_SYNTH_TO_LPF, 'out_bus', FX_BUS_LPF_TO_REVERB, 'cutoff', 130.0, 'res', 0.5);
       orchestrator.send('/s_new', 'sonic-pi-fx_reverb', FX_REVERB_NODE, 3, FX_LPF_NODE,
         'in_bus', FX_BUS_LPF_TO_REVERB, 'out_bus', FX_BUS_OUTPUT, 'mix', 0.3, 'room', 0.6);
+
+      // Wait for scsynth to process all synthdef loads and node creations
+      const syncId = Math.floor(Math.random() * 1000000);
+      await orchestrator.sync(syncId);
+      console.log('[FX] All FX synthdefs and nodes synced');
 
       // Mark as initialized only after successful completion
       fxChainInitialized = true;
