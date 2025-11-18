@@ -792,9 +792,6 @@ initButton.addEventListener('click', async () => {
       if (metrics.schedulerQueueMax !== undefined || metrics.scheduler_queue_max !== undefined) {
         metricsWithUsage.scheduler_queue_max = metrics.schedulerQueueMax ?? metrics.scheduler_queue_max;
       }
-      if (metrics.schedulerQueueDropped !== undefined || metrics.scheduler_queue_dropped !== undefined) {
-        metricsWithUsage.scheduler_queue_dropped = metrics.schedulerQueueDropped ?? metrics.scheduler_queue_dropped;
-      }
 
       metricsWithUsage.messages_sent = orchestrator.stats.messagesSent || 0;
 
