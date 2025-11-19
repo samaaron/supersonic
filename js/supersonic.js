@@ -15,6 +15,7 @@ import ScsynthOSC from './lib/scsynth_osc.js';
 import oscLib from './vendor/osc.js/osc.js';
 import { MemPool } from '@thi.ng/malloc';
 import { NTP_EPOCH_OFFSET, DRIFT_UPDATE_INTERVAL_MS } from './timing_constants.js';
+import { ScsynthConfig } from './scsynth_options.js';
 
 class BufferManager {
     constructor(options) {
@@ -24,7 +25,8 @@ class BufferManager {
             bufferPool,
             allocatedBuffers,
             resolveAudioPath,
-            registerPendingOp
+            registerPendingOp,
+            maxBuffers = 1024
         } = options;
 
         this.audioContext = audioContext;
@@ -40,8 +42,8 @@ class BufferManager {
         this.GUARD_BEFORE = 3;
         this.GUARD_AFTER = 1;
 
-        // SuperCollider default buffer limit
-        this.MAX_BUFFERS = 1024;
+        // Maximum buffer count (from config)
+        this.MAX_BUFFERS = maxBuffers;
     }
 
     #validateBufferNumber(bufnum) {
@@ -423,7 +425,9 @@ export class SuperSonic {
             audioContextOptions: {
                 latencyHint: 'interactive',
                 sampleRate: 48000
-            }
+            },
+            // scsynth configuration (from scsynth_options.js)
+            scsynth: ScsynthConfig
         };
 
         // Resource loading configuration
@@ -492,31 +496,30 @@ export class SuperSonic {
      * Initialize shared WebAssembly memory
      */
     #initializeSharedMemory() {
-        // Memory layout:
+        // Memory layout (from scsynth_options.js):
         // 0-32MB:     Emscripten heap (scsynth objects, stack)
         // 32-64MB:    Ring buffers (OSC in/out, debug, control)
         // 64-192MB:   Buffer pool (128MB for audio buffers)
-        const TOTAL_PAGES = 3072;  // 3072 pages = 192MB
+        const memConfig = this.config.scsynth.memory;
 
         this.wasmMemory = new WebAssembly.Memory({
-            initial: TOTAL_PAGES,
-            maximum: TOTAL_PAGES,
+            initial: memConfig.totalPages,
+            maximum: memConfig.totalPages,
             shared: true
         });
         this.sharedBuffer = this.wasmMemory.buffer;
 
-        // Initialize buffer pool (64MB offset, 128MB size)
-        const BUFFER_POOL_OFFSET = 64 * 1024 * 1024;  // 64MB
-        const BUFFER_POOL_SIZE = 128 * 1024 * 1024;   // 128MB
-
+        // Initialize buffer pool
         this.bufferPool = new MemPool({
             buf: this.sharedBuffer,
-            start: BUFFER_POOL_OFFSET,
-            size: BUFFER_POOL_SIZE,
+            start: memConfig.bufferPoolOffset,
+            size: memConfig.bufferPoolSize,
             align: 8  // 8-byte alignment (minimum required by MemPool)
         });
 
-        console.log('[SuperSonic] Buffer pool initialized: 128MB at offset 64MB');
+        const poolSizeMB = (memConfig.bufferPoolSize / (1024 * 1024)).toFixed(0);
+        const poolOffsetMB = (memConfig.bufferPoolOffset / (1024 * 1024)).toFixed(0);
+        console.log(`[SuperSonic] Buffer pool initialized: ${poolSizeMB}MB at offset ${poolOffsetMB}MB`);
     }
 
 
@@ -558,7 +561,8 @@ export class SuperSonic {
             allocatedBuffers: this.allocatedBuffers,
             resolveAudioPath: (path) => this._resolveAudioPath(path),
             registerPendingOp: (uuid, bufnum, timeoutMs) =>
-                this.#createPendingBufferOperation(uuid, bufnum, timeoutMs)
+                this.#createPendingBufferOperation(uuid, bufnum, timeoutMs),
+            maxBuffers: this.config.scsynth.worldOptions.numBuffers
         });
     }
 
