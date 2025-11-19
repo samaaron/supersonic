@@ -261,22 +261,37 @@ extern "C" {
                      SUPERSONIC_VERSION_MAJOR, SUPERSONIC_VERSION_MINOR, SUPERSONIC_VERSION_PATCH,
                      SC_VersionMajor, SC_VersionMinor, SC_VersionPatch, SC_VersionTweak);
 
+        // Read worldOptions from SharedArrayBuffer (written by JS)
+        // WorldOptions location: ringBufferBase + 65536 (after ring_buffer_storage)
+        uint32_t* worldOptionsPtr = (uint32_t*)((uint8_t*)ring_buffer_storage + 65536);
+
         // Configure World for NRT mode (externally driven by AudioWorklet)
+        // Values come from JS (scsynth_options.js) via SharedArrayBuffer
         WorldOptions options;
         options.mRealTime = false;                    // NRT mode - externally driven, no audio driver
         options.mMemoryLocking = false;               // No memory locking in WASM
-        options.mNumAudioBusChannels = 128;
-        options.mNumControlBusChannels = 4096;
-        options.mNumInputBusChannels = 0;             // No hardware input
-        options.mNumOutputBusChannels = 2;            // Stereo output
-        options.mBufLength = 128;                     // Match AudioWorklet quantum size (128 samples)
-        options.mPreferredSampleRate = (uint32_t)sample_rate;
-        options.mNumBuffers = 1024;                   // SndBuf count
-        options.mMaxNodes = 1024;
-        options.mMaxGraphDefs = 1024;
-        options.mMaxWireBufs = 64;                    // Wire buffers for routing audio between UGens
-        options.mRealTimeMemorySize = 16384;          // 16 MB for AllocPool (default is 8MB)
-        options.mLoadGraphDefs = 0;                   // Don't auto-load SynthDefs from disk
+        options.mNumBuffers = worldOptionsPtr[0];                   // From JS
+        options.mMaxNodes = worldOptionsPtr[1];                     // From JS
+        options.mMaxGraphDefs = worldOptionsPtr[2];                 // From JS
+        options.mMaxWireBufs = worldOptionsPtr[3];                  // From JS
+        options.mNumAudioBusChannels = worldOptionsPtr[4];          // From JS
+        options.mNumInputBusChannels = worldOptionsPtr[5];          // From JS
+        options.mNumOutputBusChannels = worldOptionsPtr[6];         // From JS
+        options.mNumControlBusChannels = worldOptionsPtr[7];        // From JS
+        options.mBufLength = worldOptionsPtr[8];                    // From JS (must be 128)
+        options.mRealTimeMemorySize = worldOptionsPtr[9];           // From JS
+        options.mNumRGens = worldOptionsPtr[10];                    // From JS
+        // worldOptionsPtr[11] = realTime (ignored, always false for WASM)
+        // worldOptionsPtr[12] = memoryLocking (ignored, always false for WASM)
+        options.mLoadGraphDefs = worldOptionsPtr[13];               // From JS
+        options.mPreferredSampleRate = worldOptionsPtr[14] > 0
+            ? worldOptionsPtr[14]
+            : (uint32_t)sample_rate;                                // From JS or AudioContext
+        // worldOptionsPtr[15] = verbosity
+        options.mVerbosity = worldOptionsPtr[15];                   // From JS
+
+        worklet_debug("WorldOptions from JS: numBuffers=%u, maxNodes=%u, realTimeMemorySize=%u KB",
+                     options.mNumBuffers, options.mMaxNodes, options.mRealTimeMemorySize);
 
         // Create World
         try {
