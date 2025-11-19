@@ -657,12 +657,31 @@ initButton.addEventListener('click', async () => {
       workerBaseURL: 'dist/workers/',
       wasmBaseURL: 'dist/wasm/',
       sampleBaseURL: 'dist/samples/',
-      synthdefBaseURL: 'dist/synthdefs/'
+      synthdefBaseURL: 'dist/synthdefs/',
+      scsynthOptions: {
+        numBuffers: 512,           // Custom: 512 instead of default 1024
+        maxNodes: 256,             // Custom: 256 instead of default 1024
+        numAudioBusChannels: 64,   // Custom: 64 instead of default 128
+        realTimeMemorySize: 8192   // Custom: 8MB instead of default 16MB
+      }
     });
 
     // Set up callbacks
     orchestrator.onInitialized = async (data) => {
       console.log('[App] System initialised', data);
+
+      // Display custom configuration
+      const config = orchestrator.getConfig();
+      console.log('[App] ✅ Custom Configuration Active:');
+      console.log('  - numBuffers:', config.worldOptions.numBuffers, '(default: 1024)');
+      console.log('  - maxNodes:', config.worldOptions.maxNodes, '(default: 1024)');
+      console.log('  - numAudioBusChannels:', config.worldOptions.numAudioBusChannels, '(default: 128)');
+      console.log('  - realTimeMemorySize:', config.worldOptions.realTimeMemorySize, 'KB (default: 16384 KB)');
+
+      // Display diagnostics to verify
+      const diagnostics = orchestrator.getDiagnostics();
+      console.log('[App] 📊 Diagnostics:', diagnostics);
+
       updateStatus('ready');
 
       // Expose to global scope for console access (development only)

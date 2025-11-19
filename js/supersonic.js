@@ -417,6 +417,9 @@ export class SuperSonic {
         const workerBaseURL = options.workerBaseURL;
         const wasmBaseURL = options.wasmBaseURL;
 
+        // Merge user-provided scsynth options with defaults
+        const scsynthConfig = this.#mergeScsynthOptions(options.scsynthOptions || {});
+
         this.config = {
             wasmUrl: options.wasmUrl || wasmBaseURL + 'scsynth-nrt.wasm',
             workletUrl: options.workletUrl || workerBaseURL + 'scsynth_audio_worklet.js',
@@ -426,8 +429,8 @@ export class SuperSonic {
                 latencyHint: 'interactive',
                 sampleRate: 48000
             },
-            // scsynth configuration (from scsynth_options.js)
-            scsynth: ScsynthConfig
+            // scsynth configuration (merged defaults + user overrides)
+            scsynth: scsynthConfig
         };
 
         // Resource loading configuration
@@ -490,6 +493,41 @@ export class SuperSonic {
         }
 
         return this.capabilities;
+    }
+
+    /**
+     * Merge user-provided scsynth options with defaults
+     * @private
+     */
+    #mergeScsynthOptions(userOptions) {
+        // Deep clone defaults to avoid mutation
+        const merged = {
+            memory: { ...ScsynthConfig.memory },
+            worldOptions: { ...ScsynthConfig.worldOptions }
+        };
+
+        // Merge user overrides
+        if (userOptions.memory) {
+            Object.assign(merged.memory, userOptions.memory);
+        }
+        if (userOptions.worldOptions) {
+            Object.assign(merged.worldOptions, userOptions.worldOptions);
+        }
+
+        // Also accept top-level worldOptions (shorthand)
+        // e.g., { numBuffers: 2048 } instead of { worldOptions: { numBuffers: 2048 } }
+        const topLevelKeys = Object.keys(userOptions).filter(
+            key => key !== 'memory' && key !== 'worldOptions'
+        );
+        if (topLevelKeys.length > 0) {
+            topLevelKeys.forEach(key => {
+                if (key in merged.worldOptions) {
+                    merged.worldOptions[key] = userOptions[key];
+                }
+            });
+        }
+
+        return merged;
     }
 
     /**
@@ -629,11 +667,12 @@ export class SuperSonic {
             sharedBuffer: this.sharedBuffer
         });
 
-        // Send WASM bytes and memory
+        // Send WASM bytes, memory, and worldOptions
         this.workletNode.port.postMessage({
             type: 'loadWasm',
             wasmBytes: wasmBytes,
-            wasmMemory: this.wasmMemory
+            wasmMemory: this.wasmMemory,
+            worldOptions: this.config.scsynth.worldOptions
         });
 
         // Wait for worklet initialization
@@ -1085,6 +1124,27 @@ export class SuperSonic {
             capabilities: this.capabilities,
             stats: this.stats,
             audioContextState: this.audioContext?.state
+        };
+    }
+
+    /**
+     * Get current configuration (merged defaults + user overrides)
+     * Useful for debugging and displaying in UI
+     * @returns {Object} Current scsynth configuration
+     * @example
+     * const config = sonic.getConfig();
+     * console.log('Buffer limit:', config.worldOptions.numBuffers);
+     * console.log('Memory layout:', config.memory);
+     */
+    getConfig() {
+        if (!this.config?.scsynth) {
+            return null;
+        }
+
+        // Return a deep clone to prevent external mutation
+        return {
+            memory: { ...this.config.scsynth.memory },
+            worldOptions: { ...this.config.scsynth.worldOptions }
         };
     }
 

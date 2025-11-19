@@ -143,6 +143,38 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
     }
 
+    // Write worldOptions to SharedArrayBuffer for C++ to read
+    // WorldOptions are written after ring buffer storage (65536 bytes)
+    writeWorldOptionsToMemory() {
+        if (!this.worldOptions || !this.wasmMemory) {
+            return;
+        }
+
+        // WorldOptions location: ringBufferBase + 65536 (after ring_buffer_storage)
+        const WORLD_OPTIONS_OFFSET = this.ringBufferBase + 65536;
+        const uint32View = new Uint32Array(this.wasmMemory.buffer, WORLD_OPTIONS_OFFSET, 32);
+        const float32View = new Float32Array(this.wasmMemory.buffer, WORLD_OPTIONS_OFFSET, 32);
+
+        // Write worldOptions as uint32/float32 values
+        // Order must match C++ reading code in audio_processor.cpp
+        uint32View[0] = this.worldOptions.numBuffers || 1024;
+        uint32View[1] = this.worldOptions.maxNodes || 1024;
+        uint32View[2] = this.worldOptions.maxGraphDefs || 1024;
+        uint32View[3] = this.worldOptions.maxWireBufs || 64;
+        uint32View[4] = this.worldOptions.numAudioBusChannels || 128;
+        uint32View[5] = this.worldOptions.numInputBusChannels || 0;
+        uint32View[6] = this.worldOptions.numOutputBusChannels || 2;
+        uint32View[7] = this.worldOptions.numControlBusChannels || 4096;
+        uint32View[8] = this.worldOptions.bufLength || 128;
+        uint32View[9] = this.worldOptions.realTimeMemorySize || 16384;
+        uint32View[10] = this.worldOptions.numRGens || 64;
+        uint32View[11] = this.worldOptions.realTime ? 1 : 0;
+        uint32View[12] = this.worldOptions.memoryLocking ? 1 : 0;
+        uint32View[13] = this.worldOptions.loadGraphDefs || 0;
+        uint32View[14] = this.worldOptions.preferredSampleRate || 0;
+        uint32View[15] = this.worldOptions.verbosity || 0;
+    }
+
     // Write debug message to SharedArrayBuffer DEBUG ring buffer
     js_debug(message) {
         if (!this.uint8View || !this.atomicView || !this.CONTROL_INDICES || !this.ringBufferBase) {
@@ -217,6 +249,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     // Save memory reference for later use (WASM imports memory, doesn't export it)
                     this.wasmMemory = memory;
 
+                    // Store worldOptions for C++ initialization
+                    this.worldOptions = data.worldOptions || {};
+
                     // Import object for WASM
                     // scsynth with pthread support requires these imports
                     // (pthread stubs are no-ops - AudioWorklet is single-threaded)
@@ -271,6 +306,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                         this.calculateBufferIndices(this.ringBufferBase);
 
+                        // Write worldOptions to SharedArrayBuffer for C++ to read
+                        this.writeWorldOptionsToMemory();
+
                         // Initialize WASM memory
                         if (this.wasmInstance.exports.init_memory) {
                             this.wasmInstance.exports.init_memory(48000.0);
@@ -298,6 +336,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         this.loadBufferConstants();
 
                         this.calculateBufferIndices(this.ringBufferBase);
+
+                        // Write worldOptions to SharedArrayBuffer for C++ to read
+                        this.writeWorldOptionsToMemory();
 
                         // Initialize WASM memory
                         if (this.wasmInstance.exports.init_memory) {
