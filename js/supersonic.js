@@ -419,13 +419,13 @@ export class SuperSonic {
         const workerBaseURL = options.workerBaseURL;
         const wasmBaseURL = options.wasmBaseURL;
 
-        // Merge user-provided scsynth options with defaults
-        const scsynthConfig = this.#mergeScsynthOptions(options.scsynthOptions || {});
+        // Merge user-provided world options with defaults
+        const worldOptions = this.#mergeWorldOptions(options.scsynthOptions || {});
 
         // Validate configuration before initialization
         try {
-            ConfigValidator.validateWorldOptions(scsynthConfig.worldOptions, scsynthConfig.memory);
-            ConfigValidator.validateMemoryLayout(scsynthConfig.memory);
+            ConfigValidator.validateWorldOptions(worldOptions, MemoryLayout);
+            ConfigValidator.validateMemoryLayout(MemoryLayout);
         } catch (error) {
             // Improve error message with context
             throw new Error(`SuperSonic configuration validation failed:\n${error.message}`);
@@ -440,8 +440,10 @@ export class SuperSonic {
                 latencyHint: 'interactive',
                 sampleRate: 48000
             },
-            // scsynth configuration (merged defaults + user overrides)
-            scsynth: scsynthConfig
+            // Build-time memory layout (constant)
+            memory: MemoryLayout,
+            // Runtime world options (merged defaults + user overrides)
+            worldOptions: worldOptions
         };
 
         // Resource loading configuration
@@ -507,32 +509,24 @@ export class SuperSonic {
     }
 
     /**
-     * Merge user-provided scsynth options with defaults
+     * Merge user-provided world options with defaults
      * @private
      */
-    #mergeScsynthOptions(userOptions) {
-        const merged = {
-            memory: MemoryLayout,  // Build-time constant (not user-configurable)
-            worldOptions: { ...defaultWorldOptions }  // Deep clone defaults to avoid mutation
-        };
+    #mergeWorldOptions(userOptions) {
+        const merged = { ...defaultWorldOptions };  // Clone defaults
 
-        // Merge user worldOptions overrides
+        // Merge user overrides (if provided as nested worldOptions)
         if (userOptions.worldOptions) {
-            Object.assign(merged.worldOptions, userOptions.worldOptions);
+            Object.assign(merged, userOptions.worldOptions);
         }
 
-        // Also accept top-level worldOptions (shorthand)
+        // Also accept top-level options (shorthand)
         // e.g., { numBuffers: 2048 } instead of { worldOptions: { numBuffers: 2048 } }
-        const topLevelKeys = Object.keys(userOptions).filter(
-            key => key !== 'memory' && key !== 'worldOptions'
-        );
-        if (topLevelKeys.length > 0) {
-            topLevelKeys.forEach(key => {
-                if (key in merged.worldOptions) {
-                    merged.worldOptions[key] = userOptions[key];
-                }
-            });
-        }
+        Object.keys(userOptions).forEach(key => {
+            if (key !== 'worldOptions' && key in merged) {
+                merged[key] = userOptions[key];
+            }
+        });
 
         return merged;
     }
@@ -545,7 +539,7 @@ export class SuperSonic {
         // 0-32MB:     Emscripten heap (scsynth objects, stack)
         // 32-64MB:    Ring buffers (OSC in/out, debug, control)
         // 64-192MB:   Buffer pool (128MB for audio buffers)
-        const memConfig = this.config.scsynth.memory;
+        const memConfig = this.config.memory;
 
         this.wasmMemory = new WebAssembly.Memory({
             initial: memConfig.totalPages,
@@ -607,7 +601,7 @@ export class SuperSonic {
             resolveAudioPath: (path) => this._resolveAudioPath(path),
             registerPendingOp: (uuid, bufnum, timeoutMs) =>
                 this.#createPendingBufferOperation(uuid, bufnum, timeoutMs),
-            maxBuffers: this.config.scsynth.worldOptions.numBuffers
+            maxBuffers: this.config.worldOptions.numBuffers
         });
     }
 
@@ -679,7 +673,7 @@ export class SuperSonic {
             type: 'loadWasm',
             wasmBytes: wasmBytes,
             wasmMemory: this.wasmMemory,
-            worldOptions: this.config.scsynth.worldOptions,
+            worldOptions: this.config.worldOptions,
             sampleRate: this.audioContext.sampleRate  // Pass actual AudioContext sample rate
         });
 
@@ -1145,14 +1139,14 @@ export class SuperSonic {
      * console.log('Memory layout:', config.memory);
      */
     getConfig() {
-        if (!this.config?.scsynth) {
+        if (!this.config) {
             return null;
         }
 
         // Return a deep clone to prevent external mutation
         return {
-            memory: { ...this.config.scsynth.memory },
-            worldOptions: { ...this.config.scsynth.worldOptions }
+            memory: { ...this.config.memory },
+            worldOptions: { ...this.config.worldOptions }
         };
     }
 
