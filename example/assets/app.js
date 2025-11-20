@@ -320,8 +320,8 @@ function updateMetrics(metrics) {
 }
 
 function addMessage(message) {
-  messages.unshift(message);
-  if (messages.length > 50) messages = messages.slice(0, 50);
+  messages.push(message);
+  if (messages.length > 50) messages = messages.slice(-50);
 
   renderMessages();
 }
