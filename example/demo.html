@@ -3,24 +3,48 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="icon" type="image/png" href="favicon.png" />
 
     <!-- Open Graph meta tags -->
-    <meta property="og:title" content="SuperSonic - SuperCollider's Synthesis Engine in the Browser">
-    <meta property="og:description" content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation.">
-    <meta property="og:image" content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png">
-    <meta property="og:image:alt" content="SuperSonic logo - SuperCollider's Synthesis Engine in the browser">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://sonic-pi.net/supersonic/">
+    <meta
+      property="og:title"
+      content="SuperSonic - SuperCollider's Synthesis Engine in the Browser"
+    />
+    <meta
+      property="og:description"
+      content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation."
+    />
+    <meta
+      property="og:image"
+      content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png"
+    />
+    <meta
+      property="og:image:alt"
+      content="SuperSonic logo - SuperCollider's Synthesis Engine in the browser"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://sonic-pi.net/supersonic/" />
 
     <!-- Twitter Card meta tags -->
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="SuperSonic - SuperCollider in the Browser">
-    <meta name="twitter:description" content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation.">
-    <meta name="twitter:image" content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png">
-    <meta name="twitter:image:alt" content="SuperSonic logo - SuperCollider's scsynth in the browser">
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="SuperSonic - SuperCollider in the Browser"
+    />
+    <meta
+      name="twitter:description"
+      content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation."
+    />
+    <meta
+      name="twitter:image"
+      content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="SuperSonic logo - SuperCollider's scsynth in the browser"
+    />
 
     <title>SuperSonic - SuperCollider's Synthes Engine in the Browser</title>
     <link
@@ -324,16 +348,15 @@
       }
 
       @keyframes pulsate {
-        0%, 100% {
+        0%,
+        100% {
           box-shadow: 0 0 0 0 rgba(255, 102, 0, 1),
-                      0 0 30px rgba(255, 102, 0, 0.6),
-                      0 0 60px rgba(255, 102, 0, 0.3);
+            0 0 30px rgba(255, 102, 0, 0.6), 0 0 60px rgba(255, 102, 0, 0.3);
           filter: brightness(1);
         }
         50% {
           box-shadow: 0 0 30px 15px rgba(255, 102, 0, 0.8),
-                      0 0 60px rgba(255, 102, 0, 0.6),
-                      0 0 90px rgba(255, 102, 0, 0.4);
+            0 0 60px rgba(255, 102, 0, 0.6), 0 0 90px rgba(255, 102, 0, 0.4);
           filter: brightness(1.3);
         }
       }
@@ -436,7 +459,7 @@
         padding: 0.3rem 0.5rem;
         border-radius: 4px;
         border: 1px solid rgba(255, 140, 0, 0.3);
-        font-family: 'Courier New', monospace;
+        font-family: "Courier New", monospace;
         display: block;
         white-space: pre-wrap;
         word-wrap: break-word;
@@ -1230,7 +1253,12 @@
         aspect-ratio: 5 / 3;
         max-height: 360px;
         margin: 0 auto;
-        background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0f0f1a 100%);
+        background: linear-gradient(
+          135deg,
+          #0a0a0f 0%,
+          #1a1a2e 50%,
+          #0f0f1a 100%
+        );
         border: 4px solid #ff6600;
         border-radius: 12px;
         cursor: crosshair;
@@ -1238,22 +1266,19 @@
         overflow: hidden;
         touch-action: none;
         user-select: none;
-        box-shadow:
-          0 0 30px rgba(255, 20, 147, 0.3),
+        box-shadow: 0 0 30px rgba(255, 20, 147, 0.3),
           inset 0 0 60px rgba(0, 0, 0, 0.5);
         transition: box-shadow 0.3s ease;
       }
 
       .synth-pad:hover {
-        box-shadow:
-          0 0 40px rgba(255, 20, 147, 0.5),
+        box-shadow: 0 0 40px rgba(255, 20, 147, 0.5),
           inset 0 0 60px rgba(0, 0, 0, 0.5);
       }
 
       .synth-pad.active {
         border-color: #ffd700;
-        box-shadow:
-          0 0 50px rgba(255, 215, 0, 0.6),
+        box-shadow: 0 0 50px rgba(255, 215, 0, 0.6),
           inset 0 0 60px rgba(0, 0, 0, 0.5);
       }
 
@@ -1262,20 +1287,24 @@
         width: 40px;
         height: 40px;
         border-radius: 50%;
-        background: radial-gradient(circle, #ffd700 0%, #ff6600 70%, transparent 100%);
+        background: radial-gradient(
+          circle,
+          #ffd700 0%,
+          #ff6600 70%,
+          transparent 100%
+        );
         pointer-events: none;
         transform: translate(-50%, -50%);
         opacity: 0;
         transition: opacity 0.15s ease-out;
-        box-shadow:
-          0 0 30px #ffd700,
-          0 0 60px #ff6600;
+        box-shadow: 0 0 30px #ffd700, 0 0 60px #ff6600;
         animation: pulse-touch 1s ease-in-out infinite;
         z-index: 4;
       }
 
       @keyframes pulse-touch {
-        0%, 100% {
+        0%,
+        100% {
           transform: translate(-50%, -50%) scale(1);
         }
         50% {
@@ -1286,22 +1315,16 @@
       @keyframes beat-pulse {
         0% {
           transform: translate(-50%, -50%) scale(1);
-          box-shadow:
-            0 0 30px #ffd700,
-            0 0 60px #ff6600;
+          box-shadow: 0 0 30px #ffd700, 0 0 60px #ff6600;
         }
         50% {
           transform: translate(-50%, -50%) scale(1.3);
-          box-shadow:
-            0 0 50px #ffd700,
-            0 0 100px #ff6600,
+          box-shadow: 0 0 50px #ffd700, 0 0 100px #ff6600,
             0 0 150px rgba(255, 215, 0, 0.5);
         }
         100% {
           transform: translate(-50%, -50%) scale(1);
-          box-shadow:
-            0 0 30px #ffd700,
-            0 0 60px #ff6600;
+          box-shadow: 0 0 30px #ffd700, 0 0 60px #ff6600;
         }
       }
 
@@ -1325,8 +1348,11 @@
       .synth-pad-grid {
         position: absolute;
         inset: 0;
-        background-image:
-          linear-gradient(0deg, rgba(255, 20, 147, 0.08) 1px, transparent 1px),
+        background-image: linear-gradient(
+            0deg,
+            rgba(255, 20, 147, 0.08) 1px,
+            transparent 1px
+          ),
           linear-gradient(90deg, rgba(30, 144, 255, 0.08) 1px, transparent 1px);
         background-size: 60px 60px;
         pointer-events: none;
@@ -1349,7 +1375,8 @@
         position: absolute;
         width: 100%;
         height: 2px;
-        background: linear-gradient(90deg,
+        background: linear-gradient(
+          90deg,
           rgba(255, 215, 0, 0) 0%,
           rgba(255, 215, 0, 0.2) 20%,
           rgba(255, 215, 0, 0.6) 50%,
@@ -1364,7 +1391,8 @@
         position: absolute;
         width: 2px;
         height: 100%;
-        background: linear-gradient(0deg,
+        background: linear-gradient(
+          0deg,
           rgba(255, 215, 0, 0) 0%,
           rgba(255, 215, 0, 0.2) 20%,
           rgba(255, 215, 0, 0.6) 50%,
@@ -1409,7 +1437,7 @@
         bottom: 8px;
         right: 12px;
         font-size: 0.75rem;
-        font-family: 'Courier New', monospace;
+        font-family: "Courier New", monospace;
         color: #ffd700;
         background: rgba(0, 0, 0, 0.7);
         padding: 6px 10px;
@@ -1457,7 +1485,7 @@
 
       .slider-value {
         color: #ff6600;
-        font-family: 'Courier New', monospace;
+        font-family: "Courier New", monospace;
         font-size: 0.875rem;
         font-weight: normal;
       }
@@ -1545,7 +1573,7 @@
         padding: 0.4rem 0.8rem;
         font-size: 0.75rem;
         font-weight: bold;
-        font-family: 'Courier New', monospace;
+        font-family: "Courier New", monospace;
         cursor: pointer;
         transition: all 0.2s ease;
         width: auto;
@@ -1778,9 +1806,21 @@
               font-style: normal;
             "
           >
-            <a href="https://supercollider.github.io/" target="_blank" rel="noopener" style="color: #ff1493; text-decoration: none; transition: all 0.3s ease; display: inline-block;" onmouseover="this.style.color='#ffd700'; this.style.transform='translateY(-2px)';" onmouseout="this.style.color='#ff1493'; this.style.transform='translateY(0)';">SuperCollider</a>'s powerful audio synthesis engine <emph>scsynth</emph> running in the
-            browser as an AudioWorklet.
-
+            <a
+              href="https://supercollider.github.io/"
+              target="_blank"
+              rel="noopener"
+              style="
+                color: #ff1493;
+                text-decoration: none;
+                transition: all 0.3s ease;
+                display: inline-block;
+              "
+              onmouseover="this.style.color='#ffd700'; this.style.transform='translateY(-2px)';"
+              onmouseout="this.style.color='#ff1493'; this.style.transform='translateY(0)';"
+              >SuperCollider</a
+            >'s powerful audio synthesis engine <emph>scsynth</emph> running in
+            the browser as an AudioWorklet.
           </p>
           <p
             style="
@@ -1791,7 +1831,7 @@
               font-style: italic;
             "
           >
-          Zero installation.
+            Zero installation.
           </p>
           <div
             style="
@@ -1907,7 +1947,16 @@
             </div>
           </div>
 
-          <div style="text-align: center; margin-top: 2rem; display: flex; flex-direction: column; gap: 1rem; align-items: center;">
+          <div
+            style="
+              text-align: center;
+              margin-top: 2rem;
+              display: flex;
+              flex-direction: column;
+              gap: 1rem;
+              align-items: center;
+            "
+          >
             <a
               href="#demo"
               style="
@@ -1931,7 +1980,14 @@
             >
               Whizz to Demo
             </a>
-            <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center;">
+            <div
+              style="
+                display: flex;
+                gap: 1rem;
+                flex-wrap: wrap;
+                justify-content: center;
+              "
+            >
               <a
                 href="https://github.com/samaaron/supersonic"
                 target="_blank"
@@ -1986,8 +2042,8 @@
       </div>
 
       <!-- Getting Started Section -->
-      <div style="background: #1f2937; padding: 3rem 1rem; margin-bottom: 3rem;">
-        <div style="max-width: 1200px; margin: 0 auto;">
+      <div style="background: #1f2937; padding: 3rem 1rem; margin-bottom: 3rem">
+        <div style="max-width: 1200px; margin: 0 auto">
           <p
             style="
               font-size: 1.3rem;
@@ -2001,59 +2057,141 @@
             Sprinkle the scsynth audio engine onto your web page...
           </p>
 
-        <div class="code-snippets-container">
-          <!-- Import Box -->
-          <div class="code-snippet">
-            <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
-              First, install via npm and import locally
-            </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ff1493; overflow-x: auto;"><code><span style="color: #75715e;">// npm install supersonic-scsynth</span>
+          <div class="code-snippets-container">
+            <!-- Import Box -->
+            <div class="code-snippet">
+              <p
+                class="code-comment"
+                style="font-size: 0.95rem; color: #e5e7eb"
+              >
+                First, install via npm and import locally
+              </p>
+              <pre
+                style="
+                  background: #2d3748;
+                  color: #e2e8f0;
+                  padding: 0.75rem;
+                  line-height: 1.8;
+                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+                  border-radius: 8px;
+                  border-left: 4px solid #ff1493;
+                  overflow-x: auto;
+                "
+              ><code><span style="color: #75715e;">// npm install supersonic-scsynth</span>
 <span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'supersonic-scsynth'</span>;</code></pre>
-          </div>
+            </div>
 
-          <!-- Initialise Box -->
-          <div class="code-snippet">
-            <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
-              Initialise and you're ready to go
-            </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #1e90ff; overflow-x: auto;"><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
+            <!-- Initialise Box -->
+            <div class="code-snippet">
+              <p
+                class="code-comment"
+                style="font-size: 0.95rem; color: #e5e7eb"
+              >
+                Initialise and you're ready to go
+              </p>
+              <pre
+                style="
+                  background: #2d3748;
+                  color: #e2e8f0;
+                  padding: 0.75rem;
+                  line-height: 1.8;
+                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+                  border-radius: 8px;
+                  border-left: 4px solid #1e90ff;
+                  overflow-x: auto;
+                "
+              ><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>();</code></pre>
-          </div>
+            </div>
 
-          <!-- Play Synth Box -->
-          <div class="code-snippet">
-            <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
-              Load and play a synth
-            </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; font-size: 0.9rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #50fa7b; overflow-x: auto;"><code><span style="color: #75715e;">// Load synthdef, then play synth</span>
+            <!-- Play Synth Box -->
+            <div class="code-snippet">
+              <p
+                class="code-comment"
+                style="font-size: 0.95rem; color: #e5e7eb"
+              >
+                Load and play a synth
+              </p>
+              <pre
+                style="
+                  background: #2d3748;
+                  color: #e2e8f0;
+                  padding: 0.75rem;
+                  font-size: 0.9rem;
+                  line-height: 1.8;
+                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+                  border-radius: 8px;
+                  border-left: 4px solid #50fa7b;
+                  overflow-x: auto;
+                "
+              ><code><span style="color: #75715e;">// Load synthdef, then play synth</span>
 <span style="color: #75715e;">// with ID 1000 in group 0</span>
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSynthDef</span>(<span style="color: #ffd700;">'sonic-pi-prophet'</span>);
 sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-prophet'</span>, <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>,
              <span style="color: #ffd700;">'note'</span>, <span style="color: #bd93f9;">60</span>);</code></pre>
-          </div>
+            </div>
 
-          <!-- Load Sample Box -->
-          <div class="code-snippet">
-            <p class="code-comment" style="font-size: 0.95rem; color: #e5e7eb;">
-              Load and play a sample
-            </p>
-            <pre style="background: #2d3748; color: #e2e8f0; padding: 0.75rem; font-size: 0.9rem; line-height: 1.8; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); border-radius: 8px; border-left: 4px solid #ffd700; overflow-x: auto;"><code><span style="color: #75715e;">// Load sample into buffer 0</span>
+            <!-- Load Sample Box -->
+            <div class="code-snippet">
+              <p
+                class="code-comment"
+                style="font-size: 0.95rem; color: #e5e7eb"
+              >
+                Load and play a sample
+              </p>
+              <pre
+                style="
+                  background: #2d3748;
+                  color: #e2e8f0;
+                  padding: 0.75rem;
+                  font-size: 0.9rem;
+                  line-height: 1.8;
+                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+                  border-radius: 8px;
+                  border-left: 4px solid #ffd700;
+                  overflow-x: auto;
+                "
+              ><code><span style="color: #75715e;">// Load sample into buffer 0</span>
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSample</span>(<span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'bd_haus.flac'</span>);
 sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>,
              <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'buf'</span>, <span style="color: #bd93f9;">0</span>);</code></pre>
+            </div>
           </div>
-        </div>
 
-        <p
-          style="
-            margin-top: 3rem;
-            color: #a0aec0;
-            font-size: 0.75rem;
-            text-align: center;
-          "
-        >
-         Note: Self-hosting required + <code style="background: #2d3748; color: #ffd700; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem;">COOP/COEP</code> headers — see <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener" style="color: #ff1493; text-decoration: none; transition: all 0.3s ease;" onmouseover="this.style.color='#ffd700';" onmouseout="this.style.color='#ff1493';">README</a>
-        </p>
+          <p
+            style="
+              margin-top: 3rem;
+              color: #a0aec0;
+              font-size: 0.75rem;
+              text-align: center;
+            "
+          >
+            Note: Self-hosting required +
+            <code
+              style="
+                background: #2d3748;
+                color: #ffd700;
+                padding: 0.2rem 0.5rem;
+                border-radius: 4px;
+                font-size: 0.75rem;
+              "
+              >COOP/COEP</code
+            >
+            headers — see
+            <a
+              href="https://github.com/samaaron/supersonic"
+              target="_blank"
+              rel="noopener"
+              style="
+                color: #ff1493;
+                text-decoration: none;
+                transition: all 0.3s ease;
+              "
+              onmouseover="this.style.color='#ffd700';"
+              onmouseout="this.style.color='#ff1493';"
+              >README</a
+            >
+          </p>
         </div>
       </div>
 
@@ -2100,7 +2238,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 letter-spacing: 0.05em;
               "
             >
-              Brought to you by<br/>Sam Aaron
+              Brought to you by<br />Sam Aaron
             </h2>
             <p
               style="
@@ -2111,10 +2249,11 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 margin: 0 auto;
               "
             >
-              Please consider joining the wonderful community<br/>
-              of supporters enabling Sam's work on<br/>
-              creative coding projects like this,<br/>
-              <a href="https://sonic-pi.net">Sonic Pi</a> and <a href="https://tau5.live">Tau5</a>.
+              Please consider joining the wonderful community<br />
+              of supporters enabling Sam's work on<br />
+              creative coding projects like this,<br />
+              <a href="https://sonic-pi.net">Sonic Pi</a> and
+              <a href="https://tau5.live">Tau5</a>.
             </p>
           </div>
 
@@ -2268,30 +2407,48 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
             <!-- Left Column: Tabs (Playground / OSC API) -->
             <div class="left-column">
               <!-- Main Content Tabs -->
-              <div class="main-tabs" style="padding: 0; margin-bottom: 1rem;">
-                <button class="main-tab-button active" data-main-tab="playground">Playground</button>
-                <button class="main-tab-button" data-main-tab="osc-api">OSC API</button>
+              <div class="main-tabs" style="padding: 0; margin-bottom: 1rem">
+                <button
+                  class="main-tab-button active"
+                  data-main-tab="playground"
+                >
+                  Playground
+                </button>
+                <button class="main-tab-button" data-main-tab="osc-api">
+                  OSC API
+                </button>
               </div>
 
               <!-- Playground Tab Content -->
-              <div class="main-tab-content active" data-main-tab-content="playground">
+              <div
+                class="main-tab-content active"
+                data-main-tab-content="playground"
+              >
                 <!-- 2D Synth Pad -->
                 <div class="synth-pad-section">
                   <div class="synth-pad-container">
                     <div id="synth-pad" class="synth-pad">
                       <div class="synth-pad-grid"></div>
                       <canvas id="trail-canvas" class="trail-canvas"></canvas>
-                      <div id="synth-pad-prompt" class="synth-pad-prompt">Click/Tap & Drag</div>
+                      <div id="synth-pad-prompt" class="synth-pad-prompt">
+                        Click/Tap & Drag
+                      </div>
                       <div id="synth-pad-crosshair" class="synth-pad-crosshair">
-                        <div id="synth-pad-crosshair-h" class="synth-pad-crosshair-h"></div>
-                        <div id="synth-pad-crosshair-v" class="synth-pad-crosshair-v"></div>
+                        <div
+                          id="synth-pad-crosshair-h"
+                          class="synth-pad-crosshair-h"
+                        ></div>
+                        <div
+                          id="synth-pad-crosshair-v"
+                          class="synth-pad-crosshair-v"
+                        ></div>
                       </div>
                       <div id="synth-pad-touch" class="synth-pad-touch"></div>
                       <div id="synth-pad-coords" class="synth-pad-coords">
                         <div>X: <span id="pad-x-value">0.00</span></div>
+                        <div>Reverb: <span id="fx-mix-value">0.30</span></div>
                         <div>Y: <span id="pad-y-value">0.00</span></div>
                         <div>Cutoff: <span id="fx-cutoff-value">130</span></div>
-                        <div>Reverb: <span id="fx-mix-value">0.30</span></div>
                       </div>
                     </div>
                   </div>
@@ -2362,13 +2519,21 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
 
                     <div class="slider-control">
                       <label>Random Arp</label>
-                      <button id="random-arp-toggle" class="toggle-button" data-active="true">On</button>
+                      <button
+                        id="random-arp-toggle"
+                        class="toggle-button"
+                        data-active="true"
+                      >
+                        On
+                      </button>
                     </div>
 
                     <div class="slider-control">
                       <label>
                         Root Note
-                        <span id="root-note-value" class="slider-value">60</span>
+                        <span id="root-note-value" class="slider-value"
+                          >60</span
+                        >
                       </label>
                       <input
                         type="range"
@@ -2413,7 +2578,9 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                     <div class="slider-control">
                       <label>
                         Release
-                        <span id="release-value" class="slider-value">0.10</span>
+                        <span id="release-value" class="slider-value"
+                          >0.10</span
+                        >
                       </label>
                       <input
                         type="range"
@@ -2431,44 +2598,44 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
               <!-- OSC API Tab Content -->
               <div class="main-tab-content" data-main-tab-content="osc-api">
                 <!-- Error/Warning Messages -->
-                <div id="error-message" class="alert alert-error hidden">
-                <svg
-                  class="alert-icon"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  ></path>
-                </svg>
-                <div>
-                  <h3 class="alert-title">Error</h3>
-                  <p id="error-text" class="alert-text"></p>
+                <div id="error-message" class="hidden alert alert-error">
+                  <svg
+                    class="alert-icon"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    ></path>
+                  </svg>
+                  <div>
+                    <h3 class="alert-title">Error</h3>
+                    <p id="error-text" class="alert-text"></p>
+                  </div>
                 </div>
-              </div>
 
-              <div id="warning-message" class="alert alert-warning hidden">
-                <svg
-                  class="alert-icon"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  ></path>
-                </svg>
-                <div>
-                  <p id="warning-text" class="alert-text"></p>
+                <div id="warning-message" class="hidden alert alert-warning">
+                  <svg
+                    class="alert-icon"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    ></path>
+                  </svg>
+                  <div>
+                    <p id="warning-text" class="alert-text"></p>
+                  </div>
                 </div>
-              </div>
 
                 <!-- Welcome Guide -->
                 <div class="welcome-guide">
@@ -2477,80 +2644,123 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                   <ol>
                     <li>
                       <span class="welcome-text">
-                        <strong>Available Synths</strong> — Many synths are pre-loaded and ready to use:
-                        <code class="welcome-code-block">sonic-pi-beep, sonic-pi-dsaw, sonic-pi-prophet, sonic-pi-tb303, sonic-pi-fm...</code>
+                        <strong>Available Synths</strong> — Many synths are
+                        pre-loaded and ready to use:
+                        <code class="welcome-code-block"
+                          >sonic-pi-beep, sonic-pi-dsaw, sonic-pi-prophet,
+                          sonic-pi-tb303, sonic-pi-fm...</code
+                        >
                       </span>
                     </li>
 
                     <li>
                       <span class="welcome-text">
-                        <strong>Play a Synth</strong> — Create a synth using <span class="welcome-code">/s_new</span>:
+                        <strong>Play a Synth</strong> — Create a synth using
+                        <span class="welcome-code">/s_new</span>:
                       </span>
-                      <code class="welcome-code-block">/s_new sonic-pi-beep -1 0 0 note 72</code>
-                      <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
-                        The <span class="welcome-code">-1</span> auto-assigns a node ID, <span class="welcome-code">note</span> sets the MIDI pitch
-                      </span>
-                    </li>
-
-                    <li>
-                      <span class="welcome-text">
-                        <strong>Load Loop Samples</strong> — Click "Load Samples" to load these pre-configured loops into buffers 1-6:
-                      </span>
-                      <code class="welcome-code-block">Buffer 1: loop_amen.flac
-Buffer 2: loop_breakbeat.flac
-Buffer 3: loop_compus.flac
-Buffer 4: loop_garzul.flac
-Buffer 5: loop_industrial.flac
-Buffer 6: loop_tabla.flac</code>
-                      <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
-                        After loading, use these buffer IDs (1-6) to play the loops
+                      <code class="welcome-code-block"
+                        >/s_new sonic-pi-beep -1 0 0 note 72</code
+                      >
+                      <span
+                        class="welcome-text"
+                        style="font-size: 0.85em; opacity: 0.9"
+                      >
+                        The <span class="welcome-code">-1</span> auto-assigns a
+                        node ID, <span class="welcome-code">note</span> sets the
+                        MIDI pitch
                       </span>
                     </li>
 
                     <li>
                       <span class="welcome-text">
-                        <strong>Load Additional Samples</strong> — Click "Load Samples" for API samples, or load custom ones:
+                        <strong>Load Loop Samples</strong> — Click "Load
+                        Samples" to load these pre-configured loops into buffers
+                        1-6:
                       </span>
-                      <code class="welcome-code-block">/b_allocRead 10 ambi_choir.flac
-/b_allocRead 11 bd_haus.flac
-/b_allocRead 12 elec_ping.flac</code>
-                      <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
-                        The first number is the buffer ID (use 10+ to avoid 1-6 which are reserved for pre-loaded loops)
-                      </span>
-                    </li>
-
-                    <li>
-                      <span class="welcome-text">
-                        <strong>Trigger Samples</strong> — Play samples using the stereo or mono player:
-                      </span>
-                      <code class="welcome-code-block">/s_new sonic-pi-basic_stereo_player -1 0 0 buf 1
-/s_new sonic-pi-basic_stereo_player -1 0 0 buf 3 rate 1.2</code>
-                      <span class="welcome-text" style="font-size: 0.85em; opacity: 0.9;">
-                        <span class="welcome-code">buf</span> uses the buffer ID (1-6 for pre-loaded loops), <span class="welcome-code">rate</span> changes playback speed
+                      <code class="welcome-code-block"
+                        >Buffer 1: loop_amen.flac Buffer 2: loop_breakbeat.flac
+                        Buffer 3: loop_compus.flac Buffer 4: loop_garzul.flac
+                        Buffer 5: loop_industrial.flac Buffer 6:
+                        loop_tabla.flac</code
+                      >
+                      <span
+                        class="welcome-text"
+                        style="font-size: 0.85em; opacity: 0.9"
+                      >
+                        After loading, use these buffer IDs (1-6) to play the
+                        loops
                       </span>
                     </li>
 
                     <li>
                       <span class="welcome-text">
-                        <strong>Schedule Sequences</strong> — Add times at the start to create rhythms:
+                        <strong>Load Additional Samples</strong> — Click "Load
+                        Samples" for API samples, or load custom ones:
                       </span>
-                      <code class="welcome-code-block">0.0 /s_new sonic-pi-beep -1 0 0 note 60
-0.5 /s_new sonic-pi-beep -1 0 0 note 64
-1.0 /s_new sonic-pi-beep -1 0 0 note 67</code>
+                      <code class="welcome-code-block"
+                        >/b_allocRead 10 ambi_choir.flac /b_allocRead 11
+                        bd_haus.flac /b_allocRead 12 elec_ping.flac</code
+                      >
+                      <span
+                        class="welcome-text"
+                        style="font-size: 0.85em; opacity: 0.9"
+                      >
+                        The first number is the buffer ID (use 10+ to avoid 1-6
+                        which are reserved for pre-loaded loops)
+                      </span>
+                    </li>
+
+                    <li>
+                      <span class="welcome-text">
+                        <strong>Trigger Samples</strong> — Play samples using
+                        the stereo or mono player:
+                      </span>
+                      <code class="welcome-code-block"
+                        >/s_new sonic-pi-basic_stereo_player -1 0 0 buf 1 /s_new
+                        sonic-pi-basic_stereo_player -1 0 0 buf 3 rate 1.2</code
+                      >
+                      <span
+                        class="welcome-text"
+                        style="font-size: 0.85em; opacity: 0.9"
+                      >
+                        <span class="welcome-code">buf</span> uses the buffer ID
+                        (1-6 for pre-loaded loops),
+                        <span class="welcome-code">rate</span> changes playback
+                        speed
+                      </span>
+                    </li>
+
+                    <li>
+                      <span class="welcome-text">
+                        <strong>Schedule Sequences</strong> — Add times at the
+                        start to create rhythms:
+                      </span>
+                      <code class="welcome-code-block"
+                        >0.0 /s_new sonic-pi-beep -1 0 0 note 60 0.5 /s_new
+                        sonic-pi-beep -1 0 0 note 64 1.0 /s_new sonic-pi-beep -1
+                        0 0 note 67</code
+                      >
                     </li>
 
                     <li>
                       <span class="welcome-text">
                         <strong>Explore!</strong> — Check out the
-                        <a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" class="welcome-link">scsynth OSC docs</a>
-                        or switch to the Playground tab to jam with the interactive synth pad!
+                        <a
+                          href="https://doc.sccode.org/Reference/Server-Command-Reference.html"
+                          target="_blank"
+                          class="welcome-link"
+                          >scsynth OSC docs</a
+                        >
+                        or switch to the Playground tab to jam with the
+                        interactive synth pad!
                       </span>
                     </li>
                   </ol>
 
                   <p class="welcome-quickstart">
                     <span class="welcome-label">Quick Start:</span>
-                    Click "Load Example" to load up some example API calls then hit "Send".
+                    Click "Load Example" to load up some example API calls then
+                    hit "Send".
                   </p>
                 </div>
 
@@ -2558,49 +2768,48 @@ Buffer 6: loop_tabla.flac</code>
                 <div>
                   <h2>Choose your own OSC...</h2>
                   <form id="message-form">
-                  <div class="form-group" style="margin-bottom: 0.5rem">
-                    <textarea
-                      id="message-input"
-                      placeholder="Single: /s_new sonic-pi-beep 1001 0 0 note 72&#10;Scheduled:&#10;0 /s_new 1 0 0 note 60&#10;0.5 /s_new 2 0 0 note 64"
-                      rows="10"
-                      disabled
-                      spellcheck="false"
-                      autocomplete="off"
-                      autocorrect="off"
-                      autocapitalize="off"
-                    ></textarea>
-                  </div>
-                  <div class="button-container">
-                    <div class="button-row button-row-secondary">
-                      <button
-                        type="button"
-                        id="load-example-button"
-                        class="btn-green"
+                    <div class="form-group" style="margin-bottom: 0.5rem">
+                      <textarea
+                        id="message-input"
+                        placeholder="Single: /s_new sonic-pi-beep 1001 0 0 note 72&#10;Scheduled:&#10;0 /s_new 1 0 0 note 60&#10;0.5 /s_new 2 0 0 note 64"
+                        rows="10"
                         disabled
-                      >
-                        Load Example
-                      </button>
+                        spellcheck="false"
+                        autocomplete="off"
+                        autocorrect="off"
+                        autocapitalize="off"
+                      ></textarea>
                     </div>
-                    <div class="button-row button-row-primary">
-                      <button
-                        type="button"
-                        id="clear-button"
-                        class="btn-secondary"
-                        disabled
-                      >
-                        Clear
-                      </button>
-                      <button type="submit" class="btn-primary" disabled>
-                        Send
-                      </button>
+                    <div class="button-container">
+                      <div class="button-row button-row-secondary">
+                        <button
+                          type="button"
+                          id="load-example-button"
+                          class="btn-green"
+                          disabled
+                        >
+                          Load Example
+                        </button>
+                      </div>
+                      <div class="button-row button-row-primary">
+                        <button
+                          type="button"
+                          id="clear-button"
+                          class="btn-secondary"
+                          disabled
+                        >
+                          Clear
+                        </button>
+                        <button type="submit" class="btn-primary" disabled>
+                          Send
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </form>
-              </div>
-              <!-- End Send Message / OSC API div -->
+                  </form>
+                </div>
+                <!-- End Send Message / OSC API div -->
               </div>
               <!-- End OSC API Tab Content -->
-
             </div>
             <!-- End Left Column -->
 
@@ -2670,7 +2879,6 @@ Buffer 6: loop_tabla.flac</code>
                 </div>
               </div>
               <!-- End Logs Section -->
-
             </div>
             <!-- End Right Column -->
           </div>
@@ -2679,11 +2887,7 @@ Buffer 6: loop_tabla.flac</code>
           <!-- Performance Metrics (Full Width) -->
           <div
             id="performance-metrics-container"
-            style="
-              padding: 0.75rem;
-              margin-top: 0;
-              border-top: 1px solid #333;
-            "
+            style="padding: 0.75rem; margin-top: 0; border-top: 1px solid #333"
           >
             <div
               style="
@@ -2698,11 +2902,17 @@ Buffer 6: loop_tabla.flac</code>
             >
               <span
                 >Sent:
-                <span id="metric-sent" class="metric-value metric-value-wide">0</span></span
+                <span id="metric-sent" class="metric-value metric-value-wide"
+                  >0</span
+                ></span
               >
               <span
                 >Recv:
-                <span id="metric-received" class="metric-value metric-value-wide">0</span></span
+                <span
+                  id="metric-received"
+                  class="metric-value metric-value-wide"
+                  >0</span
+                ></span
               >
               <span
                 >Drop:
@@ -2712,7 +2922,9 @@ Buffer 6: loop_tabla.flac</code>
               >
               <span
                 >Proc:
-                <span id="metric-process-count" class="metric-value metric-value-xwide"
+                <span
+                  id="metric-process-count"
+                  class="metric-value metric-value-xwide"
                   >0</span
                 ></span
               >
@@ -2723,7 +2935,12 @@ Buffer 6: loop_tabla.flac</code>
                 ></span
               >
               <span style="display: flex; align-items: center; gap: 0.25rem">
-                IN: <span id="metric-in-usage" class="metric-value metric-value-percent">0%</span>
+                IN:
+                <span
+                  id="metric-in-usage"
+                  class="metric-value metric-value-percent"
+                  >0%</span
+                >
                 <div
                   style="
                     width: 40px;
@@ -2745,7 +2962,12 @@ Buffer 6: loop_tabla.flac</code>
                 </div>
               </span>
               <span style="display: flex; align-items: center; gap: 0.25rem">
-                OUT: <span id="metric-out-usage" class="metric-value metric-value-percent">0%</span>
+                OUT:
+                <span
+                  id="metric-out-usage"
+                  class="metric-value metric-value-percent"
+                  >0%</span
+                >
                 <div
                   style="
                     width: 40px;
@@ -2767,7 +2989,12 @@ Buffer 6: loop_tabla.flac</code>
                 </div>
               </span>
               <span style="display: flex; align-items: center; gap: 0.25rem">
-                DBG: <span id="metric-debug-usage" class="metric-value metric-value-percent">0%</span>
+                DBG:
+                <span
+                  id="metric-debug-usage"
+                  class="metric-value metric-value-percent"
+                  >0%</span
+                >
                 <div
                   style="
                     width: 40px;
@@ -2790,42 +3017,116 @@ Buffer 6: loop_tabla.flac</code>
               </span>
               <span>
                 Sched:
-                <span id="metric-scheduler-depth" class="metric-value metric-value-wide">0</span> cur /
-                <span id="metric-scheduler-peak" class="metric-value metric-value-wide">0</span> peak · drop
-                <span id="metric-scheduler-dropped" class="metric-value warning metric-value-wide">0</span>
+                <span
+                  id="metric-scheduler-depth"
+                  class="metric-value metric-value-wide"
+                  >0</span
+                >
+                cur /
+                <span
+                  id="metric-scheduler-peak"
+                  class="metric-value metric-value-wide"
+                  >0</span
+                >
+                peak · drop
+                <span
+                  id="metric-scheduler-dropped"
+                  class="metric-value warning metric-value-wide"
+                  >0</span
+                >
               </span>
               <span>
                 PreSched:
-                <span id="metric-prescheduler-pending" class="metric-value metric-value-wide">0</span> pend /
-                <span id="metric-prescheduler-peak" class="metric-value metric-value-wide">0</span> peak · sent
-                <span id="metric-prescheduler-sent" class="metric-value metric-value-wide">0</span> · retry
-                <span id="metric-prescheduler-retries-succeeded" class="metric-value success metric-value-wide">0</span> /
-                <span id="metric-prescheduler-retries-failed" class="metric-value warning metric-value-wide">0</span>
+                <span
+                  id="metric-prescheduler-pending"
+                  class="metric-value metric-value-wide"
+                  >0</span
+                >
+                pend /
+                <span
+                  id="metric-prescheduler-peak"
+                  class="metric-value metric-value-wide"
+                  >0</span
+                >
+                peak · sent
+                <span
+                  id="metric-prescheduler-sent"
+                  class="metric-value metric-value-wide"
+                  >0</span
+                >
+                · retry
+                <span
+                  id="metric-prescheduler-retries-succeeded"
+                  class="metric-value success metric-value-wide"
+                  >0</span
+                >
+                /
+                <span
+                  id="metric-prescheduler-retries-failed"
+                  class="metric-value warning metric-value-wide"
+                  >0</span
+                >
               </span>
               <span>
                 Buffers:
-                <span id="metric-buffer-count" class="metric-value metric-value-wide">0</span>
-                (<span id="metric-buffer-pending" class="metric-value warning">0</span> pend)
+                <span
+                  id="metric-buffer-count"
+                  class="metric-value metric-value-wide"
+                  >0</span
+                >
+                (<span id="metric-buffer-pending" class="metric-value warning"
+                  >0</span
+                >
+                pend)
               </span>
               <span>
                 Buf Mem:
-                <span id="metric-buffer-used" class="metric-value metric-value-xwide">0 B</span> /
-                <span id="metric-buffer-total" class="metric-value metric-value-xwide">0 B</span>
+                <span
+                  id="metric-buffer-used"
+                  class="metric-value metric-value-xwide"
+                  >0 B</span
+                >
+                /
+                <span
+                  id="metric-buffer-total"
+                  class="metric-value metric-value-xwide"
+                  >0 B</span
+                >
               </span>
               <span>
                 Free:
-                <span id="metric-buffer-free" class="metric-value metric-value-xwide">0 B</span>
+                <span
+                  id="metric-buffer-free"
+                  class="metric-value metric-value-xwide"
+                  >0 B</span
+                >
               </span>
               <span>
                 Synthdefs:
-                <span id="metric-synthdefs" class="metric-value metric-value-wide">0</span>
+                <span
+                  id="metric-synthdefs"
+                  class="metric-value metric-value-wide"
+                  >0</span
+                >
               </span>
             </div>
           </div>
 
           <!-- Hue Control (Full Width) -->
-          <div style="padding: 0.75rem; padding-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; border-bottom: 1px solid #333;">
-            <label for="hue-slider" style="color: #ffd700; min-width: 35px;">Hue</label>
+          <div
+            style="
+              padding: 0.75rem;
+              padding-top: 0.5rem;
+              display: flex;
+              align-items: center;
+              gap: 0.5rem;
+              font-size: 0.7rem;
+              border-bottom: 1px solid #333;
+            "
+          >
+            <label for="hue-slider" style="color: #ffd700; min-width: 35px"
+              >Hue</label
+            >
             <input
               type="range"
               id="hue-slider"
@@ -2833,11 +3134,14 @@ Buffer 6: loop_tabla.flac</code>
               max="360"
               value="200"
               step="1"
-              style="flex: 1; height: 4px; max-width: 300px;"
+              style="flex: 1; height: 4px; max-width: 300px"
             />
-            <span id="hue-value" style="color: #ffd700; min-width: 30px; text-align: right;">200</span>
+            <span
+              id="hue-value"
+              style="color: #ffd700; min-width: 30px; text-align: right"
+              >200</span
+            >
           </div>
-
         </div>
         <!-- End Unified Black Container -->
       </div>
