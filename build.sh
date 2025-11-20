@@ -59,14 +59,15 @@ EOF
 echo "Compiling C++ to WASM with scsynth..."
 echo "Build ID: $BUILD_ID (git: $GIT_HASH, time: $BUILD_TIME)"
 
-# Calculate INITIAL_MEMORY from memory_layout.js (ensures build/runtime sync)
+# Calculate FIXED_MEMORY from memory_layout.js (ensures build/runtime sync)
+# Memory is fixed (not growable) because we use SharedArrayBuffer for WASM/JS communication
 echo "Reading memory configuration..."
-INITIAL_MEMORY=$(node scripts/get_memory_config.js)
+FIXED_MEMORY=$(node scripts/get_memory_config.js)
 if [ $? -ne 0 ]; then
     echo "Error: Failed to read memory configuration from js/memory_layout.js"
     exit 1
 fi
-echo "INITIAL_MEMORY: $INITIAL_MEMORY bytes ($((INITIAL_MEMORY / 1024 / 1024))MB)"
+echo "FIXED_MEMORY: $FIXED_MEMORY bytes ($((FIXED_MEMORY / 1024 / 1024))MB)"
 
 # Collect all scsynth source files
 # Exclude SC_ComPort.cpp (has nova-tt dependencies, replaced by SC_OscUnroll.cpp)
@@ -75,6 +76,7 @@ SCSYNTH_COMMON_SOURCES=$(find "$SRC_DIR/scsynth/common" -name "*.cpp" ! -name "X
 SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
 
 # Compile audio processor with all scsynth sources and oscpack (standalone WASM for AudioWorklet)
+# Note: Memory is fixed (ALLOW_MEMORY_GROWTH=0) because SharedArrayBuffer cannot be resized
 emcc "$SRC_DIR/audio_processor.cpp" \
     "$SRC_DIR/buffer_commands.cpp" \
     "$SRC_DIR/scsynth/server/SC_OscUnroll.cpp" \
@@ -103,7 +105,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -sENVIRONMENT=worker \
     -pthread \
     -sALLOW_MEMORY_GROWTH=0 \
-    -sINITIAL_MEMORY=$INITIAL_MEMORY \
+    -sINITIAL_MEMORY=$FIXED_MEMORY \
     -sEXPORTED_FUNCTIONS="['___wasm_call_ctors','_get_ring_buffer_base','_get_buffer_layout','_init_memory','_process_audio','_get_audio_output_bus','_get_audio_buffer_samples','_get_supersonic_version_string','_set_time_offset','_get_time_offset','_worklet_debug','_worklet_debug_va','_get_process_count','_get_messages_processed','_get_messages_dropped','_get_status_flags']" \
     --no-entry \
     -Wl,--import-memory,--shared-memory,--allow-multiple-definition \
