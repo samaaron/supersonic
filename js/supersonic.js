@@ -15,7 +15,8 @@ import ScsynthOSC from './lib/scsynth_osc.js';
 import oscLib from './vendor/osc.js/osc.js';
 import { MemPool } from '@thi.ng/malloc';
 import { NTP_EPOCH_OFFSET, DRIFT_UPDATE_INTERVAL_MS } from './timing_constants.js';
-import { ScsynthConfig } from './scsynth_options.js';
+import { MemoryLayout } from './memory_layout.js';
+import { defaultWorldOptions } from './scsynth_options.js';
 import { ConfigValidator } from './lib/config_validator.js';
 
 class BufferManager {
@@ -510,16 +511,12 @@ export class SuperSonic {
      * @private
      */
     #mergeScsynthOptions(userOptions) {
-        // Deep clone defaults to avoid mutation
         const merged = {
-            memory: { ...ScsynthConfig.memory },
-            worldOptions: { ...ScsynthConfig.worldOptions }
+            memory: MemoryLayout,  // Build-time constant (not user-configurable)
+            worldOptions: { ...defaultWorldOptions }  // Deep clone defaults to avoid mutation
         };
 
-        // Merge user overrides
-        if (userOptions.memory) {
-            Object.assign(merged.memory, userOptions.memory);
-        }
+        // Merge user worldOptions overrides
         if (userOptions.worldOptions) {
             Object.assign(merged.worldOptions, userOptions.worldOptions);
         }
