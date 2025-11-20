@@ -52,8 +52,6 @@ export class SuperSonic {
         this.onMessage = null;          // Parsed OSC messages from scsynth (for application logic)
         this.onMessageSent = null;
         this.onMetricsUpdate = null;
-        this.onStatusUpdate = null;
-        this.onSendError = null;
         this.onDebugMessage = null;
         this.onInitialized = null;
         this.onError = null;
@@ -536,13 +534,6 @@ export class SuperSonic {
             const { data } = event;
 
             switch (data.type) {
-                case 'status':
-                    // Status update from worklet
-                    if (this.onStatusUpdate) {
-                        this.onStatusUpdate(data);
-                    }
-                    break;
-
                 case 'metrics':
                     // Performance metrics from worklet
                     if (this.onMetricsUpdate) {
