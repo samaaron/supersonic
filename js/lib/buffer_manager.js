@@ -11,9 +11,17 @@
 import { MemPool } from '@thi.ng/malloc';
 
 export class BufferManager {
-    // Private configuration fields
+    // Private configuration
     #sampleBaseURL;
     #audioPathMap;
+
+    // Private implementation
+    #audioContext;
+    #sharedBuffer;
+    #bufferPool;
+    #allocatedBuffers;
+    #pendingBufferOps;
+    #bufferLocks;
 
     constructor(options) {
         const {
@@ -50,13 +58,13 @@ export class BufferManager {
             throw new Error('maxBuffers must be a positive integer');
         }
 
-        this.audioContext = audioContext;
-        this.sharedBuffer = sharedBuffer;
+        this.#audioContext = audioContext;
+        this.#sharedBuffer = sharedBuffer;
         this.#sampleBaseURL = sampleBaseURL;
         this.#audioPathMap = audioPathMap;
 
         // Create and own buffer pool
-        this.bufferPool = new MemPool({
+        this.#bufferPool = new MemPool({
             buf: sharedBuffer,
             start: bufferPoolConfig.start,
             size: bufferPoolConfig.size,
@@ -64,9 +72,9 @@ export class BufferManager {
         });
 
         // Create and own buffer state
-        this.allocatedBuffers = new Map();  // bufnum -> { ptr, size, pendingToken, ... }
-        this.pendingBufferOps = new Map();  // UUID -> { resolve, reject, timeout }
-        this.bufferLocks = new Map();       // bufnum -> promise chain tail
+        this.#allocatedBuffers = new Map();  // bufnum -> { ptr, size, pendingToken, ... }
+        this.#pendingBufferOps = new Map();  // UUID -> { resolve, reject, timeout }
+        this.#bufferLocks = new Map();       // bufnum -> promise chain tail
 
         // Guard samples prevent interpolation artifacts at buffer boundaries.
         // SuperCollider uses 3 samples before and 1 sample after for cubic interpolation.
@@ -176,7 +184,7 @@ export class BufferManager {
             if (allocationRegistered && pendingToken) {
                 this.#finalizeReplacement(bufnum, pendingToken, false);
             } else if (allocatedPtr) {
-                this.bufferPool.free(allocatedPtr);
+                this.#bufferPool.free(allocatedPtr);
             }
             throw error;
         } finally {
@@ -208,7 +216,7 @@ export class BufferManager {
             }
 
             const arrayBuffer = await response.arrayBuffer();
-            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+            const audioBuffer = await this.#audioContext.decodeAudioData(arrayBuffer);
 
             // Calculate frame range
             const start = Math.max(0, Math.floor(startFrame || 0));
@@ -295,7 +303,7 @@ export class BufferManager {
                 sizeBytes,
                 numFrames: roundedFrames,
                 numChannels: roundedChannels,
-                sampleRate: sampleRate || this.audioContext.sampleRate
+                sampleRate: sampleRate || this.#audioContext.sampleRate
             };
         });
     }
@@ -316,10 +324,10 @@ export class BufferManager {
 
     #malloc(totalSamples) {
         const bytesNeeded = totalSamples * 4;
-        const ptr = this.bufferPool.malloc(bytesNeeded);
+        const ptr = this.#bufferPool.malloc(bytesNeeded);
 
         if (ptr === 0) {
-            const stats = this.bufferPool.stats();
+            const stats = this.#bufferPool.stats();
             const availableMB = ((stats.available || 0) / (1024 * 1024)).toFixed(2);
             const totalMB = ((stats.total || 0) / (1024 * 1024)).toFixed(2);
             const requestedMB = (bytesNeeded / (1024 * 1024)).toFixed(2);
@@ -333,18 +341,18 @@ export class BufferManager {
     }
 
     #writeToSharedBuffer(ptr, data) {
-        const heap = new Float32Array(this.sharedBuffer, ptr, data.length);
+        const heap = new Float32Array(this.#sharedBuffer, ptr, data.length);
         heap.set(data);
     }
 
     #createPendingOperation(uuid, bufnum, timeoutMs) {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
-                this.pendingBufferOps.delete(uuid);
+                this.#pendingBufferOps.delete(uuid);
                 reject(new Error(`Buffer ${bufnum} allocation timeout (${timeoutMs}ms)`));
             }, timeoutMs);
 
-            this.pendingBufferOps.set(uuid, { resolve, reject, timeout });
+            this.#pendingBufferOps.set(uuid, { resolve, reject, timeout });
         });
     }
 
@@ -355,12 +363,12 @@ export class BufferManager {
     }
 
     async #acquireBufferLock(bufnum) {
-        const prev = this.bufferLocks.get(bufnum) || Promise.resolve();
+        const prev = this.#bufferLocks.get(bufnum) || Promise.resolve();
         let releaseLock;
         const current = new Promise((resolve) => {
             releaseLock = resolve;
         });
-        this.bufferLocks.set(bufnum, prev.then(() => current));
+        this.#bufferLocks.set(bufnum, prev.then(() => current));
         await prev;
 
         return () => {
@@ -368,14 +376,14 @@ export class BufferManager {
                 releaseLock();
                 releaseLock = null;
             }
-            if (this.bufferLocks.get(bufnum) === current) {
-                this.bufferLocks.delete(bufnum);
+            if (this.#bufferLocks.get(bufnum) === current) {
+                this.#bufferLocks.delete(bufnum);
             }
         };
     }
 
     #recordAllocation(bufnum, ptr, sizeBytes, pendingToken, pendingPromise) {
-        const previousEntry = this.allocatedBuffers.get(bufnum);
+        const previousEntry = this.#allocatedBuffers.get(bufnum);
         const entry = {
             ptr,
             size: sizeBytes,
@@ -385,12 +393,12 @@ export class BufferManager {
                 ? { ptr: previousEntry.ptr, size: previousEntry.size }
                 : null
         };
-        this.allocatedBuffers.set(bufnum, entry);
+        this.#allocatedBuffers.set(bufnum, entry);
         return entry;
     }
 
     async #awaitPendingReplacement(bufnum) {
-        const existing = this.allocatedBuffers.get(bufnum);
+        const existing = this.#allocatedBuffers.get(bufnum);
         if (existing && existing.pendingToken && existing.pendingPromise) {
             try {
                 await existing.pendingPromise;
@@ -416,7 +424,7 @@ export class BufferManager {
     }
 
     #finalizeReplacement(bufnum, pendingToken, success) {
-        const entry = this.allocatedBuffers.get(bufnum);
+        const entry = this.#allocatedBuffers.get(bufnum);
         if (!entry || entry.pendingToken !== pendingToken) {
             return;
         }
@@ -428,26 +436,26 @@ export class BufferManager {
             entry.pendingPromise = null;
             entry.previousAllocation = null;
             if (previous?.ptr) {
-                this.bufferPool.free(previous.ptr);
+                this.#bufferPool.free(previous.ptr);
             }
             return;
         }
 
         if (entry.ptr) {
-            this.bufferPool.free(entry.ptr);
+            this.#bufferPool.free(entry.ptr);
         }
 
         entry.pendingPromise = null;
 
         if (previous?.ptr) {
-            this.allocatedBuffers.set(bufnum, {
+            this.#allocatedBuffers.set(bufnum, {
                 ptr: previous.ptr,
                 size: previous.size,
                 pendingToken: null,
                 previousAllocation: null
             });
         } else {
-            this.allocatedBuffers.delete(bufnum);
+            this.#allocatedBuffers.delete(bufnum);
         }
     }
 
@@ -460,18 +468,18 @@ export class BufferManager {
         const bufnum = args[0];
         const freedPtr = args[1];
 
-        const bufferInfo = this.allocatedBuffers.get(bufnum);
+        const bufferInfo = this.#allocatedBuffers.get(bufnum);
 
         if (!bufferInfo) {
             if (typeof freedPtr === 'number' && freedPtr !== 0) {
-                this.bufferPool.free(freedPtr);
+                this.#bufferPool.free(freedPtr);
             }
             return;
         }
 
         if (typeof freedPtr === 'number' && freedPtr === bufferInfo.ptr) {
-            this.bufferPool.free(bufferInfo.ptr);
-            this.allocatedBuffers.delete(bufnum);
+            this.#bufferPool.free(bufferInfo.ptr);
+            this.#allocatedBuffers.delete(bufnum);
             return;
         }
 
@@ -480,14 +488,14 @@ export class BufferManager {
             bufferInfo.previousAllocation &&
             bufferInfo.previousAllocation.ptr === freedPtr
         ) {
-            this.bufferPool.free(freedPtr);
+            this.#bufferPool.free(freedPtr);
             bufferInfo.previousAllocation = null;
             return;
         }
 
         // Fallback: free whichever pointer we're tracking and clear the entry
-        this.bufferPool.free(bufferInfo.ptr);
-        this.allocatedBuffers.delete(bufnum);
+        this.#bufferPool.free(bufferInfo.ptr);
+        this.#allocatedBuffers.delete(bufnum);
     }
 
     /**
@@ -500,11 +508,11 @@ export class BufferManager {
         const bufnum = args[1]; // Buffer number
 
         // Find and resolve the pending operation
-        const pending = this.pendingBufferOps.get(uuid);
+        const pending = this.#pendingBufferOps.get(uuid);
         if (pending) {
             clearTimeout(pending.timeout);
             pending.resolve({ bufnum });
-            this.pendingBufferOps.delete(uuid);
+            this.#pendingBufferOps.delete(uuid);
         }
     }
 
@@ -515,10 +523,10 @@ export class BufferManager {
      */
     allocate(numSamples) {
         const sizeBytes = numSamples * 4;
-        const addr = this.bufferPool.malloc(sizeBytes);
+        const addr = this.#bufferPool.malloc(sizeBytes);
 
         if (addr === 0) {
-            const stats = this.bufferPool.stats();
+            const stats = this.#bufferPool.stats();
             const availableMB = ((stats.available || 0) / (1024 * 1024)).toFixed(2);
             const totalMB = ((stats.total || 0) / (1024 * 1024)).toFixed(2);
             const requestedMB = (sizeBytes / (1024 * 1024)).toFixed(2);
@@ -537,7 +545,7 @@ export class BufferManager {
      * @returns {boolean} true if freed successfully
      */
     free(addr) {
-        return this.bufferPool.free(addr);
+        return this.#bufferPool.free(addr);
     }
 
     /**
@@ -547,7 +555,7 @@ export class BufferManager {
      * @returns {Float32Array} Typed array view
      */
     getView(addr, numSamples) {
-        return new Float32Array(this.sharedBuffer, addr, numSamples);
+        return new Float32Array(this.#sharedBuffer, addr, numSamples);
     }
 
     /**
@@ -555,7 +563,7 @@ export class BufferManager {
      * @returns {Object} Stats including total, available, used
      */
     getStats() {
-        return this.bufferPool.stats();
+        return this.#bufferPool.stats();
     }
 
     /**
@@ -563,11 +571,11 @@ export class BufferManager {
      * @returns {Object} Buffer state and pool statistics
      */
     getDiagnostics() {
-        const poolStats = this.bufferPool.stats();
+        const poolStats = this.#bufferPool.stats();
         let bytesActive = 0;
         let pendingCount = 0;
 
-        for (const entry of this.allocatedBuffers.values()) {
+        for (const entry of this.#allocatedBuffers.values()) {
             if (!entry) continue;
             bytesActive += entry.size || 0;
             if (entry.pendingToken) {
@@ -576,7 +584,7 @@ export class BufferManager {
         }
 
         return {
-            active: this.allocatedBuffers.size,
+            active: this.#allocatedBuffers.size,
             pending: pendingCount,
             bytesActive,
             pool: {
@@ -595,22 +603,22 @@ export class BufferManager {
      */
     destroy() {
         // Cancel all pending operations
-        for (const [uuid, pending] of this.pendingBufferOps.entries()) {
+        for (const [uuid, pending] of this.#pendingBufferOps.entries()) {
             clearTimeout(pending.timeout);
             pending.reject(new Error('BufferManager destroyed'));
         }
-        this.pendingBufferOps.clear();
+        this.#pendingBufferOps.clear();
 
         // Free all allocated buffers
-        for (const [bufnum, entry] of this.allocatedBuffers.entries()) {
+        for (const [bufnum, entry] of this.#allocatedBuffers.entries()) {
             if (entry.ptr) {
-                this.bufferPool.free(entry.ptr);
+                this.#bufferPool.free(entry.ptr);
             }
         }
-        this.allocatedBuffers.clear();
+        this.#allocatedBuffers.clear();
 
         // Clear buffer locks
-        this.bufferLocks.clear();
+        this.#bufferLocks.clear();
 
         console.log('[BufferManager] Destroyed');
     }
