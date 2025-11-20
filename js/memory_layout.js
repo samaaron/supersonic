@@ -9,7 +9,7 @@
         3. Restart your application
 
     The memory layout cannot be changed at runtime - it's baked into the WASM binary
-    and the SharedArrayBuffer created at initialization.
+    and the SharedArrayBuffer created at initialisation.
 
     Memory Layout:
       0-32MB:   WASM Heap (scsynth C++ allocations)
