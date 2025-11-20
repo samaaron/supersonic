@@ -89,7 +89,8 @@ extern "C" {
     // Static ring buffer allocated in WASM data segment
     // This ensures no conflicts with scsynth heap allocations
     // IMPORTANT: Must be 8-byte aligned for Float64Array access from JavaScript
-    alignas(8) uint8_t ring_buffer_storage[65536];
+    // Size: 1MB (IN: 768KB, OUT: 128KB, DEBUG: 64KB + control/metrics)
+    alignas(8) uint8_t ring_buffer_storage[1048576];
 
     // Validate at compile time that buffer layout fits in allocated storage
     static_assert(TOTAL_BUFFER_SIZE <= sizeof(ring_buffer_storage),

@@ -1,86 +1,33 @@
 /*
-    SuperSonic Configuration
+    SuperSonic Runtime Configuration
 
-    This file contains both build-time and runtime configuration for SuperSonic.
-
-    Build-time options (memory layout):
-      - Require rebuild when changed (./build.sh)
-      - Define SharedArrayBuffer memory layout
-      - Must stay synchronized with build.sh -sINITIAL_MEMORY flag
+    This file contains runtime configuration for SuperSonic that can be
+    overridden via the SuperSonic constructor without requiring a rebuild.
 
     Runtime options (worldOptions):
       - Can be overridden via SuperSonic constructor without rebuild
       - Passed to scsynth World_New()
-      - Must fit within build-time memory allocations
+      - Must fit within build-time memory allocations (see js/memory_layout.js)
+
+    Build-time configuration (memory layout):
+      - See js/memory_layout.js
+      - Requires rebuild when changed (./build.sh)
 */
+
+import { MemoryLayout } from './memory_layout.js';
 
 /**
  * Memory Layout Configuration (Build-time)
  *
- * SharedArrayBuffer is divided into three regions:
- *   0-32MB:     WASM heap (scsynth C++ allocations via malloc/AllocPool)
- *   32-64MB:    Ring buffers (OSC communication, ~64KB actual usage)
- *   64-192MB:   Buffer pool (audio sample storage via @thi.ng/malloc)
+ * Imported from memory_layout.js
+ * See that file for details and to modify memory layout.
  *
- * IMPORTANT: Changing these values requires:
- *   1. Update this file
- *   2. Update build.sh -sINITIAL_MEMORY to match totalMemory
- *   3. Rebuild: ./build.sh
- *   4. Verify worldOptions fit within new wasmHeapSize
+ * IMPORTANT: Changing memory layout requires:
+ *   1. Edit js/memory_layout.js
+ *   2. Rebuild: ./build.sh
+ *   3. Verify worldOptions fit within new wasmHeapSize
  */
-const memory = {
-    /**
-     * Total WebAssembly memory in pages (1 page = 64KB)
-     * Current: 3072 pages = 192MB
-     * Must match build.sh -sINITIAL_MEMORY / 65536
-     */
-    totalPages: 3072,
-
-    /**
-     * WASM heap size (implicit, first section of memory)
-     * Not directly configurable here - defined by bufferPoolOffset
-     * Current: 0-32MB (32 * 1024 * 1024 = 33554432 bytes)
-     */
-    // wasmHeapSize is implicitly: bufferPoolOffset - ringBufferReserved
-
-    /**
-     * Ring buffer reserved space (between WASM heap and buffer pool)
-     * Actual usage is ~64KB but reserve 32MB for alignment/future growth
-     * Current: 32MB reserved (ring buffers start where WASM heap ends)
-     */
-    ringBufferReserved: 32 * 1024 * 1024,  // 32MB reserved
-
-    /**
-     * Buffer pool byte offset from start of SharedArrayBuffer
-     * Audio samples are allocated from this pool using @thi.ng/malloc
-     * Must be after WASM heap + ring buffer area
-     * Current: 64MB offset = after 32MB heap + 32MB ring reserve
-     */
-    bufferPoolOffset: 64 * 1024 * 1024,  // 67108864 bytes
-
-    /**
-     * Buffer pool size in bytes
-     * Used for audio sample storage (loaded files + allocated buffers)
-     * Current: 128MB (enough for ~40 seconds of stereo at 48kHz uncompressed)
-     */
-    bufferPoolSize: 128 * 1024 * 1024,  // 134217728 bytes
-
-    /**
-     * Total memory calculation (should equal totalPages * 65536)
-     * wasmHeap (~32MB) + ringReserve (32MB) + bufferPool (128MB) = 192MB
-     */
-    get totalMemory() {
-        return this.bufferPoolOffset + this.bufferPoolSize;
-    },
-
-    /**
-     * Effective WASM heap size (derived)
-     * This is the space available for scsynth C++ allocations
-     */
-    get wasmHeapSize() {
-        return this.bufferPoolOffset - this.ringBufferReserved;
-    }
-};
+// Import compile-time memory layout (defined in memory_layout.js)
 
 /**
  * SuperCollider World Options (Runtime)
@@ -99,7 +46,7 @@ const memory = {
 const worldOptions = {
     /**
      * Maximum number of audio buffers (SndBuf slots)
-     * Each buffer slot: ~48 bytes overhead (3 SndBuf structs)
+     * Each buffer slot: 104 bytes overhead (2x SndBuf + SndBufUpdates structs)
      * Actual audio data is stored in buffer pool (separate from heap)
      * Default: 1024 (matching SuperCollider default)
      * Range: 1-65535 (limited by practical memory constraints)
@@ -235,9 +182,13 @@ const worldOptions = {
 
 /**
  * Complete SuperSonic configuration
+ *
+ * Combines:
+ *   - memory: Build-time layout (from memory_layout.js)
+ *   - worldOptions: Runtime defaults (can be overridden)
  */
 export const ScsynthConfig = {
-    memory,
+    memory: MemoryLayout,
     worldOptions
 };
 
