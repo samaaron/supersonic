@@ -667,12 +667,13 @@ export class SuperSonic {
             sharedBuffer: this.sharedBuffer
         });
 
-        // Send WASM bytes, memory, and worldOptions
+        // Send WASM bytes, memory, worldOptions, and actual sample rate
         this.workletNode.port.postMessage({
             type: 'loadWasm',
             wasmBytes: wasmBytes,
             wasmMemory: this.wasmMemory,
-            worldOptions: this.config.scsynth.worldOptions
+            worldOptions: this.config.scsynth.worldOptions,
+            sampleRate: this.audioContext.sampleRate  // Pass actual AudioContext sample rate
         });
 
         // Wait for worklet initialization

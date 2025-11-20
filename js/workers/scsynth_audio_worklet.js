@@ -249,8 +249,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     // Save memory reference for later use (WASM imports memory, doesn't export it)
                     this.wasmMemory = memory;
 
-                    // Store worldOptions for C++ initialization
+                    // Store worldOptions and sampleRate for C++ initialization
                     this.worldOptions = data.worldOptions || {};
+                    this.sampleRate = data.sampleRate || 48000;  // Fallback to 48000 if not provided
 
                     // Import object for WASM
                     // scsynth with pthread support requires these imports
@@ -311,7 +312,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                         // Initialize WASM memory
                         if (this.wasmInstance.exports.init_memory) {
-                            this.wasmInstance.exports.init_memory(48000.0);
+                            // Pass actual sample rate from AudioContext (not hardcoded!)
+                            this.wasmInstance.exports.init_memory(this.sampleRate);
 
                             this.isInitialized = true;
 
@@ -342,7 +344,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                         // Initialize WASM memory
                         if (this.wasmInstance.exports.init_memory) {
-                            this.wasmInstance.exports.init_memory(48000.0);
+                            // Pass actual sample rate from AudioContext (not hardcoded!)
+                            this.wasmInstance.exports.init_memory(this.sampleRate);
 
                             this.isInitialized = true;
 
