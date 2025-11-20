@@ -869,16 +869,6 @@ initButton.addEventListener('click', async () => {
       flashTab('debug');
     };
 
-    orchestrator.onSendError = (error) => {
-      if (error.backpressure) {
-        showError('Buffer full - try again in a moment');
-      } else if (error.maxSize) {
-        showError(`Message too large (max ${error.maxSize} characters)`);
-      } else {
-        showError(error.error || 'Failed to send message');
-      }
-    };
-
     // Listen for console messages from worklet
     orchestrator.onConsoleMessage = (msg) => {
       console.log('[AudioWorklet]', msg);
