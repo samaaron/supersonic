@@ -160,9 +160,22 @@ const worldOptions = {
 
     /**
      * Audio buffer length in samples (AudioWorklet quantum)
-     * MUST be 128 for AudioWorklet compatibility
-     * This is the number of samples processed per audio callback
-     * Default: 128 (WebAudio standard, cannot be changed)
+     *
+     * FIXED VALUE - DO NOT CHANGE
+     * This MUST be 128 for AudioWorklet compatibility (WebAudio API spec).
+     *
+     * Unlike SuperCollider (where bufLength can be 32, 64, 128, etc.),
+     * SuperSonic is locked to 128 because AudioWorklet has a fixed quantum size.
+     *
+     * This value is kept in the config for:
+     * 1. Documentation (shows what value SuperSonic uses)
+     * 2. Passing to C++ code (required by WorldOptions)
+     * 3. Validation (catches accidental changes)
+     *
+     * If you provide this in your config, it MUST be 128 or initialization will fail.
+     * It's recommended to omit this field entirely and let the default be used.
+     *
+     * Default: 128 (fixed, cannot be changed)
      */
     bufLength: 128,
 
