@@ -14,7 +14,6 @@
 import ScsynthOSC from './lib/scsynth_osc.js';
 import { BufferManager } from './lib/buffer_manager.js';
 import oscLib from './vendor/osc.js/osc.js';
-import { MemPool } from '@thi.ng/malloc';
 import { NTP_EPOCH_OFFSET, DRIFT_UPDATE_INTERVAL_MS } from './timing_constants.js';
 import { MemoryLayout } from './memory_layout.js';
 import { defaultWorldOptions } from './scsynth_options.js';
@@ -40,12 +39,8 @@ export class SuperSonic {
         this.osc = null;  // ScsynthOSC instance for OSC communication
         this.wasmModule = null;
         this.wasmInstance = null;
-        this.bufferPool = null;  // MemPool for audio buffer allocation
         this.bufferManager = null;
         this.loadedSynthDefs = new Set();
-
-        // Pending buffer operations map for UUID correlation
-        this.pendingBufferOps = new Map();  // UUID -> {resolve, reject, timeout}
 
         // Time offset promise (resolves when buffer constants are initialized)
         this._timeOffsetPromise = null;
@@ -107,9 +102,6 @@ export class SuperSonic {
         this.sampleBaseURL = options.sampleBaseURL || null;
         this.synthdefBaseURL = options.synthdefBaseURL || null;
         this.audioPathMap = options.audioPathMap || {};
-
-        // Track allocated buffers for cleanup
-        this.allocatedBuffers = new Map();  // bufnum -> { ptr, size }
 
         // Stats
         this.stats = {
@@ -204,18 +196,6 @@ export class SuperSonic {
             shared: true
         });
         this.sharedBuffer = this.wasmMemory.buffer;
-
-        // Initialize buffer pool
-        this.bufferPool = new MemPool({
-            buf: this.sharedBuffer,
-            start: memConfig.bufferPoolOffset,
-            size: memConfig.bufferPoolSize,
-            align: 8  // 8-byte alignment (minimum required by MemPool)
-        });
-
-        const poolSizeMB = (memConfig.bufferPoolSize / (1024 * 1024)).toFixed(0);
-        const poolOffsetMB = (memConfig.bufferPoolOffset / (1024 * 1024)).toFixed(0);
-        console.log(`[SuperSonic] Buffer pool initialized: ${poolSizeMB}MB at offset ${poolOffsetMB}MB`);
     }
 
 
@@ -250,15 +230,18 @@ export class SuperSonic {
     }
 
     #initializeBufferManager() {
+        const memConfig = this.config.memory;
+
         this.bufferManager = new BufferManager({
             audioContext: this.audioContext,
             sharedBuffer: this.sharedBuffer,
-            bufferPool: this.bufferPool,
-            allocatedBuffers: this.allocatedBuffers,
+            bufferPoolConfig: {
+                start: memConfig.bufferPoolOffset,
+                size: memConfig.bufferPoolSize,
+                align: 8
+            },
             sampleBaseURL: this.sampleBaseURL,
             audioPathMap: this.audioPathMap,
-            onPendingOp: (uuid, bufnum, timeoutMs) =>
-                this.#createPendingBufferOperation(uuid, bufnum, timeoutMs),
             maxBuffers: this.config.worldOptions.numBuffers
         });
     }
@@ -357,10 +340,10 @@ export class SuperSonic {
         this.osc.onParsedOSC((msg) => {
             // Handle internal messages
             if (msg.address === '/buffer/freed') {
-                this._handleBufferFreed(msg.args);
+                this.bufferManager?.handleBufferFreed(msg.args);
             } else if (msg.address === '/buffer/allocated') {
                 // Handle buffer allocation completion with UUID correlation
-                this._handleBufferAllocated(msg.args);
+                this.bufferManager?.handleBufferAllocated(msg.args);
             } else if (msg.address === '/synced' && msg.args.length > 0) {
                 // Handle /synced responses for sync operations
                 const syncId = msg.args[0];  // Integer sync ID
@@ -660,70 +643,6 @@ export class SuperSonic {
         }
     }
 
-    #createPendingBufferOperation(uuid, bufnum, timeoutMs = 30000) {
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                this.pendingBufferOps.delete(uuid);
-                reject(new Error(`Buffer ${bufnum} allocation timeout (${timeoutMs}ms)`));
-            }, timeoutMs);
-
-            this.pendingBufferOps.set(uuid, { resolve, reject, timeout });
-        });
-    }
-
-    /**
-     * Handle /buffer/freed message from WASM
-     */
-    _handleBufferFreed(args) {
-        const bufnum = args[0];
-        const freedPtr = args[1];
-
-        const bufferInfo = this.allocatedBuffers.get(bufnum);
-
-        if (!bufferInfo) {
-            if (typeof freedPtr === 'number' && freedPtr !== 0) {
-                this.bufferPool.free(freedPtr);
-            }
-            return;
-        }
-
-        if (typeof freedPtr === 'number' && freedPtr === bufferInfo.ptr) {
-            this.bufferPool.free(bufferInfo.ptr);
-            this.allocatedBuffers.delete(bufnum);
-            return;
-        }
-
-        if (
-            typeof freedPtr === 'number' &&
-            bufferInfo.previousAllocation &&
-            bufferInfo.previousAllocation.ptr === freedPtr
-        ) {
-            this.bufferPool.free(freedPtr);
-            bufferInfo.previousAllocation = null;
-            return;
-        }
-
-        // Fallback: free whichever pointer we're tracking and clear the entry
-        this.bufferPool.free(bufferInfo.ptr);
-        this.allocatedBuffers.delete(bufnum);
-    }
-
-    /**
-     * Handle /buffer/allocated message with UUID correlation
-     */
-    _handleBufferAllocated(args) {
-        const uuid = args[0];  // UUID string
-        const bufnum = args[1]; // Buffer number
-
-        // Find and resolve the pending operation
-        const pending = this.pendingBufferOps.get(uuid);
-        if (pending) {
-            clearTimeout(pending.timeout);
-            pending.resolve({ bufnum });
-            this.pendingBufferOps.delete(uuid);
-        }
-    }
-
     /**
      * Send pre-encoded OSC bytes to scsynth
      * @param {ArrayBuffer|Uint8Array} oscData - Pre-encoded OSC data
@@ -809,17 +728,14 @@ export class SuperSonic {
             this.audioContext = null;
         }
 
-        // Cancel all pending buffer operations and their timeouts
-        for (const [uuid, pending] of this.pendingBufferOps.entries()) {
-            clearTimeout(pending.timeout);
-            pending.reject(new Error('SuperSonic instance destroyed'));
+        // BufferManager handles its own cleanup
+        if (this.bufferManager) {
+            this.bufferManager.destroy();
+            this.bufferManager = null;
         }
-        this.pendingBufferOps.clear();
 
         this.sharedBuffer = null;
         this.initialized = false;
-        this.bufferManager = null;
-        this.allocatedBuffers.clear();
         this.loadedSynthDefs.clear();
 
         console.log('[SuperSonic] Destroyed');
@@ -1013,18 +929,8 @@ export class SuperSonic {
      * const bufferAddr = sonic.allocBuffer(44100);  // Allocate 1 second at 44.1kHz
      */
     allocBuffer(numSamples) {
-        if (!this.initialized) {
-            throw new Error('SuperSonic not initialized. Call init() first.');
-        }
-
-        const sizeBytes = numSamples * 4;  // 4 bytes per Float32
-        const addr = this.bufferPool.malloc(sizeBytes);
-
-        if (addr === 0) {
-            console.error(`[SuperSonic] Buffer allocation failed: ${numSamples} samples (${sizeBytes} bytes)`);
-        }
-
-        return addr;
+        this.#ensureInitialized('allocate buffers');
+        return this.bufferManager.allocate(numSamples);
     }
 
     /**
@@ -1035,11 +941,8 @@ export class SuperSonic {
      * sonic.freeBuffer(bufferAddr);
      */
     freeBuffer(addr) {
-        if (!this.initialized) {
-            throw new Error('SuperSonic not initialized. Call init() first.');
-        }
-
-        return this.bufferPool.free(addr);
+        this.#ensureInitialized('free buffers');
+        return this.bufferManager.free(addr);
     }
 
     /**
@@ -1052,11 +955,8 @@ export class SuperSonic {
      * view[0] = 1.0;  // Write to buffer
      */
     getBufferView(addr, numSamples) {
-        if (!this.initialized) {
-            throw new Error('SuperSonic not initialized. Call init() first.');
-        }
-
-        return new Float32Array(this.sharedBuffer, addr, numSamples);
+        this.#ensureInitialized('get buffer views');
+        return this.bufferManager.getView(addr, numSamples);
     }
 
     /**
@@ -1067,44 +967,15 @@ export class SuperSonic {
      * console.log(`Available: ${stats.available} bytes`);
      */
     getBufferPoolStats() {
-        if (!this.initialized) {
-            throw new Error('SuperSonic not initialized. Call init() first.');
-        }
-
-        return this.bufferPool.stats();
+        this.#ensureInitialized('get buffer pool stats');
+        return this.bufferManager.getStats();
     }
 
     getDiagnostics() {
         this.#ensureInitialized('get diagnostics');
 
-        const poolStats = this.bufferPool?.stats ? this.bufferPool.stats() : null;
-        let bytesActive = 0;
-        let pendingCount = 0;
-
-        for (const entry of this.allocatedBuffers.values()) {
-            if (!entry) continue;
-            bytesActive += entry.size || 0;
-            if (entry.pendingToken) {
-                pendingCount++;
-            }
-        }
-
         return {
-            buffers: {
-                active: this.allocatedBuffers.size,
-                pending: pendingCount,
-                bytesActive,
-                pool: poolStats
-                    ? {
-                        total: poolStats.total || 0,
-                        available: poolStats.available || 0,
-                        freeBytes: poolStats.free?.size || 0,
-                        freeBlocks: poolStats.free?.count || 0,
-                        usedBytes: poolStats.used?.size || 0,
-                        usedBlocks: poolStats.used?.count || 0
-                    }
-                    : null
-            },
+            buffers: this.bufferManager.getDiagnostics(),
             synthdefs: {
                 count: this.loadedSynthDefs.size
             }
