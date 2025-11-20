@@ -16,6 +16,7 @@ import oscLib from './vendor/osc.js/osc.js';
 import { MemPool } from '@thi.ng/malloc';
 import { NTP_EPOCH_OFFSET, DRIFT_UPDATE_INTERVAL_MS } from './timing_constants.js';
 import { ScsynthConfig } from './scsynth_options.js';
+import { ConfigValidator } from './lib/config_validator.js';
 
 class BufferManager {
     constructor(options) {
@@ -419,6 +420,15 @@ export class SuperSonic {
 
         // Merge user-provided scsynth options with defaults
         const scsynthConfig = this.#mergeScsynthOptions(options.scsynthOptions || {});
+
+        // Validate configuration before initialization
+        try {
+            ConfigValidator.validateWorldOptions(scsynthConfig.worldOptions, scsynthConfig.memory);
+            ConfigValidator.validateMemoryLayout(scsynthConfig.memory);
+        } catch (error) {
+            // Improve error message with context
+            throw new Error(`SuperSonic configuration validation failed:\n${error.message}`);
+        }
 
         this.config = {
             wasmUrl: options.wasmUrl || wasmBaseURL + 'scsynth-nrt.wasm',
