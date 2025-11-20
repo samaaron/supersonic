@@ -8,6 +8,8 @@
  * - Manage concurrent buffer operations
  */
 
+import { MemPool } from '@thi.ng/malloc';
+
 export class BufferManager {
     // Private configuration fields
     #sampleBaseURL;
@@ -17,11 +19,9 @@ export class BufferManager {
         const {
             audioContext,
             sharedBuffer,
-            bufferPool,
-            allocatedBuffers,
+            bufferPoolConfig,
             sampleBaseURL,
             audioPathMap = {},
-            onPendingOp,
             maxBuffers = 1024
         } = options;
 
@@ -32,17 +32,17 @@ export class BufferManager {
         if (!sharedBuffer || !(sharedBuffer instanceof SharedArrayBuffer)) {
             throw new Error('BufferManager requires sharedBuffer (SharedArrayBuffer)');
         }
-        if (!bufferPool || typeof bufferPool.malloc !== 'function' || typeof bufferPool.free !== 'function') {
-            throw new Error('BufferManager requires bufferPool with malloc() and free() methods');
+        if (!bufferPoolConfig || typeof bufferPoolConfig !== 'object') {
+            throw new Error('BufferManager requires bufferPoolConfig (object with start, size, align)');
         }
-        if (!allocatedBuffers || !(allocatedBuffers instanceof Map)) {
-            throw new Error('BufferManager requires allocatedBuffers (Map)');
+        if (!Number.isFinite(bufferPoolConfig.start) || bufferPoolConfig.start < 0) {
+            throw new Error('bufferPoolConfig.start must be a non-negative number');
+        }
+        if (!Number.isFinite(bufferPoolConfig.size) || bufferPoolConfig.size <= 0) {
+            throw new Error('bufferPoolConfig.size must be a positive number');
         }
 
         // Validate optional dependencies
-        if (onPendingOp && typeof onPendingOp !== 'function') {
-            throw new Error('onPendingOp must be a function');
-        }
         if (audioPathMap && typeof audioPathMap !== 'object') {
             throw new Error('audioPathMap must be an object');
         }
@@ -52,12 +52,21 @@ export class BufferManager {
 
         this.audioContext = audioContext;
         this.sharedBuffer = sharedBuffer;
-        this.bufferPool = bufferPool;
-        this.allocatedBuffers = allocatedBuffers;
         this.#sampleBaseURL = sampleBaseURL;
         this.#audioPathMap = audioPathMap;
-        this.onPendingOp = onPendingOp;
-        this.bufferLocks = new Map(); // bufnum -> promise chain tail
+
+        // Create and own buffer pool
+        this.bufferPool = new MemPool({
+            buf: sharedBuffer,
+            start: bufferPoolConfig.start,
+            size: bufferPoolConfig.size,
+            align: bufferPoolConfig.align || 8
+        });
+
+        // Create and own buffer state
+        this.allocatedBuffers = new Map();  // bufnum -> { ptr, size, pendingToken, ... }
+        this.pendingBufferOps = new Map();  // UUID -> { resolve, reject, timeout }
+        this.bufferLocks = new Map();       // bufnum -> promise chain tail
 
         // Guard samples prevent interpolation artifacts at buffer boundaries.
         // SuperCollider uses 3 samples before and 1 sample after for cubic interpolation.
@@ -66,6 +75,10 @@ export class BufferManager {
 
         // Maximum buffer count (from config)
         this.MAX_BUFFERS = maxBuffers;
+
+        const poolSizeMB = (bufferPoolConfig.size / (1024 * 1024)).toFixed(0);
+        const poolOffsetMB = (bufferPoolConfig.start / (1024 * 1024)).toFixed(0);
+        console.log(`[BufferManager] Initialized: ${poolSizeMB}MB pool at offset ${poolOffsetMB}MB`);
     }
 
     #resolveAudioPath(scPath) {
@@ -324,16 +337,20 @@ export class BufferManager {
         heap.set(data);
     }
 
-    #registerPending(bufnum, timeoutMs) {
-        if (!this.onPendingOp) {
-            return {
-                uuid: crypto.randomUUID(),
-                allocationComplete: Promise.resolve()
-            };
-        }
+    #createPendingOperation(uuid, bufnum, timeoutMs) {
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                this.pendingBufferOps.delete(uuid);
+                reject(new Error(`Buffer ${bufnum} allocation timeout (${timeoutMs}ms)`));
+            }, timeoutMs);
 
+            this.pendingBufferOps.set(uuid, { resolve, reject, timeout });
+        });
+    }
+
+    #registerPending(bufnum, timeoutMs) {
         const uuid = crypto.randomUUID();
-        const allocationComplete = this.onPendingOp(uuid, bufnum, timeoutMs);
+        const allocationComplete = this.#createPendingOperation(uuid, bufnum, timeoutMs);
         return { uuid, allocationComplete };
     }
 
@@ -432,5 +449,169 @@ export class BufferManager {
         } else {
             this.allocatedBuffers.delete(bufnum);
         }
+    }
+
+    /**
+     * Handle /buffer/freed notification from scsynth
+     * Called by SuperSonic when /buffer/freed OSC message is received
+     * @param {Array} args - [bufnum, freedPtr]
+     */
+    handleBufferFreed(args) {
+        const bufnum = args[0];
+        const freedPtr = args[1];
+
+        const bufferInfo = this.allocatedBuffers.get(bufnum);
+
+        if (!bufferInfo) {
+            if (typeof freedPtr === 'number' && freedPtr !== 0) {
+                this.bufferPool.free(freedPtr);
+            }
+            return;
+        }
+
+        if (typeof freedPtr === 'number' && freedPtr === bufferInfo.ptr) {
+            this.bufferPool.free(bufferInfo.ptr);
+            this.allocatedBuffers.delete(bufnum);
+            return;
+        }
+
+        if (
+            typeof freedPtr === 'number' &&
+            bufferInfo.previousAllocation &&
+            bufferInfo.previousAllocation.ptr === freedPtr
+        ) {
+            this.bufferPool.free(freedPtr);
+            bufferInfo.previousAllocation = null;
+            return;
+        }
+
+        // Fallback: free whichever pointer we're tracking and clear the entry
+        this.bufferPool.free(bufferInfo.ptr);
+        this.allocatedBuffers.delete(bufnum);
+    }
+
+    /**
+     * Handle /buffer/allocated notification from scsynth
+     * Called by SuperSonic when /buffer/allocated OSC message is received
+     * @param {Array} args - [uuid, bufnum]
+     */
+    handleBufferAllocated(args) {
+        const uuid = args[0];  // UUID string
+        const bufnum = args[1]; // Buffer number
+
+        // Find and resolve the pending operation
+        const pending = this.pendingBufferOps.get(uuid);
+        if (pending) {
+            clearTimeout(pending.timeout);
+            pending.resolve({ bufnum });
+            this.pendingBufferOps.delete(uuid);
+        }
+    }
+
+    /**
+     * Allocate raw buffer memory
+     * @param {number} numSamples - Number of Float32 samples
+     * @returns {number} Byte offset, or 0 if failed
+     */
+    allocate(numSamples) {
+        const sizeBytes = numSamples * 4;
+        const addr = this.bufferPool.malloc(sizeBytes);
+
+        if (addr === 0) {
+            const stats = this.bufferPool.stats();
+            const availableMB = ((stats.available || 0) / (1024 * 1024)).toFixed(2);
+            const totalMB = ((stats.total || 0) / (1024 * 1024)).toFixed(2);
+            const requestedMB = (sizeBytes / (1024 * 1024)).toFixed(2);
+            console.error(
+                `[BufferManager] Allocation failed: requested ${requestedMB}MB, ` +
+                `available ${availableMB}MB of ${totalMB}MB total`
+            );
+        }
+
+        return addr;
+    }
+
+    /**
+     * Free previously allocated buffer
+     * @param {number} addr - Buffer address
+     * @returns {boolean} true if freed successfully
+     */
+    free(addr) {
+        return this.bufferPool.free(addr);
+    }
+
+    /**
+     * Get Float32Array view of buffer
+     * @param {number} addr - Buffer address
+     * @param {number} numSamples - Number of samples
+     * @returns {Float32Array} Typed array view
+     */
+    getView(addr, numSamples) {
+        return new Float32Array(this.sharedBuffer, addr, numSamples);
+    }
+
+    /**
+     * Get buffer pool statistics
+     * @returns {Object} Stats including total, available, used
+     */
+    getStats() {
+        return this.bufferPool.stats();
+    }
+
+    /**
+     * Get buffer diagnostics
+     * @returns {Object} Buffer state and pool statistics
+     */
+    getDiagnostics() {
+        const poolStats = this.bufferPool.stats();
+        let bytesActive = 0;
+        let pendingCount = 0;
+
+        for (const entry of this.allocatedBuffers.values()) {
+            if (!entry) continue;
+            bytesActive += entry.size || 0;
+            if (entry.pendingToken) {
+                pendingCount++;
+            }
+        }
+
+        return {
+            active: this.allocatedBuffers.size,
+            pending: pendingCount,
+            bytesActive,
+            pool: {
+                total: poolStats.total || 0,
+                available: poolStats.available || 0,
+                freeBytes: poolStats.free?.size || 0,
+                freeBlocks: poolStats.free?.count || 0,
+                usedBytes: poolStats.used?.size || 0,
+                usedBlocks: poolStats.used?.count || 0
+            }
+        };
+    }
+
+    /**
+     * Clean up resources
+     */
+    destroy() {
+        // Cancel all pending operations
+        for (const [uuid, pending] of this.pendingBufferOps.entries()) {
+            clearTimeout(pending.timeout);
+            pending.reject(new Error('BufferManager destroyed'));
+        }
+        this.pendingBufferOps.clear();
+
+        // Free all allocated buffers
+        for (const [bufnum, entry] of this.allocatedBuffers.entries()) {
+            if (entry.ptr) {
+                this.bufferPool.free(entry.ptr);
+            }
+        }
+        this.allocatedBuffers.clear();
+
+        // Clear buffer locks
+        this.bufferLocks.clear();
+
+        console.log('[BufferManager] Destroyed');
     }
 }
