@@ -22,8 +22,8 @@ struct ReplyAddress;
 extern "C" {
     // Static ring buffer (allocated in WASM data segment)
     // This is separate from scsynth heap, preventing memory conflicts
-    // Size must be >= TOTAL_BUFFER_SIZE from shared_memory.h
-    extern uint8_t ring_buffer_storage[65536];
+    // Size: 1MB (IN: 768KB, OUT: 128KB, DEBUG: 64KB + control/metrics)
+    extern uint8_t ring_buffer_storage[1048576];
 
     // Global state
     extern uint8_t* shared_memory;

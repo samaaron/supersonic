@@ -26,9 +26,10 @@
 // ============================================================================
 
 // User-configurable buffer sizes
-constexpr uint32_t IN_BUFFER_SIZE     = 32768; // OSC messages from JS to scsynth
-constexpr uint32_t OUT_BUFFER_SIZE    = 8192;  // OSC replies from scsynth to JS
-constexpr uint32_t DEBUG_BUFFER_SIZE  = 4096;  // Debug messages from scsynth
+// Balanced to prevent message drops in audioworklet
+constexpr uint32_t IN_BUFFER_SIZE     = 786432; // 768KB - OSC messages from JS to scsynth (large for SynthDefs)
+constexpr uint32_t OUT_BUFFER_SIZE    = 131072; // 128KB - OSC replies from scsynth to JS (prevent drops)
+constexpr uint32_t DEBUG_BUFFER_SIZE  = 65536;  // 64KB - Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 40;    // Atomic control pointers & flags (36 bytes + 4 padding for 8-byte alignment)
 constexpr uint32_t METRICS_SIZE       = 48;    // Performance metrics
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
