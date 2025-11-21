@@ -865,8 +865,6 @@ initButton.addEventListener('click', async () => {
       // Version display removed from UI
     };
 
-    // Check capabilities and initialise
-    await orchestrator.checkCapabilities();
     await orchestrator.init({ development: true });
 
     // Expose for debugging

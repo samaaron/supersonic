@@ -12,11 +12,11 @@
     and the SharedArrayBuffer created at initialisation.
 
     Memory Layout:
-      0-32MB:   WASM Heap (scsynth C++ allocations)
-      32-33MB:  Ring Buffers (OSC communication, 1MB)
-      33-96MB:  Buffer Pool (audio sample storage)
+      0-16MB:   WASM Heap (scsynth C++ allocations)
+      16-17MB:  Ring Buffers (OSC communication, 1MB)
+      17-80MB:  Buffer Pool (audio sample storage)
 
-    Total: 96MB (1536 WebAssembly pages x 64KB)
+    Total: 80MB (1280 WebAssembly pages x 64KB)
 */
 
 /**
@@ -28,17 +28,17 @@
 export const MemoryLayout = {
     /**
      * Total WebAssembly memory in pages (1 page = 64KB)
-     * Current: 1536 pages = 96MB
+     * Current: 1280 pages = 80MB
      *
      * This value is used by build.sh to set -sINITIAL_MEMORY
      * Must match: totalPages * 65536 = bufferPoolOffset + bufferPoolSize
      */
-    totalPages: 1536,
+    totalPages: 1280,
 
     /**
      * WASM heap size (implicit, first section of memory)
      * Not directly configurable here - defined by bufferPoolOffset - ringBufferReserved
-     * Current: 0-32MB (32 * 1024 * 1024 = 33554432 bytes)
+     * Current: 0-16MB (16 * 1024 * 1024 = 16777216 bytes)
      */
     // wasmHeapSize is implicitly: bufferPoolOffset - ringBufferReserved
 
@@ -48,7 +48,7 @@ export const MemoryLayout = {
      * Plus control structures: CONTROL_SIZE (40B) + METRICS_SIZE (48B) + NTP_START_TIME_SIZE (8B) ≈ 96B
      * Total actual usage: ~960KB
      * Reserved: 1MB (provides ~64KB headroom for alignment and future expansion)
-     * Current: 1MB reserved (starts where WASM heap ends at 32MB)
+     * Current: 1MB reserved (starts where WASM heap ends at 16MB)
      */
     ringBufferReserved: 1 * 1024 * 1024,  // 1MB reserved
 
@@ -56,9 +56,9 @@ export const MemoryLayout = {
      * Buffer pool byte offset from start of SharedArrayBuffer
      * Audio samples are allocated from this pool using @thi.ng/malloc
      * Must be after WASM heap + ring buffer area
-     * Current: 33MB offset = after 32MB heap + 1MB ring buffers
+     * Current: 17MB offset = after 16MB heap + 1MB ring buffers
      */
-    bufferPoolOffset: 33 * 1024 * 1024,  // 34603008 bytes
+    bufferPoolOffset: 17 * 1024 * 1024,  // 17825792 bytes
 
     /**
      * Buffer pool size in bytes
@@ -69,7 +69,7 @@ export const MemoryLayout = {
 
     /**
      * Total memory calculation (should equal totalPages * 65536)
-     * wasmHeap (32MB) + ringReserve (1MB) + bufferPool (63MB) = 96MB
+     * wasmHeap (16MB) + ringReserve (1MB) + bufferPool (63MB) = 80MB
      */
     get totalMemory() {
         return this.bufferPoolOffset + this.bufferPoolSize;
