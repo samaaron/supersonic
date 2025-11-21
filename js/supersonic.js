@@ -270,15 +270,12 @@ export class SuperSonic {
     }
 
     #initializeBufferManager() {
-        const memConfig = this.config.memory;
-
         this.#bufferManager = new BufferManager({
             audioContext: this.#audioContext,
             sharedBuffer: this.#sharedBuffer,
             bufferPoolConfig: {
-                start: memConfig.bufferPoolOffset,
-                size: memConfig.bufferPoolSize,
-                align: 8
+                start: this.config.memory.bufferPoolOffset,
+                size: this.config.memory.bufferPoolSize
             },
             sampleBaseURL: this.#sampleBaseURL,
             audioPathMap: this.#audioPathMap,
