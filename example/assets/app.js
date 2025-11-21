@@ -601,7 +601,7 @@ function addSentMessage(oscData, comment = null) {
   if (!sentMessageHistory) return;  // Element may not exist
 
   const msg = { oscData, timestamp: Date.now(), comment };
-  sentMessages.unshift(msg);
+  sentMessages.push(msg);
 
   // Build HTML for just this one new message
   const messageHtml = buildMessageHTML(msg);
@@ -612,13 +612,13 @@ function addSentMessage(oscData, comment = null) {
     emptyMessage.remove();
   }
 
-  // Insert at the top (prepend)
-  sentMessageHistory.insertAdjacentHTML('afterbegin', messageHtml);
+  // Append at the bottom
+  sentMessageHistory.insertAdjacentHTML('beforeend', messageHtml);
 
   // Remove oldest message if over limit
   if (sentMessages.length > 50) {
-    sentMessages.pop();
-    sentMessageHistory.lastElementChild?.remove();
+    sentMessages.shift();
+    sentMessageHistory.firstElementChild?.remove();
   }
 
   // Auto-scroll to bottom
