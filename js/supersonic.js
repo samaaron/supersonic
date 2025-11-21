@@ -19,6 +19,64 @@ import { MemoryLayout } from './memory_layout.js';
 import { defaultWorldOptions } from './scsynth_options.js';
 import { ConfigValidator } from './lib/config_validator.js';
 
+/**
+ * SuperSonic metrics object - all metrics read synchronously from SharedArrayBuffer
+ * @typedef {Object} SuperSonicMetrics
+ *
+ * Core counters (SuperSonic in-memory):
+ * @property {number} messagesSent - OSC messages sent to scsynth
+ * @property {number} messagesReceived - OSC messages received from scsynth
+ * @property {number} errors - Total errors encountered
+ *
+ * Worklet metrics (WASM writes to SAB):
+ * @property {number} processCount - Audio process() calls
+ * @property {number} bufferOverruns - Buffer overrun events
+ * @property {number} messagesProcessed - Messages processed by scsynth
+ * @property {number} messagesDropped - Messages dropped by scsynth
+ * @property {number} schedulerQueueDepth - Current scheduler queue depth
+ * @property {number} schedulerQueueMax - Maximum scheduler queue depth reached
+ * @property {number} schedulerQueueDropped - Messages dropped from scheduler queue
+ *
+ * Buffer usage (calculated from SAB head/tail pointers):
+ * @property {Object} inBufferUsed - Input buffer usage statistics
+ * @property {number} inBufferUsed.bytes - Bytes used in input buffer
+ * @property {number} inBufferUsed.percentage - Percentage of input buffer used
+ * @property {Object} outBufferUsed - Output buffer usage statistics
+ * @property {number} outBufferUsed.bytes - Bytes used in output buffer
+ * @property {number} outBufferUsed.percentage - Percentage of output buffer used
+ * @property {Object} debugBufferUsed - Debug buffer usage statistics
+ * @property {number} debugBufferUsed.bytes - Bytes used in debug buffer
+ * @property {number} debugBufferUsed.percentage - Percentage of debug buffer used
+ *
+ * OSC worker metrics (workers write to SAB):
+ *
+ * OSC Out (Prescheduler):
+ * @property {number} preschedulerPending - Current pending events in queue
+ * @property {number} preschedulerPeak - Peak pending events (high water mark)
+ * @property {number} preschedulerSent - Total bundles written to ring buffer
+ * @property {number} bundlesDropped - Bundles dropped (ring buffer full)
+ * @property {number} retriesSucceeded - Successful retry attempts
+ * @property {number} retriesFailed - Failed retry attempts (gave up)
+ * @property {number} bundlesScheduled - Total bundles scheduled
+ * @property {number} eventsCancelled - Total events cancelled
+ * @property {number} totalDispatches - Total dispatch cycles executed
+ * @property {number} messagesRetried - Total retry attempts (all)
+ * @property {number} retryQueueSize - Current retry queue size
+ * @property {number} retryQueueMax - Peak retry queue size
+ *
+ * OSC In:
+ * @property {number} oscInMessagesReceived - OSC In messages received
+ * @property {number} oscInDroppedMessages - OSC In dropped messages
+ * @property {number} oscInWakeups - OSC In worker wakeups
+ * @property {number} oscInTimeouts - OSC In worker timeouts
+ *
+ * Debug:
+ * @property {number} debugMessagesReceived - Debug messages received
+ * @property {number} debugWakeups - Debug worker wakeups
+ * @property {number} debugTimeouts - Debug worker timeouts
+ * @property {number} debugBytesRead - Debug bytes read
+ */
+
 export class SuperSonic {
     // Expose OSC utilities as static methods
     static osc = {
@@ -46,6 +104,13 @@ export class SuperSonic {
     #initialized;
     #initializing;
     #capabilities;
+
+    // Runtime metrics (private counters)
+    #metrics_messagesSent = 0;
+    #metrics_messagesReceived = 0;
+    #metrics_errors = 0;
+    #metricsIntervalId = null;
+    #metricsGatherInProgress = false;
 
     constructor(options = {}) {
         this.#initialized = false;
@@ -106,8 +171,8 @@ export class SuperSonic {
             workerBaseURL: workerBaseURL,  // Store for worker creation
             development: false,
             audioContextOptions: {
-                latencyHint: 'interactive',
-                sampleRate: 48000
+                latencyHint: 'interactive', // hint to push for lowest latency possible
+                sampleRate: 48000 // only requested rate - actual rate is determined by hardware
             },
             // Build-time memory layout (constant)
             memory: MemoryLayout,
@@ -120,13 +185,10 @@ export class SuperSonic {
         this.#synthdefBaseURL = options.synthdefBaseURL || null;
         this.#audioPathMap = options.audioPathMap || {};
 
-        // Stats
-        this.stats = {
+        // Boot statistics (one-time metrics)
+        this.bootStats = {
             initStartTime: null,
-            initDuration: null,
-            messagesSent: 0,
-            messagesReceived: 0,
-            errors: 0
+            initDuration: null
         };
     }
 
@@ -393,7 +455,7 @@ export class SuperSonic {
 
             // Always forward to onMessage (including internal messages)
             if (this.onMessage) {
-                this.stats.messagesReceived++;
+                this.#metrics_messagesReceived++;
                 this.onMessage(msg);
             }
         });
@@ -406,7 +468,7 @@ export class SuperSonic {
 
         this.#osc.onError((error, workerName) => {
             console.error(`[SuperSonic] ${workerName} error:`, error);
-            this.stats.errors++;
+            this.#metrics_errors++;
             if (this.onError) {
                 this.onError(new Error(`${workerName}: ${error}`));
             }
@@ -422,14 +484,14 @@ export class SuperSonic {
     #finishInitialization() {
         this.#initialized = true;
         this.#initializing = false;
-        this.stats.initDuration = performance.now() - this.stats.initStartTime;
+        this.bootStats.initDuration = performance.now() - this.bootStats.initStartTime;
 
-        console.log(`[SuperSonic] Initialization complete in ${this.stats.initDuration.toFixed(2)}ms`);
+        console.log(`[SuperSonic] Initialization complete in ${this.bootStats.initDuration.toFixed(2)}ms`);
 
         if (this.onInitialized) {
             this.onInitialized({
                 capabilities: this.#capabilities,
-                stats: this.stats
+                bootStats: this.bootStats
             });
         }
     }
@@ -464,7 +526,7 @@ export class SuperSonic {
         };
 
         this.#initializing = true;
-        this.stats.initStartTime = performance.now();
+        this.bootStats.initStartTime = performance.now();
 
         try {
             this.checkCapabilities();
@@ -569,25 +631,24 @@ export class SuperSonic {
         // ScsynthOSC handles all worker messages internally
         // We only need to handle worklet messages here
 
-        // Worklet message handler
+        /**
+         * Worklet message handler
+         *
+         * Note: Worklet metrics (processCount, bufferOverruns, etc.) are read directly from
+         * SharedArrayBuffer in #getWorkletMetrics(). The worklet no longer sends 'metrics'
+         * messages, and 'getMetrics' requests are not used (SAB reads are synchronous).
+         */
         this.#workletNode.port.onmessage = (event) => {
             const { data } = event;
 
             switch (data.type) {
-                case 'metrics':
-                    // Performance metrics from worklet
-                    if (this.onMetricsUpdate) {
-                        this.onMetricsUpdate(data.metrics);
-                    }
-                    break;
-
                 case 'error':
                     console.error('[Worklet] Error:', data.error);
                     if (data.diagnostics) {
                         console.error('[Worklet] Diagnostics:', data.diagnostics);
                         console.table(data.diagnostics);
                     }
-                    this.stats.errors++;
+                    this.#metrics_errors++;
                     if (this.onError) {
                         this.onError(new Error(data.error));
                     }
@@ -620,23 +681,205 @@ export class SuperSonic {
     }
 
     /**
-     * Start performance monitoring
+     * Get metrics from SharedArrayBuffer (worklet metrics written by WASM)
+     * @returns {Object|null}
+     * @private
+     */
+    #getWorkletMetrics() {
+        if (!this.#sharedBuffer || !this.#bufferConstants || !this.#ringBufferBase) {
+            return null;
+        }
+
+        // Metrics are already in SAB - just read them directly!
+        const metricsBase = this.#ringBufferBase + this.#bufferConstants.METRICS_START;
+        const metricsCount = this.#bufferConstants.METRICS_SIZE / 4;  // METRICS_SIZE is in bytes, Uint32Array needs element count
+        const metricsView = new Uint32Array(this.#sharedBuffer, metricsBase, metricsCount);
+
+        // Read metrics from SAB (layout defined in src/shared_memory.h METRICS_* section)
+        return {
+            processCount: Atomics.load(metricsView, 0),              // PROCESS_COUNT offset / 4
+            bufferOverruns: Atomics.load(metricsView, 1),            // BUFFER_OVERRUNS offset / 4
+            messagesProcessed: Atomics.load(metricsView, 2),         // MESSAGES_PROCESSED offset / 4
+            messagesDropped: Atomics.load(metricsView, 3),           // MESSAGES_DROPPED offset / 4
+            schedulerQueueDepth: Atomics.load(metricsView, 4),       // SCHEDULER_QUEUE_DEPTH offset / 4
+            schedulerQueueMax: Atomics.load(metricsView, 5),         // SCHEDULER_QUEUE_MAX offset / 4
+            schedulerQueueDropped: Atomics.load(metricsView, 6)      // SCHEDULER_QUEUE_DROPPED offset / 4
+        };
+    }
+
+    /**
+     * Get buffer usage statistics from SAB head/tail pointers
+     * @returns {Object|null}
+     * @private
+     */
+    #getBufferUsage() {
+        if (!this.#sharedBuffer || !this.#bufferConstants || !this.#ringBufferBase) {
+            return null;
+        }
+
+        const atomicView = new Int32Array(this.#sharedBuffer);
+        const controlBase = this.#ringBufferBase + this.#bufferConstants.CONTROL_START;
+
+        // Read head/tail pointers
+        const inHead = Atomics.load(atomicView, (controlBase + 0) / 4);
+        const inTail = Atomics.load(atomicView, (controlBase + 4) / 4);
+        const outHead = Atomics.load(atomicView, (controlBase + 8) / 4);
+        const outTail = Atomics.load(atomicView, (controlBase + 12) / 4);
+        const debugHead = Atomics.load(atomicView, (controlBase + 16) / 4);
+        const debugTail = Atomics.load(atomicView, (controlBase + 20) / 4);
+
+        // Calculate bytes used (accounting for wrap-around)
+        const inUsed = (inHead - inTail + this.#bufferConstants.IN_BUFFER_SIZE) % this.#bufferConstants.IN_BUFFER_SIZE;
+        const outUsed = (outHead - outTail + this.#bufferConstants.OUT_BUFFER_SIZE) % this.#bufferConstants.OUT_BUFFER_SIZE;
+        const debugUsed = (debugHead - debugTail + this.#bufferConstants.DEBUG_BUFFER_SIZE) % this.#bufferConstants.DEBUG_BUFFER_SIZE;
+
+        return {
+            inBufferUsed: {
+                bytes: inUsed,
+                percentage: Math.round((inUsed / this.#bufferConstants.IN_BUFFER_SIZE) * 100)
+            },
+            outBufferUsed: {
+                bytes: outUsed,
+                percentage: Math.round((outUsed / this.#bufferConstants.OUT_BUFFER_SIZE) * 100)
+            },
+            debugBufferUsed: {
+                bytes: debugUsed,
+                percentage: Math.round((debugUsed / this.#bufferConstants.DEBUG_BUFFER_SIZE) * 100)
+            }
+        };
+    }
+
+    /**
+     * Get OSC worker metrics from SharedArrayBuffer (written by OSC workers)
+     * @returns {Object|null}
+     * @private
+     */
+    #getOSCMetrics() {
+        if (!this.#sharedBuffer || !this.#bufferConstants || !this.#ringBufferBase) {
+            return null;
+        }
+
+        const metricsBase = this.#ringBufferBase + this.#bufferConstants.METRICS_START;
+        const metricsCount = this.#bufferConstants.METRICS_SIZE / 4;
+        const metricsView = new Uint32Array(this.#sharedBuffer, metricsBase, metricsCount);
+
+        // Read OSC worker metrics from SAB
+        return {
+            // OSC Out (prescheduler) - offsets 7-18
+            preschedulerPending: metricsView[7],
+            preschedulerPeak: metricsView[8],
+            preschedulerSent: metricsView[9],
+            bundlesDropped: metricsView[10],
+            retriesSucceeded: metricsView[11],
+            retriesFailed: metricsView[12],
+            bundlesScheduled: metricsView[13],
+            eventsCancelled: metricsView[14],
+            totalDispatches: metricsView[15],
+            messagesRetried: metricsView[16],
+            retryQueueSize: metricsView[17],
+            retryQueueMax: metricsView[18],
+
+            // OSC In - offsets 19-22
+            oscInMessagesReceived: metricsView[19],
+            oscInDroppedMessages: metricsView[20],
+            oscInWakeups: metricsView[21],
+            oscInTimeouts: metricsView[22],
+
+            // Debug - offsets 23-26
+            debugMessagesReceived: metricsView[23],
+            debugWakeups: metricsView[24],
+            debugTimeouts: metricsView[25],
+            debugBytesRead: metricsView[26]
+        };
+    }
+
+    /**
+     * Gather metrics from all sources (worklet, OSC, internal counters)
+     * All metrics are read synchronously from SAB
+     * @returns {SuperSonicMetrics}
+     * @private
+     */
+    #gatherMetrics() {
+        const startTime = performance.now();
+
+        const metrics = {
+            // SuperSonic counters (in-memory, fast)
+            messagesSent: this.#metrics_messagesSent,
+            messagesReceived: this.#metrics_messagesReceived,
+            errors: this.#metrics_errors
+        };
+
+        // Worklet metrics (instant SAB read)
+        const workletMetrics = this.#getWorkletMetrics();
+        if (workletMetrics) {
+            Object.assign(metrics, workletMetrics);
+        }
+
+        // Buffer usage (calculated from SAB head/tail pointers)
+        const bufferUsage = this.#getBufferUsage();
+        if (bufferUsage) {
+            Object.assign(metrics, bufferUsage);
+        }
+
+        // OSC worker metrics (instant SAB read)
+        const oscMetrics = this.#getOSCMetrics();
+        if (oscMetrics) {
+            Object.assign(metrics, oscMetrics);
+        }
+
+        const totalDuration = performance.now() - startTime;
+        if (totalDuration > 1) {
+            console.warn(`[SuperSonic] Slow metrics gathering: ${totalDuration.toFixed(2)}ms`);
+        }
+
+        return metrics;
+    }
+
+    /**
+     * Start performance monitoring - gathers metrics from all sources
+     * and calls onMetricsUpdate with consolidated snapshot
      */
     #startPerformanceMonitoring() {
-        // Request metrics periodically
-        setInterval(() => {
-            if (this.#osc) {
-                // Get stats from ScsynthOSC
-                this.#osc.getStats().then(stats => {
-                    if (stats && this.onMetricsUpdate) {
-                        this.onMetricsUpdate(stats);
-                    }
-                });
+        // Clear any existing interval (shouldn't happen, but safety first)
+        if (this.#metricsIntervalId) {
+            clearInterval(this.#metricsIntervalId);
+        }
+
+        // Request metrics periodically (100ms = 10Hz)
+        // All metrics are read from SAB (<0.1ms) - fully synchronous
+        this.#metricsIntervalId = setInterval(() => {
+            if (!this.onMetricsUpdate) return;
+
+            // Prevent overlapping executions if gathering takes >100ms
+            if (this.#metricsGatherInProgress) {
+                console.warn('[SuperSonic] Metrics gathering took >100ms, skipping this interval');
+                return;
             }
-            if (this.#workletNode) {
-                this.#workletNode.port.postMessage({ type: 'getMetrics' });
+
+            this.#metricsGatherInProgress = true;
+            try {
+                // Gather all metrics from all sources (synchronous SAB reads)
+                const metrics = this.#gatherMetrics();
+
+                // Single callback with complete metrics snapshot
+                this.onMetricsUpdate(metrics);
+            } catch (error) {
+                console.error('[SuperSonic] Metrics gathering failed:', error);
+            } finally {
+                this.#metricsGatherInProgress = false;
             }
-        }, 50);
+        }, 100);
+    }
+
+    /**
+     * Stop performance monitoring
+     * @private
+     */
+    #stopPerformanceMonitoring() {
+        if (this.#metricsIntervalId) {
+            clearInterval(this.#metricsIntervalId);
+            this.#metricsIntervalId = null;
+        }
     }
 
     /**
@@ -685,7 +928,7 @@ export class SuperSonic {
         const uint8Data = this.#toUint8Array(oscData);
         const preparedData = await this.#prepareOutboundPacket(uint8Data);
 
-        this.stats.messagesSent++;
+        this.#metrics_messagesSent++;
 
         if (this.onMessageSent) {
             this.onMessageSent(preparedData);
@@ -733,7 +976,7 @@ export class SuperSonic {
         return {
             initialized: this.#initialized,
             capabilities: this.#capabilities,
-            stats: this.stats,
+            bootStats: this.bootStats,
             audioContextState: this.#audioContext?.state
         };
     }
@@ -765,8 +1008,9 @@ export class SuperSonic {
     async destroy() {
         console.log('[SuperSonic] Destroying...');
 
-        // Stop drift offset timer
+        // Stop timers
         this.#stopDriftOffsetTimer();
+        this.#stopPerformanceMonitoring();
 
         if (this.#osc) {
             this.#osc.terminate();

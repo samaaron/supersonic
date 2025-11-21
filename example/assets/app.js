@@ -767,24 +767,38 @@ initButton.addEventListener('click', async () => {
     };
 
     orchestrator.onMetricsUpdate = (metrics) => {
+      // Metrics are now consolidated from all sources (worklet, OSC, SuperSonic counters)
       // Map to snake_case and update UI
-      // Only include fields that are actually present (don't default to 0)
       const metricsWithUsage = {};
 
-      if (metrics.processCount !== undefined || metrics.process_count !== undefined) {
-        metricsWithUsage.process_count = metrics.processCount || metrics.process_count;
-      }
-      if (metrics.maxProcessTime !== undefined || metrics.max_process_time_us !== undefined) {
-        metricsWithUsage.max_process_time_us = metrics.maxProcessTime || metrics.max_process_time_us;
-      }
-      if (metrics.bufferOverruns !== undefined || metrics.buffer_overruns !== undefined) {
-        metricsWithUsage.buffer_overruns = metrics.bufferOverruns || metrics.buffer_overruns;
-      }
-      if (metrics.messagesDropped !== undefined || metrics.dropped_messages !== undefined) {
-        metricsWithUsage.messages_dropped = metrics.messagesDropped || metrics.dropped_messages;
-      }
-      // Messages received is tracked by the orchestrator, not WASM
-      metricsWithUsage.messages_received = orchestrator.stats.messagesReceived || 0;
+      // Define camelCase -> snake_case mapping
+      const metricsMapping = {
+        processCount: 'process_count',
+        maxProcessTime: 'max_process_time_us',
+        bufferOverruns: 'buffer_overruns',
+        messagesDropped: 'messages_dropped',
+        schedulerQueueDepth: 'scheduler_queue_depth',
+        schedulerQueueMax: 'scheduler_queue_max',
+        pollInterval: 'poll_interval',
+        messagesSent: 'messages_sent',
+        messagesReceived: 'messages_received',
+        errors: 'errors',
+        preschedulerPending: 'prescheduler_pending',
+        preschedulerPeak: 'prescheduler_peak',
+        preschedulerSent: 'prescheduler_sent',
+        bundlesDropped: 'scheduler_queue_dropped',
+        retriesSucceeded: 'prescheduler_retries_succeeded',
+        retriesFailed: 'prescheduler_retries_failed'
+      };
+
+      // Apply all simple mappings
+      Object.entries(metricsMapping).forEach(([source, target]) => {
+        if (metrics[source] !== undefined) {
+          metricsWithUsage[target] = metrics[source];
+        }
+      });
+
+      // Handle nested properties (buffer usage percentages)
       if (metrics.inBufferUsed?.percentage !== undefined) {
         metricsWithUsage.in_buffer_usage = metrics.inBufferUsed.percentage;
       }
@@ -793,34 +807,6 @@ initButton.addEventListener('click', async () => {
       }
       if (metrics.debugBufferUsed?.percentage !== undefined) {
         metricsWithUsage.debug_buffer_usage = metrics.debugBufferUsed.percentage;
-      }
-      if (metrics.pollInterval !== undefined) {
-        metricsWithUsage.poll_interval = metrics.pollInterval;
-      }
-      if (metrics.schedulerQueueDepth !== undefined || metrics.scheduler_queue_depth !== undefined) {
-        metricsWithUsage.scheduler_queue_depth = metrics.schedulerQueueDepth ?? metrics.scheduler_queue_depth;
-      }
-      if (metrics.schedulerQueueMax !== undefined || metrics.scheduler_queue_max !== undefined) {
-        metricsWithUsage.scheduler_queue_max = metrics.schedulerQueueMax ?? metrics.scheduler_queue_max;
-      }
-
-      metricsWithUsage.messages_sent = orchestrator.stats.messagesSent || 0;
-
-      // Collect OSC worker stats (prescheduler, etc.)
-      if (typeof orchestrator.osc?.getStats === 'function') {
-        orchestrator.osc.getStats().then(oscStats => {
-          if (oscStats?.oscOut) {
-            metricsWithUsage.prescheduler_pending = oscStats.oscOut.eventsPending || 0;
-            metricsWithUsage.prescheduler_peak = oscStats.oscOut.maxEventsPending || 0;
-            metricsWithUsage.prescheduler_sent = oscStats.oscOut.bundlesWritten || 0;
-            metricsWithUsage.scheduler_queue_dropped = oscStats.oscOut.bundlesDropped || 0;
-            metricsWithUsage.prescheduler_retries_succeeded = oscStats.oscOut.retriesSucceeded || 0;
-            metricsWithUsage.prescheduler_retries_failed = oscStats.oscOut.retriesFailed || 0;
-            updateMetrics(metricsWithUsage);
-          }
-        }).catch(err => {
-          console.warn('[App] Failed to get OSC stats', err);
-        });
       }
 
       if (typeof orchestrator.getDiagnostics === 'function') {

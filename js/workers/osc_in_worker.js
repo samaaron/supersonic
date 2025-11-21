@@ -26,6 +26,10 @@ var bufferConstants = null;
 // Control indices (calculated after init)
 var CONTROL_INDICES = {};
 
+// Metrics view (for writing stats to SAB)
+var metricsView = null;
+var METRICS_INDICES = {};
+
 // Worker state
 var running = false;
 
@@ -36,14 +40,8 @@ function oscInLog() {
     }
 }
 
-// Statistics
-var stats = {
-    messagesReceived: 0,
-    lastSequenceReceived: -1,
-    droppedMessages: 0,
-    wakeups: 0,
-    timeouts: 0
-};
+// Sequence tracking for dropped message detection
+var lastSequenceReceived = -1;
 
 /**
  * Initialize ring buffer access
@@ -60,6 +58,17 @@ function initRingBuffer(buffer, base, constants) {
     CONTROL_INDICES = {
         OUT_HEAD: (ringBufferBase + bufferConstants.CONTROL_START + 8) / 4,
         OUT_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 12) / 4
+    };
+
+    // Initialize metrics view (OSC In metrics are at offsets 19-22 in the metrics array)
+    var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
+    metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
+
+    METRICS_INDICES = {
+        MESSAGES_RECEIVED: 19,
+        DROPPED_MESSAGES: 20,
+        WAKEUPS: 21,
+        TIMEOUTS: 22
     };
 }
 
@@ -100,7 +109,7 @@ function readMessages() {
 
         if (magic !== bufferConstants.MESSAGE_MAGIC) {
             console.error('[OSCInWorker] Corrupted message at position', currentTail);
-            stats.droppedMessages++;
+            if (metricsView) Atomics.add(metricsView, METRICS_INDICES.DROPPED_MESSAGES, 1);
             // Skip this byte and continue
             currentTail = (currentTail + 1) % bufferConstants.OUT_BUFFER_SIZE;
             continue;
@@ -113,23 +122,23 @@ function readMessages() {
         // Validate message length
         if (length < bufferConstants.MESSAGE_HEADER_SIZE || length > bufferConstants.OUT_BUFFER_SIZE) {
             console.error('[OSCInWorker] Invalid message length:', length);
-            stats.droppedMessages++;
+            if (metricsView) Atomics.add(metricsView, METRICS_INDICES.DROPPED_MESSAGES, 1);
             currentTail = (currentTail + 1) % bufferConstants.OUT_BUFFER_SIZE;
             continue;
         }
 
         // Check for dropped messages via sequence
-        if (stats.lastSequenceReceived >= 0) {
-            var expectedSeq = (stats.lastSequenceReceived + 1) & 0xFFFFFFFF;
+        if (lastSequenceReceived >= 0) {
+            var expectedSeq = (lastSequenceReceived + 1) & 0xFFFFFFFF;
             if (sequence !== expectedSeq) {
                 var dropped = (sequence - expectedSeq + 0x100000000) & 0xFFFFFFFF;
                 if (dropped < 1000) { // Sanity check
                     console.warn('[OSCInWorker] Detected', dropped, 'dropped messages (expected seq', expectedSeq, 'got', sequence, ')');
-                    stats.droppedMessages += dropped;
+                    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.DROPPED_MESSAGES, dropped);
                 }
             }
         }
-        stats.lastSequenceReceived = sequence;
+        lastSequenceReceived = sequence;
 
         // Read payload (OSC binary data) - now contiguous due to padding
         var payloadLength = length - bufferConstants.MESSAGE_HEADER_SIZE;
@@ -149,7 +158,7 @@ function readMessages() {
         // Move to next message
         currentTail = (currentTail + length) % bufferConstants.OUT_BUFFER_SIZE;
         messagesRead++;
-        stats.messagesReceived++;
+        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RECEIVED, 1);
     }
 
     // Update tail pointer (consume messages)
@@ -177,9 +186,9 @@ function waitLoop() {
 
                 if (result === 'ok' || result === 'not-equal') {
                     // We were notified or value changed!
-                    stats.wakeups++;
+                    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.WAKEUPS, 1);
                 } else if (result === 'timed-out') {
-                    stats.timeouts++;
+                    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.TIMEOUTS, 1);
                     continue; // Check running flag
                 }
             }
@@ -191,13 +200,7 @@ function waitLoop() {
                 // Send to main thread
                 self.postMessage({
                     type: 'messages',
-                    messages: messages,
-                    stats: {
-                        wakeups: stats.wakeups,
-                        timeouts: stats.timeouts,
-                        messagesReceived: stats.messagesReceived,
-                        droppedMessages: stats.droppedMessages
-                    }
+                    messages: messages
                 });
             }
 
@@ -259,13 +262,6 @@ self.addEventListener('message', function(event) {
 
             case 'stop':
                 stop();
-                break;
-
-            case 'getStats':
-                self.postMessage({
-                    type: 'stats',
-                    stats: stats
-                });
                 break;
 
             default:
