@@ -26,6 +26,10 @@ var bufferConstants = null;
 // Control indices (calculated after init)
 var CONTROL_INDICES = {};
 
+// Metrics view (for writing stats to SAB)
+var metricsView = null;
+var METRICS_INDICES = {};
+
 // Worker state
 var running = false;
 
@@ -35,14 +39,6 @@ function debugWorkerLog() {
         console.log.apply(console, arguments);
     }
 }
-
-// Statistics
-var stats = {
-    messagesReceived: 0,
-    wakeups: 0,
-    timeouts: 0,
-    bytesRead: 0
-};
 
 /**
  * Initialize ring buffer access
@@ -59,6 +55,17 @@ function initRingBuffer(buffer, base, constants) {
     CONTROL_INDICES = {
         DEBUG_HEAD: (ringBufferBase + bufferConstants.CONTROL_START + 16) / 4,
         DEBUG_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 20) / 4
+    };
+
+    // Initialize metrics view (Debug metrics are at offsets 23-26 in the metrics array)
+    var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
+    metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
+
+    METRICS_INDICES = {
+        MESSAGES_RECEIVED: 23,
+        WAKEUPS: 24,
+        TIMEOUTS: 25,
+        BYTES_READ: 26
     };
 }
 
@@ -137,13 +144,13 @@ function readDebugMessages() {
         // Move to next message
         currentTail = (currentTail + length) % bufferConstants.DEBUG_BUFFER_SIZE;
         messagesRead++;
-        stats.messagesReceived++;
+        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RECEIVED, 1);
     }
 
     // Update tail pointer (consume messages)
     if (messagesRead > 0) {
         Atomics.store(atomicView, CONTROL_INDICES.DEBUG_TAIL, currentTail);
-        stats.bytesRead += messagesRead;
+        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BYTES_READ, messagesRead);
     }
 
     return messages.length > 0 ? messages : null;
@@ -166,9 +173,9 @@ function waitLoop() {
 
                 if (result === 'ok' || result === 'not-equal') {
                     // We were notified or value changed!
-                    stats.wakeups++;
+                    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.WAKEUPS, 1);
                 } else if (result === 'timed-out') {
-                    stats.timeouts++;
+                    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.TIMEOUTS, 1);
                     continue; // Check running flag
                 }
             }
@@ -180,13 +187,7 @@ function waitLoop() {
                 // Send to main thread
                 self.postMessage({
                     type: 'debug',
-                    messages: messages,
-                    stats: {
-                        wakeups: stats.wakeups,
-                        timeouts: stats.timeouts,
-                        messagesReceived: stats.messagesReceived,
-                        bytesRead: stats.bytesRead
-                    }
+                    messages: messages
                 });
             }
 
@@ -263,13 +264,6 @@ self.addEventListener('message', function(event) {
 
             case 'clear':
                 clear();
-                break;
-
-            case 'getStats':
-                self.postMessage({
-                    type: 'stats',
-                    stats: stats
-                });
                 break;
 
             default:

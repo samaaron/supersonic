@@ -17,6 +17,10 @@ var uint8View = null;
 // Ring buffer control indices
 var CONTROL_INDICES = {};
 
+// Metrics view (for writing stats to SAB)
+var metricsView = null;
+var METRICS_INDICES = {};
+
 // Priority queue implemented as binary min-heap
 // Entries: { ntpTime, seq, editorId, runTag, oscData }
 var eventHeap = [];
@@ -24,32 +28,13 @@ var periodicTimer = null;    // Single periodic timer (25ms interval)
 var sequenceCounter = 0;
 var isDispatching = false;  // Prevent reentrancy into dispatch loop
 
+// Message sequence counter for ring buffer writes (NOT a metric - used for message headers)
+var outgoingMessageSeq = 0;
+
 // Retry queue for failed writes
 var retryQueue = [];
 var MAX_RETRY_QUEUE_SIZE = 100;
 var MAX_RETRIES_PER_MESSAGE = 5;
-
-// Statistics
-var stats = {
-    bundlesScheduled: 0,
-    bundlesWritten: 0,
-    bundlesDropped: 0,
-    bufferOverruns: 0,
-    eventsPending: 0,
-    maxEventsPending: 0,
-    eventsCancelled: 0,
-    totalDispatches: 0,
-    totalLateDispatchMs: 0,
-    maxLateDispatchMs: 0,
-    totalSendTasks: 0,
-    totalSendProcessMs: 0,
-    maxSendProcessMs: 0,
-    messagesRetried: 0,
-    retriesSucceeded: 0,
-    retriesFailed: 0,
-    retryQueueSize: 0,
-    maxRetryQueueSize: 0
-};
 
 // Timing constants
 var NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
@@ -127,7 +112,44 @@ function initSharedBuffer() {
         IN_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 4) / 4
     };
 
-    console.log('[PreScheduler] SharedArrayBuffer initialized with direct ring buffer writing');
+    // Initialize metrics view (OSC Out metrics are at offsets 7-12 in the metrics array)
+    var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
+    metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
+
+    METRICS_INDICES = {
+        EVENTS_PENDING: 7,
+        MAX_EVENTS_PENDING: 8,
+        BUNDLES_WRITTEN: 9,
+        BUNDLES_DROPPED: 10,
+        RETRIES_SUCCEEDED: 11,
+        RETRIES_FAILED: 12,
+        BUNDLES_SCHEDULED: 13,
+        EVENTS_CANCELLED: 14,
+        TOTAL_DISPATCHES: 15,
+        MESSAGES_RETRIED: 16,
+        RETRY_QUEUE_SIZE: 17,
+        RETRY_QUEUE_MAX: 18
+    };
+
+    console.log('[PreScheduler] SharedArrayBuffer initialized with direct ring buffer writing and metrics');
+}
+
+/**
+ * Write metrics to SharedArrayBuffer
+ * Increments use Atomics.add() for thread safety, stores use Atomics.store()
+ */
+function updateMetrics() {
+    if (!metricsView) return;
+
+    // Update current values (use Atomics.store for absolute values)
+    Atomics.store(metricsView, METRICS_INDICES.EVENTS_PENDING, eventHeap.length);
+
+    // Update max if current exceeds it
+    var currentPending = eventHeap.length;
+    var currentMax = Atomics.load(metricsView, METRICS_INDICES.MAX_EVENTS_PENDING);
+    if (currentPending > currentMax) {
+        Atomics.store(metricsView, METRICS_INDICES.MAX_EVENTS_PENDING, currentPending);
+    }
 }
 
 /**
@@ -138,7 +160,7 @@ function initSharedBuffer() {
 function writeToRingBuffer(oscMessage, isRetry) {
     if (!sharedBuffer || !atomicView) {
         console.error('[PreScheduler] Not initialized for ring buffer writing');
-        stats.bundlesDropped++;
+        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BUNDLES_DROPPED, 1);
         return false;
     }
 
@@ -148,7 +170,7 @@ function writeToRingBuffer(oscMessage, isRetry) {
     // Check if message fits in buffer at all
     if (totalSize > bufferConstants.IN_BUFFER_SIZE - bufferConstants.MESSAGE_HEADER_SIZE) {
         console.error('[PreScheduler] Message too large:', totalSize);
-        stats.bundlesDropped++;
+        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BUNDLES_DROPPED, 1);
         return false;
     }
 
@@ -161,11 +183,10 @@ function writeToRingBuffer(oscMessage, isRetry) {
 
     if (available < totalSize) {
         // Buffer full - return false so caller can queue for retry
-        stats.bufferOverruns++;
         if (!isRetry) {
             // Only increment bundlesDropped on initial attempt
             // Retries increment different counters
-            stats.bundlesDropped++;
+            if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BUNDLES_DROPPED, 1);
             console.warn('[PreScheduler] Ring buffer full, message will be queued for retry');
         }
         return false;
@@ -183,7 +204,7 @@ function writeToRingBuffer(oscMessage, isRetry) {
         var headerView = new DataView(headerBytes.buffer);
         headerView.setUint32(0, bufferConstants.MESSAGE_MAGIC, true);
         headerView.setUint32(4, totalSize, true);
-        headerView.setUint32(8, stats.bundlesWritten, true);
+        headerView.setUint32(8, outgoingMessageSeq, true);
         headerView.setUint32(12, 0, true);
 
         var writePos1 = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
@@ -214,7 +235,7 @@ function writeToRingBuffer(oscMessage, isRetry) {
         // Write header
         dataView.setUint32(writePos, bufferConstants.MESSAGE_MAGIC, true);
         dataView.setUint32(writePos + 4, totalSize, true);
-        dataView.setUint32(writePos + 8, stats.bundlesWritten, true);
+        dataView.setUint32(writePos + 8, outgoingMessageSeq, true);
         dataView.setUint32(writePos + 12, 0, true);
 
         // Write payload
@@ -222,8 +243,8 @@ function writeToRingBuffer(oscMessage, isRetry) {
     }
 
     // Diagnostic: Log first few writes
-    if (stats.bundlesWritten < 5) {
-        schedulerLog('[PreScheduler] Write:', 'seq=' + stats.bundlesWritten,
+    if (outgoingMessageSeq < 5) {
+        schedulerLog('[PreScheduler] Write:', 'seq=' + outgoingMessageSeq,
                     'pos=' + head, 'size=' + totalSize, 'newHead=' + ((head + totalSize) % bufferConstants.IN_BUFFER_SIZE));
     }
 
@@ -236,7 +257,11 @@ function writeToRingBuffer(oscMessage, isRetry) {
     var newHead = (head + totalSize) % bufferConstants.IN_BUFFER_SIZE;
     Atomics.store(atomicView, CONTROL_INDICES.IN_HEAD, newHead);
 
-    stats.bundlesWritten++;
+    // Increment sequence counter for next message
+    outgoingMessageSeq = (outgoingMessageSeq + 1) & 0xFFFFFFFF;
+
+    // Update SAB metrics
+    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BUNDLES_WRITTEN, 1);
     return true;
 }
 
@@ -246,7 +271,7 @@ function writeToRingBuffer(oscMessage, isRetry) {
 function queueForRetry(oscData, context) {
     if (retryQueue.length >= MAX_RETRY_QUEUE_SIZE) {
         console.error('[PreScheduler] Retry queue full, dropping message permanently');
-        stats.retriesFailed++;
+        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.RETRIES_FAILED, 1);
         return;
     }
 
@@ -257,9 +282,13 @@ function queueForRetry(oscData, context) {
         queuedAt: performance.now()
     });
 
-    stats.retryQueueSize = retryQueue.length;
-    if (stats.retryQueueSize > stats.maxRetryQueueSize) {
-        stats.maxRetryQueueSize = stats.retryQueueSize;
+    // Update SAB metrics
+    if (metricsView) {
+        Atomics.store(metricsView, METRICS_INDICES.RETRY_QUEUE_SIZE, retryQueue.length);
+        var currentMax = Atomics.load(metricsView, METRICS_INDICES.RETRY_QUEUE_MAX);
+        if (retryQueue.length > currentMax) {
+            Atomics.store(metricsView, METRICS_INDICES.RETRY_QUEUE_MAX, retryQueue.length);
+        }
     }
 
     schedulerLog('[PreScheduler] Queued message for retry:', context, 'queue size:', retryQueue.length);
@@ -284,24 +313,28 @@ function processRetryQueue() {
         if (success) {
             // Success - remove from queue
             retryQueue.splice(i, 1);
-            stats.retriesSucceeded++;
-            stats.messagesRetried++;
-            stats.retryQueueSize = retryQueue.length;
+            if (metricsView) {
+                Atomics.add(metricsView, METRICS_INDICES.RETRIES_SUCCEEDED, 1);
+                Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RETRIED, 1);
+                Atomics.store(metricsView, METRICS_INDICES.RETRY_QUEUE_SIZE, retryQueue.length);
+            }
             schedulerLog('[PreScheduler] Retry succeeded for:', item.context,
                         'after', item.retryCount + 1, 'attempts');
             // Don't increment i - we removed an item
         } else {
             // Failed - increment retry count
             item.retryCount++;
-            stats.messagesRetried++;
+            if (metricsView) Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RETRIED, 1);
 
             if (item.retryCount >= MAX_RETRIES_PER_MESSAGE) {
                 // Give up on this message
                 console.error('[PreScheduler] Giving up on message after',
                              MAX_RETRIES_PER_MESSAGE, 'retries:', item.context);
                 retryQueue.splice(i, 1);
-                stats.retriesFailed++;
-                stats.retryQueueSize = retryQueue.length;
+                if (metricsView) {
+                    Atomics.add(metricsView, METRICS_INDICES.RETRIES_FAILED, 1);
+                    Atomics.store(metricsView, METRICS_INDICES.RETRY_QUEUE_SIZE, retryQueue.length);
+                }
                 // Don't increment i - we removed an item
             } else {
                 // Keep in queue, try again next cycle
@@ -343,17 +376,14 @@ function scheduleEvent(oscData, editorId, runTag) {
 
     heapPush(event);
 
-    stats.bundlesScheduled++;
-    stats.eventsPending = eventHeap.length;
-    if (stats.eventsPending > stats.maxEventsPending) {
-        stats.maxEventsPending = stats.eventsPending;
-    }
+    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BUNDLES_SCHEDULED, 1);
+    updateMetrics();  // Update SAB with current queue depth and peak
 
     schedulerLog('[PreScheduler] Scheduled bundle:',
                  'NTP=' + ntpTime.toFixed(3),
                  'current=' + currentNTP.toFixed(3),
                  'wait=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
-                 'pending=' + stats.eventsPending);
+                 'pending=' + eventHeap.length);
 }
 
 function heapPush(event) {
@@ -469,16 +499,16 @@ function checkAndDispatch() {
         if (nextEvent.ntpTime <= lookaheadTime) {
             // Ready to dispatch
             heapPop();
-            stats.eventsPending = eventHeap.length;
+            updateMetrics();  // Update SAB with current queue depth
 
             var timeUntilExec = nextEvent.ntpTime - currentNTP;
-            stats.totalDispatches++;
+            if (metricsView) Atomics.add(metricsView, METRICS_INDICES.TOTAL_DISPATCHES, 1);
 
             schedulerLog('[PreScheduler] Dispatching bundle:',
                         'NTP=' + nextEvent.ntpTime.toFixed(3),
                         'current=' + currentNTP.toFixed(3),
                         'early=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
-                        'remaining=' + stats.eventsPending);
+                        'remaining=' + eventHeap.length);
 
             var success = writeToRingBuffer(nextEvent.oscData, false);
             if (!success) {
@@ -524,8 +554,8 @@ function cancelBy(predicate) {
     if (removed > 0) {
         eventHeap = remaining;
         heapify();
-        stats.eventsCancelled += removed;
-        stats.eventsPending = eventHeap.length;
+        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.EVENTS_CANCELLED, removed);
+        updateMetrics();  // Update SAB with current queue depth
         console.log('[PreScheduler] Cancelled ' + removed + ' events, ' + eventHeap.length + ' remaining');
     }
 }
@@ -553,9 +583,9 @@ function cancelAllTags() {
         return;
     }
     var cancelled = eventHeap.length;
-    stats.eventsCancelled += cancelled;
+    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.EVENTS_CANCELLED, cancelled);
     eventHeap = [];
-    stats.eventsPending = 0;
+    updateMetrics();  // Update SAB (sets eventsPending to 0)
     console.log('[PreScheduler] Cancelled all ' + cancelled + ' events');
     // Note: Periodic timer continues running (it will just find empty queue)
 }
@@ -633,22 +663,13 @@ self.addEventListener('message', function(event) {
                 break;
 
             case 'send':
-                var sendStart = performance.now();
-
-                // New NTP-based scheduling: extract NTP from bundle
+                // NTP-based scheduling: extract NTP from bundle
                 // scheduleEvent() will dispatch immediately if not a bundle
                 scheduleEvent(
                     data.oscData,
                     data.editorId || 0,
                     data.runTag || ''
                 );
-
-                var sendDuration = performance.now() - sendStart;
-                stats.totalSendTasks++;
-                stats.totalSendProcessMs += sendDuration;
-                if (sendDuration > stats.maxSendProcessMs) {
-                    stats.maxSendProcessMs = sendDuration;
-                }
                 break;
 
             case 'sendImmediate':
@@ -667,32 +688,6 @@ self.addEventListener('message', function(event) {
 
             case 'cancelAll':
                 cancelAllTags();
-                break;
-
-            case 'getStats':
-                self.postMessage({
-                    type: 'stats',
-                    stats: {
-                        bundlesScheduled: stats.bundlesScheduled,
-                        bundlesWritten: stats.bundlesWritten,
-                        bundlesDropped: stats.bundlesDropped,
-                        bufferOverruns: stats.bufferOverruns,
-                        eventsPending: stats.eventsPending,
-                        maxEventsPending: stats.maxEventsPending,
-                        eventsCancelled: stats.eventsCancelled,
-                        totalDispatches: stats.totalDispatches,
-                        totalLateDispatchMs: stats.totalLateDispatchMs,
-                        maxLateDispatchMs: stats.maxLateDispatchMs,
-                        totalSendTasks: stats.totalSendTasks,
-                        totalSendProcessMs: stats.totalSendProcessMs,
-                        maxSendProcessMs: stats.maxSendProcessMs,
-                        messagesRetried: stats.messagesRetried,
-                        retriesSucceeded: stats.retriesSucceeded,
-                        retriesFailed: stats.retriesFailed,
-                        retryQueueSize: stats.retryQueueSize,
-                        maxRetryQueueSize: stats.maxRetryQueueSize
-                    }
-                });
                 break;
 
             default:

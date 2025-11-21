@@ -183,7 +183,7 @@ export default class ScsynthOSC {
             }
         };
 
-        // OSC OUT worker handler (mainly for errors since it writes directly)
+        // OSC OUT worker handler (mainly for errors)
         this.workers.oscOut.onmessage = (event) => {
             const data = event.data;
             switch (data.type) {
@@ -288,51 +288,6 @@ export default class ScsynthOSC {
 
         this.workers.debug.postMessage({
             type: 'clear'
-        });
-    }
-
-    /**
-     * Get statistics from all workers
-     */
-    async getStats() {
-        if (!this.initialized) {
-            return null;
-        }
-
-        const statsPromises = [
-            this.getWorkerStats(this.workers.oscOut, 'oscOut'),
-            this.getWorkerStats(this.workers.oscIn, 'oscIn'),
-            this.getWorkerStats(this.workers.debug, 'debug')
-        ];
-
-        const results = await Promise.all(statsPromises);
-
-        return {
-            oscOut: results[0],
-            oscIn: results[1],
-            debug: results[2]
-        };
-    }
-
-    /**
-     * Get stats from a single worker
-     */
-    getWorkerStats(worker, name) {
-        return new Promise((resolve) => {
-            const timeout = setTimeout(() => {
-                resolve({ error: 'Timeout getting stats' });
-            }, 1000);
-
-            const handler = (event) => {
-                if (event.data.type === 'stats') {
-                    clearTimeout(timeout);
-                    worker.removeEventListener('message', handler);
-                    resolve(event.data.stats);
-                }
-            };
-
-            worker.addEventListener('message', handler);
-            worker.postMessage({ type: 'getStats' });
         });
     }
 

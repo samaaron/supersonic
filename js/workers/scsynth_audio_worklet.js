@@ -361,59 +361,6 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 }
             }
 
-            if (data.type === 'getMetrics') {
-                // Return current metrics (only if initialized)
-                if (this.atomicView && this.METRICS_INDICES && this.CONTROL_INDICES && this.bufferConstants) {
-                    // Calculate buffer usage percentages (use constants from WASM)
-                    const IN_BUFFER_SIZE = this.bufferConstants.IN_BUFFER_SIZE;
-                    const OUT_BUFFER_SIZE = this.bufferConstants.OUT_BUFFER_SIZE;
-                    const DEBUG_BUFFER_SIZE = this.bufferConstants.DEBUG_BUFFER_SIZE;
-
-                    const inHead = Atomics.load(this.atomicView, this.CONTROL_INDICES.IN_HEAD);
-                    const inTail = Atomics.load(this.atomicView, this.CONTROL_INDICES.IN_TAIL);
-                    const inUsed = (inHead - inTail + IN_BUFFER_SIZE) % IN_BUFFER_SIZE;
-                    const inPercentage = Math.round((inUsed / IN_BUFFER_SIZE) * 100);
-
-                    const outHead = Atomics.load(this.atomicView, this.CONTROL_INDICES.OUT_HEAD);
-                    const outTail = Atomics.load(this.atomicView, this.CONTROL_INDICES.OUT_TAIL);
-                    const outUsed = (outHead - outTail + OUT_BUFFER_SIZE) % OUT_BUFFER_SIZE;
-                    const outPercentage = Math.round((outUsed / OUT_BUFFER_SIZE) * 100);
-
-                    const debugHead = Atomics.load(this.atomicView, this.CONTROL_INDICES.DEBUG_HEAD);
-                    const debugTail = Atomics.load(this.atomicView, this.CONTROL_INDICES.DEBUG_TAIL);
-                    const debugUsed = (debugHead - debugTail + DEBUG_BUFFER_SIZE) % DEBUG_BUFFER_SIZE;
-                    const debugPercentage = Math.round((debugUsed / DEBUG_BUFFER_SIZE) * 100);
-
-                    const metrics = {
-                        processCount: Atomics.load(this.atomicView, this.METRICS_INDICES.PROCESS_COUNT),
-                        bufferOverruns: Atomics.load(this.atomicView, this.METRICS_INDICES.BUFFER_OVERRUNS),
-                        messagesProcessed: Atomics.load(this.atomicView, this.METRICS_INDICES.MESSAGES_PROCESSED),
-                        messagesDropped: Atomics.load(this.atomicView, this.METRICS_INDICES.MESSAGES_DROPPED),
-                        schedulerQueueDepth: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_DEPTH),
-                        schedulerQueueMax: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_MAX),
-                        schedulerQueueDropped: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_DROPPED),
-                        statusFlags: Atomics.load(this.atomicView, this.CONTROL_INDICES.STATUS_FLAGS),
-                        inBufferUsed: {
-                            bytes: inUsed,
-                            percentage: inPercentage
-                        },
-                        outBufferUsed: {
-                            bytes: outUsed,
-                            percentage: outPercentage
-                        },
-                        debugBufferUsed: {
-                            bytes: debugUsed,
-                            percentage: debugPercentage
-                        }
-                    };
-
-                    this.port.postMessage({
-                        type: 'metrics',
-                        metrics: metrics
-                    });
-                }
-            }
-
             if (data.type === 'getVersion') {
                 // Return Supersonic/SuperCollider version string
                 if (this.wasmInstance && this.wasmInstance.exports.get_supersonic_version_string) {
