@@ -92,8 +92,6 @@ export class SuperSonic {
     #ringBufferBase;
     #bufferConstants;
     #bufferManager;
-    #timeOffsetPromise;
-    #resolveTimeOffset;
     #driftOffsetTimer;
     #syncListeners;
     #initialNTPStartTime;
@@ -125,10 +123,6 @@ export class SuperSonic {
         this.#osc = null;  // ScsynthOSC instance for OSC communication
         this.#bufferManager = null;
         this.loadedSynthDefs = new Set();
-
-        // Time offset (private)
-        this.#timeOffsetPromise = null;
-        this.#resolveTimeOffset = null;
 
         // Callbacks
         this.onOSC = null;              // Raw binary OSC from scsynth (for display/logging)
@@ -244,6 +238,11 @@ export class SuperSonic {
     }
 
     /**
+     * Merge user-provided world options with defaults
+     * @private
+     */
+
+    /**
      * Initialize shared WebAssembly memory
      */
     #initializeSharedMemory() {
@@ -265,33 +264,8 @@ export class SuperSonic {
     }
 
 
-    /**
-     * Initialize AudioContext and set up time offset calculation
-     */
     #initializeAudioContext() {
-        this.#audioContext = new (window.AudioContext || window.webkitAudioContext)(
-            this.config.audioContextOptions
-        );
-
-        // Create promise that will resolve when buffer constants are initialized
-        // and local clock offset is set up (happens in worklet initialization)
-        this.#timeOffsetPromise = new Promise((resolve) => {
-            this.#resolveTimeOffset = resolve;
-        });
-
-        // Handle suspended context
-        if (this.#audioContext.state === 'suspended') {
-            // Add one-time listener for user interaction
-            const resumeContext = async () => {
-                if (this.#audioContext.state === 'suspended') {
-                    await this.#audioContext.resume();
-                }
-            };
-
-            document.addEventListener('click', resumeContext, { once: true });
-            document.addEventListener('touchstart', resumeContext, { once: true });
-        }
-
+        this.#audioContext = new AudioContext(this.config.audioContextOptions);
         return this.#audioContext;
     }
 
@@ -565,13 +539,6 @@ export class SuperSonic {
                             // Start periodic drift offset updates (small millisecond adjustments)
                             // Measures drift from initial baseline, replaces value (doesn't accumulate)
                             this.#startDriftOffsetTimer();
-
-                            // Resolve time offset promise now that local clock offset is initialized
-                            console.log('[SuperSonic] Resolving time offset promise, _resolveTimeOffset=', this.#resolveTimeOffset);
-                            if (this.#resolveTimeOffset) {
-                                this.#resolveTimeOffset();
-                                this.#resolveTimeOffset = null;
-                            }
                         } else {
                             console.warn('[SuperSonic] Warning: bufferConstants not provided by worklet');
                         }
@@ -1007,23 +974,12 @@ export class SuperSonic {
     }
 
     /**
-     * Wait until NTP timing has been established.
-     * Note: NTP calculation is now done internally in C++ process_audio().
-     * Returns 0 for backward compatibility.
+     * Get NTP start time for bundle creation.
+     * This is the NTP timestamp when AudioContext.currentTime was 0.
+     * Bundles should have timestamp = audioContextTime + ntpStartTime
      */
-    async waitForTimeSync() {
-        // Wait for buffer constants to be initialized (which includes NTP timing setup)
-        if (!this.#bufferConstants) {
-            // Wait for the promise that was created in #initializeAudioContext()
-            // and will be resolved when bufferConstants are initialized
-            if (this.#timeOffsetPromise) {
-                await this.#timeOffsetPromise;
-            }
-        }
-
-        // Return the NTP start time for bundle creation
-        // This is the NTP timestamp when AudioContext.currentTime was 0
-        // Bundles should have timestamp = audioContextTime + ntpStartTime
+    waitForTimeSync() {
+        this.#ensureInitialized('wait for time sync');
         const ntpStartView = new Float64Array(this.#sharedBuffer, this.#ringBufferBase + this.#bufferConstants.NTP_START_TIME_START, 1);
         return ntpStartView[0];
     }
