@@ -14,7 +14,7 @@
       - new SuperSonic({ scsynthOptions: { numBuffers: 2048 } })
 
     Memory usage validation:
-      - Total allocations must fit within wasmHeapSize (~32MB by default)
+      - Total allocations must fit within wasmHeapSize (~16MB by default)
  */
 const defaultWorldOptions = {
   /**
@@ -93,10 +93,10 @@ const defaultWorldOptions = {
    * Real-time memory pool size in kilobytes
    * AllocPool for synthesis-time allocations (UGen memory, etc.)
    * This is the largest single allocation from WASM heap
-   * Memory: realTimeMemorySize * 1024 bytes (16384 * 1024 = 16MB)
-   * Default: 16384 KB (16MB, SuperSonic default, SC uses 8192 = 8MB)
+   * Memory: realTimeMemorySize * 1024 bytes (8192 * 1024 = 8MB)
+   * Default: 8192 KB (8MB, matching Sonic Pi and SuperCollider defaults)
    */
-  realTimeMemorySize: 16384,
+  realTimeMemorySize: 8192,
 
   /**
    * Number of random number generators

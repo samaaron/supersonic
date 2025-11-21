@@ -17,7 +17,6 @@ import oscLib from './vendor/osc.js/osc.js';
 import { NTP_EPOCH_OFFSET, DRIFT_UPDATE_INTERVAL_MS } from './timing_constants.js';
 import { MemoryLayout } from './memory_layout.js';
 import { defaultWorldOptions } from './scsynth_options.js';
-import { ConfigValidator } from './lib/config_validator.js';
 
 /**
  * SuperSonic metrics object - all metrics read synchronously from SharedArrayBuffer
@@ -156,15 +155,6 @@ export class SuperSonic {
         // Merge user-provided world options with defaults
         const worldOptions = this.#mergeWorldOptions(options.scsynthOptions || {});
 
-        // Validate configuration before initialization
-        try {
-            ConfigValidator.validateWorldOptions(worldOptions, MemoryLayout);
-            ConfigValidator.validateMemoryLayout(MemoryLayout);
-        } catch (error) {
-            // Improve error message with context
-            throw new Error(`SuperSonic configuration validation failed:\n${error.message}`);
-        }
-
         this.config = {
             wasmUrl: options.wasmUrl || wasmBaseURL + 'scsynth-nrt.wasm',
             workletUrl: options.workletUrl || workerBaseURL + 'scsynth_audio_worklet.js',
@@ -281,10 +271,13 @@ export class SuperSonic {
      * Initialize shared WebAssembly memory
      */
     #initializeSharedMemory() {
-        // Memory layout (from scsynth_options.js):
-        // 0-32MB:     Emscripten heap (scsynth objects, stack)
-        // 32-64MB:    Ring buffers (OSC in/out, debug, control)
-        // 64-192MB:   Buffer pool (128MB for audio buffers)
+        // Memory layout (from memory_layout.js):
+        // 0-16MB:   WASM heap (scsynth C++ allocations)
+        // 16-17MB:  Ring buffers (~1MB):
+        //           - OSC IN: 768KB, OSC OUT: 128KB, DEBUG: 64KB
+        //           - Control structures, metrics, NTP timing: ~96B
+        // 17-80MB:  Buffer pool (audio sample storage, 63MB)
+        // Total: 80MB
         const memConfig = this.config.memory;
 
         this.#wasmMemory = new WebAssembly.Memory({
