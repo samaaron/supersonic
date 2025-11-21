@@ -25,27 +25,49 @@ export class SuperSonic {
         encode: (message) => oscLib.writePacket(message),
         decode: (data, options = { metadata: false }) => oscLib.readPacket(data, options)
     };
+
+    // Private implementation
+    #audioContext;
+    #workletNode;
+    #osc;
+    #wasmModule;
+    #wasmInstance;
+    #wasmMemory;
+    #sharedBuffer;
+    #ringBufferBase;
+    #bufferConstants;
+    #bufferManager;
+    #timeOffsetPromise;
+    #resolveTimeOffset;
+    #localClockOffsetTimer;
+    #driftOffsetTimer;
+    #syncListeners;
+    #initialNTPStartTime;
+    #sampleBaseURL;
+    #synthdefBaseURL;
+    #audioPathMap;
+
     constructor(options = {}) {
         this.initialized = false;
         this.initializing = false;
         this.capabilities = {};
 
-        // Core components
-        this.sharedBuffer = null;
-        this.ringBufferBase = null;
-        this.bufferConstants = null;
-        this.audioContext = null;
-        this.workletNode = null;
-        this.osc = null;  // ScsynthOSC instance for OSC communication
-        this.wasmModule = null;
-        this.wasmInstance = null;
-        this.bufferManager = null;
+        // Core components (private)
+        this.#sharedBuffer = null;
+        this.#ringBufferBase = null;
+        this.#bufferConstants = null;
+        this.#audioContext = null;
+        this.#workletNode = null;
+        this.#osc = null;  // ScsynthOSC instance for OSC communication
+        this.#wasmModule = null;
+        this.#wasmInstance = null;
+        this.#bufferManager = null;
         this.loadedSynthDefs = new Set();
 
-        // Time offset promise (resolves when buffer constants are initialized)
-        this._timeOffsetPromise = null;
-        this._resolveTimeOffset = null;
-        this._localClockOffsetTimer = null;  // Timer for periodic drift correction
+        // Time offset (private)
+        this.#timeOffsetPromise = null;
+        this.#resolveTimeOffset = null;
+        this.#localClockOffsetTimer = null;  // Timer for periodic drift correction
 
         // Callbacks
         this.onOSC = null;              // Raw binary OSC from scsynth (for display/logging)
@@ -96,10 +118,10 @@ export class SuperSonic {
             worldOptions: worldOptions
         };
 
-        // Resource loading configuration
-        this.sampleBaseURL = options.sampleBaseURL || null;
-        this.synthdefBaseURL = options.synthdefBaseURL || null;
-        this.audioPathMap = options.audioPathMap || {};
+        // Resource loading configuration (private)
+        this.#sampleBaseURL = options.sampleBaseURL || null;
+        this.#synthdefBaseURL = options.synthdefBaseURL || null;
+        this.#audioPathMap = options.audioPathMap || {};
 
         // Stats
         this.stats = {
@@ -188,12 +210,12 @@ export class SuperSonic {
         // 64-192MB:   Buffer pool (128MB for audio buffers)
         const memConfig = this.config.memory;
 
-        this.wasmMemory = new WebAssembly.Memory({
+        this.#wasmMemory = new WebAssembly.Memory({
             initial: memConfig.totalPages,
             maximum: memConfig.totalPages,
             shared: true
         });
-        this.sharedBuffer = this.wasmMemory.buffer;
+        this.#sharedBuffer = this.#wasmMemory.buffer;
     }
 
 
@@ -201,22 +223,22 @@ export class SuperSonic {
      * Initialize AudioContext and set up time offset calculation
      */
     #initializeAudioContext() {
-        this.audioContext = new (window.AudioContext || window.webkitAudioContext)(
+        this.#audioContext = new (window.AudioContext || window.webkitAudioContext)(
             this.config.audioContextOptions
         );
 
         // Create promise that will resolve when buffer constants are initialized
         // and local clock offset is set up (happens in worklet initialization)
-        this._timeOffsetPromise = new Promise((resolve) => {
-            this._resolveTimeOffset = resolve;
+        this.#timeOffsetPromise = new Promise((resolve) => {
+            this.#resolveTimeOffset = resolve;
         });
 
         // Handle suspended context
-        if (this.audioContext.state === 'suspended') {
+        if (this.#audioContext.state === 'suspended') {
             // Add one-time listener for user interaction
             const resumeContext = async () => {
-                if (this.audioContext.state === 'suspended') {
-                    await this.audioContext.resume();
+                if (this.#audioContext.state === 'suspended') {
+                    await this.#audioContext.resume();
                 }
             };
 
@@ -224,22 +246,22 @@ export class SuperSonic {
             document.addEventListener('touchstart', resumeContext, { once: true });
         }
 
-        return this.audioContext;
+        return this.#audioContext;
     }
 
     #initializeBufferManager() {
         const memConfig = this.config.memory;
 
-        this.bufferManager = new BufferManager({
-            audioContext: this.audioContext,
-            sharedBuffer: this.sharedBuffer,
+        this.#bufferManager = new BufferManager({
+            audioContext: this.#audioContext,
+            sharedBuffer: this.#sharedBuffer,
             bufferPoolConfig: {
                 start: memConfig.bufferPoolOffset,
                 size: memConfig.bufferPoolSize,
                 align: 8
             },
-            sampleBaseURL: this.sampleBaseURL,
-            audioPathMap: this.audioPathMap,
+            sampleBaseURL: this.#sampleBaseURL,
+            audioPathMap: this.#audioPathMap,
             maxBuffers: this.config.worldOptions.numBuffers
         });
     }
@@ -287,33 +309,33 @@ export class SuperSonic {
      */
     async #initializeAudioWorklet(wasmBytes) {
         // Load AudioWorklet processor
-        await this.audioContext.audioWorklet.addModule(this.config.workletUrl);
+        await this.#audioContext.audioWorklet.addModule(this.config.workletUrl);
 
         // Create AudioWorkletNode
         // Configure with numberOfInputs: 0 to act as a source node
         // This ensures process() is called continuously without needing an input source
-        this.workletNode = new AudioWorkletNode(this.audioContext, 'scsynth-processor', {
+        this.#workletNode = new AudioWorkletNode(this.#audioContext, 'scsynth-processor', {
             numberOfInputs: 0,
             numberOfOutputs: 1,
             outputChannelCount: [2]
         });
 
         // Connect to audio graph to trigger process() calls
-        this.workletNode.connect(this.audioContext.destination);
+        this.#workletNode.connect(this.#audioContext.destination);
 
         // Initialize AudioWorklet with SharedArrayBuffer
-        this.workletNode.port.postMessage({
+        this.#workletNode.port.postMessage({
             type: 'init',
-            sharedBuffer: this.sharedBuffer
+            sharedBuffer: this.#sharedBuffer
         });
 
         // Send WASM bytes, memory, worldOptions, and actual sample rate
-        this.workletNode.port.postMessage({
+        this.#workletNode.port.postMessage({
             type: 'loadWasm',
             wasmBytes: wasmBytes,
-            wasmMemory: this.wasmMemory,
+            wasmMemory: this.#wasmMemory,
             worldOptions: this.config.worldOptions,
-            sampleRate: this.audioContext.sampleRate  // Pass actual AudioContext sample rate
+            sampleRate: this.#audioContext.sampleRate  // Pass actual AudioContext sample rate
         });
 
         // Wait for worklet initialization
@@ -325,28 +347,28 @@ export class SuperSonic {
      */
     async #initializeOSC() {
         // Create ScsynthOSC instance with custom worker base URL if provided
-        this.osc = new ScsynthOSC(this.config.workerBaseURL);
+        this.#osc = new ScsynthOSC(this.config.workerBaseURL);
 
         // Set up ScsynthOSC callbacks
-        this.osc.onRawOSC((msg) => {
+        this.#osc.onRawOSC((msg) => {
             // Forward raw binary OSC to onOSC callback (for display/logging)
             if (this.onOSC) {
                 this.onOSC(msg);
             }
         });
 
-        this.osc.onParsedOSC((msg) => {
+        this.#osc.onParsedOSC((msg) => {
             // Handle internal messages
             if (msg.address === '/buffer/freed') {
-                this.bufferManager?.handleBufferFreed(msg.args);
+                this.#bufferManager?.handleBufferFreed(msg.args);
             } else if (msg.address === '/buffer/allocated') {
                 // Handle buffer allocation completion with UUID correlation
-                this.bufferManager?.handleBufferAllocated(msg.args);
+                this.#bufferManager?.handleBufferAllocated(msg.args);
             } else if (msg.address === '/synced' && msg.args.length > 0) {
                 // Handle /synced responses for sync operations
                 const syncId = msg.args[0];  // Integer sync ID
-                if (this._syncListeners && this._syncListeners.has(syncId)) {
-                    const listener = this._syncListeners.get(syncId);
+                if (this.#syncListeners && this.#syncListeners.has(syncId)) {
+                    const listener = this.#syncListeners.get(syncId);
                     listener(msg);
                 }
             }
@@ -358,13 +380,13 @@ export class SuperSonic {
             }
         });
 
-        this.osc.onDebugMessage((msg) => {
+        this.#osc.onDebugMessage((msg) => {
             if (this.onDebugMessage) {
                 this.onDebugMessage(msg);
             }
         });
 
-        this.osc.onError((error, workerName) => {
+        this.#osc.onError((error, workerName) => {
             console.error(`[SuperSonic] ${workerName} error:`, error);
             this.stats.errors++;
             if (this.onError) {
@@ -373,7 +395,7 @@ export class SuperSonic {
         });
 
         // Initialize ScsynthOSC with SharedArrayBuffer, ring buffer base, and buffer constants
-        await this.osc.init(this.sharedBuffer, this.ringBufferBase, this.bufferConstants);
+        await this.#osc.init(this.#sharedBuffer, this.#ringBufferBase, this.#bufferConstants);
     }
 
     /**
@@ -469,26 +491,26 @@ export class SuperSonic {
                 if (event.data.type === 'error') {
                     console.error('[AudioWorklet] Error:', event.data.error);
                     clearTimeout(timeout);
-                    this.workletNode.port.removeEventListener('message', messageHandler);
+                    this.#workletNode.port.removeEventListener('message', messageHandler);
                     reject(new Error(event.data.error || 'AudioWorklet error'));
                     return;
                 }
 
                 if (event.data.type === 'initialized') {
                     clearTimeout(timeout);
-                    this.workletNode.port.removeEventListener('message', messageHandler);
+                    this.#workletNode.port.removeEventListener('message', messageHandler);
 
                     if (event.data.success) {
                         // Store the ring buffer base address and constants from WASM
                         if (event.data.ringBufferBase !== undefined) {
-                            this.ringBufferBase = event.data.ringBufferBase;
+                            this.#ringBufferBase = event.data.ringBufferBase;
                         } else {
                             console.warn('[SuperSonic] Warning: ringBufferBase not provided by worklet');
                         }
 
                         if (event.data.bufferConstants !== undefined) {
                             console.log('[SuperSonic] Received bufferConstants from worklet');
-                            this.bufferConstants = event.data.bufferConstants;
+                            this.#bufferConstants = event.data.bufferConstants;
 
                             // Initialize NTP timing (write-once: NTP time at AudioContext start)
                             console.log('[SuperSonic] Initializing NTP timing');
@@ -499,10 +521,10 @@ export class SuperSonic {
                             this.#startDriftOffsetTimer();
 
                             // Resolve time offset promise now that local clock offset is initialized
-                            console.log('[SuperSonic] Resolving time offset promise, _resolveTimeOffset=', this._resolveTimeOffset);
-                            if (this._resolveTimeOffset) {
-                                this._resolveTimeOffset();
-                                this._resolveTimeOffset = null;
+                            console.log('[SuperSonic] Resolving time offset promise, _resolveTimeOffset=', this.#resolveTimeOffset);
+                            if (this.#resolveTimeOffset) {
+                                this.#resolveTimeOffset();
+                                this.#resolveTimeOffset = null;
                             }
                         } else {
                             console.warn('[SuperSonic] Warning: bufferConstants not provided by worklet');
@@ -516,8 +538,8 @@ export class SuperSonic {
                 }
             };
 
-            this.workletNode.port.addEventListener('message', messageHandler);
-            this.workletNode.port.start();
+            this.#workletNode.port.addEventListener('message', messageHandler);
+            this.#workletNode.port.start();
         });
     }
 
@@ -530,7 +552,7 @@ export class SuperSonic {
         // We only need to handle worklet messages here
 
         // Worklet message handler
-        this.workletNode.port.onmessage = (event) => {
+        this.#workletNode.port.onmessage = (event) => {
             const { data } = event;
 
             switch (data.type) {
@@ -585,16 +607,16 @@ export class SuperSonic {
     #startPerformanceMonitoring() {
         // Request metrics periodically
         setInterval(() => {
-            if (this.osc) {
+            if (this.#osc) {
                 // Get stats from ScsynthOSC
-                this.osc.getStats().then(stats => {
+                this.#osc.getStats().then(stats => {
                     if (stats && this.onMetricsUpdate) {
                         this.onMetricsUpdate(stats);
                     }
                 });
             }
-            if (this.workletNode) {
-                this.workletNode.port.postMessage({ type: 'getMetrics' });
+            if (this.#workletNode) {
+                this.#workletNode.port.postMessage({ type: 'getMetrics' });
             }
         }, 50);
     }
@@ -659,7 +681,31 @@ export class SuperSonic {
             sendOptions.currentTimeS = timing.currentTimeS;
         }
 
-        this.osc.send(preparedData, sendOptions);
+        this.#osc.send(preparedData, sendOptions);
+    }
+
+    /**
+     * Get AudioContext instance (read-only)
+     * @returns {AudioContext} The AudioContext instance
+     */
+    get audioContext() {
+        return this.#audioContext;
+    }
+
+    /**
+     * Get AudioWorkletNode instance (read-only)
+     * @returns {AudioWorkletNode} The AudioWorkletNode instance
+     */
+    get workletNode() {
+        return this.#workletNode;
+    }
+
+    /**
+     * Get ScsynthOSC instance (read-only)
+     * @returns {ScsynthOSC} The OSC communication layer instance
+     */
+    get osc() {
+        return this.#osc;
     }
 
     /**
@@ -670,7 +716,7 @@ export class SuperSonic {
             initialized: this.initialized,
             capabilities: this.capabilities,
             stats: this.stats,
-            audioContextState: this.audioContext?.state
+            audioContextState: this.#audioContext?.state
         };
     }
 
@@ -704,28 +750,28 @@ export class SuperSonic {
         // Stop drift offset timer
         this.#stopDriftOffsetTimer();
 
-        if (this.osc) {
-            this.osc.terminate();
-            this.osc = null;
+        if (this.#osc) {
+            this.#osc.terminate();
+            this.#osc = null;
         }
 
-        if (this.workletNode) {
-            this.workletNode.disconnect();
-            this.workletNode = null;
+        if (this.#workletNode) {
+            this.#workletNode.disconnect();
+            this.#workletNode = null;
         }
 
-        if (this.audioContext) {
-            await this.audioContext.close();
-            this.audioContext = null;
+        if (this.#audioContext) {
+            await this.#audioContext.close();
+            this.#audioContext = null;
         }
 
         // BufferManager handles its own cleanup
-        if (this.bufferManager) {
-            this.bufferManager.destroy();
-            this.bufferManager = null;
+        if (this.#bufferManager) {
+            this.#bufferManager.destroy();
+            this.#bufferManager = null;
         }
 
-        this.sharedBuffer = null;
+        this.#sharedBuffer = null;
         this.initialized = false;
         this.loadedSynthDefs.clear();
 
@@ -739,18 +785,18 @@ export class SuperSonic {
      */
     async waitForTimeSync() {
         // Wait for buffer constants to be initialized (which includes NTP timing setup)
-        if (!this.bufferConstants) {
+        if (!this.#bufferConstants) {
             // Wait for the promise that was created in #initializeAudioContext()
             // and will be resolved when bufferConstants are initialized
-            if (this._timeOffsetPromise) {
-                await this._timeOffsetPromise;
+            if (this.#timeOffsetPromise) {
+                await this.#timeOffsetPromise;
             }
         }
 
         // Return the NTP start time for bundle creation
         // This is the NTP timestamp when AudioContext.currentTime was 0
         // Bundles should have timestamp = audioContextTime + ntpStartTime
-        const ntpStartView = new Float64Array(this.sharedBuffer, this.ringBufferBase + this.bufferConstants.NTP_START_TIME_START, 1);
+        const ntpStartView = new Float64Array(this.#sharedBuffer, this.#ringBufferBase + this.#bufferConstants.NTP_START_TIME_START, 1);
         return ntpStartView[0];
     }
 
@@ -832,7 +878,7 @@ export class SuperSonic {
             throw new Error('SuperSonic not initialized. Call init() first.');
         }
 
-        if (!this.synthdefBaseURL) {
+        if (!this.#synthdefBaseURL) {
             throw new Error(
                 'synthdefBaseURL not configured. Please set it in SuperSonic constructor options.\n' +
                 'Example: new SuperSonic({ synthdefBaseURL: "./dist/synthdefs/" })\n' +
@@ -847,7 +893,7 @@ export class SuperSonic {
         await Promise.all(
             names.map(async (name) => {
                 try {
-                    const path = `${this.synthdefBaseURL}${name}.scsyndef`;
+                    const path = `${this.#synthdefBaseURL}${name}.scsyndef`;
                     await this.loadSynthDef(path);
                     results[name] = { success: true };
                 } catch (error) {
@@ -884,8 +930,8 @@ export class SuperSonic {
         const syncPromise = new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 // Clean up listener on timeout
-                if (this._syncListeners) {
-                    this._syncListeners.delete(syncId);
+                if (this.#syncListeners) {
+                    this.#syncListeners.delete(syncId);
                 }
                 reject(new Error('Timeout waiting for /synced response'));
             }, 10000); // 10 second timeout
@@ -894,15 +940,15 @@ export class SuperSonic {
             const messageHandler = (msg) => {
                 clearTimeout(timeout);
                 // Remove this specific listener
-                this._syncListeners.delete(syncId);
+                this.#syncListeners.delete(syncId);
                 resolve();
             };
 
             // Store the listener in a map keyed by sync ID
-            if (!this._syncListeners) {
-                this._syncListeners = new Map();
+            if (!this.#syncListeners) {
+                this.#syncListeners = new Map();
             }
-            this._syncListeners.set(syncId, messageHandler);
+            this.#syncListeners.set(syncId, messageHandler);
         });
 
         // Send /sync command
@@ -921,7 +967,7 @@ export class SuperSonic {
      */
     allocBuffer(numSamples) {
         this.#ensureInitialized('allocate buffers');
-        return this.bufferManager.allocate(numSamples);
+        return this.#bufferManager.allocate(numSamples);
     }
 
     /**
@@ -933,7 +979,7 @@ export class SuperSonic {
      */
     freeBuffer(addr) {
         this.#ensureInitialized('free buffers');
-        return this.bufferManager.free(addr);
+        return this.#bufferManager.free(addr);
     }
 
     /**
@@ -947,7 +993,7 @@ export class SuperSonic {
      */
     getBufferView(addr, numSamples) {
         this.#ensureInitialized('get buffer views');
-        return this.bufferManager.getView(addr, numSamples);
+        return this.#bufferManager.getView(addr, numSamples);
     }
 
     /**
@@ -959,14 +1005,14 @@ export class SuperSonic {
      */
     getBufferPoolStats() {
         this.#ensureInitialized('get buffer pool stats');
-        return this.bufferManager.getStats();
+        return this.#bufferManager.getStats();
     }
 
     getDiagnostics() {
         this.#ensureInitialized('get diagnostics');
 
         return {
-            buffers: this.bufferManager.getDiagnostics(),
+            buffers: this.#bufferManager.getDiagnostics(),
             synthdefs: {
                 count: this.loadedSynthDefs.size
             }
@@ -979,30 +1025,30 @@ export class SuperSonic {
      * @private
      */
     initializeNTPTiming() {
-        if (!this.bufferConstants || !this.audioContext) {
+        if (!this.#bufferConstants || !this.#audioContext) {
             return;
         }
 
         // Calculate NTP time when AudioContext started (currentTime = 0)
         const perfTimeMs = performance.timeOrigin + performance.now();
         const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
-        const currentAudioCtx = this.audioContext.currentTime;
+        const currentAudioCtx = this.#audioContext.currentTime;
 
         // NTP time at AudioContext start = current NTP - current AudioContext time
         const ntpStartTime = currentNTP - currentAudioCtx;
 
         // Write to SharedArrayBuffer (write-once)
         const ntpStartView = new Float64Array(
-            this.sharedBuffer,
-            this.ringBufferBase + this.bufferConstants.NTP_START_TIME_START,
+            this.#sharedBuffer,
+            this.#ringBufferBase + this.#bufferConstants.NTP_START_TIME_START,
             1
         );
         ntpStartView[0] = ntpStartTime;
 
         // Store for drift calculation
-        this._initialNTPStartTime = ntpStartTime;
+        this.#initialNTPStartTime = ntpStartTime;
 
-        console.log(`[SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(6)}s (current NTP=${currentNTP.toFixed(3)}, AudioCtx=${currentAudioCtx.toFixed(3)}), ringBufferBase=${this.ringBufferBase}`);
+        console.log(`[SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(6)}s (current NTP=${currentNTP.toFixed(3)}, AudioCtx=${currentAudioCtx.toFixed(3)}), ringBufferBase=${this.#ringBufferBase}`);
     }
 
     /**
@@ -1011,30 +1057,30 @@ export class SuperSonic {
      * @private
      */
     updateDriftOffset() {
-        if (!this.bufferConstants || !this.audioContext || this._initialNTPStartTime === undefined) {
+        if (!this.#bufferConstants || !this.#audioContext || this.#initialNTPStartTime === undefined) {
             return;
         }
 
         // Calculate current NTP time from performance.now()
         const perfTimeMs = performance.timeOrigin + performance.now();
         const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
-        const currentAudioCtx = this.audioContext.currentTime;
+        const currentAudioCtx = this.#audioContext.currentTime;
 
         // Measure drift: current NTP start time vs initial baseline
         // CORRECT: This measures drift from initial baseline, not interval drift
         const currentNTPStartTime = currentNTP - currentAudioCtx;
-        const driftSeconds = currentNTPStartTime - this._initialNTPStartTime;
+        const driftSeconds = currentNTPStartTime - this.#initialNTPStartTime;
         const driftMs = Math.round(driftSeconds * 1000);
 
         // Write to SharedArrayBuffer (REPLACE value, don't accumulate)
         const driftView = new Int32Array(
-            this.sharedBuffer,
-            this.ringBufferBase + this.bufferConstants.DRIFT_OFFSET_START,
+            this.#sharedBuffer,
+            this.#ringBufferBase + this.#bufferConstants.DRIFT_OFFSET_START,
             1
         );
         Atomics.store(driftView, 0, driftMs);
 
-        console.log(`[SuperSonic] Drift offset updated: ${driftMs}ms (current NTP start=${currentNTPStartTime.toFixed(6)}, initial=${this._initialNTPStartTime.toFixed(6)})`);
+        console.log(`[SuperSonic] Drift offset updated: ${driftMs}ms (current NTP start=${currentNTPStartTime.toFixed(6)}, initial=${this.#initialNTPStartTime.toFixed(6)})`);
     }
 
     /**
@@ -1042,13 +1088,13 @@ export class SuperSonic {
      * @returns {number} Current drift in milliseconds
      */
     getDriftOffset() {
-        if (!this.bufferConstants) {
+        if (!this.#bufferConstants) {
             return 0;
         }
 
         const driftView = new Int32Array(
-            this.sharedBuffer,
-            this.ringBufferBase + this.bufferConstants.DRIFT_OFFSET_START,
+            this.#sharedBuffer,
+            this.#ringBufferBase + this.#bufferConstants.DRIFT_OFFSET_START,
             1
         );
         return Atomics.load(driftView, 0);
@@ -1063,7 +1109,7 @@ export class SuperSonic {
         this.#stopDriftOffsetTimer();
 
         // Update every DRIFT_UPDATE_INTERVAL_MS to track drift between AudioContext and performance.now()
-        this._driftOffsetTimer = setInterval(() => {
+        this.#driftOffsetTimer = setInterval(() => {
             this.updateDriftOffset();
         }, DRIFT_UPDATE_INTERVAL_MS);
 
@@ -1075,9 +1121,9 @@ export class SuperSonic {
      * @private
      */
     #stopDriftOffsetTimer() {
-        if (this._driftOffsetTimer) {
-            clearInterval(this._driftOffsetTimer);
-            this._driftOffsetTimer = null;
+        if (this.#driftOffsetTimer) {
+            clearInterval(this.#driftOffsetTimer);
+            this.#driftOffsetTimer = null;
         }
     }
 
@@ -1219,7 +1265,7 @@ export class SuperSonic {
 
         let argIndex = 2;
         let numChannels = 1;
-        let sampleRate = this.audioContext?.sampleRate || 44100;
+        let sampleRate = this.#audioContext?.sampleRate || 44100;
 
         if (this.#isNumericArg(this.#argAt(message.args, argIndex))) {
             numChannels = Math.max(1, this.#optionalIntArg(message.args, argIndex, 1));
@@ -1330,10 +1376,10 @@ export class SuperSonic {
     }
 
     #requireBufferManager() {
-        if (!this.bufferManager) {
+        if (!this.#bufferManager) {
             throw new Error('Buffer manager not ready. Call init() before issuing buffer commands.');
         }
-        return this.bufferManager;
+        return this.#bufferManager;
     }
 
     #isBundle(packet) {
@@ -1351,7 +1397,7 @@ export class SuperSonic {
         }
 
         // Read NTP start time (write-once value)
-        const ntpStartView = new Float64Array(this.sharedBuffer, this.ringBufferBase + this.bufferConstants.NTP_START_TIME_START, 1);
+        const ntpStartView = new Float64Array(this.#sharedBuffer, this.#ringBufferBase + this.#bufferConstants.NTP_START_TIME_START, 1);
         const ntpStartTime = ntpStartView[0];
 
         if (ntpStartTime === 0) {
@@ -1360,12 +1406,12 @@ export class SuperSonic {
         }
 
         // Read current drift offset (milliseconds)
-        const driftView = new Int32Array(this.sharedBuffer, this.ringBufferBase + this.bufferConstants.DRIFT_OFFSET_START, 1);
+        const driftView = new Int32Array(this.#sharedBuffer, this.#ringBufferBase + this.#bufferConstants.DRIFT_OFFSET_START, 1);
         const driftMs = Atomics.load(driftView, 0);
         const driftSeconds = driftMs / 1000.0;
 
         // Read global offset (milliseconds)
-        const globalView = new Int32Array(this.sharedBuffer, this.ringBufferBase + this.bufferConstants.GLOBAL_OFFSET_START, 1);
+        const globalView = new Int32Array(this.#sharedBuffer, this.#ringBufferBase + this.#bufferConstants.GLOBAL_OFFSET_START, 1);
         const globalMs = Atomics.load(globalView, 0);
         const globalSeconds = globalMs / 1000.0;
 
@@ -1381,7 +1427,7 @@ export class SuperSonic {
 
         const ntpTimeS = ntpSeconds + (ntpFraction / 0x100000000);
         const audioTimeS = ntpTimeS - totalOffset;
-        const currentTimeS = this.audioContext.currentTime;
+        const currentTimeS = this.#audioContext.currentTime;
 
         // Return the target audio time, not the wait time
         // The scheduler will handle lookahead scheduling
