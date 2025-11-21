@@ -43,11 +43,14 @@ export class SuperSonic {
     #sampleBaseURL;
     #synthdefBaseURL;
     #audioPathMap;
+    #initialized;
+    #initializing;
+    #capabilities;
 
     constructor(options = {}) {
-        this.initialized = false;
-        this.initializing = false;
-        this.capabilities = {};
+        this.#initialized = false;
+        this.#initializing = false;
+        this.#capabilities = {};
 
         // Core components (private)
         this.#sharedBuffer = null;
@@ -128,10 +131,31 @@ export class SuperSonic {
     }
 
     /**
+     * Get initialization status (read-only)
+     */
+    get initialized() {
+        return this.#initialized;
+    }
+
+    /**
+     * Get initialization in-progress status (read-only)
+     */
+    get initializing() {
+        return this.#initializing;
+    }
+
+    /**
+     * Get browser capabilities (read-only)
+     */
+    get capabilities() {
+        return this.#capabilities;
+    }
+
+    /**
      * Check browser capabilities for required features
      */
     checkCapabilities() {
-        this.capabilities = {
+        this.#capabilities = {
             audioWorklet: 'AudioWorklet' in window,
             sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
             crossOriginIsolated: window.crossOriginIsolated === true,
@@ -145,14 +169,14 @@ export class SuperSonic {
         // Check for required features (wasmThreads is optional - we can use mock)
         const required = ['audioWorklet', 'sharedArrayBuffer', 'crossOriginIsolated',
                          'atomics', 'webWorker'];
-        const missing = required.filter(f => !this.capabilities[f]);
+        const missing = required.filter(f => !this.#capabilities[f]);
 
         if (missing.length > 0) {
             const error = new Error(`Missing required features: ${missing.join(', ')}`);
 
             // Special case for cross-origin isolation
-            if (!this.capabilities.crossOriginIsolated) {
-                if (this.capabilities.sharedArrayBuffer) {
+            if (!this.#capabilities.crossOriginIsolated) {
+                if (this.#capabilities.sharedArrayBuffer) {
                     error.message += '\n\nSharedArrayBuffer is available but cross-origin isolation is not enabled. ' +
                                    'Please ensure COOP and COEP headers are set correctly:\n' +
                                    '  Cross-Origin-Opener-Policy: same-origin\n' +
@@ -168,7 +192,7 @@ export class SuperSonic {
             throw error;
         }
 
-        return this.capabilities;
+        return this.#capabilities;
     }
 
     /**
@@ -396,15 +420,15 @@ export class SuperSonic {
      * Complete initialization and trigger callbacks
      */
     #finishInitialization() {
-        this.initialized = true;
-        this.initializing = false;
+        this.#initialized = true;
+        this.#initializing = false;
         this.stats.initDuration = performance.now() - this.stats.initStartTime;
 
         console.log(`[SuperSonic] Initialization complete in ${this.stats.initDuration.toFixed(2)}ms`);
 
         if (this.onInitialized) {
             this.onInitialized({
-                capabilities: this.capabilities,
+                capabilities: this.#capabilities,
                 stats: this.stats
             });
         }
@@ -419,12 +443,12 @@ export class SuperSonic {
      * @param {Object} config.audioContextOptions - AudioContext options
      */
     async init(config = {}) {
-        if (this.initialized) {
+        if (this.#initialized) {
             console.warn('[SuperSonic] Already initialized');
             return;
         }
 
-        if (this.initializing) {
+        if (this.#initializing) {
             console.warn('[SuperSonic] Initialization already in progress');
             return;
         }
@@ -439,7 +463,7 @@ export class SuperSonic {
             }
         };
 
-        this.initializing = true;
+        this.#initializing = true;
         this.stats.initStartTime = performance.now();
 
         try {
@@ -454,7 +478,7 @@ export class SuperSonic {
             this.#startPerformanceMonitoring();
             this.#finishInitialization();
         } catch (error) {
-            this.initializing = false;
+            this.#initializing = false;
             console.error('[SuperSonic] Initialization failed:', error);
 
             if (this.onError) {
@@ -645,7 +669,7 @@ export class SuperSonic {
     }
 
     #ensureInitialized(actionDescription = 'perform this operation') {
-        if (!this.initialized) {
+        if (!this.#initialized) {
             throw new Error(`SuperSonic not initialized. Call init() before attempting to ${actionDescription}.`);
         }
     }
@@ -707,8 +731,8 @@ export class SuperSonic {
      */
     getStatus() {
         return {
-            initialized: this.initialized,
-            capabilities: this.capabilities,
+            initialized: this.#initialized,
+            capabilities: this.#capabilities,
             stats: this.stats,
             audioContextState: this.#audioContext?.state
         };
@@ -766,7 +790,7 @@ export class SuperSonic {
         }
 
         this.#sharedBuffer = null;
-        this.initialized = false;
+        this.#initialized = false;
         this.loadedSynthDefs.clear();
 
         console.log('[SuperSonic] Destroyed');
@@ -831,7 +855,7 @@ export class SuperSonic {
      * await sonic.loadSynthDef('./extra/synthdefs/sonic-pi-beep.scsyndef');
      */
     async loadSynthDef(path) {
-        if (!this.initialized) {
+        if (!this.#initialized) {
             throw new Error('SuperSonic not initialized. Call init() first.');
         }
 
@@ -868,7 +892,7 @@ export class SuperSonic {
      * const results = await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
      */
     async loadSynthDefs(names) {
-        if (!this.initialized) {
+        if (!this.#initialized) {
             throw new Error('SuperSonic not initialized. Call init() first.');
         }
 
@@ -913,7 +937,7 @@ export class SuperSonic {
      * await sonic.sync(12345); // Wait for all synthdefs to be processed
      */
     async sync(syncId) {
-        if (!this.initialized) {
+        if (!this.#initialized) {
             throw new Error('SuperSonic not initialized. Call init() first.');
         }
 
