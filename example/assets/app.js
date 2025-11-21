@@ -2217,12 +2217,13 @@ async function loadAllLoopSamples() {
   console.log('[Samples] Loading all loop samples...');
   const loopNames = Object.keys(LOOP_BUFFERS);
 
-  for (const loopName of loopNames) {
+  // Load all samples in parallel
+  await Promise.all(loopNames.map(loopName => {
     const bufNum = LOOP_BUFFERS[loopName];
     const fileName = `${loopName}.flac`;
     console.log(`[Samples] Loading ${fileName} to buffer ${bufNum}`);
-    await orchestrator.send('/b_allocRead', bufNum, fileName);
-  }
+    return orchestrator.send('/b_allocRead', bufNum, fileName);
+  }));
 
   amenSampleLoaded = true;
   console.log(`[Samples] Loaded ${loopNames.length} loop samples`);
