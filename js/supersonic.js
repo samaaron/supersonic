@@ -214,9 +214,9 @@ export class SuperSonic {
     }
 
     /**
-     * Check browser capabilities for required features
+     * Set and validate browser capabilities for required features
      */
-    checkCapabilities() {
+    setAndValidateCapabilities() {
         this.#capabilities = {
             audioWorklet: 'AudioWorklet' in window,
             sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
@@ -529,7 +529,7 @@ export class SuperSonic {
         this.bootStats.initStartTime = performance.now();
 
         try {
-            this.checkCapabilities();
+            this.setAndValidateCapabilities();
             this.#initializeSharedMemory();
             this.#initializeAudioContext();
             this.#initializeBufferManager();
