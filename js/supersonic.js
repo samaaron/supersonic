@@ -30,8 +30,6 @@ export class SuperSonic {
     #audioContext;
     #workletNode;
     #osc;
-    #wasmModule;
-    #wasmInstance;
     #wasmMemory;
     #sharedBuffer;
     #ringBufferBase;
@@ -39,7 +37,6 @@ export class SuperSonic {
     #bufferManager;
     #timeOffsetPromise;
     #resolveTimeOffset;
-    #localClockOffsetTimer;
     #driftOffsetTimer;
     #syncListeners;
     #initialNTPStartTime;
@@ -59,15 +56,12 @@ export class SuperSonic {
         this.#audioContext = null;
         this.#workletNode = null;
         this.#osc = null;  // ScsynthOSC instance for OSC communication
-        this.#wasmModule = null;
-        this.#wasmInstance = null;
         this.#bufferManager = null;
         this.loadedSynthDefs = new Set();
 
         // Time offset (private)
         this.#timeOffsetPromise = null;
         this.#resolveTimeOffset = null;
-        this.#localClockOffsetTimer = null;  // Timer for periodic drift correction
 
         // Callbacks
         this.onOSC = null;              // Raw binary OSC from scsynth (for display/logging)
