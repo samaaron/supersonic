@@ -1291,13 +1291,13 @@ export class SuperSonic {
             return;
         }
 
-        // Calculate NTP time when AudioContext started (currentTime = 0)
-        const perfTimeMs = performance.timeOrigin + performance.now();
+        // Get synchronized snapshot of both time domains (same moment in both clocks)
+        const timestamp = this.#audioContext.getOutputTimestamp();
+        const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
         const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
-        const currentAudioCtx = this.#audioContext.currentTime;
 
         // NTP time at AudioContext start = current NTP - current AudioContext time
-        const ntpStartTime = currentNTP - currentAudioCtx;
+        const ntpStartTime = currentNTP - timestamp.contextTime;
 
         // Write to SharedArrayBuffer (write-once)
         const ntpStartView = new Float64Array(
@@ -1310,7 +1310,7 @@ export class SuperSonic {
         // Store for drift calculation
         this.#initialNTPStartTime = ntpStartTime;
 
-        console.log(`[SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(6)}s (current NTP=${currentNTP.toFixed(3)}, AudioCtx=${currentAudioCtx.toFixed(3)}), ringBufferBase=${this.#ringBufferBase}`);
+        console.log(`[SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(6)}s (NTP=${currentNTP.toFixed(3)}s, contextTime=${timestamp.contextTime.toFixed(3)}s)`);
     }
 
     /**
@@ -1323,18 +1323,21 @@ export class SuperSonic {
             return;
         }
 
-        // Calculate current NTP time from performance.now()
-        const perfTimeMs = performance.timeOrigin + performance.now();
+        // Get synchronized snapshot of both time domains (same moment in both clocks)
+        const timestamp = this.#audioContext.getOutputTimestamp();
+        const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
         const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
-        const currentAudioCtx = this.#audioContext.currentTime;
 
-        // Measure drift: current NTP start time vs initial baseline
-        // CORRECT: This measures drift from initial baseline, not interval drift
-        const currentNTPStartTime = currentNTP - currentAudioCtx;
-        const driftSeconds = currentNTPStartTime - this.#initialNTPStartTime;
+        // Calculate where contextTime SHOULD be based on wall clock
+        const expectedContextTime = currentNTP - this.#initialNTPStartTime;
+
+        // Compare to actual contextTime to get drift
+        // Positive = AudioContext running slow (behind wall clock, needs time added)
+        // Negative = AudioContext running fast (ahead of wall clock, needs time subtracted)
+        const driftSeconds = expectedContextTime - timestamp.contextTime;
         const driftMs = Math.round(driftSeconds * 1000);
 
-        // Write to SharedArrayBuffer (REPLACE value, don't accumulate)
+        // Write to SharedArrayBuffer
         const driftView = new Int32Array(
             this.#sharedBuffer,
             this.#ringBufferBase + this.#bufferConstants.DRIFT_OFFSET_START,
@@ -1342,7 +1345,7 @@ export class SuperSonic {
         );
         Atomics.store(driftView, 0, driftMs);
 
-        console.log(`[SuperSonic] Drift offset updated: ${driftMs}ms (current NTP start=${currentNTPStartTime.toFixed(6)}, initial=${this.#initialNTPStartTime.toFixed(6)})`);
+        console.log(`[SuperSonic] Drift offset: ${driftMs}ms (expected=${expectedContextTime.toFixed(3)}s, actual=${timestamp.contextTime.toFixed(3)}s, NTP=${currentNTP.toFixed(3)}s)`);
     }
 
     /**
