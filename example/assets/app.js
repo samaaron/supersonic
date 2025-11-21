@@ -589,7 +589,7 @@ function buildMessageHTML(msg) {
     }
   }
 
-  const time = new Date(msg.timestamp).toLocaleTimeString();
+  const time = new Date(msg.timestamp).toISOString().slice(11, 23);
   return `
     <div class="message-item">
       <span class="message-header">[${time}]</span><span class="message-content">${content}</span>
