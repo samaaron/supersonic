@@ -150,8 +150,9 @@ export class SuperSonic {
 
         this.config = {
             wasmUrl: options.wasmUrl || wasmBaseURL + 'scsynth-nrt.wasm',
+            wasmBaseURL: wasmBaseURL,
             workletUrl: options.workletUrl || workerBaseURL + 'scsynth_audio_worklet.js',
-            workerBaseURL: workerBaseURL,  // Store for worker creation
+            workerBaseURL: workerBaseURL,
             development: false,
             audioContextOptions: {
                 latencyHint: 'interactive', // hint to push for lowest latency possible
@@ -283,27 +284,21 @@ export class SuperSonic {
         });
     }
 
-    /**
-     * Load WASM manifest to get the current hashed filename
-     */
     async #loadWasmManifest() {
+        const manifestUrl = this.config.wasmBaseURL + 'manifest.json';
+
         try {
-            const wasmBaseURL = this.config.workerBaseURL.replace('/workers/', '/wasm/');
-            const manifestUrl = wasmBaseURL + 'manifest.json';
             const response = await fetch(manifestUrl);
-            if (response.ok) {
-                const manifest = await response.json();
-
-                // Use the WASM file specified in manifest
-                const wasmFile = manifest.wasmFile;
-
-                this.config.wasmUrl = wasmBaseURL + wasmFile;
-                console.log(`[SuperSonic] Using WASM build: ${wasmFile}`);
-                console.log(`[SuperSonic] Build: ${manifest.buildId} (git: ${manifest.gitHash})`);
+            if (!response.ok) {
+                console.warn(`[SuperSonic] WASM manifest not found (${response.status}), using default`);
+                return;
             }
+
+            const manifest = await response.json();
+            this.config.wasmUrl = this.config.wasmBaseURL + manifest.wasmFile;
+            console.log(`[SuperSonic] WASM: ${manifest.wasmFile} (${manifest.buildId}, git: ${manifest.gitHash})`);
         } catch (error) {
-            // Fallback to non-hashed filename if manifest not found
-            console.warn('[SuperSonic] WASM manifest not found, using default filename');
+            console.warn('[SuperSonic] Failed to load WASM manifest, using default');
         }
     }
 
