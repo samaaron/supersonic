@@ -218,17 +218,14 @@ export class SuperSonic {
      */
     setAndValidateCapabilities() {
         this.#capabilities = {
-            audioWorklet: 'AudioWorklet' in window,
+            audioWorklet: typeof AudioWorklet !== 'undefined',
             sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
             crossOriginIsolated: window.crossOriginIsolated === true,
-            wasmThreads: typeof WebAssembly !== 'undefined' &&
-                        typeof WebAssembly.Memory !== 'undefined' &&
-                        WebAssembly.Memory.prototype.hasOwnProperty('shared'),
             atomics: typeof Atomics !== 'undefined',
             webWorker: typeof Worker !== 'undefined'
         };
 
-        // Check for required features (wasmThreads is optional - we can use mock)
+        // Check for required features
         const required = ['audioWorklet', 'sharedArrayBuffer', 'crossOriginIsolated',
                          'atomics', 'webWorker'];
         const missing = required.filter(f => !this.#capabilities[f]);
