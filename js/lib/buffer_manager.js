@@ -10,6 +10,8 @@
 
 import { MemPool } from '@thi.ng/malloc';
 
+const BUFFER_POOL_ALIGNMENT = 8;  // Float64 alignment
+
 export class BufferManager {
     // Private configuration
     #sampleBaseURL;
@@ -68,7 +70,7 @@ export class BufferManager {
             buf: sharedBuffer,
             start: bufferPoolConfig.start,
             size: bufferPoolConfig.size,
-            align: bufferPoolConfig.align || 8
+            align: BUFFER_POOL_ALIGNMENT
         });
 
         // Create and own buffer state
