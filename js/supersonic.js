@@ -152,8 +152,7 @@ export class SuperSonic {
         const workerBaseURL = options.workerBaseURL;
         const wasmBaseURL = options.wasmBaseURL;
 
-        // Merge user-provided world options with defaults
-        const worldOptions = this.#mergeWorldOptions(options.scsynthOptions || {});
+        const worldOptions = { ...defaultWorldOptions, ...options.scsynthOptions };
 
         this.config = {
             wasmUrl: options.wasmUrl || wasmBaseURL + 'scsynth-nrt.wasm',
@@ -242,29 +241,6 @@ export class SuperSonic {
         }
 
         return this.#capabilities;
-    }
-
-    /**
-     * Merge user-provided world options with defaults
-     * @private
-     */
-    #mergeWorldOptions(userOptions) {
-        const merged = { ...defaultWorldOptions };  // Clone defaults
-
-        // Merge user overrides (if provided as nested worldOptions)
-        if (userOptions.worldOptions) {
-            Object.assign(merged, userOptions.worldOptions);
-        }
-
-        // Also accept top-level options (shorthand)
-        // e.g., { numBuffers: 2048 } instead of { worldOptions: { numBuffers: 2048 } }
-        Object.keys(userOptions).forEach(key => {
-            if (key !== 'worldOptions' && key in merged) {
-                merged[key] = userOptions[key];
-            }
-        });
-
-        return merged;
     }
 
     /**
