@@ -56,15 +56,15 @@ function initRingBuffer(buffer, base, constants) {
         DEBUG_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 20) / 4
     };
 
-    // Initialize metrics view (Debug metrics are at offsets 23-26 in the metrics array)
+    // Initialize metrics view (Debug metrics are at offsets 21-24 in the metrics array)
     var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
     metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
 
     METRICS_INDICES = {
-        MESSAGES_RECEIVED: 23,
-        WAKEUPS: 24,
-        TIMEOUTS: 25,
-        BYTES_READ: 26
+        MESSAGES_RECEIVED: 21,
+        WAKEUPS: 22,
+        TIMEOUTS: 23,
+        BYTES_READ: 24
     };
 }
 

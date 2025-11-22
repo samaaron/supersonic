@@ -248,7 +248,6 @@ extern "C" {
 
         // Initialize metrics
         metrics->process_count.store(0, std::memory_order_relaxed);
-        metrics->buffer_overruns.store(0, std::memory_order_relaxed);
         metrics->messages_processed.store(0, std::memory_order_relaxed);
         metrics->messages_dropped.store(0, std::memory_order_relaxed);
         metrics->scheduler_queue_depth.store(0, std::memory_order_relaxed);
@@ -826,7 +825,6 @@ bool ring_buffer_write(
         // Not enough space - drop the message and track metrics
         if (metrics) {
             metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
-            metrics->buffer_overruns.fetch_add(1, std::memory_order_relaxed);
         }
         if (control) {
             control->status_flags.fetch_or(STATUS_BUFFER_FULL, std::memory_order_relaxed);

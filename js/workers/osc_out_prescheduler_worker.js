@@ -110,23 +110,22 @@ function initSharedBuffer() {
         IN_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 4) / 4
     };
 
-    // Initialize metrics view (OSC Out metrics are at offsets 7-12 in the metrics array)
+    // Initialize metrics view (OSC Out metrics are at offsets 6-16 in the metrics array)
     var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
     metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
 
     METRICS_INDICES = {
-        EVENTS_PENDING: 7,
-        MAX_EVENTS_PENDING: 8,
-        BUNDLES_WRITTEN: 9,
-        BUNDLES_DROPPED: 10,
-        RETRIES_SUCCEEDED: 11,
-        RETRIES_FAILED: 12,
-        BUNDLES_SCHEDULED: 13,
-        EVENTS_CANCELLED: 14,
-        TOTAL_DISPATCHES: 15,
-        MESSAGES_RETRIED: 16,
-        RETRY_QUEUE_SIZE: 17,
-        RETRY_QUEUE_MAX: 18
+        EVENTS_PENDING: 6,
+        MAX_EVENTS_PENDING: 7,
+        BUNDLES_WRITTEN: 8,
+        RETRIES_SUCCEEDED: 9,
+        RETRIES_FAILED: 10,
+        BUNDLES_SCHEDULED: 11,
+        EVENTS_CANCELLED: 12,
+        TOTAL_DISPATCHES: 13,
+        MESSAGES_RETRIED: 14,
+        RETRY_QUEUE_SIZE: 15,
+        RETRY_QUEUE_MAX: 16
     };
 
     schedulerLog('[PreScheduler] SharedArrayBuffer initialized with direct ring buffer writing and metrics');
@@ -158,7 +157,6 @@ function updateMetrics() {
 function writeToRingBuffer(oscMessage, isRetry) {
     if (!sharedBuffer || !atomicView) {
         console.error('[PreScheduler] Not initialized for ring buffer writing');
-        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BUNDLES_DROPPED, 1);
         return false;
     }
 
@@ -168,7 +166,6 @@ function writeToRingBuffer(oscMessage, isRetry) {
     // Check if message fits in buffer at all
     if (totalSize > bufferConstants.IN_BUFFER_SIZE - bufferConstants.MESSAGE_HEADER_SIZE) {
         console.error('[PreScheduler] Message too large:', totalSize);
-        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BUNDLES_DROPPED, 1);
         return false;
     }
 
@@ -182,9 +179,6 @@ function writeToRingBuffer(oscMessage, isRetry) {
     if (available < totalSize) {
         // Buffer full - return false so caller can queue for retry
         if (!isRetry) {
-            // Only increment bundlesDropped on initial attempt
-            // Retries increment different counters
-            if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BUNDLES_DROPPED, 1);
             console.warn('[PreScheduler] Ring buffer full, message will be queued for retry');
         }
         return false;

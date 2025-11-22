@@ -19,61 +19,7 @@ import { MemoryLayout } from './memory_layout.js';
 import { defaultWorldOptions } from './scsynth_options.js';
 
 /**
- * SuperSonic metrics object - all metrics read synchronously from SharedArrayBuffer
- * @typedef {Object} SuperSonicMetrics
- *
- * Core counters (SuperSonic in-memory):
- * @property {number} messagesSent - OSC messages sent to scsynth
- * @property {number} messagesReceived - OSC messages received from scsynth
- * @property {number} errors - Total errors encountered
- *
- * Worklet metrics (WASM writes to SAB):
- * @property {number} processCount - Audio process() calls
- * @property {number} bufferOverruns - Buffer overrun events
- * @property {number} messagesProcessed - Messages processed by scsynth
- * @property {number} messagesDropped - Messages dropped by scsynth
- * @property {number} schedulerQueueDepth - Current scheduler queue depth
- * @property {number} schedulerQueueMax - Maximum scheduler queue depth reached
- * @property {number} schedulerQueueDropped - Messages dropped from scheduler queue
- *
- * Buffer usage (calculated from SAB head/tail pointers):
- * @property {Object} inBufferUsed - Input buffer usage statistics
- * @property {number} inBufferUsed.bytes - Bytes used in input buffer
- * @property {number} inBufferUsed.percentage - Percentage of input buffer used
- * @property {Object} outBufferUsed - Output buffer usage statistics
- * @property {number} outBufferUsed.bytes - Bytes used in output buffer
- * @property {number} outBufferUsed.percentage - Percentage of output buffer used
- * @property {Object} debugBufferUsed - Debug buffer usage statistics
- * @property {number} debugBufferUsed.bytes - Bytes used in debug buffer
- * @property {number} debugBufferUsed.percentage - Percentage of debug buffer used
- *
- * OSC worker metrics (workers write to SAB):
- *
- * OSC Out (Prescheduler):
- * @property {number} preschedulerPending - Current pending events in queue
- * @property {number} preschedulerPeak - Peak pending events (high water mark)
- * @property {number} preschedulerSent - Total bundles written to ring buffer
- * @property {number} bundlesDropped - Bundles dropped (ring buffer full)
- * @property {number} retriesSucceeded - Successful retry attempts
- * @property {number} retriesFailed - Failed retry attempts (gave up)
- * @property {number} bundlesScheduled - Total bundles scheduled
- * @property {number} eventsCancelled - Total events cancelled
- * @property {number} totalDispatches - Total dispatch cycles executed
- * @property {number} messagesRetried - Total retry attempts (all)
- * @property {number} retryQueueSize - Current retry queue size
- * @property {number} retryQueueMax - Peak retry queue size
- *
- * OSC In:
- * @property {number} oscInMessagesReceived - OSC In messages received
- * @property {number} oscInDroppedMessages - OSC In dropped messages
- * @property {number} oscInWakeups - OSC In worker wakeups
- * @property {number} oscInTimeouts - OSC In worker timeouts
- *
- * Debug:
- * @property {number} debugMessagesReceived - Debug messages received
- * @property {number} debugWakeups - Debug worker wakeups
- * @property {number} debugTimeouts - Debug worker timeouts
- * @property {number} debugBytesRead - Debug bytes read
+ * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
  */
 
 export class SuperSonic {
@@ -102,10 +48,7 @@ export class SuperSonic {
     #initializing;
     #capabilities;
 
-    // Runtime metrics (private counters)
-    #metrics_messagesSent = 0;
-    #metrics_messagesReceived = 0;
-    #metrics_errors = 0;
+    // Runtime metrics
     #metricsIntervalId = null;
     #metricsGatherInProgress = false;
 
@@ -386,9 +329,8 @@ export class SuperSonic {
                 }
             }
 
-            // Always forward to onMessage (including internal messages)
+            // Forward to onMessage callback if set
             if (this.onMessage) {
-                this.#metrics_messagesReceived++;
                 this.onMessage(msg);
             }
         });
@@ -401,7 +343,6 @@ export class SuperSonic {
 
         this.#osc.onError((error, workerName) => {
             console.error(`[SuperSonic] ${workerName} error:`, error);
-            this.#metrics_errors++;
             if (this.onError) {
                 this.onError(new Error(`${workerName}: ${error}`));
             }
@@ -574,7 +515,6 @@ export class SuperSonic {
                         console.error('[Worklet] Diagnostics:', data.diagnostics);
                         console.table(data.diagnostics);
                     }
-                    this.#metrics_errors++;
                     if (this.onError) {
                         this.onError(new Error(data.error));
                     }
@@ -623,13 +563,12 @@ export class SuperSonic {
 
         // Read metrics from SAB (layout defined in src/shared_memory.h METRICS_* section)
         return {
-            processCount: Atomics.load(metricsView, 0),              // PROCESS_COUNT offset / 4
-            bufferOverruns: Atomics.load(metricsView, 1),            // BUFFER_OVERRUNS offset / 4
-            messagesProcessed: Atomics.load(metricsView, 2),         // MESSAGES_PROCESSED offset / 4
-            messagesDropped: Atomics.load(metricsView, 3),           // MESSAGES_DROPPED offset / 4
-            schedulerQueueDepth: Atomics.load(metricsView, 4),       // SCHEDULER_QUEUE_DEPTH offset / 4
-            schedulerQueueMax: Atomics.load(metricsView, 5),         // SCHEDULER_QUEUE_MAX offset / 4
-            schedulerQueueDropped: Atomics.load(metricsView, 6)      // SCHEDULER_QUEUE_DROPPED offset / 4
+            processCount: Atomics.load(metricsView, 0),              // offset 0
+            messagesProcessed: Atomics.load(metricsView, 1),         // offset 1
+            messagesDropped: Atomics.load(metricsView, 2),           // offset 2
+            schedulerQueueDepth: Atomics.load(metricsView, 3),       // offset 3
+            schedulerQueueMax: Atomics.load(metricsView, 4),         // offset 4
+            schedulerQueueDropped: Atomics.load(metricsView, 5)      // offset 5
         };
     }
 
@@ -691,32 +630,51 @@ export class SuperSonic {
 
         // Read OSC worker metrics from SAB
         return {
-            // OSC Out (prescheduler) - offsets 7-18
-            preschedulerPending: metricsView[7],
-            preschedulerPeak: metricsView[8],
-            preschedulerSent: metricsView[9],
-            bundlesDropped: metricsView[10],
-            retriesSucceeded: metricsView[11],
-            retriesFailed: metricsView[12],
-            bundlesScheduled: metricsView[13],
-            eventsCancelled: metricsView[14],
-            totalDispatches: metricsView[15],
-            messagesRetried: metricsView[16],
-            retryQueueSize: metricsView[17],
-            retryQueueMax: metricsView[18],
+            // OSC Out (prescheduler) - offsets 6-16
+            preschedulerPending: metricsView[6],
+            preschedulerPeak: metricsView[7],
+            preschedulerSent: metricsView[8],
+            retriesSucceeded: metricsView[9],
+            retriesFailed: metricsView[10],
+            bundlesScheduled: metricsView[11],
+            eventsCancelled: metricsView[12],
+            totalDispatches: metricsView[13],
+            messagesRetried: metricsView[14],
+            retryQueueSize: metricsView[15],
+            retryQueueMax: metricsView[16],
 
-            // OSC In - offsets 19-22
-            oscInMessagesReceived: metricsView[19],
-            oscInDroppedMessages: metricsView[20],
-            oscInWakeups: metricsView[21],
-            oscInTimeouts: metricsView[22],
+            // OSC In - offsets 17-20
+            oscInMessagesReceived: metricsView[17],
+            oscInDroppedMessages: metricsView[18],
+            oscInWakeups: metricsView[19],
+            oscInTimeouts: metricsView[20],
 
-            // Debug - offsets 23-26
-            debugMessagesReceived: metricsView[23],
-            debugWakeups: metricsView[24],
-            debugTimeouts: metricsView[25],
-            debugBytesRead: metricsView[26]
+            // Debug - offsets 21-24
+            debugMessagesReceived: metricsView[21],
+            debugWakeups: metricsView[22],
+            debugTimeouts: metricsView[23],
+            debugBytesRead: metricsView[24],
+
+            // Main thread - offset 25
+            messagesSent: metricsView[25]
         };
+    }
+
+    /**
+     * Increment a main thread metric in SharedArrayBuffer
+     * @param {'messagesSent'} metric - Metric to increment
+     * @private
+     */
+    #incrementMetric(metric) {
+        if (!this.#sharedBuffer || !this.#bufferConstants || !this.#ringBufferBase) {
+            return;
+        }
+
+        const metricsBase = this.#ringBufferBase + this.#bufferConstants.METRICS_START;
+        const metricsView = new Uint32Array(this.#sharedBuffer, metricsBase, this.#bufferConstants.METRICS_SIZE / 4);
+
+        const offsets = { messagesSent: 25 };
+        Atomics.add(metricsView, offsets[metric], 1);
     }
 
     /**
@@ -728,12 +686,8 @@ export class SuperSonic {
     #gatherMetrics() {
         const startTime = performance.now();
 
-        const metrics = {
-            // SuperSonic counters (in-memory, fast)
-            messagesSent: this.#metrics_messagesSent,
-            messagesReceived: this.#metrics_messagesReceived,
-            errors: this.#metrics_errors
-        };
+        // All metrics are now read from SAB
+        const metrics = {};
 
         // Worklet metrics (instant SAB read)
         const workletMetrics = this.#getWorkletMetrics();
@@ -747,7 +701,7 @@ export class SuperSonic {
             Object.assign(metrics, bufferUsage);
         }
 
-        // OSC worker metrics (instant SAB read)
+        // OSC worker metrics + main thread metrics (instant SAB read)
         const oscMetrics = this.#getOSCMetrics();
         if (oscMetrics) {
             Object.assign(metrics, oscMetrics);
@@ -854,7 +808,7 @@ export class SuperSonic {
         const uint8Data = this.#toUint8Array(oscData);
         const preparedData = await this.#prepareOutboundPacket(uint8Data);
 
-        this.#metrics_messagesSent++;
+        this.#incrementMetric('messagesSent');
 
         if (this.onMessageSent) {
             this.onMessageSent(preparedData);

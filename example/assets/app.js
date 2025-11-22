@@ -2,8 +2,6 @@
 import { SuperSonic } from '../dist/supersonic.js';
 
 let orchestrator = null;
-let messagesSent = 0;
-let messagesReceived = 0;
 let messages = [];
 let sentMessages = [];
 let runCounter = 0;
@@ -237,21 +235,13 @@ function updateMetrics(metrics) {
   if (metrics.messages_sent !== undefined) {
     document.getElementById('metric-sent').textContent = metrics.messages_sent;
   }
-  if (metrics.messages_received !== undefined) {
-    document.getElementById('metric-received').textContent = metrics.messages_received;
-    messagesReceived = metrics.messages_received;
-  }
-  if (metrics.messages_dropped !== undefined || metrics.dropped_messages !== undefined) {
-    const dropped = metrics.messages_dropped || metrics.dropped_messages || 0;
-    document.getElementById('metric-dropped').textContent = dropped;
+  if (metrics.osc_in_messages_received !== undefined) {
+    document.getElementById('metric-received').textContent = metrics.osc_in_messages_received;
   }
 
   // WASM stats
   if (metrics.process_count !== undefined) {
     document.getElementById('metric-process-count').textContent = metrics.process_count;
-  }
-  if (metrics.buffer_overruns !== undefined) {
-    document.getElementById('metric-overruns').textContent = metrics.buffer_overruns;
   }
 
   // Buffer usage
@@ -316,6 +306,19 @@ function updateMetrics(metrics) {
   }
   if (metrics.prescheduler_retries_failed !== undefined) {
     document.getElementById('metric-prescheduler-retries-failed').textContent = metrics.prescheduler_retries_failed;
+  }
+
+  // Messages processed
+  if (metrics.messages_processed !== undefined) {
+    document.getElementById('metric-messages-processed').textContent = metrics.messages_processed;
+  }
+
+  // Debug worker metrics
+  if (metrics.debug_messages_received !== undefined) {
+    document.getElementById('metric-debug-received').textContent = metrics.debug_messages_received;
+  }
+  if (metrics.debug_bytes_read !== undefined) {
+    document.getElementById('metric-debug-bytes').textContent = metrics.debug_bytes_read;
   }
 }
 
@@ -773,22 +776,27 @@ initButton.addEventListener('click', async () => {
 
       // Define camelCase -> snake_case mapping
       const metricsMapping = {
+        // Main thread metrics
+        messagesSent: 'messages_sent',
+        // Worklet metrics
         processCount: 'process_count',
-        maxProcessTime: 'max_process_time_us',
-        bufferOverruns: 'buffer_overruns',
+        messagesProcessed: 'messages_processed',
         messagesDropped: 'messages_dropped',
         schedulerQueueDepth: 'scheduler_queue_depth',
         schedulerQueueMax: 'scheduler_queue_max',
-        pollInterval: 'poll_interval',
-        messagesSent: 'messages_sent',
-        messagesReceived: 'messages_received',
-        errors: 'errors',
+        schedulerQueueDropped: 'scheduler_queue_dropped',
+        // Prescheduler metrics
         preschedulerPending: 'prescheduler_pending',
         preschedulerPeak: 'prescheduler_peak',
         preschedulerSent: 'prescheduler_sent',
-        bundlesDropped: 'scheduler_queue_dropped',
         retriesSucceeded: 'prescheduler_retries_succeeded',
-        retriesFailed: 'prescheduler_retries_failed'
+        retriesFailed: 'prescheduler_retries_failed',
+        // OSC In worker metrics
+        oscInMessagesReceived: 'osc_in_messages_received',
+        oscInDroppedMessages: 'osc_in_dropped_messages',
+        // Debug worker metrics
+        debugMessagesReceived: 'debug_messages_received',
+        debugBytesRead: 'debug_bytes_read'
       };
 
       // Apply all simple mappings
@@ -977,8 +985,6 @@ messageForm.addEventListener('submit', async (e) => {
     // Log comments immediately so the history shows them in order
     parsed.comments.forEach(comment => addSentMessage(null, comment));
 
-    let sendsThisRound = 0;
-
     // Handle scheduled bundles if any timestamps were provided
     if (parsed.scheduled.size > 0) {
       // NTP epoch offset (seconds from 1900-01-01 to 1970-01-01)
@@ -1048,7 +1054,6 @@ messageForm.addEventListener('submit', async (e) => {
         const isFirstBundle = (i === 0);
         const bundle = createOSCBundle(timestamp, messagesAtTime, isFirstBundle);
         bundlePromises.push(orchestrator.sendOSC(bundle, { runTag }));
-        sendsThisRound += messagesAtTime.length;
       }
 
       await Promise.all(bundlePromises);
@@ -1058,13 +1063,8 @@ messageForm.addEventListener('submit', async (e) => {
     for (const oscMessage of parsed.immediate) {
       const args = oscMessage.args.map(arg => arg.value);
       orchestrator.send(oscMessage.address, ...args);
-      sendsThisRound++;
     }
 
-    if (sendsThisRound > 0) {
-      messagesSent += sendsThisRound;
-      updateMetrics({ messages_sent: messagesSent });
-    }
   } catch (error) {
     showError(error.message);
   }

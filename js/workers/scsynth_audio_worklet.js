@@ -133,12 +133,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
         this.METRICS_INDICES = {
             PROCESS_COUNT: (ringBufferBase + METRICS_START + 0) / 4,
-            BUFFER_OVERRUNS: (ringBufferBase + METRICS_START + 4) / 4,
-            MESSAGES_PROCESSED: (ringBufferBase + METRICS_START + 8) / 4,
-            MESSAGES_DROPPED: (ringBufferBase + METRICS_START + 12) / 4,
-            SCHEDULER_QUEUE_DEPTH: (ringBufferBase + METRICS_START + 16) / 4,
-            SCHEDULER_QUEUE_MAX: (ringBufferBase + METRICS_START + 20) / 4,
-            SCHEDULER_QUEUE_DROPPED: (ringBufferBase + METRICS_START + 24) / 4
+            MESSAGES_PROCESSED: (ringBufferBase + METRICS_START + 4) / 4,
+            MESSAGES_DROPPED: (ringBufferBase + METRICS_START + 8) / 4,
+            SCHEDULER_QUEUE_DEPTH: (ringBufferBase + METRICS_START + 12) / 4,
+            SCHEDULER_QUEUE_MAX: (ringBufferBase + METRICS_START + 16) / 4,
+            SCHEDULER_QUEUE_DROPPED: (ringBufferBase + METRICS_START + 20) / 4
         };
 
     }
@@ -519,7 +518,6 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 processCount: Atomics.load(this.atomicView, this.METRICS_INDICES.PROCESS_COUNT),
                 messagesProcessed: Atomics.load(this.atomicView, this.METRICS_INDICES.MESSAGES_PROCESSED),
                 messagesDropped: Atomics.load(this.atomicView, this.METRICS_INDICES.MESSAGES_DROPPED),
-                bufferOverruns: Atomics.load(this.atomicView, this.METRICS_INDICES.BUFFER_OVERRUNS),
                 schedulerQueueDepth: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_DEPTH),
                 schedulerQueueMax: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_MAX),
                 schedulerQueueDropped: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_DROPPED)
