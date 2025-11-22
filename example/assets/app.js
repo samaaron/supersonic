@@ -307,6 +307,12 @@ function updateMetrics(metrics) {
   if (metrics.prescheduler_retries_failed !== undefined) {
     document.getElementById('metric-prescheduler-retries-failed').textContent = metrics.prescheduler_retries_failed;
   }
+  if (metrics.prescheduler_retry_queue_size !== undefined) {
+    document.getElementById('metric-prescheduler-retry-queue-size').textContent = metrics.prescheduler_retry_queue_size;
+  }
+  if (metrics.prescheduler_retry_queue_max !== undefined) {
+    document.getElementById('metric-prescheduler-retry-queue-max').textContent = metrics.prescheduler_retry_queue_max;
+  }
 
   // Messages processed
   if (metrics.messages_processed !== undefined) {
@@ -791,6 +797,8 @@ initButton.addEventListener('click', async () => {
         preschedulerSent: 'prescheduler_sent',
         retriesSucceeded: 'prescheduler_retries_succeeded',
         retriesFailed: 'prescheduler_retries_failed',
+        retryQueueSize: 'prescheduler_retry_queue_size',
+        retryQueueMax: 'prescheduler_retry_queue_max',
         // OSC In worker metrics
         oscInMessagesReceived: 'osc_in_messages_received',
         oscInDroppedMessages: 'osc_in_dropped_messages',
