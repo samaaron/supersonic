@@ -492,7 +492,7 @@ export class SuperSonic {
                 reject(new Error('AudioWorklet initialization timeout'));
             }, 5000);
 
-            const messageHandler = (event) => {
+            const messageHandler = async (event) => {
                 // Handle debug messages during initialization
                 if (event.data.type === 'debug') {
                     // Silent during init
@@ -524,9 +524,9 @@ export class SuperSonic {
                             console.log('[SuperSonic] Received bufferConstants from worklet');
                             this.#bufferConstants = event.data.bufferConstants;
 
-                            // Initialize NTP timing (write-once: NTP time at AudioContext start)
-                            console.log('[SuperSonic] Initializing NTP timing');
-                            this.initializeNTPTiming();
+                            // Initialize NTP timing (blocks until audio is flowing)
+                            console.log('[SuperSonic] Initializing NTP timing (waiting for audio to flow)...');
+                            await this.initializeNTPTiming();
 
                             // Start periodic drift offset updates (small millisecond adjustments)
                             // Measures drift from initial baseline, replaces value (doesn't accumulate)
@@ -1198,15 +1198,25 @@ export class SuperSonic {
     /**
      * Initialize NTP timing (write-once)
      * Sets the NTP start time when AudioContext started
+     * Blocks until audio is actually flowing (contextTime > 0)
      * @private
      */
-    initializeNTPTiming() {
+    async initializeNTPTiming() {
         if (!this.#bufferConstants || !this.#audioContext) {
             return;
         }
 
-        // Get synchronized snapshot of both time domains (same moment in both clocks)
-        const timestamp = this.#audioContext.getOutputTimestamp();
+        // Wait for audio to actually be flowing (contextTime > 0)
+        let timestamp;
+        while (true) {
+            timestamp = this.#audioContext.getOutputTimestamp();
+            if (timestamp.contextTime > 0) {
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        // Get synchronized snapshot of both time domains
         const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
         const currentNTP = (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
 
