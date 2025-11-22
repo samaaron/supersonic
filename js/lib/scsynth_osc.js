@@ -352,6 +352,6 @@ export default class ScsynthOSC {
         };
 
         this.initialized = false;
-        console.log('[ScsynthOSC] All workers terminated');
+        if (__DEV__) console.log('[ScsynthOSC] All workers terminated');
     }
 }

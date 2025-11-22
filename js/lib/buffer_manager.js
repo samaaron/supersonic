@@ -88,7 +88,7 @@ export class BufferManager {
 
         const poolSizeMB = (bufferPoolConfig.size / (1024 * 1024)).toFixed(0);
         const poolOffsetMB = (bufferPoolConfig.start / (1024 * 1024)).toFixed(0);
-        console.log(`[BufferManager] Initialized: ${poolSizeMB}MB pool at offset ${poolOffsetMB}MB`);
+        if (__DEV__) console.log(`[BufferManager] Initialized: ${poolSizeMB}MB pool at offset ${poolOffsetMB}MB`);
     }
 
     #resolveAudioPath(scPath) {
@@ -622,6 +622,6 @@ export class BufferManager {
         // Clear buffer locks
         this.#bufferLocks.clear();
 
-        console.log('[BufferManager] Destroyed');
+        if (__DEV__) console.log('[BufferManager] Destroyed');
     }
 }

@@ -33,9 +33,8 @@ var METRICS_INDICES = {};
 // Worker state
 var running = false;
 
-var DEBUG_DEBUGWORKER_LOGS = false;
 function debugWorkerLog() {
-    if (DEBUG_DEBUGWORKER_LOGS) {
+    if (__DEV__) {
         console.log.apply(console, arguments);
     }
 }

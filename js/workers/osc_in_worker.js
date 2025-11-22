@@ -33,9 +33,8 @@ var METRICS_INDICES = {};
 // Worker state
 var running = false;
 
-var DEBUG_OSCIN_LOGS = false;
 function oscInLog() {
-    if (DEBUG_OSCIN_LOGS) {
+    if (__DEV__) {
         console.log.apply(console, arguments);
     }
 }

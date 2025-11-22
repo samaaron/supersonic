@@ -295,7 +295,7 @@ export class SuperSonic {
 
             const manifest = await response.json();
             this.config.wasmUrl = this.config.wasmBaseURL + manifest.wasmFile;
-            console.log(`[SuperSonic] WASM: ${manifest.wasmFile} (${manifest.buildId}, git: ${manifest.gitHash})`);
+            if (__DEV__) console.log(`[SuperSonic] WASM: ${manifest.wasmFile} (${manifest.buildId}, git: ${manifest.gitHash})`);
         } catch (error) {
             // Manifest failed to load - use default filename
         }
@@ -419,7 +419,7 @@ export class SuperSonic {
         this.#initializing = false;
         this.bootStats.initDuration = performance.now() - this.bootStats.initStartTime;
 
-        console.log(`[SuperSonic] Initialization complete in ${this.bootStats.initDuration.toFixed(2)}ms`);
+        if (__DEV__) console.log(`[SuperSonic] Initialization complete in ${this.bootStats.initDuration.toFixed(2)}ms`);
 
         if (this.onInitialized) {
             this.onInitialized({
@@ -522,11 +522,11 @@ export class SuperSonic {
                         }
 
                         if (event.data.bufferConstants !== undefined) {
-                            console.log('[SuperSonic] Received bufferConstants from worklet');
+                            if (__DEV__) console.log('[SuperSonic] Received bufferConstants from worklet');
                             this.#bufferConstants = event.data.bufferConstants;
 
                             // Initialize NTP timing (blocks until audio is flowing)
-                            console.log('[SuperSonic] Initializing NTP timing (waiting for audio to flow)...');
+                            if (__DEV__) console.log('[SuperSonic] Initializing NTP timing (waiting for audio to flow)...');
                             await this.initializeNTPTiming();
 
                             // Start periodic drift offset updates (small millisecond adjustments)
@@ -536,7 +536,7 @@ export class SuperSonic {
                             console.warn('[SuperSonic] Warning: bufferConstants not provided by worklet');
                         }
 
-                        console.log('[SuperSonic] Calling resolve() for worklet initialization');
+                        if (__DEV__) console.log('[SuperSonic] Calling resolve() for worklet initialization');
                         resolve();
                     } else {
                         reject(new Error(event.data.error || 'AudioWorklet initialization failed'));
@@ -932,7 +932,7 @@ export class SuperSonic {
      * Destroy the orchestrator and clean up resources
      */
     async destroy() {
-        console.log('[SuperSonic] Destroying...');
+        if (__DEV__) console.log('[SuperSonic] Destroying...');
 
         // Stop timers
         this.#stopDriftOffsetTimer();
@@ -963,7 +963,7 @@ export class SuperSonic {
         this.#initialized = false;
         this.loadedSynthDefs.clear();
 
-        console.log('[SuperSonic] Destroyed');
+        if (__DEV__) console.log('[SuperSonic] Destroyed');
     }
 
     /**
@@ -1036,7 +1036,7 @@ export class SuperSonic {
                 this.loadedSynthDefs.add(synthName);
             }
 
-            console.log(`[SuperSonic] Sent synthdef from ${path} (${synthdefData.length} bytes)`);
+            if (__DEV__) console.log(`[SuperSonic] Sent synthdef from ${path} (${synthdefData.length} bytes)`);
         } catch (error) {
             console.error('[SuperSonic] Failed to load synthdef:', error);
             throw error;
@@ -1081,7 +1081,7 @@ export class SuperSonic {
         );
 
         const successCount = Object.values(results).filter(r => r.success).length;
-        console.log(`[SuperSonic] Sent ${successCount}/${names.length} synthdef loads`);
+        if (__DEV__) console.log(`[SuperSonic] Sent ${successCount}/${names.length} synthdef loads`);
 
         return results;
     }
@@ -1235,7 +1235,7 @@ export class SuperSonic {
         // Store for drift calculation
         this.#initialNTPStartTime = ntpStartTime;
 
-        console.log(`[SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(6)}s (NTP=${currentNTP.toFixed(3)}s, contextTime=${timestamp.contextTime.toFixed(3)}s)`);
+        if (__DEV__) console.log(`[SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(6)}s (NTP=${currentNTP.toFixed(3)}s, contextTime=${timestamp.contextTime.toFixed(3)}s)`);
     }
 
     /**
@@ -1270,7 +1270,7 @@ export class SuperSonic {
         );
         Atomics.store(driftView, 0, driftMs);
 
-        console.log(`[SuperSonic] Drift offset: ${driftMs}ms (expected=${expectedContextTime.toFixed(3)}s, actual=${timestamp.contextTime.toFixed(3)}s, NTP=${currentNTP.toFixed(3)}s)`);
+        if (__DEV__) console.log(`[SuperSonic] Drift offset: ${driftMs}ms (expected=${expectedContextTime.toFixed(3)}s, actual=${timestamp.contextTime.toFixed(3)}s, NTP=${currentNTP.toFixed(3)}s)`);
     }
 
     /**
@@ -1303,7 +1303,7 @@ export class SuperSonic {
             this.updateDriftOffset();
         }, DRIFT_UPDATE_INTERVAL_MS);
 
-        console.log(`[SuperSonic] Started drift offset correction (every ${DRIFT_UPDATE_INTERVAL_MS}ms)`);
+        if (__DEV__) console.log(`[SuperSonic] Started drift offset correction (every ${DRIFT_UPDATE_INTERVAL_MS}ms)`);
     }
 
     /**

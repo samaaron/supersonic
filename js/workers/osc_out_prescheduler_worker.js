@@ -42,9 +42,7 @@ var POLL_INTERVAL_MS = 25;           // Check every 25ms
 var LOOKAHEAD_S = 0.100;             // 100ms lookahead window
 
 function schedulerLog() {
-    // Toggle to true for verbose diagnostics
-    var DEBUG = true;  // Enable for debugging
-    if (DEBUG) {
+    if (__DEV__) {
         console.log.apply(console, arguments);
     }
 }
@@ -131,7 +129,7 @@ function initSharedBuffer() {
         RETRY_QUEUE_MAX: 18
     };
 
-    console.log('[PreScheduler] SharedArrayBuffer initialized with direct ring buffer writing and metrics');
+    schedulerLog('[PreScheduler] SharedArrayBuffer initialized with direct ring buffer writing and metrics');
 }
 
 /**
@@ -462,7 +460,7 @@ function startPeriodicPolling() {
         return;
     }
 
-    console.log('[PreScheduler] Starting periodic polling (every ' + POLL_INTERVAL_MS + 'ms)');
+    schedulerLog('[PreScheduler] Starting periodic polling (every ' + POLL_INTERVAL_MS + 'ms)');
     checkAndDispatch();  // Start immediately
 }
 
@@ -473,7 +471,7 @@ function stopPeriodicPolling() {
     if (periodicTimer !== null) {
         clearTimeout(periodicTimer);
         periodicTimer = null;
-        console.log('[PreScheduler] Stopped periodic polling');
+        schedulerLog('[PreScheduler] Stopped periodic polling');
     }
 }
 
@@ -556,7 +554,7 @@ function cancelBy(predicate) {
         heapify();
         if (metricsView) Atomics.add(metricsView, METRICS_INDICES.EVENTS_CANCELLED, removed);
         updateMetrics();  // Update SAB with current queue depth
-        console.log('[PreScheduler] Cancelled ' + removed + ' events, ' + eventHeap.length + ' remaining');
+        schedulerLog('[PreScheduler] Cancelled ' + removed + ' events, ' + eventHeap.length + ' remaining');
     }
 }
 
@@ -586,7 +584,7 @@ function cancelAllTags() {
     if (metricsView) Atomics.add(metricsView, METRICS_INDICES.EVENTS_CANCELLED, cancelled);
     eventHeap = [];
     updateMetrics();  // Update SAB (sets eventsPending to 0)
-    console.log('[PreScheduler] Cancelled all ' + cancelled + ' events');
+    schedulerLog('[PreScheduler] Cancelled all ' + cancelled + ' events');
     // Note: Periodic timer continues running (it will just find empty queue)
 }
 
