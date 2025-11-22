@@ -31,7 +31,7 @@ constexpr uint32_t IN_BUFFER_SIZE     = 786432; // 768KB - OSC messages from JS 
 constexpr uint32_t OUT_BUFFER_SIZE    = 131072; // 128KB - OSC replies from scsynth to JS (prevent drops)
 constexpr uint32_t DEBUG_BUFFER_SIZE  = 65536;  // 64KB - Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 40;    // Atomic control pointers & flags (36 bytes + 4 padding for 8-byte alignment)
-constexpr uint32_t METRICS_SIZE       = 128;   // Performance metrics: 26 fields + 6 padding = 32 * 4 bytes = 128 bytes
+constexpr uint32_t METRICS_SIZE       = 128;   // Performance metrics: 22 fields + 10 padding = 32 * 4 bytes = 128 bytes
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in milliseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
@@ -72,7 +72,7 @@ struct alignas(4) ControlPointers {
 };
 
 // Performance metrics structure
-// Layout: [0-5] Worklet, [6-16] OSC Out, [17-20] OSC In, [21-24] Debug, [25] Main thread, [26-31] padding
+// Layout: [0-5] Worklet, [6-16] OSC Out, [17-18] OSC In, [19-20] Debug, [21] Main thread, [22-31] padding
 struct alignas(4) PerformanceMetrics {
     // Worklet metrics (offsets 0-5, written by WASM)
     std::atomic<uint32_t> process_count;
@@ -95,23 +95,19 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> osc_out_retry_queue_size;
     std::atomic<uint32_t> osc_out_retry_queue_max;
 
-    // OSC In metrics (offsets 17-20, written by osc_in_worker.js)
+    // OSC In metrics (offsets 17-18, written by osc_in_worker.js)
     std::atomic<uint32_t> osc_in_messages_received;
     std::atomic<uint32_t> osc_in_dropped_messages;
-    std::atomic<uint32_t> osc_in_wakeups;
-    std::atomic<uint32_t> osc_in_timeouts;
 
-    // Debug metrics (offsets 21-24, written by debug_worker.js)
+    // Debug metrics (offsets 19-20, written by debug_worker.js)
     std::atomic<uint32_t> debug_messages_received;
-    std::atomic<uint32_t> debug_wakeups;
-    std::atomic<uint32_t> debug_timeouts;
     std::atomic<uint32_t> debug_bytes_read;
 
-    // Main thread metrics (offset 25, written by supersonic.js via Atomics)
+    // Main thread metrics (offset 21, written by supersonic.js via Atomics)
     std::atomic<uint32_t> messages_sent;      // OSC messages sent to scsynth
 
-    // Padding to ensure 8-byte alignment for subsequent Float64Array fields (offsets 26-31)
-    uint32_t _padding[6];
+    // Padding to ensure 8-byte alignment for subsequent Float64Array fields (offsets 22-31)
+    uint32_t _padding[10];
 };
 
 // Status flags

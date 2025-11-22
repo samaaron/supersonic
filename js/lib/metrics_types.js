@@ -58,12 +58,8 @@
  *
  * @property {number} oscInMessagesReceived - OSC In messages received
  * @property {number} oscInDroppedMessages - OSC In dropped messages
- * @property {number} oscInWakeups - OSC In worker wakeups
- * @property {number} oscInTimeouts - OSC In worker timeouts
  *
  * @property {number} debugMessagesReceived - Debug messages received
- * @property {number} debugWakeups - Debug worker wakeups
- * @property {number} debugTimeouts - Debug worker timeouts
  * @property {number} debugBytesRead - Debug bytes read
  */
 

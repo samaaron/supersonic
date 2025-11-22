@@ -643,20 +643,16 @@ export class SuperSonic {
             retryQueueSize: metricsView[15],
             retryQueueMax: metricsView[16],
 
-            // OSC In - offsets 17-20
+            // OSC In - offsets 17-18
             oscInMessagesReceived: metricsView[17],
             oscInDroppedMessages: metricsView[18],
-            oscInWakeups: metricsView[19],
-            oscInTimeouts: metricsView[20],
 
-            // Debug - offsets 21-24
-            debugMessagesReceived: metricsView[21],
-            debugWakeups: metricsView[22],
-            debugTimeouts: metricsView[23],
-            debugBytesRead: metricsView[24],
+            // Debug - offsets 19-20
+            debugMessagesReceived: metricsView[19],
+            debugBytesRead: metricsView[20],
 
-            // Main thread - offset 25
-            messagesSent: metricsView[25]
+            // Main thread - offset 21
+            messagesSent: metricsView[21]
         };
     }
 

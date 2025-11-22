@@ -231,101 +231,60 @@ function hideError() {
 }
 
 function updateMetrics(metrics) {
-  // Message stats
-  if (metrics.messages_sent !== undefined) {
-    document.getElementById('metric-sent').textContent = metrics.messages_sent;
-  }
-  if (metrics.osc_in_messages_received !== undefined) {
-    document.getElementById('metric-received').textContent = metrics.osc_in_messages_received;
-  }
+  // Messages
+  document.getElementById('metric-sent').textContent = metrics.messages_sent ?? 0;
+  document.getElementById('metric-received').textContent = metrics.osc_in_messages_received ?? 0;
+  document.getElementById('metric-osc-in-dropped').textContent = metrics.osc_in_dropped_messages ?? 0;
 
-  // WASM stats
-  if (metrics.process_count !== undefined) {
-    document.getElementById('metric-process-count').textContent = metrics.process_count;
-  }
+  // Processing
+  document.getElementById('metric-messages-processed').textContent = metrics.messages_processed ?? 0;
+  document.getElementById('metric-messages-dropped').textContent = metrics.messages_dropped ?? 0;
+  document.getElementById('metric-process-count').textContent = metrics.process_count ?? 0;
 
-  // Buffer usage
-  if (metrics.in_buffer_usage !== undefined) {
-    document.getElementById('metric-in-usage').textContent = metrics.in_buffer_usage + '%';
-    document.getElementById('metric-in-bar').style.width = metrics.in_buffer_usage + '%';
-  }
-  if (metrics.out_buffer_usage !== undefined) {
-    document.getElementById('metric-out-usage').textContent = metrics.out_buffer_usage + '%';
-    document.getElementById('metric-out-bar').style.width = metrics.out_buffer_usage + '%';
-  }
-  if (metrics.debug_buffer_usage !== undefined) {
-    document.getElementById('metric-debug-usage').textContent = metrics.debug_buffer_usage + '%';
-    document.getElementById('metric-debug-bar').style.width = metrics.debug_buffer_usage + '%';
-  }
+  // Scheduler
+  document.getElementById('metric-scheduler-depth').textContent = metrics.scheduler_queue_depth ?? 0;
+  document.getElementById('metric-scheduler-peak').textContent = metrics.scheduler_queue_max ?? 0;
+  document.getElementById('metric-scheduler-dropped').textContent = metrics.scheduler_queue_dropped ?? 0;
 
-  if (metrics.buffer_allocated_count !== undefined) {
-    document.getElementById('metric-buffer-count').textContent = metrics.buffer_allocated_count;
-  }
-  if (metrics.buffer_pending !== undefined) {
-    document.getElementById('metric-buffer-pending').textContent = metrics.buffer_pending;
-  }
-  if (metrics.buffer_bytes_active !== undefined) {
-    document.getElementById('metric-buffer-used').textContent = formatBytes(metrics.buffer_bytes_active);
-  }
-  if (metrics.buffer_pool_total !== undefined) {
-    document.getElementById('metric-buffer-total').textContent = formatBytes(metrics.buffer_pool_total);
-  }
-  if (metrics.buffer_pool_available !== undefined) {
-    document.getElementById('metric-buffer-free').textContent = formatBytes(metrics.buffer_pool_available);
-  }
-  if (metrics.synthdef_count !== undefined) {
-    document.getElementById('metric-synthdefs').textContent = metrics.synthdef_count;
-  }
+  // PreScheduler
+  document.getElementById('metric-prescheduler-pending').textContent = metrics.prescheduler_pending ?? 0;
+  document.getElementById('metric-prescheduler-peak').textContent = metrics.prescheduler_peak ?? 0;
+  document.getElementById('metric-prescheduler-sent').textContent = metrics.prescheduler_sent ?? 0;
+  document.getElementById('metric-bundles-scheduled').textContent = metrics.bundles_scheduled ?? 0;
+  document.getElementById('metric-events-cancelled').textContent = metrics.events_cancelled ?? 0;
 
-  // Scheduler metrics
-  const schedulerDepth = metrics.scheduler_queue_depth ?? metrics.schedulerQueueDepth;
-  if (schedulerDepth !== undefined) {
-    document.getElementById('metric-scheduler-depth').textContent = schedulerDepth;
-  }
-  const schedulerPeak = metrics.scheduler_queue_max ?? metrics.schedulerQueueMax;
-  if (schedulerPeak !== undefined) {
-    document.getElementById('metric-scheduler-peak').textContent = schedulerPeak;
-  }
-  const schedulerDropped = metrics.scheduler_queue_dropped ?? metrics.schedulerQueueDropped;
-  if (schedulerDropped !== undefined) {
-    document.getElementById('metric-scheduler-dropped').textContent = schedulerDropped;
-  }
+  // Retries
+  document.getElementById('metric-prescheduler-retries-succeeded').textContent = metrics.prescheduler_retries_succeeded ?? 0;
+  document.getElementById('metric-prescheduler-retries-failed').textContent = metrics.prescheduler_retries_failed ?? 0;
+  document.getElementById('metric-prescheduler-retry-queue-size').textContent = metrics.prescheduler_retry_queue_size ?? 0;
+  document.getElementById('metric-prescheduler-retry-queue-max').textContent = metrics.prescheduler_retry_queue_max ?? 0;
+  document.getElementById('metric-messages-retried').textContent = metrics.messages_retried ?? 0;
+  document.getElementById('metric-total-dispatches').textContent = metrics.total_dispatches ?? 0;
 
-  // Prescheduler metrics
-  if (metrics.prescheduler_pending !== undefined) {
-    document.getElementById('metric-prescheduler-pending').textContent = metrics.prescheduler_pending;
-  }
-  if (metrics.prescheduler_peak !== undefined) {
-    document.getElementById('metric-prescheduler-peak').textContent = metrics.prescheduler_peak;
-  }
-  if (metrics.prescheduler_sent !== undefined) {
-    document.getElementById('metric-prescheduler-sent').textContent = metrics.prescheduler_sent;
-  }
-  if (metrics.prescheduler_retries_succeeded !== undefined) {
-    document.getElementById('metric-prescheduler-retries-succeeded').textContent = metrics.prescheduler_retries_succeeded;
-  }
-  if (metrics.prescheduler_retries_failed !== undefined) {
-    document.getElementById('metric-prescheduler-retries-failed').textContent = metrics.prescheduler_retries_failed;
-  }
-  if (metrics.prescheduler_retry_queue_size !== undefined) {
-    document.getElementById('metric-prescheduler-retry-queue-size').textContent = metrics.prescheduler_retry_queue_size;
-  }
-  if (metrics.prescheduler_retry_queue_max !== undefined) {
-    document.getElementById('metric-prescheduler-retry-queue-max').textContent = metrics.prescheduler_retry_queue_max;
-  }
+  // Ring buffer usage
+  const inUsage = metrics.in_buffer_usage ?? 0;
+  const outUsage = metrics.out_buffer_usage ?? 0;
+  const debugUsage = metrics.debug_buffer_usage ?? 0;
+  document.getElementById('metric-in-usage').textContent = inUsage + '%';
+  document.getElementById('metric-in-bar').style.width = inUsage + '%';
+  document.getElementById('metric-out-usage').textContent = outUsage + '%';
+  document.getElementById('metric-out-bar').style.width = outUsage + '%';
+  document.getElementById('metric-debug-usage').textContent = debugUsage + '%';
+  document.getElementById('metric-debug-bar').style.width = debugUsage + '%';
 
-  // Messages processed
-  if (metrics.messages_processed !== undefined) {
-    document.getElementById('metric-messages-processed').textContent = metrics.messages_processed;
-  }
+  // Debug worker
+  document.getElementById('metric-debug-received').textContent = metrics.debug_messages_received ?? 0;
+  document.getElementById('metric-debug-bytes').textContent = metrics.debug_bytes_read ?? 0;
 
-  // Debug worker metrics
-  if (metrics.debug_messages_received !== undefined) {
-    document.getElementById('metric-debug-received').textContent = metrics.debug_messages_received;
-  }
-  if (metrics.debug_bytes_read !== undefined) {
-    document.getElementById('metric-debug-bytes').textContent = metrics.debug_bytes_read;
-  }
+  // Audio buffers
+  document.getElementById('metric-buffer-count').textContent = metrics.buffer_allocated_count ?? 0;
+  document.getElementById('metric-buffer-pending').textContent = metrics.buffer_pending ?? 0;
+  document.getElementById('metric-synthdefs').textContent = metrics.synthdef_count ?? 0;
+
+  // Buffer memory
+  document.getElementById('metric-buffer-used').textContent = formatBytes(metrics.buffer_bytes_active ?? 0);
+  document.getElementById('metric-buffer-total').textContent = formatBytes(metrics.buffer_pool_total ?? 0);
+  document.getElementById('metric-buffer-free').textContent = formatBytes(metrics.buffer_pool_available ?? 0);
 }
 
 function addMessage(message) {
@@ -799,6 +758,10 @@ initButton.addEventListener('click', async () => {
         retriesFailed: 'prescheduler_retries_failed',
         retryQueueSize: 'prescheduler_retry_queue_size',
         retryQueueMax: 'prescheduler_retry_queue_max',
+        bundlesScheduled: 'bundles_scheduled',
+        eventsCancelled: 'events_cancelled',
+        totalDispatches: 'total_dispatches',
+        messagesRetried: 'messages_retried',
         // OSC In worker metrics
         oscInMessagesReceived: 'osc_in_messages_received',
         oscInDroppedMessages: 'osc_in_dropped_messages',

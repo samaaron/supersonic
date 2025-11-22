@@ -59,15 +59,13 @@ function initRingBuffer(buffer, base, constants) {
         OUT_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 12) / 4
     };
 
-    // Initialize metrics view (OSC In metrics are at offsets 17-20 in the metrics array)
+    // Initialize metrics view (OSC In metrics are at offsets 17-18 in the metrics array)
     var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
     metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
 
     METRICS_INDICES = {
         MESSAGES_RECEIVED: 17,
-        DROPPED_MESSAGES: 18,
-        WAKEUPS: 19,
-        TIMEOUTS: 20
+        DROPPED_MESSAGES: 18
     };
 }
 
@@ -185,9 +183,7 @@ function waitLoop() {
 
                 if (result === 'ok' || result === 'not-equal') {
                     // We were notified or value changed!
-                    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.WAKEUPS, 1);
                 } else if (result === 'timed-out') {
-                    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.TIMEOUTS, 1);
                     continue; // Check running flag
                 }
             }
