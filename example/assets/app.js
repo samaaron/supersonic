@@ -1265,8 +1265,6 @@ if (synthPad) {
     if (typeof updateFXParameters === 'function') {
       updateFXParameters(x, y);
     }
-
-    console.log('[UI] Pad position:', { x: x.toFixed(3), y: y.toFixed(3), active: isPadActive });
   }
 
   function activatePad(clientX, clientY) {
