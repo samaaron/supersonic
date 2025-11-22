@@ -1404,13 +1404,11 @@ setupSlider('release-slider', 'release-value', 'release', (v) => v.toFixed(2));
 
 // Hue slider with custom handler to update CSS filter
 const hueSlider = document.getElementById('hue-slider');
-const hueValue = document.getElementById('hue-value');
 const synthUIContainer = document.getElementById('synth-ui-container');
 
-if (hueSlider && hueValue && synthUIContainer) {
+if (hueSlider && synthUIContainer) {
   hueSlider.addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
-    hueValue.textContent = value;
     synthUIContainer.style.filter = `hue-rotate(${value}deg) saturate(2)`;
   });
   console.log('[UI] Hue slider initialised');

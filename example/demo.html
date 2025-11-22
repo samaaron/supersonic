@@ -3031,33 +3031,28 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
 
           <!-- Hue Control (Full Width) -->
           <div
+            class="slider-control"
             style="
               padding: 0.75rem;
               padding-top: 0.5rem;
               display: flex;
+              flex-direction: column;
               align-items: center;
-              gap: 0.5rem;
-              font-size: 0.7rem;
+              gap: 0.3rem;
               border-bottom: 1px solid #333;
             "
           >
-            <label for="hue-slider" style="color: #ffd700; min-width: 35px"
-              >Hue</label
-            >
-            <input
-              type="range"
-              id="hue-slider"
-              min="0"
-              max="360"
-              value="200"
-              step="1"
-              style="flex: 1; height: 4px; max-width: 300px"
-            />
-            <span
-              id="hue-value"
-              style="color: #ffd700; min-width: 30px; text-align: right"
-              >200</span
-            >
+            <div style="width: 300px">
+              <label>Hue</label>
+              <input
+                type="range"
+                id="hue-slider"
+                min="0"
+                max="360"
+                value="200"
+                step="1"
+              />
+            </div>
           </div>
         </div>
         <!-- End Unified Black Container -->
