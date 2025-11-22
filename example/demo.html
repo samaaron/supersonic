@@ -2900,6 +2900,9 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 <div style="display: flex; justify-content: space-between; color: #888;">
                   <span>out</span><span id="metric-received" style="color: #ffd700;">0</span>
                 </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>dropped</span><span id="metric-osc-in-dropped" style="color: #a44;">0</span>
+                </div>
               </div>
 
               <!-- Processing -->
@@ -2907,6 +2910,9 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Processing</div>
                 <div style="display: flex; justify-content: space-between; color: #888;">
                   <span>processed</span><span id="metric-messages-processed" style="color: #ffd700;">0</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>dropped</span><span id="metric-messages-dropped" style="color: #a44;">0</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; color: #888;">
                   <span>ticks</span><span id="metric-process-count" style="color: #666;">0</span>
@@ -2933,6 +2939,12 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 <div style="display: flex; justify-content: space-between; color: #888;">
                   <span>sent</span><span id="metric-prescheduler-sent" style="color: #ffd700;">0</span>
                 </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>scheduled</span><span id="metric-bundles-scheduled" style="color: #666;">0</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>cancelled</span><span id="metric-events-cancelled" style="color: #a44;">0</span>
+                </div>
               </div>
 
               <!-- Retries -->
@@ -2943,6 +2955,12 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 </div>
                 <div style="display: flex; justify-content: space-between; color: #888;">
                   <span>queue</span><span><span id="metric-prescheduler-retry-queue-size" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-retry-queue-max" style="color: #555;">0</span></span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>retried</span><span id="metric-messages-retried" style="color: #666;">0</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>dispatches</span><span id="metric-total-dispatches" style="color: #666;">0</span>
                 </div>
               </div>
 
@@ -2972,9 +2990,9 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 </div>
               </div>
 
-              <!-- Debug -->
+              <!-- Debug Worker -->
               <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Debug</div>
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Debug Worker</div>
                 <div style="display: flex; justify-content: space-between; color: #888;">
                   <span>messages</span><span id="metric-debug-received" style="color: #888;">0</span>
                 </div>
