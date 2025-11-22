@@ -865,7 +865,7 @@ initButton.addEventListener('click', async () => {
       // Version display removed from UI
     };
 
-    await orchestrator.init({ development: true });
+    /* DEMO_BUILD_CONFIG */ await orchestrator.init({ development: true });
 
     // Expose for debugging
     window.testOrchestrator = orchestrator;
