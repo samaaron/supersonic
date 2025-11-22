@@ -2887,249 +2887,127 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
           <!-- Performance Metrics (Full Width) -->
           <div
             id="performance-metrics-container"
-            style="padding: 0.75rem; margin-top: 0; border-top: 1px solid #333"
+            style="padding: 0.6rem 0.75rem; margin-top: 0; border-top: 1px solid #333;"
           >
-            <div
-              style="
-                display: flex;
-                gap: 1rem;
-                flex-wrap: wrap;
-                font-size: 0.7rem;
-                color: #ffd700;
-                align-items: center;
-                justify-content: flex-start;
-              "
-            >
-              <span
-                >Sent:
-                <span id="metric-sent" class="metric-value metric-value-wide"
-                  >0</span
-                ></span
-              >
-              <span
-                >Recv:
-                <span
-                  id="metric-received"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                ></span
-              >
-              <span
-                >Processed:
-                <span id="metric-messages-processed" class="metric-value metric-value-wide"
-                  >0</span
-                ></span
-              >
-              <span
-                >Ticks:
-                <span
-                  id="metric-process-count"
-                  class="metric-value metric-value-xwide"
-                  >0</span
-                ></span
-              >
-              <span style="display: flex; align-items: center; gap: 0.25rem">
-                IN:
-                <span
-                  id="metric-in-usage"
-                  class="metric-value metric-value-percent"
-                  >0%</span
-                >
-                <div
-                  style="
-                    width: 40px;
-                    height: 4px;
-                    background: #ff6600;
-                    border-radius: 2px;
-                    overflow: hidden;
-                  "
-                >
-                  <div
-                    id="metric-in-bar"
-                    style="
-                      height: 100%;
-                      background: #1e90ff;
-                      width: 0%;
-                      transition: width 0.3s;
-                    "
-                  ></div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem; font-size: 0.6rem;">
+
+              <!-- OSC Messages -->
+              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Messages</div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>in</span><span id="metric-sent" style="color: #ffd700;">0</span>
                 </div>
-              </span>
-              <span style="display: flex; align-items: center; gap: 0.25rem">
-                OUT:
-                <span
-                  id="metric-out-usage"
-                  class="metric-value metric-value-percent"
-                  >0%</span
-                >
-                <div
-                  style="
-                    width: 40px;
-                    height: 4px;
-                    background: #ff6600;
-                    border-radius: 2px;
-                    overflow: hidden;
-                  "
-                >
-                  <div
-                    id="metric-out-bar"
-                    style="
-                      height: 100%;
-                      background: #00ff00;
-                      width: 0%;
-                      transition: width 0.3s;
-                    "
-                  ></div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>out</span><span id="metric-received" style="color: #ffd700;">0</span>
                 </div>
-              </span>
-              <span style="display: flex; align-items: center; gap: 0.25rem">
-                DBG:
-                <span
-                  id="metric-debug-usage"
-                  class="metric-value metric-value-percent"
-                  >0%</span
-                >
-                <div
-                  style="
-                    width: 40px;
-                    height: 4px;
-                    background: #ff6600;
-                    border-radius: 2px;
-                    overflow: hidden;
-                  "
-                >
-                  <div
-                    id="metric-debug-bar"
-                    style="
-                      height: 100%;
-                      background: #ff00ff;
-                      width: 0%;
-                      transition: width 0.3s;
-                    "
-                  ></div>
+              </div>
+
+              <!-- Processing -->
+              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Processing</div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>processed</span><span id="metric-messages-processed" style="color: #ffd700;">0</span>
                 </div>
-              </span>
-              <span>
-                Sched:
-                <span
-                  id="metric-scheduler-depth"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                >
-                cur /
-                <span
-                  id="metric-scheduler-peak"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                >
-                peak · drop
-                <span
-                  id="metric-scheduler-dropped"
-                  class="metric-value warning metric-value-wide"
-                  >0</span
-                >
-              </span>
-              <span>
-                PreSched:
-                <span
-                  id="metric-prescheduler-pending"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                >
-                pend /
-                <span
-                  id="metric-prescheduler-peak"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                >
-                peak · sent
-                <span
-                  id="metric-prescheduler-sent"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                >
-                · retry
-                <span
-                  id="metric-prescheduler-retries-succeeded"
-                  class="metric-value success metric-value-wide"
-                  >0</span
-                >
-                /
-                <span
-                  id="metric-prescheduler-retries-failed"
-                  class="metric-value warning metric-value-wide"
-                  >0</span
-                >
-                · q
-                <span
-                  id="metric-prescheduler-retry-queue-size"
-                  class="metric-value warning metric-value-wide"
-                  >0</span
-                >
-                /
-                <span
-                  id="metric-prescheduler-retry-queue-max"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                >
-              </span>
-              <span>
-                Debug:
-                <span
-                  id="metric-debug-received"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                >
-                recv /
-                <span
-                  id="metric-debug-bytes"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                >
-                B
-              </span>
-              <span>
-                Buffers:
-                <span
-                  id="metric-buffer-count"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                >
-                (<span id="metric-buffer-pending" class="metric-value warning"
-                  >0</span
-                >
-                pend)
-              </span>
-              <span>
-                Buf Mem:
-                <span
-                  id="metric-buffer-used"
-                  class="metric-value metric-value-xwide"
-                  >0 B</span
-                >
-                /
-                <span
-                  id="metric-buffer-total"
-                  class="metric-value metric-value-xwide"
-                  >0 B</span
-                >
-              </span>
-              <span>
-                Free:
-                <span
-                  id="metric-buffer-free"
-                  class="metric-value metric-value-xwide"
-                  >0 B</span
-                >
-              </span>
-              <span>
-                Synthdefs:
-                <span
-                  id="metric-synthdefs"
-                  class="metric-value metric-value-wide"
-                  >0</span
-                >
-              </span>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>ticks</span><span id="metric-process-count" style="color: #666;">0</span>
+                </div>
+              </div>
+
+              <!-- Scheduler -->
+              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Scheduler</div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>queue</span><span><span id="metric-scheduler-depth" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-scheduler-peak" style="color: #555;">0</span></span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>dropped</span><span id="metric-scheduler-dropped" style="color: #a44;">0</span>
+                </div>
+              </div>
+
+              <!-- PreScheduler -->
+              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">PreScheduler</div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>pending</span><span><span id="metric-prescheduler-pending" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-peak" style="color: #555;">0</span></span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>sent</span><span id="metric-prescheduler-sent" style="color: #ffd700;">0</span>
+                </div>
+              </div>
+
+              <!-- Retries -->
+              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Retries</div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>ok / fail</span><span><span id="metric-prescheduler-retries-succeeded" style="color: #4a4;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-retries-failed" style="color: #a44;">0</span></span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>queue</span><span><span id="metric-prescheduler-retry-queue-size" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-retry-queue-max" style="color: #555;">0</span></span>
+                </div>
+              </div>
+
+              <!-- Ring Buffers -->
+              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Ring Buffers</div>
+                <div style="display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0.15rem;">
+                  <span style="color: #888; width: 20px;">in</span>
+                  <div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;">
+                    <div id="metric-in-bar" style="height: 100%; background: #1e90ff; width: 0%; transition: width 0.3s;"></div>
+                  </div>
+                  <span id="metric-in-usage" style="color: #1e90ff; width: 24px; text-align: right; font-size: 0.55rem;">0%</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0.15rem;">
+                  <span style="color: #888; width: 20px;">out</span>
+                  <div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;">
+                    <div id="metric-out-bar" style="height: 100%; background: #4a4; width: 0%; transition: width 0.3s;"></div>
+                  </div>
+                  <span id="metric-out-usage" style="color: #4a4; width: 24px; text-align: right; font-size: 0.55rem;">0%</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.3rem;">
+                  <span style="color: #888; width: 20px;">dbg</span>
+                  <div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;">
+                    <div id="metric-debug-bar" style="height: 100%; background: #a4a; width: 0%; transition: width 0.3s;"></div>
+                  </div>
+                  <span id="metric-debug-usage" style="color: #a4a; width: 24px; text-align: right; font-size: 0.55rem;">0%</span>
+                </div>
+              </div>
+
+              <!-- Debug -->
+              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Debug</div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>messages</span><span id="metric-debug-received" style="color: #888;">0</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>bytes</span><span id="metric-debug-bytes" style="color: #888;">0</span>
+                </div>
+              </div>
+
+              <!-- Audio Buffers -->
+              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Audio Buffers</div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>loaded</span><span><span id="metric-buffer-count" style="color: #ffd700;">0</span><span style="color: #444;"> (<span id="metric-buffer-pending" style="color: #a44;">0</span>)</span></span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>defs</span><span id="metric-synthdefs" style="color: #ffd700;">0</span>
+                </div>
+              </div>
+
+              <!-- Memory -->
+              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Buffer Memory</div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>used</span><span id="metric-buffer-used" style="color: #ffd700;">0 B</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>free</span><span id="metric-buffer-free" style="color: #4a4;">0 B</span>
+                </div>
+                <div style="display: none; justify-content: space-between; color: #888;">
+                  <span>total</span><span id="metric-buffer-total" style="color: #555;">0 B</span>
+                </div>
+              </div>
+
             </div>
           </div>
 
