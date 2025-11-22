@@ -21,6 +21,7 @@ export class BufferManager {
     #audioContext;
     #sharedBuffer;
     #bufferPool;
+    #bufferPoolSize;
     #allocatedBuffers;
     #pendingBufferOps;
     #bufferLocks;
@@ -72,6 +73,7 @@ export class BufferManager {
             size: bufferPoolConfig.size,
             align: BUFFER_POOL_ALIGNMENT
         });
+        this.#bufferPoolSize = bufferPoolConfig.size;
 
         // Create and own buffer state
         this.#allocatedBuffers = new Map();  // bufnum -> { ptr, size, pendingToken, ... }
@@ -590,7 +592,7 @@ export class BufferManager {
             pending: pendingCount,
             bytesActive,
             pool: {
-                total: poolStats.total || 0,
+                total: this.#bufferPoolSize,  // Use configured size, not stats().total (which returns full buffer size)
                 available: poolStats.available || 0,
                 freeBytes: poolStats.free?.size || 0,
                 freeBlocks: poolStats.free?.count || 0,
