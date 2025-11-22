@@ -412,7 +412,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
     process(inputs, outputs, parameters) {
         // DEBUG: Log first call
-        if (!this._everCalled) {
+        if (__DEV__ && !this._everCalled) {
             this._everCalled = true;
             console.log('[AudioWorklet] process() called for first time');
         }

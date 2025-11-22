@@ -176,18 +176,39 @@ fi
 
 echo "Bundling JavaScript with esbuild..."
 
+# Set __DEV__ flag and minification based on build mode
+if [ "$RELEASE_MODE" = true ]; then
+    DEV_FLAG="false"
+    MINIFY_FLAG="--minify"
+    echo "  __DEV__ = false (release mode - debug logs stripped, minified)"
+else
+    DEV_FLAG="true"
+    MINIFY_FLAG=""
+    echo "  __DEV__ = true (dev mode - debug logs enabled, readable)"
+fi
+
 # Bundle the main orchestrator (entry point for the library)
 # osc.js is now a pure ES module (converted from UMD) and can be bundled
 esbuild "$JS_DIR/supersonic.js" \
     --bundle \
     --format=esm \
+    --define:__DEV__=$DEV_FLAG \
+    $MINIFY_FLAG \
     --outfile="$OUTPUT_DIR/supersonic.js" \
     --external:./scsynth-nrt.wasm
 
-# Copy worker files to workers subdirectory (these need to remain separate as they run in different contexts)
-echo "Copying worker files..."
+# Process worker files through esbuild (separate output files, same __DEV__ treatment)
+echo "Processing worker files..."
 mkdir -p "$OUTPUT_DIR/workers"
-cp "$JS_DIR/workers/"* "$OUTPUT_DIR/workers/"
+for worker in "$JS_DIR/workers/"*.js; do
+    worker_name=$(basename "$worker")
+    esbuild "$worker" \
+        --bundle \
+        --format=iife \
+        --define:__DEV__=$DEV_FLAG \
+        $MINIFY_FLAG \
+        --outfile="$OUTPUT_DIR/workers/$worker_name"
+done
 
 # Create symlinks to synthdefs and samples from packages
 SYNTHDEFS_SRC="$PROJECT_ROOT/packages/supersonic-scsynth-synthdefs/synthdefs"
