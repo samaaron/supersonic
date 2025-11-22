@@ -290,7 +290,6 @@ export class SuperSonic {
         try {
             const response = await fetch(manifestUrl);
             if (!response.ok) {
-                console.warn(`[SuperSonic] WASM manifest not found (${response.status}), using default`);
                 return;
             }
 
@@ -298,7 +297,7 @@ export class SuperSonic {
             this.config.wasmUrl = this.config.wasmBaseURL + manifest.wasmFile;
             console.log(`[SuperSonic] WASM: ${manifest.wasmFile} (${manifest.buildId}, git: ${manifest.gitHash})`);
         } catch (error) {
-            console.warn('[SuperSonic] Failed to load WASM manifest, using default');
+            // Manifest failed to load - use default filename
         }
     }
 
@@ -306,8 +305,10 @@ export class SuperSonic {
      * Load WASM binary from network
      */
     async #loadWasm() {
-        // Load manifest first to get the hashed filename
-        await this.#loadWasmManifest();
+        // In development mode, load manifest for cache-busted filename
+        if (this.config.development) {
+            await this.#loadWasmManifest();
+        }
 
         const wasmResponse = await fetch(this.config.wasmUrl);
         if (!wasmResponse.ok) {
