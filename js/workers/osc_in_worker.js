@@ -15,37 +15,37 @@
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 
 // Ring buffer configuration
-var sharedBuffer = null;
-var ringBufferBase = null;
-var atomicView = null;
-var dataView = null;
-var uint8View = null;
+let sharedBuffer = null;
+let ringBufferBase = null;
+let atomicView = null;
+let dataView = null;
+let uint8View = null;
 
 // Ring buffer layout constants (loaded from WASM at initialization)
-var bufferConstants = null;
+let bufferConstants = null;
 
 // Control indices (calculated after init)
-var CONTROL_INDICES = {};
+let CONTROL_INDICES = {};
 
 // Metrics view (for writing stats to SAB)
-var metricsView = null;
+let metricsView = null;
 
 // Worker state
-var running = false;
+let running = false;
 
-function oscInLog() {
+const oscInLog = (...args) => {
     if (__DEV__) {
-        console.log.apply(console, arguments);
+        console.log(...args);
     }
-}
+};
 
 // Sequence tracking for dropped message detection
-var lastSequenceReceived = -1;
+let lastSequenceReceived = -1;
 
 /**
  * Initialize ring buffer access
  */
-function initRingBuffer(buffer, base, constants) {
+const initRingBuffer = (buffer, base, constants) => {
     sharedBuffer = buffer;
     ringBufferBase = base;
     bufferConstants = constants;
@@ -60,38 +60,38 @@ function initRingBuffer(buffer, base, constants) {
     };
 
     // Initialize metrics view
-    var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
+    const metricsBase = ringBufferBase + bufferConstants.METRICS_START;
     metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
-}
+};
 
 /**
  * Read all available messages from OUT buffer
  */
-function readMessages() {
-    var head = Atomics.load(atomicView, CONTROL_INDICES.OUT_HEAD);
-    var tail = Atomics.load(atomicView, CONTROL_INDICES.OUT_TAIL);
+const readMessages = () => {
+    const head = Atomics.load(atomicView, CONTROL_INDICES.OUT_HEAD);
+    const tail = Atomics.load(atomicView, CONTROL_INDICES.OUT_TAIL);
 
-    var messages = [];
+    const messages = [];
 
     if (head === tail) {
         return messages; // No messages
     }
 
-    var currentTail = tail;
-    var messagesRead = 0;
-    var maxMessages = 100;
+    let currentTail = tail;
+    let messagesRead = 0;
+    const maxMessages = 100;
 
     while (currentTail !== head && messagesRead < maxMessages) {
-        var bytesToEnd = bufferConstants.OUT_BUFFER_SIZE - currentTail;
+        const bytesToEnd = bufferConstants.OUT_BUFFER_SIZE - currentTail;
         if (bytesToEnd < bufferConstants.MESSAGE_HEADER_SIZE) {
             currentTail = 0;
             continue;
         }
 
-        var readPos = ringBufferBase + bufferConstants.OUT_BUFFER_START + currentTail;
+        const readPos = ringBufferBase + bufferConstants.OUT_BUFFER_START + currentTail;
 
         // Read message header (now contiguous or wrapped)
-        var magic = dataView.getUint32(readPos, true);
+        const magic = dataView.getUint32(readPos, true);
 
         // Check for padding marker - skip to beginning
         if (magic === bufferConstants.PADDING_MAGIC) {
@@ -107,9 +107,8 @@ function readMessages() {
             continue;
         }
 
-        var length = dataView.getUint32(readPos + 4, true);
-        var sequence = dataView.getUint32(readPos + 8, true);
-        var padding = dataView.getUint32(readPos + 12, true);  // unused padding field
+        const length = dataView.getUint32(readPos + 4, true);
+        const sequence = dataView.getUint32(readPos + 8, true);
 
         // Validate message length
         if (length < bufferConstants.MESSAGE_HEADER_SIZE || length > bufferConstants.OUT_BUFFER_SIZE) {
@@ -121,9 +120,9 @@ function readMessages() {
 
         // Check for dropped messages via sequence
         if (lastSequenceReceived >= 0) {
-            var expectedSeq = (lastSequenceReceived + 1) & 0xFFFFFFFF;
+            const expectedSeq = (lastSequenceReceived + 1) & 0xFFFFFFFF;
             if (sequence !== expectedSeq) {
-                var dropped = (sequence - expectedSeq + 0x100000000) & 0xFFFFFFFF;
+                const dropped = (sequence - expectedSeq + 0x100000000) & 0xFFFFFFFF;
                 if (dropped < 1000) { // Sanity check
                     console.warn('[OSCInWorker] Detected', dropped, 'dropped messages (expected seq', expectedSeq, 'got', sequence, ')');
                     if (metricsView) Atomics.add(metricsView, MetricsOffsets.OSC_IN_DROPPED_MESSAGES, dropped);
@@ -133,18 +132,18 @@ function readMessages() {
         lastSequenceReceived = sequence;
 
         // Read payload (OSC binary data) - now contiguous due to padding
-        var payloadLength = length - bufferConstants.MESSAGE_HEADER_SIZE;
-        var payloadStart = readPos + bufferConstants.MESSAGE_HEADER_SIZE;
+        const payloadLength = length - bufferConstants.MESSAGE_HEADER_SIZE;
+        const payloadStart = readPos + bufferConstants.MESSAGE_HEADER_SIZE;
 
         // Create a proper copy (not a view into SharedArrayBuffer)
-        var payload = new Uint8Array(payloadLength);
-        for (var i = 0; i < payloadLength; i++) {
+        const payload = new Uint8Array(payloadLength);
+        for (let i = 0; i < payloadLength; i++) {
             payload[i] = uint8View[payloadStart + i];
         }
 
         messages.push({
             oscData: payload,
-            sequence: sequence
+            sequence
         });
 
         // Move to next message
@@ -162,22 +161,22 @@ function readMessages() {
     }
 
     return messages;
-}
+};
 
 /**
  * Main wait loop using Atomics.wait for instant wake
  */
-function waitLoop() {
+const waitLoop = () => {
     while (running) {
         try {
             // Get current OUT_HEAD value
-            var currentHead = Atomics.load(atomicView, CONTROL_INDICES.OUT_HEAD);
-            var currentTail = Atomics.load(atomicView, CONTROL_INDICES.OUT_TAIL);
+            const currentHead = Atomics.load(atomicView, CONTROL_INDICES.OUT_HEAD);
+            const currentTail = Atomics.load(atomicView, CONTROL_INDICES.OUT_TAIL);
 
             // If buffer is empty, wait for AudioWorklet to notify us
             if (currentHead === currentTail) {
                 // Wait for up to 100ms (allows checking stop signal)
-                var result = Atomics.wait(atomicView, CONTROL_INDICES.OUT_HEAD, currentHead, 100);
+                const result = Atomics.wait(atomicView, CONTROL_INDICES.OUT_HEAD, currentHead, 100);
 
                 if (result === 'ok' || result === 'not-equal') {
                     // We were notified or value changed!
@@ -187,13 +186,13 @@ function waitLoop() {
             }
 
             // Read all available messages
-            var messages = readMessages();
+            const messages = readMessages();
 
             if (messages.length > 0) {
                 // Send to main thread
                 self.postMessage({
                     type: 'messages',
-                    messages: messages
+                    messages
                 });
             }
 
@@ -209,12 +208,12 @@ function waitLoop() {
             Atomics.wait(atomicView, 0, atomicView[0], 10);
         }
     }
-}
+};
 
 /**
  * Start the wait loop
  */
-function start() {
+const start = () => {
     if (!sharedBuffer) {
         console.error('[OSCInWorker] Cannot start - not initialized');
         return;
@@ -227,20 +226,20 @@ function start() {
 
     running = true;
     waitLoop();
-}
+};
 
 /**
  * Stop the wait loop
  */
-function stop() {
+const stop = () => {
     running = false;
-}
+};
 
 /**
  * Handle messages from main thread
  */
-self.addEventListener('message', function(event) {
-    var data = event.data;
+self.addEventListener('message', (event) => {
+    const { data } = event;
 
     try {
         switch (data.type) {
