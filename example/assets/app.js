@@ -41,8 +41,14 @@ const uiState = {
   amplitude: 0.5,
   attack: 0,
   release: 0.1,
-  randomArp: true
+  randomArp: true,
+  bpm: 120
 };
+
+// BPM scaling factor (relative to 120 BPM baseline)
+function getBpmScale() {
+  return uiState.bpm / 120;
+}
 
 // Make uiState globally accessible for debugging and audio algorithm access
 window.uiState = uiState;
@@ -1404,6 +1410,7 @@ if (loopSelect && loopValue) {
 }
 
 // Setup all sliders
+setupSlider('bpm-slider', 'bpm-value', 'bpm', (v) => Math.round(v));
 setupSlider('root-note-slider', 'root-note-value', 'rootNote', (v) => Math.round(v));
 setupSlider('octaves-slider', 'octaves-value', 'octaves', (v) => Math.round(v));
 setupSlider('attack-slider', 'attack-value', 'attack', (v) => v.toFixed(2));
@@ -1674,8 +1681,8 @@ async function startArpeggiator() {
   if (arpeggiatorRunning) return;
   arpeggiatorRunning = true;
 
-  const NOTE_INTERVAL = 0.125; // Must match scheduleArpeggiatorBatch
-  const GRID_INTERVAL = 0.5;   // Snap to 0.5s grid
+  const NOTE_INTERVAL = 0.125 / getBpmScale(); // Scale timing by BPM
+  const GRID_INTERVAL = 0.5 / getBpmScale();   // Snap to grid (scaled by BPM)
 
   // Get current time
   const perfTimeMs = performance.timeOrigin + performance.now();
@@ -1719,7 +1726,7 @@ async function startArpeggiator() {
 function scheduleArpeggiatorBatch() {
   if (!arpeggiatorRunning) return;
 
-  const NOTE_INTERVAL = 0.125; // 0.5s per note (120 BPM half notes)
+  const NOTE_INTERVAL = 0.125 / getBpmScale(); // Scale timing by BPM
   const NOTES_PER_BATCH = 4;
 
   // Get current scale from uiState
@@ -1829,7 +1836,7 @@ function stopArpeggiator() {
  * Start visual beat pulse on pad touch indicator
  */
 function startBeatPulse() {
-  const NOTE_INTERVAL = 0.125; // Match arp timing
+  const NOTE_INTERVAL = 0.125 / getBpmScale(); // Scale timing by BPM
   const touchElement = document.getElementById('synth-pad-touch');
 
   if (!touchElement) return;
@@ -2036,8 +2043,8 @@ async function startKickLoop() {
   if (kickRunning) return;
   kickRunning = true;
 
-  const KICK_INTERVAL = 0.5; // Must match scheduleKickBatch
-  const GRID_INTERVAL = 0.5; // Snap to 0.5s grid
+  const KICK_INTERVAL = 0.5 / getBpmScale(); // Scale timing by BPM
+  const GRID_INTERVAL = 0.5 / getBpmScale(); // Snap to grid (scaled by BPM)
 
   // Get current time
   const perfTimeMs = performance.timeOrigin + performance.now();
@@ -2078,7 +2085,7 @@ async function startKickLoop() {
 function scheduleKickBatch() {
   if (!kickRunning) return;
 
-  const KICK_INTERVAL = 0.5; // 0.5s per kick (matches 4 arp notes)
+  const KICK_INTERVAL = 0.5 / getBpmScale(); // Scale timing by BPM
   const KICKS_PER_BATCH = 4;
 
   // Schedule 4 kicks
@@ -2206,8 +2213,10 @@ async function startAmenLoop() {
   if (amenRunning) return;
   amenRunning = true;
 
-  const AMEN_INTERVAL = 2.0; // Must match scheduleAmenBatch
-  const GRID_INTERVAL = 0.5; // Snap to 0.5s grid
+  // Get the config for the currently selected loop sample to calculate scaled interval
+  const loopConfig = LOOP_CONFIG[uiState.loopSample] || { rate: 1.0, duration: 2.0 };
+  const LOOP_INTERVAL = loopConfig.duration / getBpmScale(); // Scale timing by BPM
+  const GRID_INTERVAL = 0.5 / getBpmScale(); // Snap to grid (scaled by BPM)
 
   // Get current time
   const perfTimeMs = performance.timeOrigin + performance.now();
@@ -2224,8 +2233,8 @@ async function startAmenLoop() {
   } else {
     // Calculate which beat we should start from relative to the global grid
     const elapsed = currentNTP - playbackStartNTP;
-    amenBeatCounter = Math.ceil(elapsed / AMEN_INTERVAL);
-    amenCurrentTime = playbackStartNTP + (amenBeatCounter * AMEN_INTERVAL);
+    amenBeatCounter = Math.ceil(elapsed / LOOP_INTERVAL);
+    amenCurrentTime = playbackStartNTP + (amenBeatCounter * LOOP_INTERVAL);
   }
 
   // Calculate delay until our start beat
@@ -2250,16 +2259,17 @@ function scheduleAmenBatch() {
 
   // Get the config for the currently selected loop sample
   const loopConfig = LOOP_CONFIG[uiState.loopSample] || { rate: 1.0, duration: 2.0 };
-  const AMEN_RATE = loopConfig.rate;
-  const AMEN_INTERVAL = loopConfig.duration;
-  const AMEN_PER_BATCH = 1; // Schedule 1 at a time for faster stop
+  const bpmScale = getBpmScale();
+  const loopRate = loopConfig.rate * bpmScale; // Scale rate by BPM (faster BPM = faster playback)
+  const loopInterval = loopConfig.duration / bpmScale; // Scale timing by BPM
+  const LOOPS_PER_BATCH = 1; // Schedule 1 at a time for faster stop
 
   console.log(`[Amen] Scheduling batch starting at beat ${amenBeatCounter}`);
 
-  for (let i = 0; i < AMEN_PER_BATCH; i++) {
+  for (let i = 0; i < LOOPS_PER_BATCH; i++) {
     // Thread time through - use current time and increment
     const targetNTP = amenCurrentTime + LOOKAHEAD;
-    amenCurrentTime += AMEN_INTERVAL;
+    amenCurrentTime += loopInterval;
 
     // Create OSC message for loop sample
     const message = {
@@ -2274,7 +2284,7 @@ function scheduleAmenBatch() {
         { type: 's', value: 'amp' },
         { type: 'f', value: 0.5 },
         { type: 's', value: 'rate' },
-        { type: 'f', value: AMEN_RATE },
+        { type: 'f', value: loopRate },
         { type: 's', value: 'out_bus' },
         { type: 'i', value: FX_BUS_SYNTH_TO_LPF }
       ]
@@ -2313,7 +2323,7 @@ function scheduleAmenBatch() {
   }
 
   // Advance counter
-  amenBeatCounter += AMEN_PER_BATCH;
+  amenBeatCounter += LOOPS_PER_BATCH;
 
   // Calculate when to schedule next batch (500ms before the first event in next batch)
   const perfTimeMs = performance.timeOrigin + performance.now();
