@@ -233,7 +233,9 @@ function hideError() {
 function updateMetrics(metrics) {
   // Messages
   document.getElementById('metric-sent').textContent = metrics.messages_sent ?? 0;
+  document.getElementById('metric-bytes-sent').textContent = formatBytes(metrics.bytes_sent ?? 0);
   document.getElementById('metric-received').textContent = metrics.osc_in_messages_received ?? 0;
+  document.getElementById('metric-bytes-received').textContent = formatBytes(metrics.osc_in_bytes_received ?? 0);
   document.getElementById('metric-osc-in-dropped').textContent = metrics.osc_in_dropped_messages ?? 0;
 
   // Processing
@@ -245,6 +247,7 @@ function updateMetrics(metrics) {
   document.getElementById('metric-scheduler-depth').textContent = metrics.scheduler_queue_depth ?? 0;
   document.getElementById('metric-scheduler-peak').textContent = metrics.scheduler_queue_max ?? 0;
   document.getElementById('metric-scheduler-dropped').textContent = metrics.scheduler_queue_dropped ?? 0;
+  document.getElementById('metric-drift').textContent = (metrics.drift_offset_ms ?? 0) + 'ms';
 
   // PreScheduler
   document.getElementById('metric-prescheduler-pending').textContent = metrics.prescheduler_pending ?? 0;
@@ -265,16 +268,16 @@ function updateMetrics(metrics) {
   const inUsage = metrics.in_buffer_usage ?? 0;
   const outUsage = metrics.out_buffer_usage ?? 0;
   const debugUsage = metrics.debug_buffer_usage ?? 0;
-  document.getElementById('metric-in-usage').textContent = inUsage + '%';
+  document.getElementById('metric-in-usage').textContent = inUsage.toFixed(2) + '%';
   document.getElementById('metric-in-bar').style.width = inUsage + '%';
-  document.getElementById('metric-out-usage').textContent = outUsage + '%';
+  document.getElementById('metric-out-usage').textContent = outUsage.toFixed(2) + '%';
   document.getElementById('metric-out-bar').style.width = outUsage + '%';
-  document.getElementById('metric-debug-usage').textContent = debugUsage + '%';
+  document.getElementById('metric-debug-usage').textContent = debugUsage.toFixed(2) + '%';
   document.getElementById('metric-debug-bar').style.width = debugUsage + '%';
 
   // Debug worker
   document.getElementById('metric-debug-received').textContent = metrics.debug_messages_received ?? 0;
-  document.getElementById('metric-debug-bytes').textContent = metrics.debug_bytes_read ?? 0;
+  document.getElementById('metric-debug-bytes-received').textContent = formatBytes(metrics.debug_bytes_received ?? 0);
 
   // Audio buffers
   document.getElementById('metric-buffer-count').textContent = metrics.buffer_allocated_count ?? 0;
@@ -743,6 +746,7 @@ initButton.addEventListener('click', async () => {
       const metricsMapping = {
         // Main thread metrics
         messagesSent: 'messages_sent',
+        bytesSent: 'bytes_sent',
         // Worklet metrics
         processCount: 'process_count',
         messagesProcessed: 'messages_processed',
@@ -765,9 +769,12 @@ initButton.addEventListener('click', async () => {
         // OSC In worker metrics
         oscInMessagesReceived: 'osc_in_messages_received',
         oscInDroppedMessages: 'osc_in_dropped_messages',
+        oscInBytesReceived: 'osc_in_bytes_received',
         // Debug worker metrics
         debugMessagesReceived: 'debug_messages_received',
-        debugBytesRead: 'debug_bytes_read'
+        debugBytesReceived: 'debug_bytes_received',
+        // Timing
+        driftOffsetMs: 'drift_offset_ms'
       };
 
       // Apply all simple mappings

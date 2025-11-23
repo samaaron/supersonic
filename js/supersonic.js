@@ -601,15 +601,15 @@ export class SuperSonic {
         return {
             inBufferUsed: {
                 bytes: inUsed,
-                percentage: Math.round((inUsed / this.#bufferConstants.IN_BUFFER_SIZE) * 100)
+                percentage: (inUsed / this.#bufferConstants.IN_BUFFER_SIZE) * 100
             },
             outBufferUsed: {
                 bytes: outUsed,
-                percentage: Math.round((outUsed / this.#bufferConstants.OUT_BUFFER_SIZE) * 100)
+                percentage: (outUsed / this.#bufferConstants.OUT_BUFFER_SIZE) * 100
             },
             debugBufferUsed: {
                 bytes: debugUsed,
-                percentage: Math.round((debugUsed / this.#bufferConstants.DEBUG_BUFFER_SIZE) * 100)
+                percentage: (debugUsed / this.#bufferConstants.DEBUG_BUFFER_SIZE) * 100
             }
         };
     }
@@ -643,25 +643,28 @@ export class SuperSonic {
             retryQueueSize: metricsView[15],
             retryQueueMax: metricsView[16],
 
-            // OSC In - offsets 17-18
+            // OSC In - offsets 17-19
             oscInMessagesReceived: metricsView[17],
             oscInDroppedMessages: metricsView[18],
+            oscInBytesReceived: metricsView[19],
 
-            // Debug - offsets 19-20
-            debugMessagesReceived: metricsView[19],
-            debugBytesRead: metricsView[20],
+            // Debug - offsets 20-21
+            debugMessagesReceived: metricsView[20],
+            debugBytesReceived: metricsView[21],
 
-            // Main thread - offset 21
-            messagesSent: metricsView[21]
+            // Main thread - offsets 22-23
+            messagesSent: metricsView[22],
+            bytesSent: metricsView[23]
         };
     }
 
     /**
-     * Increment a main thread metric in SharedArrayBuffer
-     * @param {'messagesSent'} metric - Metric to increment
+     * Add to a main thread metric in SharedArrayBuffer
+     * @param {'messagesSent'|'bytesSent'} metric - Metric to update
+     * @param {number} [amount=1] - Amount to add
      * @private
      */
-    #incrementMetric(metric) {
+    #addMetric(metric, amount = 1) {
         if (!this.#sharedBuffer || !this.#bufferConstants || !this.#ringBufferBase) {
             return;
         }
@@ -669,8 +672,8 @@ export class SuperSonic {
         const metricsBase = this.#ringBufferBase + this.#bufferConstants.METRICS_START;
         const metricsView = new Uint32Array(this.#sharedBuffer, metricsBase, this.#bufferConstants.METRICS_SIZE / 4);
 
-        const offsets = { messagesSent: 21 };
-        Atomics.add(metricsView, offsets[metric], 1);
+        const offsets = { messagesSent: 22, bytesSent: 23 };
+        Atomics.add(metricsView, offsets[metric], amount);
     }
 
     /**
@@ -702,6 +705,9 @@ export class SuperSonic {
         if (oscMetrics) {
             Object.assign(metrics, oscMetrics);
         }
+
+        // Drift offset (milliseconds)
+        metrics.driftOffsetMs = this.getDriftOffset();
 
         const totalDuration = performance.now() - startTime;
         if (totalDuration > 1) {
@@ -804,7 +810,8 @@ export class SuperSonic {
         const uint8Data = this.#toUint8Array(oscData);
         const preparedData = await this.#prepareOutboundPacket(uint8Data);
 
-        this.#incrementMetric('messagesSent');
+        this.#addMetric('messagesSent');
+        this.#addMetric('bytesSent', preparedData.length);
 
         if (this.onMessageSent) {
             this.onMessageSent(preparedData);

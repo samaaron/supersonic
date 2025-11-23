@@ -72,7 +72,7 @@ struct alignas(4) ControlPointers {
 };
 
 // Performance metrics structure
-// Layout: [0-5] Worklet, [6-16] OSC Out, [17-18] OSC In, [19-20] Debug, [21] Main thread, [22-31] padding
+// Layout: [0-5] Worklet, [6-16] OSC Out, [17-19] OSC In, [20] Debug, [21-22] Main thread, [23-31] padding
 struct alignas(4) PerformanceMetrics {
     // Worklet metrics (offsets 0-5, written by WASM)
     std::atomic<uint32_t> process_count;
@@ -95,19 +95,21 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> osc_out_retry_queue_size;
     std::atomic<uint32_t> osc_out_retry_queue_max;
 
-    // OSC In metrics (offsets 17-18, written by osc_in_worker.js)
+    // OSC In metrics (offsets 17-19, written by osc_in_worker.js)
     std::atomic<uint32_t> osc_in_messages_received;
     std::atomic<uint32_t> osc_in_dropped_messages;
+    std::atomic<uint32_t> osc_in_bytes_received;  // Total bytes read from OUT buffer
 
-    // Debug metrics (offsets 19-20, written by debug_worker.js)
+    // Debug metrics (offsets 20-21, written by debug_worker.js)
     std::atomic<uint32_t> debug_messages_received;
-    std::atomic<uint32_t> debug_bytes_read;
+    std::atomic<uint32_t> debug_bytes_received;   // Total bytes read from DEBUG buffer
 
-    // Main thread metrics (offset 21, written by supersonic.js via Atomics)
+    // Main thread metrics (offsets 22-23, written by supersonic.js via Atomics)
     std::atomic<uint32_t> messages_sent;      // OSC messages sent to scsynth
+    std::atomic<uint32_t> bytes_sent;         // Total bytes written to IN buffer
 
-    // Padding to ensure 8-byte alignment for subsequent Float64Array fields (offsets 22-31)
-    uint32_t _padding[10];
+    // Padding to ensure 8-byte alignment for subsequent Float64Array fields (offsets 24-31)
+    uint32_t _padding[8];
 };
 
 // Status flags

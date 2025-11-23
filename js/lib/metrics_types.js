@@ -25,42 +25,53 @@
  *
  * @typedef {Object} SuperSonicMetrics
  *
- * @property {number} messagesSent - OSC messages sent to scsynth
+ * --- Main Thread (written by supersonic.js, offsets 22-23) ---
+ * @property {number} messagesSent - OSC messages sent to scsynth (JS → IN buffer)
+ * @property {number} bytesSent - Total bytes sent to scsynth (JS → IN buffer)
  *
- * @property {number} processCount - Audio process() calls
- * @property {number} messagesProcessed - Messages processed by scsynth
- * @property {number} messagesDropped - Messages dropped by scsynth
- * @property {number} schedulerQueueDepth - Current scheduler queue depth
- * @property {number} schedulerQueueMax - Maximum scheduler queue depth reached
- * @property {number} schedulerQueueDropped - Messages dropped from scheduler queue
+ * --- Worklet (written by WASM, offsets 0-5) ---
+ * @property {number} processCount - Audio process() calls (cumulative)
+ * @property {number} messagesProcessed - Messages processed by scsynth from IN buffer
+ * @property {number} messagesDropped - Messages dropped by scsynth scheduler (queue full)
+ * @property {number} schedulerQueueDepth - Current scsynth scheduler queue depth
+ * @property {number} schedulerQueueMax - Peak scsynth scheduler queue depth
+ * @property {number} schedulerQueueDropped - Messages dropped from scsynth scheduler queue
  *
- * @property {Object} inBufferUsed - Input buffer usage statistics
- * @property {number} inBufferUsed.bytes - Bytes used in input buffer
- * @property {number} inBufferUsed.percentage - Percentage of input buffer used
- * @property {Object} outBufferUsed - Output buffer usage statistics
- * @property {number} outBufferUsed.bytes - Bytes used in output buffer
- * @property {number} outBufferUsed.percentage - Percentage of output buffer used
- * @property {Object} debugBufferUsed - Debug buffer usage statistics
- * @property {number} debugBufferUsed.bytes - Bytes used in debug buffer
+ * --- Ring Buffer Usage (calculated from head/tail pointers) ---
+ * @property {Object} inBufferUsed - IN buffer usage (JS → scsynth)
+ * @property {number} inBufferUsed.bytes - Bytes currently in IN buffer
+ * @property {number} inBufferUsed.percentage - Percentage of IN buffer used
+ * @property {Object} outBufferUsed - OUT buffer usage (scsynth → JS)
+ * @property {number} outBufferUsed.bytes - Bytes currently in OUT buffer
+ * @property {number} outBufferUsed.percentage - Percentage of OUT buffer used
+ * @property {Object} debugBufferUsed - Debug buffer usage (scsynth → JS)
+ * @property {number} debugBufferUsed.bytes - Bytes currently in debug buffer
  * @property {number} debugBufferUsed.percentage - Percentage of debug buffer used
  *
- * @property {number} preschedulerPending - Current pending events in queue
- * @property {number} preschedulerPeak - Peak pending events (high water mark)
- * @property {number} preschedulerSent - Total bundles written to ring buffer
- * @property {number} retriesSucceeded - Successful retry attempts
- * @property {number} retriesFailed - Failed retry attempts (gave up)
- * @property {number} bundlesScheduled - Total bundles scheduled
- * @property {number} eventsCancelled - Total events cancelled
- * @property {number} totalDispatches - Total dispatch cycles executed
- * @property {number} messagesRetried - Total retry attempts (all)
+ * --- Prescheduler (written by osc_out_prescheduler_worker.js, offsets 6-16) ---
+ * @property {number} preschedulerPending - Events waiting in prescheduler queue
+ * @property {number} preschedulerPeak - Peak prescheduler queue depth
+ * @property {number} preschedulerSent - Bundles successfully written to IN buffer
+ * @property {number} retriesSucceeded - Ring buffer writes that succeeded after retry
+ * @property {number} retriesFailed - Ring buffer writes that failed after max retries
+ * @property {number} bundlesScheduled - Total bundles added to prescheduler
+ * @property {number} eventsCancelled - Bundles cancelled before dispatch
+ * @property {number} totalDispatches - Dispatch cycles executed
+ * @property {number} messagesRetried - Total retry attempts (includes multiple per message)
  * @property {number} retryQueueSize - Current retry queue size
  * @property {number} retryQueueMax - Peak retry queue size
  *
- * @property {number} oscInMessagesReceived - OSC In messages received
- * @property {number} oscInDroppedMessages - OSC In dropped messages
+ * --- OSC In Worker (written by osc_in_worker.js, offsets 17-19) ---
+ * @property {number} oscInMessagesReceived - OSC replies received from scsynth (OUT buffer → JS)
+ * @property {number} oscInDroppedMessages - OSC replies lost, detected via sequence gaps or corruption
+ * @property {number} oscInBytesReceived - Total bytes received from scsynth (OUT buffer → JS)
  *
- * @property {number} debugMessagesReceived - Debug messages received
- * @property {number} debugBytesRead - Debug bytes read
+ * --- Debug Worker (written by debug_worker.js, offsets 20-21) ---
+ * @property {number} debugMessagesReceived - Debug messages received from scsynth
+ * @property {number} debugBytesReceived - Total bytes received from scsynth (DEBUG buffer → JS)
+ *
+ * --- Timing ---
+ * @property {number} driftOffsetMs - Drift between AudioContext and performance.now() (milliseconds)
  */
 
 export {};

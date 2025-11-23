@@ -59,13 +59,14 @@ function initRingBuffer(buffer, base, constants) {
         OUT_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 12) / 4
     };
 
-    // Initialize metrics view (OSC In metrics are at offsets 17-18 in the metrics array)
+    // Initialize metrics view (OSC In metrics are at offsets 17-19 in the metrics array)
     var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
     metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
 
     METRICS_INDICES = {
         MESSAGES_RECEIVED: 17,
-        DROPPED_MESSAGES: 18
+        DROPPED_MESSAGES: 18,
+        BYTES_RECEIVED: 19
     };
 }
 
@@ -155,7 +156,10 @@ function readMessages() {
         // Move to next message
         currentTail = (currentTail + length) % bufferConstants.OUT_BUFFER_SIZE;
         messagesRead++;
-        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RECEIVED, 1);
+        if (metricsView) {
+            Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RECEIVED, 1);
+            Atomics.add(metricsView, METRICS_INDICES.BYTES_RECEIVED, payloadLength);
+        }
     }
 
     // Update tail pointer (consume messages)

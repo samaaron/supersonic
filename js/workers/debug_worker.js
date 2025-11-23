@@ -56,13 +56,13 @@ function initRingBuffer(buffer, base, constants) {
         DEBUG_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 20) / 4
     };
 
-    // Initialize metrics view (Debug metrics are at offsets 19-20 in the metrics array)
+    // Initialize metrics view (Debug metrics at offset 20 in the metrics array)
     var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
     metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
 
     METRICS_INDICES = {
-        MESSAGES_RECEIVED: 19,
-        BYTES_READ: 20
+        MESSAGES_RECEIVED: 20,
+        BYTES_RECEIVED: 21
     };
 }
 
@@ -141,13 +141,15 @@ function readDebugMessages() {
         // Move to next message
         currentTail = (currentTail + length) % bufferConstants.DEBUG_BUFFER_SIZE;
         messagesRead++;
-        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RECEIVED, 1);
+        if (metricsView) {
+            Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RECEIVED, 1);
+            Atomics.add(metricsView, METRICS_INDICES.BYTES_RECEIVED, payloadLength);
+        }
     }
 
     // Update tail pointer (consume messages)
     if (messagesRead > 0) {
         Atomics.store(atomicView, CONTROL_INDICES.DEBUG_TAIL, currentTail);
-        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BYTES_READ, messagesRead);
     }
 
     return messages.length > 0 ? messages : null;
