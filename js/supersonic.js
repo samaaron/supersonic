@@ -17,6 +17,7 @@ import oscLib from './vendor/osc.js/osc.js';
 import { NTP_EPOCH_OFFSET, DRIFT_UPDATE_INTERVAL_MS } from './timing_constants.js';
 import { MemoryLayout } from './memory_layout.js';
 import { defaultWorldOptions } from './scsynth_options.js';
+import * as MetricsOffsets from './lib/metrics_offsets.js';
 
 /**
  * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
@@ -630,31 +631,31 @@ export class SuperSonic {
 
         // Read OSC worker metrics from SAB
         return {
-            // OSC Out (prescheduler) - offsets 6-16
-            preschedulerPending: metricsView[6],
-            preschedulerPeak: metricsView[7],
-            preschedulerSent: metricsView[8],
-            retriesSucceeded: metricsView[9],
-            retriesFailed: metricsView[10],
-            bundlesScheduled: metricsView[11],
-            eventsCancelled: metricsView[12],
-            totalDispatches: metricsView[13],
-            messagesRetried: metricsView[14],
-            retryQueueSize: metricsView[15],
-            retryQueueMax: metricsView[16],
+            // OSC Out (prescheduler)
+            preschedulerPending: metricsView[MetricsOffsets.PRESCHEDULER_PENDING],
+            preschedulerPeak: metricsView[MetricsOffsets.PRESCHEDULER_PEAK],
+            preschedulerSent: metricsView[MetricsOffsets.PRESCHEDULER_SENT],
+            retriesSucceeded: metricsView[MetricsOffsets.RETRIES_SUCCEEDED],
+            retriesFailed: metricsView[MetricsOffsets.RETRIES_FAILED],
+            bundlesScheduled: metricsView[MetricsOffsets.BUNDLES_SCHEDULED],
+            eventsCancelled: metricsView[MetricsOffsets.EVENTS_CANCELLED],
+            totalDispatches: metricsView[MetricsOffsets.TOTAL_DISPATCHES],
+            messagesRetried: metricsView[MetricsOffsets.MESSAGES_RETRIED],
+            retryQueueSize: metricsView[MetricsOffsets.RETRY_QUEUE_SIZE],
+            retryQueueMax: metricsView[MetricsOffsets.RETRY_QUEUE_MAX],
 
-            // OSC In - offsets 17-19
-            oscInMessagesReceived: metricsView[17],
-            oscInDroppedMessages: metricsView[18],
-            oscInBytesReceived: metricsView[19],
+            // OSC In
+            oscInMessagesReceived: metricsView[MetricsOffsets.OSC_IN_MESSAGES_RECEIVED],
+            oscInDroppedMessages: metricsView[MetricsOffsets.OSC_IN_DROPPED_MESSAGES],
+            oscInBytesReceived: metricsView[MetricsOffsets.OSC_IN_BYTES_RECEIVED],
 
-            // Debug - offsets 20-21
-            debugMessagesReceived: metricsView[20],
-            debugBytesReceived: metricsView[21],
+            // Debug
+            debugMessagesReceived: metricsView[MetricsOffsets.DEBUG_MESSAGES_RECEIVED],
+            debugBytesReceived: metricsView[MetricsOffsets.DEBUG_BYTES_RECEIVED],
 
-            // Main thread - offsets 22-23
-            messagesSent: metricsView[22],
-            bytesSent: metricsView[23]
+            // Main thread
+            messagesSent: metricsView[MetricsOffsets.MESSAGES_SENT],
+            bytesSent: metricsView[MetricsOffsets.BYTES_SENT]
         };
     }
 
@@ -672,7 +673,10 @@ export class SuperSonic {
         const metricsBase = this.#ringBufferBase + this.#bufferConstants.METRICS_START;
         const metricsView = new Uint32Array(this.#sharedBuffer, metricsBase, this.#bufferConstants.METRICS_SIZE / 4);
 
-        const offsets = { messagesSent: 22, bytesSent: 23 };
+        const offsets = {
+            messagesSent: MetricsOffsets.MESSAGES_SENT,
+            bytesSent: MetricsOffsets.BYTES_SENT
+        };
         Atomics.add(metricsView, offsets[metric], amount);
     }
 

@@ -9,8 +9,9 @@
 /**
  * AudioWorklet Processor for scsynth WASM
  * Runs in AudioWorkletGlobalScope with real-time priority
- * VERSION: 16 - Reduced atomic operation frequency
  */
+
+import * as MetricsOffsets from '../lib/metrics_offsets.js';
 
 class ScsynthProcessor extends AudioWorkletProcessor {
     constructor() {
@@ -41,8 +42,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         // Control region indices (Int32Array indices) - will be calculated dynamically
         this.CONTROL_INDICES = null;
 
-        // Metrics indices - will be calculated dynamically
-        this.METRICS_INDICES = null;
+        // Metrics view (Uint32Array into metrics region of SharedArrayBuffer)
+        this.metricsView = null;
 
         // Status flag masks
         this.STATUS_FLAGS = {
@@ -131,15 +132,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             STATUS_FLAGS: (ringBufferBase + CONTROL_START + 28) / 4
         };
 
-        this.METRICS_INDICES = {
-            PROCESS_COUNT: (ringBufferBase + METRICS_START + 0) / 4,
-            MESSAGES_PROCESSED: (ringBufferBase + METRICS_START + 4) / 4,
-            MESSAGES_DROPPED: (ringBufferBase + METRICS_START + 8) / 4,
-            SCHEDULER_QUEUE_DEPTH: (ringBufferBase + METRICS_START + 12) / 4,
-            SCHEDULER_QUEUE_MAX: (ringBufferBase + METRICS_START + 16) / 4,
-            SCHEDULER_QUEUE_DROPPED: (ringBufferBase + METRICS_START + 20) / 4
-        };
-
+        // Create metrics view into the metrics region of SharedArrayBuffer
+        const metricsBase = ringBufferBase + METRICS_START;
+        this.metricsView = new Uint32Array(this.sharedBuffer, metricsBase, this.bufferConstants.METRICS_SIZE / 4);
     }
 
     // Write worldOptions to SharedArrayBuffer for C++ to read
@@ -515,12 +510,12 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
             // Get current metrics
             const metrics = {
-                processCount: Atomics.load(this.atomicView, this.METRICS_INDICES.PROCESS_COUNT),
-                messagesProcessed: Atomics.load(this.atomicView, this.METRICS_INDICES.MESSAGES_PROCESSED),
-                messagesDropped: Atomics.load(this.atomicView, this.METRICS_INDICES.MESSAGES_DROPPED),
-                schedulerQueueDepth: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_DEPTH),
-                schedulerQueueMax: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_MAX),
-                schedulerQueueDropped: Atomics.load(this.atomicView, this.METRICS_INDICES.SCHEDULER_QUEUE_DROPPED)
+                processCount: Atomics.load(this.metricsView, MetricsOffsets.PROCESS_COUNT),
+                messagesProcessed: Atomics.load(this.metricsView, MetricsOffsets.MESSAGES_PROCESSED),
+                messagesDropped: Atomics.load(this.metricsView, MetricsOffsets.MESSAGES_DROPPED),
+                schedulerQueueDepth: Atomics.load(this.metricsView, MetricsOffsets.SCHEDULER_QUEUE_DEPTH),
+                schedulerQueueMax: Atomics.load(this.metricsView, MetricsOffsets.SCHEDULER_QUEUE_MAX),
+                schedulerQueueDropped: Atomics.load(this.metricsView, MetricsOffsets.SCHEDULER_QUEUE_DROPPED)
             };
 
             this.port.postMessage({
