@@ -7,6 +7,7 @@
 */
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
+import { writeToRingBuffer } from '../lib/ring_buffer_writer.js';
 
 // Shared memory for ring buffer writing
 let sharedBuffer = null;
@@ -29,8 +30,8 @@ let periodicTimer = null;    // Single periodic timer (25ms interval)
 let sequenceCounter = 0;
 let isDispatching = false;  // Prevent reentrancy into dispatch loop
 
-// Message sequence counter for ring buffer writes (NOT a metric - used for message headers)
-let outgoingMessageSeq = 0;
+// Message sequence counter now lives in SAB at CONTROL_INDICES.IN_SEQUENCE
+// Shared between prescheduler worker and main thread (for direct writes)
 
 // Retry queue for failed writes
 let retryQueue = [];
@@ -104,9 +105,13 @@ const initSharedBuffer = () => {
     uint8View = new Uint8Array(sharedBuffer);
 
     // Calculate control indices for ring buffer
+    // Offsets: in_head=0, in_tail=4, out_head=8, out_tail=12, debug_head=16, debug_tail=20,
+    //          in_sequence=24, out_sequence=28, debug_sequence=32, status_flags=36, in_write_lock=40
     CONTROL_INDICES = {
         IN_HEAD: (ringBufferBase + bufferConstants.CONTROL_START + 0) / 4,
-        IN_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 4) / 4
+        IN_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 4) / 4,
+        IN_SEQUENCE: (ringBufferBase + bufferConstants.CONTROL_START + 24) / 4,
+        IN_WRITE_LOCK: (ringBufferBase + bufferConstants.CONTROL_START + 40) / 4
     };
 
     // Initialize metrics view
@@ -135,11 +140,10 @@ const updateMetrics = () => {
 };
 
 /**
- * Write OSC message directly to ring buffer (replaces MessagePort to writer worker)
- * This is now the ONLY place that writes to the ring buffer
+ * Write OSC message to ring buffer using shared module
  * Returns true if successful, false if failed (caller should queue for retry)
  */
-const writeToRingBuffer = (oscMessage, isRetry) => {
+const writeOSCToRingBuffer = (oscMessage, isRetry) => {
     if (!sharedBuffer || !atomicView) {
         console.error('[PreScheduler] Not initialized for ring buffer writing');
         return false;
@@ -154,88 +158,25 @@ const writeToRingBuffer = (oscMessage, isRetry) => {
         return false;
     }
 
-    // Try to write (non-blocking, single attempt)
-    const head = Atomics.load(atomicView, CONTROL_INDICES.IN_HEAD);
-    const tail = Atomics.load(atomicView, CONTROL_INDICES.IN_TAIL);
+    // Use shared ring buffer writer (worker can spin briefly for lock)
+    const success = writeToRingBuffer({
+        atomicView,
+        dataView,
+        uint8View,
+        bufferConstants,
+        ringBufferBase,
+        controlIndices: CONTROL_INDICES,
+        oscMessage,
+        maxSpins: 10  // Worker can afford brief spinning
+    });
 
-    // Calculate available space
-    const available = (bufferConstants.IN_BUFFER_SIZE - 1 - head + tail) % bufferConstants.IN_BUFFER_SIZE;
-
-    if (available < totalSize) {
+    if (!success) {
         // Buffer full - return false so caller can queue for retry
         if (!isRetry) {
             console.warn('[PreScheduler] Ring buffer full, message will be queued for retry');
         }
         return false;
     }
-
-    // ringbuf.js approach: split writes across wrap boundary
-    // No padding markers - just split the write into two parts if it wraps
-
-    const spaceToEnd = bufferConstants.IN_BUFFER_SIZE - head;
-
-    if (totalSize > spaceToEnd) {
-        // Message will wrap - write in two parts
-        // Create header as byte array to simplify split writes
-        const headerBytes = new Uint8Array(bufferConstants.MESSAGE_HEADER_SIZE);
-        const headerView = new DataView(headerBytes.buffer);
-        headerView.setUint32(0, bufferConstants.MESSAGE_MAGIC, true);
-        headerView.setUint32(4, totalSize, true);
-        headerView.setUint32(8, outgoingMessageSeq, true);
-        headerView.setUint32(12, 0, true);
-
-        const writePos1 = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
-        const writePos2 = ringBufferBase + bufferConstants.IN_BUFFER_START;
-
-        // Write header (may be split)
-        if (spaceToEnd >= bufferConstants.MESSAGE_HEADER_SIZE) {
-            // Header fits contiguously
-            uint8View.set(headerBytes, writePos1);
-
-            // Write payload (split across boundary)
-            const payloadBytesInFirstPart = spaceToEnd - bufferConstants.MESSAGE_HEADER_SIZE;
-            uint8View.set(oscMessage.subarray(0, payloadBytesInFirstPart), writePos1 + bufferConstants.MESSAGE_HEADER_SIZE);
-            uint8View.set(oscMessage.subarray(payloadBytesInFirstPart), writePos2);
-        } else {
-            // Header is split across boundary
-            uint8View.set(headerBytes.subarray(0, spaceToEnd), writePos1);
-            uint8View.set(headerBytes.subarray(spaceToEnd), writePos2);
-
-            // All payload goes at beginning
-            const payloadOffset = bufferConstants.MESSAGE_HEADER_SIZE - spaceToEnd;
-            uint8View.set(oscMessage, writePos2 + payloadOffset);
-        }
-    } else {
-        // Message fits contiguously - write normally
-        const writePos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
-
-        // Write header
-        dataView.setUint32(writePos, bufferConstants.MESSAGE_MAGIC, true);
-        dataView.setUint32(writePos + 4, totalSize, true);
-        dataView.setUint32(writePos + 8, outgoingMessageSeq, true);
-        dataView.setUint32(writePos + 12, 0, true);
-
-        // Write payload
-        uint8View.set(oscMessage, writePos + bufferConstants.MESSAGE_HEADER_SIZE);
-    }
-
-    // Diagnostic: Log first few writes
-    if (outgoingMessageSeq < 5) {
-        schedulerLog('[PreScheduler] Write:', 'seq=' + outgoingMessageSeq,
-                    'pos=' + head, 'size=' + totalSize, 'newHead=' + ((head + totalSize) % bufferConstants.IN_BUFFER_SIZE));
-    }
-
-    // CRITICAL: Ensure memory barrier before publishing head pointer
-    // All previous writes (header + payload) must be visible to C++ reader
-    // Atomics.load provides necessary memory fence/barrier
-    Atomics.load(atomicView, CONTROL_INDICES.IN_HEAD);
-
-    // Update head pointer (publish message)
-    const newHead = (head + totalSize) % bufferConstants.IN_BUFFER_SIZE;
-    Atomics.store(atomicView, CONTROL_INDICES.IN_HEAD, newHead);
-
-    // Increment sequence counter for next message
-    outgoingMessageSeq = (outgoingMessageSeq + 1) & 0xFFFFFFFF;
 
     // Update SAB metrics
     if (metricsView) Atomics.add(metricsView, MetricsOffsets.PRESCHEDULER_SENT, 1);
@@ -285,7 +226,7 @@ const processRetryQueue = () => {
         const item = retryQueue[i];
 
         // Try to write
-        const success = writeToRingBuffer(item.oscData, true);
+        const success = writeOSCToRingBuffer(item.oscData, true);
 
         if (success) {
             // Success - remove from queue
@@ -331,7 +272,7 @@ const scheduleEvent = (oscData, editorId, runTag) => {
     if (ntpTime === null) {
         // Not a bundle - dispatch immediately to ring buffer
         schedulerLog('[PreScheduler] Non-bundle message, dispatching immediately');
-        const success = writeToRingBuffer(oscData, false);
+        const success = writeOSCToRingBuffer(oscData, false);
         if (!success) {
             // Queue for retry
             queueForRetry(oscData, 'immediate message');
@@ -484,7 +425,7 @@ const checkAndDispatch = () => {
                         'early=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
                         'remaining=' + eventHeap.length);
 
-            const success = writeToRingBuffer(nextEvent.oscData, false);
+            const success = writeOSCToRingBuffer(nextEvent.oscData, false);
             if (!success) {
                 // Queue for retry
                 queueForRetry(nextEvent.oscData, 'scheduled bundle NTP=' + nextEvent.ntpTime.toFixed(3));
@@ -598,13 +539,13 @@ const processImmediate = (oscData) => {
     if (isBundle(oscData)) {
         const messages = extractMessagesFromBundle(oscData);
         for (let i = 0; i < messages.length; i++) {
-            const success = writeToRingBuffer(messages[i], false);
+            const success = writeOSCToRingBuffer(messages[i], false);
             if (!success) {
                 queueForRetry(messages[i], 'immediate bundle message ' + i);
             }
         }
     } else {
-        const success = writeToRingBuffer(oscData, false);
+        const success = writeOSCToRingBuffer(oscData, false);
         if (!success) {
             queueForRetry(oscData, 'immediate message');
         }

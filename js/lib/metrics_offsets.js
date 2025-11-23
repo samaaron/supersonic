@@ -4,7 +4,7 @@
  * These offsets correspond to the PerformanceMetrics struct in shared_memory.h.
  * All values are Uint32 array indices (not byte offsets).
  *
- * Layout: [0-5] Worklet, [6-16] OSC Out, [17-19] OSC In, [20-21] Debug, [22-23] Main thread, [24-31] padding
+ * Layout: [0-5] Worklet, [6-16] OSC Out, [17-19] OSC In, [20-21] Debug, [22-23] Main thread, [24] Gap detection, [25] Direct writes, [26-31] padding
  */
 
 // Worklet metrics (written by WASM)
@@ -40,3 +40,9 @@ export const DEBUG_BYTES_RECEIVED = 21;
 // Main thread metrics (written by supersonic.js via Atomics)
 export const MESSAGES_SENT = 22;
 export const BYTES_SENT = 23;
+
+// Gap detection metrics (written by WASM)
+export const SEQUENCE_GAPS = 24;
+
+// Direct write metrics (written by supersonic.js main thread)
+export const DIRECT_WRITES = 25;  // Messages that bypassed prescheduler worker
