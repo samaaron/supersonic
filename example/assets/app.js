@@ -240,6 +240,7 @@ function updateMetrics(metrics) {
   // Messages
   document.getElementById('metric-sent').textContent = metrics.messages_sent ?? 0;
   document.getElementById('metric-bytes-sent').textContent = formatBytes(metrics.bytes_sent ?? 0);
+  document.getElementById('metric-direct-writes').textContent = metrics.direct_writes ?? 0;
   document.getElementById('metric-received').textContent = metrics.osc_in_messages_received ?? 0;
   document.getElementById('metric-bytes-received').textContent = formatBytes(metrics.osc_in_bytes_received ?? 0);
   document.getElementById('metric-osc-in-dropped').textContent = metrics.osc_in_dropped_messages ?? 0;
@@ -247,6 +248,7 @@ function updateMetrics(metrics) {
   // Processing
   document.getElementById('metric-messages-processed').textContent = metrics.messages_processed ?? 0;
   document.getElementById('metric-messages-dropped').textContent = metrics.messages_dropped ?? 0;
+  document.getElementById('metric-sequence-gaps').textContent = metrics.sequence_gaps ?? 0;
   document.getElementById('metric-process-count').textContent = metrics.process_count ?? 0;
 
   // Scheduler
@@ -780,7 +782,10 @@ initButton.addEventListener('click', async () => {
         debugMessagesReceived: 'debug_messages_received',
         debugBytesReceived: 'debug_bytes_received',
         // Timing
-        driftOffsetMs: 'drift_offset_ms'
+        driftOffsetMs: 'drift_offset_ms',
+        // Direct writes & gap detection
+        directWrites: 'direct_writes',
+        sequenceGaps: 'sequence_gaps'
       };
 
       // Apply all simple mappings
