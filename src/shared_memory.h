@@ -30,7 +30,7 @@
 constexpr uint32_t IN_BUFFER_SIZE     = 786432; // 768KB - OSC messages from JS to scsynth (large for SynthDefs)
 constexpr uint32_t OUT_BUFFER_SIZE    = 131072; // 128KB - OSC replies from scsynth to JS (prevent drops)
 constexpr uint32_t DEBUG_BUFFER_SIZE  = 65536;  // 64KB - Debug messages from scsynth
-constexpr uint32_t CONTROL_SIZE       = 40;    // Atomic control pointers & flags (36 bytes + 4 padding for 8-byte alignment)
+constexpr uint32_t CONTROL_SIZE       = 48;    // Atomic control pointers & flags (11 fields × 4 bytes + 4 padding for 8-byte alignment)
 constexpr uint32_t METRICS_SIZE       = 128;   // Performance metrics: 22 fields + 10 padding = 32 * 4 bytes = 128 bytes
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in milliseconds (int32, atomic)
@@ -58,7 +58,7 @@ struct alignas(4) Message {
     // payload follows (binary data - OSC or text depending on buffer)
 };
 
-// Control pointers structure (4-byte aligned for atomics)
+// Control pointers structure (4-byte aligned for atomics, padded to 48 bytes for 8-byte alignment)
 struct alignas(4) ControlPointers {
     std::atomic<int32_t> in_head;
     std::atomic<int32_t> in_tail;
@@ -66,13 +66,16 @@ struct alignas(4) ControlPointers {
     std::atomic<int32_t> out_tail;
     std::atomic<int32_t> debug_head;
     std::atomic<int32_t> debug_tail;
+    std::atomic<int32_t> in_sequence;     // Sequence counter for IN buffer (shared between main thread & worker)
     std::atomic<int32_t> out_sequence;    // Sequence counter for OUT buffer
     std::atomic<int32_t> debug_sequence;  // Sequence counter for DEBUG buffer
     std::atomic<uint32_t> status_flags;
+    std::atomic<int32_t> in_write_lock;   // Spinlock for IN buffer writes (0=unlocked, 1=locked)
+    int32_t _padding;                     // Padding to maintain 8-byte alignment for subsequent Float64
 };
 
 // Performance metrics structure
-// Layout: [0-5] Worklet, [6-16] OSC Out, [17-19] OSC In, [20] Debug, [21-22] Main thread, [23-31] padding
+// Layout: [0-5] Worklet, [6-16] OSC Out, [17-19] OSC In, [20-21] Debug, [22-23] Main thread, [24] Gap detection, [25] Direct writes, [26-31] padding
 struct alignas(4) PerformanceMetrics {
     // Worklet metrics (offsets 0-5, written by WASM)
     std::atomic<uint32_t> process_count;
@@ -108,8 +111,14 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> messages_sent;      // OSC messages sent to scsynth
     std::atomic<uint32_t> bytes_sent;         // Total bytes written to IN buffer
 
-    // Padding to ensure 8-byte alignment for subsequent Float64Array fields (offsets 24-31)
-    uint32_t _padding[8];
+    // Sequence gap detection (offset 24, written by WASM)
+    std::atomic<uint32_t> messages_sequence_gaps;  // Count of detected sequence gaps (missing messages)
+
+    // Direct write metrics (offset 25, written by supersonic.js main thread)
+    std::atomic<uint32_t> direct_writes;  // Messages that bypassed prescheduler worker
+
+    // Padding to ensure 8-byte alignment for subsequent Float64Array fields (offsets 26-31)
+    uint32_t _padding[6];
 };
 
 // Status flags

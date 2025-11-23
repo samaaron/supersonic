@@ -18,6 +18,7 @@ import { NTP_EPOCH_OFFSET, DRIFT_UPDATE_INTERVAL_MS } from './timing_constants.j
 import { MemoryLayout } from './memory_layout.js';
 import { defaultWorldOptions } from './scsynth_options.js';
 import * as MetricsOffsets from './lib/metrics_offsets.js';
+import { writeToRingBuffer } from './lib/ring_buffer_writer.js';
 
 /**
  * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
@@ -48,6 +49,12 @@ export class SuperSonic {
     #initialized;
     #initializing;
     #capabilities;
+
+    // Direct ring buffer write (bypasses worker for low-latency non-bundle messages)
+    #directWriteAtomicView;
+    #directWriteDataView;
+    #directWriteUint8View;
+    #directWriteControlIndices;
 
     // Runtime metrics
     #metricsIntervalId = null;
@@ -467,6 +474,9 @@ export class SuperSonic {
                             if (__DEV__) console.log('[SuperSonic] Received bufferConstants from worklet');
                             this.#bufferConstants = event.data.bufferConstants;
 
+                            // Initialize direct ring buffer write views for low-latency sends
+                            this.#initDirectWriteViews();
+
                             // Initialize NTP timing (blocks until audio is flowing)
                             if (__DEV__) console.log('[SuperSonic] Initializing NTP timing (waiting for audio to flow)...');
                             await this.initializeNTPTiming();
@@ -655,7 +665,11 @@ export class SuperSonic {
 
             // Main thread
             messagesSent: metricsView[MetricsOffsets.MESSAGES_SENT],
-            bytesSent: metricsView[MetricsOffsets.BYTES_SENT]
+            bytesSent: metricsView[MetricsOffsets.BYTES_SENT],
+            directWrites: metricsView[MetricsOffsets.DIRECT_WRITES],
+
+            // Gap detection (written by WASM)
+            sequenceGaps: metricsView[MetricsOffsets.SEQUENCE_GAPS]
         };
     }
 
@@ -675,7 +689,8 @@ export class SuperSonic {
 
         const offsets = {
             messagesSent: MetricsOffsets.MESSAGES_SENT,
-            bytesSent: MetricsOffsets.BYTES_SENT
+            bytesSent: MetricsOffsets.BYTES_SENT,
+            directWrites: MetricsOffsets.DIRECT_WRITES
         };
         Atomics.add(metricsView, offsets[metric], amount);
     }
@@ -804,6 +819,60 @@ export class SuperSonic {
     }
 
     /**
+     * Initialize views for direct ring buffer writes (bypassing worker)
+     */
+    #initDirectWriteViews() {
+        if (!this.#sharedBuffer || !this.#ringBufferBase || !this.#bufferConstants) {
+            console.warn('[SuperSonic] Cannot initialize direct write views - missing buffer info');
+            return;
+        }
+
+        this.#directWriteAtomicView = new Int32Array(this.#sharedBuffer);
+        this.#directWriteDataView = new DataView(this.#sharedBuffer);
+        this.#directWriteUint8View = new Uint8Array(this.#sharedBuffer);
+
+        // Control indices (must match shared_memory.h ControlPointers layout)
+        // Offsets: in_head=0, in_tail=4, ..., in_sequence=24, ..., in_write_lock=40
+        const CONTROL_START = this.#bufferConstants.CONTROL_START;
+        this.#directWriteControlIndices = {
+            IN_HEAD: (this.#ringBufferBase + CONTROL_START + 0) / 4,
+            IN_TAIL: (this.#ringBufferBase + CONTROL_START + 4) / 4,
+            IN_SEQUENCE: (this.#ringBufferBase + CONTROL_START + 24) / 4,
+            IN_WRITE_LOCK: (this.#ringBufferBase + CONTROL_START + 40) / 4
+        };
+
+        if (__DEV__) console.log('[SuperSonic] Direct write views initialized');
+    }
+
+    /**
+     * Check if raw OSC binary data is a bundle (starts with #bundle)
+     */
+    #isBundleData(oscData) {
+        return oscData.length >= 8 && oscData[0] === 0x23; // '#' character
+    }
+
+    /**
+     * Try to write OSC message directly to ring buffer (bypasses worker)
+     * Returns true if successful, false if buffer full (caller should use worker)
+     */
+    #tryDirectWrite(oscData) {
+        if (!this.#directWriteAtomicView || !this.#directWriteControlIndices) {
+            return false;
+        }
+
+        // Use shared ring buffer writer (handles wrap-around)
+        return writeToRingBuffer({
+            atomicView: this.#directWriteAtomicView,
+            dataView: this.#directWriteDataView,
+            uint8View: this.#directWriteUint8View,
+            bufferConstants: this.#bufferConstants,
+            ringBufferBase: this.#ringBufferBase,
+            controlIndices: this.#directWriteControlIndices,
+            oscMessage: oscData
+        });
+    }
+
+    /**
      * Send pre-encoded OSC bytes to scsynth
      * @param {ArrayBuffer|Uint8Array} oscData - Pre-encoded OSC data
      * @param {Object} options - Send options
@@ -821,6 +890,15 @@ export class SuperSonic {
             this.onMessageSent(preparedData);
         }
 
+        // Fast path: try direct ring buffer write for non-bundle messages
+        // This bypasses the worker thread, saving ~1-2ms of postMessage latency
+        if (!this.#isBundleData(preparedData) && this.#tryDirectWrite(preparedData)) {
+            this.#addMetric('directWrites');
+            return; // Direct write succeeded
+        }
+
+        // Fall back to worker for bundles, buffer-full, or wrap-around cases
+        // Worker has retry queue for buffer-full scenarios
         const timing = this.#calculateBundleWait(preparedData);
         const sendOptions = { ...options };
 

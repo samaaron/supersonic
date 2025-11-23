@@ -242,9 +242,11 @@ extern "C" {
         control->out_tail.store(0, std::memory_order_relaxed);
         control->debug_head.store(0, std::memory_order_relaxed);
         control->debug_tail.store(0, std::memory_order_relaxed);
+        control->in_sequence.store(0, std::memory_order_relaxed);
         control->out_sequence.store(0, std::memory_order_relaxed);
         control->debug_sequence.store(0, std::memory_order_relaxed);
         control->status_flags.store(STATUS_OK, std::memory_order_relaxed);
+        control->in_write_lock.store(0, std::memory_order_relaxed);  // 0 = unlocked
 
         // Initialize metrics
         metrics->process_count.store(0, std::memory_order_relaxed);
@@ -253,6 +255,7 @@ extern "C" {
         metrics->scheduler_queue_depth.store(0, std::memory_order_relaxed);
         metrics->scheduler_queue_max.store(0, std::memory_order_relaxed);
         metrics->scheduler_queue_dropped.store(0, std::memory_order_relaxed);
+        metrics->messages_sequence_gaps.store(0, std::memory_order_relaxed);
 
         // Enable worklet_debug
         memory_initialized = true;
@@ -466,6 +469,27 @@ extern "C" {
                     in_tail = control->in_tail.load(std::memory_order_acquire);
                     continue;
                 }
+
+                // Gap detection: check for missing messages
+                // Uses static to persist across process() calls
+                static int32_t last_in_sequence = -1;
+                if (last_in_sequence >= 0) {
+                    int32_t expected = (last_in_sequence + 1) & 0x7FFFFFFF;  // Handle wrap at INT32_MAX
+                    if ((int32_t)header.sequence != expected) {
+                        // Gap detected - messages were lost
+                        int32_t gap_size = ((int32_t)header.sequence - expected + 0x80000000) & 0x7FFFFFFF;
+                        if (gap_size > 0 && gap_size < 1000) {  // Sanity check - ignore huge gaps (likely reset)
+                            metrics->messages_sequence_gaps.fetch_add(gap_size, std::memory_order_relaxed);
+                            static uint32_t gap_log_count = 0;
+                            if (gap_log_count < 5) {
+                                worklet_debug("WARNING: Sequence gap detected: expected %d, got %u (gap of %d)",
+                                             expected, header.sequence, gap_size);
+                                gap_log_count++;
+                            }
+                        }
+                    }
+                }
+                last_in_sequence = (int32_t)header.sequence;
 
                 char osc_buffer[MAX_MESSAGE_SIZE];
 
