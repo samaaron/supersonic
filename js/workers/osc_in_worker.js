@@ -10,8 +10,9 @@
  * OSC IN Worker - Receives OSC messages from scsynth
  * Uses Atomics.wait() for instant wake when data arrives
  * Reads from OUT ring buffer and forwards to main thread
- * ES5-compatible for Qt WebEngine
  */
+
+import * as MetricsOffsets from '../lib/metrics_offsets.js';
 
 // Ring buffer configuration
 var sharedBuffer = null;
@@ -28,7 +29,6 @@ var CONTROL_INDICES = {};
 
 // Metrics view (for writing stats to SAB)
 var metricsView = null;
-var METRICS_INDICES = {};
 
 // Worker state
 var running = false;
@@ -59,15 +59,9 @@ function initRingBuffer(buffer, base, constants) {
         OUT_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 12) / 4
     };
 
-    // Initialize metrics view (OSC In metrics are at offsets 17-19 in the metrics array)
+    // Initialize metrics view
     var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
     metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
-
-    METRICS_INDICES = {
-        MESSAGES_RECEIVED: 17,
-        DROPPED_MESSAGES: 18,
-        BYTES_RECEIVED: 19
-    };
 }
 
 /**
@@ -107,7 +101,7 @@ function readMessages() {
 
         if (magic !== bufferConstants.MESSAGE_MAGIC) {
             console.error('[OSCInWorker] Corrupted message at position', currentTail);
-            if (metricsView) Atomics.add(metricsView, METRICS_INDICES.DROPPED_MESSAGES, 1);
+            if (metricsView) Atomics.add(metricsView, MetricsOffsets.OSC_IN_DROPPED_MESSAGES, 1);
             // Skip this byte and continue
             currentTail = (currentTail + 1) % bufferConstants.OUT_BUFFER_SIZE;
             continue;
@@ -120,7 +114,7 @@ function readMessages() {
         // Validate message length
         if (length < bufferConstants.MESSAGE_HEADER_SIZE || length > bufferConstants.OUT_BUFFER_SIZE) {
             console.error('[OSCInWorker] Invalid message length:', length);
-            if (metricsView) Atomics.add(metricsView, METRICS_INDICES.DROPPED_MESSAGES, 1);
+            if (metricsView) Atomics.add(metricsView, MetricsOffsets.OSC_IN_DROPPED_MESSAGES, 1);
             currentTail = (currentTail + 1) % bufferConstants.OUT_BUFFER_SIZE;
             continue;
         }
@@ -132,7 +126,7 @@ function readMessages() {
                 var dropped = (sequence - expectedSeq + 0x100000000) & 0xFFFFFFFF;
                 if (dropped < 1000) { // Sanity check
                     console.warn('[OSCInWorker] Detected', dropped, 'dropped messages (expected seq', expectedSeq, 'got', sequence, ')');
-                    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.DROPPED_MESSAGES, dropped);
+                    if (metricsView) Atomics.add(metricsView, MetricsOffsets.OSC_IN_DROPPED_MESSAGES, dropped);
                 }
             }
         }
@@ -157,8 +151,8 @@ function readMessages() {
         currentTail = (currentTail + length) % bufferConstants.OUT_BUFFER_SIZE;
         messagesRead++;
         if (metricsView) {
-            Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RECEIVED, 1);
-            Atomics.add(metricsView, METRICS_INDICES.BYTES_RECEIVED, payloadLength);
+            Atomics.add(metricsView, MetricsOffsets.OSC_IN_MESSAGES_RECEIVED, 1);
+            Atomics.add(metricsView, MetricsOffsets.OSC_IN_BYTES_RECEIVED, payloadLength);
         }
     }
 

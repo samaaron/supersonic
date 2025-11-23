@@ -6,6 +6,8 @@
     - Tag-based cancellation to drop pending runs before they hit WASM
 */
 
+import * as MetricsOffsets from '../lib/metrics_offsets.js';
+
 // Shared memory for ring buffer writing
 var sharedBuffer = null;
 var ringBufferBase = null;
@@ -19,7 +21,6 @@ var CONTROL_INDICES = {};
 
 // Metrics view (for writing stats to SAB)
 var metricsView = null;
-var METRICS_INDICES = {};
 
 // Priority queue implemented as binary min-heap
 // Entries: { ntpTime, seq, editorId, runTag, oscData }
@@ -110,23 +111,9 @@ function initSharedBuffer() {
         IN_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 4) / 4
     };
 
-    // Initialize metrics view (OSC Out metrics are at offsets 6-16 in the metrics array)
+    // Initialize metrics view
     var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
     metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
-
-    METRICS_INDICES = {
-        EVENTS_PENDING: 6,
-        MAX_EVENTS_PENDING: 7,
-        BUNDLES_WRITTEN: 8,
-        RETRIES_SUCCEEDED: 9,
-        RETRIES_FAILED: 10,
-        BUNDLES_SCHEDULED: 11,
-        EVENTS_CANCELLED: 12,
-        TOTAL_DISPATCHES: 13,
-        MESSAGES_RETRIED: 14,
-        RETRY_QUEUE_SIZE: 15,
-        RETRY_QUEUE_MAX: 16
-    };
 
     schedulerLog('[PreScheduler] SharedArrayBuffer initialized with direct ring buffer writing and metrics');
 }
@@ -139,13 +126,13 @@ function updateMetrics() {
     if (!metricsView) return;
 
     // Update current values (use Atomics.store for absolute values)
-    Atomics.store(metricsView, METRICS_INDICES.EVENTS_PENDING, eventHeap.length);
+    Atomics.store(metricsView, MetricsOffsets.PRESCHEDULER_PENDING, eventHeap.length);
 
     // Update max if current exceeds it
     var currentPending = eventHeap.length;
-    var currentMax = Atomics.load(metricsView, METRICS_INDICES.MAX_EVENTS_PENDING);
+    var currentMax = Atomics.load(metricsView, MetricsOffsets.PRESCHEDULER_PEAK);
     if (currentPending > currentMax) {
-        Atomics.store(metricsView, METRICS_INDICES.MAX_EVENTS_PENDING, currentPending);
+        Atomics.store(metricsView, MetricsOffsets.PRESCHEDULER_PEAK, currentPending);
     }
 }
 
@@ -253,7 +240,7 @@ function writeToRingBuffer(oscMessage, isRetry) {
     outgoingMessageSeq = (outgoingMessageSeq + 1) & 0xFFFFFFFF;
 
     // Update SAB metrics
-    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BUNDLES_WRITTEN, 1);
+    if (metricsView) Atomics.add(metricsView, MetricsOffsets.PRESCHEDULER_SENT, 1);
     return true;
 }
 
@@ -263,7 +250,7 @@ function writeToRingBuffer(oscMessage, isRetry) {
 function queueForRetry(oscData, context) {
     if (retryQueue.length >= MAX_RETRY_QUEUE_SIZE) {
         console.error('[PreScheduler] Retry queue full, dropping message permanently');
-        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.RETRIES_FAILED, 1);
+        if (metricsView) Atomics.add(metricsView, MetricsOffsets.RETRIES_FAILED, 1);
         return;
     }
 
@@ -276,10 +263,10 @@ function queueForRetry(oscData, context) {
 
     // Update SAB metrics
     if (metricsView) {
-        Atomics.store(metricsView, METRICS_INDICES.RETRY_QUEUE_SIZE, retryQueue.length);
-        var currentMax = Atomics.load(metricsView, METRICS_INDICES.RETRY_QUEUE_MAX);
+        Atomics.store(metricsView, MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
+        var currentMax = Atomics.load(metricsView, MetricsOffsets.RETRY_QUEUE_MAX);
         if (retryQueue.length > currentMax) {
-            Atomics.store(metricsView, METRICS_INDICES.RETRY_QUEUE_MAX, retryQueue.length);
+            Atomics.store(metricsView, MetricsOffsets.RETRY_QUEUE_MAX, retryQueue.length);
         }
     }
 
@@ -306,9 +293,9 @@ function processRetryQueue() {
             // Success - remove from queue
             retryQueue.splice(i, 1);
             if (metricsView) {
-                Atomics.add(metricsView, METRICS_INDICES.RETRIES_SUCCEEDED, 1);
-                Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RETRIED, 1);
-                Atomics.store(metricsView, METRICS_INDICES.RETRY_QUEUE_SIZE, retryQueue.length);
+                Atomics.add(metricsView, MetricsOffsets.RETRIES_SUCCEEDED, 1);
+                Atomics.add(metricsView, MetricsOffsets.MESSAGES_RETRIED, 1);
+                Atomics.store(metricsView, MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
             }
             schedulerLog('[PreScheduler] Retry succeeded for:', item.context,
                         'after', item.retryCount + 1, 'attempts');
@@ -316,7 +303,7 @@ function processRetryQueue() {
         } else {
             // Failed - increment retry count
             item.retryCount++;
-            if (metricsView) Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RETRIED, 1);
+            if (metricsView) Atomics.add(metricsView, MetricsOffsets.MESSAGES_RETRIED, 1);
 
             if (item.retryCount >= MAX_RETRIES_PER_MESSAGE) {
                 // Give up on this message
@@ -324,8 +311,8 @@ function processRetryQueue() {
                              MAX_RETRIES_PER_MESSAGE, 'retries:', item.context);
                 retryQueue.splice(i, 1);
                 if (metricsView) {
-                    Atomics.add(metricsView, METRICS_INDICES.RETRIES_FAILED, 1);
-                    Atomics.store(metricsView, METRICS_INDICES.RETRY_QUEUE_SIZE, retryQueue.length);
+                    Atomics.add(metricsView, MetricsOffsets.RETRIES_FAILED, 1);
+                    Atomics.store(metricsView, MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
                 }
                 // Don't increment i - we removed an item
             } else {
@@ -368,7 +355,7 @@ function scheduleEvent(oscData, editorId, runTag) {
 
     heapPush(event);
 
-    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.BUNDLES_SCHEDULED, 1);
+    if (metricsView) Atomics.add(metricsView, MetricsOffsets.BUNDLES_SCHEDULED, 1);
     updateMetrics();  // Update SAB with current queue depth and peak
 
     schedulerLog('[PreScheduler] Scheduled bundle:',
@@ -494,7 +481,7 @@ function checkAndDispatch() {
             updateMetrics();  // Update SAB with current queue depth
 
             var timeUntilExec = nextEvent.ntpTime - currentNTP;
-            if (metricsView) Atomics.add(metricsView, METRICS_INDICES.TOTAL_DISPATCHES, 1);
+            if (metricsView) Atomics.add(metricsView, MetricsOffsets.TOTAL_DISPATCHES, 1);
 
             schedulerLog('[PreScheduler] Dispatching bundle:',
                         'NTP=' + nextEvent.ntpTime.toFixed(3),
@@ -546,7 +533,7 @@ function cancelBy(predicate) {
     if (removed > 0) {
         eventHeap = remaining;
         heapify();
-        if (metricsView) Atomics.add(metricsView, METRICS_INDICES.EVENTS_CANCELLED, removed);
+        if (metricsView) Atomics.add(metricsView, MetricsOffsets.EVENTS_CANCELLED, removed);
         updateMetrics();  // Update SAB with current queue depth
         schedulerLog('[PreScheduler] Cancelled ' + removed + ' events, ' + eventHeap.length + ' remaining');
     }
@@ -575,7 +562,7 @@ function cancelAllTags() {
         return;
     }
     var cancelled = eventHeap.length;
-    if (metricsView) Atomics.add(metricsView, METRICS_INDICES.EVENTS_CANCELLED, cancelled);
+    if (metricsView) Atomics.add(metricsView, MetricsOffsets.EVENTS_CANCELLED, cancelled);
     eventHeap = [];
     updateMetrics();  // Update SAB (sets eventsPending to 0)
     schedulerLog('[PreScheduler] Cancelled all ' + cancelled + ' events');

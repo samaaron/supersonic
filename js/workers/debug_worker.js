@@ -10,8 +10,9 @@
  * DEBUG Worker - Receives debug messages from AudioWorklet
  * Uses Atomics.wait() for instant wake when debug logs arrive
  * Reads from DEBUG ring buffer and forwards to main thread
- * ES5-compatible for Qt WebEngine
  */
+
+import * as MetricsOffsets from '../lib/metrics_offsets.js';
 
 // Ring buffer configuration
 var sharedBuffer = null;
@@ -28,7 +29,6 @@ var CONTROL_INDICES = {};
 
 // Metrics view (for writing stats to SAB)
 var metricsView = null;
-var METRICS_INDICES = {};
 
 // Worker state
 var running = false;
@@ -56,14 +56,9 @@ function initRingBuffer(buffer, base, constants) {
         DEBUG_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 20) / 4
     };
 
-    // Initialize metrics view (Debug metrics at offset 20 in the metrics array)
+    // Initialize metrics view
     var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
     metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
-
-    METRICS_INDICES = {
-        MESSAGES_RECEIVED: 20,
-        BYTES_RECEIVED: 21
-    };
 }
 
 /**
@@ -142,8 +137,8 @@ function readDebugMessages() {
         currentTail = (currentTail + length) % bufferConstants.DEBUG_BUFFER_SIZE;
         messagesRead++;
         if (metricsView) {
-            Atomics.add(metricsView, METRICS_INDICES.MESSAGES_RECEIVED, 1);
-            Atomics.add(metricsView, METRICS_INDICES.BYTES_RECEIVED, payloadLength);
+            Atomics.add(metricsView, MetricsOffsets.DEBUG_MESSAGES_RECEIVED, 1);
+            Atomics.add(metricsView, MetricsOffsets.DEBUG_BYTES_RECEIVED, payloadLength);
         }
     }
 
