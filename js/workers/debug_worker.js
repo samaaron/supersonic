@@ -15,34 +15,37 @@
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 
 // Ring buffer configuration
-var sharedBuffer = null;
-var ringBufferBase = null;
-var atomicView = null;
-var dataView = null;
-var uint8View = null;
+let sharedBuffer = null;
+let ringBufferBase = null;
+let atomicView = null;
+let dataView = null;
+let uint8View = null;
 
 // Ring buffer layout constants (loaded from WASM at initialization)
-var bufferConstants = null;
+let bufferConstants = null;
 
 // Control indices (calculated after init)
-var CONTROL_INDICES = {};
+let CONTROL_INDICES = {};
 
 // Metrics view (for writing stats to SAB)
-var metricsView = null;
+let metricsView = null;
 
 // Worker state
-var running = false;
+let running = false;
 
-function debugWorkerLog() {
+// Reusable TextDecoder for debug message parsing
+const textDecoder = new TextDecoder('utf-8');
+
+const debugWorkerLog = (...args) => {
     if (__DEV__) {
-        console.log.apply(console, arguments);
+        console.log(...args);
     }
-}
+};
 
 /**
  * Initialize ring buffer access
  */
-function initRingBuffer(buffer, base, constants) {
+const initRingBuffer = (buffer, base, constants) => {
     sharedBuffer = buffer;
     ringBufferBase = base;
     bufferConstants = constants;
@@ -57,37 +60,37 @@ function initRingBuffer(buffer, base, constants) {
     };
 
     // Initialize metrics view
-    var metricsBase = ringBufferBase + bufferConstants.METRICS_START;
+    const metricsBase = ringBufferBase + bufferConstants.METRICS_START;
     metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
-}
+};
 
 /**
  * Read debug messages from buffer
  */
-function readDebugMessages() {
-    var head = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_HEAD);
-    var tail = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_TAIL);
+const readDebugMessages = () => {
+    const head = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_HEAD);
+    const tail = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_TAIL);
 
     if (head === tail) {
         return null; // No messages
     }
 
-    var messages = [];
-    var currentTail = tail;
-    var messagesRead = 0;
-    var maxMessages = 1000; // Process up to 1000 messages per wake
+    const messages = [];
+    let currentTail = tail;
+    let messagesRead = 0;
+    const maxMessages = 1000; // Process up to 1000 messages per wake
 
     while (currentTail !== head && messagesRead < maxMessages) {
-        var bytesToEnd = bufferConstants.DEBUG_BUFFER_SIZE - currentTail;
+        const bytesToEnd = bufferConstants.DEBUG_BUFFER_SIZE - currentTail;
         if (bytesToEnd < bufferConstants.MESSAGE_HEADER_SIZE) {
             currentTail = 0;
             continue;
         }
 
-        var readPos = ringBufferBase + bufferConstants.DEBUG_BUFFER_START + currentTail;
+        const readPos = ringBufferBase + bufferConstants.DEBUG_BUFFER_START + currentTail;
 
         // Read message header (now contiguous or wrapped)
-        var magic = dataView.getUint32(readPos, true);
+        const magic = dataView.getUint32(readPos, true);
 
         // Check for padding marker - skip to beginning
         if (magic === bufferConstants.PADDING_MAGIC) {
@@ -103,8 +106,8 @@ function readDebugMessages() {
             continue;
         }
 
-        var length = dataView.getUint32(readPos + 4, true);
-        var sequence = dataView.getUint32(readPos + 8, true);
+        const length = dataView.getUint32(readPos + 4, true);
+        const sequence = dataView.getUint32(readPos + 8, true);
 
         // Validate message length
         if (length < bufferConstants.MESSAGE_HEADER_SIZE || length > bufferConstants.DEBUG_BUFFER_SIZE) {
@@ -114,13 +117,12 @@ function readDebugMessages() {
         }
 
         // Read payload (debug text) - now contiguous due to padding
-        var payloadLength = length - bufferConstants.MESSAGE_HEADER_SIZE;
-        var payloadStart = readPos + bufferConstants.MESSAGE_HEADER_SIZE;
+        const payloadLength = length - bufferConstants.MESSAGE_HEADER_SIZE;
+        const payloadStart = readPos + bufferConstants.MESSAGE_HEADER_SIZE;
 
         // Convert bytes to string using TextDecoder for proper UTF-8 handling
-        var payloadBytes = uint8View.slice(payloadStart, payloadStart + payloadLength);
-        var decoder = new TextDecoder('utf-8');
-        var messageText = decoder.decode(payloadBytes);
+        const payloadBytes = uint8View.slice(payloadStart, payloadStart + payloadLength);
+        let messageText = textDecoder.decode(payloadBytes);
 
         // Remove trailing newline if present
         if (messageText.endsWith('\n')) {
@@ -130,7 +132,7 @@ function readDebugMessages() {
         messages.push({
             text: messageText,
             timestamp: performance.now(),
-            sequence: sequence
+            sequence
         });
 
         // Move to next message
@@ -148,22 +150,22 @@ function readDebugMessages() {
     }
 
     return messages.length > 0 ? messages : null;
-}
+};
 
 /**
  * Main wait loop using Atomics.wait for instant wake
  */
-function waitLoop() {
+const waitLoop = () => {
     while (running) {
         try {
             // Get current DEBUG_HEAD value
-            var currentHead = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_HEAD);
-            var currentTail = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_TAIL);
+            const currentHead = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_HEAD);
+            const currentTail = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_TAIL);
 
             // If buffer is empty, wait for AudioWorklet to notify us
             if (currentHead === currentTail) {
                 // Wait for up to 100ms (allows checking stop signal)
-                var result = Atomics.wait(atomicView, CONTROL_INDICES.DEBUG_HEAD, currentHead, 100);
+                const result = Atomics.wait(atomicView, CONTROL_INDICES.DEBUG_HEAD, currentHead, 100);
 
                 if (result === 'ok' || result === 'not-equal') {
                     // We were notified or value changed!
@@ -173,13 +175,13 @@ function waitLoop() {
             }
 
             // Read all available debug messages
-            var messages = readDebugMessages();
+            const messages = readDebugMessages();
 
             if (messages && messages.length > 0) {
                 // Send to main thread
                 self.postMessage({
                     type: 'debug',
-                    messages: messages
+                    messages
                 });
             }
 
@@ -195,12 +197,12 @@ function waitLoop() {
             Atomics.wait(atomicView, 0, atomicView[0], 10);
         }
     }
-}
+};
 
 /**
  * Start the wait loop
  */
-function start() {
+const start = () => {
     if (!sharedBuffer) {
         console.error('[DebugWorker] Cannot start - not initialized');
         return;
@@ -213,31 +215,31 @@ function start() {
 
     running = true;
     waitLoop();
-}
+};
 
 /**
  * Stop the wait loop
  */
-function stop() {
+const stop = () => {
     running = false;
-}
+};
 
 /**
  * Clear debug buffer
  */
-function clear() {
+const clear = () => {
     if (!sharedBuffer) return;
 
     // Reset head and tail to 0
     Atomics.store(atomicView, CONTROL_INDICES.DEBUG_HEAD, 0);
     Atomics.store(atomicView, CONTROL_INDICES.DEBUG_TAIL, 0);
-}
+};
 
 /**
  * Handle messages from main thread
  */
-self.addEventListener('message', function(event) {
-    var data = event.data;
+self.addEventListener('message', (event) => {
+    const { data } = event;
 
     try {
         switch (data.type) {
