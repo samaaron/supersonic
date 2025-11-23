@@ -669,7 +669,7 @@ export class SuperSonic {
         const metricsBase = this.#ringBufferBase + this.#bufferConstants.METRICS_START;
         const metricsView = new Uint32Array(this.#sharedBuffer, metricsBase, this.#bufferConstants.METRICS_SIZE / 4);
 
-        const offsets = { messagesSent: 25 };
+        const offsets = { messagesSent: 21 };
         Atomics.add(metricsView, offsets[metric], 1);
     }
 
