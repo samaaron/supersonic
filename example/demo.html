@@ -2943,6 +2943,23 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 </div>
               </div>
 
+              <!-- PreScheduler Retries -->
+              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">PreScheduler Retries</div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>ok / fail</span><span><span id="metric-prescheduler-retries-succeeded" style="color: #4a4;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-retries-failed" style="color: #a44;">0</span></span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>queue</span><span><span id="metric-prescheduler-retry-queue-size" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-retry-queue-max" style="color: #555;">0</span></span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>retried</span><span id="metric-messages-retried" style="color: #666;">0</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>dispatches</span><span id="metric-total-dispatches" style="color: #666;">0</span>
+                </div>
+              </div>
+
               <!-- Scheduler -->
               <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
                 <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Scheduler</div>
@@ -2974,23 +2991,6 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 </div>
               </div>
 
-              <!-- Retries -->
-              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Retries</div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>ok / fail</span><span><span id="metric-prescheduler-retries-succeeded" style="color: #4a4;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-retries-failed" style="color: #a44;">0</span></span>
-                </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>queue</span><span><span id="metric-prescheduler-retry-queue-size" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-retry-queue-max" style="color: #555;">0</span></span>
-                </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>retried</span><span id="metric-messages-retried" style="color: #666;">0</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>dispatches</span><span id="metric-total-dispatches" style="color: #666;">0</span>
-                </div>
-              </div>
-
               <!-- Ring Buffers -->
               <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
                 <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Ring Buffers</div>
@@ -3017,14 +3017,14 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 </div>
               </div>
 
-              <!-- Audio Buffers -->
+              <!-- Audio Buffers & SynthDefs -->
               <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Audio Buffers</div>
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Buffers & SynthDefs</div>
                 <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>loaded</span><span><span id="metric-buffer-count" style="color: #ffd700;">0</span><span style="color: #444;"> (<span id="metric-buffer-pending" style="color: #a44;">0</span>)</span></span>
+                  <span>buffers</span><span><span id="metric-buffer-count" style="color: #ffd700;">0</span><span style="color: #444;"> (<span id="metric-buffer-pending" style="color: #a44;">0</span>)</span></span>
                 </div>
                 <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>defs</span><span id="metric-synthdefs" style="color: #ffd700;">0</span>
+                  <span>synthdefs</span><span id="metric-synthdefs" style="color: #ffd700;">0</span>
                 </div>
               </div>
 
