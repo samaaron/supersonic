@@ -56,6 +56,9 @@ export class SuperSonic {
     #directWriteUint8View;
     #directWriteControlIndices;
 
+    // Cached metrics view (avoids creating new Uint32Array on every read)
+    #metricsView;
+
     // Runtime metrics
     #metricsIntervalId = null;
     #metricsGatherInProgress = false;
@@ -558,28 +561,55 @@ export class SuperSonic {
     }
 
     /**
-     * Get metrics from SharedArrayBuffer (worklet metrics written by WASM)
+     * Get all metrics from SharedArrayBuffer
+     * Layout defined in src/shared_memory.h and js/lib/metrics_offsets.js
      * @returns {Object|null}
      * @private
      */
-    #getWorkletMetrics() {
-        if (!this.#sharedBuffer || !this.#bufferConstants || !this.#ringBufferBase) {
+    #getSABMetrics() {
+        if (!this.#metricsView) {
             return null;
         }
 
-        // Metrics are already in SAB - just read them directly!
-        const metricsBase = this.#ringBufferBase + this.#bufferConstants.METRICS_START;
-        const metricsCount = this.#bufferConstants.METRICS_SIZE / 4;  // METRICS_SIZE is in bytes, Uint32Array needs element count
-        const metricsView = new Uint32Array(this.#sharedBuffer, metricsBase, metricsCount);
-
-        // Read metrics from SAB (layout defined in src/shared_memory.h METRICS_* section)
+        const m = this.#metricsView;
         return {
-            processCount: Atomics.load(metricsView, 0),              // offset 0
-            messagesProcessed: Atomics.load(metricsView, 1),         // offset 1
-            messagesDropped: Atomics.load(metricsView, 2),           // offset 2
-            schedulerQueueDepth: Atomics.load(metricsView, 3),       // offset 3
-            schedulerQueueMax: Atomics.load(metricsView, 4),         // offset 4
-            schedulerQueueDropped: Atomics.load(metricsView, 5)      // offset 5
+            // Worklet metrics (written by WASM)
+            processCount: m[MetricsOffsets.PROCESS_COUNT],
+            messagesProcessed: m[MetricsOffsets.MESSAGES_PROCESSED],
+            messagesDropped: m[MetricsOffsets.MESSAGES_DROPPED],
+            schedulerQueueDepth: m[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
+            schedulerQueueMax: m[MetricsOffsets.SCHEDULER_QUEUE_MAX],
+            schedulerQueueDropped: m[MetricsOffsets.SCHEDULER_QUEUE_DROPPED],
+
+            // PreScheduler metrics (written by osc_out_prescheduler_worker.js)
+            preschedulerPending: m[MetricsOffsets.PRESCHEDULER_PENDING],
+            preschedulerPeak: m[MetricsOffsets.PRESCHEDULER_PEAK],
+            preschedulerSent: m[MetricsOffsets.PRESCHEDULER_SENT],
+            retriesSucceeded: m[MetricsOffsets.RETRIES_SUCCEEDED],
+            retriesFailed: m[MetricsOffsets.RETRIES_FAILED],
+            bundlesScheduled: m[MetricsOffsets.BUNDLES_SCHEDULED],
+            eventsCancelled: m[MetricsOffsets.EVENTS_CANCELLED],
+            totalDispatches: m[MetricsOffsets.TOTAL_DISPATCHES],
+            messagesRetried: m[MetricsOffsets.MESSAGES_RETRIED],
+            retryQueueSize: m[MetricsOffsets.RETRY_QUEUE_SIZE],
+            retryQueueMax: m[MetricsOffsets.RETRY_QUEUE_MAX],
+
+            // OSC In metrics (written by osc_in_worker.js)
+            oscInMessagesReceived: m[MetricsOffsets.OSC_IN_MESSAGES_RECEIVED],
+            oscInDroppedMessages: m[MetricsOffsets.OSC_IN_DROPPED_MESSAGES],
+            oscInBytesReceived: m[MetricsOffsets.OSC_IN_BYTES_RECEIVED],
+
+            // Debug metrics (written by debug_worker.js)
+            debugMessagesReceived: m[MetricsOffsets.DEBUG_MESSAGES_RECEIVED],
+            debugBytesReceived: m[MetricsOffsets.DEBUG_BYTES_RECEIVED],
+
+            // Main thread metrics (written by supersonic.js)
+            messagesSent: m[MetricsOffsets.MESSAGES_SENT],
+            bytesSent: m[MetricsOffsets.BYTES_SENT],
+            directWrites: m[MetricsOffsets.DIRECT_WRITES],
+
+            // Gap detection (written by WASM)
+            sequenceGaps: m[MetricsOffsets.SEQUENCE_GAPS]
         };
     }
 
@@ -626,73 +656,22 @@ export class SuperSonic {
     }
 
     /**
-     * Get OSC worker metrics from SharedArrayBuffer (written by OSC workers)
-     * @returns {Object|null}
-     * @private
-     */
-    #getOSCMetrics() {
-        if (!this.#sharedBuffer || !this.#bufferConstants || !this.#ringBufferBase) {
-            return null;
-        }
-
-        const metricsBase = this.#ringBufferBase + this.#bufferConstants.METRICS_START;
-        const metricsCount = this.#bufferConstants.METRICS_SIZE / 4;
-        const metricsView = new Uint32Array(this.#sharedBuffer, metricsBase, metricsCount);
-
-        // Read OSC worker metrics from SAB
-        return {
-            // OSC Out (prescheduler)
-            preschedulerPending: metricsView[MetricsOffsets.PRESCHEDULER_PENDING],
-            preschedulerPeak: metricsView[MetricsOffsets.PRESCHEDULER_PEAK],
-            preschedulerSent: metricsView[MetricsOffsets.PRESCHEDULER_SENT],
-            retriesSucceeded: metricsView[MetricsOffsets.RETRIES_SUCCEEDED],
-            retriesFailed: metricsView[MetricsOffsets.RETRIES_FAILED],
-            bundlesScheduled: metricsView[MetricsOffsets.BUNDLES_SCHEDULED],
-            eventsCancelled: metricsView[MetricsOffsets.EVENTS_CANCELLED],
-            totalDispatches: metricsView[MetricsOffsets.TOTAL_DISPATCHES],
-            messagesRetried: metricsView[MetricsOffsets.MESSAGES_RETRIED],
-            retryQueueSize: metricsView[MetricsOffsets.RETRY_QUEUE_SIZE],
-            retryQueueMax: metricsView[MetricsOffsets.RETRY_QUEUE_MAX],
-
-            // OSC In
-            oscInMessagesReceived: metricsView[MetricsOffsets.OSC_IN_MESSAGES_RECEIVED],
-            oscInDroppedMessages: metricsView[MetricsOffsets.OSC_IN_DROPPED_MESSAGES],
-            oscInBytesReceived: metricsView[MetricsOffsets.OSC_IN_BYTES_RECEIVED],
-
-            // Debug
-            debugMessagesReceived: metricsView[MetricsOffsets.DEBUG_MESSAGES_RECEIVED],
-            debugBytesReceived: metricsView[MetricsOffsets.DEBUG_BYTES_RECEIVED],
-
-            // Main thread
-            messagesSent: metricsView[MetricsOffsets.MESSAGES_SENT],
-            bytesSent: metricsView[MetricsOffsets.BYTES_SENT],
-            directWrites: metricsView[MetricsOffsets.DIRECT_WRITES],
-
-            // Gap detection (written by WASM)
-            sequenceGaps: metricsView[MetricsOffsets.SEQUENCE_GAPS]
-        };
-    }
-
-    /**
      * Add to a main thread metric in SharedArrayBuffer
-     * @param {'messagesSent'|'bytesSent'} metric - Metric to update
+     * @param {'messagesSent'|'bytesSent'|'directWrites'} metric - Metric to update
      * @param {number} [amount=1] - Amount to add
      * @private
      */
     #addMetric(metric, amount = 1) {
-        if (!this.#sharedBuffer || !this.#bufferConstants || !this.#ringBufferBase) {
+        if (!this.#metricsView) {
             return;
         }
-
-        const metricsBase = this.#ringBufferBase + this.#bufferConstants.METRICS_START;
-        const metricsView = new Uint32Array(this.#sharedBuffer, metricsBase, this.#bufferConstants.METRICS_SIZE / 4);
 
         const offsets = {
             messagesSent: MetricsOffsets.MESSAGES_SENT,
             bytesSent: MetricsOffsets.BYTES_SENT,
             directWrites: MetricsOffsets.DIRECT_WRITES
         };
-        Atomics.add(metricsView, offsets[metric], amount);
+        Atomics.add(this.#metricsView, offsets[metric], amount);
     }
 
     /**
@@ -704,25 +683,13 @@ export class SuperSonic {
     #gatherMetrics() {
         const startTime = performance.now();
 
-        // All metrics are now read from SAB
-        const metrics = {};
-
-        // Worklet metrics (instant SAB read)
-        const workletMetrics = this.#getWorkletMetrics();
-        if (workletMetrics) {
-            Object.assign(metrics, workletMetrics);
-        }
+        // All metrics read from SAB in one call
+        const metrics = this.#getSABMetrics() || {};
 
         // Buffer usage (calculated from SAB head/tail pointers)
         const bufferUsage = this.#getBufferUsage();
         if (bufferUsage) {
             Object.assign(metrics, bufferUsage);
-        }
-
-        // OSC worker metrics + main thread metrics (instant SAB read)
-        const oscMetrics = this.#getOSCMetrics();
-        if (oscMetrics) {
-            Object.assign(metrics, oscMetrics);
         }
 
         // Drift offset (milliseconds)
@@ -830,6 +797,10 @@ export class SuperSonic {
         this.#directWriteAtomicView = new Int32Array(this.#sharedBuffer);
         this.#directWriteDataView = new DataView(this.#sharedBuffer);
         this.#directWriteUint8View = new Uint8Array(this.#sharedBuffer);
+
+        // Cache metrics view for efficient reads
+        const metricsBase = this.#ringBufferBase + this.#bufferConstants.METRICS_START;
+        this.#metricsView = new Uint32Array(this.#sharedBuffer, metricsBase, this.#bufferConstants.METRICS_SIZE / 4);
 
         // Control indices (must match shared_memory.h ControlPointers layout)
         // Offsets: in_head=0, in_tail=4, ..., in_sequence=24, ..., in_write_lock=40
