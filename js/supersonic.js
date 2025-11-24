@@ -574,29 +574,31 @@ export class SuperSonic {
         const m = this.#metricsView;
         return {
             // Worklet metrics (written by WASM)
-            processCount: m[MetricsOffsets.PROCESS_COUNT],
-            messagesProcessed: m[MetricsOffsets.MESSAGES_PROCESSED],
-            messagesDropped: m[MetricsOffsets.MESSAGES_DROPPED],
-            schedulerQueueDepth: m[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
-            schedulerQueueMax: m[MetricsOffsets.SCHEDULER_QUEUE_MAX],
-            schedulerQueueDropped: m[MetricsOffsets.SCHEDULER_QUEUE_DROPPED],
+            workletProcessCount: m[MetricsOffsets.PROCESS_COUNT],
+            workletMessagesProcessed: m[MetricsOffsets.MESSAGES_PROCESSED],
+            workletMessagesDropped: m[MetricsOffsets.MESSAGES_DROPPED],
+            workletSchedulerDepth: m[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
+            workletSchedulerMax: m[MetricsOffsets.SCHEDULER_QUEUE_MAX],
+            workletSchedulerDropped: m[MetricsOffsets.SCHEDULER_QUEUE_DROPPED],
+            workletSequenceGaps: m[MetricsOffsets.SEQUENCE_GAPS],
 
             // PreScheduler metrics (written by osc_out_prescheduler_worker.js)
             preschedulerPending: m[MetricsOffsets.PRESCHEDULER_PENDING],
             preschedulerPeak: m[MetricsOffsets.PRESCHEDULER_PEAK],
             preschedulerSent: m[MetricsOffsets.PRESCHEDULER_SENT],
-            retriesSucceeded: m[MetricsOffsets.RETRIES_SUCCEEDED],
-            retriesFailed: m[MetricsOffsets.RETRIES_FAILED],
-            bundlesScheduled: m[MetricsOffsets.BUNDLES_SCHEDULED],
-            eventsCancelled: m[MetricsOffsets.EVENTS_CANCELLED],
-            totalDispatches: m[MetricsOffsets.TOTAL_DISPATCHES],
-            messagesRetried: m[MetricsOffsets.MESSAGES_RETRIED],
-            retryQueueSize: m[MetricsOffsets.RETRY_QUEUE_SIZE],
-            retryQueueMax: m[MetricsOffsets.RETRY_QUEUE_MAX],
+            preschedulerRetriesSucceeded: m[MetricsOffsets.RETRIES_SUCCEEDED],
+            preschedulerRetriesFailed: m[MetricsOffsets.RETRIES_FAILED],
+            preschedulerBundlesScheduled: m[MetricsOffsets.BUNDLES_SCHEDULED],
+            preschedulerEventsCancelled: m[MetricsOffsets.EVENTS_CANCELLED],
+            preschedulerTotalDispatches: m[MetricsOffsets.TOTAL_DISPATCHES],
+            preschedulerMessagesRetried: m[MetricsOffsets.MESSAGES_RETRIED],
+            preschedulerRetryQueueSize: m[MetricsOffsets.RETRY_QUEUE_SIZE],
+            preschedulerRetryQueueMax: m[MetricsOffsets.RETRY_QUEUE_MAX],
+            preschedulerBypassed: m[MetricsOffsets.DIRECT_WRITES],
 
             // OSC In metrics (written by osc_in_worker.js)
             oscInMessagesReceived: m[MetricsOffsets.OSC_IN_MESSAGES_RECEIVED],
-            oscInDroppedMessages: m[MetricsOffsets.OSC_IN_DROPPED_MESSAGES],
+            oscInMessagesDropped: m[MetricsOffsets.OSC_IN_DROPPED_MESSAGES],
             oscInBytesReceived: m[MetricsOffsets.OSC_IN_BYTES_RECEIVED],
 
             // Debug metrics (written by debug_worker.js)
@@ -604,12 +606,8 @@ export class SuperSonic {
             debugBytesReceived: m[MetricsOffsets.DEBUG_BYTES_RECEIVED],
 
             // Main thread metrics (written by supersonic.js)
-            messagesSent: m[MetricsOffsets.MESSAGES_SENT],
-            bytesSent: m[MetricsOffsets.BYTES_SENT],
-            directWrites: m[MetricsOffsets.DIRECT_WRITES],
-
-            // Gap detection (written by WASM)
-            sequenceGaps: m[MetricsOffsets.SEQUENCE_GAPS]
+            mainMessagesSent: m[MetricsOffsets.MESSAGES_SENT],
+            mainBytesSent: m[MetricsOffsets.BYTES_SENT]
         };
     }
 
@@ -619,20 +617,20 @@ export class SuperSonic {
      * @private
      */
     #getBufferUsage() {
-        if (!this.#sharedBuffer || !this.#bufferConstants || !this.#ringBufferBase) {
+        if (!this.#directWriteAtomicView || !this.#bufferConstants || !this.#ringBufferBase) {
             return null;
         }
 
-        const atomicView = new Int32Array(this.#sharedBuffer);
         const controlBase = this.#ringBufferBase + this.#bufferConstants.CONTROL_START;
 
-        // Read head/tail pointers
-        const inHead = Atomics.load(atomicView, (controlBase + 0) / 4);
-        const inTail = Atomics.load(atomicView, (controlBase + 4) / 4);
-        const outHead = Atomics.load(atomicView, (controlBase + 8) / 4);
-        const outTail = Atomics.load(atomicView, (controlBase + 12) / 4);
-        const debugHead = Atomics.load(atomicView, (controlBase + 16) / 4);
-        const debugTail = Atomics.load(atomicView, (controlBase + 20) / 4);
+        // Read head/tail pointers (reuse cached Int32Array view)
+        const view = this.#directWriteAtomicView;
+        const inHead = Atomics.load(view, (controlBase + 0) / 4);
+        const inTail = Atomics.load(view, (controlBase + 4) / 4);
+        const outHead = Atomics.load(view, (controlBase + 8) / 4);
+        const outTail = Atomics.load(view, (controlBase + 12) / 4);
+        const debugHead = Atomics.load(view, (controlBase + 16) / 4);
+        const debugTail = Atomics.load(view, (controlBase + 20) / 4);
 
         // Calculate bytes used (accounting for wrap-around)
         const inUsed = (inHead - inTail + this.#bufferConstants.IN_BUFFER_SIZE) % this.#bufferConstants.IN_BUFFER_SIZE;
@@ -657,7 +655,7 @@ export class SuperSonic {
 
     /**
      * Add to a main thread metric in SharedArrayBuffer
-     * @param {'messagesSent'|'bytesSent'|'directWrites'} metric - Metric to update
+     * @param {'mainMessagesSent'|'mainBytesSent'|'preschedulerBypassed'} metric - Metric to update
      * @param {number} [amount=1] - Amount to add
      * @private
      */
@@ -667,9 +665,9 @@ export class SuperSonic {
         }
 
         const offsets = {
-            messagesSent: MetricsOffsets.MESSAGES_SENT,
-            bytesSent: MetricsOffsets.BYTES_SENT,
-            directWrites: MetricsOffsets.DIRECT_WRITES
+            mainMessagesSent: MetricsOffsets.MESSAGES_SENT,
+            mainBytesSent: MetricsOffsets.BYTES_SENT,
+            preschedulerBypassed: MetricsOffsets.DIRECT_WRITES
         };
         Atomics.add(this.#metricsView, offsets[metric], amount);
     }
@@ -854,8 +852,8 @@ export class SuperSonic {
         const uint8Data = this.#toUint8Array(oscData);
         const preparedData = await this.#prepareOutboundPacket(uint8Data);
 
-        this.#addMetric('messagesSent');
-        this.#addMetric('bytesSent', preparedData.length);
+        this.#addMetric('mainMessagesSent');
+        this.#addMetric('mainBytesSent', preparedData.length);
 
         if (this.onMessageSent) {
             this.onMessageSent(preparedData);
@@ -864,7 +862,7 @@ export class SuperSonic {
         // Fast path: try direct ring buffer write for non-bundle messages
         // This bypasses the worker thread, saving ~1-2ms of postMessage latency
         if (!this.#isBundleData(preparedData) && this.#tryDirectWrite(preparedData)) {
-            this.#addMetric('directWrites');
+            this.#addMetric('preschedulerBypassed');
             return; // Direct write succeeded
         }
 
