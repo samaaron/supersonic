@@ -47,6 +47,7 @@ The complete SuperSonic API.
 | Property | Description |
 |----------|-------------|
 | [`initialized`](#initialized-read-only) | Whether engine is initialised (read-only) |
+| [`initializing`](#initializing-read-only) | Whether engine is currently initializing (read-only) |
 | [`audioContext`](#audiocontext-read-only) | The Web Audio AudioContext (read-only) |
 | `workletNode` | The AudioWorkletNode (read-only) |
 
@@ -100,9 +101,15 @@ Load multiple synth definitions by name in parallel.
 await sonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
 ```
 
-### `loadSample(bufnum, nameOrPath)`
+### `loadSample(bufnum, nameOrPath, startFrame, numFrames)`
 
 Load a sample into a buffer. Pass a filename to use `sampleBaseURL`, or a full path.
+
+**Parameters:**
+- `bufnum` - Buffer number (integer)
+- `nameOrPath` - Sample filename or full path/URL (string)
+- `startFrame` - Optional starting frame offset (integer, default: 0)
+- `numFrames` - Optional number of frames to load (integer, default: 0 = all frames)
 
 ```javascript
 // By name (uses sampleBaseURL)
@@ -110,6 +117,9 @@ await sonic.loadSample(0, "loop_amen.flac");
 
 // By full path
 await sonic.loadSample(0, "./custom/my-sample.wav");
+
+// Load partial sample (frames 1000-2000)
+await sonic.loadSample(0, "long-sample.flac", 1000, 1000);
 ```
 
 ### `send(address, ...args)`
@@ -217,6 +227,20 @@ if (sonic.initialized) {
 }
 ```
 
+### `initializing` (read-only)
+
+Whether the engine is currently initializing. Useful for showing loading states in your UI.
+
+```javascript
+if (sonic.initializing) {
+  console.log('Engine is booting...');
+} else if (sonic.initialized) {
+  console.log('Engine is ready');
+} else {
+  console.log('Engine not started');
+}
+```
+
 ### `audioContext` (read-only)
 
 The underlying Web Audio AudioContext.
@@ -275,6 +299,7 @@ Returns an object containing:
 - `bufferPoolSize` - Buffer pool size (bytes)
 - `bootTimeMs` - Engine initialisation time (ms)
 - `capabilities` - Browser capabilities object
+- `version` - Engine version string (may be null if not yet received)
 
 ## Common OSC Commands
 

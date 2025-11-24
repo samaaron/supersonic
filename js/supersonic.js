@@ -49,6 +49,8 @@ export class SuperSonic {
     #initialized;
     #initializing;
     #capabilities;
+    #version;
+    #config;
 
     // Direct ring buffer write (bypasses worker for low-latency non-bundle messages)
     #directWriteAtomicView;
@@ -68,6 +70,7 @@ export class SuperSonic {
         this.#initialized = false;
         this.#initializing = false;
         this.#capabilities = {};
+        this.#version = null;
 
         // Core components (private)
         this.#sharedBuffer = null;
@@ -105,7 +108,7 @@ export class SuperSonic {
 
         const worldOptions = { ...defaultWorldOptions, ...options.scsynthOptions };
 
-        this.config = {
+        this.#config = {
             wasmUrl: options.wasmUrl || wasmBaseURL + 'scsynth-nrt.wasm',
             wasmBaseURL: wasmBaseURL,
             workletUrl: options.workletUrl || workerBaseURL + 'scsynth_audio_worklet.js',
@@ -148,16 +151,10 @@ export class SuperSonic {
     }
 
     /**
-     * Get browser capabilities (read-only)
-     */
-    get capabilities() {
-        return this.#capabilities;
-    }
-
-    /**
      * Set and validate browser capabilities for required features
+     * @private
      */
-    setAndValidateCapabilities() {
+    #setAndValidateCapabilities() {
         this.#capabilities = {
             audioWorklet: typeof AudioWorklet !== 'undefined',
             sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
@@ -211,7 +208,7 @@ export class SuperSonic {
         //           - Control structures, metrics, NTP timing: ~96B
         // 17-80MB:  Buffer pool (audio sample storage, 63MB)
         // Total: 80MB
-        const memConfig = this.config.memory;
+        const memConfig = this.#config.memory;
 
         this.#wasmMemory = new WebAssembly.Memory({
             initial: memConfig.totalPages,
@@ -223,7 +220,7 @@ export class SuperSonic {
 
 
     #initializeAudioContext() {
-        this.#audioContext = new AudioContext(this.config.audioContextOptions);
+        this.#audioContext = new AudioContext(this.#config.audioContextOptions);
         return this.#audioContext;
     }
 
@@ -232,17 +229,17 @@ export class SuperSonic {
             audioContext: this.#audioContext,
             sharedBuffer: this.#sharedBuffer,
             bufferPoolConfig: {
-                start: this.config.memory.bufferPoolOffset,
-                size: this.config.memory.bufferPoolSize
+                start: this.#config.memory.bufferPoolOffset,
+                size: this.#config.memory.bufferPoolSize
             },
             sampleBaseURL: this.#sampleBaseURL,
             audioPathMap: this.#audioPathMap,
-            maxBuffers: this.config.worldOptions.numBuffers
+            maxBuffers: this.#config.worldOptions.numBuffers
         });
     }
 
     async #loadWasmManifest() {
-        const manifestUrl = this.config.wasmBaseURL + 'manifest.json';
+        const manifestUrl = this.#config.wasmBaseURL + 'manifest.json';
 
         try {
             const response = await fetch(manifestUrl);
@@ -251,7 +248,7 @@ export class SuperSonic {
             }
 
             const manifest = await response.json();
-            this.config.wasmUrl = this.config.wasmBaseURL + manifest.wasmFile;
+            this.#config.wasmUrl = this.#config.wasmBaseURL + manifest.wasmFile;
             if (__DEV__) console.log(`[SuperSonic] WASM: ${manifest.wasmFile} (${manifest.buildId}, git: ${manifest.gitHash})`);
         } catch (error) {
             // Manifest failed to load - use default filename
@@ -263,11 +260,11 @@ export class SuperSonic {
      */
     async #loadWasm() {
         // In development mode, load manifest for cache-busted filename
-        if (this.config.development) {
+        if (this.#config.development) {
             await this.#loadWasmManifest();
         }
 
-        const wasmResponse = await fetch(this.config.wasmUrl);
+        const wasmResponse = await fetch(this.#config.wasmUrl);
         if (!wasmResponse.ok) {
             throw new Error(`Failed to load WASM: ${wasmResponse.status} ${wasmResponse.statusText}`);
         }
@@ -279,7 +276,7 @@ export class SuperSonic {
      */
     async #initializeAudioWorklet(wasmBytes) {
         // Load AudioWorklet processor
-        await this.#audioContext.audioWorklet.addModule(this.config.workletUrl);
+        await this.#audioContext.audioWorklet.addModule(this.#config.workletUrl);
 
         // Create AudioWorkletNode
         // Configure with numberOfInputs: 0 to act as a source node
@@ -304,7 +301,7 @@ export class SuperSonic {
             type: 'loadWasm',
             wasmBytes: wasmBytes,
             wasmMemory: this.#wasmMemory,
-            worldOptions: this.config.worldOptions,
+            worldOptions: this.#config.worldOptions,
             sampleRate: this.#audioContext.sampleRate  // Pass actual AudioContext sample rate
         });
 
@@ -317,7 +314,7 @@ export class SuperSonic {
      */
     async #initializeOSC() {
         // Create ScsynthOSC instance with custom worker base URL if provided
-        this.#osc = new ScsynthOSC(this.config.workerBaseURL);
+        this.#osc = new ScsynthOSC(this.#config.workerBaseURL);
 
         // Set up ScsynthOSC callbacks
         this.#osc.onRawOSC((msg) => {
@@ -404,11 +401,11 @@ export class SuperSonic {
         }
 
         // Merge config with defaults
-        this.config = {
-            ...this.config,
+        this.#config = {
+            ...this.#config,
             ...config,
             audioContextOptions: {
-                ...this.config.audioContextOptions,
+                ...this.#config.audioContextOptions,
                 ...(config.audioContextOptions || {})
             }
         };
@@ -417,7 +414,7 @@ export class SuperSonic {
         this.bootStats.initStartTime = performance.now();
 
         try {
-            this.setAndValidateCapabilities();
+            this.#setAndValidateCapabilities();
             this.#initializeSharedMemory();
             this.#initializeAudioContext();
             this.#initializeBufferManager();
@@ -546,18 +543,9 @@ export class SuperSonic {
                     // Debug messages from AudioWorklet - silent in production
                     break;
 
-                case 'console':
-                    // Console messages from AudioWorklet - forward to callback
-                    if (this.onConsoleMessage) {
-                        this.onConsoleMessage(data.message);
-                    }
-                    break;
-
                 case 'version':
-                    // Version from worklet (Supersonic + SuperCollider)
-                    if (this.onVersion) {
-                        this.onVersion(data.version);
-                    }
+                    // Version from worklet - stored for getInfo()
+                    this.#version = data.version;
                     break;
             }
         };
@@ -694,7 +682,7 @@ export class SuperSonic {
         }
 
         // Drift offset (milliseconds)
-        metrics.driftOffsetMs = this.getDriftOffset();
+        metrics.driftOffsetMs = this.#getDriftOffset();
 
         // AudioContext state (running, suspended, closed)
         metrics.audioContextState = this.#audioContext?.state || 'unknown';
@@ -960,16 +948,19 @@ export class SuperSonic {
             sampleRate: this.#audioContext.sampleRate,
 
             // Limits
-            numBuffers: this.config.worldOptions.numBuffers,
+            numBuffers: this.#config.worldOptions.numBuffers,
 
             // Memory (bytes)
-            totalMemory: this.config.memory.totalMemory,
-            wasmHeapSize: this.config.memory.wasmHeapSize,
-            bufferPoolSize: this.config.memory.bufferPoolSize,
+            totalMemory: this.#config.memory.totalMemory,
+            wasmHeapSize: this.#config.memory.wasmHeapSize,
+            bufferPoolSize: this.#config.memory.bufferPoolSize,
 
             // Boot
             bootTimeMs: this.bootStats.initDuration,
-            capabilities: { ...this.#capabilities }
+            capabilities: { ...this.#capabilities },
+
+            // Version (may be null if not yet received)
+            version: this.#version
         };
     }
 
@@ -1015,8 +1006,9 @@ export class SuperSonic {
      * Get NTP start time for bundle creation.
      * This is the NTP timestamp when AudioContext.currentTime was 0.
      * Bundles should have timestamp = audioContextTime + ntpStartTime
+     * @private
      */
-    waitForTimeSync() {
+    #waitForTimeSync() {
         this.#ensureInitialized('wait for time sync');
         const ntpStartView = new Float64Array(this.#sharedBuffer, this.#ringBufferBase + this.#bufferConstants.NTP_START_TIME_START, 1);
         return ntpStartView[0];
@@ -1261,7 +1253,7 @@ export class SuperSonic {
      * CRITICAL: This REPLACES the drift value, does not accumulate
      * @private
      */
-    updateDriftOffset() {
+    #updateDriftOffset() {
         if (!this.#bufferConstants || !this.#audioContext || this.#initialNTPStartTime === undefined) {
             return;
         }
@@ -1294,8 +1286,9 @@ export class SuperSonic {
     /**
      * Get current drift offset in milliseconds
      * @returns {number} Current drift in milliseconds
+     * @private
      */
-    getDriftOffset() {
+    #getDriftOffset() {
         if (!this.#bufferConstants) {
             return 0;
         }
@@ -1318,7 +1311,7 @@ export class SuperSonic {
 
         // Update every DRIFT_UPDATE_INTERVAL_MS to track drift between AudioContext and performance.now()
         this.#driftOffsetTimer = setInterval(() => {
-            this.updateDriftOffset();
+            this.#updateDriftOffset();
         }, DRIFT_UPDATE_INTERVAL_MS);
 
         if (__DEV__) console.log(`[SuperSonic] Started drift offset correction (every ${DRIFT_UPDATE_INTERVAL_MS}ms)`);
