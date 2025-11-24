@@ -237,40 +237,40 @@ function hideError() {
 }
 
 function updateMetrics(metrics) {
-  // Messages
-  document.getElementById('metric-sent').textContent = metrics.messages_sent ?? 0;
-  document.getElementById('metric-bytes-sent').textContent = formatBytes(metrics.bytes_sent ?? 0);
-  document.getElementById('metric-direct-writes').textContent = metrics.direct_writes ?? 0;
+  // Main thread messages
+  document.getElementById('metric-sent').textContent = metrics.main_messages_sent ?? 0;
+  document.getElementById('metric-bytes-sent').textContent = formatBytes(metrics.main_bytes_sent ?? 0);
+  document.getElementById('metric-direct-writes').textContent = metrics.prescheduler_bypassed ?? 0;
   document.getElementById('metric-received').textContent = metrics.osc_in_messages_received ?? 0;
   document.getElementById('metric-bytes-received').textContent = formatBytes(metrics.osc_in_bytes_received ?? 0);
-  document.getElementById('metric-osc-in-dropped').textContent = metrics.osc_in_dropped_messages ?? 0;
+  document.getElementById('metric-osc-in-dropped').textContent = metrics.osc_in_messages_dropped ?? 0;
 
-  // Processing
-  document.getElementById('metric-messages-processed').textContent = metrics.messages_processed ?? 0;
-  document.getElementById('metric-messages-dropped').textContent = metrics.messages_dropped ?? 0;
-  document.getElementById('metric-sequence-gaps').textContent = metrics.sequence_gaps ?? 0;
-  document.getElementById('metric-process-count').textContent = metrics.process_count ?? 0;
+  // Worklet processing
+  document.getElementById('metric-messages-processed').textContent = metrics.worklet_messages_processed ?? 0;
+  document.getElementById('metric-messages-dropped').textContent = metrics.worklet_messages_dropped ?? 0;
+  document.getElementById('metric-sequence-gaps').textContent = metrics.worklet_sequence_gaps ?? 0;
+  document.getElementById('metric-process-count').textContent = metrics.worklet_process_count ?? 0;
 
-  // Scheduler
-  document.getElementById('metric-scheduler-depth').textContent = metrics.scheduler_queue_depth ?? 0;
-  document.getElementById('metric-scheduler-peak').textContent = metrics.scheduler_queue_max ?? 0;
-  document.getElementById('metric-scheduler-dropped').textContent = metrics.scheduler_queue_dropped ?? 0;
+  // Worklet scheduler
+  document.getElementById('metric-scheduler-depth').textContent = metrics.worklet_scheduler_depth ?? 0;
+  document.getElementById('metric-scheduler-peak').textContent = metrics.worklet_scheduler_max ?? 0;
+  document.getElementById('metric-scheduler-dropped').textContent = metrics.worklet_scheduler_dropped ?? 0;
   document.getElementById('metric-drift').textContent = (metrics.drift_offset_ms ?? 0) + 'ms';
 
   // PreScheduler
   document.getElementById('metric-prescheduler-pending').textContent = metrics.prescheduler_pending ?? 0;
   document.getElementById('metric-prescheduler-peak').textContent = metrics.prescheduler_peak ?? 0;
   document.getElementById('metric-prescheduler-sent').textContent = metrics.prescheduler_sent ?? 0;
-  document.getElementById('metric-bundles-scheduled').textContent = metrics.bundles_scheduled ?? 0;
-  document.getElementById('metric-events-cancelled').textContent = metrics.events_cancelled ?? 0;
+  document.getElementById('metric-bundles-scheduled').textContent = metrics.prescheduler_bundles_scheduled ?? 0;
+  document.getElementById('metric-events-cancelled').textContent = metrics.prescheduler_events_cancelled ?? 0;
 
   // Retries
   document.getElementById('metric-prescheduler-retries-succeeded').textContent = metrics.prescheduler_retries_succeeded ?? 0;
   document.getElementById('metric-prescheduler-retries-failed').textContent = metrics.prescheduler_retries_failed ?? 0;
   document.getElementById('metric-prescheduler-retry-queue-size').textContent = metrics.prescheduler_retry_queue_size ?? 0;
   document.getElementById('metric-prescheduler-retry-queue-max').textContent = metrics.prescheduler_retry_queue_max ?? 0;
-  document.getElementById('metric-messages-retried').textContent = metrics.messages_retried ?? 0;
-  document.getElementById('metric-total-dispatches').textContent = metrics.total_dispatches ?? 0;
+  document.getElementById('metric-messages-retried').textContent = metrics.prescheduler_messages_retried ?? 0;
+  document.getElementById('metric-total-dispatches').textContent = metrics.prescheduler_total_dispatches ?? 0;
 
   // Ring buffer usage
   const inUsage = metrics.in_buffer_usage ?? 0;
@@ -752,40 +752,39 @@ initButton.addEventListener('click', async () => {
 
       // Define camelCase -> snake_case mapping
       const metricsMapping = {
-        // Main thread metrics
-        messagesSent: 'messages_sent',
-        bytesSent: 'bytes_sent',
         // Worklet metrics
-        processCount: 'process_count',
-        messagesProcessed: 'messages_processed',
-        messagesDropped: 'messages_dropped',
-        schedulerQueueDepth: 'scheduler_queue_depth',
-        schedulerQueueMax: 'scheduler_queue_max',
-        schedulerQueueDropped: 'scheduler_queue_dropped',
+        workletProcessCount: 'worklet_process_count',
+        workletMessagesProcessed: 'worklet_messages_processed',
+        workletMessagesDropped: 'worklet_messages_dropped',
+        workletSchedulerDepth: 'worklet_scheduler_depth',
+        workletSchedulerMax: 'worklet_scheduler_max',
+        workletSchedulerDropped: 'worklet_scheduler_dropped',
+        workletSequenceGaps: 'worklet_sequence_gaps',
         // Prescheduler metrics
         preschedulerPending: 'prescheduler_pending',
         preschedulerPeak: 'prescheduler_peak',
         preschedulerSent: 'prescheduler_sent',
-        retriesSucceeded: 'prescheduler_retries_succeeded',
-        retriesFailed: 'prescheduler_retries_failed',
-        retryQueueSize: 'prescheduler_retry_queue_size',
-        retryQueueMax: 'prescheduler_retry_queue_max',
-        bundlesScheduled: 'bundles_scheduled',
-        eventsCancelled: 'events_cancelled',
-        totalDispatches: 'total_dispatches',
-        messagesRetried: 'messages_retried',
+        preschedulerRetriesSucceeded: 'prescheduler_retries_succeeded',
+        preschedulerRetriesFailed: 'prescheduler_retries_failed',
+        preschedulerRetryQueueSize: 'prescheduler_retry_queue_size',
+        preschedulerRetryQueueMax: 'prescheduler_retry_queue_max',
+        preschedulerBundlesScheduled: 'prescheduler_bundles_scheduled',
+        preschedulerEventsCancelled: 'prescheduler_events_cancelled',
+        preschedulerTotalDispatches: 'prescheduler_total_dispatches',
+        preschedulerMessagesRetried: 'prescheduler_messages_retried',
+        preschedulerBypassed: 'prescheduler_bypassed',
         // OSC In worker metrics
         oscInMessagesReceived: 'osc_in_messages_received',
-        oscInDroppedMessages: 'osc_in_dropped_messages',
+        oscInMessagesDropped: 'osc_in_messages_dropped',
         oscInBytesReceived: 'osc_in_bytes_received',
         // Debug worker metrics
         debugMessagesReceived: 'debug_messages_received',
         debugBytesReceived: 'debug_bytes_received',
+        // Main thread metrics
+        mainMessagesSent: 'main_messages_sent',
+        mainBytesSent: 'main_bytes_sent',
         // Timing
-        driftOffsetMs: 'drift_offset_ms',
-        // Direct writes & gap detection
-        directWrites: 'direct_writes',
-        sequenceGaps: 'sequence_gaps'
+        driftOffsetMs: 'drift_offset_ms'
       };
 
       // Apply all simple mappings
