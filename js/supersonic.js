@@ -702,9 +702,9 @@ export class SuperSonic {
         // Buffer pool stats
         if (this.#bufferManager) {
             const poolStats = this.#bufferManager.getStats();
-            metrics.bufferPoolUsedBytes = poolStats.used;
+            metrics.bufferPoolUsedBytes = poolStats.used.size;
             metrics.bufferPoolAvailableBytes = poolStats.available;
-            metrics.bufferPoolAllocations = poolStats.allocations;
+            metrics.bufferPoolAllocations = poolStats.used.count;
         }
 
         // Loaded synthdefs count
