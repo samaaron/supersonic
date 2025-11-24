@@ -696,6 +696,20 @@ export class SuperSonic {
         // Drift offset (milliseconds)
         metrics.driftOffsetMs = this.getDriftOffset();
 
+        // AudioContext state (running, suspended, closed)
+        metrics.audioContextState = this.#audioContext?.state || 'unknown';
+
+        // Buffer pool stats
+        if (this.#bufferManager) {
+            const poolStats = this.#bufferManager.getStats();
+            metrics.bufferPoolUsedBytes = poolStats.used;
+            metrics.bufferPoolAvailableBytes = poolStats.available;
+            metrics.bufferPoolAllocations = poolStats.allocations;
+        }
+
+        // Loaded synthdefs count
+        metrics.loadedSynthDefs = this.loadedSynthDefs?.size || 0;
+
         const totalDuration = performance.now() - startTime;
         if (totalDuration > 1) {
             console.warn(`[SuperSonic] Slow metrics gathering: ${totalDuration.toFixed(2)}ms`);
@@ -930,35 +944,32 @@ export class SuperSonic {
     }
 
     /**
-     * Get current status
-     */
-    getStatus() {
-        return {
-            initialized: this.#initialized,
-            capabilities: this.#capabilities,
-            bootStats: this.bootStats,
-            audioContextState: this.#audioContext?.state
-        };
-    }
-
-    /**
-     * Get current configuration (merged defaults + user overrides)
-     * Useful for debugging and displaying in UI
-     * @returns {Object} Current scsynth configuration
+     * Get static boot-time information about the engine
+     * Values are fixed after init() - use getMetrics() for dynamic values
+     * @returns {Object} Static engine configuration
      * @example
-     * const config = sonic.getConfig();
-     * console.log('Buffer limit:', config.worldOptions.numBuffers);
-     * console.log('Memory layout:', config.memory);
+     * const info = sonic.getInfo();
+     * console.log('Sample rate:', info.sampleRate);
+     * console.log('Buffer limit:', info.numBuffers);
      */
-    getConfig() {
-        if (!this.config) {
-            return null;
-        }
+    getInfo() {
+        this.#ensureInitialized('get info');
 
-        // Return a deep clone to prevent external mutation
         return {
-            memory: { ...this.config.memory },
-            worldOptions: { ...this.config.worldOptions }
+            // Audio
+            sampleRate: this.#audioContext.sampleRate,
+
+            // Limits
+            numBuffers: this.config.worldOptions.numBuffers,
+
+            // Memory (bytes)
+            totalMemory: this.config.memory.totalMemory,
+            wasmHeapSize: this.config.memory.wasmHeapSize,
+            bufferPoolSize: this.config.memory.bufferPoolSize,
+
+            // Boot
+            bootTimeMs: this.bootStats.initDuration,
+            capabilities: { ...this.#capabilities }
         };
     }
 
@@ -1199,65 +1210,13 @@ export class SuperSonic {
     }
 
     /**
-     * Allocate memory for an audio buffer (includes guard samples)
-     * @param {number} numSamples - Number of Float32 samples to allocate
-     * @returns {number} Byte offset into SharedArrayBuffer, or 0 if allocation failed
-     * @example
-     * const bufferAddr = sonic.allocBuffer(44100);  // Allocate 1 second at 44.1kHz
+     * Get buffer pool statistics (internal use)
+     * @private
      */
-    allocBuffer(numSamples) {
-        this.#ensureInitialized('allocate buffers');
-        return this.#bufferManager.allocate(numSamples);
+    #getBufferPoolStats() {
+        return this.#bufferManager?.getStats();
     }
 
-    /**
-     * Free a previously allocated buffer
-     * @param {number} addr - Buffer address returned by allocBuffer()
-     * @returns {boolean} true if freed successfully
-     * @example
-     * sonic.freeBuffer(bufferAddr);
-     */
-    freeBuffer(addr) {
-        this.#ensureInitialized('free buffers');
-        return this.#bufferManager.free(addr);
-    }
-
-    /**
-     * Get a Float32Array view of an allocated buffer
-     * @param {number} addr - Buffer address returned by allocBuffer()
-     * @param {number} numSamples - Number of Float32 samples
-     * @returns {Float32Array} Typed array view into the buffer
-     * @example
-     * const view = sonic.getBufferView(bufferAddr, 44100);
-     * view[0] = 1.0;  // Write to buffer
-     */
-    getBufferView(addr, numSamples) {
-        this.#ensureInitialized('get buffer views');
-        return this.#bufferManager.getView(addr, numSamples);
-    }
-
-    /**
-     * Get buffer pool statistics
-     * @returns {Object} Stats including total, available, used, etc.
-     * @example
-     * const stats = sonic.getBufferPoolStats();
-     * console.log(`Available: ${stats.available} bytes`);
-     */
-    getBufferPoolStats() {
-        this.#ensureInitialized('get buffer pool stats');
-        return this.#bufferManager.getStats();
-    }
-
-    getDiagnostics() {
-        this.#ensureInitialized('get diagnostics');
-
-        return {
-            buffers: this.#bufferManager.getDiagnostics(),
-            synthdefs: {
-                count: this.loadedSynthDefs.size
-            }
-        };
-    }
 
     /**
      * Initialize NTP timing (write-once)
