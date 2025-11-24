@@ -24,9 +24,9 @@
 static const int SC_VersionMajor = 3;
 static const int SC_VersionMinor = 14;
 static const int SC_VersionPatch = 1;
-static const char SC_VersionTweak[] = "-rc2";
-static const char SC_RefType[] = "branch";
-static const char SC_BranchOrTag[] = "wasm-3-14";
+static const char SC_VersionTweak[] = "";
+static const char SC_RefType[] = "tag";
+static const char SC_BranchOrTag[] = "Version-3.14.1";
 static const char SC_CommitHash[] = "8a3bc4f";
 
 // For backward compatibility in scsynth and supernova only.
