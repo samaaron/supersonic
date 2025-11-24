@@ -337,9 +337,6 @@ target_link_libraries( libscide PUBLIC
 
 target_link_libraries( SuperCollider libscide)
 
-target_link_libraries( libscide PUBLIC boost_system_lib)
-include_directories(${boost_include_dirs})
-
 # This makes sclang/scide work with a Qt installation at a fixed location.
 set_property(TARGET libscide SuperCollider PROPERTY INSTALL_RPATH_USE_LINK_PATH TRUE)
 
@@ -496,7 +493,7 @@ if(APPLE OR WIN32)
             ")
         endif()
         set(VERIFY_CMD "include(BundleUtilities)")
-        if("${QT_VERSION_MAJOR}" GREATER_EQUAL 6 AND SC_USE_QTWEBENGINE)
+        if("${QT_VERSION_MAJOR}" GREATER_EQUAL 6 AND "${Qt6_VERSION}" VERSION_LESS "6.9.3" AND SC_USE_QTWEBENGINE)
             # Fix deployment with qt from homebrew
             execute_process(COMMAND brew --prefix OUTPUT_VARIABLE BREW_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE)
             get_target_property(QtCore_location Qt${QT_VERSION_MAJOR}::Core LOCATION)
