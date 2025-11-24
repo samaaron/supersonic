@@ -1163,19 +1163,15 @@ export class SuperSonic {
     /**
      * Send /sync command and wait for /synced response
      * Use this to ensure all previous asynchronous commands have completed
-     * @param {number} syncId - Unique integer identifier for this sync operation
+     * @param {number} [syncId] - Optional integer identifier (defaults to random)
      * @returns {Promise<void>}
      * @example
      * await sonic.loadSynthDefs(['synth1', 'synth2']);
-     * await sonic.sync(12345); // Wait for all synthdefs to be processed
+     * await sonic.sync(); // Wait for all synthdefs to be processed
      */
-    async sync(syncId) {
+    async sync(syncId = Math.floor(Math.random() * 2147483647)) {
         if (!this.#initialized) {
             throw new Error('SuperSonic not initialized. Call init() first.');
-        }
-
-        if (!Number.isInteger(syncId)) {
-            throw new Error('sync() requires an integer syncId parameter');
         }
 
         const syncPromise = new Promise((resolve, reject) => {
