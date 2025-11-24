@@ -2131,7 +2131,6 @@
                   overflow-x: auto;
                 "
               ><code><span style="color: #75715e;">// Load synthdef, then play synth</span>
-<span style="color: #75715e;">// with ID 1000 in group 0</span>
 
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSynthDef</span>(<span style="color: #ffd700;">'sonic-pi-prophet'</span>);
 sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-prophet'</span>, <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>,
@@ -2911,146 +2910,622 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
           <!-- Performance Metrics (Full Width) -->
           <div
             id="performance-metrics-container"
-            style="padding: 0.6rem 0.75rem; margin-top: 0; border-top: 1px solid #333;"
+            style="
+              padding: 0.6rem 0.75rem;
+              margin-top: 0;
+              border-top: 1px solid #333;
+            "
           >
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem; font-size: 0.6rem;">
-
+            <div
+              style="
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+                gap: 0.5rem;
+                font-size: 0.6rem;
+              "
+            >
               <!-- OSC Messages -->
-              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Messages</div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>sent</span><span><span id="metric-sent" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-bytes-sent" style="color: #555;">0 B</span></span>
+              <div
+                style="
+                  background: #1a1a1a;
+                  border-radius: 4px;
+                  padding: 0.4rem 0.5rem;
+                "
+              >
+                <div
+                  style="
+                    color: #666;
+                    font-size: 0.5rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 0.2rem;
+                  "
+                >
+                  Messages
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>direct</span><span id="metric-direct-writes" style="color: #4a4;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>sent</span
+                  ><span
+                    ><span id="metric-sent" style="color: #ffd700">0</span
+                    ><span style="color: #444"> / </span
+                    ><span id="metric-bytes-sent" style="color: #555"
+                      >0 B</span
+                    ></span
+                  >
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>received</span><span><span id="metric-received" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-bytes-received" style="color: #555;">0 B</span></span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>direct</span
+                  ><span id="metric-direct-writes" style="color: #4a4">0</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>debug</span><span><span id="metric-debug-received" style="color: #888;">0</span><span style="color: #444;"> / </span><span id="metric-debug-bytes-received" style="color: #555;">0 B</span></span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>received</span
+                  ><span
+                    ><span id="metric-received" style="color: #ffd700">0</span
+                    ><span style="color: #444"> / </span
+                    ><span id="metric-bytes-received" style="color: #555"
+                      >0 B</span
+                    ></span
+                  >
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>dropped</span><span id="metric-osc-in-dropped" style="color: #a44;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>debug</span
+                  ><span
+                    ><span id="metric-debug-received" style="color: #888"
+                      >0</span
+                    ><span style="color: #444"> / </span
+                    ><span id="metric-debug-bytes-received" style="color: #555"
+                      >0 B</span
+                    ></span
+                  >
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>dropped</span
+                  ><span id="metric-osc-in-dropped" style="color: #a44">0</span>
                 </div>
               </div>
 
               <!-- PreScheduler -->
-              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">PreScheduler</div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>pending</span><span><span id="metric-prescheduler-pending" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-peak" style="color: #555;">0</span></span>
+              <div
+                style="
+                  background: #1a1a1a;
+                  border-radius: 4px;
+                  padding: 0.4rem 0.5rem;
+                "
+              >
+                <div
+                  style="
+                    color: #666;
+                    font-size: 0.5rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 0.2rem;
+                  "
+                >
+                  PreScheduler
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>sent</span><span id="metric-prescheduler-sent" style="color: #ffd700;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>pending</span
+                  ><span
+                    ><span
+                      id="metric-prescheduler-pending"
+                      style="color: #ffd700"
+                      >0</span
+                    ><span style="color: #444"> / </span
+                    ><span id="metric-prescheduler-peak" style="color: #555"
+                      >0</span
+                    ></span
+                  >
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>scheduled</span><span id="metric-bundles-scheduled" style="color: #666;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>sent</span
+                  ><span id="metric-prescheduler-sent" style="color: #ffd700"
+                    >0</span
+                  >
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>cancelled</span><span id="metric-events-cancelled" style="color: #a44;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>scheduled</span
+                  ><span id="metric-bundles-scheduled" style="color: #666"
+                    >0</span
+                  >
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>cancelled</span
+                  ><span id="metric-events-cancelled" style="color: #a44"
+                    >0</span
+                  >
                 </div>
               </div>
 
               <!-- PreScheduler Retries -->
-              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">PreScheduler Retries</div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>ok / fail</span><span><span id="metric-prescheduler-retries-succeeded" style="color: #4a4;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-retries-failed" style="color: #a44;">0</span></span>
+              <div
+                style="
+                  background: #1a1a1a;
+                  border-radius: 4px;
+                  padding: 0.4rem 0.5rem;
+                "
+              >
+                <div
+                  style="
+                    color: #666;
+                    font-size: 0.5rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 0.2rem;
+                  "
+                >
+                  PreScheduler Retries
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>queue</span><span><span id="metric-prescheduler-retry-queue-size" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-prescheduler-retry-queue-max" style="color: #555;">0</span></span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>ok / fail</span
+                  ><span
+                    ><span
+                      id="metric-prescheduler-retries-succeeded"
+                      style="color: #4a4"
+                      >0</span
+                    ><span style="color: #444"> / </span
+                    ><span
+                      id="metric-prescheduler-retries-failed"
+                      style="color: #a44"
+                      >0</span
+                    ></span
+                  >
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>retried</span><span id="metric-messages-retried" style="color: #666;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>queue</span
+                  ><span
+                    ><span
+                      id="metric-prescheduler-retry-queue-size"
+                      style="color: #ffd700"
+                      >0</span
+                    ><span style="color: #444"> / </span
+                    ><span
+                      id="metric-prescheduler-retry-queue-max"
+                      style="color: #555"
+                      >0</span
+                    ></span
+                  >
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>dispatches</span><span id="metric-total-dispatches" style="color: #666;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>retried</span
+                  ><span id="metric-messages-retried" style="color: #666"
+                    >0</span
+                  >
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>dispatches</span
+                  ><span id="metric-total-dispatches" style="color: #666"
+                    >0</span
+                  >
                 </div>
               </div>
 
               <!-- Scheduler -->
-              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Scheduler</div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>queue</span><span><span id="metric-scheduler-depth" style="color: #ffd700;">0</span><span style="color: #444;"> / </span><span id="metric-scheduler-peak" style="color: #555;">0</span></span>
+              <div
+                style="
+                  background: #1a1a1a;
+                  border-radius: 4px;
+                  padding: 0.4rem 0.5rem;
+                "
+              >
+                <div
+                  style="
+                    color: #666;
+                    font-size: 0.5rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 0.2rem;
+                  "
+                >
+                  Scheduler
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>dropped</span><span id="metric-scheduler-dropped" style="color: #a44;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>queue</span
+                  ><span
+                    ><span id="metric-scheduler-depth" style="color: #ffd700"
+                      >0</span
+                    ><span style="color: #444"> / </span
+                    ><span id="metric-scheduler-peak" style="color: #555"
+                      >0</span
+                    ></span
+                  >
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>clock drift</span><span id="metric-drift" style="color: #ffd700;">0ms</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>dropped</span
+                  ><span id="metric-scheduler-dropped" style="color: #a44"
+                    >0</span
+                  >
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>clock drift</span
+                  ><span id="metric-drift" style="color: #ffd700">0ms</span>
                 </div>
               </div>
 
               <!-- Processing -->
-              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Processing</div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>processed</span><span id="metric-messages-processed" style="color: #ffd700;">0</span>
+              <div
+                style="
+                  background: #1a1a1a;
+                  border-radius: 4px;
+                  padding: 0.4rem 0.5rem;
+                "
+              >
+                <div
+                  style="
+                    color: #666;
+                    font-size: 0.5rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 0.2rem;
+                  "
+                >
+                  Processing
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>dropped</span><span id="metric-messages-dropped" style="color: #a44;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>processed</span
+                  ><span id="metric-messages-processed" style="color: #ffd700"
+                    >0</span
+                  >
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>seq gaps</span><span id="metric-sequence-gaps" style="color: #a44;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>dropped</span
+                  ><span id="metric-messages-dropped" style="color: #a44"
+                    >0</span
+                  >
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>ticks</span><span id="metric-process-count" style="color: #666;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>seq gaps</span
+                  ><span id="metric-sequence-gaps" style="color: #a44">0</span>
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>ticks</span
+                  ><span id="metric-process-count" style="color: #666">0</span>
                 </div>
               </div>
 
               <!-- Ring Buffers -->
-              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Ring Buffers</div>
-                <div style="display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0.15rem;">
-                  <span style="color: #888; width: 20px;">in</span>
-                  <div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;">
-                    <div id="metric-in-bar" style="height: 100%; background: #1e90ff; width: 0%; transition: width 0.3s;"></div>
-                  </div>
-                  <span id="metric-in-usage" style="color: #1e90ff; width: 24px; text-align: right; font-size: 0.55rem;">0%</span>
+              <div
+                style="
+                  background: #1a1a1a;
+                  border-radius: 4px;
+                  padding: 0.4rem 0.5rem;
+                "
+              >
+                <div
+                  style="
+                    color: #666;
+                    font-size: 0.5rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 0.2rem;
+                  "
+                >
+                  Ring Buffers
                 </div>
-                <div style="display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0.15rem;">
-                  <span style="color: #888; width: 20px;">out</span>
-                  <div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;">
-                    <div id="metric-out-bar" style="height: 100%; background: #4a4; width: 0%; transition: width 0.3s;"></div>
+                <div
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 0.3rem;
+                    margin-bottom: 0.15rem;
+                  "
+                >
+                  <span style="color: #888; width: 20px">in</span>
+                  <div
+                    style="
+                      flex: 1;
+                      height: 4px;
+                      background: #222;
+                      border-radius: 2px;
+                      overflow: hidden;
+                    "
+                  >
+                    <div
+                      id="metric-in-bar"
+                      style="
+                        height: 100%;
+                        background: #1e90ff;
+                        width: 0%;
+                        transition: width 0.3s;
+                      "
+                    ></div>
                   </div>
-                  <span id="metric-out-usage" style="color: #4a4; width: 24px; text-align: right; font-size: 0.55rem;">0%</span>
+                  <span
+                    id="metric-in-usage"
+                    style="
+                      color: #1e90ff;
+                      width: 24px;
+                      text-align: right;
+                      font-size: 0.55rem;
+                    "
+                    >0%</span
+                  >
                 </div>
-                <div style="display: flex; align-items: center; gap: 0.3rem;">
-                  <span style="color: #888; width: 20px;">dbg</span>
-                  <div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;">
-                    <div id="metric-debug-bar" style="height: 100%; background: #a4a; width: 0%; transition: width 0.3s;"></div>
+                <div
+                  style="
+                    display: flex;
+                    align-items: center;
+                    gap: 0.3rem;
+                    margin-bottom: 0.15rem;
+                  "
+                >
+                  <span style="color: #888; width: 20px">out</span>
+                  <div
+                    style="
+                      flex: 1;
+                      height: 4px;
+                      background: #222;
+                      border-radius: 2px;
+                      overflow: hidden;
+                    "
+                  >
+                    <div
+                      id="metric-out-bar"
+                      style="
+                        height: 100%;
+                        background: #4a4;
+                        width: 0%;
+                        transition: width 0.3s;
+                      "
+                    ></div>
                   </div>
-                  <span id="metric-debug-usage" style="color: #a4a; width: 24px; text-align: right; font-size: 0.55rem;">0%</span>
+                  <span
+                    id="metric-out-usage"
+                    style="
+                      color: #4a4;
+                      width: 24px;
+                      text-align: right;
+                      font-size: 0.55rem;
+                    "
+                    >0%</span
+                  >
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.3rem">
+                  <span style="color: #888; width: 20px">dbg</span>
+                  <div
+                    style="
+                      flex: 1;
+                      height: 4px;
+                      background: #222;
+                      border-radius: 2px;
+                      overflow: hidden;
+                    "
+                  >
+                    <div
+                      id="metric-debug-bar"
+                      style="
+                        height: 100%;
+                        background: #a4a;
+                        width: 0%;
+                        transition: width 0.3s;
+                      "
+                    ></div>
+                  </div>
+                  <span
+                    id="metric-debug-usage"
+                    style="
+                      color: #a4a;
+                      width: 24px;
+                      text-align: right;
+                      font-size: 0.55rem;
+                    "
+                    >0%</span
+                  >
                 </div>
               </div>
 
               <!-- Engine State -->
-              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Engine State</div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>audio</span><span id="metric-audio-state" style="color: #4a4;">-</span>
+              <div
+                style="
+                  background: #1a1a1a;
+                  border-radius: 4px;
+                  padding: 0.4rem 0.5rem;
+                "
+              >
+                <div
+                  style="
+                    color: #666;
+                    font-size: 0.5rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 0.2rem;
+                  "
+                >
+                  Engine State
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>synthdefs</span><span id="metric-synthdefs" style="color: #ffd700;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>audio</span
+                  ><span id="metric-audio-state" style="color: #4a4">-</span>
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>synthdefs</span
+                  ><span id="metric-synthdefs" style="color: #ffd700">0</span>
                 </div>
               </div>
 
               <!-- Buffer Pool -->
-              <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Buffer Pool</div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>used</span><span id="metric-buffer-used" style="color: #ffd700;">0 B</span>
+              <div
+                style="
+                  background: #1a1a1a;
+                  border-radius: 4px;
+                  padding: 0.4rem 0.5rem;
+                "
+              >
+                <div
+                  style="
+                    color: #666;
+                    font-size: 0.5rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 0.2rem;
+                  "
+                >
+                  Buffer Pool
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>free</span><span id="metric-buffer-free" style="color: #4a4;">0 B</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>used</span
+                  ><span id="metric-buffer-used" style="color: #ffd700"
+                    >0 B</span
+                  >
                 </div>
-                <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>allocs</span><span id="metric-buffer-allocs" style="color: #666;">0</span>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>free</span
+                  ><span id="metric-buffer-free" style="color: #4a4">0 B</span>
+                </div>
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    color: #888;
+                  "
+                >
+                  <span>allocs</span
+                  ><span id="metric-buffer-allocs" style="color: #666">0</span>
                 </div>
               </div>
-
             </div>
           </div>
 
