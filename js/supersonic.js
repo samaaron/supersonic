@@ -1014,11 +1014,27 @@ export class SuperSonic {
     /**
      * Load a sample into a buffer and wait for confirmation
      * @param {number} bufnum - Buffer number
-     * @param {string} path - Audio file path
+     * @param {string} nameOrPath - Sample filename (e.g. 'loop_amen.flac') or full path/URL
      * @returns {Promise} Resolves when buffer is ready
+     * @example
+     * await sonic.loadSample(0, 'loop_amen.flac');  // Uses sampleBaseURL
+     * await sonic.loadSample(0, './custom/my-sample.wav');  // Full path
      */
-    async loadSample(bufnum, path, startFrame = 0, numFrames = 0) {
+    async loadSample(bufnum, nameOrPath, startFrame = 0, numFrames = 0) {
         this.#ensureInitialized('load samples');
+
+        // Resolve name to path if needed
+        let path;
+        if (this.#isPath(nameOrPath)) {
+            path = nameOrPath;
+        } else {
+            if (!this.#sampleBaseURL) {
+                throw new Error(
+                    'sampleBaseURL not configured. Either provide a full path or set sampleBaseURL in constructor options.'
+                );
+            }
+            path = `${this.#sampleBaseURL}${nameOrPath}`;
+        }
 
         const bufferInfo = await this.#requireBufferManager().prepareFromFile({
             bufnum,
@@ -1041,15 +1057,38 @@ export class SuperSonic {
     }
 
     /**
+     * Check if a string looks like a path (contains / or ://)
+     * @param {string} str - String to check
+     * @returns {boolean} True if it looks like a path
+     */
+    #isPath(str) {
+        return str.includes('/') || str.includes('://');
+    }
+
+    /**
      * Load a binary synthdef file and send it to scsynth
-     * @param {string} path - Path or URL to the .scsyndef file
+     * @param {string} nameOrPath - Synthdef name (e.g. 'sonic-pi-beep') or full path/URL
      * @returns {Promise<void>}
      * @example
-     * await sonic.loadSynthDef('./extra/synthdefs/sonic-pi-beep.scsyndef');
+     * await sonic.loadSynthDef('sonic-pi-beep');  // Uses synthdefBaseURL
+     * await sonic.loadSynthDef('./custom/my-synth.scsyndef');  // Full path
      */
-    async loadSynthDef(path) {
+    async loadSynthDef(nameOrPath) {
         if (!this.#initialized) {
             throw new Error('SuperSonic not initialized. Call init() first.');
+        }
+
+        // Resolve name to path if needed
+        let path;
+        if (this.#isPath(nameOrPath)) {
+            path = nameOrPath;
+        } else {
+            if (!this.#synthdefBaseURL) {
+                throw new Error(
+                    'synthdefBaseURL not configured. Either provide a full path or set synthdefBaseURL in constructor options.'
+                );
+            }
+            path = `${this.#synthdefBaseURL}${nameOrPath}.scsyndef`;
         }
 
         try {
@@ -1078,7 +1117,7 @@ export class SuperSonic {
     }
 
     /**
-     * Load multiple synthdefs from a directory
+     * Load multiple synthdefs by name
      * @param {string[]} names - Array of synthdef names (without .scsyndef extension)
      * @returns {Promise<Object>} Map of name -> success/error
      * @example
@@ -1089,23 +1128,13 @@ export class SuperSonic {
             throw new Error('SuperSonic not initialized. Call init() first.');
         }
 
-        if (!this.#synthdefBaseURL) {
-            throw new Error(
-                'synthdefBaseURL not configured. Please set it in SuperSonic constructor options.\n' +
-                'Example: new SuperSonic({ synthdefBaseURL: "./dist/synthdefs/" })\n' +
-                'Or use CDN: new SuperSonic({ synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/" })\n' +
-                'Or install: npm install supersonic-scsynth-synthdefs'
-            );
-        }
-
         const results = {};
 
         // Send all /d_recv commands in parallel
         await Promise.all(
             names.map(async (name) => {
                 try {
-                    const path = `${this.#synthdefBaseURL}${name}.scsyndef`;
-                    await this.loadSynthDef(path);
+                    await this.loadSynthDef(name);
                     results[name] = { success: true };
                 } catch (error) {
                     console.error(`[SuperSonic] Failed to load ${name}:`, error);
