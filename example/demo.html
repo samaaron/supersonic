@@ -2100,7 +2100,7 @@
                   border-left: 4px solid #1e90ff;
                   overflow-x: auto;
                 "
-              ><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">baseURL</span> = <span style="color: #ffd700;">'/supersonic'</span>; <span style="color: #75715e;">// Configure for your setup</span>
+              ><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">baseURL</span> = <span style="color: #ffd700;">'/your/path/'</span>;
 <span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>({
   <span style="color: #ffd700;">workerBaseURL</span>:   <span style="color: #ffd700;">`${baseURL}/workers/`</span>,
   <span style="color: #ffd700;">wasmBaseURL</span>:     <span style="color: #ffd700;">`${baseURL}/wasm/`</span>,
@@ -2158,8 +2158,9 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                   overflow-x: auto;
                 "
               ><code><span style="color: #75715e;">// Load synthdef and sample, then play</span>
-<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSynthDef</span>(<span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>);
-<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSample</span>(<span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'bd_haus.flac'</span>);
+sonic.<span style="color: #50fa7b;">loadSynthDef</span>(<span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>);
+sonic.<span style="color: #50fa7b;">loadSample</span>(<span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'bd_haus.flac'</span>);
+<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">sync</span>(); <span style="color: #75715e;">// wait for loads</span>
 sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>,
              <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'buf'</span>, <span style="color: #bd93f9;">0</span>);</code></pre>
             </div>
