@@ -62,6 +62,7 @@ export class SuperSonic {
     // Runtime metrics
     #metricsIntervalId = null;
     #metricsGatherInProgress = false;
+    #metricsInterval = 100;
 
     constructor(options = {}) {
         this.#initialized = false;
@@ -82,10 +83,12 @@ export class SuperSonic {
         this.onOSC = null;              // Raw binary OSC from scsynth (for display/logging)
         this.onMessage = null;          // Parsed OSC messages from scsynth (for application logic)
         this.onMessageSent = null;
-        this.onMetricsUpdate = null;
         this.onDebugMessage = null;
         this.onInitialized = null;
         this.onError = null;
+
+        // Metrics callback
+        this.onMetricsUpdate = null;    // Callback for periodic metrics updates
 
         // Configuration - require explicit base URLs for workers and WASM
         // This ensures SuperSonic works correctly in bundled/vendored environments
@@ -703,38 +706,37 @@ export class SuperSonic {
 
     /**
      * Start performance monitoring - gathers metrics from all sources
-     * and calls onMetricsUpdate with consolidated snapshot
+     * and calls the metrics callback with consolidated snapshot
+     * Uses this.metricsInterval for polling rate
+     * @private
      */
     #startPerformanceMonitoring() {
-        // Clear any existing interval (shouldn't happen, but safety first)
-        if (this.#metricsIntervalId) {
-            clearInterval(this.#metricsIntervalId);
-        }
+        // Clear any existing interval
+        this.#stopPerformanceMonitoring();
 
-        // Request metrics periodically (100ms = 10Hz)
+        const intervalMs = this.#metricsInterval;
+
+        // Request metrics periodically
         // All metrics are read from SAB (<0.1ms) - fully synchronous
         this.#metricsIntervalId = setInterval(() => {
             if (!this.onMetricsUpdate) return;
 
-            // Prevent overlapping executions if gathering takes >100ms
+            // Prevent overlapping executions
             if (this.#metricsGatherInProgress) {
-                console.warn('[SuperSonic] Metrics gathering took >100ms, skipping this interval');
+                console.warn(`[SuperSonic] Metrics gathering took >${intervalMs}ms, skipping this interval`);
                 return;
             }
 
             this.#metricsGatherInProgress = true;
             try {
-                // Gather all metrics from all sources (synchronous SAB reads)
                 const metrics = this.#gatherMetrics();
-
-                // Single callback with complete metrics snapshot
                 this.onMetricsUpdate(metrics);
             } catch (error) {
                 console.error('[SuperSonic] Metrics gathering failed:', error);
             } finally {
                 this.#metricsGatherInProgress = false;
             }
-        }, 100);
+        }, intervalMs);
     }
 
     /**
@@ -746,6 +748,30 @@ export class SuperSonic {
             clearInterval(this.#metricsIntervalId);
             this.#metricsIntervalId = null;
         }
+    }
+
+    /**
+     * Get metrics snapshot on-demand (synchronous)
+     * @returns {Object} Current metrics from all sources
+     */
+    getMetrics() {
+        return this.#gatherMetrics();
+    }
+
+    /**
+     * Set metrics polling interval and restart the timer
+     * @param {number} ms - Polling interval in milliseconds
+     */
+    setMetricsInterval(ms) {
+        this.#metricsInterval = ms;
+        this.#startPerformanceMonitoring();
+    }
+
+    /**
+     * Stop periodic metrics polling
+     */
+    stopMetricsPolling() {
+        this.#stopPerformanceMonitoring();
     }
 
     /**
