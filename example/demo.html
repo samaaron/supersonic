@@ -2100,7 +2100,13 @@
                   border-left: 4px solid #1e90ff;
                   overflow-x: auto;
                 "
-              ><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>();
+              ><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">baseURL</span> = <span style="color: #ffd700;">'/supersonic'</span>; <span style="color: #75715e;">// Configure for your setup</span>
+<span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>({
+  <span style="color: #ffd700;">workerBaseURL</span>:   <span style="color: #ffd700;">`${baseURL}/workers/`</span>,
+  <span style="color: #ffd700;">wasmBaseURL</span>:     <span style="color: #ffd700;">`${baseURL}/wasm/`</span>,
+  <span style="color: #ffd700;">synthdefBaseURL</span>: <span style="color: #ffd700;">`${baseURL}/synthdefs/`</span>,
+  <span style="color: #ffd700;">sampleBaseURL</span>:   <span style="color: #ffd700;">`${baseURL}/samples/`</span>
+});
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>();</code></pre>
             </div>
 
@@ -2151,7 +2157,8 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                   border-left: 4px solid #ffd700;
                   overflow-x: auto;
                 "
-              ><code><span style="color: #75715e;">// Load sample into buffer 0</span>
+              ><code><span style="color: #75715e;">// Load synthdef and sample, then play</span>
+<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSynthDef</span>(<span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>);
 <span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSample</span>(<span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'bd_haus.flac'</span>);
 sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>,
              <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'buf'</span>, <span style="color: #bd93f9;">0</span>);</code></pre>
@@ -3017,28 +3024,28 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 </div>
               </div>
 
-              <!-- Audio Buffers & SynthDefs -->
+              <!-- Engine State -->
               <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Buffers & SynthDefs</div>
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Engine State</div>
                 <div style="display: flex; justify-content: space-between; color: #888;">
-                  <span>buffers</span><span><span id="metric-buffer-count" style="color: #ffd700;">0</span><span style="color: #444;"> (<span id="metric-buffer-pending" style="color: #a44;">0</span>)</span></span>
+                  <span>audio</span><span id="metric-audio-state" style="color: #4a4;">-</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; color: #888;">
                   <span>synthdefs</span><span id="metric-synthdefs" style="color: #ffd700;">0</span>
                 </div>
               </div>
 
-              <!-- Memory -->
+              <!-- Buffer Pool -->
               <div style="background: #1a1a1a; border-radius: 4px; padding: 0.4rem 0.5rem;">
-                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Buffer Memory</div>
+                <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.2rem;">Buffer Pool</div>
                 <div style="display: flex; justify-content: space-between; color: #888;">
                   <span>used</span><span id="metric-buffer-used" style="color: #ffd700;">0 B</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; color: #888;">
                   <span>free</span><span id="metric-buffer-free" style="color: #4a4;">0 B</span>
                 </div>
-                <div style="display: none; justify-content: space-between; color: #888;">
-                  <span>total</span><span id="metric-buffer-total" style="color: #555;">0 B</span>
+                <div style="display: flex; justify-content: space-between; color: #888;">
+                  <span>allocs</span><span id="metric-buffer-allocs" style="color: #666;">0</span>
                 </div>
               </div>
 

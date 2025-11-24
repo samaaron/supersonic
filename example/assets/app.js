@@ -287,15 +287,14 @@ function updateMetrics(metrics) {
   document.getElementById('metric-debug-received').textContent = metrics.debug_messages_received ?? 0;
   document.getElementById('metric-debug-bytes-received').textContent = formatBytes(metrics.debug_bytes_received ?? 0);
 
-  // Audio buffers
-  document.getElementById('metric-buffer-count').textContent = metrics.buffer_allocated_count ?? 0;
-  document.getElementById('metric-buffer-pending').textContent = metrics.buffer_pending ?? 0;
+  // Engine state
+  document.getElementById('metric-audio-state').textContent = metrics.audio_context_state ?? '-';
   document.getElementById('metric-synthdefs').textContent = metrics.synthdef_count ?? 0;
 
-  // Buffer memory
-  document.getElementById('metric-buffer-used').textContent = formatBytes(metrics.buffer_bytes_active ?? 0);
-  document.getElementById('metric-buffer-total').textContent = formatBytes(metrics.buffer_pool_total ?? 0);
+  // Buffer pool
+  document.getElementById('metric-buffer-used').textContent = formatBytes(metrics.buffer_pool_used ?? 0);
   document.getElementById('metric-buffer-free').textContent = formatBytes(metrics.buffer_pool_available ?? 0);
+  document.getElementById('metric-buffer-allocs').textContent = metrics.buffer_pool_allocations ?? 0;
 }
 
 function addMessage(message) {
@@ -805,25 +804,12 @@ initButton.addEventListener('click', async () => {
         metricsWithUsage.debug_buffer_usage = metrics.debugBufferUsed.percentage;
       }
 
-      if (typeof orchestrator.getDiagnostics === 'function') {
-        try {
-          const diagnostics = orchestrator.getDiagnostics();
-          if (diagnostics?.buffers) {
-            metricsWithUsage.buffer_allocated_count = diagnostics.buffers.active;
-            metricsWithUsage.buffer_pending = diagnostics.buffers.pending;
-            metricsWithUsage.buffer_bytes_active = diagnostics.buffers.bytesActive;
-            if (diagnostics.buffers.pool) {
-              metricsWithUsage.buffer_pool_total = diagnostics.buffers.pool.total;
-              metricsWithUsage.buffer_pool_available = diagnostics.buffers.pool.available;
-            }
-          }
-          if (diagnostics?.synthdefs) {
-            metricsWithUsage.synthdef_count = diagnostics.synthdefs.count;
-          }
-        } catch (diagError) {
-          console.warn('[App] Diagnostics fetch failed', diagError);
-        }
-      }
+      // Buffer pool stats and engine state (from metrics)
+      metricsWithUsage.buffer_pool_used = metrics.bufferPoolUsedBytes;
+      metricsWithUsage.buffer_pool_available = metrics.bufferPoolAvailableBytes;
+      metricsWithUsage.buffer_pool_allocations = metrics.bufferPoolAllocations;
+      metricsWithUsage.synthdef_count = metrics.loadedSynthDefs;
+      metricsWithUsage.audio_context_state = metrics.audioContextState;
 
       updateMetrics(metricsWithUsage);
     };
