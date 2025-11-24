@@ -6,6 +6,9 @@ let messages = [];
 let sentMessages = [];
 let runCounter = 0;
 
+// Development mode - enables console logging for debugging
+/* DEMO_BUILD_CONFIG */ const DEV_MODE = false;
+
 // Loop sample configuration: rate and duration for each sample
 const LOOP_CONFIG = {
   'loop_amen': { rate: 0.8767, duration: 2.0 },
@@ -650,7 +653,7 @@ initButton.addEventListener('click', async () => {
       updateStatus('ready');
 
       // Expose to global scope for console access (development only)
-      if (orchestrator.config.development) {
+      if (DEV_MODE) {
         window.orchestrator = orchestrator;
         console.log('[App] orchestrator exposed to window for dev console access');
       }
@@ -694,7 +697,7 @@ initButton.addEventListener('click', async () => {
     orchestrator.onOSC = (message) => {
       addMessage(message);
       // Also log to console in development mode
-      if (orchestrator.config.development && message.oscData) {
+      if (DEV_MODE && message.oscData) {
         try {
           const decoded = SuperSonic.osc.decode(message.oscData);
           const args = decoded.args ? decoded.args.map(a => a.value !== undefined ? a.value : a).join(' ') : '';
@@ -708,7 +711,7 @@ initButton.addEventListener('click', async () => {
     orchestrator.onMessageSent = (oscData) => {
       addSentMessage(oscData);
       // Also log to console in development mode
-      if (orchestrator.config.development) {
+      if (DEV_MODE) {
         try {
           const decoded = SuperSonic.osc.decode(oscData);
           // Truncate large binary arguments to avoid flooding console
@@ -822,7 +825,7 @@ initButton.addEventListener('click', async () => {
 
     orchestrator.onDebugMessage = (msg) => {
       // Log to console in dev mode (easier to copy/paste full logs)
-      if (orchestrator.config.development) {
+      if (DEV_MODE) {
         console.log(msg.text);
       }
 
@@ -847,7 +850,7 @@ initButton.addEventListener('click', async () => {
       // Version display removed from UI
     };
 
-    /* DEMO_BUILD_CONFIG */ await orchestrator.init({ development: true });
+    /* DEMO_BUILD_CONFIG */ await orchestrator.init({ development: DEV_MODE });
 
     // Expose for debugging
     window.testOrchestrator = orchestrator;
