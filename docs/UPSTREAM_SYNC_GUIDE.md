@@ -1,9 +1,9 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2025-11-19
+**Last Updated**: 2025-11-24
 **Last Sync Commit**: 0edfbdb8f
 **Upstream Branch**: supercollider/develop (tracked to 2025-09-25)
-**Verified Against**: SuperCollider 3.14.1-rc2 (commit f663df770e, 2025-11-16) - No scsynth/plugin changes needed
+**Verified Against**: SuperCollider 3.14.1 (2025-11-23) - No scsynth/plugin changes needed
 
 ---
 
@@ -596,12 +596,12 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 
 ## Reference: Previous Sync Summary
 
-### Verification: SuperCollider 3.14.1-rc2 (2025-11-19)
+### Verification: SuperCollider 3.14.1 (2025-11-24)
 
-Verified SuperSonic is aligned with SuperCollider 3.14.1-rc2 (commit f663df770e, released 2025-11-16):
+Verified SuperSonic is aligned with SuperCollider 3.14.1 (released 2025-11-23):
 
 **Analysis:**
-- Examined all commits between last sync (2025-09-25) and Version-3.14.1-rc2 tag
+- Examined all commits between last sync (2025-09-25) and Version-3.14.1 tag
 - Found 3 server directory commits:
   1. fdd4db02f1 - portaudio CMake cleanup (build system only - skipped)
   2. 04a9350261 - Boost CMake integration (build system only - skipped)
@@ -609,7 +609,7 @@ Verified SuperSonic is aligned with SuperCollider 3.14.1-rc2 (commit f663df770e,
 
 **3.14.1 Release Content:**
 - Single sclang fix: keyword arguments crash (PR #7206)
-- No scsynth or plugin changes
+- No scsynth or plugin changes since 3.14.1-rc2
 - Not applicable to SuperSonic (sclang-only)
 
 **Conclusion:** No changes needed. SuperSonic is current with all relevant upstream changes.
