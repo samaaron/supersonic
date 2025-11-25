@@ -198,7 +198,7 @@ SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* in
 
         // Send internal message for JavaScript to track buffer allocation
         small_scpacket packet;
-        packet.adds("/buffer/allocated");
+        packet.adds("/supersonic/buffer/allocated");
         packet.maketags(3);
         packet.addtag(',');
         packet.addtag('s');  // UUID string
