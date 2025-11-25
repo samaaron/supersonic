@@ -1,18 +1,16 @@
 # API Reference
 
-The complete SuperSonic API.
-
 ## Quick Reference
 
 ### Core
 
 | Method | Description |
 |--------|-------------|
-| [`init()`](#init) | Initialise the audio engine |
-| `destroy()` | Shut down and clean up resources |
+| [`init(config)`](#initconfig) | Initialise the audio engine |
+| [`destroy()`](#destroy) | Shut down and clean up resources |
 | [`send(address, ...args)`](#sendaddress-args) | Send an OSC message |
 | [`sendOSC(data, options)`](#sendoscoscbytes-options) | Send pre-encoded OSC bytes |
-| `sync(syncId)` | Wait for server to process all commands |
+| [`sync(syncId)`](#syncsyncid) | Wait for server to process all commands |
 
 ### Asset Loading
 
@@ -47,15 +45,19 @@ The complete SuperSonic API.
 | Property | Description |
 |----------|-------------|
 | [`initialized`](#initialized-read-only) | Whether engine is initialised (read-only) |
-| [`initializing`](#initializing-read-only) | Whether engine is currently initializing (read-only) |
+| [`initializing`](#initializing-read-only) | Whether engine is currently initialising (read-only) |
 | [`audioContext`](#audiocontext-read-only) | The Web Audio AudioContext (read-only) |
 | `workletNode` | The AudioWorkletNode (read-only) |
+| [`loadedSynthDefs`](#loadedsynthdefs-read-only) | Set of loaded synthdef names (read-only) |
+| [`bootStats`](#bootstats-read-only) | Boot timing information (read-only) |
 
 ### Advanced
 
 | Method | Description |
 |--------|-------------|
 | [`getInfo()`](#getinfo) | Get static engine configuration |
+| [`SuperSonic.osc.encode()`](#supersonicoscencodemessage) | Encode an OSC message to bytes |
+| [`SuperSonic.osc.decode()`](#supersonicoscdecodedata-options) | Decode OSC bytes to a message |
 
 ## Creating an Instance
 
@@ -67,27 +69,75 @@ const sonic = new SuperSonic({
   workerBaseURL:   `${baseURL}/workers/`,   // Required
   wasmBaseURL:     `${baseURL}/wasm/`,      // Required
   synthdefBaseURL: `${baseURL}/synthdefs/`, // Optional
-  sampleBaseURL:   `${baseURL}/samples/`    // Optional
+  sampleBaseURL:   `${baseURL}/samples/`,   // Optional
+  scsynthOptions:  { numBuffers: 4096 }     // Optional
+});
+```
+
+### Constructor Options
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `workerBaseURL` | Yes | Base URL for worker scripts |
+| `wasmBaseURL` | Yes | Base URL for WASM files |
+| `synthdefBaseURL` | No | Base URL for synthdef files (used by `loadSynthDef`) |
+| `sampleBaseURL` | No | Base URL for sample files (used by `loadSample`) |
+| `scsynthOptions` | No | Server options (see below) |
+
+### Server Options (`scsynthOptions`)
+
+Override scsynth server defaults:
+
+```javascript
+const sonic = new SuperSonic({
+  // ... required options ...
+  scsynthOptions: {
+    numBuffers: 4096,  // Max audio buffers (default: 1024)
+  }
 });
 ```
 
 ## Core Methods
 
-### `init()`
+### `init(config)`
 
-Initialise the audio engine. Must be called before anything else.
+Initialise the audio engine. Call this before anything else.
 
 ```javascript
 await sonic.init();
 ```
 
+**Optional config overrides:**
+
+```javascript
+await sonic.init({
+  development: true,  // Use cache-busted WASM (for dev)
+  audioContextOptions: {
+    sampleRate: 44100,      // Request specific sample rate
+    latencyHint: "playback" // "interactive" (default), "balanced", or "playback"
+  }
+});
+```
+
+| Option | Description |
+|--------|-------------|
+| `development` | Enable development mode with cache-busted WASM files |
+| `wasmUrl` | Override the WASM file URL |
+| `workletUrl` | Override the worklet script URL |
+| `audioContextOptions` | Options passed to the AudioContext constructor |
+
+Calling `init()` multiple times is safe - it returns immediately if already initialised, or returns the existing promise if initialisation is in progress.
+
 ### `loadSynthDef(nameOrPath)`
 
-Load a synth definition. Pass a name to use `synthdefBaseURL`, or a full path.
+Load a synthdef. Pass a name to use `synthdefBaseURL`, or provide a full path.
+
+**Returns:** `Promise<{name: string, size: number}>` - The synthdef name and size in bytes.
 
 ```javascript
 // By name (uses synthdefBaseURL)
-await sonic.loadSynthDef("sonic-pi-beep");
+const info = await sonic.loadSynthDef("sonic-pi-beep");
+console.log(`Loaded ${info.name} (${info.size} bytes)`);
 
 // By full path
 await sonic.loadSynthDef("./custom/my-synth.scsyndef");
@@ -95,15 +145,26 @@ await sonic.loadSynthDef("./custom/my-synth.scsyndef");
 
 ### `loadSynthDefs(names)`
 
-Load multiple synth definitions by name in parallel.
+Load multiple synthdefs in parallel.
+
+**Returns:** `Promise<Object>` - A map of synthdef name to result object. Each result contains either `{success: true}` or `{success: false, error: string}`.
 
 ```javascript
-await sonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
+const results = await sonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
+
+// Check results
+for (const [name, result] of Object.entries(results)) {
+  if (result.success) {
+    console.log(`Loaded ${name}`);
+  } else {
+    console.error(`Failed to load ${name}: ${result.error}`);
+  }
+}
 ```
 
 ### `loadSample(bufnum, nameOrPath, startFrame, numFrames)`
 
-Load a sample into a buffer. Pass a filename to use `sampleBaseURL`, or a full path.
+Load a sample into a buffer. Pass a filename to use `sampleBaseURL`, or provide a full path.
 
 **Parameters:**
 - `bufnum` - Buffer number (integer)
@@ -141,9 +202,38 @@ const oscData = new Uint8Array([...]); // Your OSC bytes
 sonic.sendOSC(oscData);
 ```
 
+### `sync(syncId)`
+
+Send a `/sync` command and wait for the `/synced` response. Use this to ensure all previous asynchronous commands (like `/d_recv` for synthdefs) have been processed by the server.
+
+**Parameters:**
+- `syncId` - Optional integer identifier (default: random). The server echoes this back in the `/synced` response.
+
+**Returns:** `Promise<void>` - Resolves when the server responds, or rejects after 10 seconds.
+
+```javascript
+// Load synthdefs then wait for them to be ready
+await sonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
+await sonic.sync();  // Now safe to use the synthdefs
+
+// Use a specific sync ID for tracking
+await sonic.sync(42);
+```
+
+### `destroy()`
+
+Shut down the engine and clean up all resources. Stops audio processing, terminates workers, and closes the AudioContext.
+
+**Returns:** `Promise<void>`
+
+```javascript
+await sonic.destroy();
+// sonic is no longer usable after this
+```
+
 ## Callbacks
 
-Set these to receive events from the engine.
+Set these properties to receive events from the engine.
 
 ### `onInitialized`
 
@@ -229,7 +319,7 @@ if (sonic.initialized) {
 
 ### `initializing` (read-only)
 
-Whether the engine is currently initializing. Useful for showing loading states in your UI.
+Whether the engine is currently initialising. Useful for showing loading states in your UI.
 
 ```javascript
 if (sonic.initializing) {
@@ -249,6 +339,32 @@ The underlying Web Audio AudioContext.
 const ctx = sonic.audioContext;
 console.log('Sample rate:', ctx.sampleRate);
 ```
+
+### `loadedSynthDefs` (read-only)
+
+A `Set` containing the names of all confirmed loaded synthdefs. A synthdef appears here only after scsynth has confirmed it's ready - not just when the load request was sent. Removed when freed via `/d_free` or `/d_freeAll`.
+
+```javascript
+if (sonic.loadedSynthDefs.has("sonic-pi-beep")) {
+  sonic.send("/s_new", "sonic-pi-beep", -1, 0, 0);
+}
+
+// See all loaded synthdefs
+console.log("Loaded:", [...sonic.loadedSynthDefs]);
+```
+
+### `bootStats` (read-only)
+
+Timing information from engine initialisation.
+
+```javascript
+const stats = sonic.bootStats;
+console.log(`Engine booted in ${stats.initDuration.toFixed(2)}ms`);
+```
+
+**Properties:**
+- `initStartTime` - When `init()` was called (`performance.now()` timestamp)
+- `initDuration` - How long initialisation took (milliseconds)
 
 ## Metrics API
 
@@ -283,7 +399,7 @@ sonic.stopMetricsPolling();
 
 ### `getInfo()`
 
-Static config from boot time.
+Returns static configuration from boot time - things that don't change after initialisation.
 
 ```javascript
 const info = sonic.getInfo();
@@ -301,9 +417,46 @@ Returns an object containing:
 - `capabilities` - Browser capabilities object
 - `version` - Engine version string (may be null if not yet received)
 
+### `SuperSonic.osc.encode(message)`
+
+Encode an OSC message object into binary format. Useful for building OSC messages manually.
+
+```javascript
+const message = {
+  address: "/s_new",
+  args: [
+    { type: "s", value: "sonic-pi-beep" },
+    { type: "i", value: -1 },
+    { type: "i", value: 0 },
+    { type: "i", value: 0 }
+  ]
+};
+
+const bytes = SuperSonic.osc.encode(message);
+// bytes is a Uint8Array
+```
+
+### `SuperSonic.osc.decode(data, options)`
+
+Decode binary OSC data into a message object. Useful for debugging or logging.
+
+**Parameters:**
+- `data` - `Uint8Array` or `ArrayBuffer` containing OSC data
+- `options` - Optional. `{ metadata: true }` to include type info in args
+
+```javascript
+// Basic decode
+const msg = SuperSonic.osc.decode(oscBytes);
+console.log(msg.address, msg.args);
+
+// With type metadata
+const msg = SuperSonic.osc.decode(oscBytes, { metadata: true });
+// msg.args will be [{ type: "s", value: "..." }, ...]
+```
+
 ## Common OSC Commands
 
-SuperSonic uses the SuperCollider Server protocol. Common commands:
+SuperSonic speaks the SuperCollider Server protocol. Here are the commands you'll use most often:
 
 ### Synths
 
@@ -339,3 +492,18 @@ sonic.send('/status');
 ```
 
 For the complete OSC command reference, see the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html).
+
+### Unsupported Commands
+
+These SuperCollider commands are **not supported** in SuperSonic because there's no filesystem in the browser/WASM environment:
+
+| Command | Alternative |
+|---------|-------------|
+| `/d_load` | Use `loadSynthDef()` or send `/d_recv` with synthdef bytes |
+| `/d_loadDir` | Use `loadSynthDefs()` to load multiple synthdefs |
+| `/b_read` | Use `loadSample()` to load audio into a buffer |
+| `/b_readChannel` | Use `loadSample()` to load audio into a buffer |
+| `/b_write` | Not available (cannot write files in browser) |
+| `/b_close` | Not available (no disk streaming in browser) |
+
+Attempting to send these commands will throw an error with guidance on the alternative.
