@@ -31,10 +31,20 @@
 #include "SC_HiddenWorld.h"
 #include "Unroll.h"
 
-// From audio_processor.cpp
+// =============================================================================
+// SUPERSONIC MODIFICATION START - Node Tree for SharedArrayBuffer
+// This section adds support for tracking the node tree in shared memory,
+// allowing JavaScript to poll the synth/group hierarchy without OSC latency.
+// When merging upstream changes, preserve this block.
+// =============================================================================
 extern "C" {
     int worklet_debug(const char* fmt, ...);
+    extern uint8_t* shared_memory;
 }
+#include "../../node_tree.h"
+// =============================================================================
+// SUPERSONIC MODIFICATION END
+// =============================================================================
 
 void Node_StateMsg(Node* inNode, int inState);
 
@@ -361,9 +371,12 @@ void Node_StateMsg(Node* inNode, int inState) {
         return; // no notification for negative IDs
 
     World* world = inNode->mWorld;
-    // NOTE: Removed NRT check to enable notifications in WebAudio/WASM mode
-    // if (!world->mRealTime)
-    //     return;
+    // =========================================================================
+    // SUPERSONIC MODIFICATION - Removed NRT check for WebAudio/WASM mode
+    // Original code:
+    //     if (!world->mRealTime)
+    //         return;
+    // =========================================================================
 
     NodeEndMsg msg;
     msg.mWorld = world;
@@ -383,6 +396,33 @@ void Node_StateMsg(Node* inNode, int inState) {
     }
     msg.mState = inState;
     world->hw->mNodeEnds.Write(msg);
+
+    // =========================================================================
+    // SUPERSONIC MODIFICATION START - Update SharedArrayBuffer node tree
+    // This enables JavaScript to poll the node tree without OSC round-trips.
+    // When merging upstream changes, preserve this block.
+    // =========================================================================
+    if (shared_memory) {
+        uint8_t* node_tree_ptr = shared_memory + NODE_TREE_START;
+        NodeTreeHeader* tree_header = reinterpret_cast<NodeTreeHeader*>(node_tree_ptr);
+        NodeEntry* tree_entries = reinterpret_cast<NodeEntry*>(node_tree_ptr + NODE_TREE_HEADER_SIZE);
+
+        switch (inState) {
+            case kNode_Go:
+                NodeTree_Add(inNode, tree_header, tree_entries);
+                break;
+            case kNode_End:
+                NodeTree_Remove(inNode->mID, tree_header, tree_entries);
+                break;
+            case kNode_Move:
+                NodeTree_Update(inNode, tree_header, tree_entries);
+                break;
+            // kNode_On, kNode_Off, kNode_Info don't affect tree structure
+        }
+    }
+    // =========================================================================
+    // SUPERSONIC MODIFICATION END
+    // =========================================================================
 }
 
 #include "SC_Unit.h"

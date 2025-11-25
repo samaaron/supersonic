@@ -39,6 +39,9 @@
 #include "scheduler/PriorityQueue.h"
 #include "scheduler/SC_ScheduledEvent.h"
 
+// Node tree for SharedArrayBuffer polling
+#include "node_tree.h"
+
 // Forward declarations
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
@@ -257,6 +260,20 @@ extern "C" {
         metrics->scheduler_queue_dropped.store(0, std::memory_order_relaxed);
         metrics->messages_sequence_gaps.store(0, std::memory_order_relaxed);
 
+        // Initialize node tree memory
+        // All entries start with id = -1 (empty slot)
+        // Using memset with 0xFF sets all bytes to 0xFF, which is -1 for signed int32
+        uint8_t* node_tree_ptr = shared_memory + NODE_TREE_START;
+        memset(node_tree_ptr, 0xFF, NODE_TREE_SIZE);
+
+        // Initialize header properly (count=0, version=0)
+        NodeTreeHeader* tree_header = reinterpret_cast<NodeTreeHeader*>(node_tree_ptr);
+        tree_header->node_count.store(0, std::memory_order_relaxed);
+        tree_header->version.store(0, std::memory_order_relaxed);
+
+        worklet_debug("[NodeTree] Initialized at offset %u, size %u bytes",
+                     NODE_TREE_START, NODE_TREE_SIZE);
+
         // Enable worklet_debug
         memory_initialized = true;
 
@@ -361,6 +378,17 @@ extern "C" {
 
         worklet_debug("Scheduler initialized: buf=%d samples, osc_inc=%lld",
                      buf_length, (long long)g_osc_increment);
+
+        // Add root group to node tree (it was created during World_New but doesn't trigger Node_StateMsg)
+        if (g_world->mTopGroup) {
+            uint8_t* node_tree_ptr = shared_memory + NODE_TREE_START;
+            NodeTreeHeader* tree_header = reinterpret_cast<NodeTreeHeader*>(node_tree_ptr);
+            NodeEntry* tree_entries = reinterpret_cast<NodeEntry*>(node_tree_ptr + NODE_TREE_HEADER_SIZE);
+            NodeTree_Add(&g_world->mTopGroup->mNode, tree_header, tree_entries);
+            worklet_debug("[NodeTree] Added root group (id %d), count now: %u",
+                         g_world->mTopGroup->mNode.mID,
+                         tree_header->node_count.load(std::memory_order_relaxed));
+        }
 
         worklet_debug("░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀");
         worklet_debug("░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░");
