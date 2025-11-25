@@ -45,31 +45,33 @@ export const MemoryLayout = {
     /**
      * Ring buffer reserved space (between WASM heap and buffer pool)
      * Actual ring buffer usage: IN: 768KB, OUT: 128KB, DEBUG: 64KB = 960KB
-     * Plus control structures: CONTROL_SIZE (40B) + METRICS_SIZE (48B) + NTP_START_TIME_SIZE (8B) ≈ 96B
-     * Total actual usage: ~960KB
-     * Reserved: 1MB (provides ~64KB headroom for alignment and future expansion)
-     * Current: 1MB reserved (starts where WASM heap ends at 16MB)
+     * Plus control structures: CONTROL_SIZE (48B) + METRICS_SIZE (128B) + timing (16B) = 192B
+     * Plus node tree: ~57KB
+     * Plus audio capture buffer (for testing): 3sec at 48kHz stereo = ~1.1MB
+     * Total actual usage: ~2.2MB
+     * Reserved: 3MB (provides headroom for future expansion)
+     * Current: 3MB reserved (starts where WASM heap ends at 16MB)
      */
-    ringBufferReserved: 1 * 1024 * 1024,  // 1MB reserved
+    ringBufferReserved: 3 * 1024 * 1024,  // 3MB reserved
 
     /**
      * Buffer pool byte offset from start of SharedArrayBuffer
      * Audio samples are allocated from this pool using @thi.ng/malloc
      * Must be after WASM heap + ring buffer area
-     * Current: 17MB offset = after 16MB heap + 1MB ring buffers
+     * Current: 19MB offset = after 16MB heap + 3MB ring buffers
      */
-    bufferPoolOffset: 17 * 1024 * 1024,  // 17825792 bytes
+    bufferPoolOffset: 19 * 1024 * 1024,  // 19922944 bytes
 
     /**
      * Buffer pool size in bytes
      * Used for audio sample storage (loaded files + allocated buffers)
-     * Current: 63MB (enough for ~3.5 minutes of stereo at 48kHz uncompressed)
+     * Current: 61MB (enough for ~3.4 minutes of stereo at 48kHz uncompressed)
      */
-    bufferPoolSize: 63 * 1024 * 1024,  // 66060288 bytes
+    bufferPoolSize: 61 * 1024 * 1024,  // 63963136 bytes
 
     /**
      * Total memory calculation (should equal totalPages * 65536)
-     * wasmHeap (16MB) + ringReserve (1MB) + bufferPool (63MB) = 80MB
+     * wasmHeap (16MB) + ringReserve (3MB) + bufferPool (61MB) = 80MB
      */
     get totalMemory() {
         return this.bufferPoolOffset + this.bufferPoolSize;

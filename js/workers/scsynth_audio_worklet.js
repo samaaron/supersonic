@@ -74,9 +74,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             throw new Error('WASM memory not available');
         }
 
-        // Read the struct (27 uint32_t fields + 1 uint8_t + 3 padding bytes = 112 bytes)
-        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 27);
-        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 112);
+        // Read the struct (32 uint32_t fields + 1 uint8_t + 3 padding bytes = 132 bytes)
+        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 32);
+        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 132);
 
         // Extract constants (order matches BufferLayout struct in shared_memory.h)
         this.bufferConstants = {
@@ -102,11 +102,17 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             NODE_TREE_ENTRY_SIZE: uint32View[19],
             NODE_TREE_DEF_NAME_SIZE: uint32View[20],
             NODE_TREE_MAX_NODES: uint32View[21],
-            TOTAL_BUFFER_SIZE: uint32View[22],
-            MAX_MESSAGE_SIZE: uint32View[23],
-            MESSAGE_MAGIC: uint32View[24],
-            PADDING_MAGIC: uint32View[25],
-            DEBUG_PADDING_MARKER: uint8View[104],  // After 26 uint32s = 104 bytes
+            AUDIO_CAPTURE_START: uint32View[22],
+            AUDIO_CAPTURE_SIZE: uint32View[23],
+            AUDIO_CAPTURE_HEADER_SIZE: uint32View[24],
+            AUDIO_CAPTURE_FRAMES: uint32View[25],
+            AUDIO_CAPTURE_CHANNELS: uint32View[26],
+            AUDIO_CAPTURE_SAMPLE_RATE: uint32View[27],
+            TOTAL_BUFFER_SIZE: uint32View[28],
+            MAX_MESSAGE_SIZE: uint32View[29],
+            MESSAGE_MAGIC: uint32View[30],
+            PADDING_MAGIC: uint32View[31],
+            DEBUG_PADDING_MARKER: uint8View[128],  // After 32 uint32s = 128 bytes
             MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, padding)
         };
 

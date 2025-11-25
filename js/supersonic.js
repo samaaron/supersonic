@@ -351,6 +351,127 @@ export class SuperSonic {
     return this.#sharedBuffer;
   }
 
+  // ============================================================================
+  // AUDIO CAPTURE API (for testing)
+  // ============================================================================
+
+  /**
+   * Start capturing audio output to the shared buffer
+   * Useful for testing audio output verification
+   * @example
+   * sonic.startCapture();
+   * sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0);
+   * await sonic.wait(500);
+   * const audio = sonic.stopCapture();
+   * // audio is { sampleRate, channels, frames, left, right }
+   */
+  startCapture() {
+    if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {
+      throw new Error('SuperSonic not initialized');
+    }
+
+    const bc = this.#bufferConstants;
+    const headerOffset = this.#ringBufferBase + bc.AUDIO_CAPTURE_START;
+
+    // Use Atomics for cross-thread access
+    const headerView = new Uint32Array(this.#sharedBuffer, headerOffset, 4);
+
+    // Reset head position and enable capture
+    Atomics.store(headerView, 1, 0);  // head = 0
+    Atomics.store(headerView, 0, 1);  // enabled = 1
+  }
+
+  /**
+   * Stop capturing audio and return captured data
+   * @returns {Object} Captured audio data with sampleRate, channels, frames, left, right arrays
+   */
+  stopCapture() {
+    if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {
+      throw new Error('SuperSonic not initialized');
+    }
+
+    const bc = this.#bufferConstants;
+    const headerOffset = this.#ringBufferBase + bc.AUDIO_CAPTURE_START;
+
+    // Read header
+    const headerView = new Uint32Array(this.#sharedBuffer, headerOffset, 4);
+
+    // Disable capture first
+    Atomics.store(headerView, 0, 0);  // enabled = 0
+
+    // Read captured data
+    const head = Atomics.load(headerView, 1);  // frames captured
+    const sampleRate = headerView[2];
+    const channels = headerView[3];
+
+    // Read audio data (interleaved: L0, R0, L1, R1, ...)
+    const dataOffset = headerOffset + bc.AUDIO_CAPTURE_HEADER_SIZE;
+    const dataView = new Float32Array(this.#sharedBuffer, dataOffset, head * channels);
+
+    // Deinterleave into separate channel arrays (copy to non-shared buffer)
+    const left = new Float32Array(head);
+    const right = channels > 1 ? new Float32Array(head) : null;
+
+    for (let i = 0; i < head; i++) {
+      left[i] = dataView[i * channels];
+      if (right) {
+        right[i] = dataView[i * channels + 1];
+      }
+    }
+
+    return {
+      sampleRate,
+      channels,
+      frames: head,
+      left,
+      right
+    };
+  }
+
+  /**
+   * Check if audio capture is currently enabled
+   * @returns {boolean} True if capture is enabled
+   */
+  isCaptureEnabled() {
+    if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {
+      return false;
+    }
+
+    const bc = this.#bufferConstants;
+    const headerOffset = this.#ringBufferBase + bc.AUDIO_CAPTURE_START;
+    const headerView = new Uint32Array(this.#sharedBuffer, headerOffset, 1);
+    return Atomics.load(headerView, 0) === 1;
+  }
+
+  /**
+   * Get current capture position in frames
+   * @returns {number} Number of frames captured so far
+   */
+  getCaptureFrames() {
+    if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {
+      return 0;
+    }
+
+    const bc = this.#bufferConstants;
+    const headerOffset = this.#ringBufferBase + bc.AUDIO_CAPTURE_START;
+    const headerView = new Uint32Array(this.#sharedBuffer, headerOffset, 2);
+    return Atomics.load(headerView, 1);
+  }
+
+  /**
+   * Get maximum capture duration in seconds
+   * @returns {number} Maximum capture duration based on buffer size and sample rate
+   */
+  getMaxCaptureDuration() {
+    if (!this.#bufferConstants) return 0;
+    const bc = this.#bufferConstants;
+    // AUDIO_CAPTURE_SAMPLE_RATE is the configured capture rate from shared_memory.h
+    // The actual sample rate may differ and is set by WASM at init
+    return bc.AUDIO_CAPTURE_FRAMES / (bc.AUDIO_CAPTURE_SAMPLE_RATE || 48000);
+  }
+
+  // ============================================================================
+
   /**
    * Send OSC message with simplified syntax (auto-detects types)
    * @param {string} address - OSC address
@@ -447,17 +568,15 @@ export class SuperSonic {
       this.onMessageSent(preparedData);
     }
 
-    // Fast path: try direct ring buffer write for non-bundle messages
-    // This bypasses the worker thread, saving ~1-2ms of postMessage latency
-    if (
-      !this.#isBundleData(preparedData) &&
-      this.#tryDirectWrite(preparedData)
-    ) {
+    // Fast path: try direct ring buffer write for messages that don't need scheduling
+    // This bypasses the worker thread, saving ~30-50ms of worker latency
+    // Eligible: non-bundles, immediate bundles (timetag 1), or bundles within 100ms
+    if (this.#shouldBypassPrescheduler(preparedData) && this.#tryDirectWrite(preparedData)) {
       this.#addMetric("preschedulerBypassed");
       return; // Direct write succeeded
     }
 
-    // Fall back to worker for bundles, buffer-full, or wrap-around cases
+    // Fall back to worker for future-scheduled bundles, buffer-full, or wrap-around cases
     // Worker has retry queue for buffer-full scenarios
     const timing = this.#calculateBundleWait(preparedData);
     const sendOptions = { ...options };
@@ -1445,6 +1564,46 @@ export class SuperSonic {
    */
   #isBundleData(oscData) {
     return oscData.length >= 8 && oscData[0] === 0x23; // '#' character
+  }
+
+  /**
+   * Check if an OSC message/bundle should bypass the prescheduler for direct write
+   * Returns true for: non-bundles, immediate bundles (timetag 1), past timetags, or within 100ms
+   */
+  #shouldBypassPrescheduler(oscData) {
+    // Non-bundles always bypass
+    if (!this.#isBundleData(oscData)) {
+      return true;
+    }
+
+    // Bundle format: "#bundle\0" (8 bytes) + timetag (8 bytes)
+    // Timetag is at bytes 8-15: seconds (4 bytes) + fraction (4 bytes)
+    if (oscData.length < 16) {
+      return true; // Malformed bundle, let it through
+    }
+
+    // Read NTP timetag (big-endian)
+    const view = new DataView(oscData.buffer, oscData.byteOffset, oscData.byteLength);
+    const ntpSeconds = view.getUint32(8, false);
+    const ntpFraction = view.getUint32(12, false);
+
+    // Timetag 1 means "execute immediately"
+    if (ntpSeconds === 0 && ntpFraction === 1) {
+      return true;
+    }
+
+    // Get current NTP time using AudioContext (same reference as WASM)
+    if (!this.#audioContext || !this.#ntpStartView) {
+      return true; // Can't compare, let it through
+    }
+
+    const ntpStartTime = this.#ntpStartView[0];
+    const currentNTP = this.#audioContext.currentTime + ntpStartTime;
+    const bundleNTP = ntpSeconds + ntpFraction / 0x100000000;
+
+    // Bypass if timetag is in the past or within 100ms from now
+    const diffSeconds = bundleNTP - currentNTP;
+    return diffSeconds < 0.1; // 100ms threshold
   }
 
   /**
