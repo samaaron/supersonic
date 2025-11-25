@@ -37,11 +37,11 @@ jobs:
           test -f dist/wasm/scsynth-nrt.wasm || { echo "Error: scsynth-nrt.wasm not found"; exit 1; }
           echo "Build verification passed!"
 
-  # Placeholder for future test jobs
-  # test:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #     - name: Run tests
-  #       run: # Add your test command here
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run tests
+        run: npm test

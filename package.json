@@ -11,6 +11,7 @@
     "build:release": "./build.sh --release",
     "clean": "./clean.sh",
     "dev": "cd example && ruby server.rb",
+    "test": "playwright test",
     "prepublishOnly": "./build.sh --release"
   },
   "repository": {
@@ -45,6 +46,7 @@
     "@thi.ng/malloc": "^6.1.128"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.0",
     "esbuild": "^0.24.0"
   },
   "engines": {
