@@ -70,6 +70,7 @@ npm install supersonic-scsynth-bundle
 ## Documentation
 
 - [API Reference](docs/API.md) - Methods, callbacks, and configuration
+- [Server Command Reference](docs/SERVER_COMMAND_REFERENCE.md) - OSC commands for controlling scsynth
 - [Metrics](docs/METRICS.md) - Performance monitoring and debugging
 - [Browser Setup](docs/BROWSER_SETUP.md) - Required headers and browser requirements
 - [CDN and Self-Hosting](docs/CDN.md) - Why self-hosting is required
