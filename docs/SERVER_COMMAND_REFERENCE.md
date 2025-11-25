@@ -25,21 +25,72 @@ const oscBytes = SuperSonic.osc.encode({
 supersonic.sendOSC(oscBytes);
 ```
 
-## Table of Contents
+## Quick Reference
 
-- [Conventions](#conventions)
-- [Top-Level Commands](#top-level-commands)
-- [Synth Definition Commands](#synth-definition-commands)
-- [Node Commands](#node-commands)
-- [Synth Commands](#synth-commands)
-- [Group Commands](#group-commands)
-- [Unit Generator Commands](#unit-generator-commands)
-- [Buffer Commands](#buffer-commands)
-- [Control Bus Commands](#control-bus-commands)
-- [Buffer Fill Commands](#buffer-fill-commands-for-b_gen)
-- [Reply Messages](#reply-messages)
-- [Node Notifications](#node-notifications)
-- [Unsupported Commands](#unsupported-commands)
+| Command | Description |
+|---------|-------------|
+| **Top-Level** | |
+| [`/quit`](#quit) | Terminate the server |
+| [`/notify`](#notify) | Register for node event notifications |
+| [`/status`](#status) | Query server status (UGens, synths, CPU) |
+| [`/cmd`](#cmd) | Execute a plugin command |
+| [`/sync`](#sync) | Wait for async commands to complete |
+| [`/version`](#version) | Query server version info |
+| [`/rtMemoryStatus`](#rtmemorystatus) | Query realtime memory usage |
+| **Synth Definitions** | |
+| [`/d_recv`](#d_recv) | Load a synthdef from binary data |
+| [`/d_free`](#d_free) | Free loaded synthdefs by name |
+| **Nodes** | |
+| [`/n_free`](#n_free) | Delete nodes |
+| [`/n_run`](#n_run) | Turn nodes on or off |
+| [`/n_set`](#n_set) | Set node control values |
+| [`/n_setn`](#n_setn) | Set sequential control values |
+| [`/n_fill`](#n_fill) | Fill controls with a single value |
+| [`/n_map`](#n_map) | Map controls to control buses |
+| [`/n_mapn`](#n_mapn) | Map sequential controls to control buses |
+| [`/n_mapa`](#n_mapa) | Map controls to audio buses |
+| [`/n_mapan`](#n_mapan) | Map sequential controls to audio buses |
+| [`/n_before`](#n_before) | Move node before another |
+| [`/n_after`](#n_after) | Move node after another |
+| [`/n_query`](#n_query) | Query node info |
+| [`/n_trace`](#n_trace) | Debug trace node execution |
+| [`/n_order`](#n_order) | Reorder nodes within a group |
+| **Synths** | |
+| [`/s_new`](#s_new) | Create a new synth |
+| [`/s_get`](#s_get) | Get synth control values |
+| [`/s_getn`](#s_getn) | Get sequential synth control values |
+| [`/s_noid`](#s_noid) | Remove synth ID tracking |
+| **Groups** | |
+| [`/g_new`](#g_new) | Create a new group |
+| [`/p_new`](#p_new) | Create a parallel group |
+| [`/g_head`](#g_head) | Move node to head of group |
+| [`/g_tail`](#g_tail) | Move node to tail of group |
+| [`/g_freeAll`](#g_freeall) | Free all nodes in group |
+| [`/g_deepFree`](#g_deepfree) | Recursively free all synths in group |
+| [`/g_dumpTree`](#g_dumptree) | Print group tree (debug) |
+| [`/g_queryTree`](#g_querytree) | Query group tree structure |
+| **Unit Generators** | |
+| [`/u_cmd`](#u_cmd) | Send command to a UGen |
+| **Buffers** | |
+| [`/b_alloc`](#b_alloc) | Allocate an empty buffer |
+| [`/b_allocRead`](#b_allocread) | Allocate and load audio file |
+| [`/b_allocReadChannel`](#b_allocreadchannel) | Load specific channels from file |
+| [`/b_free`](#b_free) | Free a buffer |
+| [`/b_zero`](#b_zero) | Zero buffer contents |
+| [`/b_set`](#b_set) | Set individual samples |
+| [`/b_setn`](#b_setn) | Set sequential samples |
+| [`/b_setSampleRate`](#b_setsamplerate) | Set buffer sample rate |
+| [`/b_fill`](#b_fill) | Fill samples with a value |
+| [`/b_gen`](#b_gen) | Generate buffer contents (sine, cheby, etc.) |
+| [`/b_query`](#b_query) | Query buffer info |
+| [`/b_get`](#b_get) | Get sample values |
+| [`/b_getn`](#b_getn) | Get sequential sample values |
+| **Control Buses** | |
+| [`/c_set`](#c_set) | Set control bus values |
+| [`/c_setn`](#c_setn) | Set sequential bus values |
+| [`/c_fill`](#c_fill) | Fill buses with a value |
+| [`/c_get`](#c_get) | Get bus values |
+| [`/c_getn`](#c_getn) | Get sequential bus values |
 
 ---
 
