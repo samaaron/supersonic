@@ -1,0 +1,1391 @@
+# Server Command Reference
+
+This document describes the OSC commands supported by the SuperCollider synthesis server (scsynth). SuperSonic implements a subset of these commands - see [Unsupported Commands](#unsupported-commands) at the end.
+
+> **Source:** This documentation is based on the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html).
+
+Commands are sent as OSC messages using `sonic.send(address, ...args)`. For example:
+
+```javascript
+sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'note', 60);
+```
+
+## Table of Contents
+
+- [Conventions](#conventions)
+- [Top-Level Commands](#top-level-commands)
+- [Synth Definition Commands](#synth-definition-commands)
+- [Node Commands](#node-commands)
+- [Synth Commands](#synth-commands)
+- [Group Commands](#group-commands)
+- [Unit Generator Commands](#unit-generator-commands)
+- [Buffer Commands](#buffer-commands)
+- [Control Bus Commands](#control-bus-commands)
+- [Buffer Fill Commands](#buffer-fill-commands-for-b_gen)
+- [Reply Messages](#reply-messages)
+- [Node Notifications](#node-notifications)
+- [Unsupported Commands](#unsupported-commands)
+
+---
+
+## Conventions
+
+### Parameter Types
+
+| Notation | Type | Description |
+|----------|------|-------------|
+| `int` | Integer | 32-bit signed integer |
+| `float` | Float | 32-bit floating point |
+| `double` | Double | 64-bit floating point |
+| `string` | String | Null-terminated string |
+| `bytes` | Blob | Binary data (byte array) |
+
+### Repetition
+
+`N ×` indicates the parameter can be repeated N times. For example:
+
+```javascript
+// /n_free takes N node IDs
+sonic.send('/n_free', 1000, 1001, 1002);
+```
+
+### Node IDs
+
+- Use `-1` to have the server auto-generate a unique node ID
+- Node ID `0` is the root group (always exists)
+- Positive integers are user-assigned IDs
+
+### Add Actions
+
+Used when creating or moving nodes:
+
+| Value | Action | Description |
+|-------|--------|-------------|
+| 0 | head | Add to head of target group |
+| 1 | tail | Add to tail of target group |
+| 2 | before | Add before target node |
+| 3 | after | Add after target node |
+| 4 | replace | Replace target node |
+
+### Control Values
+
+Controls can be set by index (integer) or name (string). Values can be:
+- `float` or `int` - Direct value
+- `"cN"` - Map to control bus N (e.g., `"c0"`)
+- `"aN"` - Map to audio bus N (e.g., `"a0"`)
+
+### Asynchronous Commands
+
+Commands marked **Async** execute on a background thread. They reply with `/done` on success or `/fail` on error. Use `/sync` to wait for all async commands to complete.
+
+---
+
+## Top-Level Commands
+
+### `/quit`
+
+Terminate the synthesis server.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+
+**Async:** Yes
+**Reply:** `/done /quit`
+
+```javascript
+sonic.send('/quit');
+```
+
+---
+
+### `/notify`
+
+Register/unregister for server notifications.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| flag | int | 1 = register, 0 = unregister |
+| clientID | int | Client ID (optional) |
+
+**Async:** Yes
+**Reply:** `/done /notify clientID [maxLogins]`
+
+When registered, the server sends notifications for node events (`/n_go`, `/n_end`, etc.).
+
+```javascript
+sonic.send('/notify', 1);  // Register for notifications
+sonic.send('/notify', 0);  // Unregister
+```
+
+---
+
+### `/status`
+
+Query server status.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+
+**Reply:** `/status.reply` with:
+
+```javascript
+sonic.send('/status');
+```
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 0 | int | (unused) |
+| 1 | int | Number of unit generators |
+| 2 | int | Number of synths |
+| 3 | int | Number of groups |
+| 4 | int | Number of loaded synth definitions |
+| 5 | float | Average CPU usage (%) |
+| 6 | float | Peak CPU usage (%) |
+| 7 | double | Nominal sample rate |
+| 8 | double | Actual sample rate |
+
+---
+
+### `/cmd`
+
+Execute a plugin command.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| name | string | Command name |
+| args | ... | Command-specific arguments |
+
+```javascript
+sonic.send('/cmd', 'pluginName', arg1, arg2);
+```
+
+---
+
+### `/dumpOSC`
+
+Enable/disable OSC message printing for debugging.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| mode | int | 0 = off, 1 = on, 2 = hex, 3 = both |
+
+```javascript
+sonic.send('/dumpOSC', 1);  // Enable OSC printing
+sonic.send('/dumpOSC', 0);  // Disable
+```
+
+---
+
+### `/sync`
+
+Wait for all asynchronous commands to complete.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| id | int | Unique identifier |
+
+**Async:** Yes
+**Reply:** `/synced id`
+
+Use this to ensure async operations (like loading synthdefs) have finished:
+
+```javascript
+sonic.send('/d_recv', synthdefBytes);
+sonic.send('/sync', 1);
+// Wait for /synced 1 before using the synthdef
+```
+
+---
+
+### `/clearSched`
+
+Clear all scheduled bundles.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+
+```javascript
+sonic.send('/clearSched');
+```
+
+---
+
+### `/error`
+
+Set error posting mode.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| mode | int | 0 = off, 1 = on, -1 = off for next bundle, -2 = on for next bundle |
+
+```javascript
+sonic.send('/error', 1);   // Enable error posting
+sonic.send('/error', 0);   // Disable error posting
+sonic.send('/error', -1);  // Disable for next bundle only
+```
+
+---
+
+### `/version`
+
+Query server version.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+
+```javascript
+sonic.send('/version');
+```
+
+**Reply:** `/version.reply` with:
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 0 | string | Program name |
+| 1 | int | Major version |
+| 2 | int | Minor version |
+| 3 | string | Patch version |
+| 4 | string | Git branch |
+| 5 | string | Commit hash |
+
+---
+
+### `/rtMemoryStatus`
+
+Query realtime memory status.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+
+```javascript
+sonic.send('/rtMemoryStatus');
+```
+
+**Reply:** `/rtMemoryStatus.reply` with:
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 0 | int | Free memory (bytes) |
+| 1 | int | Largest free block (bytes) |
+
+---
+
+## Synth Definition Commands
+
+### `/d_recv`
+
+Receive a synth definition from bytes.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| data | bytes | Compiled synthdef binary |
+| completion | bytes | OSC message to execute on completion (optional) |
+
+**Async:** Yes
+**Reply:** `/done /d_recv`
+
+```javascript
+// Send raw synthdef bytes
+sonic.send('/d_recv', synthdefBytes);
+
+// In SuperSonic, prefer loadSynthDef() which handles fetching:
+await sonic.loadSynthDef('sonic-pi-beep');
+```
+
+---
+
+### `/d_free`
+
+Free synth definitions.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| names | N × string | Synthdef names to free |
+
+```javascript
+sonic.send('/d_free', 'sonic-pi-beep', 'sonic-pi-prophet');
+```
+
+---
+
+## Node Commands
+
+Nodes are the basic units of the server's execution tree. There are two types:
+- **Synths** - Sound-producing nodes
+- **Groups** - Collections of nodes
+
+### `/n_free`
+
+Free (delete) nodes.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeIDs | N × int | Node IDs to free |
+
+```javascript
+sonic.send('/n_free', 1000, 1001, 1002);
+```
+
+---
+
+### `/n_run`
+
+Turn nodes on or off.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Node ID |
+| flag | int | 0 = off, 1 = on |
+| ... | | (repeat for multiple nodes) |
+
+```javascript
+sonic.send('/n_run', 1000, 0);  // Turn off node 1000
+sonic.send('/n_run', 1000, 1);  // Turn on node 1000
+```
+
+---
+
+### `/n_set`
+
+Set node control values.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Node ID |
+| control | int or string | Control index or name |
+| value | float or int | Control value |
+| ... | | (repeat control/value pairs) |
+
+If the node is a group, sets the control on all nodes in the group.
+
+```javascript
+sonic.send('/n_set', 1000, 'freq', 440, 'amp', 0.5);
+sonic.send('/n_set', 1000, 0, 440, 1, 0.5);  // By index
+```
+
+---
+
+### `/n_setn`
+
+Set sequential control values.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Node ID |
+| control | int or string | Starting control index or name |
+| count | int | Number of sequential controls |
+| values | N × float | Control values |
+| ... | | (repeat for more ranges) |
+
+```javascript
+// Set controls 0, 1, 2 to values 100, 200, 300
+sonic.send('/n_setn', 1000, 0, 3, 100, 200, 300);
+```
+
+---
+
+### `/n_fill`
+
+Fill sequential controls with a single value.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Node ID |
+| control | int or string | Starting control index or name |
+| count | int | Number of controls to fill |
+| value | float | Fill value |
+| ... | | (repeat for more ranges) |
+
+```javascript
+// Fill controls 0-9 with value 0.5
+sonic.send('/n_fill', 1000, 0, 10, 0.5);
+```
+
+---
+
+### `/n_map`
+
+Map controls to control buses.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Node ID |
+| control | int or string | Control index or name |
+| busIndex | int | Control bus index (-1 to unmap) |
+| ... | | (repeat for more mappings) |
+
+Controls mapped to buses read their values continuously from the bus.
+
+```javascript
+sonic.send('/n_map', 1000, 'freq', 0);   // Map freq to bus 0
+sonic.send('/n_map', 1000, 'freq', -1);  // Unmap freq
+```
+
+---
+
+### `/n_mapn`
+
+Map sequential controls to control buses.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Node ID |
+| control | int or string | Starting control index or name |
+| busIndex | int | Starting control bus index |
+| count | int | Number of controls to map |
+| ... | | (repeat for more ranges) |
+
+```javascript
+// Map controls 0-3 to buses 10-13
+sonic.send('/n_mapn', 1000, 0, 10, 4);
+```
+
+---
+
+### `/n_mapa`
+
+Map controls to audio buses.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Node ID |
+| control | int or string | Control index or name |
+| busIndex | int | Audio bus index (-1 to unmap) |
+| ... | | (repeat for more mappings) |
+
+```javascript
+sonic.send('/n_mapa', 1000, 'freq', 0);  // Map freq to audio bus 0
+```
+
+---
+
+### `/n_mapan`
+
+Map sequential controls to audio buses.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Node ID |
+| control | int or string | Starting control index or name |
+| busIndex | int | Starting audio bus index |
+| count | int | Number of controls to map |
+| ... | | (repeat for more ranges) |
+
+```javascript
+// Map controls 0-3 to audio buses 0-3
+sonic.send('/n_mapan', 1000, 0, 0, 4);
+```
+
+---
+
+### `/n_before`
+
+Move nodes to execute before other nodes.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeA | int | Node to move |
+| nodeB | int | Target node |
+| ... | | (repeat for more pairs) |
+
+Places nodeA immediately before nodeB in the same group.
+
+```javascript
+sonic.send('/n_before', 1001, 1000);  // Move 1001 before 1000
+```
+
+---
+
+### `/n_after`
+
+Move nodes to execute after other nodes.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeA | int | Node to move |
+| nodeB | int | Target node |
+| ... | | (repeat for more pairs) |
+
+Places nodeA immediately after nodeB in the same group.
+
+```javascript
+sonic.send('/n_after', 1001, 1000);  // Move 1001 after 1000
+```
+
+---
+
+### `/n_query`
+
+Query node information.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeIDs | N × int | Node IDs to query |
+
+**Reply:** `/n_info` for each node (see [Node Notifications](#node-notifications))
+
+```javascript
+sonic.send('/n_query', 1000, 1001, 1002);
+```
+
+---
+
+### `/n_trace`
+
+Trace node execution (debug).
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeIDs | N × int | Node IDs to trace |
+
+Prints control values and calculation rates for each node.
+
+```javascript
+sonic.send('/n_trace', 1000);
+```
+
+---
+
+### `/n_order`
+
+Reorder nodes within a group.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| addAction | int | 0 = head, 1 = tail, 2 = before, 3 = after |
+| target | int | Target node ID |
+| nodeIDs | N × int | Node IDs to reorder |
+
+```javascript
+// Move nodes 1001, 1002, 1003 to head of group 0
+sonic.send('/n_order', 0, 0, 1001, 1002, 1003);
+```
+
+---
+
+## Synth Commands
+
+### `/s_new`
+
+Create a new synth.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| name | string | Synthdef name |
+| nodeID | int | Synth ID (-1 for auto-assign) |
+| addAction | int | Where to add (see Add Actions) |
+| target | int | Target node ID |
+| control | int or string | Control index or name (optional) |
+| value | float, int, or string | Control value or bus mapping (optional) |
+| ... | | (repeat control/value pairs) |
+
+```javascript
+// Create synth at head of group 0
+sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'note', 60, 'amp', 0.5);
+
+// Auto-assign node ID
+sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0);
+
+// Map control to bus
+sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'freq', 'c0');  // Control bus 0
+sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'freq', 'a0');  // Audio bus 0
+```
+
+---
+
+### `/s_get`
+
+Get synth control values.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Synth ID |
+| controls | N × (int or string) | Control indices or names |
+
+**Reply:** `/n_set nodeID control value ...`
+
+```javascript
+sonic.send('/s_get', 1000, 'freq', 'amp');
+```
+
+---
+
+### `/s_getn`
+
+Get sequential synth control values.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Synth ID |
+| control | int or string | Starting control index or name |
+| count | int | Number of sequential controls |
+| ... | | (repeat for more ranges) |
+
+**Reply:** `/n_setn nodeID control count values...`
+
+```javascript
+// Get controls 0-4 from synth 1000
+sonic.send('/s_getn', 1000, 0, 5);
+```
+
+---
+
+### `/s_noid`
+
+Remove synth IDs (internal bookkeeping).
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeIDs | N × int | Synth IDs |
+
+Reassigns the synths to reserved negative IDs. Used for freeing client-side tracking while keeping synths running.
+
+```javascript
+sonic.send('/s_noid', 1000, 1001);
+```
+
+---
+
+## Group Commands
+
+### `/g_new`
+
+Create new groups.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | New group ID |
+| addAction | int | Where to add (see Add Actions) |
+| target | int | Target node ID |
+| ... | | (repeat for more groups) |
+
+```javascript
+// Create group 100 at head of root group
+sonic.send('/g_new', 100, 0, 0);
+
+// Create multiple groups
+sonic.send('/g_new', 100, 0, 0, 101, 1, 0, 102, 3, 100);
+```
+
+---
+
+### `/p_new`
+
+Create new parallel groups.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | New group ID |
+| addAction | int | Where to add (see Add Actions) |
+| target | int | Target node ID |
+| ... | | (repeat for more groups) |
+
+Parallel groups evaluate their children in unspecified order, allowing for parallel processing optimizations.
+
+```javascript
+sonic.send('/p_new', 100, 0, 0);  // Create parallel group 100 at head of root
+```
+
+---
+
+### `/g_head`
+
+Move nodes to head of groups.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| groupID | int | Target group |
+| nodeID | int | Node to move |
+| ... | | (repeat for more pairs) |
+
+```javascript
+sonic.send('/g_head', 0, 1000);  // Move node 1000 to head of group 0
+```
+
+---
+
+### `/g_tail`
+
+Move nodes to tail of groups.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| groupID | int | Target group |
+| nodeID | int | Node to move |
+| ... | | (repeat for more pairs) |
+
+```javascript
+sonic.send('/g_tail', 0, 1000);  // Move node 1000 to tail of group 0
+```
+
+---
+
+### `/g_freeAll`
+
+Free all nodes in groups.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| groupIDs | N × int | Group IDs |
+
+Frees all immediate children of the groups.
+
+```javascript
+sonic.send('/g_freeAll', 0);  // Free all nodes in root group
+```
+
+---
+
+### `/g_deepFree`
+
+Deep free all synths in groups.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| groupIDs | N × int | Group IDs |
+
+Traverses all nested groups and frees all synths found.
+
+```javascript
+sonic.send('/g_deepFree', 0);  // Free all synths recursively from root
+```
+
+---
+
+### `/g_dumpTree`
+
+Print group tree (debug).
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| groupID | int | Group ID |
+| flag | int | 0 = structure only, non-zero = include control values |
+
+```javascript
+sonic.send('/g_dumpTree', 0, 0);  // Print structure only
+sonic.send('/g_dumpTree', 0, 1);  // Print with control values
+```
+
+---
+
+### `/g_queryTree`
+
+Query group tree structure.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| groupID | int | Group ID |
+| flag | int | 0 = structure only, non-zero = include control values |
+
+**Reply:** `/g_queryTree.reply` with tree structure:
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 0 | int | Flag (echoed) |
+| 1 | int | Root node ID |
+| 2 | int | Number of children |
+| ... | | For each child: nodeID, numChildren (-1 if synth), [synthName], [controlValues] |
+
+```javascript
+sonic.send('/g_queryTree', 0, 0);  // Query root group structure
+```
+
+---
+
+## Unit Generator Commands
+
+### `/u_cmd`
+
+Send a command to a unit generator.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| nodeID | int | Node ID containing the UGen |
+| ugenIndex | int | UGen index within the synth |
+| command | string | Command name |
+| args | ... | Command-specific arguments |
+
+```javascript
+sonic.send('/u_cmd', 1000, 0, 'commandName', arg1, arg2);
+```
+
+---
+
+## Buffer Commands
+
+Buffers store audio data for playback, recording, and wavetables.
+
+### `/b_alloc`
+
+Allocate a buffer.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| frames | int | Number of frames |
+| channels | int | Number of channels (default: 1) |
+| completion | bytes | Completion message (optional) |
+| sampleRate | float | Sample rate (optional, default: server rate) |
+
+**Async:** Yes
+**Reply:** `/done /b_alloc bufnum`
+
+```javascript
+// Allocate mono buffer with 44100 frames
+sonic.send('/b_alloc', 0, 44100, 1);
+
+// Allocate stereo buffer
+sonic.send('/b_alloc', 1, 44100, 2);
+```
+
+---
+
+### `/b_allocRead`
+
+Allocate and read a sound file into a buffer.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| path | string | Sound file path |
+| startFrame | int | Starting frame in file (default: 0) |
+| numFrames | int | Frames to read (default: 0 = entire file) |
+| completion | bytes | Completion message (optional) |
+
+**Async:** Yes
+**Reply:** `/done /b_allocRead bufnum`
+
+```javascript
+// Load entire file
+sonic.send('/b_allocRead', 0, 'samples/kick.wav');
+
+// Load frames 1000-2000
+sonic.send('/b_allocRead', 0, 'samples/loop.wav', 1000, 1000);
+```
+
+**Note:** In SuperSonic, use `loadSample()` for easier sample loading.
+
+---
+
+### `/b_allocReadChannel`
+
+Allocate and read specific channels from a sound file.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| path | string | Sound file path |
+| startFrame | int | Starting frame in file |
+| numFrames | int | Frames to read |
+| channels | N × int | Source channel indices |
+| completion | bytes | Completion message (optional) |
+
+**Async:** Yes
+**Reply:** `/done /b_allocReadChannel bufnum`
+
+```javascript
+// Load only left channel (channel 0) from stereo file
+sonic.send('/b_allocReadChannel', 0, 'samples/stereo.wav', 0, 0, 0);
+```
+
+---
+
+### `/b_free`
+
+Free a buffer.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| completion | bytes | Completion message (optional) |
+
+**Async:** Yes
+**Reply:** `/done /b_free bufnum`
+
+```javascript
+sonic.send('/b_free', 0);
+```
+
+---
+
+### `/b_zero`
+
+Zero a buffer's contents.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| completion | bytes | Completion message (optional) |
+
+**Async:** Yes
+**Reply:** `/done /b_zero bufnum`
+
+```javascript
+sonic.send('/b_zero', 0);
+```
+
+---
+
+### `/b_set`
+
+Set individual samples in a buffer.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| index | int | Sample index |
+| value | float | Sample value |
+| ... | | (repeat index/value pairs) |
+
+```javascript
+sonic.send('/b_set', 0, 0, 1.0, 100, 0.5, 200, -0.5);
+```
+
+---
+
+### `/b_setn`
+
+Set sequential samples in a buffer.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| startIndex | int | Starting sample index |
+| count | int | Number of samples |
+| values | N × float | Sample values |
+| ... | | (repeat for more ranges) |
+
+```javascript
+// Set samples 0-2 to [1.0, 0.5, 0.0]
+sonic.send('/b_setn', 0, 0, 3, 1.0, 0.5, 0.0);
+```
+
+---
+
+### `/b_setSampleRate`
+
+Set a buffer's sample rate.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| sampleRate | float | Sample rate (0 or nil = server rate) |
+
+```javascript
+sonic.send('/b_setSampleRate', 0, 44100);
+```
+
+---
+
+### `/b_fill`
+
+Fill buffer samples with a value.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| startIndex | int | Starting sample index |
+| count | int | Number of samples to fill |
+| value | float | Fill value |
+| ... | | (repeat for more ranges) |
+
+```javascript
+// Fill samples 0-99 with 0.5
+sonic.send('/b_fill', 0, 0, 100, 0.5);
+```
+
+---
+
+### `/b_gen`
+
+Generate buffer contents using a fill command.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| command | string | Generator command name |
+| args | ... | Command-specific arguments |
+
+**Async:** Yes
+**Reply:** `/done /b_gen bufnum`
+
+See [Buffer Fill Commands](#buffer-fill-commands-for-b_gen) for available generators.
+
+```javascript
+// Generate a sine wave with 3 harmonics
+sonic.send('/b_gen', 0, 'sine1', 7, 1.0, 0.5, 0.25);
+```
+
+---
+
+### `/b_query`
+
+Query buffer information.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnums | N × int | Buffer numbers |
+
+**Reply:** `/b_info` for each buffer:
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 0 | int | Buffer number |
+| 1 | int | Number of frames |
+| 2 | int | Number of channels |
+| 3 | float | Sample rate |
+
+```javascript
+sonic.send('/b_query', 0, 1, 2);  // Query buffers 0, 1, and 2
+```
+
+---
+
+### `/b_get`
+
+Get individual sample values from a buffer.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| indices | N × int | Sample indices |
+
+```javascript
+sonic.send('/b_get', 0, 0, 100, 200);  // Get samples at indices 0, 100, 200
+```
+
+**Reply:** `/b_set bufnum index value ...`
+
+---
+
+### `/b_getn`
+
+Get sequential sample values from a buffer.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| startIndex | int | Starting sample index |
+| count | int | Number of samples |
+| ... | | (repeat for more ranges) |
+
+**Reply:** `/b_setn bufnum startIndex count values...`
+
+```javascript
+sonic.send('/b_getn', 0, 0, 100);  // Get samples 0-99 from buffer 0
+```
+
+---
+
+## Control Bus Commands
+
+Control buses are single-sample values used to pass control signals between synths.
+
+### `/c_set`
+
+Set control bus values.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| index | int | Bus index |
+| value | float or int | Bus value |
+| ... | | (repeat for more buses) |
+
+```javascript
+sonic.send('/c_set', 0, 440, 1, 0.5);
+```
+
+---
+
+### `/c_setn`
+
+Set sequential control bus values.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| startIndex | int | Starting bus index |
+| count | int | Number of buses |
+| values | N × (float or int) | Bus values |
+| ... | | (repeat for more ranges) |
+
+```javascript
+sonic.send('/c_setn', 0, 3, 440, 880, 1320);
+```
+
+---
+
+### `/c_fill`
+
+Fill control buses with a value.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| startIndex | int | Starting bus index |
+| count | int | Number of buses to fill |
+| value | float or int | Fill value |
+| ... | | (repeat for more ranges) |
+
+```javascript
+sonic.send('/c_fill', 0, 10, 0.0);  // Fill buses 0-9 with 0.0
+```
+
+---
+
+### `/c_get`
+
+Get control bus values.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| indices | N × int | Bus indices |
+
+**Reply:** `/c_set index value ...`
+
+```javascript
+sonic.send('/c_get', 0, 1, 2);  // Get bus values 0, 1, 2
+```
+
+---
+
+### `/c_getn`
+
+Get sequential control bus values.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| startIndex | int | Starting bus index |
+| count | int | Number of buses |
+| ... | | (repeat for more ranges) |
+
+**Reply:** `/c_setn startIndex count values...`
+
+```javascript
+sonic.send('/c_getn', 0, 10);  // Get buses 0-9
+```
+
+---
+
+## Buffer Fill Commands (for /b_gen)
+
+These commands are used with `/b_gen` to generate buffer contents.
+
+### Flags
+
+All waveform generators accept a flags parameter:
+
+| Flag | Value | Description |
+|------|-------|-------------|
+| normalize | 1 | Normalize peak amplitude to 1.0 |
+| wavetable | 2 | Generate in wavetable format (for Osc UGen) |
+| clear | 4 | Clear buffer before generating |
+
+Combine flags by adding: `7 = normalize + wavetable + clear`
+
+### `sine1`
+
+Generate a waveform from harmonic amplitudes.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| flags | int | See flags above |
+| amplitudes | N × float | Amplitude for each harmonic |
+
+```javascript
+// Fundamental + 2 harmonics, normalized
+sonic.send('/b_gen', 0, 'sine1', 1, 1.0, 0.5, 0.25);
+```
+
+### `sine2`
+
+Generate a waveform from frequencies and amplitudes.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| flags | int | See flags above |
+| freq | float | Frequency in cycles per buffer |
+| amp | float | Amplitude |
+| ... | | (repeat freq/amp pairs) |
+
+```javascript
+// Two partials at different frequencies
+sonic.send('/b_gen', 0, 'sine2', 1, 1.0, 1.0, 2.5, 0.5);
+```
+
+### `sine3`
+
+Generate a waveform from frequencies, amplitudes, and phases.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| flags | int | See flags above |
+| freq | float | Frequency in cycles per buffer |
+| amp | float | Amplitude |
+| phase | float | Phase in radians |
+| ... | | (repeat freq/amp/phase triplets) |
+
+### `cheby`
+
+Generate a Chebyshev polynomial waveshaping transfer function.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| flags | int | See flags above |
+| amplitudes | N × float | Amplitude for each polynomial order |
+
+Useful for creating harmonic distortion with predictable spectral content.
+
+### `copy`
+
+Copy samples from another buffer.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| destPos | int | Destination sample position |
+| srcBuf | int | Source buffer number |
+| srcPos | int | Source sample position |
+| count | int | Number of samples (-1 = maximum possible) |
+
+```javascript
+// Copy 1000 samples from buffer 1 to buffer 0
+sonic.send('/b_gen', 0, 'copy', 0, 1, 0, 1000);
+```
+
+---
+
+## Reply Messages
+
+### `/done`
+
+Sent when an asynchronous command completes successfully.
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 0 | string | Command name |
+| 1+ | ... | Command-specific data |
+
+### `/fail`
+
+Sent when a command fails.
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 0 | string | Command name |
+| 1 | string | Error message |
+| 2+ | ... | Command-specific data |
+
+### `/late`
+
+Sent when a scheduled bundle arrives too late.
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 0 | int | Timestamp high 32 bits |
+| 1 | int | Timestamp low 32 bits |
+| 2 | int | Execution time high 32 bits |
+| 3 | int | Execution time low 32 bits |
+
+---
+
+## Node Notifications
+
+When registered for notifications (via `/notify`), the server sends messages about node state changes. All node notifications include:
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 0 | int | Node ID |
+| 1 | int | Parent group ID |
+| 2 | int | Previous node ID (-1 if none) |
+| 3 | int | Next node ID (-1 if none) |
+| 4 | int | Is group (1 = group, 0 = synth) |
+
+For groups, additionally:
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 5 | int | Head node ID (-1 if empty) |
+| 6 | int | Tail node ID (-1 if empty) |
+
+### `/n_go`
+
+Sent when a node is created.
+
+### `/n_end`
+
+Sent when a node is freed/deallocated.
+
+### `/n_off`
+
+Sent when a node is turned off (via `/n_run`).
+
+### `/n_on`
+
+Sent when a node is turned on (via `/n_run`).
+
+### `/n_move`
+
+Sent when a node is moved to a different position.
+
+### `/n_info`
+
+Reply to `/n_query`.
+
+---
+
+## Trigger Notification
+
+### `/tr`
+
+Sent when a `SendTrig` UGen fires in a synth.
+
+| Position | Type | Description |
+|----------|------|-------------|
+| 0 | int | Node ID |
+| 1 | int | Trigger ID |
+| 2 | float | Trigger value |
+
+This allows synths to send events back to clients.
+
+---
+
+## Unsupported Commands
+
+The following SuperCollider commands and features are **not supported** in SuperSonic. Attempting to use them will throw an error.
+
+### Non-Realtime Mode (NRT)
+
+SuperSonic only supports realtime audio synthesis. Non-realtime rendering (NRT mode) is not available in the browser environment.
+
+### Filesystem Commands
+
+There is no filesystem in the browser/WASM environment, so all file-based commands are unavailable:
+
+#### Synthdef Loading (File-based)
+
+| Command | Description | Alternative |
+|---------|-------------|-------------|
+| `/d_load` | Load synthdef from file path | Use `loadSynthDef()` or send `/d_recv` with synthdef bytes |
+| `/d_loadDir` | Load all synthdefs from directory | Use `loadSynthDefs()` to load multiple by name |
+
+#### Buffer File I/O
+
+| Command | Description | Alternative |
+|---------|-------------|-------------|
+| `/b_read` | Read sound file into existing buffer | Use `loadSample()` to load audio |
+| `/b_readChannel` | Read specific channels from file | Use `loadSample()` to load audio |
+| `/b_write` | Write buffer to sound file | Not available (cannot write files in browser) |
+| `/b_close` | Close streaming sound file | Not available (no disk streaming) |
+
+### SuperSonic Alternatives
+
+For loading synthdefs and samples, use the SuperSonic JavaScript API:
+
+```javascript
+// Load synthdefs
+await sonic.loadSynthDef("sonic-pi-beep");
+await sonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
+
+// Load samples
+await sonic.loadSample(0, "loop_amen.flac");
+```
+
+These methods fetch the files via HTTP and send the data to scsynth using the supported `/d_recv` and `/b_allocRead` commands.
