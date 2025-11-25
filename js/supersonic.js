@@ -51,7 +51,6 @@ export class SuperSonic {
   #initialNTPStartTime;
   #sampleBaseURL;
   #synthdefBaseURL;
-  #audioPathMap;
   #initialized;
   #initializing;
   #initPromise;
@@ -143,7 +142,6 @@ export class SuperSonic {
     // Resource loading configuration (private)
     this.#sampleBaseURL = options.sampleBaseURL || null;
     this.#synthdefBaseURL = options.synthdefBaseURL || null;
-    this.#audioPathMap = options.audioPathMap || {};
 
     // Boot statistics (one-time metrics)
     this.bootStats = {
@@ -705,7 +703,6 @@ export class SuperSonic {
         size: this.#config.memory.bufferPoolSize,
       },
       sampleBaseURL: this.#sampleBaseURL,
-      audioPathMap: this.#audioPathMap,
       maxBuffers: this.#config.worldOptions.numBuffers,
     });
   }

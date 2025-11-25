@@ -15,7 +15,6 @@ const BUFFER_POOL_ALIGNMENT = 8;  // Float64 alignment
 export class BufferManager {
     // Private configuration
     #sampleBaseURL;
-    #audioPathMap;
 
     // Private implementation
     #audioContext;
@@ -32,7 +31,6 @@ export class BufferManager {
             sharedBuffer,
             bufferPoolConfig,
             sampleBaseURL,
-            audioPathMap = {},
             maxBuffers = 1024
         } = options;
 
@@ -54,9 +52,6 @@ export class BufferManager {
         }
 
         // Validate optional dependencies
-        if (audioPathMap && typeof audioPathMap !== 'object') {
-            throw new Error('audioPathMap must be an object');
-        }
         if (!Number.isInteger(maxBuffers) || maxBuffers <= 0) {
             throw new Error('maxBuffers must be a positive integer');
         }
@@ -64,7 +59,6 @@ export class BufferManager {
         this.#audioContext = audioContext;
         this.#sharedBuffer = sharedBuffer;
         this.#sampleBaseURL = sampleBaseURL;
-        this.#audioPathMap = audioPathMap;
 
         // Create and own buffer pool
         this.#bufferPool = new MemPool({
@@ -114,14 +108,9 @@ export class BufferManager {
             throw new Error(`Invalid audio path: path cannot contain URL-encoded characters (got: ${scPath})`);
         }
 
-        // Reject backslash (Windows path separator) to ensure consistent behavior
+        // Reject backslash (Windows path separator) to ensure consistent behaviour
         if (scPath.includes('\\')) {
             throw new Error(`Invalid audio path: use forward slashes only (got: ${scPath})`);
-        }
-
-        // Explicit mapping takes precedence
-        if (this.#audioPathMap[scPath]) {
-            return this.#audioPathMap[scPath];
         }
 
         // Check if sampleBaseURL is configured
