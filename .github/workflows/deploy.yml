@@ -1,7 +1,9 @@
-name: Deploy to GitHub Pages
+name: Build, Test & Deploy
 
 on:
   push:
+    branches: [ main ]
+  pull_request:
     branches: [ main ]
   workflow_dispatch:
 
@@ -17,11 +19,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  build-and-test:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout repository
@@ -41,6 +40,22 @@ jobs:
 
       - name: Run build script (release mode)
         run: ./build.sh --release
+
+      - name: Verify build output
+        run: |
+          ls -lh dist/
+          test -f dist/supersonic.js || { echo "Error: supersonic.js not found"; exit 1; }
+          test -f dist/wasm/scsynth-nrt.wasm || { echo "Error: scsynth-nrt.wasm not found"; exit 1; }
+          echo "Build verification passed!"
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run tests
+        run: npm test
 
       - name: Replace symlinks with actual files for distribution
         run: |
@@ -67,13 +82,20 @@ jobs:
         run: cp supersonic-dist.zip dist/
 
       - name: Setup Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v4
 
       - name: Upload artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: './dist'
 
       - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: deployment
         uses: actions/deploy-pages@v4
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
