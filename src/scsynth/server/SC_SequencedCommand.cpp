@@ -416,10 +416,10 @@ bool BufFreeCmd::Stage3() {
 void BufFreeCmd::Stage4() {
 #ifdef __EMSCRIPTEN__
     // In WebAssembly, buffers are managed by JavaScript
-    // Send /buffer/freed message so JavaScript can free from the buffer pool
+    // Send /supersonic/buffer/freed message so JavaScript can free from the buffer pool
     if (mFreeData) {
         small_scpacket packet;
-        packet.adds("/buffer/freed");
+        packet.adds("/supersonic/buffer/freed");
         packet.maketags(3);
         packet.addtag(',');
         packet.addtag('i');  // buffer number
@@ -1380,6 +1380,20 @@ bool RecvSynthDefCmd::Stage3() {
 
 void RecvSynthDefCmd::Stage4() {
     SendDone("/d_recv");
+
+    // Send /supersonic/synthdef/loaded for each synthdef that was loaded
+    // A synthdef file can contain multiple definitions (linked list via mNext)
+    GraphDef* def = mDefs;
+    while (def) {
+        small_scpacket packet;
+        packet.adds("/supersonic/synthdef/loaded");
+        packet.maketags(2);
+        packet.addtag(',');
+        packet.addtag('s');  // synthdef name
+        packet.adds((char*)def->mNodeDef.mName);
+        SendReply(&mReplyAddress, packet.data(), packet.size());
+        def = def->mNext;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////

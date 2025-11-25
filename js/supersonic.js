@@ -265,6 +265,35 @@ export class SuperSonic {
   async send(address, ...args) {
     this.#ensureInitialized("send OSC messages");
 
+    // Block filesystem-based commands (no filesystem in WASM)
+    if (address === "/d_load" || address === "/d_loadDir") {
+      throw new Error(
+        `${address} is not supported in SuperSonic (no filesystem). Use loadSynthDef() or send /d_recv with synthdef bytes instead.`
+      );
+    }
+    if (address === "/b_read" || address === "/b_readChannel") {
+      throw new Error(
+        `${address} is not supported in SuperSonic (no filesystem). Use loadSample() to load audio into a buffer.`
+      );
+    }
+    if (address === "/b_write" || address === "/b_close") {
+      throw new Error(
+        `${address} is not supported in SuperSonic (no filesystem). Writing audio files is not available in the browser.`
+      );
+    }
+
+    // Track synthdef frees locally (server doesn't send confirmation)
+    if (address === "/d_free") {
+      // /d_free takes one or more synthdef names
+      for (const name of args) {
+        if (typeof name === "string") {
+          this.loadedSynthDefs.delete(name);
+        }
+      }
+    } else if (address === "/d_freeAll") {
+      this.loadedSynthDefs.clear();
+    }
+
     const oscArgs = args.map((arg) => {
       if (typeof arg === "string") {
         return { type: "s", value: arg };
@@ -388,13 +417,12 @@ export class SuperSonic {
       const arrayBuffer = await response.arrayBuffer();
       const synthdefData = new Uint8Array(arrayBuffer);
 
-      // Send via /d_recv OSC message (fire and forget - will be synced by caller)
+      // Send via /d_recv OSC message
+      // The synthdef will be added to loadedSynthDefs when we receive
+      // /supersonic/synthdef/loaded confirmation from scsynth
       await this.send("/d_recv", synthdefData);
 
       const synthName = this.#extractSynthDefName(path);
-      if (synthName) {
-        this.loadedSynthDefs.add(synthName);
-      }
 
       if (__DEV__)
         console.log(
@@ -811,12 +839,19 @@ export class SuperSonic {
     });
 
     this.#osc.onParsedOSC((msg) => {
-      // Handle internal messages
-      if (msg.address === "/buffer/freed") {
+      // Handle internal /supersonic/ messages
+      if (msg.address === "/supersonic/buffer/freed") {
         this.#bufferManager?.handleBufferFreed(msg.args);
-      } else if (msg.address === "/buffer/allocated") {
+      } else if (msg.address === "/supersonic/buffer/allocated") {
         // Handle buffer allocation completion with UUID correlation
         this.#bufferManager?.handleBufferAllocated(msg.args);
+      } else if (msg.address === "/supersonic/synthdef/loaded") {
+        // Handle synthdef load confirmation from scsynth
+        const synthName = msg.args[0];
+        if (synthName) {
+          this.loadedSynthDefs.add(synthName);
+          if (__DEV__) console.log(`[SuperSonic] Synthdef confirmed: ${synthName}`);
+        }
       } else if (msg.address === "/synced" && msg.args.length > 0) {
         // Handle /synced responses for sync operations
         const syncId = msg.args[0]; // Integer sync ID
