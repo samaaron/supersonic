@@ -15,3 +15,9 @@ export const NTP_EPOCH_OFFSET = 2208988800;
 
 // Drift offset update interval in milliseconds
 export const DRIFT_UPDATE_INTERVAL_MS = 15000;
+
+// Timeout waiting for /synced response from scsynth
+export const SYNC_TIMEOUT_MS = 10000;
+
+// Timeout waiting for AudioWorklet initialization
+export const WORKLET_INIT_TIMEOUT_MS = 5000;

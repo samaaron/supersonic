@@ -17,6 +17,8 @@ import oscLib from "./vendor/osc.js/osc.js";
 import {
   NTP_EPOCH_OFFSET,
   DRIFT_UPDATE_INTERVAL_MS,
+  SYNC_TIMEOUT_MS,
+  WORKLET_INIT_TIMEOUT_MS,
 } from "./timing_constants.js";
 import { MemoryLayout } from "./memory_layout.js";
 import { defaultWorldOptions } from "./scsynth_options.js";
@@ -52,6 +54,7 @@ export class SuperSonic {
   #audioPathMap;
   #initialized;
   #initializing;
+  #initPromise;
   #capabilities;
   #version;
   #config;
@@ -65,6 +68,11 @@ export class SuperSonic {
   // Cached metrics view (avoids creating new Uint32Array on every read)
   #metricsView;
 
+  // Cached views for NTP timing (avoids creating new TypedArrays on every read)
+  #ntpStartView;
+  #driftView;
+  #globalOffsetView;
+
   // Runtime metrics
   #metricsIntervalId = null;
   #metricsGatherInProgress = false;
@@ -73,6 +81,7 @@ export class SuperSonic {
   constructor(options = {}) {
     this.#initialized = false;
     this.#initializing = false;
+    this.#initPromise = null;
     this.#capabilities = {};
     this.#version = null;
 
@@ -167,15 +176,24 @@ export class SuperSonic {
    */
   async init(config = {}) {
     if (this.#initialized) {
-      console.warn("[SuperSonic] Already initialized");
       return;
     }
 
-    if (this.#initializing) {
-      console.warn("[SuperSonic] Initialization already in progress");
-      return;
+    // Return existing promise if initialization is already in progress
+    // This prevents race conditions when init() is called concurrently
+    if (this.#initPromise) {
+      return this.#initPromise;
     }
 
+    this.#initPromise = this.#doInit(config);
+    return this.#initPromise;
+  }
+
+  /**
+   * Internal initialization implementation
+   * @private
+   */
+  async #doInit(config) {
     // Merge config with defaults
     this.#config = {
       ...this.#config,
@@ -202,6 +220,7 @@ export class SuperSonic {
       this.#finishInitialization();
     } catch (error) {
       this.#initializing = false;
+      this.#initPromise = null;
       console.error("[SuperSonic] Initialization failed:", error);
 
       if (this.onError) {
@@ -336,10 +355,10 @@ export class SuperSonic {
   /**
    * Load a binary synthdef file and send it to scsynth
    * @param {string} nameOrPath - Synthdef name (e.g. 'sonic-pi-beep') or full path/URL
-   * @returns {Promise<void>}
+   * @returns {Promise<{name: string, size: number}>} Synthdef info
    * @example
-   * await sonic.loadSynthDef('sonic-pi-beep');  // Uses synthdefBaseURL
-   * await sonic.loadSynthDef('./custom/my-synth.scsyndef');  // Full path
+   * const info = await sonic.loadSynthDef('sonic-pi-beep');  // Uses synthdefBaseURL
+   * console.log(`Loaded ${info.name} (${info.size} bytes)`);
    */
   async loadSynthDef(nameOrPath) {
     if (!this.#initialized) {
@@ -348,7 +367,7 @@ export class SuperSonic {
 
     // Resolve name to path if needed
     let path;
-    if (this.#isPath(nameOrPath)) {
+    if (this.#looksLikePathOrURL(nameOrPath)) {
       path = nameOrPath;
     } else {
       if (!this.#synthdefBaseURL) {
@@ -383,6 +402,11 @@ export class SuperSonic {
         console.log(
           `[SuperSonic] Sent synthdef from ${path} (${synthdefData.length} bytes)`
         );
+
+      return {
+        name: synthName,
+        size: synthdefData.length,
+      };
     } catch (error) {
       console.error("[SuperSonic] Failed to load synthdef:", error);
       throw error;
@@ -439,7 +463,7 @@ export class SuperSonic {
 
     // Resolve name to path if needed
     let path;
-    if (this.#isPath(nameOrPath)) {
+    if (this.#looksLikePathOrURL(nameOrPath)) {
       path = nameOrPath;
     } else {
       if (!this.#sampleBaseURL) {
@@ -491,7 +515,7 @@ export class SuperSonic {
           this.#syncListeners.delete(syncId);
         }
         reject(new Error("Timeout waiting for /synced response"));
-      }, 10000); // 10 second timeout
+      }, SYNC_TIMEOUT_MS);
 
       // Create a one-time message listener for this specific sync ID
       const messageHandler = (msg) => {
@@ -557,6 +581,10 @@ export class SuperSonic {
     // Stop timers
     this.#stopDriftOffsetTimer();
     this.#stopPerformanceMonitoring();
+
+    // Clear sync listeners
+    this.#syncListeners?.clear();
+    this.#syncListeners = null;
 
     if (this.#osc) {
       this.#osc.terminate();
@@ -711,7 +739,15 @@ export class SuperSonic {
       await this.#loadWasmManifest();
     }
 
-    const wasmResponse = await fetch(this.#config.wasmUrl);
+    let wasmResponse;
+    try {
+      wasmResponse = await fetch(this.#config.wasmUrl);
+    } catch (error) {
+      throw new Error(
+        `Failed to fetch WASM from ${this.#config.wasmUrl}: ${error.message}`
+      );
+    }
+
     if (!wasmResponse.ok) {
       throw new Error(
         `Failed to load WASM: ${wasmResponse.status} ${wasmResponse.statusText}`
@@ -851,7 +887,7 @@ export class SuperSonic {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error("AudioWorklet initialization timeout"));
-      }, 5000);
+      }, WORKLET_INIT_TIMEOUT_MS);
 
       const messageHandler = async (event) => {
         // Handle debug messages during initialization
@@ -1227,6 +1263,23 @@ export class SuperSonic {
       this.#bufferConstants.METRICS_SIZE / 4
     );
 
+    // Cache NTP timing views for efficient reads
+    this.#ntpStartView = new Float64Array(
+      this.#sharedBuffer,
+      this.#ringBufferBase + this.#bufferConstants.NTP_START_TIME_START,
+      1
+    );
+    this.#driftView = new Int32Array(
+      this.#sharedBuffer,
+      this.#ringBufferBase + this.#bufferConstants.DRIFT_OFFSET_START,
+      1
+    );
+    this.#globalOffsetView = new Int32Array(
+      this.#sharedBuffer,
+      this.#ringBufferBase + this.#bufferConstants.GLOBAL_OFFSET_START,
+      1
+    );
+
     // Control indices (must match shared_memory.h ControlPointers layout)
     // Offsets: in_head=0, in_tail=4, ..., in_sequence=24, ..., in_write_lock=40
     const CONTROL_START = this.#bufferConstants.CONTROL_START;
@@ -1269,11 +1322,13 @@ export class SuperSonic {
   }
 
   /**
-   * Check if a string looks like a path (contains / or ://)
+   * Check if a string looks like a URL or file path (contains / or ://)
+   * Used to distinguish between simple names (e.g. 'sonic-pi-beep') and
+   * paths/URLs (e.g. './custom/synth.scsyndef' or 'http://example.com/synth.scsyndef')
    * @param {string} str - String to check
-   * @returns {boolean} True if it looks like a path
+   * @returns {boolean} True if it looks like a path or URL
    */
-  #isPath(str) {
+  #looksLikePathOrURL(str) {
     return str.includes("/") || str.includes("://");
   }
 
@@ -1314,12 +1369,7 @@ export class SuperSonic {
     const ntpStartTime = currentNTP - timestamp.contextTime;
 
     // Write to SharedArrayBuffer (write-once)
-    const ntpStartView = new Float64Array(
-      this.#sharedBuffer,
-      this.#ringBufferBase + this.#bufferConstants.NTP_START_TIME_START,
-      1
-    );
-    ntpStartView[0] = ntpStartTime;
+    this.#ntpStartView[0] = ntpStartTime;
 
     // Store for drift calculation
     this.#initialNTPStartTime = ntpStartTime;
@@ -1362,13 +1412,8 @@ export class SuperSonic {
     const driftSeconds = expectedContextTime - timestamp.contextTime;
     const driftMs = Math.round(driftSeconds * 1000);
 
-    // Write to SharedArrayBuffer
-    const driftView = new Int32Array(
-      this.#sharedBuffer,
-      this.#ringBufferBase + this.#bufferConstants.DRIFT_OFFSET_START,
-      1
-    );
-    Atomics.store(driftView, 0, driftMs);
+    // Write to SharedArrayBuffer using cached view
+    Atomics.store(this.#driftView, 0, driftMs);
 
     if (__DEV__)
       console.log(
@@ -1386,16 +1431,10 @@ export class SuperSonic {
    * @private
    */
   #getDriftOffset() {
-    if (!this.#bufferConstants) {
+    if (!this.#driftView) {
       return 0;
     }
-
-    const driftView = new Int32Array(
-      this.#sharedBuffer,
-      this.#ringBufferBase + this.#bufferConstants.DRIFT_OFFSET_START,
-      1
-    );
-    return Atomics.load(driftView, 0);
+    return Atomics.load(this.#driftView, 0);
   }
 
   /**
@@ -1738,35 +1777,20 @@ export class SuperSonic {
       return null;
     }
 
-    // Read NTP start time (write-once value)
-    const ntpStartView = new Float64Array(
-      this.#sharedBuffer,
-      this.#ringBufferBase + this.#bufferConstants.NTP_START_TIME_START,
-      1
-    );
-    const ntpStartTime = ntpStartView[0];
+    // Read NTP start time using cached view (write-once value)
+    const ntpStartTime = this.#ntpStartView[0];
 
     if (ntpStartTime === 0) {
       console.warn("[SuperSonic] NTP start time not yet initialized");
       return null;
     }
 
-    // Read current drift offset (milliseconds)
-    const driftView = new Int32Array(
-      this.#sharedBuffer,
-      this.#ringBufferBase + this.#bufferConstants.DRIFT_OFFSET_START,
-      1
-    );
-    const driftMs = Atomics.load(driftView, 0);
+    // Read current drift offset using cached view (milliseconds)
+    const driftMs = Atomics.load(this.#driftView, 0);
     const driftSeconds = driftMs / 1000.0;
 
-    // Read global offset (milliseconds)
-    const globalView = new Int32Array(
-      this.#sharedBuffer,
-      this.#ringBufferBase + this.#bufferConstants.GLOBAL_OFFSET_START,
-      1
-    );
-    const globalMs = Atomics.load(globalView, 0);
+    // Read global offset using cached view (milliseconds)
+    const globalMs = Atomics.load(this.#globalOffsetView, 0);
     const globalSeconds = globalMs / 1000.0;
 
     const totalOffset = ntpStartTime + driftSeconds + globalSeconds;
