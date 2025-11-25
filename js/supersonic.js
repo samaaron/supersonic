@@ -380,6 +380,23 @@ export class SuperSonic {
       );
     }
 
+    // Block commands that have no effect in SuperSonic's NRT mode
+    if (address === "/clearSched") {
+      throw new Error(
+        `/clearSched is not supported in SuperSonic. Bundle scheduling works differently in the browser AudioWorklet environment.`
+      );
+    }
+    if (address === "/dumpOSC") {
+      throw new Error(
+        `/dumpOSC is not supported in SuperSonic. Use browser developer tools to inspect OSC messages.`
+      );
+    }
+    if (address === "/error") {
+      throw new Error(
+        `/error is not supported in SuperSonic. Error notifications are always enabled.`
+      );
+    }
+
     // Track synthdef frees locally (server doesn't send confirmation)
     if (address === "/d_free") {
       // /d_free takes one or more synthdef names
