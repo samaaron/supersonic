@@ -111,7 +111,11 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -Wl,--import-memory,--shared-memory,--allow-multiple-definition \
     -fcommon \
     -O3 \
-    -ffast-math \
+    -fno-math-errno \
+    -fsigned-zeros \
+    -fno-associative-math \
+    -Wno-nontrivial-memcall \
+    -Wno-extern-c-compat \
     -msimd128 \
     -flto \
     -sERROR_ON_UNDEFINED_SYMBOLS=0 \
