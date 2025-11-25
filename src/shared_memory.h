@@ -41,7 +41,17 @@ constexpr uint32_t NODE_TREE_MAX_NODES = 1024; // Max nodes in tree
 constexpr uint32_t NODE_TREE_HEADER_SIZE = 8;  // node_count (4) + version (4)
 constexpr uint32_t NODE_TREE_DEF_NAME_SIZE = 32; // Max synthdef name length (including null terminator)
 constexpr uint32_t NODE_TREE_ENTRY_SIZE = 56;  // 6 x int32 (24) + def_name (32) = 56 bytes per entry
-constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MAX_NODES * NODE_TREE_ENTRY_SIZE); // ~24KB
+constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MAX_NODES * NODE_TREE_ENTRY_SIZE); // ~57KB
+
+// Audio capture configuration (for testing - captures audio output to SharedArrayBuffer)
+// 1 second at 48kHz stereo = 96000 samples * 4 bytes = ~375KB
+constexpr uint32_t AUDIO_CAPTURE_SAMPLE_RATE = 48000;
+constexpr uint32_t AUDIO_CAPTURE_CHANNELS = 2;
+constexpr uint32_t AUDIO_CAPTURE_SECONDS = 1;
+constexpr uint32_t AUDIO_CAPTURE_FRAMES = AUDIO_CAPTURE_SAMPLE_RATE * AUDIO_CAPTURE_SECONDS;
+constexpr uint32_t AUDIO_CAPTURE_HEADER_SIZE = 16; // enabled (4) + head (4) + sample_rate (4) + channels (4)
+constexpr uint32_t AUDIO_CAPTURE_DATA_SIZE = AUDIO_CAPTURE_FRAMES * AUDIO_CAPTURE_CHANNELS * sizeof(float);
+constexpr uint32_t AUDIO_CAPTURE_SIZE = AUDIO_CAPTURE_HEADER_SIZE + AUDIO_CAPTURE_DATA_SIZE;
 
 // Auto-calculated offsets (DO NOT MODIFY - computed from sizes above)
 constexpr uint32_t IN_BUFFER_START    = 0;
@@ -53,9 +63,10 @@ constexpr uint32_t NTP_START_TIME_START = METRICS_START + METRICS_SIZE;
 constexpr uint32_t DRIFT_OFFSET_START = NTP_START_TIME_START + NTP_START_TIME_SIZE;
 constexpr uint32_t GLOBAL_OFFSET_START = DRIFT_OFFSET_START + DRIFT_OFFSET_SIZE;
 constexpr uint32_t NODE_TREE_START = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
+constexpr uint32_t AUDIO_CAPTURE_START = NODE_TREE_START + NODE_TREE_SIZE;
 
 // Total buffer size (for validation)
-constexpr uint32_t TOTAL_BUFFER_SIZE  = NODE_TREE_START + NODE_TREE_SIZE;
+constexpr uint32_t TOTAL_BUFFER_SIZE  = AUDIO_CAPTURE_START + AUDIO_CAPTURE_SIZE;
 
 // Message structure
 struct alignas(4) Message {
@@ -157,6 +168,16 @@ struct alignas(4) NodeEntry {
     char def_name[NODE_TREE_DEF_NAME_SIZE]; // Synthdef name for synths, "group" for groups
 };
 
+// Audio capture header (at AUDIO_CAPTURE_START offset in ring_buffer_storage)
+// Written by WASM when capture is enabled, read by JS to retrieve captured audio
+struct alignas(4) AudioCaptureHeader {
+    std::atomic<uint32_t> enabled;      // 0 = disabled, 1 = enabled (JS writes to start/stop)
+    std::atomic<uint32_t> head;         // Write position in frames (WASM writes)
+    uint32_t sample_rate;               // Actual sample rate (set by WASM on init)
+    uint32_t channels;                  // Number of channels (2 for stereo)
+    // Audio data follows: float[AUDIO_CAPTURE_FRAMES * AUDIO_CAPTURE_CHANNELS]
+};
+
 // Constants
 constexpr uint32_t MAX_MESSAGE_SIZE = IN_BUFFER_SIZE - sizeof(Message);
 constexpr uint32_t MESSAGE_MAGIC = 0xDEADBEEF;
@@ -192,6 +213,12 @@ struct BufferLayout {
     uint32_t node_tree_entry_size;
     uint32_t node_tree_def_name_size;
     uint32_t node_tree_max_nodes;
+    uint32_t audio_capture_start;
+    uint32_t audio_capture_size;
+    uint32_t audio_capture_header_size;
+    uint32_t audio_capture_frames;
+    uint32_t audio_capture_channels;
+    uint32_t audio_capture_sample_rate;
     uint32_t total_buffer_size;
     uint32_t max_message_size;
     uint32_t message_magic;
@@ -224,6 +251,12 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     NODE_TREE_ENTRY_SIZE,
     NODE_TREE_DEF_NAME_SIZE,
     NODE_TREE_MAX_NODES,
+    AUDIO_CAPTURE_START,
+    AUDIO_CAPTURE_SIZE,
+    AUDIO_CAPTURE_HEADER_SIZE,
+    AUDIO_CAPTURE_FRAMES,
+    AUDIO_CAPTURE_CHANNELS,
+    AUDIO_CAPTURE_SAMPLE_RATE,
     TOTAL_BUFFER_SIZE,
     MAX_MESSAGE_SIZE,
     MESSAGE_MAGIC,

@@ -92,8 +92,8 @@ extern "C" {
     // Static ring buffer allocated in WASM data segment
     // This ensures no conflicts with scsynth heap allocations
     // IMPORTANT: Must be 8-byte aligned for Float64Array access from JavaScript
-    // Size: 1MB (IN: 768KB, OUT: 128KB, DEBUG: 64KB + control/metrics)
-    alignas(8) uint8_t ring_buffer_storage[1048576];
+    // Size: ~1.4MB (IN: 768KB, OUT: 128KB, DEBUG: 64KB, control/metrics, node tree ~57KB, audio capture ~375KB)
+    alignas(8) uint8_t ring_buffer_storage[TOTAL_BUFFER_SIZE];
 
     // Validate at compile time that buffer layout fits in allocated storage
     static_assert(TOTAL_BUFFER_SIZE <= sizeof(ring_buffer_storage),
@@ -109,6 +109,8 @@ extern "C" {
     double* ntp_start_time = nullptr;        // NEW
     std::atomic<int32_t>* drift_offset = nullptr;  // NEW
     std::atomic<int32_t>* global_offset = nullptr; // NEW
+    AudioCaptureHeader* audio_capture = nullptr;   // Audio capture for testing
+    float* audio_capture_data = nullptr;           // Audio capture data buffer
     bool memory_initialized = false;
     World* g_world = nullptr;
 
@@ -273,6 +275,14 @@ extern "C" {
 
         worklet_debug("[NodeTree] Initialized at offset %u, size %u bytes",
                      NODE_TREE_START, NODE_TREE_SIZE);
+
+        // Initialize audio capture
+        audio_capture = reinterpret_cast<AudioCaptureHeader*>(shared_memory + AUDIO_CAPTURE_START);
+        audio_capture_data = reinterpret_cast<float*>(shared_memory + AUDIO_CAPTURE_START + AUDIO_CAPTURE_HEADER_SIZE);
+        audio_capture->enabled.store(0, std::memory_order_relaxed);  // Disabled by default
+        audio_capture->head.store(0, std::memory_order_relaxed);
+        audio_capture->sample_rate = static_cast<uint32_t>(sample_rate);
+        audio_capture->channels = AUDIO_CAPTURE_CHANNELS;
 
         // Enable worklet_debug
         memory_initialized = true;
@@ -675,6 +685,34 @@ extern "C" {
             // Fallback to memcpy if SIMD not available
             memcpy(dst, src, g_world->mNumOutputs * QUANTUM_SIZE * sizeof(float));
 #endif
+
+            // Audio capture for testing - copy interleaved audio to capture buffer
+            if (audio_capture && audio_capture->enabled.load(std::memory_order_relaxed)) {
+                uint32_t head = audio_capture->head.load(std::memory_order_relaxed);
+                const uint32_t channels = g_world->mNumOutputs;
+                const uint32_t frames_to_copy = QUANTUM_SIZE;
+
+                // Check if we have room in the capture buffer
+                if (head + frames_to_copy <= AUDIO_CAPTURE_FRAMES) {
+                    // Copy audio data - interleave channels for easier JS processing
+                    // Source is channel-by-channel (ch0[0..127], ch1[0..127])
+                    // Destination is interleaved (ch0[0], ch1[0], ch0[1], ch1[1], ...)
+                    for (uint32_t frame = 0; frame < frames_to_copy; frame++) {
+                        for (uint32_t ch = 0; ch < channels && ch < AUDIO_CAPTURE_CHANNELS; ch++) {
+                            audio_capture_data[(head + frame) * AUDIO_CAPTURE_CHANNELS + ch] =
+                                static_audio_bus[ch * QUANTUM_SIZE + frame];
+                        }
+                    }
+                    audio_capture->head.store(head + frames_to_copy, std::memory_order_release);
+                } else {
+                    // Buffer full - log once and stop capturing
+                    static bool logged_buffer_full = false;
+                    if (!logged_buffer_full) {
+                        worklet_debug("[AudioCapture] Buffer full (%u frames), capture stopped", AUDIO_CAPTURE_FRAMES);
+                        logged_buffer_full = true;
+                    }
+                }
+            }
         }
 
         return true; // Keep processor alive
