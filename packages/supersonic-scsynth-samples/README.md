@@ -16,21 +16,21 @@ npm install supersonic-scsynth-samples
 
 ```javascript
 // Self-hosted core library
-import { SuperSonic } from './dist/supersonic.js';
+import { SuperSonic } from './dist/supersupersonic.js';
 
-const sonic = new SuperSonic({
+const supersonic = new SuperSonic({
   sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/'
 });
 
-await sonic.init();
+await supersonic.init();
 
 // Load any sample
-await sonic.allocReadBuffer(0, 'bd_haus.flac');
-await sonic.allocReadBuffer(1, 'loop_amen.flac');
-await sonic.allocReadBuffer(2, 'ambi_choir.flac');
+await supersonic.allocReadBuffer(0, 'bd_haus.flac');
+await supersonic.allocReadBuffer(1, 'loop_amen.flac');
+await supersonic.allocReadBuffer(2, 'ambi_choir.flac');
 
 // Play with basic_mono_player synthdef
-sonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 1, 'buf', 0);
+supersonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 1, 'buf', 0);
 ```
 
 ### Self-hosted core and samples
@@ -38,9 +38,9 @@ sonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 1, 'buf', 0);
 Copy samples to your public directory and reference them locally:
 
 ```javascript
-import { SuperSonic } from './dist/supersonic.js';
+import { SuperSonic } from './dist/supersupersonic.js';
 
-const sonic = new SuperSonic({
+const supersonic = new SuperSonic({
   sampleBaseURL: './samples/'
 });
 ```

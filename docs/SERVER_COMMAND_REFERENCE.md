@@ -4,10 +4,25 @@ This document describes the OSC commands supported by the SuperCollider synthesi
 
 > **Source:** This documentation is based on the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html).
 
-Commands are sent as OSC messages using `sonic.send(address, ...args)`. For example:
+Commands are sent as OSC messages. You can use the high-level `send()` method which auto-detects types:
 
 ```javascript
-sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'note', 60);
+supersonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'note', 60);
+```
+
+Or send pre-encoded OSC bytes directly using `sendOSC()`:
+
+```javascript
+const oscBytes = SuperSonic.osc.encode({
+  address: '/s_new',
+  args: [
+    { type: 's', value: 'sonic-pi-beep' },
+    { type: 'i', value: 1000 },
+    { type: 'i', value: 0 },
+    { type: 'i', value: 0 }
+  ]
+});
+supersonic.sendOSC(oscBytes);
 ```
 
 ## Table of Contents
@@ -46,7 +61,7 @@ sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'note', 60);
 
 ```javascript
 // /n_free takes N node IDs
-sonic.send('/n_free', 1000, 1001, 1002);
+supersonic.send('/n_free', 1000, 1001, 1002);
 ```
 
 ### Node IDs
@@ -93,7 +108,7 @@ Terminate the synthesis server.
 **Reply:** `/done /quit`
 
 ```javascript
-sonic.send('/quit');
+supersonic.send('/quit');
 ```
 
 ---
@@ -113,8 +128,8 @@ Register/unregister for server notifications.
 When registered, the server sends notifications for node events (`/n_go`, `/n_end`, etc.).
 
 ```javascript
-sonic.send('/notify', 1);  // Register for notifications
-sonic.send('/notify', 0);  // Unregister
+supersonic.send('/notify', 1);  // Register for notifications
+supersonic.send('/notify', 0);  // Unregister
 ```
 
 ---
@@ -129,7 +144,7 @@ Query server status.
 **Reply:** `/status.reply` with:
 
 ```javascript
-sonic.send('/status');
+supersonic.send('/status');
 ```
 
 | Position | Type | Description |
@@ -156,7 +171,7 @@ Execute a plugin command.
 | args | ... | Command-specific arguments |
 
 ```javascript
-sonic.send('/cmd', 'pluginName', arg1, arg2);
+supersonic.send('/cmd', 'pluginName', arg1, arg2);
 ```
 
 ---
@@ -170,8 +185,8 @@ Enable/disable OSC message printing for debugging.
 | mode | int | 0 = off, 1 = on, 2 = hex, 3 = both |
 
 ```javascript
-sonic.send('/dumpOSC', 1);  // Enable OSC printing
-sonic.send('/dumpOSC', 0);  // Disable
+supersonic.send('/dumpOSC', 1);  // Enable OSC printing
+supersonic.send('/dumpOSC', 0);  // Disable
 ```
 
 ---
@@ -190,8 +205,8 @@ Wait for all asynchronous commands to complete.
 Use this to ensure async operations (like loading synthdefs) have finished:
 
 ```javascript
-sonic.send('/d_recv', synthdefBytes);
-sonic.send('/sync', 1);
+supersonic.send('/d_recv', synthdefBytes);
+supersonic.send('/sync', 1);
 // Wait for /synced 1 before using the synthdef
 ```
 
@@ -205,7 +220,7 @@ Clear all scheduled bundles.
 |-----------|------|-------------|
 
 ```javascript
-sonic.send('/clearSched');
+supersonic.send('/clearSched');
 ```
 
 ---
@@ -219,9 +234,9 @@ Set error posting mode.
 | mode | int | 0 = off, 1 = on, -1 = off for next bundle, -2 = on for next bundle |
 
 ```javascript
-sonic.send('/error', 1);   // Enable error posting
-sonic.send('/error', 0);   // Disable error posting
-sonic.send('/error', -1);  // Disable for next bundle only
+supersonic.send('/error', 1);   // Enable error posting
+supersonic.send('/error', 0);   // Disable error posting
+supersonic.send('/error', -1);  // Disable for next bundle only
 ```
 
 ---
@@ -234,7 +249,7 @@ Query server version.
 |-----------|------|-------------|
 
 ```javascript
-sonic.send('/version');
+supersonic.send('/version');
 ```
 
 **Reply:** `/version.reply` with:
@@ -258,7 +273,7 @@ Query realtime memory status.
 |-----------|------|-------------|
 
 ```javascript
-sonic.send('/rtMemoryStatus');
+supersonic.send('/rtMemoryStatus');
 ```
 
 **Reply:** `/rtMemoryStatus.reply` with:
@@ -286,10 +301,10 @@ Receive a synth definition from bytes.
 
 ```javascript
 // Send raw synthdef bytes
-sonic.send('/d_recv', synthdefBytes);
+supersonic.send('/d_recv', synthdefBytes);
 
 // In SuperSonic, prefer loadSynthDef() which handles fetching:
-await sonic.loadSynthDef('sonic-pi-beep');
+await supersonic.loadSynthDef('sonic-pi-beep');
 ```
 
 ---
@@ -303,7 +318,7 @@ Free synth definitions.
 | names | N × string | Synthdef names to free |
 
 ```javascript
-sonic.send('/d_free', 'sonic-pi-beep', 'sonic-pi-prophet');
+supersonic.send('/d_free', 'sonic-pi-beep', 'sonic-pi-prophet');
 ```
 
 ---
@@ -323,7 +338,7 @@ Free (delete) nodes.
 | nodeIDs | N × int | Node IDs to free |
 
 ```javascript
-sonic.send('/n_free', 1000, 1001, 1002);
+supersonic.send('/n_free', 1000, 1001, 1002);
 ```
 
 ---
@@ -339,8 +354,8 @@ Turn nodes on or off.
 | ... | | (repeat for multiple nodes) |
 
 ```javascript
-sonic.send('/n_run', 1000, 0);  // Turn off node 1000
-sonic.send('/n_run', 1000, 1);  // Turn on node 1000
+supersonic.send('/n_run', 1000, 0);  // Turn off node 1000
+supersonic.send('/n_run', 1000, 1);  // Turn on node 1000
 ```
 
 ---
@@ -359,8 +374,8 @@ Set node control values.
 If the node is a group, sets the control on all nodes in the group.
 
 ```javascript
-sonic.send('/n_set', 1000, 'freq', 440, 'amp', 0.5);
-sonic.send('/n_set', 1000, 0, 440, 1, 0.5);  // By index
+supersonic.send('/n_set', 1000, 'freq', 440, 'amp', 0.5);
+supersonic.send('/n_set', 1000, 0, 440, 1, 0.5);  // By index
 ```
 
 ---
@@ -379,7 +394,7 @@ Set sequential control values.
 
 ```javascript
 // Set controls 0, 1, 2 to values 100, 200, 300
-sonic.send('/n_setn', 1000, 0, 3, 100, 200, 300);
+supersonic.send('/n_setn', 1000, 0, 3, 100, 200, 300);
 ```
 
 ---
@@ -398,7 +413,7 @@ Fill sequential controls with a single value.
 
 ```javascript
 // Fill controls 0-9 with value 0.5
-sonic.send('/n_fill', 1000, 0, 10, 0.5);
+supersonic.send('/n_fill', 1000, 0, 10, 0.5);
 ```
 
 ---
@@ -417,8 +432,8 @@ Map controls to control buses.
 Controls mapped to buses read their values continuously from the bus.
 
 ```javascript
-sonic.send('/n_map', 1000, 'freq', 0);   // Map freq to bus 0
-sonic.send('/n_map', 1000, 'freq', -1);  // Unmap freq
+supersonic.send('/n_map', 1000, 'freq', 0);   // Map freq to bus 0
+supersonic.send('/n_map', 1000, 'freq', -1);  // Unmap freq
 ```
 
 ---
@@ -437,7 +452,7 @@ Map sequential controls to control buses.
 
 ```javascript
 // Map controls 0-3 to buses 10-13
-sonic.send('/n_mapn', 1000, 0, 10, 4);
+supersonic.send('/n_mapn', 1000, 0, 10, 4);
 ```
 
 ---
@@ -454,7 +469,7 @@ Map controls to audio buses.
 | ... | | (repeat for more mappings) |
 
 ```javascript
-sonic.send('/n_mapa', 1000, 'freq', 0);  // Map freq to audio bus 0
+supersonic.send('/n_mapa', 1000, 'freq', 0);  // Map freq to audio bus 0
 ```
 
 ---
@@ -473,7 +488,7 @@ Map sequential controls to audio buses.
 
 ```javascript
 // Map controls 0-3 to audio buses 0-3
-sonic.send('/n_mapan', 1000, 0, 0, 4);
+supersonic.send('/n_mapan', 1000, 0, 0, 4);
 ```
 
 ---
@@ -491,7 +506,7 @@ Move nodes to execute before other nodes.
 Places nodeA immediately before nodeB in the same group.
 
 ```javascript
-sonic.send('/n_before', 1001, 1000);  // Move 1001 before 1000
+supersonic.send('/n_before', 1001, 1000);  // Move 1001 before 1000
 ```
 
 ---
@@ -509,7 +524,7 @@ Move nodes to execute after other nodes.
 Places nodeA immediately after nodeB in the same group.
 
 ```javascript
-sonic.send('/n_after', 1001, 1000);  // Move 1001 after 1000
+supersonic.send('/n_after', 1001, 1000);  // Move 1001 after 1000
 ```
 
 ---
@@ -525,7 +540,7 @@ Query node information.
 **Reply:** `/n_info` for each node (see [Node Notifications](#node-notifications))
 
 ```javascript
-sonic.send('/n_query', 1000, 1001, 1002);
+supersonic.send('/n_query', 1000, 1001, 1002);
 ```
 
 ---
@@ -541,7 +556,7 @@ Trace node execution (debug).
 Prints control values and calculation rates for each node.
 
 ```javascript
-sonic.send('/n_trace', 1000);
+supersonic.send('/n_trace', 1000);
 ```
 
 ---
@@ -558,7 +573,7 @@ Reorder nodes within a group.
 
 ```javascript
 // Move nodes 1001, 1002, 1003 to head of group 0
-sonic.send('/n_order', 0, 0, 1001, 1002, 1003);
+supersonic.send('/n_order', 0, 0, 1001, 1002, 1003);
 ```
 
 ---
@@ -581,14 +596,14 @@ Create a new synth.
 
 ```javascript
 // Create synth at head of group 0
-sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'note', 60, 'amp', 0.5);
+supersonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'note', 60, 'amp', 0.5);
 
 // Auto-assign node ID
-sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0);
+supersonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0);
 
 // Map control to bus
-sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'freq', 'c0');  // Control bus 0
-sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'freq', 'a0');  // Audio bus 0
+supersonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'freq', 'c0');  // Control bus 0
+supersonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'freq', 'a0');  // Audio bus 0
 ```
 
 ---
@@ -605,7 +620,7 @@ Get synth control values.
 **Reply:** `/n_set nodeID control value ...`
 
 ```javascript
-sonic.send('/s_get', 1000, 'freq', 'amp');
+supersonic.send('/s_get', 1000, 'freq', 'amp');
 ```
 
 ---
@@ -625,7 +640,7 @@ Get sequential synth control values.
 
 ```javascript
 // Get controls 0-4 from synth 1000
-sonic.send('/s_getn', 1000, 0, 5);
+supersonic.send('/s_getn', 1000, 0, 5);
 ```
 
 ---
@@ -641,7 +656,7 @@ Remove synth IDs (internal bookkeeping).
 Reassigns the synths to reserved negative IDs. Used for freeing client-side tracking while keeping synths running.
 
 ```javascript
-sonic.send('/s_noid', 1000, 1001);
+supersonic.send('/s_noid', 1000, 1001);
 ```
 
 ---
@@ -661,10 +676,10 @@ Create new groups.
 
 ```javascript
 // Create group 100 at head of root group
-sonic.send('/g_new', 100, 0, 0);
+supersonic.send('/g_new', 100, 0, 0);
 
 // Create multiple groups
-sonic.send('/g_new', 100, 0, 0, 101, 1, 0, 102, 3, 100);
+supersonic.send('/g_new', 100, 0, 0, 101, 1, 0, 102, 3, 100);
 ```
 
 ---
@@ -683,7 +698,7 @@ Create new parallel groups.
 Parallel groups evaluate their children in unspecified order, allowing for parallel processing optimizations.
 
 ```javascript
-sonic.send('/p_new', 100, 0, 0);  // Create parallel group 100 at head of root
+supersonic.send('/p_new', 100, 0, 0);  // Create parallel group 100 at head of root
 ```
 
 ---
@@ -699,7 +714,7 @@ Move nodes to head of groups.
 | ... | | (repeat for more pairs) |
 
 ```javascript
-sonic.send('/g_head', 0, 1000);  // Move node 1000 to head of group 0
+supersonic.send('/g_head', 0, 1000);  // Move node 1000 to head of group 0
 ```
 
 ---
@@ -715,7 +730,7 @@ Move nodes to tail of groups.
 | ... | | (repeat for more pairs) |
 
 ```javascript
-sonic.send('/g_tail', 0, 1000);  // Move node 1000 to tail of group 0
+supersonic.send('/g_tail', 0, 1000);  // Move node 1000 to tail of group 0
 ```
 
 ---
@@ -731,7 +746,7 @@ Free all nodes in groups.
 Frees all immediate children of the groups.
 
 ```javascript
-sonic.send('/g_freeAll', 0);  // Free all nodes in root group
+supersonic.send('/g_freeAll', 0);  // Free all nodes in root group
 ```
 
 ---
@@ -747,7 +762,7 @@ Deep free all synths in groups.
 Traverses all nested groups and frees all synths found.
 
 ```javascript
-sonic.send('/g_deepFree', 0);  // Free all synths recursively from root
+supersonic.send('/g_deepFree', 0);  // Free all synths recursively from root
 ```
 
 ---
@@ -762,8 +777,8 @@ Print group tree (debug).
 | flag | int | 0 = structure only, non-zero = include control values |
 
 ```javascript
-sonic.send('/g_dumpTree', 0, 0);  // Print structure only
-sonic.send('/g_dumpTree', 0, 1);  // Print with control values
+supersonic.send('/g_dumpTree', 0, 0);  // Print structure only
+supersonic.send('/g_dumpTree', 0, 1);  // Print with control values
 ```
 
 ---
@@ -787,7 +802,7 @@ Query group tree structure.
 | ... | | For each child: nodeID, numChildren (-1 if synth), [synthName], [controlValues] |
 
 ```javascript
-sonic.send('/g_queryTree', 0, 0);  // Query root group structure
+supersonic.send('/g_queryTree', 0, 0);  // Query root group structure
 ```
 
 ---
@@ -806,7 +821,7 @@ Send a command to a unit generator.
 | args | ... | Command-specific arguments |
 
 ```javascript
-sonic.send('/u_cmd', 1000, 0, 'commandName', arg1, arg2);
+supersonic.send('/u_cmd', 1000, 0, 'commandName', arg1, arg2);
 ```
 
 ---
@@ -832,10 +847,10 @@ Allocate a buffer.
 
 ```javascript
 // Allocate mono buffer with 44100 frames
-sonic.send('/b_alloc', 0, 44100, 1);
+supersonic.send('/b_alloc', 0, 44100, 1);
 
 // Allocate stereo buffer
-sonic.send('/b_alloc', 1, 44100, 2);
+supersonic.send('/b_alloc', 1, 44100, 2);
 ```
 
 ---
@@ -857,10 +872,10 @@ Allocate and read a sound file into a buffer.
 
 ```javascript
 // Load entire file
-sonic.send('/b_allocRead', 0, 'samples/kick.wav');
+supersonic.send('/b_allocRead', 0, 'samples/kick.wav');
 
 // Load frames 1000-2000
-sonic.send('/b_allocRead', 0, 'samples/loop.wav', 1000, 1000);
+supersonic.send('/b_allocRead', 0, 'samples/loop.wav', 1000, 1000);
 ```
 
 **Note:** In SuperSonic, use `loadSample()` for easier sample loading.
@@ -885,7 +900,7 @@ Allocate and read specific channels from a sound file.
 
 ```javascript
 // Load only left channel (channel 0) from stereo file
-sonic.send('/b_allocReadChannel', 0, 'samples/stereo.wav', 0, 0, 0);
+supersonic.send('/b_allocReadChannel', 0, 'samples/stereo.wav', 0, 0, 0);
 ```
 
 ---
@@ -903,7 +918,7 @@ Free a buffer.
 **Reply:** `/done /b_free bufnum`
 
 ```javascript
-sonic.send('/b_free', 0);
+supersonic.send('/b_free', 0);
 ```
 
 ---
@@ -921,7 +936,7 @@ Zero a buffer's contents.
 **Reply:** `/done /b_zero bufnum`
 
 ```javascript
-sonic.send('/b_zero', 0);
+supersonic.send('/b_zero', 0);
 ```
 
 ---
@@ -938,7 +953,7 @@ Set individual samples in a buffer.
 | ... | | (repeat index/value pairs) |
 
 ```javascript
-sonic.send('/b_set', 0, 0, 1.0, 100, 0.5, 200, -0.5);
+supersonic.send('/b_set', 0, 0, 1.0, 100, 0.5, 200, -0.5);
 ```
 
 ---
@@ -957,7 +972,7 @@ Set sequential samples in a buffer.
 
 ```javascript
 // Set samples 0-2 to [1.0, 0.5, 0.0]
-sonic.send('/b_setn', 0, 0, 3, 1.0, 0.5, 0.0);
+supersonic.send('/b_setn', 0, 0, 3, 1.0, 0.5, 0.0);
 ```
 
 ---
@@ -972,7 +987,7 @@ Set a buffer's sample rate.
 | sampleRate | float | Sample rate (0 or nil = server rate) |
 
 ```javascript
-sonic.send('/b_setSampleRate', 0, 44100);
+supersonic.send('/b_setSampleRate', 0, 44100);
 ```
 
 ---
@@ -991,7 +1006,7 @@ Fill buffer samples with a value.
 
 ```javascript
 // Fill samples 0-99 with 0.5
-sonic.send('/b_fill', 0, 0, 100, 0.5);
+supersonic.send('/b_fill', 0, 0, 100, 0.5);
 ```
 
 ---
@@ -1013,7 +1028,7 @@ See [Buffer Fill Commands](#buffer-fill-commands-for-b_gen) for available genera
 
 ```javascript
 // Generate a sine wave with 3 harmonics
-sonic.send('/b_gen', 0, 'sine1', 7, 1.0, 0.5, 0.25);
+supersonic.send('/b_gen', 0, 'sine1', 7, 1.0, 0.5, 0.25);
 ```
 
 ---
@@ -1036,7 +1051,7 @@ Query buffer information.
 | 3 | float | Sample rate |
 
 ```javascript
-sonic.send('/b_query', 0, 1, 2);  // Query buffers 0, 1, and 2
+supersonic.send('/b_query', 0, 1, 2);  // Query buffers 0, 1, and 2
 ```
 
 ---
@@ -1051,7 +1066,7 @@ Get individual sample values from a buffer.
 | indices | N × int | Sample indices |
 
 ```javascript
-sonic.send('/b_get', 0, 0, 100, 200);  // Get samples at indices 0, 100, 200
+supersonic.send('/b_get', 0, 0, 100, 200);  // Get samples at indices 0, 100, 200
 ```
 
 **Reply:** `/b_set bufnum index value ...`
@@ -1072,7 +1087,7 @@ Get sequential sample values from a buffer.
 **Reply:** `/b_setn bufnum startIndex count values...`
 
 ```javascript
-sonic.send('/b_getn', 0, 0, 100);  // Get samples 0-99 from buffer 0
+supersonic.send('/b_getn', 0, 0, 100);  // Get samples 0-99 from buffer 0
 ```
 
 ---
@@ -1092,7 +1107,7 @@ Set control bus values.
 | ... | | (repeat for more buses) |
 
 ```javascript
-sonic.send('/c_set', 0, 440, 1, 0.5);
+supersonic.send('/c_set', 0, 440, 1, 0.5);
 ```
 
 ---
@@ -1109,7 +1124,7 @@ Set sequential control bus values.
 | ... | | (repeat for more ranges) |
 
 ```javascript
-sonic.send('/c_setn', 0, 3, 440, 880, 1320);
+supersonic.send('/c_setn', 0, 3, 440, 880, 1320);
 ```
 
 ---
@@ -1126,7 +1141,7 @@ Fill control buses with a value.
 | ... | | (repeat for more ranges) |
 
 ```javascript
-sonic.send('/c_fill', 0, 10, 0.0);  // Fill buses 0-9 with 0.0
+supersonic.send('/c_fill', 0, 10, 0.0);  // Fill buses 0-9 with 0.0
 ```
 
 ---
@@ -1142,7 +1157,7 @@ Get control bus values.
 **Reply:** `/c_set index value ...`
 
 ```javascript
-sonic.send('/c_get', 0, 1, 2);  // Get bus values 0, 1, 2
+supersonic.send('/c_get', 0, 1, 2);  // Get bus values 0, 1, 2
 ```
 
 ---
@@ -1160,7 +1175,7 @@ Get sequential control bus values.
 **Reply:** `/c_setn startIndex count values...`
 
 ```javascript
-sonic.send('/c_getn', 0, 10);  // Get buses 0-9
+supersonic.send('/c_getn', 0, 10);  // Get buses 0-9
 ```
 
 ---
@@ -1192,7 +1207,7 @@ Generate a waveform from harmonic amplitudes.
 
 ```javascript
 // Fundamental + 2 harmonics, normalized
-sonic.send('/b_gen', 0, 'sine1', 1, 1.0, 0.5, 0.25);
+supersonic.send('/b_gen', 0, 'sine1', 1, 1.0, 0.5, 0.25);
 ```
 
 ### `sine2`
@@ -1208,7 +1223,7 @@ Generate a waveform from frequencies and amplitudes.
 
 ```javascript
 // Two partials at different frequencies
-sonic.send('/b_gen', 0, 'sine2', 1, 1.0, 1.0, 2.5, 0.5);
+supersonic.send('/b_gen', 0, 'sine2', 1, 1.0, 1.0, 2.5, 0.5);
 ```
 
 ### `sine3`
@@ -1247,7 +1262,7 @@ Copy samples from another buffer.
 
 ```javascript
 // Copy 1000 samples from buffer 1 to buffer 0
-sonic.send('/b_gen', 0, 'copy', 0, 1, 0, 1000);
+supersonic.send('/b_gen', 0, 'copy', 0, 1, 0, 1000);
 ```
 
 ---
@@ -1381,11 +1396,11 @@ For loading synthdefs and samples, use the SuperSonic JavaScript API:
 
 ```javascript
 // Load synthdefs
-await sonic.loadSynthDef("sonic-pi-beep");
-await sonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
+await supersonic.loadSynthDef("sonic-pi-beep");
+await supersonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
 
 // Load samples
-await sonic.loadSample(0, "loop_amen.flac");
+await supersonic.loadSample(0, "loop_amen.flac");
 ```
 
 These methods fetch the files via HTTP and send the data to scsynth using the supported `/d_recv` and `/b_allocRead` commands.

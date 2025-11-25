@@ -6,13 +6,13 @@ Real-time performance metrics, read directly from shared memory.
 
 ```javascript
 // Receive periodic updates (default: every 100ms)
-sonic.onMetricsUpdate = (metrics) => {
+supersonic.onMetricsUpdate = (metrics) => {
   console.log('Processed:', metrics.workletMessagesProcessed);
   console.log('Dropped:', metrics.workletMessagesDropped);
 };
 
 // Or get a snapshot on demand
-const metrics = sonic.getMetrics();
+const metrics = supersonic.getMetrics();
 ```
 
 ## API
@@ -22,12 +22,12 @@ const metrics = sonic.getMetrics();
 Set a callback to receive periodic metrics updates. The timer runs from boot at 100ms intervals but does nothing until you set a callback.
 
 ```javascript
-sonic.onMetricsUpdate = (metrics) => {
+supersonic.onMetricsUpdate = (metrics) => {
   // Called every 100ms by default
 };
 
 // Stop receiving updates
-sonic.onMetricsUpdate = null;
+supersonic.onMetricsUpdate = null;
 ```
 
 ### `setMetricsInterval(ms)`
@@ -35,8 +35,8 @@ sonic.onMetricsUpdate = null;
 Change the polling interval and restart the timer.
 
 ```javascript
-sonic.setMetricsInterval(500);  // Update every 500ms (2Hz)
-sonic.setMetricsInterval(50);   // Update every 50ms (20Hz)
+supersonic.setMetricsInterval(500);  // Update every 500ms (2Hz)
+supersonic.setMetricsInterval(50);   // Update every 50ms (20Hz)
 ```
 
 ### `stopMetricsPolling()`
@@ -44,7 +44,7 @@ sonic.setMetricsInterval(50);   // Update every 50ms (20Hz)
 Stop the metrics timer entirely.
 
 ```javascript
-sonic.stopMetricsPolling();
+supersonic.stopMetricsPolling();
 ```
 
 ### `getMetrics()`
@@ -52,7 +52,7 @@ sonic.stopMetricsPolling();
 Get a metrics snapshot on demand. Always available, regardless of polling state.
 
 ```javascript
-const metrics = sonic.getMetrics();
+const metrics = supersonic.getMetrics();
 ```
 
 ## Available Metrics
@@ -152,7 +152,7 @@ Main thread state.
 ## Example: Simple Monitor
 
 ```javascript
-sonic.onMetricsUpdate = (metrics) => {
+supersonic.onMetricsUpdate = (metrics) => {
   // Check for problems
   if (metrics.workletMessagesDropped > 0) {
     console.warn('Messages being dropped!');

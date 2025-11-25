@@ -65,7 +65,7 @@
 import { SuperSonic } from "supersonic-scsynth";
 
 const baseURL = "/supersonic"; // Configure for your setup
-const sonic = new SuperSonic({
+const supersonic = new SuperSonic({
   workerBaseURL:   `${baseURL}/workers/`,   // Required
   wasmBaseURL:     `${baseURL}/wasm/`,      // Required
   synthdefBaseURL: `${baseURL}/synthdefs/`, // Optional
@@ -89,7 +89,7 @@ const sonic = new SuperSonic({
 Override scsynth server defaults:
 
 ```javascript
-const sonic = new SuperSonic({
+const supersonic = new SuperSonic({
   // ... required options ...
   scsynthOptions: {
     numBuffers: 4096,  // Max audio buffers (default: 1024)
@@ -104,13 +104,13 @@ const sonic = new SuperSonic({
 Initialise the audio engine. Call this before anything else.
 
 ```javascript
-await sonic.init();
+await supersonic.init();
 ```
 
 **Optional config overrides:**
 
 ```javascript
-await sonic.init({
+await supersonic.init({
   development: true,  // Use cache-busted WASM (for dev)
   audioContextOptions: {
     sampleRate: 44100,      // Request specific sample rate
@@ -136,11 +136,11 @@ Load a synthdef. Pass a name to use `synthdefBaseURL`, or provide a full path.
 
 ```javascript
 // By name (uses synthdefBaseURL)
-const info = await sonic.loadSynthDef("sonic-pi-beep");
+const info = await supersonic.loadSynthDef("sonic-pi-beep");
 console.log(`Loaded ${info.name} (${info.size} bytes)`);
 
 // By full path
-await sonic.loadSynthDef("./custom/my-synth.scsyndef");
+await supersonic.loadSynthDef("./custom/my-synth.scsyndef");
 ```
 
 ### `loadSynthDefs(names)`
@@ -150,7 +150,7 @@ Load multiple synthdefs in parallel.
 **Returns:** `Promise<Object>` - A map of synthdef name to result object. Each result contains either `{success: true}` or `{success: false, error: string}`.
 
 ```javascript
-const results = await sonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
+const results = await supersonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
 
 // Check results
 for (const [name, result] of Object.entries(results)) {
@@ -174,13 +174,13 @@ Load a sample into a buffer. Pass a filename to use `sampleBaseURL`, or provide 
 
 ```javascript
 // By name (uses sampleBaseURL)
-await sonic.loadSample(0, "loop_amen.flac");
+await supersonic.loadSample(0, "loop_amen.flac");
 
 // By full path
-await sonic.loadSample(0, "./custom/my-sample.wav");
+await supersonic.loadSample(0, "./custom/my-sample.wav");
 
 // Load partial sample (frames 1000-2000)
-await sonic.loadSample(0, "long-sample.flac", 1000, 1000);
+await supersonic.loadSample(0, "long-sample.flac", 1000, 1000);
 ```
 
 ### `send(address, ...args)`
@@ -188,9 +188,9 @@ await sonic.loadSample(0, "long-sample.flac", 1000, 1000);
 Send an OSC message. Types are auto-detected from JavaScript values.
 
 ```javascript
-sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60, 'amp', 0.5);
-sonic.send('/n_free', 1000);
-sonic.send('/b_allocRead', 0, 'bd_haus.flac');
+supersonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60, 'amp', 0.5);
+supersonic.send('/n_free', 1000);
+supersonic.send('/b_allocRead', 0, 'bd_haus.flac');
 ```
 
 ### `sendOSC(oscBytes, options)`
@@ -199,7 +199,7 @@ Send pre-encoded OSC bytes. Useful if you're building OSC messages yourself.
 
 ```javascript
 const oscData = new Uint8Array([...]); // Your OSC bytes
-sonic.sendOSC(oscData);
+supersonic.sendOSC(oscData);
 ```
 
 ### `sync(syncId)`
@@ -213,11 +213,11 @@ Send a `/sync` command and wait for the `/synced` response. Use this to ensure a
 
 ```javascript
 // Load synthdefs then wait for them to be ready
-await sonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
-await sonic.sync();  // Now safe to use the synthdefs
+await supersonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
+await supersonic.sync();  // Now safe to use the synthdefs
 
 // Use a specific sync ID for tracking
-await sonic.sync(42);
+await supersonic.sync(42);
 ```
 
 ### `destroy()`
@@ -227,7 +227,7 @@ Shut down the engine and clean up all resources. Stops audio processing, termina
 **Returns:** `Promise<void>`
 
 ```javascript
-await sonic.destroy();
+await supersonic.destroy();
 // sonic is no longer usable after this
 ```
 
@@ -240,7 +240,7 @@ Set these properties to receive events from the engine.
 Called when the engine is ready.
 
 ```javascript
-sonic.onInitialized = () => {
+supersonic.onInitialized = () => {
   console.log('Engine ready');
 };
 ```
@@ -250,7 +250,7 @@ sonic.onInitialized = () => {
 Called when something goes wrong.
 
 ```javascript
-sonic.onError = (error) => {
+supersonic.onError = (error) => {
   console.error('SuperSonic error:', error);
 };
 ```
@@ -260,7 +260,7 @@ sonic.onError = (error) => {
 Called when an OSC message is received from the engine.
 
 ```javascript
-sonic.onMessage = (msg) => {
+supersonic.onMessage = (msg) => {
   console.log('Received:', msg.address, msg.args);
 };
 ```
@@ -270,7 +270,7 @@ sonic.onMessage = (msg) => {
 Called with raw OSC bytes received from the engine.
 
 ```javascript
-sonic.onOSC = (data) => {
+supersonic.onOSC = (data) => {
   // data is a Uint8Array
 };
 ```
@@ -280,7 +280,7 @@ sonic.onOSC = (data) => {
 Called when an OSC message is sent to the engine.
 
 ```javascript
-sonic.onMessageSent = (data) => {
+supersonic.onMessageSent = (data) => {
   // data is a Uint8Array
 };
 ```
@@ -290,7 +290,7 @@ sonic.onMessageSent = (data) => {
 Called with debug output from the engine.
 
 ```javascript
-sonic.onDebugMessage = (msg) => {
+supersonic.onDebugMessage = (msg) => {
   console.log('[scsynth]', msg);
 };
 ```
@@ -300,7 +300,7 @@ sonic.onDebugMessage = (msg) => {
 Called periodically with performance metrics. See [Metrics](METRICS.md) for details.
 
 ```javascript
-sonic.onMetricsUpdate = (metrics) => {
+supersonic.onMetricsUpdate = (metrics) => {
   console.log('Process count:', metrics.workletProcessCount);
 };
 ```
@@ -312,8 +312,8 @@ sonic.onMetricsUpdate = (metrics) => {
 Whether the engine has been initialised.
 
 ```javascript
-if (sonic.initialized) {
-  sonic.send('/s_new', ...);
+if (supersonic.initialized) {
+  supersonic.send('/s_new', ...);
 }
 ```
 
@@ -322,9 +322,9 @@ if (sonic.initialized) {
 Whether the engine is currently initialising. Useful for showing loading states in your UI.
 
 ```javascript
-if (sonic.initializing) {
+if (supersonic.initializing) {
   console.log('Engine is booting...');
-} else if (sonic.initialized) {
+} else if (supersonic.initialized) {
   console.log('Engine is ready');
 } else {
   console.log('Engine not started');
@@ -336,7 +336,7 @@ if (sonic.initializing) {
 The underlying Web Audio AudioContext.
 
 ```javascript
-const ctx = sonic.audioContext;
+const ctx = supersonic.audioContext;
 console.log('Sample rate:', ctx.sampleRate);
 ```
 
@@ -345,12 +345,12 @@ console.log('Sample rate:', ctx.sampleRate);
 A `Set` containing the names of all confirmed loaded synthdefs. A synthdef appears here only after scsynth has confirmed it's ready - not just when the load request was sent. Removed when freed via `/d_free` or `/d_freeAll`.
 
 ```javascript
-if (sonic.loadedSynthDefs.has("sonic-pi-beep")) {
-  sonic.send("/s_new", "sonic-pi-beep", -1, 0, 0);
+if (supersonic.loadedSynthDefs.has("sonic-pi-beep")) {
+  supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0);
 }
 
 // See all loaded synthdefs
-console.log("Loaded:", [...sonic.loadedSynthDefs]);
+console.log("Loaded:", [...supersonic.loadedSynthDefs]);
 ```
 
 ### `bootStats` (read-only)
@@ -358,7 +358,7 @@ console.log("Loaded:", [...sonic.loadedSynthDefs]);
 Timing information from engine initialisation.
 
 ```javascript
-const stats = sonic.bootStats;
+const stats = supersonic.bootStats;
 console.log(`Engine booted in ${stats.initDuration.toFixed(2)}ms`);
 ```
 
@@ -375,7 +375,7 @@ For monitoring performance and debugging. See [Metrics](METRICS.md) for the full
 Get a metrics snapshot on demand.
 
 ```javascript
-const metrics = sonic.getMetrics();
+const metrics = supersonic.getMetrics();
 console.log('Messages processed:', metrics.workletMessagesProcessed);
 ```
 
@@ -384,7 +384,7 @@ console.log('Messages processed:', metrics.workletMessagesProcessed);
 Change the polling interval for `onMetricsUpdate`. Default is 100ms (10Hz).
 
 ```javascript
-sonic.setMetricsInterval(500);  // Update every 500ms
+supersonic.setMetricsInterval(500);  // Update every 500ms
 ```
 
 ### `stopMetricsPolling()`
@@ -392,7 +392,7 @@ sonic.setMetricsInterval(500);  // Update every 500ms
 Stop the metrics polling timer.
 
 ```javascript
-sonic.stopMetricsPolling();
+supersonic.stopMetricsPolling();
 ```
 
 ## Advanced
@@ -402,7 +402,7 @@ sonic.stopMetricsPolling();
 Returns static configuration from boot time - things that don't change after initialisation.
 
 ```javascript
-const info = sonic.getInfo();
+const info = supersonic.getInfo();
 console.log('Sample rate:', info.sampleRate);
 console.log('Boot time:', info.bootTimeMs, 'ms');
 ```
@@ -462,33 +462,33 @@ SuperSonic speaks the SuperCollider Server protocol. Here are the commands you'l
 
 ```javascript
 // Create a synth (node ID -1 = auto-assign)
-sonic.send('/s_new', 'synth-name', nodeId, addAction, target, ...params);
+supersonic.send('/s_new', 'synth-name', nodeId, addAction, target, ...params);
 
 // Set synth parameters
-sonic.send('/n_set', nodeId, 'param', value, 'param2', value2);
+supersonic.send('/n_set', nodeId, 'param', value, 'param2', value2);
 
 // Free a synth
-sonic.send('/n_free', nodeId);
+supersonic.send('/n_free', nodeId);
 ```
 
 ### Buffers (Samples)
 
 ```javascript
 // Load a sample into a buffer
-sonic.send('/b_allocRead', bufferNum, 'filename.flac');
+supersonic.send('/b_allocRead', bufferNum, 'filename.flac');
 
 // Free a buffer
-sonic.send('/b_free', bufferNum);
+supersonic.send('/b_free', bufferNum);
 ```
 
 ### Server
 
 ```javascript
 // Enable notifications (receive messages back from server)
-sonic.send('/notify', 1);
+supersonic.send('/notify', 1);
 
 // Query server status
-sonic.send('/status');
+supersonic.send('/status');
 ```
 
 For the complete OSC command reference, see the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html).

@@ -24,28 +24,28 @@ Import SuperSonic and initialise it:
 import { SuperSonic } from "supersonic-scsynth";
 
 const baseURL = "/supersonic"; // Configure for your setup
-const sonic = new SuperSonic({
+const supersonic = new SuperSonic({
   workerBaseURL: `${baseURL}/workers/`,
   wasmBaseURL: `${baseURL}/wasm/`,
   synthdefBaseURL: `${baseURL}/synthdefs/`,
   sampleBaseURL: `${baseURL}/samples/`,
 });
-await sonic.init();
+await supersonic.init();
 ```
 
 Load and play a synth:
 
 ```javascript
-await sonic.loadSynthDef("sonic-pi-prophet");
-sonic.send("/s_new", "sonic-pi-prophet", -1, 0, 0, "note", 60);
+await supersonic.loadSynthDef("sonic-pi-prophet");
+supersonic.send("/s_new", "sonic-pi-prophet", -1, 0, 0, "note", 60);
 ```
 
 Load and play a sample:
 
 ```javascript
-await sonic.loadSynthDef("sonic-pi-basic_stereo_player");
-await sonic.loadSample(0, "loop_amen.flac");
-sonic.send("/s_new", "sonic-pi-basic_stereo_player", -1, 0, 0, "buf", 0);
+await supersonic.loadSynthDef("sonic-pi-basic_stereo_player");
+await supersonic.loadSample(0, "loop_amen.flac");
+supersonic.send("/s_new", "sonic-pi-basic_stereo_player", -1, 0, 0, "buf", 0);
 ```
 
 Take a look at `example/simple.html` for a minimal working example.
