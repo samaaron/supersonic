@@ -41,7 +41,7 @@ The recommended setup: self-host the core, use CDN for assets.
 import { SuperSonic } from "supersonic-scsynth";
 
 const baseURL = "/supersonic"; // Configure for your setup
-const sonic = new SuperSonic({
+const supersonic = new SuperSonic({
   // Must be self-hosted (workers use SharedArrayBuffer)
   workerBaseURL: `${baseURL}/workers/`,
   wasmBaseURL:   `${baseURL}/wasm/`,
@@ -89,7 +89,7 @@ Your server must send COOP/COEP headers. See [Browser Setup](BROWSER_SETUP.md).
 import { SuperSonic } from "supersonic-scsynth";
 
 const baseURL = "/supersonic"; // Configure for your setup
-const sonic = new SuperSonic({
+const supersonic = new SuperSonic({
   workerBaseURL:   `${baseURL}/workers/`,
   wasmBaseURL:     `${baseURL}/wasm/`,
   synthdefBaseURL: `${baseURL}/synthdefs/`,
@@ -105,16 +105,16 @@ If you want everything local (no CDN at all):
 import { SuperSonic } from "supersonic-scsynth";
 
 const baseURL = "/supersonic"; // Configure for your setup
-const sonic = new SuperSonic({
+const supersonic = new SuperSonic({
   workerBaseURL:   `${baseURL}/workers/`,
   wasmBaseURL:     `${baseURL}/wasm/`,
   synthdefBaseURL: `${baseURL}/synthdefs/`,
   sampleBaseURL:   `${baseURL}/samples/`
 });
 
-await sonic.init();
-await sonic.loadSynthDef("sonic-pi-beep");
-sonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60);
+await supersonic.init();
+await supersonic.loadSynthDef("sonic-pi-beep");
+supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60);
 ```
 
 ## npm Packages

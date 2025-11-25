@@ -103,7 +103,7 @@ Browsers require a user gesture (click, tap, keypress) before audio can play. Th
 
 ```javascript
 document.getElementById('start-button').addEventListener('click', async () => {
-  await sonic.init();
+  await supersonic.init();
   // Now audio will work
 });
 ```

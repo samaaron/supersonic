@@ -9,14 +9,14 @@ Load `.scsyndef` files directly using the SuperSonic API:
 ```javascript
 import { SuperSonic } from './dist/supersonic.js';
 
-const sonic = new SuperSonic();
-await sonic.init();
+const supersonic = new SuperSonic();
+await supersonic.init();
 
 // Load a single synthdef
-await sonic.loadSynthDef('./dist/extra/synthdefs/sonic-pi-beep.scsyndef');
+await supersonic.loadSynthDef('./dist/extra/synthdefs/sonic-pi-beep.scsyndef');
 
 // Load multiple synthdefs
-const results = await sonic.loadSynthDefs([
+const results = await supersonic.loadSynthDefs([
     'sonic-pi-beep',
     'sonic-pi-tb303',
     'sonic-pi-dsaw'

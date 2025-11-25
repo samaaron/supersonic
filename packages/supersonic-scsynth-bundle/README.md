@@ -26,13 +26,13 @@ This installs all three packages as dependencies.
 import { SuperSonic } from './dist/supersonic.js';
 
 // Synthdefs and samples can use CDN
-const sonic = new SuperSonic({
+const supersonic = new SuperSonic({
   sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/',
   synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/'
 });
 
-await sonic.init();
-await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
+await supersonic.init();
+await supersonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
 ```
 
 ## When to Use This
