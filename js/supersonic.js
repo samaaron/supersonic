@@ -254,6 +254,104 @@ export class SuperSonic {
   }
 
   /**
+   * Get node tree state from SharedArrayBuffer (for polling-based visualization)
+   * This reads directly from shared memory - no OSC latency.
+   * @returns {Object} Tree state: { nodeCount, version, nodes: [{id, parentId, isGroup, ...}] }
+   * @example
+   * // Poll tree at 60fps for visualization
+   * let lastVersion = 0;
+   * setInterval(() => {
+   *   const tree = sonic.getTree();
+   *   if (tree.version !== lastVersion) {
+   *     lastVersion = tree.version;
+   *     renderTree(tree.nodes);
+   *   }
+   * }, 16);
+   */
+  getTree() {
+    if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {
+      return { nodeCount: 0, version: 0, nodes: [] };
+    }
+
+    const bc = this.#bufferConstants;
+    const treeBase = this.#ringBufferBase + bc.NODE_TREE_START;
+
+    // Read header (2 x uint32)
+    const headerView = new Uint32Array(this.#sharedBuffer, treeBase, 2);
+    const nodeCount = headerView[0];
+    const version = headerView[1];
+
+    // Read entries - each entry is 56 bytes: 6 int32s (24 bytes) + def_name (32 bytes)
+    const entriesBase = treeBase + bc.NODE_TREE_HEADER_SIZE;
+    const maxNodes = bc.NODE_TREE_MAX_NODES;
+    const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 56 bytes
+    const defNameSize = bc.NODE_TREE_DEF_NAME_SIZE; // 32 bytes
+
+    // Use DataView for mixed int32/string access
+    const dataView = new DataView(this.#sharedBuffer, entriesBase, maxNodes * entrySize);
+    const textDecoder = new TextDecoder('utf-8');
+
+    // Collect non-empty entries
+    // Note: We scan all slots, not just nodeCount, because slots can be sparse after removals
+    // Only skip slots where id === -1 (empty marker)
+    const nodes = [];
+    let foundCount = 0;
+    for (let i = 0; i < maxNodes && foundCount < nodeCount; i++) {
+      const byteOffset = i * entrySize;
+      const id = dataView.getInt32(byteOffset, true); // little-endian
+      if (id === -1) continue; // Empty slot
+      foundCount++;
+
+      // Read def_name (32 bytes starting at byte 24 of entry)
+      // Note: Must copy from SharedArrayBuffer to regular ArrayBuffer for TextDecoder
+      const defNameStart = entriesBase + byteOffset + 24;
+      const defNameShared = new Uint8Array(this.#sharedBuffer, defNameStart, defNameSize);
+      const defNameBytes = new Uint8Array(defNameSize);
+      defNameBytes.set(defNameShared); // Copy to non-shared buffer
+      // Find null terminator
+      let nullIndex = defNameBytes.indexOf(0);
+      if (nullIndex === -1) nullIndex = defNameSize;
+      const defName = textDecoder.decode(defNameBytes.subarray(0, nullIndex));
+
+      nodes.push({
+        id,
+        parentId: dataView.getInt32(byteOffset + 4, true),
+        isGroup: dataView.getInt32(byteOffset + 8, true) === 1,
+        prevId: dataView.getInt32(byteOffset + 12, true),
+        nextId: dataView.getInt32(byteOffset + 16, true),
+        headId: dataView.getInt32(byteOffset + 20, true),
+        defName
+      });
+    }
+
+    return { nodeCount, version, nodes };
+  }
+
+  /**
+   * Get buffer constants (for testing/debugging)
+   * @returns {Object} Buffer layout constants
+   */
+  get bufferConstants() {
+    return this.#bufferConstants;
+  }
+
+  /**
+   * Get ring buffer base address (for testing/debugging)
+   * @returns {number} Base address in WASM memory
+   */
+  get ringBufferBase() {
+    return this.#ringBufferBase;
+  }
+
+  /**
+   * Get shared buffer (for testing/debugging)
+   * @returns {SharedArrayBuffer} The shared memory buffer
+   */
+  get sharedBuffer() {
+    return this.#sharedBuffer;
+  }
+
+  /**
    * Send OSC message with simplified syntax (auto-detects types)
    * @param {string} address - OSC address
    * @param {...*} args - Arguments (numbers, strings, Uint8Array)

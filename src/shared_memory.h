@@ -36,6 +36,13 @@ constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext sta
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in milliseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
 
+// Node tree configuration (for observing synth/group hierarchy via polling)
+constexpr uint32_t NODE_TREE_MAX_NODES = 1024; // Max nodes in tree
+constexpr uint32_t NODE_TREE_HEADER_SIZE = 8;  // node_count (4) + version (4)
+constexpr uint32_t NODE_TREE_DEF_NAME_SIZE = 32; // Max synthdef name length (including null terminator)
+constexpr uint32_t NODE_TREE_ENTRY_SIZE = 56;  // 6 x int32 (24) + def_name (32) = 56 bytes per entry
+constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MAX_NODES * NODE_TREE_ENTRY_SIZE); // ~24KB
+
 // Auto-calculated offsets (DO NOT MODIFY - computed from sizes above)
 constexpr uint32_t IN_BUFFER_START    = 0;
 constexpr uint32_t OUT_BUFFER_START   = IN_BUFFER_START + IN_BUFFER_SIZE;
@@ -45,9 +52,10 @@ constexpr uint32_t METRICS_START      = CONTROL_START + CONTROL_SIZE;
 constexpr uint32_t NTP_START_TIME_START = METRICS_START + METRICS_SIZE;
 constexpr uint32_t DRIFT_OFFSET_START = NTP_START_TIME_START + NTP_START_TIME_SIZE;
 constexpr uint32_t GLOBAL_OFFSET_START = DRIFT_OFFSET_START + DRIFT_OFFSET_SIZE;
+constexpr uint32_t NODE_TREE_START = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
 
 // Total buffer size (for validation)
-constexpr uint32_t TOTAL_BUFFER_SIZE  = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
+constexpr uint32_t TOTAL_BUFFER_SIZE  = NODE_TREE_START + NODE_TREE_SIZE;
 
 // Message structure
 struct alignas(4) Message {
@@ -130,6 +138,25 @@ enum StatusFlags : uint32_t {
     STATUS_FRAGMENTED_MSG = 1 << 3
 };
 
+// Node tree header (at NODE_TREE_START offset in ring_buffer_storage)
+// Written by WASM, read by JS for polling
+struct alignas(4) NodeTreeHeader {
+    std::atomic<uint32_t> node_count;  // Number of active nodes
+    std::atomic<uint32_t> version;     // Incremented on each change (for change detection)
+};
+
+// Node entry in the tree (56 bytes = 6 x int32 + 32-byte def_name)
+// Array follows NodeTreeHeader at NODE_TREE_START + NODE_TREE_HEADER_SIZE
+struct alignas(4) NodeEntry {
+    int32_t id;         // Node ID (-1 = empty slot)
+    int32_t parent_id;  // Parent group ID (-1 for root)
+    int32_t is_group;   // 1 = group, 0 = synth
+    int32_t prev_id;    // Previous sibling (-1 if first)
+    int32_t next_id;    // Next sibling (-1 if last)
+    int32_t head_id;    // For groups: first child (-1 if empty or if synth)
+    char def_name[NODE_TREE_DEF_NAME_SIZE]; // Synthdef name for synths, "group" for groups
+};
+
 // Constants
 constexpr uint32_t MAX_MESSAGE_SIZE = IN_BUFFER_SIZE - sizeof(Message);
 constexpr uint32_t MESSAGE_MAGIC = 0xDEADBEEF;
@@ -159,6 +186,12 @@ struct BufferLayout {
     uint32_t drift_offset_size;
     uint32_t global_offset_start;
     uint32_t global_offset_size;
+    uint32_t node_tree_start;
+    uint32_t node_tree_size;
+    uint32_t node_tree_header_size;
+    uint32_t node_tree_entry_size;
+    uint32_t node_tree_def_name_size;
+    uint32_t node_tree_max_nodes;
     uint32_t total_buffer_size;
     uint32_t max_message_size;
     uint32_t message_magic;
@@ -185,6 +218,12 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     DRIFT_OFFSET_SIZE,
     GLOBAL_OFFSET_START,
     GLOBAL_OFFSET_SIZE,
+    NODE_TREE_START,
+    NODE_TREE_SIZE,
+    NODE_TREE_HEADER_SIZE,
+    NODE_TREE_ENTRY_SIZE,
+    NODE_TREE_DEF_NAME_SIZE,
+    NODE_TREE_MAX_NODES,
     TOTAL_BUFFER_SIZE,
     MAX_MESSAGE_SIZE,
     MESSAGE_MAGIC,
