@@ -124,6 +124,13 @@ void Node_RemoveID(Node* inNode) {
     if (inNode->mID == 0)
         return; // failed
 
+    // =========================================================================
+    // SUPERSONIC MODIFICATION - Send kNode_End notification before ID change
+    // This ensures the SAB node tree is updated with the original ID.
+    // The Node_Delete path will skip the notification due to negative ID check.
+    // =========================================================================
+    Node_StateMsg(inNode, kNode_End);
+
     World* world = inNode->mWorld;
     if (!World_RemoveNode(world, inNode)) {
         int err = kSCErr_Failed; // shouldn't happen..

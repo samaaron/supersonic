@@ -40,7 +40,29 @@ extern int gMissingNodeID;
 // From audio_processor.cpp
 extern "C" {
     int worklet_debug(const char* fmt, ...);
+    extern uint8_t* shared_memory;
 }
+
+// =============================================================================
+// SUPERSONIC MODIFICATION START - Direct SAB tree update for /n_order
+// When nodes are reordered within the same group, SuperCollider doesn't send
+// kNode_Move (no OSC notification). But we need to update the SAB tree.
+// This helper updates the SAB tree directly without triggering OSC messages.
+// =============================================================================
+#include "../../node_tree.h"
+
+static void NodeTree_UpdateDirect(Node* node) {
+    if (!shared_memory || !node) return;
+
+    uint8_t* node_tree_ptr = shared_memory + NODE_TREE_START;
+    NodeTreeHeader* tree_header = reinterpret_cast<NodeTreeHeader*>(node_tree_ptr);
+    NodeEntry* tree_entries = reinterpret_cast<NodeEntry*>(node_tree_ptr + NODE_TREE_HEADER_SIZE);
+
+    NodeTree_Update(node, tree_header, tree_entries);
+}
+// =============================================================================
+// SUPERSONIC MODIFICATION END
+// =============================================================================
 
 // returns number of bytes in an OSC string.
 int OSCstrlen(char* strin);
@@ -669,6 +691,7 @@ SCErr meth_n_fill(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRe
                 Node_SetControl(node, hash, name, i, value);
             }
 
+            // Check for optional bus mapping string (e.g., "c0" to map to control bus 0)
             if (msg.nextTag('f') == 's') {
                 const char* string = msg.gets();
                 if (*string == 'c') {
@@ -677,12 +700,8 @@ SCErr meth_n_fill(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRe
                         Node_MapControl(node, hash, name, i, bus + i);
                     }
                 }
-            } else {
-                float32 value = msg.getf();
-                for (int i = 0; i < n; ++i) {
-                    Node_SetControl(node, hash, name, i, value);
-                }
             }
+            // Note: Removed buggy else block that read a non-existent second value
         } else {
             int32 index = msg.geti();
             int32 n = msg.geti();
@@ -691,6 +710,7 @@ SCErr meth_n_fill(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRe
             for (int i = 0; i < n; ++i) {
                 Node_SetControl(node, index + i, value);
             }
+            // Check for optional bus mapping string (e.g., "c0" to map to control bus 0)
             if (msg.nextTag('f') == 's') {
                 const char* string = msg.gets();
                 if (*string == 'c') {
@@ -699,12 +719,8 @@ SCErr meth_n_fill(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRe
                         Node_MapControl(node, index + i, bus + i);
                     }
                 }
-            } else {
-                float32 value = msg.getf();
-                for (int i = 0; i < n; ++i) {
-                    Node_SetControl(node, index + i, value);
-                }
             }
+            // Note: Removed buggy else block that read a non-existent second value
         }
     }
 
@@ -1160,6 +1176,9 @@ SCErr meth_n_order(World* inWorld, int inSize, char* inData, ReplyAddress* /*inR
 
         if (group != prevGroup) {
             Node_StateMsg(node, kNode_Move);
+        } else {
+            // SUPERSONIC: Update SAB tree for same-group reorder (no OSC notification)
+            NodeTree_UpdateDirect(node);
         }
 
         prevNode = node;
@@ -1183,6 +1202,9 @@ SCErr meth_n_order(World* inWorld, int inSize, char* inData, ReplyAddress* /*inR
 
         if (group != prevGroup) {
             Node_StateMsg(node, kNode_Move);
+        } else {
+            // SUPERSONIC: Update SAB tree for same-group reorder (no OSC notification)
+            NodeTree_UpdateDirect(node);
         }
 
         prevNode = node;
