@@ -176,21 +176,6 @@ supersonic.send('/cmd', 'pluginName', arg1, arg2);
 
 ---
 
-### `/dumpOSC`
-
-Enable/disable OSC message printing for debugging.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| mode | int | 0 = off, 1 = on, 2 = hex, 3 = both |
-
-```javascript
-supersonic.send('/dumpOSC', 1);  // Enable OSC printing
-supersonic.send('/dumpOSC', 0);  // Disable
-```
-
----
-
 ### `/sync`
 
 Wait for all asynchronous commands to complete.
@@ -208,35 +193,6 @@ Use this to ensure async operations (like loading synthdefs) have finished:
 supersonic.send('/d_recv', synthdefBytes);
 supersonic.send('/sync', 1);
 // Wait for /synced 1 before using the synthdef
-```
-
----
-
-### `/clearSched`
-
-Clear all scheduled bundles.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-
-```javascript
-supersonic.send('/clearSched');
-```
-
----
-
-### `/error`
-
-Set error posting mode.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| mode | int | 0 = off, 1 = on, -1 = off for next bundle, -2 = on for next bundle |
-
-```javascript
-supersonic.send('/error', 1);   // Enable error posting
-supersonic.send('/error', 0);   // Disable error posting
-supersonic.send('/error', -1);  // Disable for next bundle only
 ```
 
 ---
@@ -1365,6 +1321,14 @@ This allows synths to send events back to clients.
 ## Unsupported Commands
 
 The following SuperCollider commands and features are **not supported** in SuperSonic. Attempting to use them will throw an error.
+
+### Scheduling and Debug Commands
+
+| Command | Description | Reason |
+|---------|-------------|--------|
+| `/clearSched` | Clear scheduled bundles | SuperSonic runs in NRT mode internally where `mRealTime = false`. The `/clearSched` command only works in realtime mode. |
+| `/dumpOSC` | Print OSC messages | This debugging feature has no effect in SuperSonic. Use browser developer tools to inspect OSC messages via the `onMessage` callback. |
+| `/error` | Set error notification mode | Error notification flags are not applicable in SuperSonic's architecture. |
 
 ### Non-Realtime Mode (NRT)
 
