@@ -114,7 +114,7 @@ extern "C" {
     void PhysicalModeling_Load(InterfaceTable* table);
     void Demand_Load(InterfaceTable* table);
     void DynNoise_Load(InterfaceTable* table);
-    // void FFT_UGens_Load(InterfaceTable* table);  // Function doesn't exist, initFFT is used instead
+    void FFT_UGens_Load(InterfaceTable* table);
     // void iPhone_Load(InterfaceTable* table);      // Not needed for WASM
 }
 
@@ -184,7 +184,7 @@ void initialize_library(const char* uGensPluginPath) {
 #    if defined(SC_IPHONE) && !TARGET_IPHONE_SIMULATOR
     // iPhone_Load(&gInterfaceTable);  // Not needed for WASM
 #    endif
-    // FFT_UGens_Load(&gInterfaceTable);  // Function doesn't exist
+    FFT_UGens_Load(&gInterfaceTable);
     return;
 #endif // STATIC_PLUGINS
 

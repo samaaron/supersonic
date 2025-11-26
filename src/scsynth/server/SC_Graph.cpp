@@ -35,6 +35,16 @@
 #include "SC_Errors.h"
 #include "Unroll.h"
 
+// =============================================================================
+// SUPERSONIC MODIFICATIONS
+// =============================================================================
+// This file has the following changes from upstream SuperCollider:
+//
+// 1. worklet_debug declaration: For WASM debugging output
+// 2. Graph_CalcTrace: Uses worklet_debug instead of scprintf
+// 3. Graph_New error logging: Added worklet_debug call on error
+// =============================================================================
+
 #ifdef __EMSCRIPTEN__
 extern "C" {
     int worklet_debug(const char* fmt, ...);
@@ -55,7 +65,7 @@ void Graph_FirstCalc(Graph* inGraph);
 void Graph_NullFirstCalc(Graph* inGraph);
 
 void Graph_Dtor(Graph* inGraph) {
-    // worklet_debug("->Graph_Dtor %d\n", inGraph->mNode.mID);
+    // scprintf("->Graph_Dtor %d\n", inGraph->mNode.mID);
     World* world = inGraph->mNode.mWorld;
     uint32 numUnits = inGraph->mNumUnits;
     Unit** graphUnits = inGraph->mUnits;
@@ -90,7 +100,7 @@ void Graph_Dtor(Graph* inGraph) {
     }
 
     Node_Dtor(&inGraph->mNode);
-    // worklet_debug("<-Graph_Dtor\n");
+    // scprintf("<-Graph_Dtor\n");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -113,7 +123,7 @@ int Graph_New(struct World* inWorld, struct GraphDef* inGraphDef, int32 inID, st
 void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter* msg,
                 bool argtype) // true for normal args , false for setn type args
 {
-    // worklet_debug("->Graph_Ctor\n");
+    // scprintf("->Graph_Ctor\n");
 
     // hit the memory allocator only once.
     char* memory = (char*)graph + sizeof(Graph);
@@ -390,7 +400,7 @@ void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter*
     graph->mPrivate = nullptr;
 
     // initialize units
-    // worklet_debug("initialize units\n");
+    // scprintf("initialize units\n");
     Unit** calcUnits = graph->mCalcUnits;
     Unit** graphUnits = graph->mUnits;
     int calcCtr = 0;
@@ -410,7 +420,7 @@ void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter*
 
         {
             // hook up unit inputs
-            // worklet_debug("hook up unit inputs\n");
+            // scprintf("hook up unit inputs\n");
             InputSpec* inputSpec = unitSpec->mInputSpec;
             Wire** unitInput = unit->mInput;
             float** unitInBuf = unit->mInBuf;
@@ -424,7 +434,7 @@ void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter*
 
         {
             // hook up unit outputs
-            // worklet_debug("hook up unit outputs\n");
+            // scprintf("hook up unit outputs\n");
             Wire** unitOutput = unit->mOutput;
             float** unitOutBuf = unit->mOutBuf;
             uint32 numOutputs = unitSpec->mNumOutputs;
@@ -462,7 +472,7 @@ void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter*
 void Graph_QueueUnitCmd(Graph* inGraph, int inSize, const char* inData) {
     // put the unit command on a queue and dispatch it right after the first
     // calc function, i.e. after calling the unit constructors.
-    // worklet_debug("->Graph_QueueUnitCmd\n");
+    // scprintf("->Graph_QueueUnitCmd\n");
     QueuedCmd* cmd = (QueuedCmd*)World_Alloc(inGraph->mNode.mWorld, sizeof(QueuedCmd) + inSize);
     cmd->mNext = nullptr;
     cmd->mSize = inSize;
@@ -524,7 +534,7 @@ void Graph_FirstCalc(Graph* inGraph) {
 void Node_NullCalc(struct Node* /*inNode*/);
 
 void Graph_NullFirstCalc(Graph* inGraph) {
-    // worklet_debug("->Graph_FirstCalc\n");
+    // scprintf("->Graph_FirstCalc\n");
     uint32 numUnits = inGraph->mNumUnits;
     Unit** units = inGraph->mUnits;
     for (uint32 i = 0; i < numUnits; ++i) {
@@ -532,46 +542,17 @@ void Graph_NullFirstCalc(Graph* inGraph) {
         // call constructor
         (*unit->mUnitDef->mUnitCtorFunc)(unit);
     }
-    // worklet_debug("<-Graph_FirstCalc\n");
+    // scprintf("<-Graph_FirstCalc\n");
 
     inGraph->mNode.mCalcFunc = &Node_NullCalc;
     // after setting the calc function!
     Graph_DispatchUnitCmds(inGraph);
 }
 
-inline void Graph_Calc_unit(Unit* unit) {
-#ifdef __EMSCRIPTEN__
-    if (!unit) {
-        worklet_debug("[Graph_Calc_unit] ERROR: unit is NULL!");
-        return;
-    }
-    if (!unit->mCalcFunc) {
-        worklet_debug("[Graph_Calc_unit] ERROR: unit->mCalcFunc is NULL! unit=%p", unit);
-        return;
-    }
-
-    for (uint32 i = 0; i < unit->mNumOutputs; ++i) {
-        if (!unit->mOutBuf[i]) {
-            worklet_debug("[Graph_Calc_unit] ERROR: unit->mOutBuf[%d] is NULL! unit=%p, unitDef=%s",
-                         i, unit, unit->mUnitDef ? (char*)unit->mUnitDef->mUnitDefName : "NULL");
-            return;
-        }
-    }
-
-    for (uint32 i = 0; i < unit->mNumInputs; ++i) {
-        if (!unit->mInput[i]) {
-            worklet_debug("[Graph_Calc_unit] ERROR: unit->mInput[%d] is NULL! unit=%p, unitDef=%s",
-                         i, unit, unit->mUnitDef ? (char*)unit->mUnitDef->mUnitDefName : "NULL");
-            return;
-        }
-    }
-#endif
-
-    (unit->mCalcFunc)(unit, unit->mBufLength);
-}
+inline void Graph_Calc_unit(Unit* unit) { (unit->mCalcFunc)(unit, unit->mBufLength); }
 
 void Graph_Calc(Graph* inGraph) {
-    // worklet_debug("->Graph_Calc\n");
+    // scprintf("->Graph_Calc\n");
     uint32 numCalcUnits = inGraph->mNumCalcUnits;
     Unit** calcUnits = inGraph->mCalcUnits;
 
@@ -611,7 +592,7 @@ void Graph_Calc(Graph* inGraph) {
     if (remain2)
         Graph_Calc_unit(calcUnits[i]);
 
-    // worklet_debug("<-Graph_Calc\n");
+    // scprintf("<-Graph_Calc\n");
 }
 
 void Graph_CalcTrace(Graph* inGraph);

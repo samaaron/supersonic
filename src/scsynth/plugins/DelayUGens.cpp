@@ -29,12 +29,6 @@
 
 using namespace std; // for math functions
 
-#ifdef __EMSCRIPTEN__
-extern "C" {
-    int worklet_debug(const char* fmt, ...);
-}
-#endif
-
 const int kMAXMEDIANSIZE = 32;
 
 static InterfaceTable* ft;

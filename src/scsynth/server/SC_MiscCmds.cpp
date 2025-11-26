@@ -691,7 +691,16 @@ SCErr meth_n_fill(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRe
                 Node_SetControl(node, hash, name, i, value);
             }
 
-            // Check for optional bus mapping string (e.g., "c0" to map to control bus 0)
+            // =============================================================================
+            // SUPERSONIC BUG FIX: Removed erroneous else block from upstream
+            // The upstream code had an else block that called msg.getf() to read another
+            // value after the bus mapping check. But per the OSC spec, /n_fill only takes
+            // [controlIndex, numControls, value] - there's no second value to read.
+            // The else block would read garbage/undefined data and overwrite the correct
+            // values that were just set. This was likely a copy-paste error from /n_setn
+            // which DOES take multiple values.
+            // Test: test/osc_semantic.spec.mjs "/n_fill semantic tests"
+            // =============================================================================
             if (msg.nextTag('f') == 's') {
                 const char* string = msg.gets();
                 if (*string == 'c') {
@@ -701,7 +710,7 @@ SCErr meth_n_fill(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRe
                     }
                 }
             }
-            // Note: Removed buggy else block that read a non-existent second value
+            // No else block - if no bus mapping string, the value was already set above
         } else {
             int32 index = msg.geti();
             int32 n = msg.geti();
@@ -710,7 +719,9 @@ SCErr meth_n_fill(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRe
             for (int i = 0; i < n; ++i) {
                 Node_SetControl(node, index + i, value);
             }
-            // Check for optional bus mapping string (e.g., "c0" to map to control bus 0)
+            // =============================================================================
+            // SUPERSONIC BUG FIX: Same fix as above for index-based path
+            // =============================================================================
             if (msg.nextTag('f') == 's') {
                 const char* string = msg.gets();
                 if (*string == 'c') {
@@ -720,7 +731,7 @@ SCErr meth_n_fill(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRe
                     }
                 }
             }
-            // Note: Removed buggy else block that read a non-existent second value
+            // No else block - if no bus mapping string, the value was already set above
         }
     }
 
@@ -1992,6 +2003,13 @@ void initMiscCommands() {
     NEW_COMMAND(b_zero);
     NEW_COMMAND(b_set);
     NEW_COMMAND(b_setn);
+    // =============================================================================
+    // SUPERSONIC: /b_setSampleRate intentionally not implemented
+    // In WebAudio, the browser's decodeAudioData() resamples audio files to match
+    // the AudioContext's sample rate BEFORE the data reaches our buffers.
+    // The buffer's sample rate is set correctly by buffer_set_data() when loading.
+    // This command would have no useful effect in our context.
+    // =============================================================================
     NEW_COMMAND(b_fill);
     NEW_COMMAND(b_gen);
 

@@ -32,6 +32,25 @@
 
 #include <filesystem>
 
+// =============================================================================
+// SUPERSONIC MODIFICATIONS
+// =============================================================================
+// This file has the following changes from upstream SuperCollider:
+//
+// 1. worklet_debug: All scprintf calls replaced with worklet_debug for WASM
+// 2. GET_COMPLETION_MSG: Removed optional integer skip (upstream commit b06dc8b4f)
+//    - The upstream version skips an optional integer after completion message
+//    - This was added to support the optional sampleRate parameter in /b_alloc
+//    - Not needed in WebAudio where sample rate is fixed by AudioContext
+// 3. BufAllocCmd::Init: Removed optional sampleRate parameter (upstream b06dc8b4f)
+//    - WebAudio's decodeAudioData() handles sample rate conversion
+//    - We always use mWorld->mSampleRate for allocated buffers
+// 4. BufFreeCmd::Stage4: Sends /supersonic/buffer/freed for JS buffer pool
+// 5. AudioQuitCmd: Excludes mShmem and mQuitProgram (no SHM/semaphores in WASM)
+// 6. RecvSynthDefCmd::Stage2: Null check for mDefs to prevent null pointer crash
+// 7. RecvSynthDefCmd::Stage4: Sends /supersonic/synthdef/loaded messages
+// =============================================================================
+
 // From audio_processor.cpp
 extern "C" {
     int worklet_debug(const char* fmt, ...);
@@ -1381,7 +1400,9 @@ bool RecvSynthDefCmd::Stage3() {
 void RecvSynthDefCmd::Stage4() {
     SendDone("/d_recv");
 
-    // Send /supersonic/synthdef/loaded for each synthdef that was loaded
+#ifdef __EMSCRIPTEN__
+    // SUPERSONIC: Send /supersonic/synthdef/loaded for each synthdef that was loaded
+    // This allows JavaScript to track which synthdefs are available
     // A synthdef file can contain multiple definitions (linked list via mNext)
     GraphDef* def = mDefs;
     while (def) {
@@ -1394,6 +1415,7 @@ void RecvSynthDefCmd::Stage4() {
         SendReply(&mReplyAddress, packet.data(), packet.size());
         def = def->mNext;
     }
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////
