@@ -116,6 +116,9 @@ extern "C" {
     void DynNoise_Load(InterfaceTable* table);
     void FFT_UGens_Load(InterfaceTable* table);
     // void iPhone_Load(InterfaceTable* table);      // Not needed for WASM
+    // sc3-plugins
+    void Distortion_Load(InterfaceTable* table);
+    void Mda_Load(InterfaceTable* table);
 }
 
 extern void DiskIO_Unload(void);
@@ -185,6 +188,9 @@ void initialize_library(const char* uGensPluginPath) {
     // iPhone_Load(&gInterfaceTable);  // Not needed for WASM
 #    endif
     FFT_UGens_Load(&gInterfaceTable);
+    // sc3-plugins
+    Distortion_Load(&gInterfaceTable);
+    Mda_Load(&gInterfaceTable);
     return;
 #endif // STATIC_PLUGINS
 
