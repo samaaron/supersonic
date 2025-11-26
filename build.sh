@@ -74,6 +74,7 @@ echo "FIXED_MEMORY: $FIXED_MEMORY bytes ($((FIXED_MEMORY / 1024 / 1024))MB)"
 # (SC_ComPort.cpp, XenomaiLock.cpp, SC_PaUtils.cpp, sc_popen.cpp, strtod.c)
 SCSYNTH_SERVER_SOURCES=$(find "$SRC_DIR/scsynth/server" -name "*.cpp" ! -name "SC_*Plugins.cpp" ! -name "scsynth_main.cpp" ! -name "SC_WebAudio.cpp" ! -name "SC_Wasm.cpp" ! -name "SC_WasmOscBuilder.cpp" 2>/dev/null | tr '\n' ' ')
 SCSYNTH_COMMON_SOURCES=$(find "$SRC_DIR/scsynth/common" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
+SCSYNTH_COMMON_C_SOURCES=$(find "$SRC_DIR/scsynth/common" -name "*.c" 2>/dev/null | tr '\n' ' ')
 SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
 
 # Compile audio processor with all scsynth sources and oscpack (standalone WASM for AudioWorklet)
@@ -84,6 +85,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     "$SRC_DIR/scsynth/server/SC_OscUnroll.cpp" \
     $SCSYNTH_SERVER_SOURCES \
     $SCSYNTH_COMMON_SOURCES \
+    $SCSYNTH_COMMON_C_SOURCES \
     $SCSYNTH_PLUGIN_SOURCES \
     "$SRC_DIR/vendor/oscpack/osc/OscTypes.cpp" \
     "$SRC_DIR/vendor/oscpack/osc/OscOutboundPacketStream.cpp" \
@@ -102,6 +104,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -DBOOST_ASIO_HAS_PTHREADS \
     -DSTATIC_PLUGINS \
     -DNOVA_SIMD \
+    -DSC_FFT_GREEN \
     -sSTANDALONE_WASM \
     -sNO_FILESYSTEM=1 \
     -sENVIRONMENT=worker \

@@ -30,6 +30,7 @@ extern void initFFT(InterfaceTable* inTable);
 extern void initPV(InterfaceTable* inTable);
 extern void initPartConv(InterfaceTable* inTable);
 
+extern "C"
 PluginLoad(FFT_UGens) {
     ft = inTable;
 

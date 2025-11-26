@@ -187,7 +187,7 @@ static bool scfft_global_initialization(void) {
     for (int i = SC_FFT_LOG2_MINSIZE; i < SC_FFT_LOG2_MAXSIZE + 1; ++i) {
         cosTable[i] = create_cosTable(i);
     }
-    printf("SC FFT global init: cosTable initialised.\n");
+    // printf("SC FFT global init: cosTable initialised.\n");  // Disabled for WASM
 #elif SC_FFT_VDSP
     // vDSP inits its twiddle factors
     for (int i = SC_FFT_LOG2_MINSIZE; i < SC_FFT_LOG2_MAXSIZE + 1; ++i) {

@@ -50,6 +50,16 @@
 
 namespace fs = std::filesystem;
 
+// =============================================================================
+// SUPERSONIC MODIFICATIONS
+// =============================================================================
+// This file has the following changes from upstream SuperCollider:
+//
+// 1. worklet_debug: Replaces scprintf throughout (declaration from SC_InterfaceTable.h)
+// 2. GraphDef_Load/GraphDef_LoadDir: Exception handlers emptied (filesystem not
+//    available in WASM - synthdefs loaded via OSC /d_recv instead)
+// =============================================================================
+
 extern Malloc gMalloc;
 
 const size_t ERR_BUF_SIZE(256);
@@ -189,8 +199,6 @@ GraphDef* GraphDef_ReadVer1(World* inWorld, char*& buffer, GraphDef* inList, int
 
 GraphDef* GraphDefLib_Read(World* inWorld, char* buffer, GraphDef* inList);
 GraphDef* GraphDefLib_Read(World* inWorld, char* buffer, GraphDef* inList) {
-    char* buffer_start = buffer;
-
     int32 magic = readInt32_be(buffer);
 
     if (magic != (('S' << 24) | ('C' << 16) | ('g' << 8) | 'f') /*'SCgf'*/) {
@@ -367,8 +375,6 @@ static void GraphDef_SetAllocSizes(GraphDef* graphDef) {
  * \note Relevant v1 code: \c GraphDef_ReadVer1()
  */
 GraphDef* GraphDef_Read(World* inWorld, char*& buffer, GraphDef* inList, int32 inVersion) {
-    char* buffer_entry = buffer;
-
     int32 name[kSCNodeDefNameLen];
     ReadNodeDefName(buffer, name);
 
@@ -384,19 +390,12 @@ GraphDef* GraphDef_Read(World* inWorld, char*& buffer, GraphDef* inList, int32 i
 
     graphDef->mNumConstants = readInt32_be(buffer);
 
-    if (graphDef->mNumConstants > 0) {
-        graphDef->mConstants = (float*)malloc(graphDef->mNumConstants * sizeof(float));
-        for (uint32 i = 0; i < graphDef->mNumConstants; ++i) {
-            graphDef->mConstants[i] = readFloat_be(buffer);
-            if (i < 5 || i == graphDef->mNumConstants - 1) {
-            }
-        }
-    } else {
-        graphDef->mConstants = nullptr;
+    graphDef->mConstants = (float*)malloc(graphDef->mNumConstants * sizeof(float));
+    for (uint32 i = 0; i < graphDef->mNumConstants; ++i) {
+        graphDef->mConstants[i] = readFloat_be(buffer);
     }
 
     graphDef->mNumControls = readInt32_be(buffer);
-
     graphDef->mInitialControlValues = (float32*)malloc(sizeof(float32) * graphDef->mNumControls);
     for (uint32 i = 0; i < graphDef->mNumControls; ++i) {
         graphDef->mInitialControlValues[i] = readFloat_be(buffer);
@@ -608,9 +607,9 @@ GraphDef* GraphDef_Recv(World* inWorld, char* buffer, GraphDef* inList) {
     try {
         inList = GraphDefLib_Read(inWorld, buffer, inList);
     } catch (std::exception& exc) {
-        return inList;
+        worklet_debug("exception in GraphDef_Recv: %s\n", exc.what());
     } catch (...) {
-        return inList;
+        worklet_debug("unknown exception in GraphDef_Recv\n");
     }
 
     return inList;
@@ -644,14 +643,16 @@ std::string load_file(const std::filesystem::path& file_path) {
     return buffer.str();
 }
 
+// NOTE: This function requires filesystem access which is not available in WASM.
+// SuperSonic loads synthdefs via OSC (/d_recv) through GraphDef_Recv instead.
 GraphDef* GraphDef_Load(World* inWorld, const fs::path& path, GraphDef* inList) {
     try {
         std::string file_contents = load_file(path);
         inList = GraphDefLib_Read(inWorld, &file_contents[0], inList);
     } catch (const std::exception& e) {
-        const std::string path_utf8_str = SC_Codecvt::path_to_utf8_str(path);
+        // Filesystem not available in WASM - this function won't be called
     } catch (...) {
-        const std::string path_utf8_str = SC_Codecvt::path_to_utf8_str(path);
+        // Filesystem not available in WASM - this function won't be called
     }
 
     return inList;
@@ -717,13 +718,21 @@ void GraphDef_Free(GraphDef* inGraphDef) {
 }
 
 void NodeDef_Dump(NodeDef* inNodeDef) {
+    worklet_debug("mName '%s'\n", (char*)inNodeDef->mName);
+    worklet_debug("mHash %d\n", inNodeDef->mHash);
+    worklet_debug("mAllocSize %lu\n", inNodeDef->mAllocSize);
 }
 
 void GraphDef_Dump(GraphDef* inGraphDef) {
     NodeDef_Dump(&inGraphDef->mNodeDef);
 
+    worklet_debug("mNumControls %d\n", inGraphDef->mNumControls);
+    worklet_debug("mNumWires %d\n", inGraphDef->mNumWires);
+    worklet_debug("mNumUnitSpecs %d\n", inGraphDef->mNumUnitSpecs);
+    worklet_debug("mNumWireBufs %d\n", inGraphDef->mNumWireBufs);
 
     for (uint32 i = 0; i < inGraphDef->mNumControls; ++i) {
+        worklet_debug("   %d mInitialControlValues %g\n", i, inGraphDef->mInitialControlValues[i]);
     }
 
     for (uint32 i = 0; i < inGraphDef->mNumWires; ++i) {
