@@ -70,9 +70,10 @@ fi
 echo "FIXED_MEMORY: $FIXED_MEMORY bytes ($((FIXED_MEMORY / 1024 / 1024))MB)"
 
 # Collect all scsynth source files
-# Exclude SC_ComPort.cpp (has nova-tt dependencies, replaced by SC_OscUnroll.cpp)
-SCSYNTH_SERVER_SOURCES=$(find "$SRC_DIR/scsynth/server" -name "*.cpp" ! -name "SC_*Plugins.cpp" ! -name "scsynth_main.cpp" ! -name "SC_WebAudio.cpp" ! -name "SC_Wasm.cpp" ! -name "SC_WasmOscBuilder.cpp" ! -name "SC_ComPort.cpp" 2>/dev/null | tr '\n' ' ')
-SCSYNTH_COMMON_SOURCES=$(find "$SRC_DIR/scsynth/common" -name "*.cpp" ! -name "XenomaiLock.cpp" ! -name "SC_PaUtils.cpp" ! -name "sc_popen.cpp" ! -name "strtod.c" 2>/dev/null | tr '\n' ' ')
+# Note: Platform-specific and unused files have been removed from the repo entirely
+# (SC_ComPort.cpp, XenomaiLock.cpp, SC_PaUtils.cpp, sc_popen.cpp, strtod.c)
+SCSYNTH_SERVER_SOURCES=$(find "$SRC_DIR/scsynth/server" -name "*.cpp" ! -name "SC_*Plugins.cpp" ! -name "scsynth_main.cpp" ! -name "SC_WebAudio.cpp" ! -name "SC_Wasm.cpp" ! -name "SC_WasmOscBuilder.cpp" 2>/dev/null | tr '\n' ' ')
+SCSYNTH_COMMON_SOURCES=$(find "$SRC_DIR/scsynth/common" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
 SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
 
 # Compile audio processor with all scsynth sources and oscpack (standalone WASM for AudioWorklet)
