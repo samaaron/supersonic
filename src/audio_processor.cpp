@@ -287,9 +287,7 @@ extern "C" {
         // Enable worklet_debug
         memory_initialized = true;
 
-        worklet_debug("Booting SuperSonic %d.%d.%d (scsynth-nrt %d.%d.%d%s)",
-                     SUPERSONIC_VERSION_MAJOR, SUPERSONIC_VERSION_MINOR, SUPERSONIC_VERSION_PATCH,
-                     SC_VersionMajor, SC_VersionMinor, SC_VersionPatch, SC_VersionTweak);
+        // Boot message shown after ASCII art below
 
         // Read worldOptions from SharedArrayBuffer (written by JS)
         // WorldOptions location: ringBufferBase + 65536 (after ring_buffer_storage)
@@ -319,9 +317,6 @@ extern "C" {
             : (uint32_t)sample_rate;                                // From JS or AudioContext
         // worldOptionsPtr[15] = verbosity
         options.mVerbosity = worldOptionsPtr[15];                   // From JS
-
-        worklet_debug("WorldOptions from JS: numBuffers=%u, maxNodes=%u, realTimeMemorySize=%u KB",
-                     options.mNumBuffers, options.mMaxNodes, options.mRealTimeMemorySize);
 
         // Create World
         try {
@@ -386,24 +381,21 @@ extern "C" {
         g_scheduler.Empty();
         update_scheduler_depth_metric(0);
 
-        worklet_debug("Scheduler initialized: buf=%d samples, osc_inc=%lld",
-                     buf_length, (long long)g_osc_increment);
-
         // Add root group to node tree (it was created during World_New but doesn't trigger Node_StateMsg)
         if (g_world->mTopGroup) {
             uint8_t* node_tree_ptr = shared_memory + NODE_TREE_START;
             NodeTreeHeader* tree_header = reinterpret_cast<NodeTreeHeader*>(node_tree_ptr);
             NodeEntry* tree_entries = reinterpret_cast<NodeEntry*>(node_tree_ptr + NODE_TREE_HEADER_SIZE);
             NodeTree_Add(&g_world->mTopGroup->mNode, tree_header, tree_entries);
-            worklet_debug("[NodeTree] Added root group (id %d), count now: %u",
-                         g_world->mTopGroup->mNode.mID,
-                         tree_header->node_count.load(std::memory_order_relaxed));
         }
 
         worklet_debug("░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀");
         worklet_debug("░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░");
         worklet_debug("░▀▀▀░▀▀▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀");
-        worklet_debug("scsynth-nrt ready: %.0fHz, %d channels (build: %s)", sample_rate, options.mNumOutputBusChannels, BUILD_HASH);
+        worklet_debug("v%d.%d.%d (scsynth %d.%d.%d) %.0fkHz %dch",
+                     SUPERSONIC_VERSION_MAJOR, SUPERSONIC_VERSION_MINOR, SUPERSONIC_VERSION_PATCH,
+                     SC_VersionMajor, SC_VersionMinor, SC_VersionPatch,
+                     sample_rate / 1000, options.mNumOutputBusChannels);
     }
 
     // Main audio processing function - called every audio frame (128 samples)
@@ -437,14 +429,6 @@ extern "C" {
         double ntp_start = cached_ntp_start;
         double drift_seconds = drift_offset ? (drift_offset->load(std::memory_order_relaxed) / 1000.0) : 0.0;
         double global_seconds = global_offset ? (global_offset->load(std::memory_order_relaxed) / 1000.0) : 0.0;
-
-        // Debug: Log first time ntp_start is cached
-        static bool logged_once = false;
-        if (!logged_once && ntp_start != 0.0) {
-            worklet_debug("NTP timing: ntp_start=%.6f drift=%.3fms global=%.3fms",
-                         ntp_start, drift_seconds * 1000.0, global_seconds * 1000.0);
-            logged_once = true;
-        }
 
         double current_ntp = current_time + ntp_start + drift_seconds + global_seconds;
 
