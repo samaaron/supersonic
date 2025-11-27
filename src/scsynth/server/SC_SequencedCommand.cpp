@@ -49,6 +49,7 @@
 // 5. AudioQuitCmd: Excludes mShmem and mQuitProgram (no SHM/semaphores in WASM)
 // 6. RecvSynthDefCmd::Stage2: Null check for mDefs to prevent null pointer crash
 // 7. RecvSynthDefCmd::Stage4: Sends /supersonic/synthdef/loaded messages
+// 8. RecvSynthDefCmd::Init: Added worklet_debug for empty synthdef error
 // =============================================================================
 
 // From audio_processor.cpp
@@ -1364,6 +1365,7 @@ int RecvSynthDefCmd::Init(char* inData, int inSize) {
 
     int size = msg.getbsize();
     if (!size) {
+        worklet_debug("ERROR /d_recv: synthdef data is empty");
         throw kSCErr_WrongArgType;
     }
 

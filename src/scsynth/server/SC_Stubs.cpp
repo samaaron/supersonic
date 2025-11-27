@@ -72,6 +72,20 @@ extern "C" {
 // PerformOSCMessage - dispatch OSC commands to their handlers
 // Based on SC_CoreAudio.cpp:200-224
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
+    // Validate inputs
+    if (!inWorld) {
+        worklet_debug("ERROR: PerformOSCMessage called with null World");
+        return kSCErr_Failed;
+    }
+    if (!inData) {
+        worklet_debug("ERROR: PerformOSCMessage called with null data");
+        return kSCErr_Failed;
+    }
+    if (inSize <= 0 || inSize > 65536) {
+        worklet_debug("ERROR: PerformOSCMessage invalid size: %d", inSize);
+        return kSCErr_Failed;
+    }
+
     // Safety check: ensure command library is initialized
     if (!gCmdLib) {
         worklet_debug("ERROR: gCmdLib not initialized");
@@ -84,6 +98,10 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
     if (inData[0] == 0) {
         // Integer command (first byte is 0)
         cmdNameLen = 4;
+        if (inSize < 4) {
+            worklet_debug("ERROR: Integer command too short: %d bytes", inSize);
+            return kSCErr_Failed;
+        }
         uint32 index = inData[3];
         if (index >= NUMBER_OF_COMMANDS)
             cmdObj = nullptr;
@@ -92,19 +110,36 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
     } else {
         // String command (like "/status")
         cmdNameLen = OSCstrlen(inData);
+        if (cmdNameLen <= 0 || cmdNameLen > inSize) {
+            worklet_debug("ERROR: Invalid command name length: %d (data size: %d)", cmdNameLen, inSize);
+            return kSCErr_Failed;
+        }
         cmdObj = gCmdLib->Get((int32*)inData);
     }
 
     if (!cmdObj) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "Command not found: %s", inData);
-        worklet_debug(msg);
+        // Sanitize command name for logging (may contain binary garbage)
+        char safeName[64];
+        int copyLen = (inSize < 63) ? inSize : 63;
+        for (int i = 0; i < copyLen; i++) {
+            char c = inData[i];
+            safeName[i] = (c >= 32 && c < 127) ? c : '?';
+        }
+        safeName[copyLen] = '\0';
+        worklet_debug("Command not found: %s (size=%d)", safeName, inSize);
         return kSCErr_NoSuchCommand;
+    }
+
+    // Validate arguments size
+    int argSize = inSize - cmdNameLen;
+    if (argSize < 0) {
+        worklet_debug("ERROR: Negative argument size: %d (cmd=%d, total=%d)", argSize, cmdNameLen, inSize);
+        return kSCErr_Failed;
     }
 
     // Execute command via exception-safe Perform() wrapper
     // Pass only the arguments (skip the command name)
-    int err = cmdObj->Perform(inWorld, inSize - cmdNameLen, inData + cmdNameLen, inReply);
+    int err = cmdObj->Perform(inWorld, argSize, inData + cmdNameLen, inReply);
 
     return err;
 }
@@ -112,10 +147,37 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
 // PerformOSCBundle - execute all messages in an OSC bundle
 // Based on SC_CoreAudio.cpp:226-243
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket) {
+    // Validate inputs
+    if (!inWorld) {
+        worklet_debug("ERROR: PerformOSCBundle called with null World");
+        return;
+    }
+    if (!inPacket || !inPacket->mData) {
+        worklet_debug("ERROR: PerformOSCBundle called with null packet/data");
+        return;
+    }
+    if (inPacket->mSize < 16) {
+        worklet_debug("ERROR: Bundle too small: %d bytes (min 16)", inPacket->mSize);
+        return;
+    }
+    if (inPacket->mSize > 65536) {
+        worklet_debug("ERROR: Bundle too large: %d bytes", inPacket->mSize);
+        return;
+    }
+
     char* data = inPacket->mData + 16;  // Skip "#bundle" (8 bytes) + timetag (8 bytes)
     char* dataEnd = inPacket->mData + inPacket->mSize;
+    int msgCount = 0;
+    const int maxMessages = 256;  // Sanity limit
 
-    while (data < dataEnd) {
+    while (data < dataEnd && msgCount < maxMessages) {
+        // Check we have at least 4 bytes for size
+        if (data + 4 > dataEnd) {
+            worklet_debug("ERROR: Bundle truncated at message %d (need 4 bytes, have %ld)",
+                         msgCount, (long)(dataEnd - data));
+            break;
+        }
+
         // Read big-endian int32 message size
         int32_t msgSize = ((uint8_t)data[0] << 24) |
                           ((uint8_t)data[1] << 16) |
@@ -123,9 +185,29 @@ void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket) {
                           ((uint8_t)data[3]);
         data += sizeof(int32_t);
 
+        // Validate message size
+        if (msgSize <= 0) {
+            worklet_debug("ERROR: Invalid message size %d at message %d", msgSize, msgCount);
+            break;
+        }
+        if (msgSize > 65536) {
+            worklet_debug("ERROR: Message %d too large: %d bytes", msgCount, msgSize);
+            break;
+        }
+        if (data + msgSize > dataEnd) {
+            worklet_debug("ERROR: Message %d overflows bundle (size=%d, avail=%ld)",
+                         msgCount, msgSize, (long)(dataEnd - data));
+            break;
+        }
+
         // Perform the OSC message
         PerformOSCMessage(inWorld, msgSize, data, &inPacket->mReplyAddr);
         data += msgSize;
+        msgCount++;
+    }
+
+    if (msgCount >= maxMessages) {
+        worklet_debug("WARNING: Bundle hit message limit (%d)", maxMessages);
     }
 
     // Reset error notification state for next command
@@ -206,6 +288,10 @@ bool SC_AudioDriver::Setup() {
 }
 
 bool SC_AudioDriver::Start() {
+    return false;  // Never called in NRT
+}
+
+bool SC_AudioDriver::Stop() {
     return false;  // Never called in NRT
 }
 
