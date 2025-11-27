@@ -553,6 +553,16 @@ extern "C" {
 
                         PerformOSCBundle(g_world, &packet);
                     } else {
+                        // Future bundle - check if scheduler has room first (backpressure)
+                        if (g_scheduler.IsFull()) {
+                            // Scheduler full - leave message in ring buffer for next callback
+                            // Reset sequence tracking so next iteration processes this message correctly
+                            last_in_sequence = (header.sequence > 0) ? (int32_t)(header.sequence - 1) : -1;
+                            worklet_debug("INFO: Scheduler full (%d events), backpressure - message stays in ring buffer",
+                                         g_scheduler.Size());
+                            break;  // Exit message processing loop
+                        }
+
                         // Future bundle - schedule it (RT-safe, no malloc!)
                         // Convert current NTP time to OSC timetag format (int64)
                         uint32_t seconds = (uint32_t)current_ntp;
@@ -561,7 +571,8 @@ extern "C" {
                         int64_t current_osc_time = (int64_t)current_osc_time_u;
 
                         if (!schedule_bundle(g_world, (int64_t)timetag, current_osc_time, osc_buffer, payload_size, reply_addr)) {
-                            worklet_debug("ERROR: Failed to schedule bundle");
+                            // This shouldn't happen now since we check IsFull() first
+                            worklet_debug("ERROR: Failed to schedule bundle (unexpected)");
                         }
                     }
                 } else {
