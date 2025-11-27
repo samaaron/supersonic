@@ -1173,20 +1173,33 @@ test.describe("/s_new semantic tests", () => {
 
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
-      const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
 
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
 
-      messages.length = 0;
-      await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
-      await sonic.sync(1);
+      // Wait for /n_go notification (not just sync reply)
+      const nGoPromise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("/n_go not received")), 2000);
+        const originalHandler = sonic.onMessage;
+        sonic.onMessage = (msg) => {
+          if (msg.address === "/n_go" && msg.args[0] === 1000) {
+            clearTimeout(timeout);
+            sonic.onMessage = originalHandler;
+            resolve(msg);
+          }
+          if (originalHandler) originalHandler(msg);
+        };
+      });
 
-      const nGoMsg = messages.find(
-        (m) => m.address === "/n_go" && m.args[0] === 1000
-      );
+      await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
+
+      let nGoMsg;
+      try {
+        nGoMsg = await nGoPromise;
+      } catch (e) {
+        nGoMsg = null;
+      }
 
       // Cleanup
       await sonic.send("/n_free", 1000);
