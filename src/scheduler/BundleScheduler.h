@@ -18,7 +18,7 @@ struct World;
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
 
 // Maximum scheduled events (RT-safe, statically allocated)
-constexpr int MAX_SCHEDULED_BUNDLES = 64;
+constexpr int MAX_SCHEDULED_BUNDLES = 128;
 
 // Scheduled OSC bundle - stored in pool, never copied
 struct ScheduledBundle {

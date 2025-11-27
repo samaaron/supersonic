@@ -3,17 +3,17 @@ import { test, expect } from "@playwright/test";
 /**
  * Scheduler Queue Overflow Test
  *
- * The scheduler has a fixed capacity of 64 events. When we send more than 64
+ * The scheduler has a fixed capacity of 128 events. When we send more than 128
  * timed bundles rapidly, the queue overflows and messages are dropped.
  *
- * This test sends SCHEDULER_CAPACITY + 20 = 84 messages to prove the issue.
+ * This test sends SCHEDULER_CAPACITY + 200 messages to prove the issue.
  * The test FAILS if any messages are dropped - which currently happens.
  *
  * After implementing backpressure (leaving messages in the ring buffer when
  * scheduler is full), this test should PASS.
  */
 
-const SCHEDULER_CAPACITY = 64;
+const SCHEDULER_CAPACITY = 128;
 const OVERFLOW_AMOUNT = 200; // Much more aggressive - send 3x+ capacity
 const TOTAL_MESSAGES = SCHEDULER_CAPACITY + OVERFLOW_AMOUNT;
 
@@ -387,8 +387,8 @@ test.describe("Scheduler Queue Overflow", () => {
     expect(result.overflowErrors?.length || 0).toBe(0);
   });
 
-  test("verify scheduler capacity is 64", async ({ page }) => {
-    // Sanity check: send exactly 64 messages - should all fit
+  test("verify scheduler capacity is 128", async ({ page }) => {
+    // Sanity check: send exactly 128 messages - should all fit
     await page.goto("/test/harness.html");
 
     await page.waitForFunction(() => window.supersonicReady === true, {
