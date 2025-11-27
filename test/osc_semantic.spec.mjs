@@ -2644,6 +2644,672 @@ test.describe("Error handling tests", () => {
 });
 
 // =============================================================================
+// MALFORMED INPUT ROBUSTNESS TESTS
+// =============================================================================
+
+test.describe("Malformed input robustness tests", () => {
+  // Test 1: Malformed synthdef with truncated header
+  test("malformed synthdef - truncated header handled gracefully", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+
+      // Create a truncated synthdef (just the magic bytes, no content)
+      // SCgf header is "SCgf" (0x53436766)
+      const truncatedSynthdef = new Uint8Array([0x53, 0x43, 0x67, 0x66]);
+
+      try {
+        await sonic.send("/d_recv", truncatedSynthdef);
+        await sonic.sync(1);
+      } catch (e) {
+        // Exception is acceptable for malformed data
+      }
+
+      // Verify server is still responsive
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(2);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+      return {
+        serverResponsive: !!statusReply,
+        numGroups: statusReply?.args?.[3],
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+    expect(result.numGroups).toBeGreaterThanOrEqual(1);
+  });
+
+  // Test 2: Synthdef with invalid/unknown UGen name
+  test("synthdef with unknown UGen name handled gracefully", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      const debugMessages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.onDebugMessage = (msg) => debugMessages.push(msg);
+
+      await sonic.init();
+
+      // Create a minimal synthdef structure with a fake UGen name
+      // This is a simplified synthdef-like structure:
+      // SCgf magic (4) + version (4) + num defs (2) + name len (1) + name + ...
+      const fakeUGenName = "NonExistentUGen123";
+      const defName = "test-bad-ugen";
+
+      // Build a minimal but structurally valid synthdef with unknown UGen
+      const header = new Uint8Array([
+        0x53,
+        0x43,
+        0x67,
+        0x66, // "SCgf"
+        0x00,
+        0x00,
+        0x00,
+        0x02, // version 2
+        0x00,
+        0x01, // 1 synthdef
+      ]);
+
+      // Simplified - just send corrupted data to test exception handling
+      const malformed = new Uint8Array([
+        ...header,
+        defName.length,
+        ...new TextEncoder().encode(defName),
+        0x00,
+        0x00,
+        0x00,
+        0x00, // 0 constants
+        0x00,
+        0x00,
+        0x00,
+        0x00, // 0 params
+        0x00,
+        0x00,
+        0x00,
+        0x00, // 0 param names
+        0x00,
+        0x00,
+        0x00,
+        0x01, // 1 UGen
+        fakeUGenName.length,
+        ...new TextEncoder().encode(fakeUGenName),
+        0x02, // rate
+        0x00,
+        0x00,
+        0x00,
+        0x00, // 0 inputs
+        0x00,
+        0x00,
+        0x00,
+        0x01, // 1 output
+        0x00,
+        0x00, // special index
+        0x02, // output rate
+      ]);
+
+      await sonic.send("/d_recv", malformed);
+
+      // Wait for processing
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Verify server still works
+      await sonic.send("/status");
+      await new Promise((r) => setTimeout(r, 200));
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const hasUGenError = debugMessages.some(
+        (m) => m.text && m.text.includes("not installed")
+      );
+
+      return {
+        serverResponsive: !!statusReply,
+        hasUGenError,
+        debugMessages: debugMessages.map((m) => m.text).filter(Boolean),
+        allMessages: messages.map((m) => m.address),
+      };
+    }, SONIC_CONFIG);
+
+    console.log("Test result:", result);
+
+    expect(result.serverResponsive).toBe(true);
+    expect(result.hasUGenError).toBe(true);
+  });
+
+  // Test 3: Synthdef with excessively long name
+  test("synthdef with excessively long name handled gracefully", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+
+      // Create a synthdef with a name > 255 characters (max allowed)
+      // The name length byte can only hold 0-255, so we test edge cases
+      const longName = "a".repeat(300);
+
+      // Build header with oversized name (will be truncated to 255 in length byte)
+      const header = new Uint8Array([
+        0x53,
+        0x43,
+        0x67,
+        0x66, // "SCgf"
+        0x00,
+        0x00,
+        0x00,
+        0x02, // version 2
+        0x00,
+        0x01, // 1 synthdef
+        0xff, // 255 (max length byte can hold)
+        ...new TextEncoder().encode(longName.slice(0, 255)),
+        // Incomplete data after name
+      ]);
+
+      try {
+        await sonic.send("/d_recv", header);
+        await sonic.sync(1);
+      } catch (e) {
+        // Exception is acceptable
+      }
+
+      // Verify server still works
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(2);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+      return {
+        serverResponsive: !!statusReply,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+  });
+
+  // Test 4: Empty synthdef data
+  test("empty synthdef data handled gracefully", async ({ page }) => {
+    await page.goto("/test/harness.html");
+
+    // Capture console errors from the page
+    const consoleErrors = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        consoleErrors.push(msg.text());
+      }
+    });
+    page.on("pageerror", (err) => {
+      consoleErrors.push(`Page error: ${err.message}`);
+    });
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      const debugMessages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.onDebugMessage = (msg) => debugMessages.push(msg);
+
+      await sonic.init();
+
+      // First verify server works before malformed input
+      await sonic.send("/status");
+      await new Promise((r) => setTimeout(r, 100));
+      const statusBefore = messages.find((m) => m.address === "/status.reply");
+
+      // Send empty synthdef - should be rejected gracefully
+      messages.length = 0;
+      await sonic.send("/d_recv", new Uint8Array(0));
+
+      // Wait for any error/debug messages
+      await new Promise((r) => setTimeout(r, 200));
+
+      // Verify server still works
+      await sonic.send("/status");
+      await new Promise((r) => setTimeout(r, 200));
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const hasErrorMessage = debugMessages.some(
+        (m) => m.text && m.text.includes("ERROR") && m.text.includes("d_recv")
+      );
+
+      return {
+        serverWorkedBefore: !!statusBefore,
+        serverResponsive: !!statusReply,
+        hasErrorMessage,
+        debugMessages: debugMessages.map((m) => m.text).filter(Boolean),
+        allMessages: messages.map((m) => m.address),
+      };
+    }, SONIC_CONFIG);
+
+    console.log("Test result:", result);
+    console.log("Console errors:", consoleErrors);
+
+    expect(result.serverWorkedBefore).toBe(true);
+    expect(result.serverResponsive).toBe(true);
+    expect(result.hasErrorMessage).toBe(true);
+  });
+
+  // Test 5: Random garbage data as synthdef
+  test("random garbage data as synthdef handled gracefully", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+
+      // Send random garbage bytes
+      const garbage = new Uint8Array(256);
+      for (let i = 0; i < garbage.length; i++) {
+        garbage[i] = Math.floor(Math.random() * 256);
+      }
+
+      try {
+        await sonic.send("/d_recv", garbage);
+        await sonic.sync(1);
+      } catch (e) {
+        // Exception is acceptable
+      }
+
+      // Verify server still works
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(2);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+      return {
+        serverResponsive: !!statusReply,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+  });
+
+  // Test 6: /s_new with non-existent synthdef
+  test("/s_new with non-existent synthdef handled gracefully", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+
+      const treeBefore = sonic.getTree();
+      const countBefore = treeBefore.nodeCount;
+
+      // Try to create synth with non-existent synthdef
+      await sonic.send("/s_new", "this-synthdef-does-not-exist", 5000, 0, 0);
+      await sonic.sync(1);
+
+      const treeAfter = sonic.getTree();
+      const countAfter = treeAfter.nodeCount;
+
+      // Verify server still works
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(2);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+
+      return {
+        serverResponsive: !!statusReply,
+        synthNotCreated: countBefore === countAfter,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+    expect(result.synthNotCreated).toBe(true);
+  });
+
+  // Test 7: Invalid add action in /s_new
+  test("/s_new with invalid add action handled gracefully", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      const treeBefore = sonic.getTree();
+      const countBefore = treeBefore.nodeCount;
+
+      // Try with invalid add action (999)
+      await sonic.send("/s_new", "sonic-pi-beep", 5001, 999, 0);
+      await sonic.sync(1);
+
+      const treeAfter = sonic.getTree();
+
+      // Verify server still works
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(2);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+
+      return {
+        serverResponsive: !!statusReply,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+  });
+
+  // Test 8: /g_new with invalid target node
+  test("/g_new with non-existent target node handled gracefully", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+
+      const treeBefore = sonic.getTree();
+      const countBefore = treeBefore.nodeCount;
+
+      // Try to create group with non-existent target
+      await sonic.send("/g_new", 6000, 0, 99999);
+      await sonic.sync(1);
+
+      const treeAfter = sonic.getTree();
+      const countAfter = treeAfter.nodeCount;
+
+      // Verify server still works
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(2);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+
+      return {
+        serverResponsive: !!statusReply,
+        groupNotCreated: countBefore === countAfter,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+    expect(result.groupNotCreated).toBe(true);
+  });
+
+  // Test 9: /n_set with wrong argument types
+  test("/n_set with wrong argument types handled gracefully", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      // Create a synth
+      await sonic.send("/s_new", "sonic-pi-beep", 7000, 0, 0);
+      await sonic.sync(1);
+
+      // Try various malformed /n_set calls
+      await sonic.send("/n_set", 7000); // Missing control name/value
+      await sonic.sync(2);
+
+      // Verify synth still exists and server works
+      const tree = sonic.getTree();
+      const synthExists = tree.nodes.some((n) => n.id === 7000);
+
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(3);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+
+      // Cleanup
+      await sonic.send("/n_free", 7000);
+
+      return {
+        serverResponsive: !!statusReply,
+        synthStillExists: synthExists,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+    expect(result.synthStillExists).toBe(true);
+  });
+
+  // Test 10: /b_alloc with extreme values
+  test("/b_alloc with extreme values handled gracefully", async ({ page }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+
+      // Try to allocate an impossibly large buffer
+      try {
+        await sonic.send("/b_alloc", 100, 0x7fffffff, 2); // ~2GB buffer
+        await sonic.sync(1);
+      } catch (e) {
+        // Exception is acceptable
+      }
+
+      // Verify server still works
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(2);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+
+      return {
+        serverResponsive: !!statusReply,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+  });
+
+  // Test 11: /b_set with out-of-bounds index
+  test("/b_set with out-of-bounds index handled gracefully", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+
+      // Allocate a small buffer
+      await sonic.send("/b_alloc", 200, 64, 1);
+      await sonic.sync(1);
+
+      // Try to set out-of-bounds sample
+      await sonic.send("/b_set", 200, 99999, 1.0);
+      await sonic.sync(2);
+
+      // Verify server still works
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(3);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+
+      // Cleanup
+      await sonic.send("/b_free", 200);
+
+      return {
+        serverResponsive: !!statusReply,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+  });
+
+  // Test 12: Rapid fire of malformed commands doesn't crash
+  test("rapid fire of malformed commands handled gracefully", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+
+      // Send many malformed commands rapidly
+      const promises = [];
+      for (let i = 0; i < 50; i++) {
+        promises.push(sonic.send("/s_new", "nonexistent", -1, 0, 0));
+        promises.push(sonic.send("/n_free", 99999 + i));
+        promises.push(sonic.send("/n_set", 88888 + i, "x", i));
+        promises.push(sonic.send("/g_new", -1, 999, 77777 + i));
+      }
+
+      try {
+        await Promise.all(promises);
+      } catch (e) {
+        // Exceptions acceptable
+      }
+
+      await sonic.sync(1);
+
+      // Verify server still works
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(2);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+
+      return {
+        serverResponsive: !!statusReply,
+        numGroups: statusReply?.args?.[3],
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+    expect(result.numGroups).toBeGreaterThanOrEqual(1);
+  });
+
+  // Test 13: Unknown OSC command handled gracefully
+  test("unknown OSC command handled gracefully", async ({ page }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+
+      // Send completely unknown command
+      await sonic.send("/this_command_does_not_exist", 1, 2, 3);
+      await sonic.sync(1);
+
+      // Verify server still works
+      messages.length = 0;
+      await sonic.send("/status");
+      await sonic.sync(2);
+
+      const statusReply = messages.find((m) => m.address === "/status.reply");
+
+      return {
+        serverResponsive: !!statusReply,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.serverResponsive).toBe(true);
+  });
+
+  // Test 14: Valid synthdef still works after malformed ones
+  test("valid synthdef loads after malformed attempts", async ({ page }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.onMessage = (msg) => messages.push(msg);
+
+      await sonic.init();
+
+      // Send several malformed synthdefs
+      const garbage = new Uint8Array([1, 2, 3, 4, 5]);
+      try {
+        await sonic.send("/d_recv", garbage);
+      } catch (e) {}
+      try {
+        await sonic.send("/d_recv", new Uint8Array(0));
+      } catch (e) {}
+      try {
+        await sonic.send(
+          "/d_recv",
+          new Uint8Array([0x53, 0x43, 0x67, 0x66, 0xff, 0xff])
+        );
+      } catch (e) {}
+
+      await sonic.sync(1);
+
+      // Now load a valid synthdef
+      await sonic.loadSynthDef("sonic-pi-beep");
+      await sonic.sync(2);
+
+      // Create a synth with it
+      await sonic.send("/s_new", "sonic-pi-beep", 8000, 0, 0);
+      await sonic.sync(3);
+
+      const tree = sonic.getTree();
+      const synthExists = tree.nodes.some((n) => n.id === 8000);
+
+      // Cleanup
+      await sonic.send("/n_free", 8000);
+
+      return {
+        synthCreated: synthExists,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.synthCreated).toBe(true);
+  });
+});
+
+// =============================================================================
 // /d_freeAll - FREE ALL SYNTHDEFS
 // =============================================================================
 

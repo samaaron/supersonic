@@ -951,9 +951,27 @@ Group* World_GetGroup(World* inWorld, int32 inID) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Forward declare worklet_debug
+extern "C" int worklet_debug(const char* fmt, ...);
+
 void World_Run(World* inWorld) {
+    // Validate world before running
+    if (!inWorld) {
+        worklet_debug("ERROR: World_Run called with null World");
+        return;
+    }
+    if (!inWorld->mTopGroup) {
+        worklet_debug("ERROR: World_Run: mTopGroup is null");
+        return;
+    }
+
     // run top group
     Node* node = (Node*)inWorld->mTopGroup;
+    if (!node->mCalcFunc) {
+        worklet_debug("ERROR: World_Run: TopGroup has null mCalcFunc");
+        return;
+    }
+
     (*node->mCalcFunc)(node);
 }
 

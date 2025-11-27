@@ -123,6 +123,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -Wno-extern-c-compat \
     -msimd128 \
     -flto \
+    -fwasm-exceptions \
     -sERROR_ON_UNDEFINED_SYMBOLS=0 \
     -o "$OUTPUT_DIR/wasm/scsynth-nrt.wasm"
 
