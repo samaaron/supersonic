@@ -39,7 +39,7 @@ test.describe("Ring Buffer Stress Test (Demo Page)", () => {
 
     // Wait for SuperSonic to initialize by checking debug log
     await page.waitForFunction(
-      () => document.querySelector("#debug-log")?.textContent?.includes("scsynth-nrt ready"),
+      () => document.querySelector("#debug-log")?.textContent?.includes("scsynth-nrt ready..."),
       { timeout: 30000 }
     );
 
