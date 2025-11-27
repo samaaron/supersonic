@@ -36,8 +36,7 @@
 #include "Samp.hpp"                // for sine table initialization
 
 // Scheduler includes
-#include "scheduler/PriorityQueue.h"
-#include "scheduler/SC_ScheduledEvent.h"
+#include "scheduler/BundleScheduler.h"
 
 // Node tree for SharedArrayBuffer polling
 #include "node_tree.h"
@@ -114,9 +113,9 @@ extern "C" {
     bool memory_initialized = false;
     World* g_world = nullptr;
 
-    // OSC Bundle Scheduler - Priority queue for timed bundle execution
-    // Based on SC_CoreAudio.h:159 - Uses static array for RT-safety (no malloc)
-    PriorityQueueT<SC_ScheduledEvent, 64> g_scheduler;
+    // OSC Bundle Scheduler - Index-based pool for RT-safety
+    // Events stored in pool (never copied), queue only stores small indices
+    BundleScheduler g_scheduler;
 
     // Time conversion constants - Based on SC_CoreAudio.cpp
     const uint64_t SECONDS_1900_TO_1970 = 2208988800ULL;
@@ -207,11 +206,8 @@ extern "C" {
             return false;
         }
 
-        // Create event with embedded data (no malloc!)
-        SC_ScheduledEvent event(world, ntp_time, data, size, true, reply_addr);
-
-        // Add to scheduler (copies event into queue)
-        if (!g_scheduler.Add(event)) {
+        // Add directly to scheduler pool (no 8KB copy - data copied into pool slot)
+        if (!g_scheduler.Add(world, ntp_time, data, size, reply_addr)) {
             worklet_debug("ERROR: Scheduler queue full (%d events)", g_scheduler.Size());
             increment_scheduler_drop_metric();
             update_scheduler_depth_metric(g_scheduler.Size());
@@ -378,7 +374,7 @@ extern "C" {
         g_osc_to_samples = sample_rate / 4294967296.0;
 
         // Clear scheduler
-        g_scheduler.Empty();
+        g_scheduler.Clear();
         update_scheduler_depth_metric(0);
 
         // Add root group to node tree (it was created during World_New but doesn't trigger Node_StateMsg)
@@ -625,8 +621,13 @@ extern "C" {
                 else if (g_world->mSampleOffset >= g_world->mBufLength)
                     g_world->mSampleOffset = g_world->mBufLength - 1;
 
-                SC_ScheduledEvent event = g_scheduler.Remove();
+                // Get pointer to bundle in pool (no 8KB copy!)
+                ScheduledBundle* bundle = g_scheduler.Remove();
                 update_scheduler_depth_metric(g_scheduler.Size());
+
+                if (!bundle) {
+                    break;  // Should not happen, but be safe
+                }
 
                 // Late bundle detection - warn when timing is broken
                 int64_t time_diff_osc = schedTime - currentOscTime;
@@ -639,7 +640,8 @@ extern "C" {
                                  time_diff_ms, g_world->mSampleOffset, g_world->mSubsampleOffset);
                 }
 
-                event.Perform();  // Calls PerformOSCBundle + no free (embedded data)
+                bundle->Perform();  // Execute the bundle
+                bundle->Release();  // Return slot to pool
             }
 
             // Reset offset
