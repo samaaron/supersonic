@@ -159,8 +159,6 @@ test.describe("SuperSonic", () => {
       }
     });
 
-    console.log('Stage 1 result:', JSON.stringify(result, null, 2));
-
     expect(result.success).toBe(true);
     // Verify constants are set
     expect(result.bufferConstants.NODE_TREE_START).toBeGreaterThan(0);
@@ -219,8 +217,6 @@ test.describe("SuperSonic", () => {
         return { success: false, error: err.message, stack: err.stack };
       }
     });
-
-    console.log('Stage 4 result:', JSON.stringify(result, null, 2));
 
     expect(result.success).toBe(true);
     // Root group should be in tree
@@ -281,8 +277,6 @@ test.describe("SuperSonic", () => {
         return { success: false, error: err.message, stack: err.stack };
       }
     });
-
-    console.log('Stage 5 result:', JSON.stringify(result, null, 2));
 
     expect(result.success).toBe(true);
 
@@ -355,8 +349,6 @@ test.describe("SuperSonic", () => {
         return { success: false, error: err.message, stack: err.stack };
       }
     });
-
-    console.log('Stage 6 result:', JSON.stringify(result, null, 2));
 
     expect(result.success).toBe(true);
     expect(result.queryTreeMsg).toBeDefined();
@@ -489,11 +481,6 @@ test.describe("SuperSonic", () => {
         return { success: false, error: err.message, stack: err.stack };
       }
     });
-
-    console.log('Stress test result:', JSON.stringify({
-      ...result,
-      nodesAfterFree: result.nodesAfterFree?.length + ' nodes'
-    }, null, 2));
 
     expect(result.success).toBe(true);
 

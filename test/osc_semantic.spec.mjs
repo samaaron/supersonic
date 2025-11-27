@@ -2782,8 +2782,6 @@ test.describe("Malformed input robustness tests", () => {
       };
     }, SONIC_CONFIG);
 
-    console.log("Test result:", result);
-
     expect(result.serverResponsive).toBe(true);
     expect(result.hasUGenError).toBe(true);
   });
@@ -2896,9 +2894,6 @@ test.describe("Malformed input robustness tests", () => {
         allMessages: messages.map((m) => m.address),
       };
     }, SONIC_CONFIG);
-
-    console.log("Test result:", result);
-    console.log("Console errors:", consoleErrors);
 
     expect(result.serverWorkedBefore).toBe(true);
     expect(result.serverResponsive).toBe(true);

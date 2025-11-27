@@ -11,7 +11,7 @@
     "build:release": "./build.sh --release",
     "clean": "./clean.sh",
     "dev": "cd example && ruby server.rb",
-    "test": "playwright test",
+    "test": "playwright test --reporter=list",
     "prepublishOnly": "./build.sh --release"
   },
   "repository": {
