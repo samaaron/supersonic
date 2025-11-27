@@ -321,7 +321,7 @@ void Disintegrator_next(Disintegrator *unit, int inNumSamples)
   for(int i = 0; i < inNumSamples; i++)
     {
       if( (unit->mLastInput>0 && in[i]<0) || (unit->mLastInput<0 && in[i]>0))
-	unit->mActive = rand() < prob*RAND_MAX;
+	unit->mActive = rand() < prob * (float)RAND_MAX;
 
       unit->mLastInput = in[i];
 
