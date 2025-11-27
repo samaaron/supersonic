@@ -21,17 +21,31 @@
 
 #include "SC_Reply.h"
 #include "SC_ReplyImpl.hpp"
+#include <cstring>
 
 void null_reply_func(struct ReplyAddress* addr, char* msg, int size) {}
 
 bool operator==(const ReplyAddress& a, const ReplyAddress& b) {
+#ifdef __EMSCRIPTEN__
+    return std::memcmp(a.mAddressPlaceholder, b.mAddressPlaceholder, sizeof(a.mAddressPlaceholder)) == 0
+        && a.mProtocol == b.mProtocol && a.mPort == b.mPort && a.mSocket == b.mSocket;
+#else
     return a.mAddress == b.mAddress && a.mProtocol == b.mProtocol && a.mPort == b.mPort && a.mSocket == b.mSocket;
+#endif
 }
 
 bool operator<(const ReplyAddress& a, const ReplyAddress& b) {
+#ifdef __EMSCRIPTEN__
+    int cmp = std::memcmp(a.mAddressPlaceholder, b.mAddressPlaceholder, sizeof(a.mAddressPlaceholder));
+    if (cmp != 0) {
+        return cmp < 0;
+    }
+#else
     if (a.mAddress != b.mAddress) {
         return a.mAddress < b.mAddress;
-    } else if (a.mPort != b.mPort) {
+    }
+#endif
+    if (a.mPort != b.mPort) {
         return a.mPort < b.mPort;
     } else if (a.mSocket != b.mSocket) {
         return a.mSocket < b.mSocket;

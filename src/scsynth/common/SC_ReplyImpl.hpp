@@ -35,7 +35,11 @@ enum Protocol {
 };
 
 struct ReplyAddress {
+#ifdef __EMSCRIPTEN__
+    uint32_t mAddressPlaceholder[4];  // Trivially copyable placeholder (no network in WASM)
+#else
     boost::asio::ip::address mAddress;
+#endif
     enum Protocol mProtocol;
     int mPort;
     int mSocket;
