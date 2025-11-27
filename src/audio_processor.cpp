@@ -436,8 +436,10 @@ extern "C" {
             int32_t in_tail = control->in_tail.load(std::memory_order_acquire);
 
 
-            // Process all available messages
-            while (in_head != in_tail) {
+            // Process available messages (limit per frame to stay within audio budget)
+            const int MAX_MESSAGES_PER_FRAME = 32;
+            int messages_this_frame = 0;
+            while (in_head != in_tail && messages_this_frame < MAX_MESSAGES_PER_FRAME) {
                 uint32_t msg_offset = IN_BUFFER_START + in_tail;
                 uint32_t space_to_end = IN_BUFFER_SIZE - in_tail;
 
@@ -579,6 +581,7 @@ extern "C" {
                 // Update IN tail (consume message)
                 control->in_tail.store((in_tail + header.length) % IN_BUFFER_SIZE, std::memory_order_release);
                 metrics->messages_processed.fetch_add(1, std::memory_order_relaxed);
+                messages_this_frame++;
 
                 // Update tail for next iteration
                 in_tail = control->in_tail.load(std::memory_order_acquire);

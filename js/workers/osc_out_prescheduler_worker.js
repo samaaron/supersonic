@@ -35,8 +35,10 @@ let isDispatching = false;  // Prevent reentrancy into dispatch loop
 
 // Retry queue for failed writes
 let retryQueue = [];
-const MAX_RETRY_QUEUE_SIZE = 100;
 const MAX_RETRIES_PER_MESSAGE = 5;
+
+// Backpressure: max total pending messages (heap + retry queue combined)
+const MAX_PENDING_MESSAGES = 500;
 
 // Timing constants
 const NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
@@ -187,8 +189,10 @@ const writeOSCToRingBuffer = (oscMessage, isRetry) => {
  * Add a message to the retry queue
  */
 const queueForRetry = (oscData, context) => {
-    if (retryQueue.length >= MAX_RETRY_QUEUE_SIZE) {
-        console.error('[PreScheduler] Retry queue full, dropping message permanently');
+    // Use same holistic limit as scheduleEvent
+    const totalPending = eventHeap.length + retryQueue.length;
+    if (totalPending >= MAX_PENDING_MESSAGES) {
+        console.error('[PreScheduler] Backpressure: dropping retry (' + totalPending + ' pending)');
         if (metricsView) Atomics.add(metricsView, MetricsOffsets.RETRIES_FAILED, 1);
         return;
     }
@@ -265,8 +269,16 @@ const processRetryQueue = () => {
 /**
  * Schedule an OSC bundle by its NTP timestamp
  * Non-bundles or bundles without timestamps are dispatched immediately
+ * Returns false if rejected due to backpressure
  */
 const scheduleEvent = (oscData, editorId, runTag) => {
+    // Backpressure: reject if total pending work exceeds limit
+    const totalPending = eventHeap.length + retryQueue.length;
+    if (totalPending >= MAX_PENDING_MESSAGES) {
+        console.warn('[PreScheduler] Backpressure: rejecting message (' + totalPending + ' pending)');
+        return false;
+    }
+
     const ntpTime = extractNTPFromBundle(oscData);
 
     if (ntpTime === null) {
@@ -277,7 +289,7 @@ const scheduleEvent = (oscData, editorId, runTag) => {
             // Queue for retry
             queueForRetry(oscData, 'immediate message');
         }
-        return;
+        return true;
     }
 
     const currentNTP = getCurrentNTP();
@@ -302,6 +314,8 @@ const scheduleEvent = (oscData, editorId, runTag) => {
                  'current=' + currentNTP.toFixed(3),
                  'wait=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
                  'pending=' + eventHeap.length);
+
+    return true;
 };
 
 const heapPush = (event) => {
