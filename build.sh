@@ -69,6 +69,12 @@ if [ $? -ne 0 ]; then
 fi
 echo "FIXED_MEMORY: $FIXED_MEMORY bytes ($((FIXED_MEMORY / 1024 / 1024))MB)"
 
+# Scheduler configuration (override with environment variables if needed)
+SCHEDULER_SLOT_SIZE=${SCHEDULER_SLOT_SIZE:-1024}
+SCHEDULER_SLOT_COUNT=${SCHEDULER_SLOT_COUNT:-512}
+SCHEDULER_MEMORY=$((SCHEDULER_SLOT_SIZE * SCHEDULER_SLOT_COUNT))
+echo "SCHEDULER: $SCHEDULER_SLOT_COUNT slots × $SCHEDULER_SLOT_SIZE bytes = $((SCHEDULER_MEMORY / 1024))KB"
+
 # Collect all scsynth source files
 # Note: Platform-specific and unused files have been removed from the repo entirely
 # (SC_ComPort.cpp, XenomaiLock.cpp, SC_PaUtils.cpp, sc_popen.cpp, strtod.c)
@@ -101,6 +107,8 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -I"$SRC_DIR/vendor/oscpack" \
     -DNO_LIBSNDFILE \
     -DNDEBUG \
+    -DSCHEDULER_SLOT_SIZE=$SCHEDULER_SLOT_SIZE \
+    -DSCHEDULER_SLOT_COUNT=$SCHEDULER_SLOT_COUNT \
     -DBOOST_ASIO_HAS_PTHREADS \
     -DSTATIC_PLUGINS \
     -DNOVA_SIMD \

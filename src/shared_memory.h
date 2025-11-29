@@ -184,6 +184,16 @@ constexpr uint32_t MESSAGE_MAGIC = 0xDEADBEEF;
 constexpr uint32_t PADDING_MAGIC = 0xBADDCAFE;  // Marks padding at end of buffer (OSC buffers)
 constexpr uint8_t DEBUG_PADDING_MARKER = 0xFF;  // Marks padding at end of debug buffer (skip to position 0)
 
+// Scheduler configuration - can be overridden via -D flags at compile time
+// These must match the values in BundleScheduler.h
+#ifndef SCHEDULER_SLOT_SIZE
+#define SCHEDULER_SLOT_SIZE 1024
+#endif
+
+#ifndef SCHEDULER_SLOT_COUNT
+#define SCHEDULER_SLOT_COUNT 512
+#endif
+
 // ============================================================================
 // BUFFER LAYOUT EXPORT (for JavaScript)
 // ============================================================================
@@ -223,6 +233,8 @@ struct BufferLayout {
     uint32_t max_message_size;
     uint32_t message_magic;
     uint32_t padding_magic;
+    uint32_t scheduler_slot_size;
+    uint32_t scheduler_slot_count;
     uint8_t debug_padding_marker;
     uint8_t _padding[3];  // Align to 4 bytes
 };
@@ -261,6 +273,8 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     MAX_MESSAGE_SIZE,
     MESSAGE_MAGIC,
     PADDING_MAGIC,
+    SCHEDULER_SLOT_SIZE,
+    SCHEDULER_SLOT_COUNT,
     DEBUG_PADDING_MARKER,
     {0, 0, 0}  // padding
 };

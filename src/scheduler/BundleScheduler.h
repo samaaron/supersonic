@@ -2,9 +2,13 @@
     SuperSonic - SuperCollider AudioWorklet WebAssembly port
     Copyright (c) 2025 Sam Aaron
 
-    Index-based bundle scheduler - avoids copying 8KB structs.
+    Index-based bundle scheduler for sample-accurate OSC timing.
     Events are stored in a fixed pool and never moved.
     Priority queue only stores small indices.
+
+    Slot size and count are configurable via compile-time flags:
+      -DSCHEDULER_SLOT_SIZE=512  (default: 512 bytes)
+      -DSCHEDULER_SLOT_COUNT=512 (default: 512 slots)
 */
 
 #pragma once
@@ -17,8 +21,18 @@
 struct World;
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
 
+// Scheduler configuration - can be overridden via -D flags at compile time
+// Default: 512 slots × 1024 bytes = 512KB (was 128 × 8KB = 1MB)
+#ifndef SCHEDULER_SLOT_SIZE
+#define SCHEDULER_SLOT_SIZE 1024
+#endif
+
+#ifndef SCHEDULER_SLOT_COUNT
+#define SCHEDULER_SLOT_COUNT 512
+#endif
+
 // Maximum scheduled events (RT-safe, statically allocated)
-constexpr int MAX_SCHEDULED_BUNDLES = 128;
+constexpr int MAX_SCHEDULED_BUNDLES = SCHEDULER_SLOT_COUNT;
 
 // Scheduled OSC bundle - stored in pool, never copied
 struct ScheduledBundle {
@@ -27,8 +41,8 @@ struct ScheduledBundle {
     World* mWorld;
     int64_t mStabilityCount;
     ReplyAddress mReplyAddr;
-    char mData[8192];  // Embedded OSC data
-    bool mInUse;       // Pool slot tracking
+    char mData[SCHEDULER_SLOT_SIZE];  // Embedded OSC data (configurable)
+    bool mInUse;                       // Pool slot tracking
 
     ScheduledBundle() : mTime(0), mSize(0), mWorld(nullptr), mStabilityCount(0), mInUse(false) {
         mReplyAddr.mReplyFunc = nullptr;
@@ -42,7 +56,7 @@ struct ScheduledBundle {
         mStabilityCount = stabilityCount;
         mReplyAddr = replyAddr;
         mInUse = true;
-        if (size > 0 && size <= 8192) {
+        if (size > 0 && size <= SCHEDULER_SLOT_SIZE) {
             std::memcpy(mData, data, size);
         }
     }
