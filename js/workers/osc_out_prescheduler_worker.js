@@ -38,12 +38,13 @@ let retryQueue = [];
 const MAX_RETRIES_PER_MESSAGE = 5;
 
 // Backpressure: max total pending messages (heap + retry queue combined)
-const MAX_PENDING_MESSAGES = 500;
+// Default 65536, can be overridden via init config
+let maxPendingMessages = 65536;
 
 // Timing constants
 const NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
 const POLL_INTERVAL_MS = 25;           // Check every 25ms
-const LOOKAHEAD_S = 0.100;             // 100ms lookahead window
+const LOOKAHEAD_S = 0.200;             // 200ms lookahead window
 
 const schedulerLog = (...args) => {
     if (__DEV__) {
@@ -191,7 +192,7 @@ const writeOSCToRingBuffer = (oscMessage, isRetry) => {
 const queueForRetry = (oscData, context) => {
     // Use same holistic limit as scheduleEvent
     const totalPending = eventHeap.length + retryQueue.length;
-    if (totalPending >= MAX_PENDING_MESSAGES) {
+    if (totalPending >= maxPendingMessages) {
         console.error('[PreScheduler] Backpressure: dropping retry (' + totalPending + ' pending)');
         if (metricsView) Atomics.add(metricsView, MetricsOffsets.RETRIES_FAILED, 1);
         return;
@@ -250,13 +251,15 @@ const processRetryQueue = () => {
 
             if (item.retryCount >= MAX_RETRIES_PER_MESSAGE) {
                 // Give up on this message
-                console.error('[PreScheduler] Giving up on message after',
-                             MAX_RETRIES_PER_MESSAGE, 'retries:', item.context);
+                const errorMsg = `Ring buffer full - dropped message after ${MAX_RETRIES_PER_MESSAGE} retries (${item.context})`;
+                console.error('[PreScheduler]', errorMsg);
                 retryQueue.splice(i, 1);
                 if (metricsView) {
                     Atomics.add(metricsView, MetricsOffsets.RETRIES_FAILED, 1);
                     Atomics.store(metricsView, MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
                 }
+                // Notify main thread so onError callback fires
+                self.postMessage({ type: 'error', error: errorMsg });
                 // Don't increment i - we removed an item
             } else {
                 // Keep in queue, try again next cycle
@@ -274,7 +277,7 @@ const processRetryQueue = () => {
 const scheduleEvent = (oscData, editorId, runTag) => {
     // Backpressure: reject if total pending work exceeds limit
     const totalPending = eventHeap.length + retryQueue.length;
-    if (totalPending >= MAX_PENDING_MESSAGES) {
+    if (totalPending >= maxPendingMessages) {
         console.warn('[PreScheduler] Backpressure: rejecting message (' + totalPending + ' pending)');
         return false;
     }
@@ -577,13 +580,18 @@ self.addEventListener('message', (event) => {
                 ringBufferBase = data.ringBufferBase;
                 bufferConstants = data.bufferConstants;
 
+                // Apply config overrides
+                if (data.maxPendingMessages) {
+                    maxPendingMessages = data.maxPendingMessages;
+                }
+
                 // Initialize SharedArrayBuffer views (including offset)
                 initSharedBuffer();
 
                 // Start periodic polling
                 startPeriodicPolling();
 
-                schedulerLog('[OSCPreSchedulerWorker] Initialized with NTP-based scheduling and direct ring buffer writing');
+                schedulerLog('[OSCPreSchedulerWorker] Initialized with NTP-based scheduling, capacity=' + maxPendingMessages);
                 self.postMessage({ type: 'initialized' });
                 break;
 

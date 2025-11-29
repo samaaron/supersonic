@@ -41,7 +41,7 @@ export default class ScsynthOSC {
     /**
      * Initialize all workers with SharedArrayBuffer
      */
-    async init(sharedBuffer, ringBufferBase, bufferConstants) {
+    async init(sharedBuffer, ringBufferBase, bufferConstants, options = {}) {
         if (this.initialized) {
             console.warn('[ScsynthOSC] Already initialized');
             return;
@@ -50,6 +50,7 @@ export default class ScsynthOSC {
         this.sharedBuffer = sharedBuffer;
         this.ringBufferBase = ringBufferBase;
         this.bufferConstants = bufferConstants;
+        this.preschedulerCapacity = options.preschedulerCapacity || 65536;
 
         try {
             // Create all workers
@@ -67,7 +68,9 @@ export default class ScsynthOSC {
 
             // Initialize all workers with SharedArrayBuffer
             const initPromises = [
-                this.initWorker(this.workers.oscOut, 'OSC SCHEDULER+WRITER'),
+                this.initWorker(this.workers.oscOut, 'OSC SCHEDULER+WRITER', {
+                    maxPendingMessages: this.preschedulerCapacity
+                }),
                 this.initWorker(this.workers.oscIn, 'OSC IN'),
                 this.initWorker(this.workers.debug, 'DEBUG')
             ];
@@ -96,7 +99,7 @@ export default class ScsynthOSC {
     /**
      * Initialize a single worker
      */
-    initWorker(worker, name) {
+    initWorker(worker, name, extraConfig = {}) {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error(`${name} worker initialization timeout`));
@@ -115,7 +118,8 @@ export default class ScsynthOSC {
                 type: 'init',
                 sharedBuffer: this.sharedBuffer,
                 ringBufferBase: this.ringBufferBase,
-                bufferConstants: this.bufferConstants
+                bufferConstants: this.bufferConstants,
+                ...extraConfig
             });
         });
     }

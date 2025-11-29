@@ -137,6 +137,8 @@ export class SuperSonic {
       memory: MemoryLayout,
       // Runtime world options (merged defaults + user overrides)
       worldOptions: worldOptions,
+      // Prescheduler capacity (max pending events in JS heap)
+      preschedulerCapacity: options.preschedulerCapacity || 65536,
     };
 
     // Resource loading configuration (private)
@@ -570,10 +572,20 @@ export class SuperSonic {
 
     // Fast path: try direct ring buffer write for messages that don't need scheduling
     // This bypasses the worker thread, saving ~30-50ms of worker latency
-    // Eligible: non-bundles, immediate bundles (timetag 1), or bundles within 100ms
+    // Eligible: non-bundles, immediate bundles (timetag 0/1), or bundles within 200ms
     if (this.#shouldBypassPrescheduler(preparedData) && this.#tryDirectWrite(preparedData)) {
       this.#addMetric("preschedulerBypassed");
       return; // Direct write succeeded
+    }
+
+    // Size guard: reject oversized scheduled bundles
+    // These would exceed the C++ scheduler's slot size and be silently dropped
+    const slotSize = this.#bufferConstants?.scheduler_slot_size;
+    if (slotSize && preparedData.length > slotSize) {
+      throw new Error(
+        `OSC bundle too large to schedule (${preparedData.length} > ${slotSize} bytes). ` +
+        `Use immediate timestamp (0 or 1) for large messages, or reduce bundle size.`
+      );
     }
 
     // Fall back to worker for future-scheduled bundles, buffer-full, or wrap-around cases
@@ -1118,7 +1130,8 @@ export class SuperSonic {
     await this.#osc.init(
       this.#sharedBuffer,
       this.#ringBufferBase,
-      this.#bufferConstants
+      this.#bufferConstants,
+      { preschedulerCapacity: this.#config.preschedulerCapacity }
     );
   }
 
@@ -1568,7 +1581,7 @@ export class SuperSonic {
 
   /**
    * Check if an OSC message/bundle should bypass the prescheduler for direct write
-   * Returns true for: non-bundles, immediate bundles (timetag 1), past timetags, or within 100ms
+   * Returns true for: non-bundles, immediate bundles (timetag 0/1), past timetags, or within 200ms
    */
   #shouldBypassPrescheduler(oscData) {
     // Non-bundles always bypass
@@ -1587,8 +1600,8 @@ export class SuperSonic {
     const ntpSeconds = view.getUint32(8, false);
     const ntpFraction = view.getUint32(12, false);
 
-    // Timetag 1 means "execute immediately"
-    if (ntpSeconds === 0 && ntpFraction === 1) {
+    // Timetag 0 or 1 means "execute immediately"
+    if (ntpSeconds === 0 && (ntpFraction === 0 || ntpFraction === 1)) {
       return true;
     }
 
@@ -1601,9 +1614,9 @@ export class SuperSonic {
     const currentNTP = this.#audioContext.currentTime + ntpStartTime;
     const bundleNTP = ntpSeconds + ntpFraction / 0x100000000;
 
-    // Bypass if timetag is in the past or within 100ms from now
+    // Bypass if timetag is in the past or within 200ms from now
     const diffSeconds = bundleNTP - currentNTP;
-    return diffSeconds < 0.1; // 100ms threshold
+    return diffSeconds < 0.2; // 200ms threshold (matches prescheduler LOOKAHEAD_S)
   }
 
   /**
