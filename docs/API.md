@@ -83,6 +83,7 @@ const supersonic = new SuperSonic({
 | `synthdefBaseURL` | No | Base URL for synthdef files (used by `loadSynthDef`) |
 | `sampleBaseURL` | No | Base URL for sample files (used by `loadSample`) |
 | `scsynthOptions` | No | Server options (see below) |
+| `preschedulerCapacity` | No | Max pending events in JS prescheduler (default: 65536) |
 
 ### Server Options (`scsynthOptions`)
 
