@@ -201,12 +201,12 @@ extern "C" {
     // Returns true if scheduled, false if queue full
     bool schedule_bundle(World* world, int64_t ntp_time, int64_t current_osc_time,
                         const char* data, int32_t size, const ReplyAddress& reply_addr) {
-        if (size > 8192) {
-            worklet_debug("ERROR: Bundle too large: %d bytes", size);
+        if (size > SCHEDULER_SLOT_SIZE) {
+            worklet_debug("ERROR: Bundle too large: %d bytes (max %d)", size, SCHEDULER_SLOT_SIZE);
             return false;
         }
 
-        // Add directly to scheduler pool (no 8KB copy - data copied into pool slot)
+        // Add directly to scheduler pool (data copied into pool slot)
         if (!g_scheduler.Add(world, ntp_time, data, size, reply_addr)) {
             worklet_debug("ERROR: Scheduler queue full (%d events)", g_scheduler.Size());
             increment_scheduler_drop_metric();

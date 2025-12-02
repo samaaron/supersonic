@@ -56,6 +56,7 @@ struct ScheduledBundle {
         mStabilityCount = stabilityCount;
         mReplyAddr = replyAddr;
         mInUse = true;
+        // Size validation is done in schedule_bundle() before Add() is called
         if (size > 0 && size <= SCHEDULER_SLOT_SIZE) {
             std::memcpy(mData, data, size);
         }
@@ -63,6 +64,12 @@ struct ScheduledBundle {
 
     void Perform() {
         if (mWorld && mSize > 0) {
+            // Validate mSize before performing - corruption detection
+            if (mSize > SCHEDULER_SLOT_SIZE) {
+                worklet_debug("ERROR: ScheduledBundle::Perform - mSize corrupted: %d (max %d)",
+                             mSize, SCHEDULER_SLOT_SIZE);
+                return;
+            }
             OSC_Packet packet;
             packet.mData = mData;
             packet.mSize = mSize;
