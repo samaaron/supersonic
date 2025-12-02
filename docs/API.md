@@ -7,7 +7,9 @@
 | Method | Description |
 |--------|-------------|
 | [`init(config)`](#initconfig) | Initialise the audio engine |
-| [`destroy()`](#destroy) | Shut down and clean up resources |
+| [`shutdown()`](#shutdown) | Shut down, preserving listeners (can call `init()` again) |
+| [`destroy()`](#destroy) | Permanently destroy instance, clearing all listeners |
+| [`reset(config?)`](#resetconfig) | Shutdown and re-initialize (convenience method) |
 | [`send(address, ...args)`](#sendaddress-args) | Send an OSC message |
 | [`sendOSC(data, options)`](#sendoscoscbytes-options) | Send pre-encoded OSC bytes |
 | [`sync(syncId)`](#syncsyncid) | Wait for server to process all commands |
@@ -20,25 +22,40 @@
 | [`loadSynthDefs(names)`](#loadsynthdefsnames) | Load multiple synthdefs in parallel |
 | [`loadSample(bufnum, nameOrPath)`](#loadsamplebufnum-nameorpath) | Load a sample into a buffer |
 
+### Events
+
+| Method | Description |
+|--------|-------------|
+| [`on(event, callback)`](#onevent-callback) | Subscribe to an event, returns unsubscribe function |
+| [`off(event, callback)`](#offevent-callback) | Unsubscribe from an event |
+| [`once(event, callback)`](#onceevent-callback) | Subscribe to an event once |
+| [`removeAllListeners(event?)`](#removealllistenersevent) | Remove all listeners for an event (or all events) |
+
+### Event Types
+
+| Event | Description |
+|-------|-------------|
+| `ready` | Engine initialised and ready |
+| `error` | Error occurred |
+| `message` | OSC message received (parsed) |
+| `message:raw` | OSC message received (with raw bytes) |
+| `message:sent` | OSC message sent |
+| `debug` | Debug output from scsynth |
+| `metrics` | Periodic metrics update |
+| `shutdown` | Engine shutting down (emitted by `shutdown()`, `reset()`, and `destroy()`) |
+| `destroy` | Engine being permanently destroyed (emitted by `destroy()` only) |
+| `audiocontext:statechange` | AudioContext state changed (with `{ state }` payload) |
+| `audiocontext:suspended` | AudioContext was suspended (browser tab backgrounded, etc.) |
+| `audiocontext:resumed` | AudioContext resumed running |
+| `audiocontext:interrupted` | AudioContext was interrupted (iOS audio session, etc.) |
+
 ### Metrics
 
 | Method | Description |
 |--------|-------------|
-| [`onMetricsUpdate`](#onmetricsupdatemetrics) | Callback for periodic metrics updates |
 | [`getMetrics()`](#getmetrics) | Get metrics snapshot on demand |
 | [`setMetricsInterval(ms)`](#setmetricsintervalms) | Change polling interval |
 | [`stopMetricsPolling()`](#stopmetricspolling) | Stop the metrics timer |
-
-### Callbacks
-
-| Property | Description |
-|----------|-------------|
-| [`onInitialized`](#oninitialized) | Called when engine is ready |
-| [`onError`](#onerrorerror) | Called on errors |
-| [`onMessage`](#onmessagemsg) | Called when OSC message received |
-| [`onOSC`](#onoscdata) | Called with raw OSC bytes received |
-| [`onMessageSent`](#onmessagesentdata) | Called when OSC message sent |
-| [`onDebugMessage`](#ondebugmessagemsg) | Called with debug output |
 
 ### Properties
 
@@ -84,6 +101,7 @@ const supersonic = new SuperSonic({
 | `sampleBaseURL` | No | Base URL for sample files (used by `loadSample`) |
 | `scsynthOptions` | No | Server options (see below) |
 | `preschedulerCapacity` | No | Max pending events in JS prescheduler (default: 65536) |
+| `debugMaxLineLength` | No | Truncate debug messages longer than this (default: 0 = no truncation) |
 
 ### Server Options (`scsynthOptions`)
 
@@ -221,89 +239,247 @@ await supersonic.sync();  // Now safe to use the synthdefs
 await supersonic.sync(42);
 ```
 
+### `shutdown()`
+
+Shut down the engine, releasing all resources but preserving event listeners. After shutdown, you can call `init()` again to restart. Emits the `shutdown` event before teardown begins.
+
+**Returns:** `Promise<void>`
+
+```javascript
+await supersonic.shutdown();
+// Engine is stopped, but listeners are preserved
+
+// Later, restart the engine
+await supersonic.init();
+```
+
 ### `destroy()`
 
-Shut down the engine and clean up all resources. Stops audio processing, terminates workers, and closes the AudioContext.
+Permanently destroy the instance, releasing all resources AND clearing all event listeners. After destroy, the instance cannot be reused - create a new SuperSonic instance instead. Emits `destroy` event, then `shutdown` event, then clears all listeners.
 
 **Returns:** `Promise<void>`
 
 ```javascript
 await supersonic.destroy();
-// sonic is no longer usable after this
+// Instance is now unusable, no memory leaks
 ```
 
-## Callbacks
+### `reset(config?)`
 
-Set these properties to receive events from the engine.
+Convenience method that calls `shutdown()` then `init()`. Use this to recover from browser audio suspension or other broken states. Event listeners are preserved across reset.
 
-### `onInitialized`
+**Parameters:**
+| Name | Type | Description |
+|------|------|-------------|
+| `config` | `Object` | Optional configuration overrides for init() |
 
-Called when the engine is ready.
+**Returns:** `Promise<void>`
 
 ```javascript
-supersonic.onInitialized = () => {
-  console.log('Engine ready');
-};
+// Browser suspended audio, need to recover
+await supersonic.reset();
+// Engine is now re-initialized and ready to use
 ```
 
-### `onError(error)`
+## Events
 
-Called when something goes wrong.
+SuperSonic uses an event emitter pattern. Subscribe with `on()`, which returns an unsubscribe function.
+
+### `on(event, callback)`
+
+Subscribe to an event. Returns an unsubscribe function for easy cleanup.
 
 ```javascript
-supersonic.onError = (error) => {
-  console.error('SuperSonic error:', error);
-};
+// Subscribe
+const unsubscribe = supersonic.on('message', (msg) => {
+  console.log('Received:', msg.address);
+});
+
+// Later, unsubscribe
+unsubscribe();
 ```
 
-### `onMessage(msg)`
-
-Called when an OSC message is received from the engine.
+Multiple listeners can subscribe to the same event - each receives all events independently.
 
 ```javascript
-supersonic.onMessage = (msg) => {
-  console.log('Received:', msg.address, msg.args);
-};
+// Both listeners receive all messages
+supersonic.on('message', (msg) => console.log('Listener A:', msg.address));
+supersonic.on('message', (msg) => console.log('Listener B:', msg.address));
 ```
 
-### `onOSC(data)`
+### `off(event, callback)`
 
-Called with raw OSC bytes received from the engine.
+Unsubscribe using the original callback reference. Alternative to using the unsubscribe function.
 
 ```javascript
-supersonic.onOSC = (data) => {
-  // data is a Uint8Array
-};
+const handler = (msg) => console.log(msg);
+supersonic.on('message', handler);
+
+// Later
+supersonic.off('message', handler);
 ```
 
-### `onMessageSent(data)`
+### `once(event, callback)`
 
-Called when an OSC message is sent to the engine.
+Subscribe to an event once. The listener auto-unsubscribes after the first event.
 
 ```javascript
-supersonic.onMessageSent = (data) => {
-  // data is a Uint8Array
-};
+supersonic.once('ready', (info) => {
+  console.log('Engine booted in', info.bootTimeMs, 'ms');
+});
 ```
 
-### `onDebugMessage(msg)`
+### Event: `ready`
 
-Called with debug output from the engine.
+Emitted when the engine is initialised and ready to use.
 
 ```javascript
-supersonic.onDebugMessage = (msg) => {
-  console.log('[scsynth]', msg);
-};
+supersonic.on('ready', (info) => {
+  console.log('Sample rate:', info.sampleRate);
+  console.log('Boot time:', info.bootTimeMs, 'ms');
+});
 ```
 
-### `onMetricsUpdate(metrics)`
+### Event: `error`
 
-Called periodically with performance metrics. See [Metrics](METRICS.md) for details.
+Emitted when an error occurs.
 
 ```javascript
-supersonic.onMetricsUpdate = (metrics) => {
-  console.log('Process count:', metrics.workletProcessCount);
-};
+supersonic.on('error', (error) => {
+  console.error('SuperSonic error:', error.message);
+});
+```
+
+### Event: `message`
+
+Emitted when a parsed OSC message is received from scsynth.
+
+```javascript
+supersonic.on('message', (msg) => {
+  console.log('Address:', msg.address);
+  console.log('Args:', msg.args);
+});
+```
+
+### Event: `message:raw`
+
+Emitted with raw OSC data including the original bytes. Useful for logging.
+
+```javascript
+supersonic.on('message:raw', (data) => {
+  console.log('OSC bytes:', data.oscData);
+  console.log('Parsed:', data.address, data.args);
+});
+```
+
+### Event: `message:sent`
+
+Emitted when an OSC message is sent to scsynth.
+
+```javascript
+supersonic.on('message:sent', (oscBytes) => {
+  const decoded = SuperSonic.osc.decode(oscBytes);
+  console.log('Sent:', decoded.address);
+});
+```
+
+### Event: `debug`
+
+Emitted with debug output from scsynth.
+
+```javascript
+supersonic.on('debug', (msg) => {
+  console.log('[scsynth]', msg.text);
+});
+```
+
+### Event: `metrics`
+
+Emitted periodically with performance metrics. See [Metrics](METRICS.md) for details.
+
+```javascript
+supersonic.on('metrics', (metrics) => {
+  console.log('Messages sent:', metrics.mainMessagesSent);
+  console.log('Scheduler depth:', metrics.workletSchedulerDepth);
+});
+```
+
+### Event: `shutdown`
+
+Emitted when the engine is shutting down. Fired by `shutdown()`, `reset()`, and `destroy()`. Use this to clean up application state that depends on SuperSonic.
+
+```javascript
+supersonic.on('shutdown', () => {
+  console.log('Engine shutting down, cleaning up...');
+  // Reset application state flags, stop loops, etc.
+});
+```
+
+### Event: `destroy`
+
+Emitted when the engine is being permanently destroyed (only fired by `destroy()`, not by `shutdown()` or `reset()`). This is your last chance to clean up before all listeners are cleared.
+
+```javascript
+supersonic.on('destroy', () => {
+  console.log('Engine being destroyed permanently');
+  // Final cleanup before instance becomes unusable
+});
+```
+
+### Event: `audiocontext:statechange`
+
+Emitted when the AudioContext state changes. The payload contains the new state.
+
+```javascript
+supersonic.on('audiocontext:statechange', ({ state }) => {
+  console.log('AudioContext state:', state);
+  // state is one of: 'running', 'suspended', 'interrupted', 'closed'
+});
+```
+
+### Event: `audiocontext:suspended`
+
+Emitted when the AudioContext is suspended. This typically happens when the browser tab is backgrounded or the system suspends audio. Use this to show a "restart" UI to the user.
+
+```javascript
+supersonic.on('audiocontext:suspended', () => {
+  console.log('Audio suspended - show restart button');
+  showRestartUI();
+});
+```
+
+### Event: `audiocontext:resumed`
+
+Emitted when the AudioContext resumes running after being suspended.
+
+```javascript
+supersonic.on('audiocontext:resumed', () => {
+  console.log('Audio resumed');
+  hideRestartUI();
+});
+```
+
+### Event: `audiocontext:interrupted`
+
+Emitted when the AudioContext is interrupted by the system (common on iOS when another app takes audio focus). Similar to `suspended` but triggered externally.
+
+```javascript
+supersonic.on('audiocontext:interrupted', () => {
+  console.log('Audio interrupted by system');
+  showRestartUI();
+});
+```
+
+### `removeAllListeners(event?)`
+
+Remove all listeners for an event, or all listeners entirely. Useful for cleanup.
+
+```javascript
+// Remove all 'message' listeners
+supersonic.removeAllListeners('message');
+
+// Remove ALL listeners (use with caution)
+supersonic.removeAllListeners();
 ```
 
 ## Properties
