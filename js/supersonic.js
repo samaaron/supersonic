@@ -77,6 +77,9 @@ export class SuperSonic {
   #metricsGatherInProgress = false;
   #metricsInterval = 100;
 
+  // Event emitter
+  #listeners = new Map();
+
   constructor(options = {}) {
     this.#initialized = false;
     this.#initializing = false;
@@ -93,17 +96,6 @@ export class SuperSonic {
     this.#osc = null; // ScsynthOSC instance for OSC communication
     this.#bufferManager = null;
     this.loadedSynthDefs = new Set();
-
-    // Callbacks
-    this.onOSC = null; // Raw binary OSC from scsynth (for display/logging)
-    this.onMessage = null; // Parsed OSC messages from scsynth (for application logic)
-    this.onMessageSent = null;
-    this.onDebugMessage = null;
-    this.onInitialized = null;
-    this.onError = null;
-
-    // Metrics callback
-    this.onMetricsUpdate = null; // Callback for periodic metrics updates
 
     // Configuration - require explicit base URLs for workers and WASM
     // This ensures SuperSonic works correctly in bundled/vendored environments
@@ -139,6 +131,8 @@ export class SuperSonic {
       worldOptions: worldOptions,
       // Prescheduler capacity (max pending events in JS heap)
       preschedulerCapacity: options.preschedulerCapacity || 65536,
+      // Debug message truncation (0 = no truncation)
+      debugMaxLineLength: options.debugMaxLineLength ?? 0,
     };
 
     // Resource loading configuration (private)
@@ -165,6 +159,99 @@ export class SuperSonic {
   get initializing() {
     return this.#initializing;
   }
+
+  // ============================================================================
+  // EVENT EMITTER API
+  // ============================================================================
+
+  /**
+   * Subscribe to an event
+   * @param {string} event - Event name: 'ready', 'metrics', 'message', 'message:sent', 'message:raw', 'debug', 'error'
+   * @param {Function} callback - Function to call when event fires
+   * @returns {this} For chaining
+   * @example
+   * sonic.on('ready', (info) => console.log('Ready!', info));
+   * sonic.on('metrics', (m) => console.log('Messages:', m.mainMessagesSent));
+   * sonic.on('message', (msg) => console.log('OSC in:', msg.address));
+   */
+  on(event, callback) {
+    if (typeof callback !== 'function') {
+      throw new Error('Callback must be a function');
+    }
+    if (!this.#listeners.has(event)) {
+      this.#listeners.set(event, new Set());
+    }
+    this.#listeners.get(event).add(callback);
+    return () => this.off(event, callback);
+  }
+
+  /**
+   * Unsubscribe from an event
+   * @param {string} event - Event name
+   * @param {Function} callback - Function to remove
+   * @returns {this} For chaining
+   */
+  off(event, callback) {
+    const listeners = this.#listeners.get(event);
+    if (listeners) {
+      listeners.delete(callback);
+    }
+    return this;
+  }
+
+  /**
+   * Subscribe to an event once (auto-unsubscribes after first call)
+   * @param {string} event - Event name
+   * @param {Function} callback - Function to call once
+   * @returns {this} For chaining
+   */
+  once(event, callback) {
+    const wrapper = (...args) => {
+      this.off(event, wrapper);
+      callback(...args);
+    };
+    return this.on(event, wrapper);
+  }
+
+  /**
+   * Remove all listeners for an event, or all listeners entirely
+   * @param {string} [event] - Event name. If omitted, removes ALL listeners.
+   * @returns {this} For chaining
+   * @example
+   * // Remove all 'message' listeners
+   * sonic.removeAllListeners('message');
+   * // Remove ALL listeners
+   * sonic.removeAllListeners();
+   */
+  removeAllListeners(event) {
+    if (event === undefined) {
+      this.#listeners.clear();
+    } else {
+      this.#listeners.delete(event);
+    }
+    return this;
+  }
+
+  /**
+   * Emit an event to all listeners
+   * @param {string} event - Event name
+   * @param {...*} args - Arguments to pass to listeners
+   * @private
+   */
+  #emit(event, ...args) {
+    const listeners = this.#listeners.get(event);
+    if (listeners) {
+      for (const callback of listeners) {
+        try {
+          callback(...args);
+        } catch (error) {
+          console.error(`[SuperSonic] Error in ${event} listener:`, error);
+        }
+      }
+    }
+  }
+
+  // ============================================================================
 
   /**
    * Initialize the audio worklet system
@@ -223,9 +310,7 @@ export class SuperSonic {
       this.#initPromise = null;
       console.error("[SuperSonic] Initialization failed:", error);
 
-      if (this.onError) {
-        this.onError(error);
-      }
+      this.#emit('error', error);
 
       throw error;
     }
@@ -566,9 +651,7 @@ export class SuperSonic {
     this.#addMetric("mainMessagesSent");
     this.#addMetric("mainBytesSent", preparedData.length);
 
-    if (this.onMessageSent) {
-      this.onMessageSent(preparedData);
-    }
+    this.#emit('message:sent', preparedData);
 
     // Fast path: try direct ring buffer write for messages that don't need scheduling
     // This bypasses the worker thread, saving ~30-50ms of worker latency
@@ -733,22 +816,11 @@ export class SuperSonic {
   async loadSample(bufnum, nameOrPath, startFrame = 0, numFrames = 0) {
     this.#ensureInitialized("load samples");
 
-    // Resolve name to path if needed
-    let path;
-    if (this.#looksLikePathOrURL(nameOrPath)) {
-      path = nameOrPath;
-    } else {
-      if (!this.#sampleBaseURL) {
-        throw new Error(
-          "sampleBaseURL not configured. Either provide a full path or set sampleBaseURL in constructor options."
-        );
-      }
-      path = `${this.#sampleBaseURL}${nameOrPath}`;
-    }
-
+    // Pass nameOrPath directly to BufferManager - it handles path resolution
+    // BufferManager will prepend sampleBaseURL if needed
     const bufferInfo = await this.#requireBufferManager().prepareFromFile({
       bufnum,
-      path,
+      path: nameOrPath,
       startFrame,
       numFrames,
     });
@@ -845,10 +917,26 @@ export class SuperSonic {
   }
 
   /**
-   * Destroy the orchestrator and clean up resources
+   * Shutdown SuperSonic, releasing all resources but preserving event listeners.
+   * After shutdown, you can call init() again to restart.
+   * Emits the 'shutdown' event before teardown begins.
+   * @returns {Promise<void>}
+   * @example
+   * // Shutdown due to browser audio issues
+   * await sonic.shutdown();
+   * // ... later, restart ...
+   * await sonic.init();
    */
-  async destroy() {
-    if (__DEV__) console.log("[SuperSonic] Destroying...");
+  async shutdown() {
+    // Idempotent: if already shut down, do nothing
+    if (!this.#initialized && !this.#initializing) {
+      return;
+    }
+
+    if (__DEV__) console.log("[SuperSonic] Shutting down...");
+
+    // Emit shutdown event before teardown
+    this.#emit("shutdown");
 
     // Stop timers
     this.#stopDriftOffsetTimer();
@@ -859,6 +947,8 @@ export class SuperSonic {
     this.#syncListeners = null;
 
     if (this.#osc) {
+      // Cancel all pending scheduled events before terminating
+      this.#osc.cancelAll();
       this.#osc.terminate();
       this.#osc = null;
     }
@@ -883,7 +973,77 @@ export class SuperSonic {
     this.#initialized = false;
     this.loadedSynthDefs.clear();
 
+    // Reset additional state so init() can be called again
+    this.#initPromise = null;
+    this.#wasmMemory = null;
+    this.#ringBufferBase = null;
+    this.#bufferConstants = null;
+
+    // Reset cached views
+    this.#directWriteAtomicView = null;
+    this.#directWriteDataView = null;
+    this.#directWriteUint8View = null;
+    this.#directWriteControlIndices = null;
+    this.#metricsView = null;
+    this.#ntpStartView = null;
+    this.#driftView = null;
+    this.#globalOffsetView = null;
+
+    // Reset timing state
+    this.#initialNTPStartTime = undefined;
+
+    // Reset boot stats for fresh timing
+    this.bootStats = {
+      initStartTime: null,
+      initDuration: null,
+    };
+
+    if (__DEV__) console.log("[SuperSonic] Shutdown complete");
+  }
+
+  /**
+   * Permanently destroy SuperSonic, releasing all resources AND clearing all listeners.
+   * After destroy, the instance cannot be reused - create a new SuperSonic instance instead.
+   * Emits 'destroy' event before final cleanup.
+   * @returns {Promise<void>}
+   * @example
+   * // Permanently dispose of SuperSonic (e.g., when unmounting a component)
+   * await sonic.destroy();
+   * // sonic is now unusable, create a new instance if needed
+   */
+  async destroy() {
+    if (__DEV__) console.log("[SuperSonic] Destroying...");
+
+    // Emit destroy event to give listeners one last chance to clean up
+    this.#emit("destroy");
+
+    // Shutdown all resources (this also emits 'shutdown')
+    await this.shutdown();
+
+    // Clear all listeners - this instance is now unusable
+    this.#listeners.clear();
+
     if (__DEV__) console.log("[SuperSonic] Destroyed");
+  }
+
+  /**
+   * Fully reset SuperSonic: shutdown and re-initialize.
+   * Use this to recover from browser audio suspension or other broken states.
+   * Event listeners are preserved across reset.
+   * @param {Object} [config] - Optional configuration overrides for init()
+   * @returns {Promise<void>}
+   * @example
+   * // Browser suspended audio, need to recover
+   * await sonic.reset();
+   * // sonic is now re-initialized and ready to use
+   */
+  async reset(config = {}) {
+    if (__DEV__) console.log("[SuperSonic] Resetting...");
+
+    await this.shutdown();
+    await this.init(config);
+
+    if (__DEV__) console.log("[SuperSonic] Reset complete");
   }
 
   /**
@@ -965,6 +1125,25 @@ export class SuperSonic {
 
   #initializeAudioContext() {
     this.#audioContext = new AudioContext(this.#config.audioContextOptions);
+
+    // Forward AudioContext state changes as SuperSonic events
+    this.#audioContext.addEventListener('statechange', () => {
+      const state = this.#audioContext?.state;
+      if (!state) return;
+
+      // Emit general statechange event
+      this.#emit('audiocontext:statechange', { state });
+
+      // Emit specific convenience events
+      if (state === 'suspended') {
+        this.#emit('audiocontext:suspended');
+      } else if (state === 'running') {
+        this.#emit('audiocontext:resumed');
+      } else if (state === 'interrupted') {
+        this.#emit('audiocontext:interrupted');
+      }
+    });
+
     return this.#audioContext;
   }
 
@@ -1078,10 +1257,7 @@ export class SuperSonic {
 
     // Set up ScsynthOSC callbacks
     this.#osc.onRawOSC((msg) => {
-      // Forward raw binary OSC to onOSC callback (for display/logging)
-      if (this.onOSC) {
-        this.onOSC(msg);
-      }
+      this.#emit('message:raw', msg);
     });
 
     this.#osc.onParsedOSC((msg) => {
@@ -1107,23 +1283,21 @@ export class SuperSonic {
         }
       }
 
-      // Forward to onMessage callback if set
-      if (this.onMessage) {
-        this.onMessage(msg);
-      }
+      this.#emit('message', msg);
     });
 
     this.#osc.onDebugMessage((msg) => {
-      if (this.onDebugMessage) {
-        this.onDebugMessage(msg);
+      // Truncate long debug lines if configured (e.g. synthdef binary dumps)
+      const maxLen = this.#config.debugMaxLineLength;
+      if (maxLen > 0 && msg.text && msg.text.length > maxLen) {
+        msg = { ...msg, text: msg.text.slice(0, maxLen) + '...' };
       }
+      this.#emit('debug', msg);
     });
 
     this.#osc.onError((error, workerName) => {
       console.error(`[SuperSonic] ${workerName} error:`, error);
-      if (this.onError) {
-        this.onError(new Error(`${workerName}: ${error}`));
-      }
+      this.#emit('error', new Error(`${workerName}: ${error}`));
     });
 
     // Initialize ScsynthOSC with SharedArrayBuffer, ring buffer base, and buffer constants
@@ -1151,12 +1325,10 @@ export class SuperSonic {
         )}ms`
       );
 
-    if (this.onInitialized) {
-      this.onInitialized({
-        capabilities: this.#capabilities,
-        bootStats: this.bootStats,
-      });
-    }
+    this.#emit('ready', {
+      capabilities: this.#capabilities,
+      bootStats: this.bootStats,
+    });
   }
 
   /**
@@ -1268,9 +1440,7 @@ export class SuperSonic {
             console.error("[Worklet] Diagnostics:", data.diagnostics);
             console.table(data.diagnostics);
           }
-          if (this.onError) {
-            this.onError(new Error(data.error));
-          }
+          this.#emit('error', new Error(data.error));
           break;
 
         case "process_debug":
@@ -1473,7 +1643,10 @@ export class SuperSonic {
     // Request metrics periodically
     // All metrics are read from SAB (<0.1ms) - fully synchronous
     this.#metricsIntervalId = setInterval(() => {
-      if (!this.onMetricsUpdate) return;
+      // Only gather metrics if there are listeners
+      if (!this.#listeners.has('metrics') || this.#listeners.get('metrics').size === 0) {
+        return;
+      }
 
       // Prevent overlapping executions
       if (this.#metricsGatherInProgress) {
@@ -1486,7 +1659,7 @@ export class SuperSonic {
       this.#metricsGatherInProgress = true;
       try {
         const metrics = this.#gatherMetrics();
-        this.onMetricsUpdate(metrics);
+        this.#emit('metrics', metrics);
       } catch (error) {
         console.error("[SuperSonic] Metrics gathering failed:", error);
       } finally {

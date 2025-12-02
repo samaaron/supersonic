@@ -98,11 +98,6 @@ export class BufferManager {
             throw new Error(`Invalid audio path: path cannot contain '..' (got: ${scPath})`);
         }
 
-        // Reject absolute paths (both Unix and Windows style)
-        if (scPath.startsWith('/') || /^[a-zA-Z]:/.test(scPath)) {
-            throw new Error(`Invalid audio path: path must be relative (got: ${scPath})`);
-        }
-
         // Reject URL-encoded traversal attempts
         if (scPath.includes('%2e') || scPath.includes('%2E')) {
             throw new Error(`Invalid audio path: path cannot contain URL-encoded characters (got: ${scPath})`);
@@ -113,7 +108,15 @@ export class BufferManager {
             throw new Error(`Invalid audio path: use forward slashes only (got: ${scPath})`);
         }
 
-        // Check if sampleBaseURL is configured
+        // If path looks like a URL or already-resolved path, use it directly
+        // - URLs (http://, https://, etc.)
+        // - Absolute paths (/foo/bar)
+        // - Explicit relative paths (./foo or ../foo - though .. is rejected above)
+        if (scPath.includes('://') || scPath.startsWith('/') || scPath.startsWith('./')) {
+            return scPath;
+        }
+
+        // Simple filenames need sampleBaseURL
         if (!this.#sampleBaseURL) {
             throw new Error(
                 'sampleBaseURL not configured. Please set it in SuperSonic constructor options.\n' +
@@ -123,7 +126,7 @@ export class BufferManager {
             );
         }
 
-        // Otherwise prepend base URL
+        // Prepend base URL for simple filenames
         return this.#sampleBaseURL + scPath;
     }
 
