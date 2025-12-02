@@ -32,7 +32,9 @@ mkdir -p "$OUTPUT_DIR/wasm"
 if ! command -v emcc &> /dev/null; then
     echo "Error: emcc (Emscripten compiler) not found!"
     echo "Please install and activate the Emscripten SDK first:"
-    echo "  source ~/Development/sc/emsdk/emsdk_env.sh"
+    echo "  https://emscripten.org/docs/getting_started/downloads.html"
+    echo ""
+    echo "Then run: source <path-to-emsdk>/emsdk_env.sh"
     exit 1
 fi
 

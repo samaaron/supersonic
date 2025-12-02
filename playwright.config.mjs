@@ -8,7 +8,7 @@ export default defineConfig({
   workers: 1, // Run tests serially - they share the audio context
 
   use: {
-    baseURL: "http://localhost:8002",
+    baseURL: "http://localhost:8003",
     headless: true,
     // Chrome flags for audio in headless mode
     launchOptions: {
@@ -32,7 +32,7 @@ export default defineConfig({
   // Start the test server before running tests
   webServer: {
     command: "node test/server.mjs",
-    port: 8002,
+    port: 8003,
     reuseExistingServer: !process.env.CI,
   },
 });
