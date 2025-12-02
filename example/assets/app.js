@@ -73,7 +73,10 @@ let trailReleaseTime = null;
 
 // DOM elements
 const initButton = document.getElementById('init-button');
-// const resetButton = document.getElementById('reset-button');
+const resetButton = document.getElementById('reset-button');
+const restartContainer = document.getElementById('restart-container');
+const suspendedOverlay = document.getElementById('suspended-overlay');
+const resumeButton = document.getElementById('resume-button');
 // const statusBadge = document.getElementById('status-badge');
 const messageInput = document.getElementById('message-input');
 const messageForm = document.getElementById('message-form');
@@ -223,6 +226,11 @@ function updateStatus(status) {
     if (initButtonContainer) initButtonContainer.style.display = 'none';
     if (scopeContainer) scopeContainer.style.display = 'block';
     if (synthUIContainer) synthUIContainer.classList.add('initialized');
+    if (restartContainer) restartContainer.style.display = 'block';
+    if (resetButton) {
+      resetButton.textContent = 'Restart';
+      resetButton.disabled = false;
+    }
     messageInput.disabled = false;
     messageForm.querySelector('button[type="submit"]').disabled = false;
     if (clearButton) clearButton.disabled = false;
@@ -647,8 +655,8 @@ initButton.addEventListener('click', async () => {
       // }
     });
 
-    // Set up callbacks
-    orchestrator.onInitialized = async (data) => {
+    // Set up event listeners
+    orchestrator.on('ready', async (data) => {
       console.log('[App] System initialised', data);
       updateStatus('ready');
 
@@ -692,9 +700,9 @@ initButton.addEventListener('click', async () => {
 
       // Setup scope visualiser
       setupScope();
-    };
+    });
 
-    orchestrator.onOSC = (message) => {
+    orchestrator.on('message:raw', (message) => {
       addMessage(message);
       // Also log to console in development mode
       if (DEV_MODE && message.oscData) {
@@ -706,9 +714,9 @@ initButton.addEventListener('click', async () => {
           console.log(`[OSC ←] <decode error: ${e.message}>`);
         }
       }
-    };
+    });
 
-    orchestrator.onMessageSent = (oscData) => {
+    orchestrator.on('message:sent', (oscData) => {
       addSentMessage(oscData);
       // Also log to console in development mode
       if (DEV_MODE) {
@@ -745,9 +753,9 @@ initButton.addEventListener('click', async () => {
           }
         }
       }
-    };
+    });
 
-    orchestrator.onMetricsUpdate = (metrics) => {
+    orchestrator.on('metrics', (metrics) => {
       // Metrics are now consolidated from all sources (worklet, OSC, SuperSonic counters)
       // Map to snake_case and update UI
       const metricsWithUsage = {};
@@ -815,15 +823,15 @@ initButton.addEventListener('click', async () => {
       metricsWithUsage.audio_context_state = metrics.audioContextState;
 
       updateMetrics(metricsWithUsage);
-    };
+    });
 
-    orchestrator.onError = (error) => {
+    orchestrator.on('error', (error) => {
       console.error('[App] Error:', error);
       showError(error.message);
       updateStatus('error');
-    };
+    });
 
-    orchestrator.onDebugMessage = (msg) => {
+    orchestrator.on('debug', (msg) => {
       // Log to console in dev mode (easier to copy/paste full logs)
       if (DEV_MODE) {
         console.log(msg.text);
@@ -838,17 +846,40 @@ initButton.addEventListener('click', async () => {
         }
       }
       flashTab('debug');
-    };
+    });
 
-    // Listen for console messages from worklet
-    orchestrator.onConsoleMessage = (msg) => {
-      console.log('[AudioWorklet]', msg);
-    };
+    orchestrator.on('shutdown', () => {
+      console.log('[App] Shutdown event received, resetting state flags');
+      // Reset all state flags so they get re-initialized after reset
+      fxChainInitialized = false;
+      fxChainInitializing = null;
+      fxSynthdefsLoaded = false;
+      instrumentSynthdefsLoaded = false;
+      kickSampleLoaded = false;
+      amenSampleLoaded = false;
+    });
 
-    orchestrator.onVersion = (version) => {
-      console.log('[App]', version);
-      // Version display removed from UI
-    };
+    // AudioContext state change events
+    orchestrator.on('audiocontext:suspended', () => {
+      console.log('[App] AudioContext suspended');
+      if (suspendedOverlay) {
+        suspendedOverlay.style.display = 'flex';
+      }
+    });
+
+    orchestrator.on('audiocontext:interrupted', () => {
+      console.log('[App] AudioContext interrupted');
+      if (suspendedOverlay) {
+        suspendedOverlay.style.display = 'flex';
+      }
+    });
+
+    orchestrator.on('audiocontext:resumed', () => {
+      console.log('[App] AudioContext resumed');
+      if (suspendedOverlay) {
+        suspendedOverlay.style.display = 'none';
+      }
+    });
 
     /* DEMO_BUILD_CONFIG */ await orchestrator.init({ development: DEV_MODE });
 
@@ -862,6 +893,84 @@ initButton.addEventListener('click', async () => {
   }
 });
 
+// Reset button
+if (resetButton) {
+  resetButton.addEventListener('click', async () => {
+    if (!orchestrator) return;
+    try {
+      resetButton.textContent = 'Restarting...';
+      resetButton.disabled = true;
+
+      // Log to debug panel
+      debugLog.textContent += '\n[App] Rebooting...\n';
+
+      // Stop all running loops/arpeggiators
+      if (typeof stopArpeggiator === 'function') stopArpeggiator();
+      if (typeof stopKickLoop === 'function') stopKickLoop();
+      if (typeof stopAmenLoop === 'function') stopAmenLoop();
+
+      // Disable synth pad to stop sending messages during reset
+      const synthPad = document.getElementById('synth-pad');
+      if (synthPad) {
+        synthPad.classList.remove('ready');
+        synthPad.classList.add('disabled');
+      }
+
+      await orchestrator.reset();
+    } catch (error) {
+      console.error('[App] Reset failed:', error);
+      showError(error.message);
+      resetButton.textContent = 'Restart';
+      resetButton.disabled = false;
+    }
+  });
+}
+
+// Resume button (shown when audio is suspended)
+if (resumeButton) {
+  resumeButton.addEventListener('click', async () => {
+    if (!orchestrator) return;
+    try {
+      resumeButton.textContent = 'Resuming...';
+      resumeButton.disabled = true;
+
+      // Log to debug panel
+      debugLog.textContent += '\n[App] Resuming audio...\n';
+
+      // Stop all running loops/arpeggiators
+      if (typeof stopArpeggiator === 'function') stopArpeggiator();
+      if (typeof stopKickLoop === 'function') stopKickLoop();
+      if (typeof stopAmenLoop === 'function') stopAmenLoop();
+
+      // Disable synth pad to stop sending messages during reset
+      const synthPad = document.getElementById('synth-pad');
+      if (synthPad) {
+        synthPad.classList.remove('ready');
+        synthPad.classList.add('disabled');
+      }
+
+      // Hide overlay immediately for better UX
+      if (suspendedOverlay) {
+        suspendedOverlay.style.display = 'none';
+      }
+
+      await orchestrator.reset();
+
+      // Reset button state
+      resumeButton.textContent = 'Resume Audio';
+      resumeButton.disabled = false;
+    } catch (error) {
+      console.error('[App] Resume failed:', error);
+      showError(error.message);
+      resumeButton.textContent = 'Resume Audio';
+      resumeButton.disabled = false;
+      // Show overlay again if resume failed
+      if (suspendedOverlay) {
+        suspendedOverlay.style.display = 'flex';
+      }
+    }
+  });
+}
 
 // Scope visualisation functions
 function setupScope() {

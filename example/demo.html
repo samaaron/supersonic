@@ -3559,6 +3559,56 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
       <!-- End Synth UI Container -->
     </div>
 
+    <div id="restart-container" style="display: none; text-align: center; padding: 1rem 0;">
+      <button
+        id="reset-button"
+        style="
+          background: transparent;
+          border: 1px solid #6b7280;
+          color: #6b7280;
+          padding: 0.25rem 0.75rem;
+          font-size: 0.75rem;
+          font-family: inherit;
+          cursor: pointer;
+        "
+      >
+        Restart
+      </button>
+    </div>
+
+    <!-- Audio Suspended Overlay -->
+    <div
+      id="suspended-overlay"
+      style="
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.85);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 1rem;
+      "
+    >
+      <div style="color: #ff6600; font-size: 1.5rem; font-weight: bold;">
+        Audio Suspended
+      </div>
+      <div style="color: #9ca3af; font-size: 0.875rem; max-width: 300px; text-align: center;">
+        The browser has paused audio playback. Click below to restart.
+      </div>
+      <button
+        id="resume-button"
+        class="btn-init"
+        style="font-size: 1.25rem; padding: 0.75rem 2rem; margin-top: 1rem;"
+      >
+        Resume Audio
+      </button>
+    </div>
+
     <script type="module" src="assets/app.js"></script>
   </body>
 </html>
