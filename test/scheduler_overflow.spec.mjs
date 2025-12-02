@@ -86,9 +86,9 @@ test.describe("Scheduler Queue Overflow", () => {
       });
 
       const debugMessages = [];
-      sonic.onDebug = (msg) => {
+      sonic.on('debug', (msg) => {
         debugMessages.push(msg);
-      };
+      });
 
       try {
         await sonic.init();
@@ -212,8 +212,8 @@ test.describe("Scheduler Queue Overflow", () => {
 
         // Check for scheduler overflow errors in debug
         const overflowErrors = debugMessages.filter(msg =>
-          msg.includes("Scheduler queue full") ||
-          msg.includes("Failed to schedule bundle")
+          msg.text?.includes("Scheduler queue full") ||
+          msg.text?.includes("Failed to schedule bundle")
         );
 
         // Wait for all scheduled messages to execute (300ms future + 26ms spread + buffer)
@@ -259,9 +259,9 @@ test.describe("Scheduler Queue Overflow", () => {
 
         // Check for any scsynth errors in debug messages
         const scsynthErrors = debugMessages.filter(msg =>
-          msg.includes("FAILURE") ||
-          msg.includes("Command not found") ||
-          msg.includes("Node") && msg.includes("not found")
+          msg.text?.includes("FAILURE") ||
+          msg.text?.includes("Command not found") ||
+          msg.text?.includes("Node") && msg.text?.includes("not found")
         );
 
         // Final metrics
@@ -404,7 +404,7 @@ test.describe("Scheduler Queue Overflow", () => {
       });
 
       const debugMessages = [];
-      sonic.onDebug = (msg) => debugMessages.push(msg);
+      sonic.on('debug', (msg) => debugMessages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDefs(["sonic-pi-beep"]);
@@ -472,7 +472,7 @@ test.describe("Scheduler Queue Overflow", () => {
         droppedAfter: metricsAfter.workletSchedulerDropped || 0,
         droppedCount: (metricsAfter.workletSchedulerDropped || 0) - droppedBefore,
         schedulerMax: metricsAfter.workletSchedulerMax,
-        overflowErrors: debugMessages.filter(m => m.includes("queue full")).length
+        overflowErrors: debugMessages.filter(m => m.text?.includes("queue full")).length
       };
     });
 

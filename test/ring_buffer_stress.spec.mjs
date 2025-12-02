@@ -139,9 +139,9 @@ test.describe("Ring Buffer Stress Test (Harness)", () => {
       });
 
       const debugMessages = [];
-      sonic.onDebug = (msg) => {
+      sonic.on('debug', (msg) => {
         debugMessages.push(msg);
-      };
+      });
 
       try {
         await sonic.init();
@@ -195,10 +195,10 @@ test.describe("Ring Buffer Stress Test (Harness)", () => {
 
         // Check for corruption indicators in debug messages
         const corruptionErrors = debugMessages.filter(msg =>
-          msg.includes("Command not found:") ||
-          msg.includes("Bundle too large") ||
-          msg.includes("Invalid magic") ||
-          msg.includes("FAILURE IN SERVER")
+          msg.text?.includes("Command not found:") ||
+          msg.text?.includes("Bundle too large") ||
+          msg.text?.includes("Invalid magic") ||
+          msg.text?.includes("FAILURE IN SERVER")
         );
 
         return {
@@ -219,7 +219,7 @@ test.describe("Ring Buffer Stress Test (Harness)", () => {
 
     if (result.corruptionErrors?.length > 0) {
       console.log("CORRUPTION DETECTED:");
-      result.corruptionErrors.forEach(e => console.log(`  - ${e}`));
+      result.corruptionErrors.forEach(e => console.log(`  - ${e.text || e}`));
     }
 
     if (errors.length > 0) {
@@ -265,9 +265,9 @@ test.describe("Ring Buffer Stress Test (Harness)", () => {
       });
 
       const debugMessages = [];
-      sonic.onDebug = (msg) => {
+      sonic.on('debug', (msg) => {
         debugMessages.push(msg);
-      };
+      });
 
       try {
         await sonic.init();
@@ -335,9 +335,9 @@ test.describe("Ring Buffer Stress Test (Harness)", () => {
         await new Promise(r => setTimeout(r, 1000));
 
         const corruptionErrors = debugMessages.filter(msg =>
-          msg.includes("Command not found:") ||
-          msg.includes("Bundle too large") ||
-          msg.includes("Invalid magic")
+          msg.text?.includes("Command not found:") ||
+          msg.text?.includes("Bundle too large") ||
+          msg.text?.includes("Invalid magic")
         );
 
         return {
@@ -355,7 +355,7 @@ test.describe("Ring Buffer Stress Test (Harness)", () => {
 
     if (result.corruptionErrors?.length > 0) {
       console.log("CORRUPTION DETECTED:");
-      result.corruptionErrors.forEach(e => console.log(`  - ${e}`));
+      result.corruptionErrors.forEach(e => console.log(`  - ${e.text || e}`));
     }
 
     expect(result.success).toBe(true);
@@ -396,9 +396,9 @@ test.describe("Ring Buffer Stress Test (Harness)", () => {
       });
 
       const debugMessages = [];
-      sonic.onDebug = (msg) => {
+      sonic.on('debug', (msg) => {
         debugMessages.push(msg);
-      };
+      });
 
       try {
         await sonic.init();
@@ -483,10 +483,10 @@ test.describe("Ring Buffer Stress Test (Harness)", () => {
         await sonic.send("/n_free", 9999);
 
         const corruptionErrors = debugMessages.filter(msg =>
-          msg.includes("Command not found:") ||
-          msg.includes("Bundle too large") ||
-          msg.includes("Invalid magic") ||
-          msg.includes("FAILURE IN SERVER")
+          msg.text?.includes("Command not found:") ||
+          msg.text?.includes("Bundle too large") ||
+          msg.text?.includes("Invalid magic") ||
+          msg.text?.includes("FAILURE IN SERVER")
         );
 
         return {
@@ -506,7 +506,7 @@ test.describe("Ring Buffer Stress Test (Harness)", () => {
 
     if (result.corruptionErrors?.length > 0) {
       console.log("CORRUPTION DETECTED:");
-      result.corruptionErrors.forEach(e => console.log(`  - ${e}`));
+      result.corruptionErrors.forEach(e => console.log(`  - ${e.text || e}`));
     }
 
     if (errors.length > 0) {

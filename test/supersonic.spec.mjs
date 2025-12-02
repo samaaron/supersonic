@@ -59,9 +59,9 @@ test.describe("SuperSonic", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => {
+      sonic.on('message', (msg) => {
         messages.push(JSON.parse(JSON.stringify(msg)));
-      };
+      });
 
       try {
         await sonic.init();
@@ -88,9 +88,9 @@ test.describe("SuperSonic", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => {
+      sonic.on('message', (msg) => {
         messages.push(JSON.parse(JSON.stringify(msg)));
-      };
+      });
 
       try {
         await sonic.init();
@@ -120,9 +120,9 @@ test.describe("SuperSonic", () => {
       });
 
       const debugMessages = [];
-      sonic.onDebugMessage = (msg) => {
+      sonic.on('debug', (msg) => {
         debugMessages.push(msg);
-      };
+      });
 
       try {
         await sonic.init();
@@ -195,9 +195,9 @@ test.describe("SuperSonic", () => {
       });
 
       const debugMessages = [];
-      sonic.onDebugMessage = (msg) => {
+      sonic.on('debug', (msg) => {
         debugMessages.push(msg);
-      };
+      });
 
       try {
         await sonic.init();
@@ -312,9 +312,9 @@ test.describe("SuperSonic", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => {
+      sonic.on('message', (msg) => {
         messages.push(JSON.parse(JSON.stringify(msg)));
-      };
+      });
 
       try {
         await sonic.init();
@@ -502,5 +502,364 @@ test.describe("SuperSonic", () => {
     expect(result.nodeCountAfterFree).toBe(1);
     expect(result.nodesAfterFree.length).toBe(1);
     expect(result.nodesAfterFree[0].id).toBe(0); // Only root remains
+  });
+});
+
+test.describe("Event Emitter", () => {
+  test.beforeEach(async ({ page }) => {
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        console.error("Browser console error:", msg.text());
+      }
+    });
+
+    page.on("pageerror", (err) => {
+      console.error("Page error:", err.message);
+    });
+
+    await page.goto("/test/harness.html");
+
+    await page.waitForFunction(() => window.supersonicReady === true, {
+      timeout: 10000,
+    });
+  });
+
+  test("on() returns an unsubscribe function", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      const messages = [];
+      const unsubscribe = sonic.on('message', (msg) => {
+        messages.push(msg.address);
+      });
+
+      // Verify unsubscribe is a function
+      const isFunction = typeof unsubscribe === 'function';
+
+      await sonic.init();
+      sonic.send("/status");
+      await sonic.sync(2);
+
+      const countBefore = messages.length;
+
+      // Unsubscribe
+      unsubscribe();
+
+      // Send another message - should not be received
+      sonic.send("/status");
+      await sonic.sync(2);
+
+      const countAfter = messages.length;
+
+      return {
+        success: true,
+        isFunction,
+        countBefore,
+        countAfter,
+        receivedAfterUnsub: countAfter > countBefore
+      };
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.isFunction).toBe(true);
+    expect(result.countBefore).toBeGreaterThan(0);
+    expect(result.receivedAfterUnsub).toBe(false);
+  });
+
+  test("multiple listeners receive same event", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      const listener1Messages = [];
+      const listener2Messages = [];
+      const listener3Messages = [];
+
+      // Three independent listeners on same event
+      sonic.on('message', (msg) => {
+        listener1Messages.push({ listener: 1, address: msg.address });
+      });
+
+      sonic.on('message', (msg) => {
+        listener2Messages.push({ listener: 2, address: msg.address });
+      });
+
+      sonic.on('message', (msg) => {
+        listener3Messages.push({ listener: 3, address: msg.address });
+      });
+
+      await sonic.init();
+      sonic.send("/status");
+      await sonic.sync(2);
+
+      return {
+        success: true,
+        listener1Count: listener1Messages.length,
+        listener2Count: listener2Messages.length,
+        listener3Count: listener3Messages.length,
+        allEqual: listener1Messages.length === listener2Messages.length &&
+                  listener2Messages.length === listener3Messages.length
+      };
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.listener1Count).toBeGreaterThan(0);
+    expect(result.allEqual).toBe(true);
+  });
+
+  test("unsubscribing one listener does not affect others", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      const listenerA = [];
+      const listenerB = [];
+      const listenerC = [];
+
+      // Three listeners - we'll unsubscribe B
+      sonic.on('message', (msg) => {
+        listenerA.push(msg.address);
+      });
+
+      const unsubB = sonic.on('message', (msg) => {
+        listenerB.push(msg.address);
+      });
+
+      sonic.on('message', (msg) => {
+        listenerC.push(msg.address);
+      });
+
+      await sonic.init();
+      sonic.send("/status");
+      await sonic.sync(2);
+
+      const countABefore = listenerA.length;
+      const countBBefore = listenerB.length;
+      const countCBefore = listenerC.length;
+
+      // Unsubscribe only B
+      unsubB();
+
+      // Send more messages
+      sonic.send("/status");
+      await sonic.sync(2);
+
+      return {
+        success: true,
+        countABefore,
+        countBBefore,
+        countCBefore,
+        countAAfter: listenerA.length,
+        countBAfter: listenerB.length,
+        countCAfter: listenerC.length,
+        // A and C should have received more, B should not
+        aReceivedMore: listenerA.length > countABefore,
+        bReceivedMore: listenerB.length > countBBefore,
+        cReceivedMore: listenerC.length > countCBefore
+      };
+    });
+
+    expect(result.success).toBe(true);
+    // A and C should continue receiving
+    expect(result.aReceivedMore).toBe(true);
+    expect(result.cReceivedMore).toBe(true);
+    // B should not receive after unsubscribe
+    expect(result.bReceivedMore).toBe(false);
+    expect(result.countBAfter).toBe(result.countBBefore);
+  });
+
+  test("once() fires only once then auto-unsubscribes", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      const onceMessages = [];
+      const regularMessages = [];
+
+      // once() listener - should only fire once
+      sonic.once('message', (msg) => {
+        onceMessages.push(msg.address);
+      });
+
+      // regular listener for comparison
+      sonic.on('message', (msg) => {
+        regularMessages.push(msg.address);
+      });
+
+      await sonic.init();
+
+      // Send multiple status commands
+      sonic.send("/status");
+      await sonic.sync(2);
+      sonic.send("/status");
+      await sonic.sync(2);
+      sonic.send("/status");
+      await sonic.sync(2);
+
+      return {
+        success: true,
+        onceCount: onceMessages.length,
+        regularCount: regularMessages.length
+      };
+    });
+
+    expect(result.success).toBe(true);
+    // once() should only receive one message
+    expect(result.onceCount).toBe(1);
+    // regular should receive multiple
+    expect(result.regularCount).toBeGreaterThan(1);
+  });
+
+  test("off() can remove listener without unsubscribe function", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      const messages = [];
+
+      // Keep reference to callback
+      const callback = (msg) => {
+        messages.push(msg.address);
+      };
+
+      sonic.on('message', callback);
+
+      await sonic.init();
+      sonic.send("/status");
+      await sonic.sync(2);
+
+      const countBefore = messages.length;
+
+      // Remove using off() with the same callback reference
+      sonic.off('message', callback);
+
+      sonic.send("/status");
+      await sonic.sync(2);
+
+      return {
+        success: true,
+        countBefore,
+        countAfter: messages.length,
+        receivedAfterOff: messages.length > countBefore
+      };
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.countBefore).toBeGreaterThan(0);
+    expect(result.receivedAfterOff).toBe(false);
+  });
+
+  test("error in one listener does not affect others", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      const goodListener1 = [];
+      const goodListener2 = [];
+
+      // First good listener
+      sonic.on('message', (msg) => {
+        goodListener1.push(msg.address);
+      });
+
+      // Bad listener that throws
+      sonic.on('message', () => {
+        throw new Error("Intentional test error");
+      });
+
+      // Second good listener - should still receive messages
+      sonic.on('message', (msg) => {
+        goodListener2.push(msg.address);
+      });
+
+      await sonic.init();
+      sonic.send("/status");
+      await sonic.sync(2);
+
+      return {
+        success: true,
+        listener1Count: goodListener1.length,
+        listener2Count: goodListener2.length,
+        bothReceived: goodListener1.length > 0 && goodListener2.length > 0
+      };
+    });
+
+    expect(result.success).toBe(true);
+    // Both good listeners should receive messages despite the bad one throwing
+    expect(result.bothReceived).toBe(true);
+    expect(result.listener1Count).toBe(result.listener2Count);
+  });
+
+  test("different event types are independent", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      const messageEvents = [];
+      const debugEvents = [];
+      const metricsEvents = [];
+
+      sonic.on('message', (msg) => {
+        messageEvents.push(msg);
+      });
+
+      sonic.on('debug', (msg) => {
+        debugEvents.push(msg);
+      });
+
+      sonic.on('metrics', (metrics) => {
+        metricsEvents.push(metrics);
+      });
+
+      await sonic.init();
+
+      // Wait for metrics (they come periodically)
+      await new Promise(r => setTimeout(r, 200));
+
+      sonic.send("/status");
+      await sonic.sync(2);
+
+      return {
+        success: true,
+        messageCount: messageEvents.length,
+        debugCount: debugEvents.length,
+        metricsCount: metricsEvents.length
+      };
+    });
+
+    expect(result.success).toBe(true);
+    // Should have received at least some messages and metrics
+    expect(result.messageCount).toBeGreaterThan(0);
+    expect(result.metricsCount).toBeGreaterThan(0);
+    // Debug messages depend on scsynth output, may or may not have any
   });
 });

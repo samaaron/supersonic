@@ -39,7 +39,7 @@ test.describe("Top-level Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/status");
@@ -75,7 +75,7 @@ test.describe("Top-level Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/sync", 42);
@@ -103,7 +103,7 @@ test.describe("Top-level Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/version");
@@ -138,7 +138,7 @@ test.describe("Top-level Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -243,7 +243,7 @@ test.describe("Synthdef Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -293,7 +293,7 @@ test.describe("Synthdef Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -388,7 +388,7 @@ test.describe("Node Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -437,7 +437,7 @@ test.describe("Node Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -494,7 +494,7 @@ test.describe("Node Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -527,7 +527,7 @@ test.describe("Node Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       // Must register for notifications - /n_query sends /n_info to registered clients
@@ -572,7 +572,7 @@ test.describe("Node Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -624,7 +624,7 @@ test.describe("Node Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -676,7 +676,7 @@ test.describe("Node Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -898,7 +898,7 @@ test.describe("Synth Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -951,7 +951,7 @@ test.describe("Synth Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -1072,7 +1072,7 @@ test.describe("Group Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -1126,7 +1126,7 @@ test.describe("Group Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -1290,7 +1290,7 @@ test.describe("Buffer Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1339,7 +1339,7 @@ test.describe("Buffer Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1372,7 +1372,7 @@ test.describe("Buffer Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1408,7 +1408,7 @@ test.describe("Buffer Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1465,7 +1465,7 @@ test.describe("Buffer Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1517,7 +1517,7 @@ test.describe("Buffer Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1560,7 +1560,7 @@ test.describe("Buffer Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1608,7 +1608,7 @@ test.describe("Buffer Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1672,7 +1672,7 @@ test.describe("Control Bus Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1716,7 +1716,7 @@ test.describe("Control Bus Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1760,7 +1760,7 @@ test.describe("Control Bus Commands", () => {
       });
 
       const messages = [];
-      sonic.onMessage = (msg) => messages.push(msg);
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
