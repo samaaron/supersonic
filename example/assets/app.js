@@ -972,6 +972,18 @@ if (resumeButton) {
   });
 }
 
+// Page visibility change handler - attempt audio recovery
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || !orchestrator) {
+    return;
+  }
+
+  const resumed = await orchestrator.resume();
+  if (!resumed && suspendedOverlay) {
+    suspendedOverlay.style.display = 'flex';
+  }
+});
+
 // Scope visualisation functions
 function setupScope() {
   if (!orchestrator || !orchestrator.audioContext || !orchestrator.workletNode) return;
