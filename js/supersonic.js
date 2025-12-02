@@ -80,6 +80,9 @@ export class SuperSonic {
   // Event emitter
   #listeners = new Map();
 
+  // Track AudioContext state for recovery detection
+  #previousAudioContextState = null;
+
   constructor(options = {}) {
     this.#initialized = false;
     this.#initializing = false;
@@ -338,6 +341,36 @@ export class SuperSonic {
    */
   stopMetricsPolling() {
     this.#stopPerformanceMonitoring();
+  }
+
+  /**
+   * Resume audio processing after interruption
+   * Resumes AudioContext, verifies worklet is running, and resyncs timing.
+   * @returns {Promise<boolean>} true if audio is running, false if resume failed
+   */
+  async resume() {
+    if (!this.#audioContext || !this.#metricsView) {
+      return false;
+    }
+
+    try {
+      await this.#audioContext.resume();
+    } catch (e) {
+      // Resume may fail
+    }
+
+    // Check if worklet is processing
+    const count1 = this.#metricsView[MetricsOffsets.PROCESS_COUNT];
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const count2 = this.#metricsView[MetricsOffsets.PROCESS_COUNT];
+
+    const isRunning = count2 > count1;
+
+    if (isRunning) {
+      this.#resyncTiming();
+    }
+
+    return isRunning;
   }
 
   /**
@@ -1130,6 +1163,14 @@ export class SuperSonic {
     this.#audioContext.addEventListener('statechange', () => {
       const state = this.#audioContext?.state;
       if (!state) return;
+
+      const previousState = this.#previousAudioContextState;
+      this.#previousAudioContextState = state;
+
+      // Resync timing when recovering from suspend/interrupt
+      if (state === 'running' && (previousState === 'suspended' || previousState === 'interrupted')) {
+        this.#resyncTiming();
+      }
 
       // Emit general statechange event
       this.#emit('audiocontext:statechange', { state });
@@ -1927,6 +1968,39 @@ export class SuperSonic {
       return 0;
     }
     return Atomics.load(this.#driftView, 0);
+  }
+
+  /**
+   * Resync NTP timing after recovering from suspend/interrupt
+   * Re-baselines the NTP start time and resets drift to 0
+   * @private
+   */
+  #resyncTiming() {
+    if (!this.#audioContext || !this.#ntpStartView || !this.#driftView) {
+      return;
+    }
+
+    const timestamp = this.#audioContext.getOutputTimestamp();
+    if (!timestamp || timestamp.contextTime <= 0) {
+      return;
+    }
+
+    // Recalculate NTP start time based on current state
+    const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
+    const currentNTP = perfTimeMs / 1000 + NTP_EPOCH_OFFSET;
+    const ntpStartTime = currentNTP - timestamp.contextTime;
+
+    // Update both SAB and internal state
+    this.#ntpStartView[0] = ntpStartTime;
+    this.#initialNTPStartTime = ntpStartTime;
+
+    // Reset drift to 0
+    Atomics.store(this.#driftView, 0, 0);
+
+    if (__DEV__)
+      console.log(
+        `[SuperSonic] Timing resynced after resume: start=${ntpStartTime.toFixed(6)}s`
+      );
   }
 
   /**
