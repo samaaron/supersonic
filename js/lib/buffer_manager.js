@@ -15,6 +15,7 @@ const BUFFER_POOL_ALIGNMENT = 8;  // Float64 alignment
 export class BufferManager {
     // Private configuration
     #sampleBaseURL;
+    #onLoadingEvent;
 
     // Private implementation
     #audioContext;
@@ -31,7 +32,8 @@ export class BufferManager {
             sharedBuffer,
             bufferPoolConfig,
             sampleBaseURL,
-            maxBuffers = 1024
+            maxBuffers = 1024,
+            onLoadingEvent = null
         } = options;
 
         // Validate required dependencies
@@ -59,6 +61,7 @@ export class BufferManager {
         this.#audioContext = audioContext;
         this.#sharedBuffer = sharedBuffer;
         this.#sampleBaseURL = sampleBaseURL;
+        this.#onLoadingEvent = onLoadingEvent;
 
         // Create and own buffer pool
         this.#bufferPool = new MemPool({
@@ -157,13 +160,15 @@ export class BufferManager {
             await this.#awaitPendingReplacement(bufnum);
 
             // Execute the actual operation (loading file or allocating empty buffer)
-            const { ptr, sizeBytes, ...extraProps } = await operation();
+            const { ptr, sizeBytes, numFrames, numChannels, sampleRate, ...extraProps } = await operation();
             allocatedPtr = ptr;
 
             // Register pending operation
             const { uuid, allocationComplete } = this.#registerPending(bufnum, timeoutMs);
             pendingToken = uuid;
-            this.#recordAllocation(bufnum, allocatedPtr, sizeBytes, uuid, allocationComplete);
+            this.#recordAllocation(bufnum, allocatedPtr, sizeBytes, uuid, allocationComplete, {
+                numFrames, numChannels, sampleRate
+            });
             allocationRegistered = true;
 
             const managedCompletion = this.#attachFinalizer(bufnum, uuid, allocationComplete);
@@ -174,6 +179,9 @@ export class BufferManager {
                 ptr: allocatedPtr,
                 uuid,
                 allocationComplete: managedCompletion,
+                numFrames,
+                numChannels,
+                sampleRate,
                 ...extraProps
             };
         } catch (error) {
@@ -205,6 +213,11 @@ export class BufferManager {
         return this.#executeBufferOperation(bufnum, 60000, async () => {
             // Fetch and decode audio file
             const resolvedPath = this.#resolveAudioPath(path);
+            const sampleName = path.split('/').pop();
+
+            // Emit loading:start event
+            this.#onLoadingEvent?.('loading:start', { type: 'sample', name: sampleName });
+
             const response = await fetch(resolvedPath);
 
             if (!response.ok) {
@@ -249,6 +262,9 @@ export class BufferManager {
 
             this.#writeToSharedBuffer(ptr, interleaved);
             const sizeBytes = interleaved.length * 4;
+
+            // Emit loading:complete event
+            this.#onLoadingEvent?.('loading:complete', { type: 'sample', name: sampleName, size: sizeBytes });
 
             return {
                 ptr,
@@ -378,11 +394,14 @@ export class BufferManager {
         };
     }
 
-    #recordAllocation(bufnum, ptr, sizeBytes, pendingToken, pendingPromise) {
+    #recordAllocation(bufnum, ptr, sizeBytes, pendingToken, pendingPromise, metadata = {}) {
         const previousEntry = this.#allocatedBuffers.get(bufnum);
         const entry = {
             ptr,
             size: sizeBytes,
+            numFrames: metadata.numFrames || 0,
+            numChannels: metadata.numChannels || 1,
+            sampleRate: metadata.sampleRate || 48000,
             pendingToken,
             pendingPromise,
             previousAllocation: previousEntry
@@ -560,6 +579,26 @@ export class BufferManager {
      */
     getStats() {
         return this.#bufferPool.stats();
+    }
+
+    /**
+     * Get all allocated buffers for recovery
+     * Returns info needed to re-send /b_allocPtr to scsynth after a soft reset
+     * @returns {Array<{bufnum: number, ptr: number, numFrames: number, numChannels: number, sampleRate: number}>}
+     */
+    getAllocatedBuffers() {
+        const buffers = [];
+        for (const [bufnum, entry] of this.#allocatedBuffers.entries()) {
+            if (!entry || !entry.ptr) continue;
+            buffers.push({
+                bufnum,
+                ptr: entry.ptr,
+                numFrames: entry.numFrames,
+                numChannels: entry.numChannels,
+                sampleRate: entry.sampleRate
+            });
+        }
+        return buffers;
     }
 
     /**

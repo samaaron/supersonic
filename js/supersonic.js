@@ -83,6 +83,9 @@ export class SuperSonic {
   // Track AudioContext state for recovery detection
   #previousAudioContextState = null;
 
+  // Cached WASM bytes for fast recover() - skip network fetch on re-init
+  #cachedWasmBytes = null;
+
   constructor(options = {}) {
     this.#initialized = false;
     this.#initializing = false;
@@ -98,7 +101,7 @@ export class SuperSonic {
     this.#workletNode = null;
     this.#osc = null; // ScsynthOSC instance for OSC communication
     this.#bufferManager = null;
-    this.loadedSynthDefs = new Set();
+    this.loadedSynthDefs = new Map();  // name -> Uint8Array (cached for recover())
 
     // Configuration - require explicit base URLs for workers and WASM
     // This ensures SuperSonic works correctly in bundled/vendored environments
@@ -169,11 +172,13 @@ export class SuperSonic {
 
   /**
    * Subscribe to an event
-   * @param {string} event - Event name: 'ready', 'metrics', 'message', 'message:sent', 'message:raw', 'debug', 'error'
+   * @param {string} event - Event name: 'ready', 'loading:start', 'loading:complete', 'metrics', 'message', 'message:sent', 'message:raw', 'debug', 'error'
    * @param {Function} callback - Function to call when event fires
-   * @returns {this} For chaining
+   * @returns {Function} Unsubscribe function
    * @example
    * sonic.on('ready', (info) => console.log('Ready!', info));
+   * sonic.on('loading:start', (e) => console.log(`Loading ${e.type}: ${e.name}`));
+   * sonic.on('loading:complete', (e) => console.log(`Loaded ${e.type}: ${e.name} (${e.size} bytes)`));
    * sonic.on('metrics', (m) => console.log('Messages:', m.mainMessagesSent));
    * sonic.on('message', (msg) => console.log('OSC in:', msg.address));
    */
@@ -638,9 +643,22 @@ export class SuperSonic {
       );
     }
 
+    // Cache synthdefs and emit loading events for /d_recv
+    if (address === "/d_recv") {
+      const synthdefBytes = args[0];
+      if (synthdefBytes instanceof Uint8Array || synthdefBytes instanceof ArrayBuffer) {
+        const bytes = synthdefBytes instanceof ArrayBuffer ? new Uint8Array(synthdefBytes) : synthdefBytes;
+        const name = this.#extractSynthDefName(bytes) || 'unknown';
+        // Emit loading events for visibility
+        this.#emit('loading:start', { type: 'synthdef', name });
+        this.loadedSynthDefs.set(name, bytes);
+        // Emit complete immediately since bytes are already in memory
+        this.#emit('loading:complete', { type: 'synthdef', name, size: bytes.byteLength });
+      }
+    }
+
     // Track synthdef frees locally (server doesn't send confirmation)
     if (address === "/d_free") {
-      // /d_free takes one or more synthdef names
       for (const name of args) {
         if (typeof name === "string") {
           this.loadedSynthDefs.delete(name);
@@ -767,6 +785,8 @@ export class SuperSonic {
       path = `${this.#synthdefBaseURL}${nameOrPath}.scsyndef`;
     }
 
+    const synthName = this.#extractSynthDefName(path);
+
     try {
       const response = await fetch(path);
 
@@ -779,12 +799,8 @@ export class SuperSonic {
       const arrayBuffer = await response.arrayBuffer();
       const synthdefData = new Uint8Array(arrayBuffer);
 
-      // Send via /d_recv OSC message
-      // The synthdef will be added to loadedSynthDefs when we receive
-      // /supersonic/synthdef/loaded confirmation from scsynth
+      // send() emits loading:start/complete events for /d_recv
       await this.send("/d_recv", synthdefData);
-
-      const synthName = this.#extractSynthDefName(path);
 
       if (__DEV__)
         console.log(
@@ -849,8 +865,6 @@ export class SuperSonic {
   async loadSample(bufnum, nameOrPath, startFrame = 0, numFrames = 0) {
     this.#ensureInitialized("load samples");
 
-    // Pass nameOrPath directly to BufferManager - it handles path resolution
-    // BufferManager will prepend sampleBaseURL if needed
     const bufferInfo = await this.#requireBufferManager().prepareFromFile({
       bufnum,
       path: nameOrPath,
@@ -1053,6 +1067,9 @@ export class SuperSonic {
     // Shutdown all resources (this also emits 'shutdown')
     await this.shutdown();
 
+    // Clear cached WASM bytes - instance is being destroyed
+    this.#cachedWasmBytes = null;
+
     // Clear all listeners - this instance is now unusable
     this.#listeners.clear();
 
@@ -1198,6 +1215,7 @@ export class SuperSonic {
       },
       sampleBaseURL: this.#sampleBaseURL,
       maxBuffers: this.#config.worldOptions.numBuffers,
+      onLoadingEvent: (event, data) => this.#emit(event, data),
     });
   }
 
@@ -1222,13 +1240,22 @@ export class SuperSonic {
   }
 
   /**
-   * Load WASM binary from network
+   * Load WASM binary - uses cache if available (for fast recover())
    */
   async #loadWasm() {
+    // Return cached WASM if available (fast path for recover())
+    if (this.#cachedWasmBytes) {
+      if (__DEV__) console.log('[SuperSonic] Using cached WASM bytes');
+      return this.#cachedWasmBytes;
+    }
+
     // In development mode, load manifest for cache-busted filename
     if (this.#config.development) {
       await this.#loadWasmManifest();
     }
+
+    const wasmName = this.#config.wasmUrl.split('/').pop();
+    this.#emit('loading:start', { type: 'wasm', name: wasmName });
 
     let wasmResponse;
     try {
@@ -1244,7 +1271,14 @@ export class SuperSonic {
         `Failed to load WASM: ${wasmResponse.status} ${wasmResponse.statusText}`
       );
     }
-    return await wasmResponse.arrayBuffer();
+
+    const wasmBytes = await wasmResponse.arrayBuffer();
+    this.#emit('loading:complete', { type: 'wasm', name: wasmName, size: wasmBytes.byteLength });
+
+    // Cache for future recover() calls
+    this.#cachedWasmBytes = wasmBytes;
+
+    return wasmBytes;
   }
 
   /**
@@ -1310,10 +1344,10 @@ export class SuperSonic {
         this.#bufferManager?.handleBufferAllocated(msg.args);
       } else if (msg.address === "/supersonic/synthdef/loaded") {
         // Handle synthdef load confirmation from scsynth
+        // Note: synthdef bytes are already cached in loadSynthDef() after sending /d_recv
         const synthName = msg.args[0];
-        if (synthName) {
-          this.loadedSynthDefs.add(synthName);
-          if (__DEV__) console.log(`[SuperSonic] Synthdef confirmed: ${synthName}`);
+        if (__DEV__ && synthName) {
+          console.log(`[SuperSonic] Synthdef confirmed: ${synthName}`);
         }
       } else if (msg.address === "/synced" && msg.args.length > 0) {
         // Handle /synced responses for sync operations
@@ -2033,12 +2067,40 @@ export class SuperSonic {
     }
   }
 
-  #extractSynthDefName(path) {
-    if (!path || typeof path !== "string") {
+  /**
+   * Extract synthdef name from path or binary data
+   * @param {string|Uint8Array|ArrayBuffer} input - File path or scsyndef binary
+   * @returns {string|null} Synthdef name or null if not found
+   * @private
+   */
+  #extractSynthDefName(input) {
+    if (!input) return null;
+
+    // Handle string path - extract from filename
+    if (typeof input === "string") {
+      const lastSegment = input.split("/").filter(Boolean).pop() || input;
+      return lastSegment.replace(/\.scsyndef$/i, "");
+    }
+
+    // Handle binary data - parse scsyndef format
+    // Format: "SCgf" (4) + version (4) + numDefs (2) + [nameLen (1) + name (n) + ...]
+    const bytes = input instanceof ArrayBuffer ? new Uint8Array(input) : input;
+    if (!(bytes instanceof Uint8Array) || bytes.length < 11) return null;
+
+    // Check magic "SCgf"
+    if (bytes[0] !== 0x53 || bytes[1] !== 0x43 || bytes[2] !== 0x67 || bytes[3] !== 0x66) {
       return null;
     }
-    const lastSegment = path.split("/").filter(Boolean).pop() || path;
-    return lastSegment.replace(/\.scsyndef$/i, "");
+
+    // Name starts at offset 10 (after magic + version + numDefs)
+    const nameLen = bytes[10];
+    if (nameLen === 0 || 11 + nameLen > bytes.length) return null;
+
+    try {
+      return new TextDecoder().decode(bytes.slice(11, 11 + nameLen));
+    } catch {
+      return null;
+    }
   }
 
   #toUint8Array(data) {
