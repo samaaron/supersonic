@@ -52,6 +52,22 @@
       href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.min.css"
     />
     <style>
+      /* Animated border angle property */
+      @property --border-angle {
+        syntax: '<angle>';
+        initial-value: 0deg;
+        inherits: false;
+      }
+
+      @keyframes rotateBorder {
+        from {
+          --border-angle: 0deg;
+        }
+        to {
+          --border-angle: 360deg;
+        }
+      }
+
       /* Let Tailwind handle most resets, only reset specific elements */
       body,
       h1,
@@ -130,6 +146,7 @@
         color: #1f2937;
         line-height: 1.6;
         overflow-y: auto;
+        scroll-behavior: smooth;
         height: 100%;
         accent-color: #ff8c00;
       }
@@ -1213,6 +1230,13 @@
 
         #init-button-container {
           order: 1;
+          height: auto !important;
+          padding: 1rem 0;
+        }
+
+        #init-button-container p {
+          font-size: 0.9rem !important;
+          margin-bottom: 0.75rem !important;
         }
 
         #scope-container {
@@ -1246,6 +1270,7 @@
       .synth-pad-container {
         margin: 0 auto;
         max-width: 600px;
+        position: relative;
       }
 
       .synth-pad {
@@ -1452,6 +1477,72 @@
 
       .synth-pad-coords > div {
         text-align: right;
+      }
+
+      /* Loading Log - fixed position to escape grayscale filter */
+      .loading-log {
+        position: fixed;
+        z-index: 1000;
+        border-radius: 12px;
+        display: none;
+        flex-direction: column;
+        /* Animated gradient border via pseudo-element (border-image doesn't support border-radius) */
+        padding: 4px;
+        background: conic-gradient(
+          from var(--border-angle),
+          #ff6600 0deg,
+          #ffaa00 90deg,
+          #ffd700 180deg,
+          #ffaa00 270deg,
+          #ff6600 360deg
+        );
+        animation: rotateBorder 3s linear infinite;
+        box-shadow: 0 0 30px rgba(255, 102, 0, 0.3);
+        filter: hue-rotate(200deg) saturate(2);
+      }
+
+      .loading-log-inner {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: linear-gradient(
+          135deg,
+          #0a0a0f 0%,
+          #1a1a2e 50%,
+          #0f0f1a 100%
+        );
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.5);
+      }
+
+      .loading-log.visible {
+        display: flex;
+      }
+
+      .loading-log-header {
+        padding: 8px 12px;
+        background: rgba(255, 102, 0, 0.15);
+        border-bottom: 1px solid rgba(255, 102, 0, 0.3);
+        font-family: "Cascadia Code", "Courier New", monospace;
+        font-size: 0.85rem;
+        color: #ffffff;
+        font-weight: bold;
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+      }
+
+      .loading-log-content {
+        flex: 1;
+        padding: 8px 12px;
+        overflow-y: auto;
+        font-family: "Cascadia Code", "Courier New", monospace;
+        font-size: 0.75rem;
+        line-height: 1.4;
+        color: #ccc;
+      }
+
+      .loading-log-content .log-entry {
+        margin-bottom: 2px;
       }
 
       /* Slider Controls */
@@ -1976,7 +2067,6 @@
               "
               onmouseover="this.style.background='linear-gradient(101deg, #ffd700 0%, #ff1493 100%)'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 16px rgba(255, 215, 0, 0.5)';"
               onmouseout="this.style.background='linear-gradient(101deg, #ff1493 0%, #1e90ff 100%)'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 6px rgba(255, 20, 147, 0.3)';"
-              onclick="event.preventDefault(); document.getElementById('demo').scrollIntoView({behavior: 'smooth', block: 'start'});"
             >
               Whizz to Demo
             </a>
@@ -2388,17 +2478,22 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
             style="
               height: 160px;
               display: flex;
+              flex-direction: column;
               align-items: center;
               justify-content: center;
               margin-bottom: 0.75rem;
+              gap: 1rem;
             "
           >
+            <p style="margin: 0 0 1.5rem 0; color: #999; font-style: italic; font-size: 1.1rem; text-align: center;">
+              This is a simple playful demo of SuperSonic's audio engine - have fun making noise!
+            </p>
             <button
               id="init-button"
               class="btn-init"
               style="font-size: 1.25rem; padding: 0.75rem 2rem"
             >
-              Boot
+              Boot Demo
             </button>
           </div>
 
@@ -3557,6 +3652,14 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
         <!-- End Unified Black Container -->
       </div>
       <!-- End Synth UI Container -->
+
+      <!-- Loading log - outside synth-ui-container to escape grayscale filter -->
+      <div id="loading-log" class="loading-log">
+        <div class="loading-log-inner">
+          <div class="loading-log-header">Loading...</div>
+          <div id="loading-log-content" class="loading-log-content"></div>
+        </div>
+      </div>
     </div>
 
     <div id="restart-container" style="display: none; text-align: center; padding: 1rem 0;">

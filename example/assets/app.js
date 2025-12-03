@@ -198,6 +198,89 @@ function flashTab(tabName) {
   }, 1500);
 }
 
+// Boot animation state
+let bootAnimationInterval = null;
+let bootDotCount = 0;
+
+function startBootAnimation() {
+  if (bootAnimationInterval) return;
+  bootDotCount = 0;
+  // Set initial width to prevent button resizing during animation
+  initButton.style.minWidth = initButton.offsetWidth + 'px';
+  bootAnimationInterval = setInterval(() => {
+    bootDotCount = (bootDotCount + 1) % 4;
+    // Use fixed-width string: visible dots + invisible dots to maintain width
+    const visibleDots = '.'.repeat(bootDotCount || 1);
+    const invisibleDots = '\u2008'.repeat(3 - (bootDotCount || 1)); // punctuation space
+    initButton.textContent = `Booting${visibleDots}${invisibleDots}`;
+  }, 400);
+}
+
+function stopBootAnimation() {
+  if (bootAnimationInterval) {
+    clearInterval(bootAnimationInterval);
+    bootAnimationInterval = null;
+  }
+}
+
+// Loading log panel - replaces synth pad during boot
+const loadingLog = document.getElementById('loading-log');
+const loadingLogContent = document.getElementById('loading-log-content');
+const loadingLogHeader = loadingLog?.querySelector('.loading-log-header');
+
+function addLoadingLogEntry(message, type = '') {
+  if (!loadingLogContent) return;
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  entry.textContent = message;
+  loadingLogContent.appendChild(entry);
+  loadingLogContent.scrollTop = loadingLogContent.scrollHeight;
+}
+
+function updateLoadingLogHeader(message) {
+  if (loadingLogHeader) {
+    loadingLogHeader.textContent = message;
+  }
+}
+
+function showLoadingLog() {
+  if (loadingLog) {
+    // Position over the synth-pad-container
+    const synthPadContainer = document.querySelector('.synth-pad-container');
+    if (synthPadContainer) {
+      const rect = synthPadContainer.getBoundingClientRect();
+      loadingLog.style.top = `${rect.top}px`;
+      loadingLog.style.left = `${rect.left}px`;
+      loadingLog.style.width = `${rect.width}px`;
+      loadingLog.style.height = `${rect.height}px`;
+    }
+    loadingLog.classList.add('visible');
+  }
+}
+
+function hideLoadingLog() {
+  if (loadingLog) loadingLog.classList.remove('visible');
+}
+
+function clearLoadingLog() {
+  if (loadingLogContent) loadingLogContent.innerHTML = '';
+}
+
+// Loading overlay - grayscale effect via CSS .initialized class
+function showLoadingOverlay() {
+  const synthUIContainer = document.getElementById('synth-ui-container');
+  if (synthUIContainer) {
+    synthUIContainer.classList.remove('initialized');
+  }
+}
+
+function hideLoadingOverlay() {
+  const synthUIContainer = document.getElementById('synth-ui-container');
+  if (synthUIContainer) {
+    synthUIContainer.classList.add('initialized');
+  }
+}
+
 // Helper functions
 function updateStatus(status) {
   const initButtonContainer = document.getElementById('init-button-container');
@@ -209,6 +292,7 @@ function updateStatus(status) {
 
   // Update UI visibility based on status
   if (status === 'not_initialized' || status === 'error') {
+    stopBootAnimation();
     initButton.textContent = 'Boot';
     initButton.disabled = false;
     if (initButtonContainer) initButtonContainer.style.display = 'block';
@@ -219,10 +303,19 @@ function updateStatus(status) {
     if (clearButton) clearButton.disabled = true;
     if (loadAllButton) loadAllButton.disabled = true;
     if (loadExampleButton) loadExampleButton.disabled = true;
+    hideLoadingOverlay();
   } else if (status === 'initializing') {
-    initButton.textContent = 'Booting...';
+    startBootAnimation();
     initButton.disabled = true;
+  } else if (status === 'loading_assets') {
+    // WASM loaded, now loading samples/synthdefs
+    stopBootAnimation();
+    if (initButtonContainer) initButtonContainer.style.display = 'none';
+    if (scopeContainer) scopeContainer.style.display = 'block';
+    showLoadingOverlay();
   } else if (status === 'ready') {
+    stopBootAnimation();
+    hideLoadingOverlay();
     if (initButtonContainer) initButtonContainer.style.display = 'none';
     if (scopeContainer) scopeContainer.style.display = 'block';
     if (synthUIContainer) synthUIContainer.classList.add('initialized');
@@ -642,6 +735,11 @@ initButton.addEventListener('click', async () => {
     updateStatus('initializing');
     hideError();
 
+    // Show and clear loading log
+    clearLoadingLog();
+    showLoadingLog();
+    addLoadingLogEntry('Initialising SuperSonic...');
+
     orchestrator = new SuperSonic({
       workerBaseURL: 'dist/workers/',
       wasmBaseURL: 'dist/wasm/',
@@ -655,10 +753,30 @@ initButton.addEventListener('click', async () => {
       // }
     });
 
+    // Track loading progress in loading log panel
+    let bootPhase = true;
+    let recoveryPhase = false;
+    let wasmLoaded = false; // Prevent duplicate WASM entries
+
+    orchestrator.on('loading:complete', (e) => {
+      if (!bootPhase && !recoveryPhase) return;
+
+      // Only show WASM loading once per boot
+      if (e.type === 'wasm') {
+        if (wasmLoaded) return;
+        wasmLoaded = true;
+      }
+
+      const sizeKB = e.size ? ` (${(e.size / 1024).toFixed(0)}KB)` : '';
+      addLoadingLogEntry(`${e.type}: ${e.name}${sizeKB}`, e.type);
+    });
+
     // Set up event listeners
     orchestrator.on('ready', async (data) => {
       console.log('[App] System initialised', data);
-      updateStatus('ready');
+
+      // Show loading status in scope area while loading assets
+      updateStatus('loading_assets');
 
       // Expose to global scope for console access (development only)
       if (DEV_MODE) {
@@ -666,14 +784,22 @@ initButton.addEventListener('click', async () => {
         console.log('[App] orchestrator exposed to window for dev console access');
       }
 
-      // Preload all loop samples on boot
-      await loadAllLoopSamples();
-      console.log('[App] Loop samples preloaded on boot');
+      // Load samples and FX synthdefs in parallel for faster boot
+      await Promise.all([
+        loadAllLoopSamples(),
+        initFXChain()
+      ]);
+      console.log('[App] Assets loaded (samples + FX chain)');
 
-      // Initialize FX chain BEFORE enabling synth pad
-      // This prevents race conditions where pad sends /n_set before nodes exist
-      await initFXChain();
-      console.log('[App] FX chain initialized on boot');
+      // Boot phase complete
+      bootPhase = false;
+      addLoadingLogEntry('Ready', 'complete');
+
+      // Now fully ready
+      updateStatus('ready');
+
+      // Hide loading log, show synth pad
+      hideLoadingLog();
 
       // Enable synth controls
       const fillSynthBtns = document.querySelectorAll('.fill-synth-button');
@@ -881,6 +1007,26 @@ initButton.addEventListener('click', async () => {
       }
     });
 
+    // Recovery events - show loading log during full reload recovery
+    orchestrator.on('recover:start', () => {
+      console.log('[App] Recovery starting (full reload)');
+      recoveryPhase = true;
+      clearLoadingLog();
+      showLoadingLog();
+      addLoadingLogEntry('Recovering audio engine...');
+    });
+
+    orchestrator.on('recover:complete', ({ success }) => {
+      console.log('[App] Recovery complete:', success ? 'success' : 'failed');
+      recoveryPhase = false;
+      if (success) {
+        addLoadingLogEntry('Recovery complete', 'complete');
+        hideLoadingLog();
+      } else {
+        addLoadingLogEntry('Recovery failed', 'error');
+      }
+    });
+
     /* DEMO_BUILD_CONFIG */ await orchestrator.init({ development: DEV_MODE });
 
     // Expose for debugging
@@ -934,6 +1080,12 @@ if (resumeButton) {
       resumeButton.textContent = 'Resuming...';
       resumeButton.disabled = true;
 
+      // Show loading overlay and log (same as first boot)
+      showLoadingOverlay();
+      clearLoadingLog();
+      showLoadingLog();
+      addLoadingLogEntry('Recovering audio...');
+
       // Log to debug panel
       debugLog.textContent += '\n[App] Resuming audio...\n';
 
@@ -954,7 +1106,19 @@ if (resumeButton) {
         suspendedOverlay.style.display = 'none';
       }
 
-      await orchestrator.reset();
+      // Smart recovery: tries quick resume first, falls back to full reload
+      const success = await orchestrator.recover();
+
+      if (synthPad) {
+        synthPad.classList.remove('disabled');
+        synthPad.classList.add('ready');
+      }
+      console.log('[App] Audio recovered successfully');
+
+      // Hide loading log and overlay, show full color UI
+      addLoadingLogEntry('Ready', 'complete');
+      hideLoadingLog();
+      hideLoadingOverlay();
 
       // Reset button state
       resumeButton.textContent = 'Resume Audio';
@@ -962,6 +1126,12 @@ if (resumeButton) {
     } catch (error) {
       console.error('[App] Resume failed:', error);
       showError(error.message);
+
+      // Hide loading log and overlay on error too
+      addLoadingLogEntry('Recovery failed', 'error');
+      hideLoadingLog();
+      hideLoadingOverlay();
+
       resumeButton.textContent = 'Resume Audio';
       resumeButton.disabled = false;
       // Show overlay again if resume failed
@@ -972,14 +1142,16 @@ if (resumeButton) {
   });
 }
 
-// Page visibility change handler - attempt audio recovery
-document.addEventListener('visibilitychange', async () => {
+// Page visibility change handler - check if audio needs recovery
+// Don't auto-recover, just show overlay if AudioContext is suspended
+// The audiocontext:suspended event handler will show the overlay
+document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !orchestrator) {
     return;
   }
 
-  const resumed = await orchestrator.resume();
-  if (!resumed && suspendedOverlay) {
+  // Just check state - don't auto-recover (user must click resume button)
+  if (orchestrator.audioContext?.state === 'suspended' && suspendedOverlay) {
     suspendedOverlay.style.display = 'flex';
   }
 });
@@ -1537,7 +1709,12 @@ const synthUIContainer = document.getElementById('synth-ui-container');
 if (hueSlider && synthUIContainer) {
   hueSlider.addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
-    synthUIContainer.style.filter = `hue-rotate(${value}deg) saturate(2)`;
+    const filterValue = `hue-rotate(${value}deg) saturate(2)`;
+    synthUIContainer.style.filter = filterValue;
+    // Also update loading-log to match
+    if (loadingLog) {
+      loadingLog.style.filter = filterValue;
+    }
   });
   console.log('[UI] Hue slider initialised');
 }
@@ -2296,12 +2473,11 @@ async function loadAllLoopSamples() {
   console.log('[Samples] Loading all loop samples...');
   const loopNames = Object.keys(LOOP_BUFFERS);
 
-  // Load all samples in parallel
+  // Load all samples in parallel using loadSample() for loading events
   await Promise.all(loopNames.map(loopName => {
     const bufNum = LOOP_BUFFERS[loopName];
     const fileName = `${loopName}.flac`;
-    console.log(`[Samples] Loading ${fileName} to buffer ${bufNum}`);
-    return orchestrator.send('/b_allocRead', bufNum, fileName);
+    return orchestrator.loadSample(bufNum, fileName);
   }));
 
   amenSampleLoaded = true;
