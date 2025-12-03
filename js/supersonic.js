@@ -349,11 +349,11 @@ export class SuperSonic {
   }
 
   /**
-   * Resume audio processing after interruption
+   * Resume audio processing after interruption (internal)
    * Resumes AudioContext, verifies worklet is running, and resyncs timing.
    * @returns {Promise<boolean>} true if audio is running, false if resume failed
    */
-  async resume() {
+  async #resume() {
     if (!this.#audioContext || !this.#metricsView) {
       return false;
     }
@@ -376,6 +376,77 @@ export class SuperSonic {
     }
 
     return isRunning;
+  }
+
+  /**
+   * Smart recovery - tries resume() first, falls back to reload() if needed.
+   * This is the recommended method for handling audio interruptions.
+   *
+   * @returns {Promise<boolean>} true if audio is running after recovery
+   * @example
+   * document.addEventListener('visibilitychange', async () => {
+   *   if (!document.hidden) await sonic.recover();
+   * });
+   */
+  async recover() {
+    if (!this.#initialized) {
+      return false;
+    }
+
+    if (__DEV__) console.log('[SuperSonic] Attempting recovery...');
+
+    // Try quick resume first
+    if (await this.#resume()) {
+      if (__DEV__) console.log('[SuperSonic] Quick resume succeeded');
+      return true;
+    }
+
+    // Resume failed - need full reload
+    if (__DEV__) console.log('[SuperSonic] Resume failed, doing full reload');
+    this.#emit('recover:start');
+    const success = await this.#reload();
+    this.#emit('recover:complete', { success });
+    return success;
+  }
+
+  /**
+   * Full reset with cached asset restoration (internal)
+   * Faster than manual reset() because:
+   * - WASM bytes are cached (no network fetch)
+   * - Synthdef bytes are cached (re-sent without network fetch)
+   *
+   * Note: Audio samples/buffers need to be reloaded by application code.
+   */
+  async #reload() {
+    if (!this.#initialized) {
+      return false;
+    }
+
+    if (__DEV__) console.log('[SuperSonic] Starting reload...');
+
+    // Save cached synthdef bytes before reset
+    const cachedSynthDefs = new Map(this.loadedSynthDefs);
+
+    if (__DEV__) {
+      console.log(`[SuperSonic] Caching ${cachedSynthDefs.size} synthdefs`);
+    }
+
+    // Full reset (new AudioContext, worklet, WASM)
+    // Note: WASM bytes are cached, so no network fetch needed
+    await this.reset();
+
+    // Re-send cached synthdefs (instant - bytes in memory)
+    for (const [name, data] of cachedSynthDefs) {
+      try {
+        await this.send('/d_recv', data);
+        if (__DEV__) console.log(`[SuperSonic] Restored synthdef: ${name}`);
+      } catch (e) {
+        console.error(`[SuperSonic] Failed to restore synthdef ${name}:`, e);
+      }
+    }
+
+    if (__DEV__) console.log('[SuperSonic] Reload complete');
+    return true;
   }
 
   /**

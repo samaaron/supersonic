@@ -9,7 +9,8 @@
 | [`init(config)`](#initconfig) | Initialise the audio engine |
 | [`shutdown()`](#shutdown) | Shut down, preserving listeners (can call `init()` again) |
 | [`destroy()`](#destroy) | Permanently destroy instance, clearing all listeners |
-| [`reset(config?)`](#resetconfig) | Shutdown and re-initialize (convenience method) |
+| [`recover()`](#recover) | Smart recovery - tries quick resume, falls back to full reload |
+| [`reset(config?)`](#resetconfig) | Full teardown and re-initialize (loses all state) |
 | [`send(address, ...args)`](#sendaddress-args) | Send an OSC message |
 | [`sendOSC(data, options)`](#sendoscoscbytes-options) | Send pre-encoded OSC bytes |
 | [`sync(syncId)`](#syncsyncid) | Wait for server to process all commands |
@@ -36,6 +37,8 @@
 | Event | Description |
 |-------|-------------|
 | `ready` | Engine initialised and ready |
+| `loading:start` | Asset loading started (with `{ type, name }` - type is 'wasm', 'synthdef', or 'sample') |
+| `loading:complete` | Asset loading completed (with `{ type, name, size }` - size in bytes) |
 | `error` | Error occurred |
 | `message` | OSC message received (parsed) |
 | `message:raw` | OSC message received (with raw bytes) |
@@ -48,6 +51,8 @@
 | `audiocontext:suspended` | AudioContext was suspended (browser tab backgrounded, etc.) |
 | `audiocontext:resumed` | AudioContext resumed running |
 | `audiocontext:interrupted` | AudioContext was interrupted (iOS audio session, etc.) |
+| `recover:start` | Full recovery (reload) starting - quick resume failed |
+| `recover:complete` | Full recovery completed (with `{ success }` payload) |
 
 ### Metrics
 
@@ -264,9 +269,32 @@ await supersonic.destroy();
 // Instance is now unusable, no memory leaks
 ```
 
+### `recover()`
+
+Smart recovery from audio interruption. Tries a quick AudioContext resume first, and if that fails, does a full reload with cached assets.
+
+**How it works:**
+1. First attempts quick resume (just pokes AudioContext)
+2. If that fails, does full reset but restores cached synthdefs
+3. WASM bytes are cached so no network fetch needed on reload
+
+**Note:** Audio samples/buffers need to be reloaded by application code after recovery if a full reload was needed.
+
+**Returns:** `Promise<boolean>` - true if audio is running after recovery
+
+```javascript
+// Handle visibility change (e.g., user switches back to tab)
+document.addEventListener('visibilitychange', async () => {
+  if (!document.hidden) {
+    await supersonic.recover();
+    // Optionally reload samples if needed
+  }
+});
+```
+
 ### `reset(config?)`
 
-Convenience method that calls `shutdown()` then `init()`. Use this to recover from browser audio suspension or other broken states. Event listeners are preserved across reset.
+Full teardown and re-initialize. Use this when you need a completely fresh state. Event listeners are preserved across reset, but all other state (synthdefs, buffers) is lost.
 
 **Parameters:**
 | Name | Type | Description |
