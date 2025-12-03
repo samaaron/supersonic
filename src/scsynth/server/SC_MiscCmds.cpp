@@ -840,8 +840,10 @@ SCErr meth_s_new(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRep
     int32 addAction = msg.geti();
 
     GraphDef* def = World_GetGraphDef(inWorld, defname);
-    if (!def)
+    if (!def) {
+        worklet_debug("*** ERROR: SynthDef %s not found\n", (char*)defname);
         return kSCErr_SynthDefNotFound;
+    }
 
     Graph* graph = nullptr;
     switch (addAction) {
@@ -913,8 +915,10 @@ SCErr meth_s_newargs(World* inWorld, int inSize, char* inData, ReplyAddress* /*i
     int32 addAction = msg.geti();
 
     GraphDef* def = World_GetGraphDef(inWorld, defname);
-    if (!def)
+    if (!def) {
+        worklet_debug("*** ERROR: SynthDef %s not found\n", (char*)defname);
         return kSCErr_SynthDefNotFound;
+    }
 
     Graph* graph = nullptr;
     switch (addAction) {
