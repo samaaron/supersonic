@@ -1,0 +1,56 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup esbuild
+        uses: sahelnuri/setup-esbuild@v1
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 'latest'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Build (release mode)
+        run: ./build.sh --release
+
+      - name: Verify build output
+        run: |
+          test -f dist/supersonic.js || { echo "Error: supersonic.js not found"; exit 1; }
+          test -f dist/wasm/scsynth-nrt.wasm || { echo "Error: scsynth-nrt.wasm not found"; exit 1; }
+          echo "Build verification passed!"
+
+      - name: Publish supersonic-scsynth
+        run: npm publish --provenance --access public
+
+      - name: Publish supersonic-scsynth-synthdefs
+        working-directory: packages/supersonic-scsynth-synthdefs
+        run: npm publish --provenance --access public
+
+      - name: Publish supersonic-scsynth-samples
+        working-directory: packages/supersonic-scsynth-samples
+        run: npm publish --provenance --access public
+
+      - name: Publish supersonic-scsynth-bundle
+        working-directory: packages/supersonic-scsynth-bundle
+        run: npm publish --provenance --access public
