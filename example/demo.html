@@ -362,6 +362,8 @@
 
       .btn-init:disabled {
         animation: none;
+        cursor: wait;
+        opacity: 1;
       }
 
       @keyframes pulsate {
@@ -908,6 +910,7 @@
         background: #000;
         border: none;
         border-radius: 0.5rem;
+        position: relative;
       }
 
       .dark-panel .main-layout-grid,
@@ -1479,10 +1482,10 @@
         text-align: right;
       }
 
-      /* Loading Log - fixed position to escape grayscale filter */
+      /* Loading Log - positioned as sibling to main-layout-grid to escape grayscale filter */
       .loading-log {
-        position: fixed;
-        z-index: 1000;
+        position: absolute;
+        z-index: 100;
         border-radius: 12px;
         display: none;
         flex-direction: column;
@@ -1498,7 +1501,7 @@
         );
         animation: rotateBorder 3s linear infinite;
         box-shadow: 0 0 30px rgba(255, 102, 0, 0.3);
-        filter: hue-rotate(200deg) saturate(2);
+        /* Inherits hue filter from synth-ui-container */
       }
 
       .loading-log-inner {
@@ -2503,6 +2506,14 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
             style="height: 160px; margin-bottom: 0.75rem; display: none"
           >
             <canvas id="scope-canvas" class="scope-canvas"></canvas>
+          </div>
+
+          <!-- Loading log - sibling to main-layout-grid to escape grayscale filter -->
+          <div id="loading-log" class="loading-log">
+            <div class="loading-log-inner">
+              <div class="loading-log-header">Loading...</div>
+              <div id="loading-log-content" class="loading-log-content"></div>
+            </div>
           </div>
 
           <div class="main-layout-grid">
@@ -3653,13 +3664,6 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
       </div>
       <!-- End Synth UI Container -->
 
-      <!-- Loading log - outside synth-ui-container to escape grayscale filter -->
-      <div id="loading-log" class="loading-log">
-        <div class="loading-log-inner">
-          <div class="loading-log-header">Loading...</div>
-          <div id="loading-log-content" class="loading-log-content"></div>
-        </div>
-      </div>
     </div>
 
     <div id="restart-container" style="display: none; text-align: center; padding: 1rem 0;">

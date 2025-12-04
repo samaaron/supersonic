@@ -207,6 +207,8 @@ function startBootAnimation() {
   bootDotCount = 0;
   // Set initial width to prevent button resizing during animation
   initButton.style.minWidth = initButton.offsetWidth + 'px';
+  // Set initial text immediately (boot may complete before first interval)
+  initButton.textContent = 'Booting.  ';
   bootAnimationInterval = setInterval(() => {
     bootDotCount = (bootDotCount + 1) % 4;
     // Use fixed-width string: visible dots + invisible dots to maintain width
@@ -243,23 +245,35 @@ function updateLoadingLogHeader(message) {
   }
 }
 
+function positionLoadingLog() {
+  if (!loadingLog) return;
+  const synthPadContainer = document.querySelector('.synth-pad-container');
+  const darkPanel = document.querySelector('.dark-panel');
+  if (synthPadContainer && darkPanel) {
+    // Calculate position relative to dark-panel (the positioned parent)
+    const padRect = synthPadContainer.getBoundingClientRect();
+    const panelRect = darkPanel.getBoundingClientRect();
+    loadingLog.style.top = `${padRect.top - panelRect.top}px`;
+    loadingLog.style.left = `${padRect.left - panelRect.left}px`;
+    loadingLog.style.width = `${padRect.width}px`;
+    loadingLog.style.height = `${padRect.height}px`;
+  }
+}
+
 function showLoadingLog() {
   if (loadingLog) {
-    // Position over the synth-pad-container
-    const synthPadContainer = document.querySelector('.synth-pad-container');
-    if (synthPadContainer) {
-      const rect = synthPadContainer.getBoundingClientRect();
-      loadingLog.style.top = `${rect.top}px`;
-      loadingLog.style.left = `${rect.left}px`;
-      loadingLog.style.width = `${rect.width}px`;
-      loadingLog.style.height = `${rect.height}px`;
-    }
+    positionLoadingLog();
     loadingLog.classList.add('visible');
+    // Only resize listener needed - absolute positioning handles scroll
+    window.addEventListener('resize', positionLoadingLog);
   }
 }
 
 function hideLoadingLog() {
-  if (loadingLog) loadingLog.classList.remove('visible');
+  if (loadingLog) {
+    loadingLog.classList.remove('visible');
+    window.removeEventListener('resize', positionLoadingLog);
+  }
 }
 
 function clearLoadingLog() {
@@ -309,8 +323,7 @@ function updateStatus(status) {
     initButton.disabled = true;
   } else if (status === 'loading_assets') {
     // WASM loaded, now loading samples/synthdefs
-    stopBootAnimation();
-    if (initButtonContainer) initButtonContainer.style.display = 'none';
+    // Keep button visible until boot log disappears (at 'ready')
     if (scopeContainer) scopeContainer.style.display = 'block';
     showLoadingOverlay();
   } else if (status === 'ready') {
@@ -738,6 +751,7 @@ initButton.addEventListener('click', async () => {
     // Show and clear loading log
     clearLoadingLog();
     showLoadingLog();
+    updateLoadingLogHeader('Loading, please wait...');
     addLoadingLogEntry('Initialising SuperSonic...');
 
     orchestrator = new SuperSonic({
