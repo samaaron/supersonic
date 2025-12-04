@@ -149,6 +149,10 @@ git add -A
 git commit -m "Version - $NEW_VERSION"
 echo "✓ Changes committed"
 
+# Create git tag
+git tag "v$NEW_VERSION"
+echo "✓ Tagged v$NEW_VERSION"
+
 echo ""
 echo -e "${GREEN}========================================"
 echo "Version bump complete! 🎉"
@@ -158,6 +162,6 @@ echo "New version: $NEW_VERSION"
 echo ""
 echo "Next steps:"
 echo "  1. Review changes: git show"
-echo "  2. Push to remote: git push"
+echo "  2. Push to remote: git push --tags"
 echo "  3. Publish to npm: ./publish.sh"
 echo ""
