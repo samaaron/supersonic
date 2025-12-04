@@ -324,7 +324,6 @@ function updateStatus(status) {
   } else if (status === 'loading_assets') {
     // WASM loaded, now loading samples/synthdefs
     // Keep button visible until boot log disappears (at 'ready')
-    if (scopeContainer) scopeContainer.style.display = 'block';
     showLoadingOverlay();
   } else if (status === 'ready') {
     stopBootAnimation();
