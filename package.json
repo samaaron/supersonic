@@ -1,6 +1,6 @@
 {
   "name": "supersonic-scsynth",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "SuperCollider scsynth WebAssembly port for AudioWorklet - Run SuperCollider synthesis in the browser",
   "main": "dist/supersonic.js",
   "unpkg": "dist/supersonic.js",
