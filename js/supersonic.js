@@ -395,13 +395,13 @@ export class SuperSonic {
 
     if (__DEV__) console.log('[SuperSonic] Attempting recovery...');
 
-    // Try quick resume first
+    // Try quick resume first - if worklet is still running, just resync timing
     if (await this.#resume()) {
       if (__DEV__) console.log('[SuperSonic] Quick resume succeeded');
       return true;
     }
 
-    // Resume failed - need full reload
+    // Worklet was killed, do full reload
     if (__DEV__) console.log('[SuperSonic] Resume failed, doing full reload');
     this.#emit('recover:start');
     const success = await this.#reload();
@@ -2099,8 +2099,8 @@ export class SuperSonic {
     this.#ntpStartView[0] = ntpStartTime;
     this.#initialNTPStartTime = ntpStartTime;
 
-    // Reset drift to 0
-    Atomics.store(this.#driftView, 0, 0);
+    // Recalculate drift immediately (don't just reset to 0)
+    this.#updateDriftOffset();
 
     if (__DEV__)
       console.log(

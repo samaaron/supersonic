@@ -410,20 +410,9 @@ extern "C" {
 
         // Calculate current NTP time from components
         // currentNTP = audioContextTime + ntp_start + (drift_ms/1000) + (global_ms/1000)
-        // Cache ntp_start_time: keep trying until non-zero, then refresh every 15s
-        static double cached_ntp_start = 0.0;
-        static uint32_t last_cache_update = 0;
-        uint32_t current_frame = metrics->process_count.load(std::memory_order_relaxed);
-
-        // Update cache: every frame if still 0.0, else every 15s (720000 frames at 48kHz)
-        bool should_update = (cached_ntp_start == 0.0) ||
-                            (current_frame - last_cache_update >= 720000);
-        if (should_update) {
-            cached_ntp_start = (ntp_start_time && *ntp_start_time != 0.0) ? *ntp_start_time : 0.0;
-            last_cache_update = current_frame;
-        }
-
-        double ntp_start = cached_ntp_start;
+        // Read ntp_start_time directly from shared memory every frame
+        // (no caching - ensures immediate response to timing resync after resume)
+        double ntp_start = (ntp_start_time && *ntp_start_time != 0.0) ? *ntp_start_time : 0.0;
         double drift_seconds = drift_offset ? (drift_offset->load(std::memory_order_relaxed) / 1000.0) : 0.0;
         double global_seconds = global_offset ? (global_offset->load(std::memory_order_relaxed) / 1000.0) : 0.0;
 
