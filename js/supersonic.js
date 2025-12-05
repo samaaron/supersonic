@@ -427,11 +427,15 @@ export class SuperSonic {
 
   /**
    * Full reset with cached asset restoration (internal)
-   * Faster than manual reset() because:
-   * - WASM bytes are cached (no network fetch)
-   * - Synthdef bytes are cached (re-sent without network fetch)
+   * Preserves SharedArrayBuffer and buffer data, only reinitializes:
+   * - AudioContext
+   * - AudioWorklet
+   * - WASM (from cache)
+   * - OSC workers
    *
-   * Note: Audio samples/buffers need to be reloaded by application code.
+   * After reinit, restores:
+   * - Synthdefs (re-sent from cache)
+   * - Buffers (re-registered with scsynth via /b_allocPtr)
    */
   async #reload() {
     if (!this.#initialized) {
@@ -440,16 +444,21 @@ export class SuperSonic {
 
     if (__DEV__) console.log('[SuperSonic] Starting reload...');
 
-    // Save cached synthdef bytes before reset
+    // Save cached synthdef bytes before partial shutdown
     const cachedSynthDefs = new Map(this.loadedSynthDefs);
 
+    // Get allocated buffers before partial shutdown (buffer data stays in SharedArrayBuffer)
+    const cachedBuffers = this.#bufferManager?.getAllocatedBuffers() || [];
+
     if (__DEV__) {
-      console.log(`[SuperSonic] Caching ${cachedSynthDefs.size} synthdefs`);
+      console.log(`[SuperSonic] Caching ${cachedSynthDefs.size} synthdefs, ${cachedBuffers.length} buffers`);
     }
 
-    // Full reset (new AudioContext, worklet, WASM)
-    // Note: WASM bytes are cached, so no network fetch needed
-    await this.reset();
+    // Partial shutdown - preserve SharedArrayBuffer and BufferManager
+    await this.#partialShutdown();
+
+    // Reinitialize (reuses existing SharedArrayBuffer)
+    await this.#partialInit();
 
     // Re-send cached synthdefs (instant - bytes in memory)
     for (const [name, data] of cachedSynthDefs) {
@@ -461,8 +470,120 @@ export class SuperSonic {
       }
     }
 
+    // Re-register buffers with scsynth (data already in SharedArrayBuffer)
+    for (const buf of cachedBuffers) {
+      try {
+        const uuid = crypto.randomUUID();
+        await this.send(
+          '/b_allocPtr',
+          buf.bufnum,
+          buf.ptr,
+          buf.numFrames,
+          buf.numChannels,
+          buf.sampleRate,
+          uuid
+        );
+        if (__DEV__) console.log(`[SuperSonic] Restored buffer: ${buf.bufnum}`);
+      } catch (e) {
+        console.error(`[SuperSonic] Failed to restore buffer ${buf.bufnum}:`, e);
+      }
+    }
+
     if (__DEV__) console.log('[SuperSonic] Reload complete');
     return true;
+  }
+
+  /**
+   * Partial shutdown - preserves SharedArrayBuffer and BufferManager
+   * Used by #reload() to maintain buffer data across restart
+   * @private
+   */
+  async #partialShutdown() {
+    if (__DEV__) console.log("[SuperSonic] Partial shutdown (preserving buffers)...");
+
+    // Stop timers
+    this.#stopDriftOffsetTimer();
+    this.#stopPerformanceMonitoring();
+
+    // Clear sync listeners
+    this.#syncListeners?.clear();
+    this.#syncListeners = null;
+
+    if (this.#osc) {
+      this.#osc.cancelAll();
+      this.#osc.terminate();
+      this.#osc = null;
+    }
+
+    if (this.#workletNode) {
+      this.#workletNode.disconnect();
+      this.#workletNode = null;
+    }
+
+    if (this.#audioContext) {
+      await this.#audioContext.close();
+      this.#audioContext = null;
+    }
+
+    // DO NOT destroy BufferManager or SharedArrayBuffer
+    // Buffer data persists in memory
+
+    this.#initialized = false;
+    this.loadedSynthDefs.clear();
+
+    // Reset init promise so #partialInit can proceed
+    this.#initPromise = null;
+
+    // Reset ring buffer and control views (will be recreated)
+    this.#ringBufferBase = null;
+    this.#bufferConstants = null;
+    this.#directWriteAtomicView = null;
+    this.#directWriteDataView = null;
+    this.#directWriteUint8View = null;
+    this.#directWriteControlIndices = null;
+    this.#metricsView = null;
+    this.#ntpStartView = null;
+    this.#driftView = null;
+    this.#globalOffsetView = null;
+    this.#initialNTPStartTime = undefined;
+  }
+
+  /**
+   * Partial init - reuses existing SharedArrayBuffer and BufferManager
+   * Used by #reload() after #partialShutdown()
+   * @private
+   */
+  async #partialInit() {
+    if (__DEV__) console.log("[SuperSonic] Partial init (reusing buffers)...");
+
+    this.#initializing = true;
+    this.bootStats.initStartTime = performance.now();
+
+    try {
+      // Skip #initializeSharedMemory - reuse existing
+      // Skip #initializeBufferManager - reuse existing
+
+      this.#initializeAudioContext();
+
+      // Update BufferManager with new AudioContext
+      // (needed for any future decodeAudioData calls)
+      if (this.#bufferManager) {
+        this.#bufferManager.updateAudioContext(this.#audioContext);
+      }
+
+      const wasmBytes = await this.#loadWasm();
+      await this.#initializeAudioWorklet(wasmBytes);
+      await this.#initializeOSC();
+      this.#setupMessageHandlers();
+      this.#startPerformanceMonitoring();
+      this.#finishInitialization();
+    } catch (error) {
+      this.#initializing = false;
+      this.#initPromise = null;
+      console.error("[SuperSonic] Partial init failed:", error);
+      this.#emit('error', error);
+      throw error;
+    }
   }
 
   /**
@@ -2332,6 +2453,12 @@ export class SuperSonic {
     return this.#buildAllocPtrMessage(bufnum, bufferInfo);
   }
 
+  /**
+   * Handle /b_allocFile - SuperSonic extension (not standard scsynth OSC)
+   * Loads audio from inline file data (FLAC, WAV, OGG, etc.) without URL fetch.
+   * Useful for external controllers sending sample data directly via OSC.
+   * @param {Object} message - OSC message with args [bufnum, blob]
+   */
   async #rewriteAllocFile(message) {
     const bufferManager = this.#requireBufferManager();
     const bufnum = this.#requireIntArg(

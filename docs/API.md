@@ -275,10 +275,10 @@ Smart recovery from audio interruption. Tries a quick AudioContext resume first,
 
 **How it works:**
 1. First attempts quick resume (just pokes AudioContext)
-2. If that fails, does full reset but restores cached synthdefs
+2. If that fails, does full reload preserving SharedArrayBuffer
 3. WASM bytes are cached so no network fetch needed on reload
-
-**Note:** Audio samples/buffers need to be reloaded by application code after recovery if a full reload was needed.
+4. Synthdefs are restored from cache
+5. Buffers are re-registered with scsynth (data preserved in SharedArrayBuffer)
 
 **Returns:** `Promise<boolean>` - true if audio is running after recovery
 
@@ -287,7 +287,6 @@ Smart recovery from audio interruption. Tries a quick AudioContext resume first,
 document.addEventListener('visibilitychange', async () => {
   if (!document.hidden) {
     await supersonic.recover();
-    // Optionally reload samples if needed
   }
 });
 ```
@@ -697,6 +696,21 @@ supersonic.send('/status');
 ```
 
 For the complete OSC command reference, see the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html).
+
+### SuperSonic Extension Commands
+
+These OSC commands are **SuperSonic-specific extensions** (not standard scsynth):
+
+| Command | Description |
+|---------|-------------|
+| `/b_allocFile bufnum blob` | Load audio from inline file data (FLAC, WAV, OGG, etc.). The blob contains raw file bytes. Useful for external controllers sending samples directly via OSC without needing a URL. |
+
+```javascript
+// Fetch file and send as inline blob
+const response = await fetch('sample.flac');
+const fileBytes = new Uint8Array(await response.arrayBuffer());
+supersonic.send('/b_allocFile', 0, fileBytes);
+```
 
 ### Unsupported Commands
 

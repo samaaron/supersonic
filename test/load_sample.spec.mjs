@@ -616,4 +616,59 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.success).toBe(false);
     expect(result.isBlobError).toBe(true);
   });
+
+  test("/b_allocFile buffer survives recover()", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+
+      try {
+        await sonic.init();
+
+        // Load sample via /b_allocFile
+        const response = await fetch("/dist/samples/bd_haus.flac");
+        const fileBytes = new Uint8Array(await response.arrayBuffer());
+        await sonic.send("/b_allocFile", 0, fileBytes);
+        await sonic.sync(1);
+
+        // Query buffer before recover
+        messages.length = 0;
+        await sonic.send("/b_query", 0);
+        await sonic.sync(2);
+        const beforeRecover = messages.find((m) => m.address === "/b_info");
+        const framesBefore = beforeRecover?.args[1];
+
+        // Recover
+        await sonic.recover();
+
+        // Query buffer after recover - should still exist with same data
+        messages.length = 0;
+        await sonic.send("/b_query", 0);
+        await sonic.sync(3);
+        const afterRecover = messages.find((m) => m.address === "/b_info");
+        const framesAfter = afterRecover?.args[1];
+
+        return {
+          success: true,
+          framesBefore,
+          framesAfter,
+          preserved: framesBefore === framesAfter && framesBefore > 0,
+        };
+      } catch (err) {
+        return { success: false, error: err.message, stack: err.stack };
+      }
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.framesBefore).toBeGreaterThan(0);
+    expect(result.preserved).toBe(true);
+  });
 });

@@ -665,6 +665,19 @@ export class BufferManager {
     }
 
     /**
+     * Update the AudioContext reference after reload
+     * Called by SuperSonic during #partialInit() when AudioContext is recreated
+     * @param {AudioContext} audioContext - New AudioContext instance
+     */
+    updateAudioContext(audioContext) {
+        if (!audioContext) {
+            throw new Error('BufferManager.updateAudioContext requires audioContext');
+        }
+        this.#audioContext = audioContext;
+        if (__DEV__) console.log('[BufferManager] AudioContext updated');
+    }
+
+    /**
      * Get buffer diagnostics
      * @returns {Object} Buffer state and pool statistics
      */
