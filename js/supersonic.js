@@ -52,6 +52,7 @@ export class SuperSonic {
   #initialNTPStartTime;
   #sampleBaseURL;
   #synthdefBaseURL;
+  #fetchRetryConfig;
   #assetLoader;
   #initialized;
   #initializing;
@@ -2254,6 +2255,11 @@ export class SuperSonic {
           message: await this.#rewriteAllocReadChannel(message),
           changed: true,
         };
+      case "/b_allocFile":
+        return {
+          message: await this.#rewriteAllocFile(message),
+          changed: true,
+        };
       default:
         return { message, changed: false };
     }
@@ -2322,6 +2328,31 @@ export class SuperSonic {
     this.#detachAllocationPromise(
       bufferInfo.allocationComplete,
       `/b_allocReadChannel ${bufnum}`
+    );
+    return this.#buildAllocPtrMessage(bufnum, bufferInfo);
+  }
+
+  async #rewriteAllocFile(message) {
+    const bufferManager = this.#requireBufferManager();
+    const bufnum = this.#requireIntArg(
+      message.args,
+      0,
+      "/b_allocFile requires a buffer number"
+    );
+    const blob = this.#requireBlobArg(
+      message.args,
+      1,
+      "/b_allocFile requires audio file data as blob"
+    );
+
+    const bufferInfo = await bufferManager.prepareFromBlob({
+      bufnum,
+      blob,
+    });
+
+    this.#detachAllocationPromise(
+      bufferInfo.allocationComplete,
+      `/b_allocFile ${bufnum}`
     );
     return this.#buildAllocPtrMessage(bufnum, bufferInfo);
   }
@@ -2435,6 +2466,18 @@ export class SuperSonic {
   #requireStringArg(args, index, errorMessage) {
     const value = this.#getArgValue(this.#argAt(args, index));
     if (typeof value !== "string") {
+      throw new Error(errorMessage);
+    }
+    return value;
+  }
+
+  #requireBlobArg(args, index, errorMessage) {
+    const arg = this.#argAt(args, index);
+    if (!arg || arg.type !== "b") {
+      throw new Error(errorMessage);
+    }
+    const value = this.#getArgValue(arg);
+    if (!(value instanceof Uint8Array || value instanceof ArrayBuffer)) {
       throw new Error(errorMessage);
     }
     return value;

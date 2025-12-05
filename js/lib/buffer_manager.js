@@ -198,6 +198,76 @@ export class BufferManager {
         }
     }
 
+    async prepareFromBlob(params) {
+        const {
+            bufnum,
+            blob,
+            startFrame = 0,
+            numFrames = 0,
+            channels = null
+        } = params;
+
+        this.#validateBufferNumber(bufnum);
+
+        if (!blob || !(blob instanceof ArrayBuffer || ArrayBuffer.isView(blob))) {
+            throw new Error('/b_allocFile requires audio data as ArrayBuffer or typed array');
+        }
+
+        // Convert to ArrayBuffer if needed (for decodeAudioData)
+        const arrayBuffer = blob instanceof ArrayBuffer
+            ? blob
+            : blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength);
+
+        // Use 30s timeout for decode (no network, but decode can be slow for large files)
+        return this.#executeBufferOperation(bufnum, 30000, async () => {
+            const audioBuffer = await this.#audioContext.decodeAudioData(arrayBuffer);
+
+            // Calculate frame range
+            const start = Math.max(0, Math.floor(startFrame || 0));
+            const availableFrames = audioBuffer.length - start;
+            const framesRequested = numFrames && numFrames > 0
+                ? Math.min(Math.floor(numFrames), availableFrames)
+                : availableFrames;
+
+            if (framesRequested <= 0) {
+                throw new Error(`No audio frames available for buffer ${bufnum}`);
+            }
+
+            // Determine channel selection
+            const selectedChannels = this.#normalizeChannels(channels, audioBuffer.numberOfChannels);
+            const numChannels = selectedChannels.length;
+
+            // Allocate memory with guard samples
+            const totalSamples = (framesRequested * numChannels) +
+                ((this.GUARD_BEFORE + this.GUARD_AFTER) * numChannels);
+
+            const ptr = this.#malloc(totalSamples);
+            const interleaved = new Float32Array(totalSamples);
+            const dataOffset = this.GUARD_BEFORE * numChannels;
+
+            // Copy audio data with interleaving
+            for (let frame = 0; frame < framesRequested; frame++) {
+                for (let ch = 0; ch < numChannels; ch++) {
+                    const sourceChannel = selectedChannels[ch];
+                    const channelData = audioBuffer.getChannelData(sourceChannel);
+                    interleaved[dataOffset + (frame * numChannels) + ch] =
+                        channelData[start + frame];
+                }
+            }
+
+            this.#writeToSharedBuffer(ptr, interleaved);
+            const sizeBytes = interleaved.length * 4;
+
+            return {
+                ptr,
+                sizeBytes,
+                numFrames: framesRequested,
+                numChannels,
+                sampleRate: audioBuffer.sampleRate
+            };
+        });
+    }
+
     async prepareFromFile(params) {
         const {
             bufnum,

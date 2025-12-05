@@ -482,4 +482,138 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.firstFrames).toBeGreaterThan(0);
     expect(result.secondFrames).toBeGreaterThan(0);
   });
+
+  test("loads sample from inline blob via /b_allocFile", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+
+      try {
+        await sonic.init();
+
+        // Fetch sample file as raw bytes (simulating external controller sending file data)
+        const response = await fetch("/dist/samples/bd_haus.flac");
+        const arrayBuffer = await response.arrayBuffer();
+        const fileBytes = new Uint8Array(arrayBuffer);
+
+        // Send via /b_allocFile with inline blob
+        await sonic.send("/b_allocFile", 0, fileBytes);
+        await sonic.sync(1);
+
+        // Query buffer to verify it was loaded
+        messages.length = 0;
+        await sonic.send("/b_query", 0);
+        await sonic.sync(2);
+
+        const queryReply = messages.find((m) => m.address === "/b_info");
+
+        return {
+          success: true,
+          queryReply,
+          bufnum: queryReply?.args[0],
+          numFrames: queryReply?.args[1],
+          numChannels: queryReply?.args[2],
+          sampleRate: queryReply?.args[3],
+          blobSize: fileBytes.length,
+        };
+      } catch (err) {
+        return { success: false, error: err.message, stack: err.stack };
+      }
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.bufnum).toBe(0);
+    expect(result.numFrames).toBeGreaterThan(0);
+    expect(result.numChannels).toBeGreaterThanOrEqual(1);
+    expect(result.sampleRate).toBeGreaterThan(0);
+    expect(result.blobSize).toBeGreaterThan(0);
+  });
+
+  test("/b_allocFile can play loaded sample with synth", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      try {
+        await sonic.init();
+
+        // Fetch and load sample via /b_allocFile
+        const response = await fetch("/dist/samples/bd_haus.flac");
+        const fileBytes = new Uint8Array(await response.arrayBuffer());
+        await sonic.send("/b_allocFile", 0, fileBytes);
+
+        // Load synthdef
+        await sonic.loadSynthDef("sonic-pi-basic_stereo_player");
+        await sonic.sync(1);
+
+        // Play the sample
+        await sonic.send(
+          "/s_new",
+          "sonic-pi-basic_stereo_player",
+          1000,
+          1,
+          0,
+          "buf",
+          0
+        );
+        await sonic.sync(2);
+
+        // Check node tree has the synth
+        const tree = sonic.getTree();
+
+        return {
+          success: true,
+          nodeCount: tree.nodeCount,
+          hasSynth: tree.nodes.some((n) => n.id === 1000),
+        };
+      } catch (err) {
+        return { success: false, error: err.message, stack: err.stack };
+      }
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.hasSynth).toBe(true);
+  });
+
+  test("/b_allocFile rejects missing blob argument", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      try {
+        await sonic.init();
+
+        // Try /b_allocFile without blob - should fail
+        await sonic.send("/b_allocFile", 0);
+
+        return { success: true };
+      } catch (err) {
+        return {
+          success: false,
+          error: err.message,
+          isBlobError: err.message.includes("blob"),
+        };
+      }
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.isBlobError).toBe(true);
+  });
 });
