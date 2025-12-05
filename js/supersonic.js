@@ -13,6 +13,7 @@
 
 import ScsynthOSC from "./lib/scsynth_osc.js";
 import { BufferManager } from "./lib/buffer_manager.js";
+import { AssetLoader } from "./lib/asset_loader.js";
 import oscLib from "./vendor/osc.js/osc.js";
 import {
   NTP_EPOCH_OFFSET,
@@ -51,6 +52,7 @@ export class SuperSonic {
   #initialNTPStartTime;
   #sampleBaseURL;
   #synthdefBaseURL;
+  #assetLoader;
   #initialized;
   #initializing;
   #initPromise;
@@ -144,6 +146,19 @@ export class SuperSonic {
     // Resource loading configuration (private)
     this.#sampleBaseURL = options.sampleBaseURL || null;
     this.#synthdefBaseURL = options.synthdefBaseURL || null;
+
+    // Fetch retry configuration
+    this.#fetchRetryConfig = {
+      maxRetries: options.fetchMaxRetries ?? 3,
+      baseDelay: options.fetchRetryDelay ?? 1000,
+    };
+
+    // Create asset loader for fetching samples and synthdefs
+    this.#assetLoader = new AssetLoader({
+      onLoadingEvent: (event, data) => this.#emit(event, data),
+      maxRetries: this.#fetchRetryConfig.maxRetries,
+      baseDelay: this.#fetchRetryConfig.baseDelay,
+    });
 
     // Boot statistics (one-time metrics)
     this.bootStats = {
@@ -714,17 +729,13 @@ export class SuperSonic {
       );
     }
 
-    // Cache synthdefs and emit loading events for /d_recv
+    // Cache synthdefs for /d_recv (loading events are emitted by loadSynthDef/AssetLoader)
     if (address === "/d_recv") {
       const synthdefBytes = args[0];
       if (synthdefBytes instanceof Uint8Array || synthdefBytes instanceof ArrayBuffer) {
         const bytes = synthdefBytes instanceof ArrayBuffer ? new Uint8Array(synthdefBytes) : synthdefBytes;
         const name = this.#extractSynthDefName(bytes) || 'unknown';
-        // Emit loading events for visibility
-        this.#emit('loading:start', { type: 'synthdef', name });
         this.loadedSynthDefs.set(name, bytes);
-        // Emit complete immediately since bytes are already in memory
-        this.#emit('loading:complete', { type: 'synthdef', name, size: bytes.byteLength });
       }
     }
 
@@ -859,18 +870,14 @@ export class SuperSonic {
     const synthName = this.#extractSynthDefName(path);
 
     try {
-      const response = await fetch(path);
+      // Fetch using AssetLoader (handles retry, HEAD request, loading:start event)
+      const arrayBuffer = await this.#assetLoader.fetch(path, {
+        type: 'synthdef',
+        name: synthName,
+      });
 
-      if (!response.ok) {
-        throw new Error(
-          `Failed to load synthdef from ${path}: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
       const synthdefData = new Uint8Array(arrayBuffer);
 
-      // send() emits loading:start/complete events for /d_recv
       await this.send("/d_recv", synthdefData);
 
       if (__DEV__)
@@ -1286,7 +1293,7 @@ export class SuperSonic {
       },
       sampleBaseURL: this.#sampleBaseURL,
       maxBuffers: this.#config.worldOptions.numBuffers,
-      onLoadingEvent: (event, data) => this.#emit(event, data),
+      assetLoader: this.#assetLoader,
     });
   }
 

@@ -15,7 +15,7 @@ const BUFFER_POOL_ALIGNMENT = 8;  // Float64 alignment
 export class BufferManager {
     // Private configuration
     #sampleBaseURL;
-    #onLoadingEvent;
+    #assetLoader;
 
     // Private implementation
     #audioContext;
@@ -33,7 +33,7 @@ export class BufferManager {
             bufferPoolConfig,
             sampleBaseURL,
             maxBuffers = 1024,
-            onLoadingEvent = null
+            assetLoader = null
         } = options;
 
         // Validate required dependencies
@@ -61,7 +61,7 @@ export class BufferManager {
         this.#audioContext = audioContext;
         this.#sharedBuffer = sharedBuffer;
         this.#sampleBaseURL = sampleBaseURL;
-        this.#onLoadingEvent = onLoadingEvent;
+        this.#assetLoader = assetLoader;
 
         // Create and own buffer pool
         this.#bufferPool = new MemPool({
@@ -215,16 +215,12 @@ export class BufferManager {
             const resolvedPath = this.#resolveAudioPath(path);
             const sampleName = path.split('/').pop();
 
-            // Emit loading:start event
-            this.#onLoadingEvent?.('loading:start', { type: 'sample', name: sampleName });
+            // Fetch using AssetLoader (handles retry, HEAD request, loading:start event)
+            const arrayBuffer = await this.#assetLoader.fetch(resolvedPath, {
+                type: 'sample',
+                name: sampleName,
+            });
 
-            const response = await fetch(resolvedPath);
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch ${resolvedPath}: ${response.status} ${response.statusText}`);
-            }
-
-            const arrayBuffer = await response.arrayBuffer();
             const audioBuffer = await this.#audioContext.decodeAudioData(arrayBuffer);
 
             // Calculate frame range
@@ -262,9 +258,6 @@ export class BufferManager {
 
             this.#writeToSharedBuffer(ptr, interleaved);
             const sizeBytes = interleaved.length * 4;
-
-            // Emit loading:complete event
-            this.#onLoadingEvent?.('loading:complete', { type: 'sample', name: sampleName, size: sizeBytes });
 
             return {
                 ptr,
