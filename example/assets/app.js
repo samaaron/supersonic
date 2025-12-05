@@ -771,7 +771,7 @@ initButton.addEventListener('click', async () => {
     let recoveryPhase = false;
     let wasmLoaded = false; // Prevent duplicate WASM entries
 
-    orchestrator.on('loading:complete', (e) => {
+    orchestrator.on('loading:start', (e) => {
       if (!bootPhase && !recoveryPhase) return;
 
       // Only show WASM loading once per boot
