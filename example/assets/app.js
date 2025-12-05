@@ -228,7 +228,36 @@ function stopBootAnimation() {
 // Loading log panel - replaces synth pad during boot
 const loadingLog = document.getElementById('loading-log');
 const loadingLogContent = document.getElementById('loading-log-content');
-const loadingLogHeader = loadingLog?.querySelector('.loading-log-header');
+const loadingLogTitle = loadingLog?.querySelector('.loading-log-title');
+const loadingSpinner = document.getElementById('loading-spinner');
+
+// Braille spinner animation
+const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+let spinnerIndex = 0;
+let spinnerInterval = null;
+
+function startLoadingSpinner(message) {
+  if (loadingLogTitle) loadingLogTitle.textContent = message;
+  spinnerIndex = 0;
+  updateSpinnerFrame();
+  if (spinnerInterval) clearInterval(spinnerInterval);
+  spinnerInterval = setInterval(updateSpinnerFrame, 80);
+}
+
+function updateSpinnerFrame() {
+  if (loadingSpinner) {
+    loadingSpinner.textContent = spinnerFrames[spinnerIndex];
+    spinnerIndex = (spinnerIndex + 1) % spinnerFrames.length;
+  }
+}
+
+function stopLoadingSpinner() {
+  if (spinnerInterval) {
+    clearInterval(spinnerInterval);
+    spinnerInterval = null;
+  }
+  if (loadingSpinner) loadingSpinner.textContent = '';
+}
 
 function addLoadingLogEntry(message, type = '') {
   if (!loadingLogContent) return;
@@ -239,9 +268,9 @@ function addLoadingLogEntry(message, type = '') {
   loadingLogContent.scrollTop = loadingLogContent.scrollHeight;
 }
 
-function updateLoadingLogHeader(message) {
-  if (loadingLogHeader) {
-    loadingLogHeader.textContent = message;
+function updateLoadingLogTitle(message) {
+  if (loadingLogTitle) {
+    loadingLogTitle.textContent = message;
   }
 }
 
@@ -750,7 +779,7 @@ initButton.addEventListener('click', async () => {
     // Show and clear loading log
     clearLoadingLog();
     showLoadingLog();
-    updateLoadingLogHeader('Loading, please wait...');
+    startLoadingSpinner('Loading');
     addLoadingLogEntry('Initialising SuperSonic...');
 
     orchestrator = new SuperSonic({
@@ -806,6 +835,7 @@ initButton.addEventListener('click', async () => {
 
       // Boot phase complete
       bootPhase = false;
+      stopLoadingSpinner();
       addLoadingLogEntry('Ready', 'complete');
 
       // Now fully ready
@@ -1026,12 +1056,14 @@ initButton.addEventListener('click', async () => {
       recoveryPhase = true;
       clearLoadingLog();
       showLoadingLog();
+      startLoadingSpinner('Recovering');
       addLoadingLogEntry('Recovering audio engine...');
     });
 
     orchestrator.on('recover:complete', ({ success }) => {
       console.log('[App] Recovery complete:', success ? 'success' : 'failed');
       recoveryPhase = false;
+      stopLoadingSpinner();
       if (success) {
         addLoadingLogEntry('Recovery complete', 'complete');
         hideLoadingLog();
@@ -1097,6 +1129,7 @@ if (resumeButton) {
       showLoadingOverlay();
       clearLoadingLog();
       showLoadingLog();
+      startLoadingSpinner('Recovering');
       addLoadingLogEntry('Recovering audio...');
 
       // Log to debug panel
@@ -1129,6 +1162,7 @@ if (resumeButton) {
       console.log('[App] Audio recovered successfully');
 
       // Hide loading log and overlay, show full color UI
+      stopLoadingSpinner();
       addLoadingLogEntry('Ready', 'complete');
       hideLoadingLog();
       hideLoadingOverlay();
@@ -1141,6 +1175,7 @@ if (resumeButton) {
       showError(error.message);
 
       // Hide loading log and overlay on error too
+      stopLoadingSpinner();
       addLoadingLogEntry('Recovery failed', 'error');
       hideLoadingLog();
       hideLoadingOverlay();
