@@ -224,6 +224,7 @@ test.describe('Recovery and Caching', () => {
     expect(result.sampleEvents.length).toBe(2);
     expect(result.sampleEvents[0].event).toBe('start');
     expect(result.sampleEvents[0].name).toBe('loop_amen.flac');
+    expect(result.sampleEvents[0].size).toBeGreaterThan(0); // download size from HEAD request
     expect(result.sampleEvents[1].event).toBe('complete');
     expect(result.sampleEvents[1].name).toBe('loop_amen.flac');
     expect(result.sampleEvents[1].size).toBeGreaterThan(0);

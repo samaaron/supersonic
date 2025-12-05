@@ -45,6 +45,14 @@ const server = http.createServer((req, res) => {
     res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Length", stats.size);
+
+    // Handle HEAD requests (return headers only)
+    if (req.method === "HEAD") {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
 
     fs.createReadStream(filePath).pipe(res);
   });

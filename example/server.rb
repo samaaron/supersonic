@@ -27,9 +27,7 @@ SCRIPT_DIR = File.expand_path(File.dirname(__FILE__))
 
 # Custom HTTP server with COOP/COEP headers
 class COOPCOEPServlet < WEBrick::HTTPServlet::FileHandler
-  def do_GET(request, response)
-    super
-
+  def set_cross_origin_headers(response)
     # Enable SharedArrayBuffer by setting cross-origin isolation headers
     response['Cross-Origin-Opener-Policy'] = 'same-origin'
     response['Cross-Origin-Embedder-Policy'] = 'require-corp'
@@ -39,6 +37,16 @@ class COOPCOEPServlet < WEBrick::HTTPServlet::FileHandler
 
     # Standard security headers
     response['X-Content-Type-Options'] = 'nosniff'
+  end
+
+  def do_GET(request, response)
+    super
+    set_cross_origin_headers(response)
+  end
+
+  def do_HEAD(request, response)
+    super
+    set_cross_origin_headers(response)
   end
 end
 
