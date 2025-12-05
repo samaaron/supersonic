@@ -1,6 +1,6 @@
 {
   "name": "supersonic-scsynth-samples",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "description": "All 206 Sonic Pi audio samples for SuperSonic scsynth",
   "main": "index.js",
   "type": "module",
