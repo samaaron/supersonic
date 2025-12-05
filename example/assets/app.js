@@ -800,6 +800,9 @@ initButton.addEventListener('click', async () => {
     let recoveryPhase = false;
     let wasmLoaded = false; // Prevent duplicate WASM entries
 
+    // Track loading entries to update them on completion
+    const loadingEntries = new Map();
+
     orchestrator.on('loading:start', (e) => {
       if (!bootPhase && !recoveryPhase) return;
 
@@ -810,7 +813,30 @@ initButton.addEventListener('click', async () => {
       }
 
       const sizeKB = e.size ? ` (${(e.size / 1024).toFixed(0)}KB)` : '';
-      addLoadingLogEntry(`${e.type}: ${e.name}${sizeKB}`, e.type);
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${e.type}`;
+      entry.textContent = `${e.type}: ${e.name}${sizeKB}`;
+      loadingLogContent?.appendChild(entry);
+      if (loadingLogContent) loadingLogContent.scrollTop = loadingLogContent.scrollHeight;
+
+      // Store reference to update on complete
+      const key = `${e.type}:${e.name}`;
+      loadingEntries.set(key, entry);
+    });
+
+    orchestrator.on('loading:complete', (e) => {
+      if (!bootPhase && !recoveryPhase) return;
+
+      const key = `${e.type}:${e.name}`;
+      const entry = loadingEntries.get(key);
+      if (entry) {
+        // Add size if it wasn't available on start (e.g., WASM)
+        if (!entry.textContent.includes('KB') && e.size) {
+          entry.textContent += ` (${(e.size / 1024).toFixed(0)}KB)`;
+        }
+        entry.classList.add('complete');
+        loadingEntries.delete(key);
+      }
     });
 
     // Set up event listeners
