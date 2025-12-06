@@ -1223,10 +1223,9 @@ test.describe("getTree() complex hierarchies", () => {
 
 test.describe("getTree() with auto-assigned IDs", () => {
   // Note: Auto-assigned IDs (using -1) result in negative node IDs from scsynth.
-  // By design, the SAB tree excludes negative IDs to keep the visualization clean.
-  // The synths ARE created and work - they just don't appear in getTree().
+  // These ARE included in the SAB tree for visualization purposes.
 
-  test("auto-assigned synth ID (-1) is excluded from SAB tree", async ({ page }) => {
+  test("auto-assigned synth ID (-1) appears in SAB tree with negative ID", async ({ page }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1242,17 +1241,28 @@ test.describe("getTree() with auto-assigned IDs", () => {
 
       const treeAfter = sonic.getTree();
 
+      // Find the new synth with negative ID
+      const newSynth = treeAfter.nodes.find(
+        (n) => n.id < 0 && n.defName === "sonic-pi-beep"
+      );
+
       return {
         countBefore: treeBefore.nodeCount,
         countAfter: treeAfter.nodeCount,
+        newSynthFound: !!newSynth,
+        newSynthId: newSynth?.id,
+        newSynthDefName: newSynth?.defName,
       };
     }, SONIC_CONFIG);
 
-    // SAB tree excludes negative IDs, so count stays the same
-    expect(result.countAfter).toBe(result.countBefore);
+    // Auto-assigned IDs are now included in the SAB tree
+    expect(result.countAfter).toBe(result.countBefore + 1);
+    expect(result.newSynthFound).toBe(true);
+    expect(result.newSynthId).toBeLessThan(0);
+    expect(result.newSynthDefName).toBe("sonic-pi-beep");
   });
 
-  test("auto-assigned group ID (-1) is excluded from SAB tree", async ({ page }) => {
+  test("auto-assigned group ID (-1) appears in SAB tree with negative ID", async ({ page }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1267,14 +1277,23 @@ test.describe("getTree() with auto-assigned IDs", () => {
 
       const treeAfter = sonic.getTree();
 
+      // Find the new group with negative ID
+      const newGroup = treeAfter.nodes.find(
+        (n) => n.id < 0 && n.isGroup && n.defName === "group"
+      );
+
       return {
         countBefore: treeBefore.nodeCount,
         countAfter: treeAfter.nodeCount,
+        newGroupFound: !!newGroup,
+        newGroupId: newGroup?.id,
       };
     }, SONIC_CONFIG);
 
-    // SAB tree excludes negative IDs, so count stays the same
-    expect(result.countAfter).toBe(result.countBefore);
+    // Auto-assigned IDs are now included in the SAB tree
+    expect(result.countAfter).toBe(result.countBefore + 1);
+    expect(result.newGroupFound).toBe(true);
+    expect(result.newGroupId).toBeLessThan(0);
   });
 
   test("explicit positive IDs appear in tree correctly", async ({ page }) => {
@@ -1309,6 +1328,54 @@ test.describe("getTree() with auto-assigned IDs", () => {
     expect(result.synthFound).toBe(true);
     expect(result.synth.id).toBe(1000);
     expect(result.synth.defName).toBe("sonic-pi-beep");
+  });
+
+  test("OSC notifications skip negative IDs (matching upstream scsynth behavior)", async ({
+    page,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on("message", (msg) => messages.push(msg));
+
+      await sonic.init();
+      await sonic.send("/notify", 1); // Enable OSC notifications
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      // Clear initial messages
+      messages.length = 0;
+
+      // Create synth with auto-assigned ID
+      await sonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "release", 60);
+      await sonic.sync(1);
+
+      // Check SAB tree has the synth
+      const tree = sonic.getTree();
+      const autoSynth = tree.nodes.find(
+        (n) => n.id < 0 && n.defName === "sonic-pi-beep"
+      );
+
+      // Check for /n_go notification
+      const nGoMessages = messages.filter((m) => m.address === "/n_go");
+
+      return {
+        synthInSabTree: !!autoSynth,
+        synthIdInSab: autoSynth?.id,
+        nGoCount: nGoMessages.length,
+        nGoNodeIds: nGoMessages.map((m) => m.args[0]),
+      };
+    }, SONIC_CONFIG);
+
+    // SAB tree should include auto-assigned synths (for visualization)
+    expect(result.synthInSabTree).toBe(true);
+    expect(result.synthIdInSab).toBeLessThan(0);
+
+    // But OSC notifications should NOT include negative IDs (matching upstream)
+    // This ensures the standard SuperCollider behavior is preserved
+    expect(result.nGoCount).toBe(0);
+    expect(result.nGoNodeIds).toEqual([]);
   });
 });
 

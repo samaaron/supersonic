@@ -100,7 +100,6 @@
     -----------
     - Maximum 1024 nodes (NODE_TREE_MAX_NODES)
     - Synthdef names truncated to 31 characters
-    - Negative node IDs (auto-assigned by scsynth) are excluded from the tree
     - No control/parameter values exposed (use OSC for that)
 
     See node_tree.cpp for implementation details.

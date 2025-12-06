@@ -871,9 +871,8 @@ test.describe("/s_new semantic tests", () => {
     expect(result.isGroup).toBe(false);
   });
 
-  // Auto-generated IDs with -1 create hidden negative IDs (e.g., -16, -24, ...)
-  // These don't appear in the SAB tree (by design), but the synth is created.
-  // Verify via SAB tree nodeCount that a node was added.
+  // Auto-generated IDs with -1 create negative IDs (e.g., -2147483640, -2147483632, ...)
+  // These DO appear in the SAB tree for visualization purposes.
   test("auto-generates ID with -1", async ({ page }) => {
     await page.goto("/test/harness.html");
 
@@ -888,18 +887,23 @@ test.describe("/s_new semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const nodeCountAfter = sonic.getTree().nodeCount;
+      const treeAfter = sonic.getTree();
+      const autoSynth = treeAfter.nodes.find(
+        (n) => n.id < 0 && n.defName === "sonic-pi-beep"
+      );
 
       return {
         nodeCountBefore,
-        nodeCountAfter,
+        nodeCountAfter: treeAfter.nodeCount,
+        autoSynthFound: !!autoSynth,
+        autoSynthId: autoSynth?.id,
       };
     }, SONIC_CONFIG);
 
-    // SAB tree excludes negative IDs, so nodeCount shouldn't change
-    // But the synth IS created - we verify this indirectly by the fact
-    // that the command succeeded without error
-    expect(result.nodeCountAfter).toBe(result.nodeCountBefore);
+    // SAB tree now includes auto-assigned negative IDs
+    expect(result.nodeCountAfter).toBe(result.nodeCountBefore + 1);
+    expect(result.autoSynthFound).toBe(true);
+    expect(result.autoSynthId).toBeLessThan(0);
   });
 
   test("add action 0 - adds to head of group", async ({ page }) => {
@@ -1287,8 +1291,8 @@ test.describe("/g_new semantic tests", () => {
     expect(result.parentId).toBe(0);
   });
 
-  // Auto-generated IDs with -1 create hidden negative IDs (e.g., -16, -24, ...)
-  // These don't appear in the SAB tree (by design), but the group is created.
+  // Auto-generated IDs with -1 create negative IDs (e.g., -2147483640, -2147483632, ...)
+  // These DO appear in the SAB tree for visualization purposes.
   test("auto-generates ID with -1", async ({ page }) => {
     await page.goto("/test/harness.html");
 
@@ -1302,18 +1306,23 @@ test.describe("/g_new semantic tests", () => {
       await sonic.send("/g_new", -1, 0, 0);
       await sonic.sync(1);
 
-      const nodeCountAfter = sonic.getTree().nodeCount;
+      const treeAfter = sonic.getTree();
+      const autoGroup = treeAfter.nodes.find(
+        (n) => n.id < 0 && n.isGroup && n.defName === "group"
+      );
 
       return {
         nodeCountBefore,
-        nodeCountAfter,
+        nodeCountAfter: treeAfter.nodeCount,
+        autoGroupFound: !!autoGroup,
+        autoGroupId: autoGroup?.id,
       };
     }, SONIC_CONFIG);
 
-    // SAB tree excludes negative IDs, so nodeCount shouldn't change
-    // But the group IS created - we verify this indirectly by the fact
-    // that the command succeeded without error
-    expect(result.nodeCountAfter).toBe(result.nodeCountBefore);
+    // SAB tree now includes auto-assigned negative IDs
+    expect(result.nodeCountAfter).toBe(result.nodeCountBefore + 1);
+    expect(result.autoGroupFound).toBe(true);
+    expect(result.autoGroupId).toBeLessThan(0);
   });
 
   test("creates multiple groups in single command", async ({ page }) => {

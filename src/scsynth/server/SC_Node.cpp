@@ -374,6 +374,39 @@ void Node_SendReply(Node* inNode, int replyID, const char* cmdName, float value)
 // this function puts the message on a FIFO which is harvested by another thread that
 // actually does the sending.
 void Node_StateMsg(Node* inNode, int inState) {
+    // =========================================================================
+    // SUPERSONIC MODIFICATION START - Update SharedArrayBuffer node tree
+    // This enables JavaScript to poll the node tree without OSC round-trips.
+    // When merging upstream changes, preserve this block.
+    //
+    // IMPORTANT: This runs BEFORE the negative ID check below because:
+    // - SuperCollider's standard behavior skips OSC notifications for auto-assigned
+    //   (negative) node IDs to reduce network traffic
+    // - But we want ALL nodes in the SAB tree for real-time visualization
+    // - The SAB tree is polled locally, so there's no network overhead concern
+    // =========================================================================
+    if (shared_memory) {
+        uint8_t* node_tree_ptr = shared_memory + NODE_TREE_START;
+        NodeTreeHeader* tree_header = reinterpret_cast<NodeTreeHeader*>(node_tree_ptr);
+        NodeEntry* tree_entries = reinterpret_cast<NodeEntry*>(node_tree_ptr + NODE_TREE_HEADER_SIZE);
+
+        switch (inState) {
+            case kNode_Go:
+                NodeTree_Add(inNode, tree_header, tree_entries);
+                break;
+            case kNode_End:
+                NodeTree_Remove(inNode->mID, tree_header, tree_entries);
+                break;
+            case kNode_Move:
+                NodeTree_Update(inNode, tree_header, tree_entries);
+                break;
+            // kNode_On, kNode_Off, kNode_Info don't affect tree structure
+        }
+    }
+    // =========================================================================
+    // SUPERSONIC MODIFICATION END
+    // =========================================================================
+
     if (inNode->mID < 0 && inState != kNode_Info)
         return; // no notification for negative IDs
 
@@ -403,33 +436,6 @@ void Node_StateMsg(Node* inNode, int inState) {
     }
     msg.mState = inState;
     world->hw->mNodeEnds.Write(msg);
-
-    // =========================================================================
-    // SUPERSONIC MODIFICATION START - Update SharedArrayBuffer node tree
-    // This enables JavaScript to poll the node tree without OSC round-trips.
-    // When merging upstream changes, preserve this block.
-    // =========================================================================
-    if (shared_memory) {
-        uint8_t* node_tree_ptr = shared_memory + NODE_TREE_START;
-        NodeTreeHeader* tree_header = reinterpret_cast<NodeTreeHeader*>(node_tree_ptr);
-        NodeEntry* tree_entries = reinterpret_cast<NodeEntry*>(node_tree_ptr + NODE_TREE_HEADER_SIZE);
-
-        switch (inState) {
-            case kNode_Go:
-                NodeTree_Add(inNode, tree_header, tree_entries);
-                break;
-            case kNode_End:
-                NodeTree_Remove(inNode->mID, tree_header, tree_entries);
-                break;
-            case kNode_Move:
-                NodeTree_Update(inNode, tree_header, tree_entries);
-                break;
-            // kNode_On, kNode_Off, kNode_Info don't affect tree structure
-        }
-    }
-    // =========================================================================
-    // SUPERSONIC MODIFICATION END
-    // =========================================================================
 }
 
 #include "SC_Unit.h"
