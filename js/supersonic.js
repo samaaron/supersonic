@@ -587,19 +587,35 @@ export class SuperSonic {
   }
 
   /**
-   * Get node tree state from SharedArrayBuffer (for polling-based visualization)
-   * This reads directly from shared memory - no OSC latency.
-   * @returns {Object} Tree state: { nodeCount, version, nodes: [{id, parentId, isGroup, ...}] }
+   * Get a snapshot of the scsynth node tree for visualization.
+   *
+   * Returns all synths and groups currently running, with their hierarchy
+   * and ordering. Use the `version` field to detect changes efficiently.
+   *
+   * @returns {Object} Tree snapshot:
+   *   - `version` {number} - Changes whenever the tree changes. Compare with
+   *     previous value to skip re-renders when nothing changed.
+   *   - `nodeCount` {number} - Number of nodes (synths + groups)
+   *   - `nodes` {Array} - All nodes, each with:
+   *     - `id` - Node ID
+   *     - `parentId` - Parent group (-1 for root)
+   *     - `isGroup` - true for groups, false for synths
+   *     - `defName` - Synthdef name, or "group"
+   *     - `headId` - First child for groups (-1 if empty or synth)
+   *     - `prevId`, `nextId` - Siblings (-1 at ends)
+   *
    * @example
-   * // Poll tree at 60fps for visualization
+   * // Render tree only when it changes
    * let lastVersion = 0;
-   * setInterval(() => {
+   * function animate() {
    *   const tree = sonic.getTree();
    *   if (tree.version !== lastVersion) {
    *     lastVersion = tree.version;
    *     renderTree(tree.nodes);
    *   }
-   * }, 16);
+   *   requestAnimationFrame(animate);
+   * }
+   * animate();
    */
   getTree() {
     if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {

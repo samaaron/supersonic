@@ -54,6 +54,12 @@
 | `recover:start` | Full recovery (reload) starting - quick resume failed |
 | `recover:complete` | Full recovery completed (with `{ success }` payload) |
 
+### Node Tree
+
+| Method | Description |
+|--------|-------------|
+| [`getTree()`](#gettree) | Get snapshot of synth/group hierarchy for visualization |
+
 ### Metrics
 
 | Method | Description |
@@ -569,6 +575,124 @@ console.log(`Engine booted in ${stats.initDuration.toFixed(2)}ms`);
 **Properties:**
 - `initStartTime` - When `init()` was called (`performance.now()` timestamp)
 - `initDuration` - How long initialisation took (milliseconds)
+
+## Node Tree API
+
+Get a live view of all running synths and groups for building visualizations.
+
+### `getTree()`
+
+Returns a snapshot of the scsynth node tree - all synths and groups currently running.
+
+```javascript
+const tree = supersonic.getTree();
+```
+
+**Returns:**
+
+```javascript
+{
+  version: 42,          // Increments on every change
+  nodeCount: 5,         // Total nodes
+  nodes: [
+    {
+      id: 0,                    // Node ID
+      parentId: -1,             // Parent group (-1 for root)
+      isGroup: true,            // true = group, false = synth
+      defName: "group",         // "group" or synthdef name
+      headId: 100,              // First child (-1 if empty/synth)
+      prevId: -1,               // Previous sibling (-1 if first)
+      nextId: -1                // Next sibling (-1 if last)
+    },
+    {
+      id: 100,
+      parentId: 0,
+      isGroup: false,
+      defName: "sonic-pi-beep",
+      headId: -1,
+      prevId: -1,
+      nextId: 101
+    },
+    // ...
+  ]
+}
+```
+
+**Polling for changes:**
+
+Use `version` to skip re-renders when nothing changed:
+
+```javascript
+let lastVersion = 0;
+
+function animate() {
+  const tree = supersonic.getTree();
+  if (tree.version !== lastVersion) {
+    lastVersion = tree.version;
+    updateVisualization(tree.nodes);
+  }
+  requestAnimationFrame(animate);
+}
+animate();
+```
+
+**Example: List all running synths**
+
+```javascript
+const { nodes } = supersonic.getTree();
+const synths = nodes.filter(n => !n.isGroup);
+
+for (const synth of synths) {
+  console.log(`Synth ${synth.id}: ${synth.defName}`);
+}
+```
+
+**Example: Build a nested tree**
+
+```javascript
+function buildNestedTree(nodes) {
+  const byId = new Map(nodes.map(n => [n.id, { ...n, children: [] }]));
+
+  for (const node of byId.values()) {
+    if (node.parentId !== -1) {
+      byId.get(node.parentId)?.children.push(node);
+    }
+  }
+
+  return byId.get(0); // root group
+}
+```
+
+**Example: Get children in execution order**
+
+Nodes are linked via `headId`/`nextId`. This is the order scsynth executes them:
+
+```javascript
+function getChildrenInOrder(nodes, groupId) {
+  const group = nodes.find(n => n.id === groupId);
+  if (!group || group.headId === -1) return [];
+
+  const children = [];
+  let nodeId = group.headId;
+
+  while (nodeId !== -1) {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) break;
+    children.push(node);
+    nodeId = node.nextId;
+  }
+
+  return children;
+}
+```
+
+**Comparison with OSC `/g_queryTree`:**
+
+| | `getTree()` | `/g_queryTree` |
+|--|-------------|----------------|
+| Latency | Instant (reads shared memory) | Round-trip to audio thread |
+| Format | Flat array with links | Nested in message args |
+| Use case | 60fps visualization | One-off queries |
 
 ## Metrics API
 
