@@ -1,7 +1,9 @@
 
 import { SuperSonic } from '../dist/supersonic.js';
+import { NodeTreeViz } from './node_tree_viz.js';
 
 let orchestrator = null;
+let nodeTreeViz = null;
 let messages = [];
 let sentMessages = [];
 let runCounter = 0;
@@ -1100,6 +1102,23 @@ initButton.addEventListener('click', async () => {
 
     /* DEMO_BUILD_CONFIG */ await orchestrator.init({ development: DEV_MODE });
 
+    // Initialize node tree visualization
+    const container2d = document.getElementById('node-tree-container-2d');
+    const container3d = document.getElementById('node-tree-container-3d');
+    if (container2d && container3d) {
+      nodeTreeViz = new NodeTreeViz(container2d, container3d, orchestrator);
+      await nodeTreeViz.init();
+
+      // Wire up 2D/3D toggle button
+      const dimBtn = document.getElementById('dim-btn');
+      if (dimBtn) {
+        dimBtn.addEventListener('click', () => {
+          const newDim = nodeTreeViz.toggleDimensions();
+          dimBtn.textContent = newDim;
+        });
+      }
+    }
+
     // Expose for debugging
     window.testOrchestrator = orchestrator;
 
@@ -1815,7 +1834,6 @@ console.log('[UI] Access current state via window.uiState');
 // Constants for FX chain and scheduling
 const NTP_EPOCH_OFFSET = 2208988800;
 const LOOKAHEAD = 0.1; // 100ms lookahead to prevent late messages
-const GROUP_SOURCE = 100; // Legacy/general
 const GROUP_ARP = 100; // Arpeggiator notes
 const GROUP_FX = 101;
 const GROUP_LOOPS = 102; // Loop samples
@@ -1953,8 +1971,8 @@ async function initFXChain() {
       await loadFXSynthdefs();
 
       // Create groups and synth nodes
-      orchestrator.send('/g_new', GROUP_SOURCE, 0, 0);
-      orchestrator.send('/g_new', GROUP_FX, 3, GROUP_SOURCE);
+      orchestrator.send('/g_new', GROUP_ARP, 0, 0);
+      orchestrator.send('/g_new', GROUP_FX, 3, GROUP_ARP);
       orchestrator.send('/g_new', GROUP_LOOPS, 0, 0);
       orchestrator.send('/g_new', GROUP_KICK, 0, 0);
       orchestrator.send('/s_new', 'sonic-pi-fx_lpf', FX_LPF_NODE, 0, GROUP_FX,
@@ -2119,7 +2137,7 @@ function scheduleArpeggiatorBatch() {
         { type: 's', value: synthName },
         { type: 'i', value: -1 }, // Auto-assign node ID (we don't need to track)
         { type: 'i', value: 0 }, // addAction: add to head
-        { type: 'i', value: GROUP_SOURCE },
+        { type: 'i', value: GROUP_ARP },
         { type: 's', value: 'note' },
         { type: 'i', value: note },
         { type: 's', value: 'out_bus' },
@@ -2466,7 +2484,7 @@ function scheduleKickBatch() {
         { type: 's', value: 'sonic-pi-basic_stereo_player' },
         { type: 'i', value: -1 }, // Auto-assign node ID
         { type: 'i', value: 0 }, // addAction: add to head
-        { type: 'i', value: GROUP_SOURCE },
+        { type: 'i', value: GROUP_KICK },
         { type: 's', value: 'buf' },
         { type: 'i', value: 0 }, // buffer 0 (bd_haus)
         { type: 's', value: 'out_bus' },
