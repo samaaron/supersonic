@@ -1,13 +1,15 @@
-name: Build-Test-Deploy
+name: Build-Test-Deploy-Publish
 
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
 
-# Sets permissions needed for GitHub Pages deployment
+# Sets permissions needed for GitHub Pages deployment and npm provenance
 permissions:
   contents: read
   pages: write
@@ -25,6 +27,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Setup esbuild
         uses: sahelnuri/setup-esbuild@v1
@@ -95,6 +103,34 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: deployment
         uses: actions/deploy-pages@v4
+
+      # npm publish steps - only run on version tags
+      - name: Publish supersonic-scsynth
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish supersonic-scsynth-synthdefs
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: packages/supersonic-scsynth-synthdefs
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish supersonic-scsynth-samples
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: packages/supersonic-scsynth-samples
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish supersonic-scsynth-bundle
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: packages/supersonic-scsynth-bundle
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
     environment:
       name: github-pages
