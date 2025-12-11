@@ -1311,10 +1311,19 @@
           grid-template-columns: repeat(2, 1fr) !important;
         }
 
-        /* Feature boxes: 1 on top, 2 below on mobile */
+        /* Feature boxes: 1 on top (centered), 2 below side-by-side on mobile */
+        .feature-boxes {
+          display: grid !important;
+          grid-template-columns: 1fr 1fr;
+          justify-items: center;
+          gap: 0.75rem !important;
+        }
         .feature-boxes .feature-box:first-child {
-          flex-basis: 100%;
+          grid-column: 1 / -1;
           max-width: 250px;
+        }
+        .feature-boxes .feature-box:not(:first-child) {
+          max-width: 160px;
         }
 
         /* Log tabs on mobile - only show active tab */
