@@ -145,6 +145,7 @@ export class NodeTreeViz {
 
   /**
    * Convert flat node list to d3 hierarchy
+   * Uses scsynth's linked list (headId/nextId) to preserve execution order
    */
   buildHierarchy(nodes) {
     if (nodes.length === 0) {
@@ -157,18 +158,38 @@ export class NodeTreeViz {
       nodeMap.set(n.id, { ...n, children: [] });
     });
 
-    // Find root and build tree
+    // Find root
     let root = null;
     nodeMap.forEach((node, id) => {
       if (node.parentId === -1 || !nodeMap.has(node.parentId)) {
-        // This is a root node
         if (!root || id === 0) {
           root = node;
         }
-      } else {
-        // Add to parent's children
+      }
+    });
+
+    // Track which nodes have been added as children
+    const addedAsChild = new Set();
+
+    // Build children in correct order using headId/nextId linked list
+    nodeMap.forEach((node) => {
+      if (node.isGroup && node.headId !== undefined && node.headId !== -1 && nodeMap.has(node.headId)) {
+        // Walk the linked list from headId following nextId
+        let childId = node.headId;
+        while (childId !== -1 && nodeMap.has(childId)) {
+          const child = nodeMap.get(childId);
+          node.children.push(child);
+          addedAsChild.add(childId);
+          childId = child.nextId !== undefined ? child.nextId : -1;
+        }
+      }
+    });
+
+    // Fallback: add any nodes not yet added via linked list (using parentId)
+    nodeMap.forEach((node, id) => {
+      if (!addedAsChild.has(id) && node.parentId !== -1 && nodeMap.has(node.parentId)) {
         const parent = nodeMap.get(node.parentId);
-        if (parent) {
+        if (!parent.children.includes(node)) {
           parent.children.push(node);
         }
       }
@@ -206,9 +227,9 @@ export class NodeTreeViz {
     const treeLayout = d3.tree().nodeSize([25, 40]);
     treeLayout(root);
 
-    // Viscosity - groups very slow, synths fast
-    const GROUP_VISCOSITY = 0.03;
-    const SYNTH_VISCOSITY = 0.3;
+    // Viscosity - lower = slower/less swing, higher = snappier
+    const GROUP_VISCOSITY = 0.06;
+    const SYNTH_VISCOSITY = 0.4;
 
     // Update positions with viscosity
     // For vertical tree: d.x = horizontal spread, d.y = vertical depth
@@ -252,8 +273,12 @@ export class NodeTreeViz {
     const padding = 20;
 
     // Detect container resize - reset view immediately on any size change
-    const containerResized = this.lastContainerWidth && width !== this.lastContainerWidth;
+    // Also treat first render (no lastContainerHeight) as needing immediate snap
+    const containerResized = !this.lastContainerHeight ||
+                             width !== this.lastContainerWidth ||
+                             height !== this.lastContainerHeight;
     this.lastContainerWidth = width;
+    this.lastContainerHeight = height;
 
     if (nodeData.length > 0) {
       const minX = Math.min(...nodeData.map(d => d.x));
@@ -261,24 +286,38 @@ export class NodeTreeViz {
       const minY = Math.min(...nodeData.map(d => d.y));
       const maxY = Math.max(...nodeData.map(d => d.y));
 
-      const treeWidth = Math.max(maxX - minX, 1) + 40;
-      const treeHeight = Math.max(maxY - minY, 1) + 40;
+      // Add padding for node radii plus some margin (smaller on mobile)
+      const isMobile = height < 180;
+      const nodePadding = isMobile ? 12 : 20;
+      const treeWidth = Math.max(maxX - minX, 1) + nodePadding * 2;
+      const treeHeight = Math.max(maxY - minY, 1) + nodePadding * 2;
 
-      const scaleX = (width - padding * 2) / treeWidth;
-      const scaleY = (height - padding * 2) / treeHeight;
+      // Top padding: stats overlay is ~20px, add margin to clear it
+      // Bottom padding: 2D/3D button is ~20px
+      const topPadding = 40;
+      const bottomPadding = 18;
+
+      // Calculate scale based on actual available space
+      const availableWidth = width - padding * 2;
+      const availableHeight = height - topPadding - bottomPadding;
+
+      const scaleX = availableWidth / treeWidth;
+      const scaleY = availableHeight / treeHeight;
       const targetScale = Math.min(scaleX, scaleY, 1.5);
 
       // Center tree horizontally: translate to center, then offset by tree center
       const treeCenterX = (minX + maxX) / 2;
       const targetTransX = width / 2 - treeCenterX * targetScale;
-      const topPadding = 45; // Extra space for stats label at top
       const targetTransY = topPadding - minY * targetScale;
 
-      // On container resize, snap immediately; otherwise use viscosity
-      if (!this.viewTransform || containerResized) {
+      // Snap when tree structure changes (nodes added) or container resized
+      const nodeCountChanged = this.lastNodeCount !== nodeData.length;
+      this.lastNodeCount = nodeData.length;
+
+      if (!this.viewTransform || containerResized || nodeCountChanged) {
         this.viewTransform = { scale: targetScale, x: targetTransX, y: targetTransY };
       } else {
-        const VIEW_VISCOSITY = 0.03;
+        const VIEW_VISCOSITY = 0.15;
         this.viewTransform.scale += (targetScale - this.viewTransform.scale) * VIEW_VISCOSITY;
         this.viewTransform.x += (targetTransX - this.viewTransform.x) * VIEW_VISCOSITY;
         this.viewTransform.y += (targetTransY - this.viewTransform.y) * VIEW_VISCOSITY;
@@ -345,8 +384,13 @@ export class NodeTreeViz {
 
     allNodes.attr('transform', d => `translate(${d.x},${d.y})`);
 
+    // Smaller nodes on mobile (based on container height)
+    const isMobile = height < 180;
+    const groupRadius = isMobile ? 6 : 8;
+    const synthRadius = isMobile ? 4.5 : 6;
+
     allNodes.select('circle')
-      .attr('r', d => d.isGroup ? 6 : 4)
+      .attr('r', d => d.isGroup ? groupRadius : synthRadius)
       .attr('fill', d => getNodeColor(d.data))
       .attr('stroke', d => getNodeColor(d.data));
 
