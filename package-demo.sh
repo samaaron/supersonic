@@ -50,7 +50,10 @@ cp "$PROJECT_ROOT/example/favicon.png" "$TEMP_DIR/"
 # Copy demo assets (only files needed by demo.html)
 echo "Copying demo assets..."
 cp "$PROJECT_ROOT/example/assets/app.js" "$TEMP_DIR/assets/"
+cp "$PROJECT_ROOT/example/assets/node_tree_viz.js" "$TEMP_DIR/assets/"
 cp "$PROJECT_ROOT/example/assets/"*.png "$TEMP_DIR/assets/"
+# Ensure all assets are world-readable
+chmod 644 "$TEMP_DIR/assets/"*
 
 # Set production mode for packaged demo (disables manifest loading, debug logging)
 sed -i 's|/\* DEMO_BUILD_CONFIG \*/ await orchestrator.init({ development: true });|await orchestrator.init({ development: false });|' "$TEMP_DIR/assets/app.js"
