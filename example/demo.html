@@ -617,6 +617,7 @@
           flex-direction: row;
           flex-wrap: nowrap;
           align-items: stretch;
+          gap: 0.5rem;
         }
 
         .left-column {
@@ -632,7 +633,6 @@
         display: flex;
         flex-direction: column;
         min-width: 200px;
-        padding-right: 0.5rem;
       }
 
       .right-column {
@@ -1626,14 +1626,21 @@
 
       .slider-controls {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 1.5rem;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.4rem;
+      }
+
+      @media (max-width: 768px) {
+        .slider-controls {
+          grid-template-columns: repeat(2, 1fr);
+        }
       }
 
       .slider-control {
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
+        padding: 0 0.2rem;
       }
 
       .slider-control label {
@@ -2000,13 +2007,15 @@
           </p>
           <div
             style="
-              display: grid;
-              grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+              display: flex;
+              flex-direction: column;
+              align-items: center;
               gap: 1rem;
               font-size: 0.875rem;
               color: #4b5563;
             "
           >
+            <!-- AudioWorklet - centered on top -->
             <div
               style="
                 background: white;
@@ -2015,6 +2024,7 @@
                 box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
                 position: relative;
                 overflow: hidden;
+                width: 250px;
               "
             >
               <div
@@ -2041,74 +2051,81 @@
               ><br />
               Runs in a dedicated high priority audio thread
             </div>
-            <div
-              style="
-                background: white;
-                padding: 1rem;
-                border-left: 6px solid #1e90ff;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                position: relative;
-                overflow: hidden;
-              "
-            >
+            <!-- WebAssembly and OSC API - side by side below -->
+            <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center;">
               <div
                 style="
-                  position: absolute;
-                  top: 0;
-                  left: 0;
-                  width: 100%;
-                  height: 3px;
-                  background: linear-gradient(101deg, #1e90ff 0%, #ffd700 100%);
-                  transform: skewY(-11deg);
-                  transform-origin: top left;
+                  background: white;
+                  padding: 1rem;
+                  border-left: 6px solid #1e90ff;
+                  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                  position: relative;
+                  overflow: hidden;
+                  flex: 1 1 150px;
+                  max-width: 250px;
                 "
-              ></div>
-              <strong
-                style="
-                  color: #1e90ff;
-                  text-transform: uppercase;
-                  letter-spacing: 0.05em;
-                  font-style: italic;
-                  font-size: 1rem;
-                "
-                >WebAssembly</strong
-              ><br />
-              Scsynth's C++ code compiled for the web
-            </div>
+              >
+                <div
+                  style="
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 3px;
+                    background: linear-gradient(101deg, #1e90ff 0%, #ffd700 100%);
+                    transform: skewY(-11deg);
+                    transform-origin: top left;
+                  "
+                ></div>
+                <strong
+                  style="
+                    color: #1e90ff;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                    font-style: italic;
+                    font-size: 1rem;
+                  "
+                  >WebAssembly</strong
+                ><br />
+                Scsynth's C++ code compiled for the web
+              </div>
 
-            <div
-              style="
-                background: white;
-                padding: 1rem;
-                border-left: 6px solid #ffd700;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                position: relative;
-                overflow: hidden;
-              "
-            >
               <div
                 style="
-                  position: absolute;
-                  top: 0;
-                  left: 0;
-                  width: 100%;
-                  height: 3px;
-                  background: linear-gradient(101deg, #ffd700 0%, #ff1493 100%);
-                  transform: skewY(-11deg);
-                  transform-origin: top left;
+                  background: white;
+                  padding: 1rem;
+                  border-left: 6px solid #ffd700;
+                  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                  position: relative;
+                  overflow: hidden;
+                  flex: 1 1 150px;
+                  max-width: 250px;
                 "
-              ></div>
-              <strong
-                style="
-                  color: #d97706;
-                  text-transform: uppercase;
-                  letter-spacing: 0.05em;
-                  font-style: italic;
-                  font-size: 1rem;
-                "
-                >OSC API</strong
-              ><br />
-              Talk to the Scsynth server through its native OSC API
+              >
+                <div
+                  style="
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 3px;
+                    background: linear-gradient(101deg, #ffd700 0%, #ff1493 100%);
+                    transform: skewY(-11deg);
+                    transform-origin: top left;
+                  "
+                ></div>
+                <strong
+                  style="
+                    color: #d97706;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                    font-style: italic;
+                    font-size: 1rem;
+                  "
+                  >OSC API</strong
+                ><br />
+                Talk to the Scsynth server through its native OSC API
+              </div>
             </div>
           </div>
 
@@ -3052,11 +3069,11 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>dispatches</span><span id="metric-total-dispatches" style="color: #666">0</span></div>
                   </div>
                   <!-- Ring Buffers -->
-                  <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
+                  <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.8rem 0.3rem 0.4rem;">
                     <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Ring Buffers</div>
-                    <div style="display: flex; align-items: center; gap: 0.4rem;"><span style="color: #888; width: 24px">in</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-in-bar" style="height: 100%; background: #1e90ff; width: 0%; transition: width 0.3s;"></div></div><span id="metric-in-usage" style="color: #1e90ff; width: 22px; text-align: right;">0%</span></div>
-                    <div style="display: flex; align-items: center; gap: 0.4rem;"><span style="color: #888; width: 24px">out</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-out-bar" style="height: 100%; background: #4a4; width: 0%; transition: width 0.3s;"></div></div><span id="metric-out-usage" style="color: #4a4; width: 22px; text-align: right;">0%</span></div>
-                    <div style="display: flex; align-items: center; gap: 0.4rem;"><span style="color: #888; width: 24px">dbg</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-debug-bar" style="height: 100%; background: #a4a; width: 0%; transition: width 0.3s;"></div></div><span id="metric-debug-usage" style="color: #a4a; width: 22px; text-align: right;">0%</span></div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;"><span style="color: #888; width: 20px">in</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-in-bar" style="height: 100%; background: #1e90ff; width: 0%; transition: width 0.3s;"></div></div><span id="metric-in-usage" style="color: #1e90ff; width: 28px; text-align: right;">0%</span></div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;"><span style="color: #888; width: 20px">out</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-out-bar" style="height: 100%; background: #4a4; width: 0%; transition: width 0.3s;"></div></div><span id="metric-out-usage" style="color: #4a4; width: 28px; text-align: right;">0%</span></div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;"><span style="color: #888; width: 20px">dbg</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-debug-bar" style="height: 100%; background: #a4a; width: 0%; transition: width 0.3s;"></div></div><span id="metric-debug-usage" style="color: #a4a; width: 28px; text-align: right;">0%</span></div>
                   </div>
                   <!-- Engine State -->
                   <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
