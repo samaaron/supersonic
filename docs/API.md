@@ -692,7 +692,10 @@ function getChildrenInOrder(nodes, groupId) {
 |--|-------------|----------------|
 | Latency | Instant (reads shared memory) | Round-trip to audio thread |
 | Format | Flat array with links | Nested in message args |
-| Use case | 60fps visualization | One-off queries |
+| Control values | Not included | Optional (flag=1) |
+| Use case | 60fps visualization | One-off queries, debugging |
+
+**Note:** `getTree()` returns node structure only (id, parent, def name, links). It does not include synth control values. To query control values, use `/g_queryTree` with flag=1, or `/n_get` for specific nodes. See [Server Command Reference](SERVER_COMMAND_REFERENCE.md) for details.
 
 ## Metrics API
 
