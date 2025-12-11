@@ -197,133 +197,6 @@ extern "C" {
         return (int64_t)result;
     }
 
-    // Helper: Format OSC bundle content for debug logging
-    // Outputs messages like: "/s_new defname 1001 0 1" or "/n_set 1001 amp 0.5"
-    // With truncation for long bundles (max 3 messages shown, max 128 chars total)
-    static void format_osc_bundle(const char* bundle_data, int bundle_size, char* out_buf, int out_buf_size) {
-        const int MAX_MESSAGES = 3;
-        const int MAX_OUTPUT = out_buf_size - 1;
-        int out_pos = 0;
-
-        // Safety check
-        if (bundle_size < 20 || out_buf_size < 32) {
-            snprintf(out_buf, out_buf_size, "<malformed>");
-            return;
-        }
-
-        // Skip "#bundle\0" (8 bytes) and timetag (8 bytes)
-        const char* data = bundle_data + 16;
-        const char* data_end = bundle_data + bundle_size;
-        int msg_count = 0;
-        int total_messages = 0;
-
-        // First pass: count total messages
-        const char* scan = data;
-        while (scan + 4 <= data_end) {
-            int32_t msg_size = 0;
-            std::memcpy(&msg_size, scan, 4);
-            msg_size = __builtin_bswap32(msg_size);  // OSC is big-endian
-            if (msg_size <= 0 || scan + 4 + msg_size > data_end) break;
-            total_messages++;
-            scan += 4 + msg_size;
-        }
-
-        // Second pass: format messages
-        while (data + 4 <= data_end && msg_count < MAX_MESSAGES && out_pos < MAX_OUTPUT - 10) {
-            // Read message size (big-endian)
-            int32_t msg_size = 0;
-            std::memcpy(&msg_size, data, 4);
-            msg_size = __builtin_bswap32(msg_size);
-            data += 4;
-
-            if (msg_size <= 0 || data + msg_size > data_end) break;
-
-            const char* msg_start = data;
-            const char* msg_end = data + msg_size;
-
-            // Separator between messages
-            if (msg_count > 0) {
-                if (out_pos < MAX_OUTPUT - 3) {
-                    out_buf[out_pos++] = ' ';
-                    out_buf[out_pos++] = '|';
-                    out_buf[out_pos++] = ' ';
-                }
-            }
-
-            // OSC address (null-terminated, padded to 4 bytes)
-            const char* address = msg_start;
-            int addr_len = strlen(address);
-            int space_left = MAX_OUTPUT - out_pos - 5;  // Leave room for "..." and args
-            int copy_len = (addr_len < space_left) ? addr_len : space_left;
-            if (copy_len > 0) {
-                memcpy(out_buf + out_pos, address, copy_len);
-                out_pos += copy_len;
-            }
-
-            // Skip to tag string (address is null-terminated and 4-byte padded)
-            const char* tags_start = OSCstrskip(address);
-            if (tags_start < msg_end && tags_start[0] == ',') {
-                // Parse up to 4 arguments for context
-                sc_msg_iter msg(msg_size - (tags_start - msg_start), tags_start);
-                int arg_count = 0;
-                const int MAX_ARGS = 4;
-
-                while (msg.remain() && arg_count < MAX_ARGS && out_pos < MAX_OUTPUT - 15) {
-                    char tag = msg.nextTag('?');
-                    out_buf[out_pos++] = ' ';
-
-                    if (tag == 'i') {
-                        int val = msg.geti();
-                        out_pos += snprintf(out_buf + out_pos, MAX_OUTPUT - out_pos, "%d", val);
-                    } else if (tag == 'f') {
-                        float val = msg.getf();
-                        out_pos += snprintf(out_buf + out_pos, MAX_OUTPUT - out_pos, "%.2f", val);
-                    } else if (tag == 's') {
-                        const char* str = msg.gets();
-                        if (str) {
-                            int str_len = strlen(str);
-                            int max_str = 20;  // Truncate long strings
-                            if (str_len > max_str) {
-                                memcpy(out_buf + out_pos, str, max_str - 2);
-                                out_pos += max_str - 2;
-                                out_buf[out_pos++] = '.';
-                                out_buf[out_pos++] = '.';
-                            } else {
-                                memcpy(out_buf + out_pos, str, str_len);
-                                out_pos += str_len;
-                            }
-                        }
-                    } else if (tag == 'b') {
-                        size_t bsize = msg.getbsize();
-                        msg.skipb();
-                        out_pos += snprintf(out_buf + out_pos, MAX_OUTPUT - out_pos, "<blob %zu>", bsize);
-                    } else {
-                        // Unknown or special tag, skip
-                        break;
-                    }
-                    arg_count++;
-                }
-
-                // Indicate if more args exist
-                if (msg.remain() && arg_count >= MAX_ARGS && out_pos < MAX_OUTPUT - 4) {
-                    out_buf[out_pos++] = '.';
-                    out_buf[out_pos++] = '.';
-                    out_buf[out_pos++] = '.';
-                }
-            }
-
-            data = msg_start + msg_size;
-            msg_count++;
-        }
-
-        // Indicate if more messages exist
-        if (total_messages > MAX_MESSAGES && out_pos < MAX_OUTPUT - 10) {
-            out_pos += snprintf(out_buf + out_pos, MAX_OUTPUT - out_pos, " (+%d more)", total_messages - MAX_MESSAGES);
-        }
-
-        out_buf[out_pos] = '\0';
-    }
-
     // RT-safe bundle scheduling - no malloc!
     // Returns true if scheduled, false if queue full
     bool schedule_bundle(World* world, int64_t ntp_time, int64_t current_osc_time,
@@ -753,12 +626,11 @@ extern "C" {
                 int64_t time_diff_osc = schedTime - currentOscTime;
                 double time_diff_ms = ((double)time_diff_osc / 4294967296.0) * 1000.0;
 
-                // Warn if bundle is late (negative diff = past due)
-                if (time_diff_ms < -3.0) {
-                    // Format bundle content for readable debug output
-                    char bundle_desc[128];
-                    format_osc_bundle(bundle->mData, bundle->mSize, bundle_desc, sizeof(bundle_desc));
-                    worklet_debug("LATE: %.1fms %s", -time_diff_ms, bundle_desc);
+                // Warn if bundle is late (>3ms) or negative (indicates broken timing)
+                if (time_diff_ms > 3.0 || time_diff_ms < 0.0) {
+                    worklet_debug("LATE: Bundle executing - timetag=%llu current=%llu diff=%.2fms offset=%d subsample=%.3f",
+                                 (unsigned long long)schedTime, (unsigned long long)currentOscTime,
+                                 time_diff_ms, g_world->mSampleOffset, g_world->mSubsampleOffset);
                 }
 
                 bundle->Perform();  // Execute the bundle
