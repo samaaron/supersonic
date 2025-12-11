@@ -632,6 +632,7 @@
         display: flex;
         flex-direction: column;
         min-width: 200px;
+        padding-right: 0.5rem;
       }
 
       .right-column {
@@ -1310,21 +1311,6 @@
           grid-template-columns: repeat(2, 1fr) !important;
         }
 
-        /* Half-width controls on mobile - 2 per row */
-        .slider-container,
-        .form-group {
-          width: calc(50% - 0.25rem);
-          display: inline-block;
-          vertical-align: top;
-        }
-
-        /* Wrap slider/control containers */
-        .synth-controls,
-        .controls-section {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.5rem;
-        }
 
         /* Log tabs on mobile - only show active tab */
         .logs-grid .tab-content {
@@ -1640,7 +1626,7 @@
 
       .slider-controls {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: 1.5rem;
       }
 
@@ -2015,7 +2001,7 @@
           <div
             style="
               display: grid;
-              grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+              grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
               gap: 1rem;
               font-size: 0.875rem;
               color: #4b5563;
@@ -2445,7 +2431,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
           <div
             style="
               display: grid;
-              grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+              grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
               gap: 2rem;
               max-width: 600px;
               margin: 0 auto;
@@ -2659,10 +2645,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 <div class="slider-controls-section">
                   <div class="slider-controls">
                     <div class="slider-control">
-                      <label>
-                        Synth
-                        <span id="synth-value" class="slider-value">beep</span>
-                      </label>
+                      <label>Synth</label>
                       <select id="synth-select">
                         <option value="bass_foundation">Bass Foundation</option>
                         <option value="beep" selected>Beep</option>
@@ -2704,10 +2687,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                     </div>
 
                     <div class="slider-control">
-                      <label>
-                        Loop Sample
-                        <span id="loop-value" class="slider-value">amen</span>
-                      </label>
+                      <label>Loop Sample</label>
                       <select id="loop-select">
                         <option value="loop_amen" selected>Amen</option>
                         <option value="loop_breakbeat">Breakbeat</option>
@@ -2716,6 +2696,17 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                         <option value="loop_industrial">Industrial</option>
                         <option value="loop_tabla">Tabla</option>
                       </select>
+                    </div>
+
+                    <div class="slider-control">
+                      <label>Random Arp</label>
+                      <button
+                        id="random-arp-toggle"
+                        class="toggle-button"
+                        data-active="true"
+                      >
+                        On
+                      </button>
                     </div>
 
                     <div class="slider-control">
@@ -2731,17 +2722,6 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                         value="120"
                         step="1"
                       />
-                    </div>
-
-                    <div class="slider-control">
-                      <label>Random Arp</label>
-                      <button
-                        id="random-arp-toggle"
-                        class="toggle-button"
-                        data-active="true"
-                      >
-                        On
-                      </button>
                     </div>
 
                     <div class="slider-control">
@@ -3033,7 +3013,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                   <!-- Row 1 -->
                   <!-- Messages -->
                   <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Messages</div>
+                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Messages</div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>sent</span><span><span id="metric-sent" style="color: #ffd700">0</span><span style="color: #444"> / </span><span id="metric-bytes-sent" style="color: #555">0 B</span></span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>received</span><span><span id="metric-received" style="color: #ffd700">0</span><span style="color: #444"> / </span><span id="metric-bytes-received" style="color: #555">0 B</span></span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>direct</span><span id="metric-direct-writes" style="color: #4a4">0</span></div>
@@ -3041,7 +3021,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                   </div>
                   <!-- PreScheduler -->
                   <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">PreScheduler</div>
+                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">PreScheduler</div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>pending</span><span><span id="metric-prescheduler-pending" style="color: #ffd700">0</span><span style="color: #444"> / </span><span id="metric-prescheduler-peak" style="color: #555">0</span></span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>sent</span><span id="metric-prescheduler-sent" style="color: #ffd700">0</span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>scheduled</span><span id="metric-bundles-scheduled" style="color: #666">0</span></div>
@@ -3049,14 +3029,14 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                   </div>
                   <!-- Scheduler -->
                   <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Scheduler</div>
+                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Scheduler</div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>queue</span><span><span id="metric-scheduler-depth" style="color: #ffd700">0</span><span style="color: #444"> / </span><span id="metric-scheduler-peak" style="color: #555">0</span></span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>dropped</span><span id="metric-scheduler-dropped" style="color: #a44">0</span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>clock drift</span><span id="metric-drift" style="color: #ffd700">0ms</span></div>
                   </div>
                   <!-- Processing -->
                   <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Processing</div>
+                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Processing</div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>processed</span><span id="metric-messages-processed" style="color: #ffd700">0</span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>dropped</span><span id="metric-messages-dropped" style="color: #a44">0</span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>seq gaps</span><span id="metric-sequence-gaps" style="color: #a44">0</span></div>
@@ -3065,7 +3045,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                   <!-- Row 2 -->
                   <!-- Retries -->
                   <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Retries</div>
+                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Retries</div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>ok / fail</span><span><span id="metric-prescheduler-retries-succeeded" style="color: #4a4">0</span><span style="color: #444"> / </span><span id="metric-prescheduler-retries-failed" style="color: #a44">0</span></span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>queue</span><span><span id="metric-prescheduler-retry-queue-size" style="color: #ffd700">0</span><span style="color: #444"> / </span><span id="metric-prescheduler-retry-queue-max" style="color: #555">0</span></span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>retried</span><span id="metric-messages-retried" style="color: #666">0</span></div>
@@ -3073,21 +3053,21 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                   </div>
                   <!-- Ring Buffers -->
                   <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Ring Buffers</div>
-                    <div style="display: flex; align-items: center; gap: 0.2rem;"><span style="color: #888; width: 18px">in</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-in-bar" style="height: 100%; background: #1e90ff; width: 0%; transition: width 0.3s;"></div></div><span id="metric-in-usage" style="color: #1e90ff; width: 22px; text-align: right; font-size: 0.5rem;">0%</span></div>
-                    <div style="display: flex; align-items: center; gap: 0.2rem;"><span style="color: #888; width: 18px">out</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-out-bar" style="height: 100%; background: #4a4; width: 0%; transition: width 0.3s;"></div></div><span id="metric-out-usage" style="color: #4a4; width: 22px; text-align: right; font-size: 0.5rem;">0%</span></div>
-                    <div style="display: flex; align-items: center; gap: 0.2rem;"><span style="color: #888; width: 18px">dbg</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-debug-bar" style="height: 100%; background: #a4a; width: 0%; transition: width 0.3s;"></div></div><span id="metric-debug-usage" style="color: #a4a; width: 22px; text-align: right; font-size: 0.5rem;">0%</span></div>
+                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Ring Buffers</div>
+                    <div style="display: flex; align-items: center; gap: 0.4rem;"><span style="color: #888; width: 24px">in</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-in-bar" style="height: 100%; background: #1e90ff; width: 0%; transition: width 0.3s;"></div></div><span id="metric-in-usage" style="color: #1e90ff; width: 22px; text-align: right;">0%</span></div>
+                    <div style="display: flex; align-items: center; gap: 0.4rem;"><span style="color: #888; width: 24px">out</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-out-bar" style="height: 100%; background: #4a4; width: 0%; transition: width 0.3s;"></div></div><span id="metric-out-usage" style="color: #4a4; width: 22px; text-align: right;">0%</span></div>
+                    <div style="display: flex; align-items: center; gap: 0.4rem;"><span style="color: #888; width: 24px">dbg</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-debug-bar" style="height: 100%; background: #a4a; width: 0%; transition: width 0.3s;"></div></div><span id="metric-debug-usage" style="color: #a4a; width: 22px; text-align: right;">0%</span></div>
                   </div>
                   <!-- Engine State -->
                   <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Engine</div>
+                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Engine</div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>audio</span><span id="metric-audio-state" style="color: #4a4">-</span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>synthdefs</span><span id="metric-synthdefs" style="color: #ffd700">0</span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>debug</span><span><span id="metric-debug-received" style="color: #888">0</span><span style="color: #444"> / </span><span id="metric-debug-bytes-received" style="color: #555">0 B</span></span></div>
                   </div>
                   <!-- Buffer Pool -->
                   <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Buffers</div>
+                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Buffers</div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>used</span><span id="metric-buffer-used" style="color: #ffd700">0 B</span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>free</span><span id="metric-buffer-free" style="color: #4a4">0 B</span></div>
                     <div style="display: flex; justify-content: space-between; color: #888;"><span>allocs</span><span id="metric-buffer-allocs" style="color: #666">0</span></div>
