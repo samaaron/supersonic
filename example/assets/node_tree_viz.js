@@ -251,6 +251,10 @@ export class NodeTreeViz {
     const height = this.container2d.clientHeight || 180;
     const padding = 20;
 
+    // Detect container resize - reset view immediately on any size change
+    const containerResized = this.lastContainerWidth && width !== this.lastContainerWidth;
+    this.lastContainerWidth = width;
+
     if (nodeData.length > 0) {
       const minX = Math.min(...nodeData.map(d => d.x));
       const maxX = Math.max(...nodeData.map(d => d.x));
@@ -269,10 +273,11 @@ export class NodeTreeViz {
       const targetTransX = width / 2 - treeCenterX * targetScale;
       const targetTransY = padding - minY * targetScale;
 
-      const VIEW_VISCOSITY = 0.03;
-      if (!this.viewTransform) {
+      // On container resize, snap immediately; otherwise use viscosity
+      if (!this.viewTransform || containerResized) {
         this.viewTransform = { scale: targetScale, x: targetTransX, y: targetTransY };
       } else {
+        const VIEW_VISCOSITY = 0.03;
         this.viewTransform.scale += (targetScale - this.viewTransform.scale) * VIEW_VISCOSITY;
         this.viewTransform.x += (targetTransX - this.viewTransform.x) * VIEW_VISCOSITY;
         this.viewTransform.y += (targetTransY - this.viewTransform.y) * VIEW_VISCOSITY;

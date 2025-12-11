@@ -1261,10 +1261,25 @@
 
         .left-column {
           order: 1;
+          display: flex;
+          flex-direction: column;
         }
 
         .right-column {
           order: 2;
+        }
+
+        /* Move metrics to bottom on mobile */
+        #performance-metrics {
+          order: 99;
+          margin-top: 0;
+          padding-top: 1rem;
+          border-top: 1px solid #333;
+        }
+
+        /* Change to 2x4 grid on mobile */
+        #performance-metrics .metrics-grid {
+          grid-template-columns: repeat(2, 1fr) !important;
         }
       }
 
@@ -2960,8 +2975,8 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
               <!-- End OSC API Tab Content -->
 
               <!-- Performance Metrics (below tabs, 2 rows x 4 columns) -->
-              <div class="metrics-section" style="margin-top: 1rem;">
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; font-size: 0.55rem;">
+              <div id="performance-metrics" class="metrics-section" style="margin-top: 1rem;">
+                <div class="metrics-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; font-size: 0.55rem;">
                   <!-- Row 1 -->
                   <!-- Messages -->
                   <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
@@ -3035,17 +3050,17 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
             <!-- Right Column: Logs (Always Visible) -->
             <div class="right-column">
               <!-- Node Tree Visualization -->
-              <div class="node-tree-section" style="margin-bottom: 0.5rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                  <h2 style="color: #999; font-size: 0.75rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; margin: 0;">Node Tree</h2>
-                  <div id="node-tree-stats" style="font-size: 0.65em; color: #888; display: flex; gap: 10px;">
-                    <span style="color: #ff8c00;">Groups: <span id="stat-groups">0</span></span>
-                    <span style="color: #ff00ff;">FX: <span id="stat-fx">0</span></span>
-                    <span style="color: #00ffff;">Samples: <span id="stat-samples">0</span></span>
-                    <span style="color: #00ff88;">Synths: <span id="stat-synths">0</span></span>
-                  </div>
+              <div class="log-container" style="border-bottom: none;">
+                <div class="log-container-header">
+                  <h2>Node Tree</h2>
                 </div>
-                <div style="position: relative; width: 100%; height: 180px; min-height: 180px; overflow: hidden; background: #000; border-radius: 4px;">
+                <div id="node-tree-stats" style="position: absolute; top: 0.25rem; left: 0.5rem; z-index: 5; font-size: 0.65em; color: #888; display: flex; gap: 10px; background: rgba(0,0,0,0.7); padding: 0.1rem 0.3rem;">
+                  <span style="color: #ff8c00;">Groups: <span id="stat-groups">0</span></span>
+                  <span style="color: #ff00ff;">FX: <span id="stat-fx">0</span></span>
+                  <span style="color: #00ffff;">Samples: <span id="stat-samples">0</span></span>
+                  <span style="color: #00ff88;">Synths: <span id="stat-synths">0</span></span>
+                </div>
+                <div style="position: relative; width: 100%; height: 200px; overflow: hidden; background: #000;">
                   <div id="node-tree-container-2d" style="width: 100%; height: 100%; background: #000;"></div>
                   <div id="node-tree-container-3d" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; background: #000;"></div>
                   <button id="dim-btn" style="position: absolute; bottom: 8px; right: 8px; z-index: 10; font-size: 0.7em; padding: 2px 8px; cursor: pointer; background: #333; color: #ff8c00; border: 1px solid #ff8c00; border-radius: 3px;">2D</button>
