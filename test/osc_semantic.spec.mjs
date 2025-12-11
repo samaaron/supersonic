@@ -2144,6 +2144,156 @@ test.describe("/g_queryTree semantic tests", () => {
     expect(result.argsLength).toBeGreaterThan(5);
   });
 
+  test("control values set via /n_set are reflected in /g_queryTree", async ({ page }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      // Create long-lasting synth with initial values
+      await sonic.send(
+        "/s_new", "sonic-pi-beep", 1000, 0, 0,
+        "note", 60,
+        "amp", 0.5,
+        "sustain", 100,
+        "release", 60
+      );
+      await sonic.sync(1);
+
+      // Change control values via /n_set
+      await sonic.send("/n_set", 1000, "note", 72, "amp", 0.25);
+      await sonic.sync(2);
+
+      // Query tree with control values
+      messages.length = 0;
+      await sonic.send("/g_queryTree", 0, 1);
+      await sonic.sync(3);
+
+      const reply = messages.find((m) => m.address === "/g_queryTree.reply");
+
+      // Parse the response to find control values
+      // Format with flag=1: flag, groupID, numChildren, [nodeID, numChildren/-1, defName?, numControls?, controlName, controlValue, ...]
+      const args = reply?.args || [];
+
+      // Find the synth entry (node 1000)
+      // Skip: flag(0), groupID(1), numChildren(2), then look for our synth
+      let controlValues = {};
+      for (let i = 3; i < args.length; i++) {
+        if (args[i] === 1000 && args[i + 1] === -1) {
+          // Found synth 1000, next is defName, then numControls
+          const defName = args[i + 2];
+          const numControls = args[i + 3];
+          // Controls follow as name, value pairs
+          for (let j = 0; j < numControls; j++) {
+            const name = args[i + 4 + j * 2];
+            const value = args[i + 4 + j * 2 + 1];
+            controlValues[name] = value;
+          }
+          break;
+        }
+      }
+
+      // Cleanup
+      await sonic.send("/n_free", 1000);
+
+      return {
+        hasReply: !!reply,
+        controlValues,
+        rawArgs: args,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.hasReply).toBe(true);
+    // Verify the control values we set via /n_set are reflected
+    expect(result.controlValues.note).toBe(72);
+    expect(result.controlValues.amp).toBeCloseTo(0.25, 2);
+  });
+
+  test("control values mapped to bus are reflected in /g_queryTree", async ({ page }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      // Create long-lasting synth
+      await sonic.send(
+        "/s_new", "sonic-pi-beep", 1000, 0, 0,
+        "note", 60,
+        "amp", 0.5,
+        "sustain", 100,
+        "release", 60
+      );
+      await sonic.sync(1);
+
+      // Set control bus 0 to a specific value
+      await sonic.send("/c_set", 0, 84);
+      await sonic.sync(2);
+
+      // Map the "note" control to bus 0
+      await sonic.send("/n_map", 1000, "note", 0);
+      await sonic.sync(3);
+
+      // Wait a moment for the mapping to take effect
+      await new Promise(r => setTimeout(r, 50));
+
+      // Query tree with control values
+      messages.length = 0;
+      await sonic.send("/g_queryTree", 0, 1);
+      await sonic.sync(4);
+
+      const reply = messages.find((m) => m.address === "/g_queryTree.reply");
+
+      // Parse the response to find control values
+      const args = reply?.args || [];
+
+      let controlValues = {};
+      let noteIsMapped = false;
+      for (let i = 3; i < args.length; i++) {
+        if (args[i] === 1000 && args[i + 1] === -1) {
+          const defName = args[i + 2];
+          const numControls = args[i + 3];
+          for (let j = 0; j < numControls; j++) {
+            const name = args[i + 4 + j * 2];
+            const value = args[i + 4 + j * 2 + 1];
+            controlValues[name] = value;
+            // When mapped to a bus, the value shown is the bus value
+            // or it might show a special indicator - let's capture it
+            if (name === "note") {
+              noteIsMapped = typeof value === "string" || value === 84;
+            }
+          }
+          break;
+        }
+      }
+
+      // Cleanup
+      await sonic.send("/n_free", 1000);
+
+      return {
+        hasReply: !!reply,
+        controlValues,
+        noteValue: controlValues.note,
+        rawArgs: args,
+      };
+    }, SONIC_CONFIG);
+
+    expect(result.hasReply).toBe(true);
+    // When mapped to a control bus, scsynth returns the bus index as a string "cN"
+    // rather than the actual bus value
+    expect(result.noteValue).toBeDefined();
+    expect(result.noteValue).toBe("c0");  // Mapped to control bus 0
+  });
+
   test("SAB tree matches /g_queryTree response", async ({ page }) => {
     await page.goto("/test/harness.html");
 
