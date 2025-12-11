@@ -303,6 +303,133 @@ test.describe("Synth Audio Output", () => {
     expect(result.highFreq).toBeGreaterThan(result.lowFreq);
   });
 
+  test("control bus mapping affects synth frequency", async ({ page }) => {
+    // This test verifies that /n_map actually works - that mapping a control
+    // to a bus causes the synth to read its value from the bus
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(
+      async (config) => {
+        eval(config.helpers);
+
+        const sonic = new window.SuperSonic(config.sonic);
+        await sonic.init();
+        await sonic.loadSynthDef("sonic-pi-beep");
+
+        // Create synth with low note (48 = C3, ~130 Hz)
+        await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "note", 48, "amp", 0.5, "release", 5);
+        await sonic.sync(1);
+
+        // Capture initial frequency (before mapping)
+        await new Promise((r) => setTimeout(r, 50)); // Let synth stabilize
+        sonic.startCapture();
+        await new Promise((r) => setTimeout(r, 200));
+        const beforeMapping = sonic.stopCapture();
+
+        // Set control bus 0 to high note (72 = C5, ~523 Hz - two octaves higher)
+        await sonic.send("/c_set", 0, 72);
+        await sonic.sync(2);
+
+        // Map the synth's "note" control to bus 0
+        await sonic.send("/n_map", 1000, "note", 0);
+        await sonic.sync(3);
+
+        // Wait for mapping to take effect and capture
+        await new Promise((r) => setTimeout(r, 50));
+        sonic.startCapture();
+        await new Promise((r) => setTimeout(r, 200));
+        const afterMapping = sonic.stopCapture();
+
+        // Cleanup
+        await sonic.send("/n_free", 1000);
+
+        // Estimate frequencies
+        const sampleRate = beforeMapping.sampleRate;
+        const start = Math.floor(sampleRate * 0.02); // Skip first 20ms
+        const length = Math.floor(sampleRate * 0.15); // Analyze 150ms
+
+        const freqBefore = estimateFrequency(beforeMapping.left, sampleRate, start, start + length);
+        const freqAfter = estimateFrequency(afterMapping.left, sampleRate, start, start + length);
+
+        return {
+          freqBefore,
+          freqAfter,
+          ratio: freqAfter / freqBefore,
+        };
+      },
+      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+    );
+
+    // After mapping to bus with note 72, frequency should be significantly higher
+    // than before (when note was 48). Two octaves = 4x frequency ratio.
+    // Note 48 = ~130Hz, Note 72 = ~523Hz, expected ratio ~4x
+    expect(result.freqAfter).toBeGreaterThan(result.freqBefore);
+    expect(result.ratio).toBeGreaterThan(2);
+  });
+
+  test("control bus value changes affect mapped synth in real-time", async ({ page }) => {
+    // This test verifies that changing a bus value dynamically updates the synth
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(
+      async (config) => {
+        eval(config.helpers);
+
+        const sonic = new window.SuperSonic(config.sonic);
+        await sonic.init();
+        await sonic.loadSynthDef("sonic-pi-beep");
+
+        // Set initial bus value to low note
+        await sonic.send("/c_set", 0, 48);
+        await sonic.sync(1);
+
+        // Create synth already mapped to bus (start with mapping active)
+        await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "amp", 0.5, "release", 5);
+        await sonic.send("/n_map", 1000, "note", 0);
+        await sonic.sync(2);
+
+        // Capture with low bus value
+        await new Promise((r) => setTimeout(r, 50));
+        sonic.startCapture();
+        await new Promise((r) => setTimeout(r, 200));
+        const lowCapture = sonic.stopCapture();
+
+        // Change bus value to high note (same synth, just changing the bus)
+        await sonic.send("/c_set", 0, 72);
+        await sonic.sync(3);
+
+        // Capture with high bus value
+        await new Promise((r) => setTimeout(r, 50));
+        sonic.startCapture();
+        await new Promise((r) => setTimeout(r, 200));
+        const highCapture = sonic.stopCapture();
+
+        // Cleanup
+        await sonic.send("/n_free", 1000);
+
+        // Estimate frequencies
+        const sampleRate = lowCapture.sampleRate;
+        const start = Math.floor(sampleRate * 0.02);
+        const length = Math.floor(sampleRate * 0.15);
+
+        const freqLow = estimateFrequency(lowCapture.left, sampleRate, start, start + length);
+        const freqHigh = estimateFrequency(highCapture.left, sampleRate, start, start + length);
+
+        return {
+          freqLow,
+          freqHigh,
+          ratio: freqHigh / freqLow,
+        };
+      },
+      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+    );
+
+    // Changing the bus value should change the synth's frequency in real-time
+    // Note 48 = ~130Hz, Note 72 = ~523Hz, expected ratio ~4x
+    expect(result.freqHigh).toBeGreaterThan(result.freqLow);
+    expect(result.ratio).toBeGreaterThan(2);
+  });
+
   test("multiple synths produce combined output", async ({ page }) => {
     await page.goto("/test/harness.html");
 
