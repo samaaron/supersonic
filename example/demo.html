@@ -1256,30 +1256,51 @@
 
         #scope-container {
           order: 2;
+          height: 100px !important;
+        }
+
+        #scope-container .scope-canvas {
+          height: 100px !important;
         }
 
         .main-layout-grid {
           order: 3;
-        }
-
-        #performance-metrics-container {
-          order: 4;
-        }
-
-        .left-column {
-          order: 1;
           display: flex;
           flex-direction: column;
         }
 
-        .right-column {
-          order: 2;
+        .left-column {
+          order: 1;
+          display: contents; /* Let children participate in main-layout-grid flex */
         }
 
-        /* Move metrics to bottom on mobile */
+        .left-column > * {
+          order: 1; /* All left-column children before right-column */
+        }
+
+        .right-column {
+          order: 2;
+          display: contents; /* Let children participate in main-layout-grid flex */
+        }
+
+        .right-column > * {
+          order: 2; /* All right-column children after left-column */
+        }
+
+        /* Node tree right after scope on mobile */
+        #node-tree-panel {
+          order: -1 !important; /* Before left-column content but after scope */
+        }
+
+        /* Node tree smaller on mobile */
+        #node-tree-panel > div:last-child {
+          height: 140px !important;
+        }
+
+        /* Metrics at bottom on mobile (after everything) */
         #performance-metrics {
-          order: 99;
-          margin-top: 0;
+          order: 99 !important;
+          margin-top: 1rem;
           padding-top: 1rem;
           border-top: 1px solid #333;
         }
@@ -1287,6 +1308,31 @@
         /* Change to 2x4 grid on mobile */
         #performance-metrics .metrics-grid {
           grid-template-columns: repeat(2, 1fr) !important;
+        }
+
+        /* Half-width controls on mobile - 2 per row */
+        .slider-container,
+        .form-group {
+          width: calc(50% - 0.25rem);
+          display: inline-block;
+          vertical-align: top;
+        }
+
+        /* Wrap slider/control containers */
+        .synth-controls,
+        .controls-section {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+
+        /* Log tabs on mobile - only show active tab */
+        .logs-grid .tab-content {
+          display: none;
+        }
+
+        .logs-grid .tab-content.active {
+          display: block;
         }
       }
 
@@ -2981,7 +3027,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
               </div>
               <!-- End OSC API Tab Content -->
 
-              <!-- Performance Metrics (below tabs, 2 rows x 4 columns) -->
+              <!-- Performance Metrics (below tabs in left column) -->
               <div id="performance-metrics" class="metrics-section" style="margin-top: 1rem;">
                 <div class="metrics-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; font-size: 0.55rem;">
                   <!-- Row 1 -->
@@ -3057,7 +3103,7 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
             <!-- Right Column: Logs (Always Visible) -->
             <div class="right-column">
               <!-- Node Tree Visualization -->
-              <div class="log-container" style="border-bottom: none;">
+              <div id="node-tree-panel" class="log-container" style="border-bottom: none;">
                 <div class="log-container-header">
                   <h2>Node Tree</h2>
                 </div>

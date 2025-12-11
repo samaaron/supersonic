@@ -1971,10 +1971,12 @@ async function initFXChain() {
       await loadFXSynthdefs();
 
       // Create groups and synth nodes
-      orchestrator.send('/g_new', GROUP_ARP, 0, 0);
-      orchestrator.send('/g_new', GROUP_FX, 3, GROUP_ARP);
-      orchestrator.send('/g_new', GROUP_LOOPS, 0, 0);
-      orchestrator.send('/g_new', GROUP_KICK, 0, 0);
+      // Order matters for audio flow: sources first, then FX
+      // addAction: 0=head, 1=tail, 3=after
+      orchestrator.send('/g_new', GROUP_ARP, 0, 0);    // ARP at head
+      orchestrator.send('/g_new', GROUP_LOOPS, 0, 0);  // LOOPS at head (before ARP)
+      orchestrator.send('/g_new', GROUP_KICK, 0, 0);   // KICK at head (before LOOPS)
+      orchestrator.send('/g_new', GROUP_FX, 1, 0);     // FX at tail (after all sources)
       orchestrator.send('/s_new', 'sonic-pi-fx_lpf', FX_LPF_NODE, 0, GROUP_FX,
         'in_bus', FX_BUS_SYNTH_TO_LPF, 'out_bus', FX_BUS_LPF_TO_REVERB, 'cutoff', 130.0, 'res', 0.5);
       orchestrator.send('/s_new', 'sonic-pi-fx_reverb', FX_REVERB_NODE, 3, FX_LPF_NODE,
