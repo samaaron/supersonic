@@ -1757,12 +1757,10 @@ function setupSlider(sliderId, valueId, stateKey, formatter = (v) => v) {
 
 // Synth selector
 const synthSelect = document.getElementById('synth-select');
-const synthValue = document.getElementById('synth-value');
 
-if (synthSelect && synthValue) {
+if (synthSelect) {
   synthSelect.addEventListener('change', (e) => {
     uiState.synth = e.target.value;
-    synthValue.textContent = e.target.value;
     console.log('[UI] synth:', e.target.value);
   });
 
@@ -1771,14 +1769,10 @@ if (synthSelect && synthValue) {
 
 // Loop sample selector
 const loopSelect = document.getElementById('loop-select');
-const loopValue = document.getElementById('loop-value');
 
-if (loopSelect && loopValue) {
+if (loopSelect) {
   loopSelect.addEventListener('change', (e) => {
     uiState.loopSample = e.target.value;
-    // Update display to show just the name without "loop_" prefix
-    const displayName = e.target.value.replace('loop_', '');
-    loopValue.textContent = displayName;
     console.log('[UI] loop sample:', e.target.value);
 
     // Mark sample as not loaded so it will be reloaded with new selection
