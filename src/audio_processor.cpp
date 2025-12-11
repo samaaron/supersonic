@@ -626,11 +626,21 @@ extern "C" {
                 int64_t time_diff_osc = schedTime - currentOscTime;
                 double time_diff_ms = ((double)time_diff_osc / 4294967296.0) * 1000.0;
 
-                // Warn if bundle is late (>3ms) or negative (indicates broken timing)
-                if (time_diff_ms > 3.0 || time_diff_ms < 0.0) {
-                    worklet_debug("LATE: Bundle executing - timetag=%llu current=%llu diff=%.2fms offset=%d subsample=%.3f",
-                                 (unsigned long long)schedTime, (unsigned long long)currentOscTime,
-                                 time_diff_ms, g_world->mSampleOffset, g_world->mSubsampleOffset);
+                // Warn if bundle is significantly late (>3ms past due)
+                // Rate-limit: only log first late bundle, then every 100th
+                static int late_count = 0;
+                if (time_diff_ms < -3.0) {
+                    late_count++;
+                    if (late_count == 1 || late_count % 100 == 0) {
+                        // Extract OSC address from first message in bundle
+                        // Bundle format: #bundle\0 (8) + timetag (8) + msg_size (4) + msg_data...
+                        // Message starts with null-terminated address string
+                        const char* addr = "?";
+                        if (bundle->mSize > 20) {
+                            addr = bundle->mData + 20;  // Skip header + timetag + size
+                        }
+                        worklet_debug("LATE: %.1fms %s (count=%d)", -time_diff_ms, addr, late_count);
+                    }
                 }
 
                 bundle->Perform();  // Execute the bundle
