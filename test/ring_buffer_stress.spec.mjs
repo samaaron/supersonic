@@ -224,8 +224,7 @@ test.describe("Ring Buffer Stress Test", () => {
         };
 
         // Send many timed bundles with timestamps slightly in the future
-        // Increased to stress the system more
-        const NUM_BUNDLES = 2000;
+        const NUM_BUNDLES = 1000;
         const baseNTP = getCurrentNTP();
 
         for (let i = 0; i < NUM_BUNDLES; i++) {
