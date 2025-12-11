@@ -271,7 +271,8 @@ export class NodeTreeViz {
       // Center tree horizontally: translate to center, then offset by tree center
       const treeCenterX = (minX + maxX) / 2;
       const targetTransX = width / 2 - treeCenterX * targetScale;
-      const targetTransY = padding - minY * targetScale;
+      const topPadding = 45; // Extra space for stats label at top
+      const targetTransY = topPadding - minY * targetScale;
 
       // On container resize, snap immediately; otherwise use viscosity
       if (!this.viewTransform || containerResized) {
