@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
 
+// 15 minute timeout for stress tests - CI runners can be slow
+test.setTimeout(15 * 60 * 1000);
+
 /**
  * Ring Buffer Stress Test
  *
