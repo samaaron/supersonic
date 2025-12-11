@@ -1311,6 +1311,11 @@
           grid-template-columns: repeat(2, 1fr) !important;
         }
 
+        /* Feature boxes: 1 on top, 2 below on mobile */
+        .feature-boxes .feature-box:first-child {
+          flex-basis: 100%;
+          max-width: 250px;
+        }
 
         /* Log tabs on mobile - only show active tab */
         .logs-grid .tab-content {
@@ -2006,17 +2011,19 @@
             Zero installation.
           </p>
           <div
+            class="feature-boxes"
             style="
               display: flex;
-              flex-direction: column;
-              align-items: center;
+              flex-wrap: wrap;
+              justify-content: center;
               gap: 1rem;
               font-size: 0.875rem;
               color: #4b5563;
             "
           >
-            <!-- AudioWorklet - centered on top -->
+            <!-- AudioWorklet -->
             <div
+              class="feature-box"
               style="
                 background: white;
                 padding: 1rem;
@@ -2024,7 +2031,8 @@
                 box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
                 position: relative;
                 overflow: hidden;
-                width: 250px;
+                flex: 1 1 150px;
+                max-width: 250px;
               "
             >
               <div
@@ -2051,81 +2059,81 @@
               ><br />
               Runs in a dedicated high priority audio thread
             </div>
-            <!-- WebAssembly and OSC API - side by side below -->
-            <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center;">
+            <!-- WebAssembly -->
+            <div
+              class="feature-box"
+              style="
+                background: white;
+                padding: 1rem;
+                border-left: 6px solid #1e90ff;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                position: relative;
+                overflow: hidden;
+                flex: 1 1 150px;
+                max-width: 250px;
+              "
+            >
               <div
                 style="
-                  background: white;
-                  padding: 1rem;
-                  border-left: 6px solid #1e90ff;
-                  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                  position: relative;
-                  overflow: hidden;
-                  flex: 1 1 150px;
-                  max-width: 250px;
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 100%;
+                  height: 3px;
+                  background: linear-gradient(101deg, #1e90ff 0%, #ffd700 100%);
+                  transform: skewY(-11deg);
+                  transform-origin: top left;
                 "
-              >
-                <div
-                  style="
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 3px;
-                    background: linear-gradient(101deg, #1e90ff 0%, #ffd700 100%);
-                    transform: skewY(-11deg);
-                    transform-origin: top left;
-                  "
-                ></div>
-                <strong
-                  style="
-                    color: #1e90ff;
-                    text-transform: uppercase;
-                    letter-spacing: 0.05em;
-                    font-style: italic;
-                    font-size: 1rem;
-                  "
-                  >WebAssembly</strong
-                ><br />
-                Scsynth's C++ code compiled for the web
-              </div>
-
+              ></div>
+              <strong
+                style="
+                  color: #1e90ff;
+                  text-transform: uppercase;
+                  letter-spacing: 0.05em;
+                  font-style: italic;
+                  font-size: 1rem;
+                "
+                >WebAssembly</strong
+              ><br />
+              Scsynth's C++ code compiled for the web
+            </div>
+            <!-- OSC API -->
+            <div
+              class="feature-box"
+              style="
+                background: white;
+                padding: 1rem;
+                border-left: 6px solid #ffd700;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                position: relative;
+                overflow: hidden;
+                flex: 1 1 150px;
+                max-width: 250px;
+              "
+            >
               <div
                 style="
-                  background: white;
-                  padding: 1rem;
-                  border-left: 6px solid #ffd700;
-                  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                  position: relative;
-                  overflow: hidden;
-                  flex: 1 1 150px;
-                  max-width: 250px;
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 100%;
+                  height: 3px;
+                  background: linear-gradient(101deg, #ffd700 0%, #ff1493 100%);
+                  transform: skewY(-11deg);
+                  transform-origin: top left;
                 "
-              >
-                <div
-                  style="
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 3px;
-                    background: linear-gradient(101deg, #ffd700 0%, #ff1493 100%);
-                    transform: skewY(-11deg);
-                    transform-origin: top left;
-                  "
-                ></div>
-                <strong
-                  style="
-                    color: #d97706;
-                    text-transform: uppercase;
-                    letter-spacing: 0.05em;
-                    font-style: italic;
-                    font-size: 1rem;
-                  "
-                  >OSC API</strong
-                ><br />
-                Talk to the Scsynth server through its native OSC API
-              </div>
+              ></div>
+              <strong
+                style="
+                  color: #d97706;
+                  text-transform: uppercase;
+                  letter-spacing: 0.05em;
+                  font-style: italic;
+                  font-size: 1rem;
+                "
+                >OSC API</strong
+              ><br />
+              Talk to the Scsynth server through its native OSC API
             </div>
           </div>
 
