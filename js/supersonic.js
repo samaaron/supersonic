@@ -956,6 +956,42 @@ export class SuperSonic {
   }
 
   /**
+   * Cancel all scheduled OSC bundles with a specific tag (any editor)
+   * @param {string} runTag - The tag to cancel
+   */
+  cancelTag(runTag) {
+    this.#ensureInitialized("cancel by tag");
+    this.#osc.cancelTag(runTag);
+  }
+
+  /**
+   * Cancel all scheduled OSC bundles from a specific editor (any tag)
+   * @param {number} editorId - The editor ID to cancel
+   */
+  cancelEditor(editorId) {
+    this.#ensureInitialized("cancel by editor");
+    this.#osc.cancelEditor(editorId);
+  }
+
+  /**
+   * Cancel all scheduled OSC bundles matching both editor and tag
+   * @param {number} editorId - The editor ID
+   * @param {string} runTag - The tag
+   */
+  cancelEditorTag(editorId, runTag) {
+    this.#ensureInitialized("cancel by editor and tag");
+    this.#osc.cancelEditorTag(editorId, runTag);
+  }
+
+  /**
+   * Cancel all scheduled OSC bundles
+   */
+  cancelAllScheduled() {
+    this.#ensureInitialized("cancel all scheduled");
+    this.#osc.cancelAll();
+  }
+
+  /**
    * Get AudioContext instance (read-only)
    * @returns {AudioContext} The AudioContext instance
    */
