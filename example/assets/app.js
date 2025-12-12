@@ -1791,16 +1791,59 @@ setupSlider('release-slider', 'release-value', 'release', (v) => v.toFixed(2));
 
 // Hue slider with custom handler to update CSS filter
 const hueSlider = document.getElementById('hue-slider');
+const hueLabel = document.getElementById('hue-label');
 const synthUIContainer = document.getElementById('synth-ui-container');
+
+// Rainbow mode state
+let rainbowMode = false;
+let rainbowHue = 0;
+let rainbowAnimationId = null;
+
+function applyHueFilter(hue) {
+  const filterValue = `hue-rotate(${hue}deg) saturate(2)`;
+  if (synthUIContainer) {
+    synthUIContainer.style.filter = filterValue;
+  }
+  if (loadingLog) {
+    loadingLog.style.filter = filterValue;
+  }
+}
+
+function animateRainbow() {
+  if (!rainbowMode) return;
+  rainbowHue = (rainbowHue + 0.5) % 360;
+  applyHueFilter(rainbowHue);
+  rainbowAnimationId = requestAnimationFrame(animateRainbow);
+}
+
+function startRainbowMode() {
+  if (rainbowMode) return;
+  rainbowMode = true;
+  rainbowHue = 0;
+  if (hueLabel) hueLabel.textContent = 'Hue (Rainbow)';
+  animateRainbow();
+  console.log('[UI] Rainbow mode enabled');
+}
+
+function stopRainbowMode() {
+  if (!rainbowMode) return;
+  rainbowMode = false;
+  if (hueLabel) hueLabel.textContent = 'Hue';
+  if (rainbowAnimationId) {
+    cancelAnimationFrame(rainbowAnimationId);
+    rainbowAnimationId = null;
+  }
+  console.log('[UI] Rainbow mode disabled');
+}
 
 if (hueSlider && synthUIContainer) {
   hueSlider.addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
-    const filterValue = `hue-rotate(${value}deg) saturate(2)`;
-    synthUIContainer.style.filter = filterValue;
-    // Also update loading-log to match
-    if (loadingLog) {
-      loadingLog.style.filter = filterValue;
+    if (value === 360) {
+      startRainbowMode();
+    } else {
+      stopRainbowMode();
+      applyHueFilter(value);
     }
   });
   console.log('[UI] Hue slider initialised');
