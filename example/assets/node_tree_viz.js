@@ -227,9 +227,14 @@ export class NodeTreeViz {
     const treeLayout = d3.tree().nodeSize([25, 40]);
     treeLayout(root);
 
-    // Viscosity - lower = slower/less swing, higher = snappier
-    const GROUP_VISCOSITY = 0.06;
-    const SYNTH_VISCOSITY = 0.4;
+    // Viscosity - higher = more resistance = slower/smoother movement
+    // Hierarchy: groups most stable, then FX, then samples, then synths
+    const VISCOSITY = {
+      group: 0.98,
+      fx: 0.96,
+      sample: 0.90,
+      synth: 0.90
+    };
 
     // Update positions with viscosity
     // For vertical tree: d.x = horizontal spread, d.y = vertical depth
@@ -240,9 +245,10 @@ export class NodeTreeViz {
 
       if (this.nodePositions.has(id)) {
         const pos = this.nodePositions.get(id);
-        const viscosity = d.data.isGroup ? GROUP_VISCOSITY : SYNTH_VISCOSITY;
-        pos.x += (targetX - pos.x) * viscosity;
-        pos.y += (targetY - pos.y) * viscosity;
+        // Root node (ID 0) never moves
+        const viscosity = d.data.id === 0 ? 1 : VISCOSITY[getNodeType(d)];
+        pos.x += (targetX - pos.x) * (1 - viscosity);
+        pos.y += (targetY - pos.y) * (1 - viscosity);
       } else {
         this.nodePositions.set(id, { x: targetX, y: targetY });
       }
@@ -310,11 +316,11 @@ export class NodeTreeViz {
       const targetTransX = width / 2 - treeCenterX * targetScale;
       const targetTransY = topPadding - minY * targetScale;
 
-      // Snap when tree structure changes (nodes added) or container resized
-      const nodeCountChanged = this.lastNodeCount !== nodeData.length;
-      this.lastNodeCount = nodeData.length;
+      // Snap viewport on first render, container resize, or when needing to zoom out significantly
+      // This prevents starting zoomed in and slowly zooming out as nodes appear
+      const needsZoomOut = this.viewTransform && targetScale < this.viewTransform.scale * 0.9;
 
-      if (!this.viewTransform || containerResized || nodeCountChanged) {
+      if (!this.viewTransform || containerResized || needsZoomOut) {
         this.viewTransform = { scale: targetScale, x: targetTransX, y: targetTransY };
       } else {
         const VIEW_VISCOSITY = 0.15;
