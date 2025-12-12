@@ -14,9 +14,15 @@
 import ScsynthOSC from "./lib/scsynth_osc.js";
 import { BufferManager } from "./lib/buffer_manager.js";
 import { AssetLoader } from "./lib/asset_loader.js";
+import { OSCRewriter } from "./lib/osc_rewriter.js";
+import { extractSynthDefName } from "./lib/synthdef_parser.js";
+import {
+  calculateCurrentNTP,
+  calculateNTPStartTime,
+  calculateDriftMs,
+} from "./lib/timing_utils.js";
 import oscLib from "./vendor/osc.js/osc.js";
 import {
-  NTP_EPOCH_OFFSET,
   DRIFT_UPDATE_INTERVAL_MS,
   SYNC_TIMEOUT_MS,
   WORKLET_INIT_TIMEOUT_MS,
@@ -47,6 +53,7 @@ export class SuperSonic {
   #ringBufferBase;
   #bufferConstants;
   #bufferManager;
+  #oscRewriter;
   #driftOffsetTimer;
   #syncListeners;
   #initialNTPStartTime;
@@ -323,6 +330,7 @@ export class SuperSonic {
       this.#initializeSharedMemory();
       this.#initializeAudioContext();
       this.#initializeBufferManager();
+      this.#initializeOSCRewriter();
       const wasmBytes = await this.#loadWasm();
       await this.#initializeAudioWorklet(wasmBytes);
       await this.#initializeOSC();
@@ -570,6 +578,9 @@ export class SuperSonic {
       if (this.#bufferManager) {
         this.#bufferManager.updateAudioContext(this.#audioContext);
       }
+
+      // Recreate OSCRewriter (was nulled in shutdown)
+      this.#initializeOSCRewriter();
 
       const wasmBytes = await this.#loadWasm();
       await this.#initializeAudioWorklet(wasmBytes);
@@ -872,7 +883,7 @@ export class SuperSonic {
       const synthdefBytes = args[0];
       if (synthdefBytes instanceof Uint8Array || synthdefBytes instanceof ArrayBuffer) {
         const bytes = synthdefBytes instanceof ArrayBuffer ? new Uint8Array(synthdefBytes) : synthdefBytes;
-        const name = this.#extractSynthDefName(bytes) || 'unknown';
+        const name = extractSynthDefName(bytes) || 'unknown';
         this.loadedSynthDefs.set(name, bytes);
       }
     }
@@ -1041,7 +1052,7 @@ export class SuperSonic {
       path = `${this.#synthdefBaseURL}${nameOrPath}.scsyndef`;
     }
 
-    const synthName = this.#extractSynthDefName(path);
+    const synthName = extractSynthDefName(path);
 
     try {
       // Fetch using AssetLoader (handles retry, HEAD request, loading:start event)
@@ -1117,7 +1128,7 @@ export class SuperSonic {
   async loadSample(bufnum, nameOrPath, startFrame = 0, numFrames = 0) {
     this.#ensureInitialized("load samples");
 
-    const bufferInfo = await this.#requireBufferManager().prepareFromFile({
+    const bufferInfo = await this.#bufferManager.prepareFromFile({
       bufnum,
       path: nameOrPath,
       startFrame,
@@ -1268,6 +1279,7 @@ export class SuperSonic {
       this.#bufferManager = null;
     }
 
+    this.#oscRewriter = null;
     this.#sharedBuffer = null;
     this.#initialized = false;
     this.loadedSynthDefs.clear();
@@ -1468,6 +1480,13 @@ export class SuperSonic {
       sampleBaseURL: this.#sampleBaseURL,
       maxBuffers: this.#config.worldOptions.numBuffers,
       assetLoader: this.#assetLoader,
+    });
+  }
+
+  #initializeOSCRewriter() {
+    this.#oscRewriter = new OSCRewriter({
+      bufferManager: this.#bufferManager,
+      getDefaultSampleRate: () => this.#audioContext?.sampleRate || 44100,
     });
   }
 
@@ -2182,10 +2201,10 @@ export class SuperSonic {
 
     // Get synchronized snapshot of both time domains
     const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
-    const currentNTP = perfTimeMs / 1000 + NTP_EPOCH_OFFSET;
+    const currentNTP = calculateCurrentNTP(perfTimeMs);
 
     // NTP time at AudioContext start = current NTP - current AudioContext time
-    const ntpStartTime = currentNTP - timestamp.contextTime;
+    const ntpStartTime = calculateNTPStartTime(currentNTP, timestamp.contextTime);
 
     // Write to SharedArrayBuffer (write-once)
     this.#ntpStartView[0] = ntpStartTime;
@@ -2220,16 +2239,13 @@ export class SuperSonic {
     // Get synchronized snapshot of both time domains (same moment in both clocks)
     const timestamp = this.#audioContext.getOutputTimestamp();
     const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
-    const currentNTP = perfTimeMs / 1000 + NTP_EPOCH_OFFSET;
+    const currentNTP = calculateCurrentNTP(perfTimeMs);
 
     // Calculate where contextTime SHOULD be based on wall clock
     const expectedContextTime = currentNTP - this.#initialNTPStartTime;
 
     // Compare to actual contextTime to get drift
-    // Positive = AudioContext running slow (behind wall clock, needs time added)
-    // Negative = AudioContext running fast (ahead of wall clock, needs time subtracted)
-    const driftSeconds = expectedContextTime - timestamp.contextTime;
-    const driftMs = Math.round(driftSeconds * 1000);
+    const driftMs = calculateDriftMs(expectedContextTime, timestamp.contextTime);
 
     // Write to SharedArrayBuffer using cached view
     Atomics.store(this.#driftView, 0, driftMs);
@@ -2273,8 +2289,8 @@ export class SuperSonic {
 
     // Recalculate NTP start time based on current state
     const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
-    const currentNTP = perfTimeMs / 1000 + NTP_EPOCH_OFFSET;
-    const ntpStartTime = currentNTP - timestamp.contextTime;
+    const currentNTP = calculateCurrentNTP(perfTimeMs);
+    const ntpStartTime = calculateNTPStartTime(currentNTP, timestamp.contextTime);
 
     // Update both SAB and internal state
     this.#ntpStartView[0] = ntpStartTime;
@@ -2319,42 +2335,6 @@ export class SuperSonic {
     }
   }
 
-  /**
-   * Extract synthdef name from path or binary data
-   * @param {string|Uint8Array|ArrayBuffer} input - File path or scsyndef binary
-   * @returns {string|null} Synthdef name or null if not found
-   * @private
-   */
-  #extractSynthDefName(input) {
-    if (!input) return null;
-
-    // Handle string path - extract from filename
-    if (typeof input === "string") {
-      const lastSegment = input.split("/").filter(Boolean).pop() || input;
-      return lastSegment.replace(/\.scsyndef$/i, "");
-    }
-
-    // Handle binary data - parse scsyndef format
-    // Format: "SCgf" (4) + version (4) + numDefs (2) + [nameLen (1) + name (n) + ...]
-    const bytes = input instanceof ArrayBuffer ? new Uint8Array(input) : input;
-    if (!(bytes instanceof Uint8Array) || bytes.length < 11) return null;
-
-    // Check magic "SCgf"
-    if (bytes[0] !== 0x53 || bytes[1] !== 0x43 || bytes[2] !== 0x67 || bytes[3] !== 0x66) {
-      return null;
-    }
-
-    // Name starts at offset 10 (after magic + version + numDefs)
-    const nameLen = bytes[10];
-    if (nameLen === 0 || 11 + nameLen > bytes.length) return null;
-
-    try {
-      return new TextDecoder().decode(bytes.slice(11, 11 + nameLen));
-    } catch {
-      return null;
-    }
-  }
-
   #toUint8Array(data) {
     if (data instanceof Uint8Array) {
       return data;
@@ -2369,7 +2349,7 @@ export class SuperSonic {
     const decodeOptions = { metadata: true, unpackSingleArgs: false };
     try {
       const decodedPacket = SuperSonic.osc.decode(uint8Data, decodeOptions);
-      const { packet, changed } = await this.#rewritePacket(decodedPacket);
+      const { packet, changed } = await this.#oscRewriter.rewritePacket(decodedPacket);
       if (!changed) {
         return uint8Data;
       }
@@ -2378,321 +2358,6 @@ export class SuperSonic {
       console.error("[SuperSonic] Failed to prepare OSC packet:", error);
       throw error;
     }
-  }
-
-  async #rewritePacket(packet) {
-    if (packet && packet.address) {
-      const { message, changed } = await this.#rewriteMessage(packet);
-      return { packet: message, changed };
-    }
-
-    if (this.#isBundle(packet)) {
-      const subResults = await Promise.all(
-        packet.packets.map((subPacket) => this.#rewritePacket(subPacket))
-      );
-
-      const changed = subResults.some((result) => result.changed);
-
-      if (!changed) {
-        return { packet, changed: false };
-      }
-
-      const rewrittenPackets = subResults.map((result) => result.packet);
-
-      return {
-        packet: {
-          timeTag: packet.timeTag,
-          packets: rewrittenPackets,
-        },
-        changed: true,
-      };
-    }
-
-    return { packet, changed: false };
-  }
-
-  async #rewriteMessage(message) {
-    switch (message.address) {
-      case "/b_alloc":
-        return {
-          message: await this.#rewriteAlloc(message),
-          changed: true,
-        };
-      case "/b_allocRead":
-        return {
-          message: await this.#rewriteAllocRead(message),
-          changed: true,
-        };
-      case "/b_allocReadChannel":
-        return {
-          message: await this.#rewriteAllocReadChannel(message),
-          changed: true,
-        };
-      case "/b_allocFile":
-        return {
-          message: await this.#rewriteAllocFile(message),
-          changed: true,
-        };
-      default:
-        return { message, changed: false };
-    }
-  }
-
-  async #rewriteAllocRead(message) {
-    const bufferManager = this.#requireBufferManager();
-    const bufnum = this.#requireIntArg(
-      message.args,
-      0,
-      "/b_allocRead requires a buffer number"
-    );
-    const path = this.#requireStringArg(
-      message.args,
-      1,
-      "/b_allocRead requires a file path"
-    );
-    const startFrame = this.#optionalIntArg(message.args, 2, 0);
-    const numFrames = this.#optionalIntArg(message.args, 3, 0);
-
-    const bufferInfo = await bufferManager.prepareFromFile({
-      bufnum,
-      path,
-      startFrame,
-      numFrames,
-    });
-
-    this.#detachAllocationPromise(
-      bufferInfo.allocationComplete,
-      `/b_allocRead ${bufnum}`
-    );
-    return this.#buildAllocPtrMessage(bufnum, bufferInfo);
-  }
-
-  async #rewriteAllocReadChannel(message) {
-    const bufferManager = this.#requireBufferManager();
-    const bufnum = this.#requireIntArg(
-      message.args,
-      0,
-      "/b_allocReadChannel requires a buffer number"
-    );
-    const path = this.#requireStringArg(
-      message.args,
-      1,
-      "/b_allocReadChannel requires a file path"
-    );
-    const startFrame = this.#optionalIntArg(message.args, 2, 0);
-    const numFrames = this.#optionalIntArg(message.args, 3, 0);
-
-    const channels = [];
-    for (let i = 4; i < (message.args?.length || 0); i++) {
-      if (!this.#isNumericArg(message.args[i])) {
-        break;
-      }
-      channels.push(Math.floor(this.#getArgValue(message.args[i])));
-    }
-
-    const bufferInfo = await bufferManager.prepareFromFile({
-      bufnum,
-      path,
-      startFrame,
-      numFrames,
-      channels: channels.length > 0 ? channels : null,
-    });
-
-    this.#detachAllocationPromise(
-      bufferInfo.allocationComplete,
-      `/b_allocReadChannel ${bufnum}`
-    );
-    return this.#buildAllocPtrMessage(bufnum, bufferInfo);
-  }
-
-  /**
-   * Handle /b_allocFile - SuperSonic extension (not standard scsynth OSC)
-   * Loads audio from inline file data (FLAC, WAV, OGG, etc.) without URL fetch.
-   * Useful for external controllers sending sample data directly via OSC.
-   * @param {Object} message - OSC message with args [bufnum, blob]
-   */
-  async #rewriteAllocFile(message) {
-    const bufferManager = this.#requireBufferManager();
-    const bufnum = this.#requireIntArg(
-      message.args,
-      0,
-      "/b_allocFile requires a buffer number"
-    );
-    const blob = this.#requireBlobArg(
-      message.args,
-      1,
-      "/b_allocFile requires audio file data as blob"
-    );
-
-    const bufferInfo = await bufferManager.prepareFromBlob({
-      bufnum,
-      blob,
-    });
-
-    this.#detachAllocationPromise(
-      bufferInfo.allocationComplete,
-      `/b_allocFile ${bufnum}`
-    );
-    return this.#buildAllocPtrMessage(bufnum, bufferInfo);
-  }
-
-  async #rewriteAlloc(message) {
-    const bufferManager = this.#requireBufferManager();
-    const bufnum = this.#requireIntArg(
-      message.args,
-      0,
-      "/b_alloc requires a buffer number"
-    );
-    const numFrames = this.#requireIntArg(
-      message.args,
-      1,
-      "/b_alloc requires a frame count"
-    );
-
-    let argIndex = 2;
-    let numChannels = 1;
-    let sampleRate = this.#audioContext?.sampleRate || 44100;
-
-    if (this.#isNumericArg(this.#argAt(message.args, argIndex))) {
-      numChannels = Math.max(
-        1,
-        this.#optionalIntArg(message.args, argIndex, 1)
-      );
-      argIndex++;
-    }
-
-    if (this.#argAt(message.args, argIndex)?.type === "b") {
-      argIndex++;
-    }
-
-    if (this.#isNumericArg(this.#argAt(message.args, argIndex))) {
-      sampleRate = this.#getArgValue(this.#argAt(message.args, argIndex));
-    }
-
-    const bufferInfo = await bufferManager.prepareEmpty({
-      bufnum,
-      numFrames,
-      numChannels,
-      sampleRate,
-    });
-
-    this.#detachAllocationPromise(
-      bufferInfo.allocationComplete,
-      `/b_alloc ${bufnum}`
-    );
-    return this.#buildAllocPtrMessage(bufnum, bufferInfo);
-  }
-
-  #buildAllocPtrMessage(bufnum, bufferInfo) {
-    return {
-      address: "/b_allocPtr",
-      args: [
-        this.#intArg(bufnum),
-        this.#intArg(bufferInfo.ptr),
-        this.#intArg(bufferInfo.numFrames),
-        this.#intArg(bufferInfo.numChannels),
-        this.#floatArg(bufferInfo.sampleRate),
-        this.#stringArg(bufferInfo.uuid),
-      ],
-    };
-  }
-
-  #intArg(value) {
-    return { type: "i", value: Math.floor(value) };
-  }
-
-  #floatArg(value) {
-    return { type: "f", value };
-  }
-
-  #stringArg(value) {
-    return { type: "s", value: String(value) };
-  }
-
-  #argAt(args, index) {
-    if (!Array.isArray(args)) {
-      return undefined;
-    }
-    return args[index];
-  }
-
-  #getArgValue(arg) {
-    if (arg === undefined || arg === null) {
-      return undefined;
-    }
-    return typeof arg === "object" &&
-      Object.prototype.hasOwnProperty.call(arg, "value")
-      ? arg.value
-      : arg;
-  }
-
-  #requireIntArg(args, index, errorMessage) {
-    const value = this.#getArgValue(this.#argAt(args, index));
-    if (!Number.isFinite(value)) {
-      throw new Error(errorMessage);
-    }
-    return Math.floor(value);
-  }
-
-  #optionalIntArg(args, index, defaultValue = 0) {
-    const value = this.#getArgValue(this.#argAt(args, index));
-    if (!Number.isFinite(value)) {
-      return defaultValue;
-    }
-    return Math.floor(value);
-  }
-
-  #requireStringArg(args, index, errorMessage) {
-    const value = this.#getArgValue(this.#argAt(args, index));
-    if (typeof value !== "string") {
-      throw new Error(errorMessage);
-    }
-    return value;
-  }
-
-  #requireBlobArg(args, index, errorMessage) {
-    const arg = this.#argAt(args, index);
-    if (!arg || arg.type !== "b") {
-      throw new Error(errorMessage);
-    }
-    const value = this.#getArgValue(arg);
-    if (!(value instanceof Uint8Array || value instanceof ArrayBuffer)) {
-      throw new Error(errorMessage);
-    }
-    return value;
-  }
-
-  #isNumericArg(arg) {
-    if (!arg) {
-      return false;
-    }
-    const value = this.#getArgValue(arg);
-    return Number.isFinite(value);
-  }
-
-  #detachAllocationPromise(promise, context) {
-    if (!promise || typeof promise.catch !== "function") {
-      return;
-    }
-
-    promise.catch((error) => {
-      console.error(`[SuperSonic] ${context} allocation failed:`, error);
-    });
-  }
-
-  #requireBufferManager() {
-    if (!this.#bufferManager) {
-      throw new Error(
-        "Buffer manager not ready. Call init() before issuing buffer commands."
-      );
-    }
-    return this.#bufferManager;
-  }
-
-  #isBundle(packet) {
-    return (
-      packet && packet.timeTag !== undefined && Array.isArray(packet.packets)
-    );
   }
 
   #calculateBundleWait(uint8Data) {
