@@ -15,6 +15,7 @@ import ScsynthOSC from "./lib/scsynth_osc.js";
 import { BufferManager } from "./lib/buffer_manager.js";
 import { AssetLoader } from "./lib/asset_loader.js";
 import { OSCRewriter } from "./lib/osc_rewriter.js";
+import { DirectWriter } from "./lib/direct_writer.js";
 import { extractSynthDefName } from "./lib/synthdef_parser.js";
 import {
   calculateCurrentNTP,
@@ -30,7 +31,6 @@ import {
 import { MemoryLayout } from "./memory_layout.js";
 import { defaultWorldOptions } from "./scsynth_options.js";
 import * as MetricsOffsets from "./lib/metrics_offsets.js";
-import { writeToRingBuffer } from "./lib/ring_buffer_writer.js";
 
 /**
  * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
@@ -69,10 +69,10 @@ export class SuperSonic {
   #config;
 
   // Direct ring buffer write (bypasses worker for low-latency non-bundle messages)
-  #directWriteAtomicView;
-  #directWriteDataView;
-  #directWriteUint8View;
-  #directWriteControlIndices;
+  #directWriter;
+
+  // Shared atomic view for reading control pointers (buffer usage metrics)
+  #atomicView;
 
   // Cached metrics view (avoids creating new Uint32Array on every read)
   #metricsView;
@@ -545,10 +545,8 @@ export class SuperSonic {
     // Reset ring buffer and control views (will be recreated)
     this.#ringBufferBase = null;
     this.#bufferConstants = null;
-    this.#directWriteAtomicView = null;
-    this.#directWriteDataView = null;
-    this.#directWriteUint8View = null;
-    this.#directWriteControlIndices = null;
+    this.#directWriter = null;
+    this.#atomicView = null;
     this.#metricsView = null;
     this.#ntpStartView = null;
     this.#driftView = null;
@@ -938,7 +936,7 @@ export class SuperSonic {
     // Fast path: try direct ring buffer write for messages that don't need scheduling
     // This bypasses the worker thread, saving ~30-50ms of worker latency
     // Eligible: non-bundles, immediate bundles (timetag 0/1), or bundles within 200ms
-    if (this.#shouldBypassPrescheduler(preparedData) && this.#tryDirectWrite(preparedData)) {
+    if (this.#directWriter?.tryWrite(preparedData)) {
       this.#addMetric("preschedulerBypassed");
       return; // Direct write succeeded
     }
@@ -1280,6 +1278,7 @@ export class SuperSonic {
     }
 
     this.#oscRewriter = null;
+    this.#directWriter = null;
     this.#sharedBuffer = null;
     this.#initialized = false;
     this.loadedSynthDefs.clear();
@@ -1291,10 +1290,7 @@ export class SuperSonic {
     this.#bufferConstants = null;
 
     // Reset cached views
-    this.#directWriteAtomicView = null;
-    this.#directWriteDataView = null;
-    this.#directWriteUint8View = null;
-    this.#directWriteControlIndices = null;
+    this.#atomicView = null;
     this.#metricsView = null;
     this.#ntpStartView = null;
     this.#driftView = null;
@@ -1723,8 +1719,11 @@ export class SuperSonic {
                 );
               this.#bufferConstants = event.data.bufferConstants;
 
-              // Initialize direct ring buffer write views for low-latency sends
-              this.#initDirectWriteViews();
+              // Initialize shared views for metrics and timing
+              this.#initSharedViews();
+
+              // Initialize direct writer for low-latency ring buffer writes
+              this.#initializeDirectWriter();
 
               // Initialize NTP timing (blocks until audio is flowing)
               if (__DEV__)
@@ -1863,11 +1862,7 @@ export class SuperSonic {
    * @private
    */
   #getBufferUsage() {
-    if (
-      !this.#directWriteAtomicView ||
-      !this.#bufferConstants ||
-      !this.#ringBufferBase
-    ) {
+    if (!this.#atomicView || !this.#bufferConstants || !this.#ringBufferBase) {
       return null;
     }
 
@@ -1875,7 +1870,7 @@ export class SuperSonic {
       this.#ringBufferBase + this.#bufferConstants.CONTROL_START;
 
     // Read head/tail pointers (reuse cached Int32Array view)
-    const view = this.#directWriteAtomicView;
+    const view = this.#atomicView;
     const inHead = Atomics.load(view, (controlBase + 0) / 4);
     const inTail = Atomics.load(view, (controlBase + 4) / 4);
     const outHead = Atomics.load(view, (controlBase + 8) / 4);
@@ -2034,23 +2029,22 @@ export class SuperSonic {
   }
 
   /**
-   * Initialize views for direct ring buffer writes (bypassing worker)
+   * Initialize shared views for metrics and timing
    */
-  #initDirectWriteViews() {
+  #initSharedViews() {
     if (
       !this.#sharedBuffer ||
       !this.#ringBufferBase ||
       !this.#bufferConstants
     ) {
       console.warn(
-        "[SuperSonic] Cannot initialize direct write views - missing buffer info"
+        "[SuperSonic] Cannot initialize shared views - missing buffer info"
       );
       return;
     }
 
-    this.#directWriteAtomicView = new Int32Array(this.#sharedBuffer);
-    this.#directWriteDataView = new DataView(this.#sharedBuffer);
-    this.#directWriteUint8View = new Uint8Array(this.#sharedBuffer);
+    // Atomic view for reading control pointers (buffer usage metrics)
+    this.#atomicView = new Int32Array(this.#sharedBuffer);
 
     // Cache metrics view for efficient reads
     const metricsBase =
@@ -2078,84 +2072,19 @@ export class SuperSonic {
       1
     );
 
-    // Control indices (must match shared_memory.h ControlPointers layout)
-    // Offsets: in_head=0, in_tail=4, ..., in_sequence=24, ..., in_write_lock=40
-    const CONTROL_START = this.#bufferConstants.CONTROL_START;
-    this.#directWriteControlIndices = {
-      IN_HEAD: (this.#ringBufferBase + CONTROL_START + 0) / 4,
-      IN_TAIL: (this.#ringBufferBase + CONTROL_START + 4) / 4,
-      IN_SEQUENCE: (this.#ringBufferBase + CONTROL_START + 24) / 4,
-      IN_WRITE_LOCK: (this.#ringBufferBase + CONTROL_START + 40) / 4,
-    };
-
-    if (__DEV__) console.log("[SuperSonic] Direct write views initialized");
+    if (__DEV__) console.log("[SuperSonic] Shared views initialized");
   }
 
   /**
-   * Check if raw OSC binary data is a bundle (starts with #bundle)
+   * Initialize DirectWriter for low-latency ring buffer writes
    */
-  #isBundleData(oscData) {
-    return oscData.length >= 8 && oscData[0] === 0x23; // '#' character
-  }
-
-  /**
-   * Check if an OSC message/bundle should bypass the prescheduler for direct write
-   * Returns true for: non-bundles, immediate bundles (timetag 0/1), past timetags, or within 200ms
-   */
-  #shouldBypassPrescheduler(oscData) {
-    // Non-bundles always bypass
-    if (!this.#isBundleData(oscData)) {
-      return true;
-    }
-
-    // Bundle format: "#bundle\0" (8 bytes) + timetag (8 bytes)
-    // Timetag is at bytes 8-15: seconds (4 bytes) + fraction (4 bytes)
-    if (oscData.length < 16) {
-      return true; // Malformed bundle, let it through
-    }
-
-    // Read NTP timetag (big-endian)
-    const view = new DataView(oscData.buffer, oscData.byteOffset, oscData.byteLength);
-    const ntpSeconds = view.getUint32(8, false);
-    const ntpFraction = view.getUint32(12, false);
-
-    // Timetag 0 or 1 means "execute immediately"
-    if (ntpSeconds === 0 && (ntpFraction === 0 || ntpFraction === 1)) {
-      return true;
-    }
-
-    // Get current NTP time using AudioContext (same reference as WASM)
-    if (!this.#audioContext || !this.#ntpStartView) {
-      return true; // Can't compare, let it through
-    }
-
-    const ntpStartTime = this.#ntpStartView[0];
-    const currentNTP = this.#audioContext.currentTime + ntpStartTime;
-    const bundleNTP = ntpSeconds + ntpFraction / 0x100000000;
-
-    // Bypass if timetag is in the past or within 200ms from now
-    const diffSeconds = bundleNTP - currentNTP;
-    return diffSeconds < 0.2; // 200ms threshold (matches prescheduler LOOKAHEAD_S)
-  }
-
-  /**
-   * Try to write OSC message directly to ring buffer (bypasses worker)
-   * Returns true if successful, false if buffer full (caller should use worker)
-   */
-  #tryDirectWrite(oscData) {
-    if (!this.#directWriteAtomicView || !this.#directWriteControlIndices) {
-      return false;
-    }
-
-    // Use shared ring buffer writer (handles wrap-around)
-    return writeToRingBuffer({
-      atomicView: this.#directWriteAtomicView,
-      dataView: this.#directWriteDataView,
-      uint8View: this.#directWriteUint8View,
-      bufferConstants: this.#bufferConstants,
+  #initializeDirectWriter() {
+    this.#directWriter = new DirectWriter({
+      sharedBuffer: this.#sharedBuffer,
       ringBufferBase: this.#ringBufferBase,
-      controlIndices: this.#directWriteControlIndices,
-      oscMessage: oscData,
+      bufferConstants: this.#bufferConstants,
+      getAudioContextTime: () => this.#audioContext?.currentTime ?? null,
+      getNTPStartTime: () => this.#ntpStartView?.[0] ?? 0,
     });
   }
 
