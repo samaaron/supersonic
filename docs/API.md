@@ -277,14 +277,7 @@ await supersonic.destroy();
 
 ### `recover()`
 
-Smart recovery from audio interruption. Tries a quick AudioContext resume first, and if that fails, does a full reload with cached assets.
-
-**How it works:**
-1. First attempts quick resume (just pokes AudioContext)
-2. If that fails, does full reload preserving SharedArrayBuffer
-3. WASM bytes are cached so no network fetch needed on reload
-4. Synthdefs are restored from cache
-5. Buffers are re-registered with scsynth (data preserved in SharedArrayBuffer)
+Recover from audio interruption. Tries a quick AudioContext resume first, falling back to a full reload if needed. WASM and synthdefs are cached, so reload is fast. Buffer data is preserved in SharedArrayBuffer.
 
 **Returns:** `Promise<boolean>` - true if audio is running after recovery
 
@@ -316,11 +309,9 @@ await supersonic.reset();
 
 ## Events
 
-SuperSonic uses an event emitter pattern. Subscribe with `on()`, which returns an unsubscribe function.
+Subscribe to events with `on()`, which returns an unsubscribe function for easy cleanup.
 
 ### `on(event, callback)`
-
-Subscribe to an event. Returns an unsubscribe function for easy cleanup.
 
 ```javascript
 // Subscribe
@@ -578,7 +569,7 @@ console.log(`Engine booted in ${stats.initDuration.toFixed(2)}ms`);
 
 ## Node Tree API
 
-Get a live view of all running synths and groups for building visualizations.
+The node tree gives you a live view of all running synths and groups - useful for building visualizations that update at 60fps without any OSC round-trip latency.
 
 ### `getTree()`
 
@@ -686,16 +677,16 @@ function getChildrenInOrder(nodes, groupId) {
 }
 ```
 
-**Comparison with OSC `/g_queryTree`:**
+**`getTree()` vs `/g_queryTree`**
 
 | | `getTree()` | `/g_queryTree` |
 |--|-------------|----------------|
-| Latency | Instant (reads shared memory) | Round-trip to audio thread |
+| Latency | Instant (reads shared memory) | ~40ms round-trip |
 | Format | Flat array with links | Nested in message args |
 | Control values | Not included | Optional (flag=1) |
 | Use case | 60fps visualization | One-off queries, debugging |
 
-**Note:** `getTree()` returns node structure only (id, parent, def name, links). It does not include synth control values. To query control values, use `/g_queryTree` with flag=1, or `/n_get` for specific nodes. See [Server Command Reference](SERVER_COMMAND_REFERENCE.md) for details.
+`getTree()` returns node structure only - not control values. For control values, use `/g_queryTree` with flag=1 or `/n_get` for specific nodes. See [Server Command Reference](SERVER_COMMAND_REFERENCE.md).
 
 ## Metrics API
 
@@ -785,71 +776,8 @@ const msg = SuperSonic.osc.decode(oscBytes, { metadata: true });
 // msg.args will be [{ type: "s", value: "..." }, ...]
 ```
 
-## Common OSC Commands
+## OSC Commands
 
-SuperSonic speaks the SuperCollider Server protocol. Here are the commands you'll use most often:
+SuperSonic speaks the SuperCollider Server protocol. You control the audio engine by sending OSC messages via `send()`.
 
-### Synths
-
-```javascript
-// Create a synth (node ID -1 = auto-assign)
-supersonic.send('/s_new', 'synth-name', nodeId, addAction, target, ...params);
-
-// Set synth parameters
-supersonic.send('/n_set', nodeId, 'param', value, 'param2', value2);
-
-// Free a synth
-supersonic.send('/n_free', nodeId);
-```
-
-### Buffers (Samples)
-
-```javascript
-// Load a sample into a buffer
-supersonic.send('/b_allocRead', bufferNum, 'filename.flac');
-
-// Free a buffer
-supersonic.send('/b_free', bufferNum);
-```
-
-### Server
-
-```javascript
-// Enable notifications (receive messages back from server)
-supersonic.send('/notify', 1);
-
-// Query server status
-supersonic.send('/status');
-```
-
-For the complete OSC command reference, see the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html).
-
-### SuperSonic Extension Commands
-
-These OSC commands are **SuperSonic-specific extensions** (not standard scsynth):
-
-| Command | Description |
-|---------|-------------|
-| `/b_allocFile bufnum blob` | Load audio from inline file data (FLAC, WAV, OGG, etc.). The blob contains raw file bytes. Useful for external controllers sending samples directly via OSC without needing a URL. |
-
-```javascript
-// Fetch file and send as inline blob
-const response = await fetch('sample.flac');
-const fileBytes = new Uint8Array(await response.arrayBuffer());
-supersonic.send('/b_allocFile', 0, fileBytes);
-```
-
-### Unsupported Commands
-
-These SuperCollider commands are **not supported** in SuperSonic because there's no filesystem in the browser/WASM environment:
-
-| Command | Alternative |
-|---------|-------------|
-| `/d_load` | Use `loadSynthDef()` or send `/d_recv` with synthdef bytes |
-| `/d_loadDir` | Use `loadSynthDefs()` to load multiple synthdefs |
-| `/b_read` | Use `loadSample()` to load audio into a buffer |
-| `/b_readChannel` | Use `loadSample()` to load audio into a buffer |
-| `/b_write` | Not available (cannot write files in browser) |
-| `/b_close` | Not available (no disk streaming in browser) |
-
-Attempting to send these commands will throw an error with guidance on the alternative.
+For the full list of supported commands, see the [Server Command Reference](SERVER_COMMAND_REFERENCE.md).

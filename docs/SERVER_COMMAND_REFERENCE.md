@@ -1,10 +1,10 @@
 # Server Command Reference
 
-This document describes the OSC commands supported by the SuperCollider synthesis server (scsynth). SuperSonic implements a subset of these commands - see [Unsupported Commands](#unsupported-commands) at the end.
+SuperSonic speaks the SuperCollider server protocol via OSC. This reference covers all supported commands.
 
-> **Source:** This documentation is based on the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html).
+> Based on the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html). See [Unsupported Commands](#unsupported-commands) for what's not available in the browser environment.
 
-Commands are sent as OSC messages. You can use the high-level `send()` method which auto-detects types:
+Send commands using `send()` which auto-detects types:
 
 ```javascript
 supersonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0, 'note', 60);
@@ -91,6 +91,8 @@ supersonic.sendOSC(oscBytes);
 | [`/c_fill`](#c_fill) | Fill buses with a value |
 | [`/c_get`](#c_get) | Get bus values |
 | [`/c_getn`](#c_getn) | Get sequential bus values |
+| **SuperSonic Extensions** | |
+| [`/b_allocFile`](#b_allocfile) | Load audio from inline file data (SuperSonic only) |
 
 ---
 
@@ -1369,53 +1371,60 @@ This allows synths to send events back to clients.
 
 ---
 
+## SuperSonic Extensions
+
+These commands are specific to SuperSonic and not part of the standard scsynth protocol.
+
+### `/b_allocFile`
+
+Load audio from inline file data. The blob contains raw file bytes (FLAC, WAV, OGG, MP3, etc.) which are decoded using the browser's `decodeAudioData()`.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| bufnum | int | Buffer number |
+| data | blob | Raw audio file bytes |
+
+```javascript
+// Fetch file and send as inline blob
+const response = await fetch('sample.flac');
+const fileBytes = new Uint8Array(await response.arrayBuffer());
+supersonic.send('/b_allocFile', 0, fileBytes);
+```
+
+This is useful when you want to send sample data directly via OSC without needing a URL - for example, from an external controller or when embedding audio data.
+
+**Reply:** `/done /b_allocFile bufnum`
+
+---
+
 ## Unsupported Commands
 
-The following SuperCollider commands and features are **not supported** in SuperSonic. Attempting to use them will throw an error.
+These commands don't work in SuperSonic - the browser environment has no filesystem and some scsynth features don't map to the AudioWorklet architecture.
 
 ### Scheduling and Debug Commands
 
-| Command | Description | Reason |
-|---------|-------------|--------|
-| `/clearSched` | Clear scheduled bundles | SuperSonic runs in NRT mode internally where `mRealTime = false`. The `/clearSched` command only works in realtime mode. |
-| `/dumpOSC` | Print OSC messages | This debugging feature has no effect in SuperSonic. Use browser developer tools to inspect OSC messages via the `onMessage` callback. |
-| `/error` | Set error notification mode | Error notification flags are not applicable in SuperSonic's architecture. |
-
-### Non-Realtime Mode (NRT)
-
-SuperSonic only supports realtime audio synthesis. Non-realtime rendering (NRT mode) is not available in the browser environment.
+| Command | Reason |
+|---------|--------|
+| `/clearSched` | Only works in scsynth's realtime mode |
+| `/dumpOSC` | Use browser dev tools and the `message` event instead |
+| `/error` | Not applicable in SuperSonic's architecture |
 
 ### Filesystem Commands
 
-There is no filesystem in the browser/WASM environment, so all file-based commands are unavailable:
+No filesystem in browser/WASM, so file-based commands aren't available:
 
-#### Synthdef Loading (File-based)
+| Command | Alternative |
+|---------|-------------|
+| `/d_load` | `loadSynthDef()` or `/d_recv` with bytes |
+| `/d_loadDir` | `loadSynthDefs()` |
+| `/b_read` | `loadSample()` |
+| `/b_readChannel` | `loadSample()` |
+| `/b_write` | Not available |
+| `/b_close` | Not available |
 
-| Command | Description | Alternative |
-|---------|-------------|-------------|
-| `/d_load` | Load synthdef from file path | Use `loadSynthDef()` or send `/d_recv` with synthdef bytes |
-| `/d_loadDir` | Load all synthdefs from directory | Use `loadSynthDefs()` to load multiple by name |
-
-#### Buffer File I/O
-
-| Command | Description | Alternative |
-|---------|-------------|-------------|
-| `/b_read` | Read sound file into existing buffer | Use `loadSample()` to load audio |
-| `/b_readChannel` | Read specific channels from file | Use `loadSample()` to load audio |
-| `/b_write` | Write buffer to sound file | Not available (cannot write files in browser) |
-| `/b_close` | Close streaming sound file | Not available (no disk streaming) |
-
-### SuperSonic Alternatives
-
-For loading synthdefs and samples, use the SuperSonic JavaScript API:
+Use the JavaScript API to load assets - it fetches via HTTP and sends the data to scsynth:
 
 ```javascript
-// Load synthdefs
 await supersonic.loadSynthDef("sonic-pi-beep");
-await supersonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
-
-// Load samples
 await supersonic.loadSample(0, "loop_amen.flac");
 ```
-
-These methods fetch the files via HTTP and send the data to scsynth using the supported `/d_recv` and `/b_allocRead` commands.

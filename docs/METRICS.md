@@ -1,15 +1,15 @@
 # Metrics
 
-Real-time performance metrics, read directly from shared memory.
+Performance metrics read directly from SharedArrayBuffer - no message passing overhead, so you can poll at 60fps if needed.
 
 ## Quick Start
 
 ```javascript
-// Receive periodic updates (default: every 100ms)
-supersonic.onMetricsUpdate = (metrics) => {
+// Subscribe to periodic updates (default: every 100ms)
+supersonic.on('metrics', (metrics) => {
   console.log('Processed:', metrics.workletMessagesProcessed);
   console.log('Dropped:', metrics.workletMessagesDropped);
-};
+});
 
 // Or get a snapshot on demand
 const metrics = supersonic.getMetrics();
@@ -17,17 +17,17 @@ const metrics = supersonic.getMetrics();
 
 ## API
 
-### `onMetricsUpdate`
+### `on('metrics', callback)`
 
-Set a callback to receive periodic metrics updates. The timer runs from boot at 100ms intervals but does nothing until you set a callback.
+Subscribe to periodic metrics updates. The timer runs from boot at 100ms intervals.
 
 ```javascript
-supersonic.onMetricsUpdate = (metrics) => {
+const unsubscribe = supersonic.on('metrics', (metrics) => {
   // Called every 100ms by default
-};
+});
 
 // Stop receiving updates
-supersonic.onMetricsUpdate = null;
+unsubscribe();
 ```
 
 ### `setMetricsInterval(ms)`
@@ -152,7 +152,7 @@ Main thread state.
 ## Example: Simple Monitor
 
 ```javascript
-supersonic.onMetricsUpdate = (metrics) => {
+supersonic.on('metrics', (metrics) => {
   // Check for problems
   if (metrics.workletMessagesDropped > 0) {
     console.warn('Messages being dropped!');
@@ -165,9 +165,9 @@ supersonic.onMetricsUpdate = (metrics) => {
 
   // Track throughput
   console.log(`Processed: ${metrics.workletMessagesProcessed}, Sent: ${metrics.mainMessagesSent}`);
-};
+});
 ```
 
-## Performance Notes
+## Performance
 
-Metrics are read directly from SharedArrayBuffer with no message passing overhead. A typical `getMetrics()` call takes less than 0.1ms. The default 100ms polling interval adds negligible CPU load.
+`getMetrics()` takes less than 0.1ms - it's just reading from shared memory. The default 100ms polling interval adds negligible CPU load.
