@@ -146,24 +146,24 @@ jobs:
           path: dist/
 
       - name: Publish supersonic-scsynth
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish supersonic-scsynth-synthdefs
         working-directory: packages/supersonic-scsynth-synthdefs
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish supersonic-scsynth-samples
         working-directory: packages/supersonic-scsynth-samples
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish supersonic-scsynth-bundle
         working-directory: packages/supersonic-scsynth-bundle
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
