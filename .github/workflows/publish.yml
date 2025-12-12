@@ -22,6 +22,11 @@ jobs:
           node-version: '22.x'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Upgrade npm for OIDC support
+        run: |
+          npm install -g npm@latest
+          npm --version
+
       - name: Setup esbuild
         uses: sahelnuri/setup-esbuild@v1
 
@@ -44,16 +49,16 @@ jobs:
         run: npm test
 
       - name: Publish supersonic-scsynth
-        run: npm publish --provenance --access public --ignore-scripts
+        run: npm publish --provenance --access public
 
       - name: Publish supersonic-scsynth-synthdefs
         working-directory: packages/supersonic-scsynth-synthdefs
-        run: npm publish --provenance --access public --ignore-scripts
+        run: npm publish --provenance --access public
 
       - name: Publish supersonic-scsynth-samples
         working-directory: packages/supersonic-scsynth-samples
-        run: npm publish --provenance --access public --ignore-scripts
+        run: npm publish --provenance --access public
 
       - name: Publish supersonic-scsynth-bundle
         working-directory: packages/supersonic-scsynth-bundle
-        run: npm publish --provenance --access public --ignore-scripts
+        run: npm publish --provenance --access public
