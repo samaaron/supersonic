@@ -506,6 +506,10 @@ const cancelEditor = (editorId) => {
     cancelBy((event) => event.editorId === editorId);
 };
 
+const cancelTag = (runTag) => {
+    cancelBy((event) => event.runTag === runTag);
+};
+
 const cancelAllTags = () => {
     if (eventHeap.length === 0) {
         return;
@@ -617,6 +621,12 @@ self.addEventListener('message', (event) => {
 
             case 'cancelEditor':
                 cancelEditor(data.editorId || 0);
+                break;
+
+            case 'cancelTag':
+                if (data.runTag !== undefined && data.runTag !== null && data.runTag !== '') {
+                    cancelTag(data.runTag);
+                }
                 break;
 
             case 'cancelAll':

@@ -273,6 +273,18 @@ export default class ScsynthOSC {
     }
 
     /**
+     * Cancel all scheduled OSC bundles with a specific tag (any editor)
+     */
+    cancelTag(runTag) {
+        if (!this.initialized) return;
+
+        this.workers.oscOut.postMessage({
+            type: 'cancelTag',
+            runTag
+        });
+    }
+
+    /**
      * Cancel all scheduled OSC bundles
      */
     cancelAll() {
