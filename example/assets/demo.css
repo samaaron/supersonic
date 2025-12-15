@@ -825,7 +825,8 @@ textarea:disabled, select:disabled, input:disabled {
 
 .slider-value { color: var(--c-orange-dark); font-family: "Courier New", monospace; font-size: 0.875rem; font-weight: normal; }
 
-.slider-control input[type="range"] {
+.slider-control input[type="range"],
+.hue-control__inner input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
@@ -838,12 +839,16 @@ textarea:disabled, select:disabled, input:disabled {
   cursor: pointer;
 }
 
-.slider-control input[type="range"]:hover { background: #444; }
-.slider-control input[type="range"]:focus { outline: none; background: #555; }
+.slider-control input[type="range"]:hover,
+.hue-control__inner input[type="range"]:hover { background: #444; }
+.slider-control input[type="range"]:focus,
+.hue-control__inner input[type="range"]:focus { outline: none; background: #555; }
 
 /* Range thumbs (consolidated) */
 .slider-control input[type="range"]::-webkit-slider-thumb,
-.slider-control input[type="range"]::-moz-range-thumb {
+.slider-control input[type="range"]::-moz-range-thumb,
+.hue-control__inner input[type="range"]::-webkit-slider-thumb,
+.hue-control__inner input[type="range"]::-moz-range-thumb {
   width: 14px; height: 14px;
   background: var(--c-orange-dark);
   border-radius: 50%;
@@ -855,7 +860,9 @@ textarea:disabled, select:disabled, input:disabled {
 }
 
 .slider-control input[type="range"]::-webkit-slider-thumb:hover,
-.slider-control input[type="range"]::-moz-range-thumb:hover {
+.slider-control input[type="range"]::-moz-range-thumb:hover,
+.hue-control__inner input[type="range"]::-webkit-slider-thumb:hover,
+.hue-control__inner input[type="range"]::-moz-range-thumb:hover {
   background: var(--c-gold);
 }
 
@@ -995,9 +1002,13 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   #performance-metrics { order: 99 !important; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #333; }
   #performance-metrics .metrics-grid { grid-template-columns: repeat(2, 1fr) !important; }
 
-  .feature-boxes { display: grid !important; grid-template-columns: 1fr 1fr; justify-items: center; gap: 0.75rem !important; }
-  .feature-boxes .feature-box:first-child { grid-column: 1 / -1; max-width: 250px; }
-  .feature-boxes .feature-box:not(:first-child) { max-width: 160px; }
+  .feature-boxes { display: grid !important; grid-template-columns: 1fr 1fr; gap: 0.75rem !important; max-width: 460px; margin: 0 auto; padding-left: 0 !important; padding-right: 6px !important; }
+  .feature-boxes .feature-box:first-child { grid-column: 1 / -1; max-width: 280px; justify-self: center; }
+  .feature-boxes .feature-box:not(:first-child) { max-width: none; }
+
+  .sponsor-card { border-left: none; border-top: 6px solid var(--c-pink); }
+  .sponsor-grid { display: flex !important; flex-direction: column; align-items: center; gap: 1.5rem; max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+  .sponsor-item { width: 260px; margin: 0 !important; padding: 1.5rem !important; }
 
   .logs-grid .tab-content { display: none; }
   .logs-grid .tab-content.active { display: block; }
@@ -1283,19 +1294,29 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   display: flex;
   flex-direction: column;
   align-items: center;
+  background: #fafafa;
+  border: 2px solid var(--c-pink);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  cursor: pointer;
+  width: 240px;
+}
+
+.sponsor-item:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(255, 20, 147, 0.2);
 }
 
 .sponsor-link {
   display: block;
-  transition: transform 0.3s ease, filter 0.3s ease;
+  transition: filter 0.3s ease;
 }
 
-.sponsor-link:hover {
-  transform: scale(1.1) rotate(2deg);
-  filter: brightness(1.2) drop-shadow(0 0 20px rgba(255, 20, 147, 0.8));
+.sponsor-item:hover .sponsor-link {
+  filter: brightness(1.1);
 }
 
-.sponsor-link--alt:hover { transform: scale(1.1) rotate(-2deg); }
 
 .sponsor-image { width: 200px; height: 133px; object-fit: contain; display: block; }
 
