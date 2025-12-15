@@ -1,94 +1,175 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="favicon.png" />
 
-    <!-- Open Graph meta tags -->
-    <meta property="og:title" content="SuperSonic - SuperCollider's Synthesis Engine in the Browser" />
-    <meta property="og:description" content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation." />
-    <meta property="og:image" content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png" />
-    <meta property="og:image:alt" content="SuperSonic logo - SuperCollider's Synthesis Engine in the browser" />
+    <!-- Open Graph -->
+    <meta
+      property="og:title"
+      content="SuperSonic - SuperCollider's Synthesis Engine in the Browser"
+    />
+    <meta
+      property="og:description"
+      content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation."
+    />
+    <meta
+      property="og:image"
+      content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png"
+    />
+    <meta property="og:image:alt" content="SuperSonic logo" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://sonic-pi.net/supersonic/" />
 
-    <!-- Twitter Card meta tags -->
+    <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="SuperSonic - SuperCollider in the Browser" />
-    <meta name="twitter:description" content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation." />
-    <meta name="twitter:image" content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png" />
-    <meta name="twitter:image:alt" content="SuperSonic logo - SuperCollider's scsynth in the browser" />
+    <meta
+      name="twitter:title"
+      content="SuperSonic - SuperCollider in the Browser"
+    />
+    <meta
+      name="twitter:description"
+      content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet."
+    />
+    <meta
+      name="twitter:image"
+      content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png"
+    />
 
     <title>SuperSonic - SuperCollider's Synthesis Engine in the Browser</title>
+
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <script src="https://cdn.jsdelivr.net/npm/force-graph"></script>
     <script src="https://cdn.jsdelivr.net/npm/3d-force-graph"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.min.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.min.css"
+    />
     <link rel="stylesheet" href="assets/demo.css" />
   </head>
   <body>
     <div class="container">
-      <!-- Hero Section -->
-      <div class="hero">
-        <img src="assets/supersonic_light.png" alt="SuperSonic" class="hero-logo" />
-      </div>
-      <div style="text-align: center; margin-bottom: 2rem">
-        <p class="hero-tagline">SuperCollider audio goodness baked into your browser</p>
-        <div class="hero-intro">
+      <!-- Header -->
+      <header class="hero">
+        <h1 class="visually-hidden">
+          SuperSonic - SuperCollider in the Browser
+        </h1>
+        <img
+          src="assets/supersonic_light.png"
+          alt="SuperSonic"
+          class="hero-logo"
+        />
+      </header>
+
+      <div class="hero-wrapper">
+        <p class="hero-tagline">
+          SuperCollider audio goodness baked into your browser
+        </p>
+
+        <section class="hero-intro" aria-label="Introduction">
           <p class="hero-description">
-            <a href="https://supercollider.github.io/" target="_blank" rel="noopener" class="hero-link">SuperCollider</a>'s
-            powerful audio synthesis engine <em>scsynth</em> running in the browser as an AudioWorklet.
+            <a
+              href="https://supercollider.github.io/"
+              target="_blank"
+              rel="noopener"
+              class="hero-link"
+              >SuperCollider</a
+            >'s powerful audio synthesis engine <em>scsynth</em> running in the
+            browser as an AudioWorklet.
           </p>
           <p class="hero-zero">Zero installation.</p>
 
-          <!-- Feature Boxes -->
-          <div class="feature-boxes">
-            <div class="feature-box feature-box--pink">
-              <div class="feature-box__accent feature-box__accent--pink-blue"></div>
-              <strong class="feature-box__title feature-box__title--pink">AudioWorklet</strong><br />
-              Runs in a dedicated high priority audio thread
-            </div>
-            <div class="feature-box feature-box--blue">
-              <div class="feature-box__accent feature-box__accent--blue-gold"></div>
-              <strong class="feature-box__title feature-box__title--blue">WebAssembly</strong><br />
-              Scsynth's C++ code compiled for the web
-            </div>
-            <div class="feature-box feature-box--gold">
-              <div class="feature-box__accent feature-box__accent--gold-pink"></div>
-              <strong class="feature-box__title feature-box__title--gold">OSC API</strong><br />
-              Talk to the Scsynth server through its native OSC API
-            </div>
-          </div>
+          <!-- Features -->
+          <ul class="feature-boxes" role="list">
+            <li class="feature-box feature-box--pink">
+              <div
+                class="feature-box__accent feature-box__accent--pink-blue"
+              ></div>
+              <strong class="feature-box__title feature-box__title--pink"
+                >AudioWorklet</strong
+              >
+              <span class="feature-box__text"
+                >Runs in a dedicated high priority audio thread</span
+              >
+            </li>
+            <li class="feature-box feature-box--blue">
+              <div
+                class="feature-box__accent feature-box__accent--blue-gold"
+              ></div>
+              <strong class="feature-box__title feature-box__title--blue"
+                >WebAssembly</strong
+              >
+              <span class="feature-box__text"
+                >Scsynth's C++ code compiled for the web</span
+              >
+            </li>
+            <li class="feature-box feature-box--gold">
+              <div
+                class="feature-box__accent feature-box__accent--gold-pink"
+              ></div>
+              <strong class="feature-box__title feature-box__title--gold"
+                >OSC API</strong
+              >
+              <span class="feature-box__text"
+                >Talk to the Scsynth server through its native OSC API</span
+              >
+            </li>
+          </ul>
 
-          <!-- CTA Buttons -->
-          <div class="cta-container">
-            <a href="#demo" class="cta-button cta-button--primary">Whizz to Demo</a>
+          <!-- CTA -->
+          <nav class="cta-container" aria-label="Primary actions">
+            <a href="#demo" class="cta-button cta-button--primary"
+              >Whizz to Demo</a
+            >
             <div class="cta-row">
-              <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener" class="cta-button cta-button--secondary">Open Source</a>
-              <a href="https://www.patreon.com/posts/introducing-in-141953467" target="_blank" rel="noopener" class="cta-button cta-button--secondary">What? How? Why?</a>
+              <a
+                href="https://github.com/samaaron/supersonic"
+                target="_blank"
+                rel="noopener"
+                class="cta-button cta-button--secondary"
+                >Open Source</a
+              >
+              <a
+                href="https://www.patreon.com/posts/introducing-in-141953467"
+                target="_blank"
+                rel="noopener"
+                class="cta-button cta-button--secondary"
+                >What? How? Why?</a
+              >
             </div>
-          </div>
-        </div>
+          </nav>
+        </section>
       </div>
 
-      <!-- Code Section -->
-      <div class="code-section">
+      <!-- Code Examples -->
+      <section class="code-section" aria-labelledby="code-heading">
         <div class="code-section__inner">
-          <p class="code-section__intro">Sprinkle the scsynth audio engine onto your web page...</p>
+          <h2 id="code-heading" class="visually-hidden">Code Examples</h2>
+          <p class="code-section__intro">
+            Sprinkle the scsynth audio engine onto your web page...
+          </p>
 
           <div class="code-snippets-container">
-            <div class="code-snippet">
-              <p class="code-comment">First, install via npm and import locally</p>
-              <pre class="code-block code-block--pink"><code><span class="syn-cmt">// npm install supersonic-scsynth</span>
+            <figure class="code-snippet">
+              <figcaption class="code-comment">
+                First, install via npm and import locally
+              </figcaption>
+              <pre
+                class="code-block code-block--pink"
+              ><code><span class="syn-cmt">// npm install supersonic-scsynth</span>
 <span class="syn-kw">import</span> { <span class="syn-type">SuperSonic</span> } <span class="syn-kw">from</span> <span class="syn-str">'supersonic-scsynth'</span>;</code></pre>
-            </div>
+            </figure>
 
-            <div class="code-snippet">
-              <p class="code-comment">Initialise and you're ready to go</p>
-              <pre class="code-block code-block--blue"><code><span class="syn-kw">const</span> <span class="syn-type">baseURL</span> = <span class="syn-str">'/your/path/'</span>;
+            <figure class="code-snippet">
+              <figcaption class="code-comment">
+                Initialise and you're ready to go
+              </figcaption>
+              <pre
+                class="code-block code-block--blue"
+              ><code><span class="syn-kw">const</span> <span class="syn-type">baseURL</span> = <span class="syn-str">'/your/path/'</span>;
 <span class="syn-kw">const</span> <span class="syn-type">sonic</span> = <span class="syn-kw">new</span> <span class="syn-type">SuperSonic</span>({
   <span class="syn-str">workerBaseURL</span>:   <span class="syn-str">`${baseURL}/workers/`</span>,
   <span class="syn-str">wasmBaseURL</span>:     <span class="syn-str">`${baseURL}/wasm/`</span>,
@@ -96,392 +177,1093 @@
   <span class="syn-str">sampleBaseURL</span>:   <span class="syn-str">`${baseURL}/samples/`</span>
 });
 <span class="syn-kw">await</span> sonic.<span class="syn-fn">init</span>();</code></pre>
-            </div>
+            </figure>
 
-            <div class="code-snippet">
-              <p class="code-comment">Load and play a synth</p>
-              <pre class="code-block code-block--green"><code><span class="syn-cmt">// Load synthdef, then play synth</span>
+            <figure class="code-snippet">
+              <figcaption class="code-comment">
+                Load and play a synth
+              </figcaption>
+              <pre
+                class="code-block code-block--green"
+              ><code><span class="syn-cmt">// Load synthdef, then play synth</span>
 <span class="syn-kw">await</span> sonic.<span class="syn-fn">loadSynthDef</span>(<span class="syn-str">'sonic-pi-prophet'</span>);
 sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <span class="syn-str">'sonic-pi-prophet'</span>, <span class="syn-num">-1</span>, <span class="syn-num">0</span>, <span class="syn-num">0</span>,
              <span class="syn-str">'note'</span>, <span class="syn-num">60</span>);</code></pre>
-            </div>
+            </figure>
 
-            <div class="code-snippet">
-              <p class="code-comment">Load and play a sample</p>
-              <pre class="code-block code-block--gold"><code><span class="syn-cmt">// Load synthdef and sample, then play</span>
+            <figure class="code-snippet">
+              <figcaption class="code-comment">
+                Load and play a sample
+              </figcaption>
+              <pre
+                class="code-block code-block--gold"
+              ><code><span class="syn-cmt">// Load synthdef and sample, then play</span>
 sonic.<span class="syn-fn">loadSynthDef</span>(<span class="syn-str">'sonic-pi-basic_stereo_player'</span>);
 sonic.<span class="syn-fn">loadSample</span>(<span class="syn-num">0</span>, <span class="syn-str">'bd_haus.flac'</span>);
 <span class="syn-kw">await</span> sonic.<span class="syn-fn">sync</span>(); <span class="syn-cmt">// wait for loads</span>
 sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <span class="syn-str">'sonic-pi-basic_stereo_player'</span>,
              <span class="syn-num">-1</span>, <span class="syn-num">0</span>, <span class="syn-num">0</span>, <span class="syn-str">'buf'</span>, <span class="syn-num">0</span>);</code></pre>
-            </div>
+            </figure>
           </div>
 
           <p class="code-note">
             Note: Self-hosting required + <code>COOP/COEP</code> headers — see
-            <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener">README</a>
+            <a
+              href="https://github.com/samaaron/supersonic"
+              target="_blank"
+              rel="noopener"
+              >README</a
+            >
           </p>
         </div>
-      </div>
+      </section>
 
-      <!-- Sponsor Section -->
-      <div class="sponsor-section">
+      <!-- Sponsor -->
+      <aside class="sponsor-section" aria-labelledby="sponsor-heading">
         <div class="sponsor-card">
           <div class="sponsor-card__accent"></div>
           <div class="sponsor-header">
-            <h2 class="sponsor-title">Brought to you by<br />Sam Aaron</h2>
+            <h2 id="sponsor-heading" class="sponsor-title">
+              <span>Brought to you by</span>
+              <span>Sam Aaron</span>
+            </h2>
             <p class="sponsor-description">
-              Please consider joining the wonderful community<br />
-              of supporters enabling Sam's work on<br />
-              creative coding projects like this,<br />
-              <a href="https://sonic-pi.net">Sonic Pi</a> and <a href="https://tau5.live">Tau5</a>.
+              <span>Please consider joining the wonderful community</span>
+              <span>of supporters enabling Sam's work on</span>
+              <span>creative coding projects like this,</span>
+              <span
+                ><a href="https://sonic-pi.net">Sonic Pi</a> and
+                <a href="https://tau5.live">Tau5</a>.</span
+              >
             </p>
           </div>
-          <div class="sponsor-grid">
-            <div class="sponsor-item">
-              <a href="https://patreon.com/samaaron" target="_blank" rel="noopener" class="sponsor-link">
-                <img src="assets/patreon-button.png" alt="Support Sam via Patreon" class="sponsor-image" />
+          <ul class="sponsor-grid" role="list">
+            <li class="sponsor-item">
+              <a
+                href="https://patreon.com/samaaron"
+                target="_blank"
+                rel="noopener"
+                class="sponsor-link"
+              >
+                <img
+                  src="assets/patreon-button.png"
+                  alt="Support Sam via Patreon"
+                  class="sponsor-image"
+                />
               </a>
               <p class="sponsor-label">Support Sam via Patreon</p>
-            </div>
-            <div class="sponsor-item">
-              <a href="https://github.com/sponsors/samaaron" target="_blank" rel="noopener" class="sponsor-link sponsor-link--alt">
-                <img src="assets/github-sponsors-button.png" alt="Support via GitHub Sponsors" class="sponsor-image" />
+            </li>
+            <li class="sponsor-item">
+              <a
+                href="https://github.com/sponsors/samaaron"
+                target="_blank"
+                rel="noopener"
+                class="sponsor-link sponsor-link--alt"
+              >
+                <img
+                  src="assets/github-sponsors-button.png"
+                  alt="Support via GitHub Sponsors"
+                  class="sponsor-image"
+                />
               </a>
               <p class="sponsor-label">Support Sam via GitHub Sponsors</p>
-            </div>
-          </div>
+            </li>
+          </ul>
         </div>
-      </div>
+      </aside>
 
-      <!-- Demo Section -->
-      <div id="demo"></div>
-      <div id="synth-ui-container" class="synth-ui-container">
-        <div class="panel dark-panel" style="padding: 0.75rem; margin-bottom: 0">
-          <!-- Init Button -->
-          <div id="init-button-container" style="height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 0.75rem; gap: 1rem;">
-            <p style="margin: 0 0 1.5rem 0; color: #999; font-style: italic; font-size: 1.1rem; text-align: center;">
-              This is a simple playful demo of SuperSonic's audio engine - have fun making noise!
-            </p>
-            <button id="init-button" class="btn-init" style="font-size: 1.25rem; padding: 0.75rem 2rem">Boot Demo</button>
-          </div>
+      <!-- Demo -->
+      <main id="demo">
+        <div id="synth-ui-container" class="synth-ui-container">
+          <div class="panel dark-panel demo-panel">
+            <!-- Init -->
+            <section
+              id="init-button-container"
+              class="init-section"
+              aria-label="Boot controls"
+            >
+              <p class="init-description">
+                This is a simple playful demo of SuperSonic's audio engine -
+                have fun making noise!
+              </p>
+              <button id="init-button" class="btn-init init-button--large">
+                Boot Demo
+              </button>
+            </section>
 
-          <!-- Scope Visualiser -->
-          <div id="scope-container" style="height: 160px; margin-bottom: 0.75rem; display: none">
-            <canvas id="scope-canvas" class="scope-canvas"></canvas>
-          </div>
+            <!-- Scope -->
+            <section
+              id="scope-container"
+              class="scope-section"
+              aria-label="Audio visualizer"
+            >
+              <canvas
+                id="scope-canvas"
+                class="scope-canvas"
+                aria-label="Waveform display"
+              ></canvas>
+            </section>
 
-          <!-- Loading Log -->
-          <div id="loading-log" class="loading-log">
-            <div class="loading-log-inner">
-              <div class="loading-log-header">
-                <span class="loading-log-title">Loading...</span>
-                <span id="loading-spinner" class="loading-spinner"></span>
+            <!-- Loading Log -->
+            <div
+              id="loading-log"
+              class="loading-log"
+              role="status"
+              aria-live="polite"
+            >
+              <div class="loading-log-inner">
+                <div class="loading-log-header">
+                  <span class="loading-log-title">Loading...</span>
+                  <span
+                    id="loading-spinner"
+                    class="loading-spinner"
+                    aria-hidden="true"
+                  ></span>
+                </div>
+                <div id="loading-log-content" class="loading-log-content"></div>
               </div>
-              <div id="loading-log-content" class="loading-log-content"></div>
             </div>
-          </div>
 
-          <div class="main-layout-grid">
-            <!-- Left Column -->
-            <div class="left-column">
-              <div class="main-tabs" style="padding: 0; margin-bottom: 1rem">
-                <button class="main-tab-button active" data-main-tab="playground">Playground</button>
-                <button class="main-tab-button" data-main-tab="osc-api">OSC API</button>
-              </div>
+            <div class="main-layout-grid">
+              <!-- Left Column -->
+              <div class="left-column">
+                <!-- Tab Navigation -->
+                <div
+                  class="main-tabs main-tabs--compact"
+                  role="tablist"
+                  aria-label="Demo sections"
+                >
+                  <button
+                    class="main-tab-button active"
+                    role="tab"
+                    aria-selected="true"
+                    aria-controls="panel-playground"
+                    id="tab-playground"
+                    data-main-tab="playground"
+                  >
+                    Playground
+                  </button>
+                  <button
+                    class="main-tab-button"
+                    role="tab"
+                    aria-selected="false"
+                    aria-controls="panel-osc-api"
+                    id="tab-osc-api"
+                    data-main-tab="osc-api"
+                  >
+                    OSC API
+                  </button>
+                </div>
 
-              <!-- Playground Tab -->
-              <div class="main-tab-content active" data-main-tab-content="playground">
-                <div class="synth-pad-section">
-                  <div class="synth-pad-container">
-                    <div id="synth-pad" class="synth-pad">
-                      <div class="synth-pad-grid"></div>
-                      <canvas id="trail-canvas" class="trail-canvas"></canvas>
-                      <div id="synth-pad-prompt" class="synth-pad-prompt">Click/Tap & Drag</div>
-                      <div id="synth-pad-crosshair" class="synth-pad-crosshair">
-                        <div id="synth-pad-crosshair-h" class="synth-pad-crosshair-h"></div>
-                        <div id="synth-pad-crosshair-v" class="synth-pad-crosshair-v"></div>
-                      </div>
-                      <div id="synth-pad-touch" class="synth-pad-touch"></div>
-                      <div id="synth-pad-coords" class="synth-pad-coords">
-                        <div>X: <span id="pad-x-value">0.00</span></div>
-                        <div>Reverb: <span id="fx-mix-value">0.30</span></div>
-                        <div>Y: <span id="pad-y-value">0.00</span></div>
-                        <div>Cutoff: <span id="fx-cutoff-value">130</span></div>
+                <!-- Playground Panel -->
+                <section
+                  class="main-tab-content active"
+                  id="panel-playground"
+                  role="tabpanel"
+                  aria-labelledby="tab-playground"
+                  data-main-tab-content="playground"
+                >
+                  <div class="synth-pad-section">
+                    <div class="synth-pad-container">
+                      <div
+                        id="synth-pad"
+                        class="synth-pad"
+                        role="application"
+                        aria-label="Synth control pad"
+                      >
+                        <div class="synth-pad-grid" aria-hidden="true"></div>
+                        <canvas
+                          id="trail-canvas"
+                          class="trail-canvas"
+                          aria-hidden="true"
+                        ></canvas>
+                        <div id="synth-pad-prompt" class="synth-pad-prompt">
+                          Click/Tap &amp; Drag
+                        </div>
+                        <div
+                          id="synth-pad-crosshair"
+                          class="synth-pad-crosshair"
+                          aria-hidden="true"
+                        >
+                          <div
+                            id="synth-pad-crosshair-h"
+                            class="synth-pad-crosshair-h"
+                          ></div>
+                          <div
+                            id="synth-pad-crosshair-v"
+                            class="synth-pad-crosshair-v"
+                          ></div>
+                        </div>
+                        <div
+                          id="synth-pad-touch"
+                          class="synth-pad-touch"
+                          aria-hidden="true"
+                        ></div>
+                        <div
+                          id="synth-pad-coords"
+                          class="synth-pad-coords"
+                          aria-live="off"
+                        >
+                          <div>X: <span id="pad-x-value">0.00</span></div>
+                          <div>Reverb: <span id="fx-mix-value">0.30</span></div>
+                          <div>Y: <span id="pad-y-value">0.00</span></div>
+                          <div>
+                            Cutoff: <span id="fx-cutoff-value">130</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                <!-- Slider Controls -->
-                <div class="slider-controls-section">
-                  <div class="slider-controls">
-                    <div class="slider-control">
-                      <label>Synth</label>
-                      <select id="synth-select">
-                        <option value="bass_foundation">Bass Foundation</option>
-                        <option value="beep" selected>Beep</option>
-                        <option value="blade">Blade</option>
-                        <option value="bnoise">BNoise</option>
-                        <option value="chipbass">Chipbass</option>
-                        <option value="chiplead">ChipLead</option>
-                        <option value="dark_ambience">Dark Ambience</option>
-                        <option value="dpulse">DPulse</option>
-                        <option value="dsaw">DSaw</option>
-                        <option value="dtri">DTri</option>
-                        <option value="fm">FM</option>
-                        <option value="gabberkick">Gabberkick</option>
-                        <option value="hollow">Hollow</option>
-                        <option value="mod_dsaw">Mod DSaw</option>
-                        <option value="mod_fm">Mod FM</option>
-                        <option value="mod_pulse">Mod Pulse</option>
-                        <option value="mod_saw">Mod Saw</option>
-                        <option value="mod_sine">Mod Sine</option>
-                        <option value="mod_tri">Mod Tri</option>
-                        <option value="noise">Noise</option>
-                        <option value="organ_tonewheel">Organ Tonewheel</option>
-                        <option value="pluck">Pluck</option>
-                        <option value="pretty_bell">Pretty Bell</option>
-                        <option value="prophet">Prophet</option>
-                        <option value="pulse">Pulse</option>
-                        <option value="rhodey">Rhodey</option>
-                        <option value="rodeo">Rodeo</option>
-                        <option value="saw">Saw</option>
-                        <option value="square">Square</option>
-                        <option value="subpulse">Subpulse</option>
-                        <option value="supersaw">Supersaw</option>
-                        <option value="tb303">TB-303</option>
-                        <option value="tech_saws">Tech Saws</option>
-                        <option value="tri">Tri</option>
-                        <option value="winwood_lead">Winwood Lead</option>
-                        <option value="zawa">Zawa</option>
-                      </select>
-                    </div>
-                    <div class="slider-control">
-                      <label>Loop Sample</label>
-                      <select id="loop-select">
-                        <option value="loop_amen" selected>Amen</option>
-                        <option value="loop_breakbeat">Breakbeat</option>
-                        <option value="loop_compus">Compus</option>
-                        <option value="loop_garzul">Garzul</option>
-                        <option value="loop_industrial">Industrial</option>
-                        <option value="loop_tabla">Tabla</option>
-                      </select>
-                    </div>
-                    <div class="slider-control">
-                      <label>Random Arp</label>
-                      <button id="random-arp-toggle" class="toggle-button" data-active="true">On</button>
-                    </div>
-                    <div class="slider-control">
-                      <label>BPM <span id="bpm-value" class="slider-value">120</span></label>
-                      <input type="range" id="bpm-slider" min="20" max="500" value="120" step="1" />
-                    </div>
-                    <div class="slider-control">
-                      <label>Root Note <span id="root-note-value" class="slider-value">60</span></label>
-                      <input type="range" id="root-note-slider" min="24" max="96" value="60" step="1" />
-                    </div>
-                    <div class="slider-control">
-                      <label>Octaves <span id="octaves-value" class="slider-value">2</span></label>
-                      <input type="range" id="octaves-slider" min="1" max="5" value="2" step="1" />
-                    </div>
-                    <div class="slider-control">
-                      <label>Attack <span id="attack-value" class="slider-value">0.00</span></label>
-                      <input type="range" id="attack-slider" min="0" max="2" value="0" step="0.01" />
-                    </div>
-                    <div class="slider-control">
-                      <label>Release <span id="release-value" class="slider-value">0.10</span></label>
-                      <input type="range" id="release-slider" min="0" max="5" value="0.1" step="0.01" />
+                  <!-- Controls -->
+                  <div class="slider-controls-section">
+                    <div class="slider-controls">
+                      <div class="slider-control">
+                        <label for="synth-select">Synth</label>
+                        <select id="synth-select">
+                          <option value="bass_foundation">
+                            Bass Foundation
+                          </option>
+                          <option value="beep" selected>Beep</option>
+                          <option value="blade">Blade</option>
+                          <option value="bnoise">BNoise</option>
+                          <option value="chipbass">Chipbass</option>
+                          <option value="chiplead">ChipLead</option>
+                          <option value="dark_ambience">Dark Ambience</option>
+                          <option value="dpulse">DPulse</option>
+                          <option value="dsaw">DSaw</option>
+                          <option value="dtri">DTri</option>
+                          <option value="fm">FM</option>
+                          <option value="gabberkick">Gabberkick</option>
+                          <option value="hollow">Hollow</option>
+                          <option value="mod_dsaw">Mod DSaw</option>
+                          <option value="mod_fm">Mod FM</option>
+                          <option value="mod_pulse">Mod Pulse</option>
+                          <option value="mod_saw">Mod Saw</option>
+                          <option value="mod_sine">Mod Sine</option>
+                          <option value="mod_tri">Mod Tri</option>
+                          <option value="noise">Noise</option>
+                          <option value="organ_tonewheel">
+                            Organ Tonewheel
+                          </option>
+                          <option value="pluck">Pluck</option>
+                          <option value="pretty_bell">Pretty Bell</option>
+                          <option value="prophet">Prophet</option>
+                          <option value="pulse">Pulse</option>
+                          <option value="rhodey">Rhodey</option>
+                          <option value="rodeo">Rodeo</option>
+                          <option value="saw">Saw</option>
+                          <option value="square">Square</option>
+                          <option value="subpulse">Subpulse</option>
+                          <option value="supersaw">Supersaw</option>
+                          <option value="tb303">TB-303</option>
+                          <option value="tech_saws">Tech Saws</option>
+                          <option value="tri">Tri</option>
+                          <option value="winwood_lead">Winwood Lead</option>
+                          <option value="zawa">Zawa</option>
+                        </select>
+                      </div>
+                      <div class="slider-control">
+                        <label for="loop-select">Loop Sample</label>
+                        <select id="loop-select">
+                          <option value="loop_amen" selected>Amen</option>
+                          <option value="loop_breakbeat">Breakbeat</option>
+                          <option value="loop_compus">Compus</option>
+                          <option value="loop_garzul">Garzul</option>
+                          <option value="loop_industrial">Industrial</option>
+                          <option value="loop_tabla">Tabla</option>
+                        </select>
+                      </div>
+                      <div class="slider-control">
+                        <label for="random-arp-toggle">Random Arp</label>
+                        <button
+                          id="random-arp-toggle"
+                          class="toggle-button"
+                          aria-pressed="true"
+                          data-active="true"
+                        >
+                          On
+                        </button>
+                      </div>
+                      <div class="slider-control">
+                        <label for="bpm-slider"
+                          >BPM
+                          <span id="bpm-value" class="slider-value"
+                            >120</span
+                          ></label
+                        >
+                        <input
+                          type="range"
+                          id="bpm-slider"
+                          min="20"
+                          max="500"
+                          value="120"
+                          step="1"
+                        />
+                      </div>
+                      <div class="slider-control">
+                        <label for="root-note-slider"
+                          >Root Note
+                          <span id="root-note-value" class="slider-value"
+                            >60</span
+                          ></label
+                        >
+                        <input
+                          type="range"
+                          id="root-note-slider"
+                          min="24"
+                          max="96"
+                          value="60"
+                          step="1"
+                        />
+                      </div>
+                      <div class="slider-control">
+                        <label for="octaves-slider"
+                          >Octaves
+                          <span id="octaves-value" class="slider-value"
+                            >2</span
+                          ></label
+                        >
+                        <input
+                          type="range"
+                          id="octaves-slider"
+                          min="1"
+                          max="5"
+                          value="2"
+                          step="1"
+                        />
+                      </div>
+                      <div class="slider-control">
+                        <label for="attack-slider"
+                          >Attack
+                          <span id="attack-value" class="slider-value"
+                            >0.00</span
+                          ></label
+                        >
+                        <input
+                          type="range"
+                          id="attack-slider"
+                          min="0"
+                          max="2"
+                          value="0"
+                          step="0.01"
+                        />
+                      </div>
+                      <div class="slider-control">
+                        <label for="release-slider"
+                          >Release
+                          <span id="release-value" class="slider-value"
+                            >0.10</span
+                          ></label
+                        >
+                        <input
+                          type="range"
+                          id="release-slider"
+                          min="0"
+                          max="5"
+                          value="0.1"
+                          step="0.01"
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
+                </section>
 
-              <!-- OSC API Tab -->
-              <div class="main-tab-content" data-main-tab-content="osc-api">
-                <div id="error-message" class="hidden alert alert-error">
-                  <svg class="alert-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                  </svg>
+                <!-- OSC API Panel -->
+                <section
+                  class="main-tab-content"
+                  id="panel-osc-api"
+                  role="tabpanel"
+                  aria-labelledby="tab-osc-api"
+                  data-main-tab-content="osc-api"
+                  hidden
+                >
+                  <div
+                    id="error-message"
+                    class="hidden alert alert-error"
+                    role="alert"
+                  >
+                    <svg
+                      class="alert-icon"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      ></path>
+                    </svg>
+                    <div>
+                      <h3 class="alert-title">Error</h3>
+                      <p id="error-text" class="alert-text"></p>
+                    </div>
+                  </div>
+
+                  <div
+                    id="warning-message"
+                    class="hidden alert alert-warning"
+                    role="alert"
+                  >
+                    <svg
+                      class="alert-icon"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                      ></path>
+                    </svg>
+                    <div><p id="warning-text" class="alert-text"></p></div>
+                  </div>
+
+                  <div class="welcome-guide">
+                    <h2>Welcome to SuperSonic</h2>
+                    <ol>
+                      <li>
+                        <strong>Available Synths</strong> — Many synths are
+                        pre-loaded and ready to use:
+                        <code class="welcome-code-block"
+                          >sonic-pi-beep, sonic-pi-dsaw, sonic-pi-prophet,
+                          sonic-pi-tb303, sonic-pi-fm...</code
+                        >
+                      </li>
+                      <li>
+                        <strong>Play a Synth</strong> — Create a synth using
+                        <span class="welcome-code">/s_new</span>:
+                        <code class="welcome-code-block"
+                          >/s_new sonic-pi-beep -1 0 0 note 72</code
+                        >
+                        <span class="welcome-text--small"
+                          >The <span class="welcome-code">-1</span> auto-assigns
+                          a node ID, <span class="welcome-code">note</span> sets
+                          the MIDI pitch</span
+                        >
+                      </li>
+                      <li>
+                        <strong>Load Loop Samples</strong> — Click "Load
+                        Samples" to load loops into buffers 1-6:
+                        <code class="welcome-code-block"
+                          >Buffer 1: loop_amen.flac Buffer 2:
+                          loop_breakbeat.flac Buffer 3: loop_compus.flac Buffer
+                          4: loop_garzul.flac Buffer 5: loop_industrial.flac
+                          Buffer 6: loop_tabla.flac</code
+                        >
+                        <span class="welcome-text--small"
+                          >After loading, use these buffer IDs (1-6) to play the
+                          loops</span
+                        >
+                      </li>
+                      <li>
+                        <strong>Load Additional Samples</strong> — Or load
+                        custom ones:
+                        <code class="welcome-code-block"
+                          >/b_allocRead 10 ambi_choir.flac /b_allocRead 11
+                          bd_haus.flac /b_allocRead 12 elec_ping.flac</code
+                        >
+                        <span class="welcome-text--small"
+                          >Use buffer IDs 10+ to avoid reserved slots 1-6</span
+                        >
+                      </li>
+                      <li>
+                        <strong>Trigger Samples</strong> — Play samples using
+                        the stereo player:
+                        <code class="welcome-code-block"
+                          >/s_new sonic-pi-basic_stereo_player -1 0 0 buf 1
+                          /s_new sonic-pi-basic_stereo_player -1 0 0 buf 3 rate
+                          1.2</code
+                        >
+                        <span class="welcome-text--small"
+                          ><span class="welcome-code">buf</span> selects the
+                          buffer, <span class="welcome-code">rate</span> changes
+                          playback speed</span
+                        >
+                      </li>
+                      <li>
+                        <strong>Schedule Sequences</strong> — Add times to
+                        create rhythms:
+                        <code class="welcome-code-block"
+                          >0.0 /s_new sonic-pi-beep -1 0 0 note 60 0.5 /s_new
+                          sonic-pi-beep -1 0 0 note 64 1.0 /s_new sonic-pi-beep
+                          -1 0 0 note 67</code
+                        >
+                      </li>
+                      <li>
+                        <strong>Explore!</strong> — Check out the
+                        <a
+                          href="https://doc.sccode.org/Reference/Server-Command-Reference.html"
+                          target="_blank"
+                          class="welcome-link"
+                          >scsynth OSC docs</a
+                        >
+                        or switch to the Playground tab!
+                      </li>
+                    </ol>
+                    <p class="welcome-quickstart">
+                      <span class="welcome-label">Quick Start:</span> Click
+                      "Load Example" then hit "Send".
+                    </p>
+                  </div>
+
                   <div>
-                    <h3 class="alert-title">Error</h3>
-                    <p id="error-text" class="alert-text"></p>
+                    <h2>Choose your own OSC...</h2>
+                    <form id="message-form">
+                      <div class="form-group form-group--tight">
+                        <label for="message-input" class="visually-hidden"
+                          >OSC Message Input</label
+                        >
+                        <textarea
+                          id="message-input"
+                          placeholder="Single: /s_new sonic-pi-beep 1001 0 0 note 72&#10;Scheduled:&#10;0 /s_new 1 0 0 note 60&#10;0.5 /s_new 2 0 0 note 64"
+                          rows="10"
+                          disabled
+                          spellcheck="false"
+                          autocomplete="off"
+                          autocorrect="off"
+                          autocapitalize="off"
+                        ></textarea>
+                      </div>
+                      <div class="button-container">
+                        <div class="button-row button-row-secondary">
+                          <button
+                            type="button"
+                            id="load-example-button"
+                            class="btn-green"
+                            disabled
+                          >
+                            Load Example
+                          </button>
+                        </div>
+                        <div class="button-row button-row-primary">
+                          <button
+                            type="button"
+                            id="clear-button"
+                            class="btn-secondary"
+                            disabled
+                          >
+                            Clear
+                          </button>
+                          <button type="submit" class="btn-primary" disabled>
+                            Send
+                          </button>
+                        </div>
+                      </div>
+                    </form>
                   </div>
-                </div>
+                </section>
 
-                <div id="warning-message" class="hidden alert alert-warning">
-                  <svg class="alert-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                  </svg>
-                  <div><p id="warning-text" class="alert-text"></p></div>
-                </div>
-
-                <div class="welcome-guide">
-                  <h2>Welcome to SuperSonic</h2>
-                  <ol>
-                    <li><span class="welcome-text"><strong>Available Synths</strong> — Many synths are pre-loaded and ready to use:<code class="welcome-code-block">sonic-pi-beep, sonic-pi-dsaw, sonic-pi-prophet, sonic-pi-tb303, sonic-pi-fm...</code></span></li>
-                    <li><span class="welcome-text"><strong>Play a Synth</strong> — Create a synth using <span class="welcome-code">/s_new</span>:</span><code class="welcome-code-block">/s_new sonic-pi-beep -1 0 0 note 72</code><span class="welcome-text" style="font-size: 0.85em; opacity: 0.9">The <span class="welcome-code">-1</span> auto-assigns a node ID, <span class="welcome-code">note</span> sets the MIDI pitch</span></li>
-                    <li><span class="welcome-text"><strong>Load Loop Samples</strong> — Click "Load Samples" to load these pre-configured loops into buffers 1-6:</span><code class="welcome-code-block">Buffer 1: loop_amen.flac Buffer 2: loop_breakbeat.flac Buffer 3: loop_compus.flac Buffer 4: loop_garzul.flac Buffer 5: loop_industrial.flac Buffer 6: loop_tabla.flac</code><span class="welcome-text" style="font-size: 0.85em; opacity: 0.9">After loading, use these buffer IDs (1-6) to play the loops</span></li>
-                    <li><span class="welcome-text"><strong>Load Additional Samples</strong> — Click "Load Samples" for API samples, or load custom ones:</span><code class="welcome-code-block">/b_allocRead 10 ambi_choir.flac /b_allocRead 11 bd_haus.flac /b_allocRead 12 elec_ping.flac</code><span class="welcome-text" style="font-size: 0.85em; opacity: 0.9">The first number is the buffer ID (use 10+ to avoid 1-6 which are reserved for pre-loaded loops)</span></li>
-                    <li><span class="welcome-text"><strong>Trigger Samples</strong> — Play samples using the stereo or mono player:</span><code class="welcome-code-block">/s_new sonic-pi-basic_stereo_player -1 0 0 buf 1 /s_new sonic-pi-basic_stereo_player -1 0 0 buf 3 rate 1.2</code><span class="welcome-text" style="font-size: 0.85em; opacity: 0.9"><span class="welcome-code">buf</span> uses the buffer ID (1-6 for pre-loaded loops), <span class="welcome-code">rate</span> changes playback speed</span></li>
-                    <li><span class="welcome-text"><strong>Schedule Sequences</strong> — Add times at the start to create rhythms:</span><code class="welcome-code-block">0.0 /s_new sonic-pi-beep -1 0 0 note 60 0.5 /s_new sonic-pi-beep -1 0 0 note 64 1.0 /s_new sonic-pi-beep -1 0 0 note 67</code></li>
-                    <li><span class="welcome-text"><strong>Explore!</strong> — Check out the <a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" class="welcome-link">scsynth OSC docs</a> or switch to the Playground tab to jam with the interactive synth pad!</span></li>
-                  </ol>
-                  <p class="welcome-quickstart"><span class="welcome-label">Quick Start:</span> Click "Load Example" to load up some example API calls then hit "Send".</p>
-                </div>
-
-                <div>
-                  <h2>Choose your own OSC...</h2>
-                  <form id="message-form">
-                    <div class="form-group" style="margin-bottom: 0.5rem">
-                      <textarea id="message-input" placeholder="Single: /s_new sonic-pi-beep 1001 0 0 note 72&#10;Scheduled:&#10;0 /s_new 1 0 0 note 60&#10;0.5 /s_new 2 0 0 note 64" rows="10" disabled spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
-                    </div>
-                    <div class="button-container">
-                      <div class="button-row button-row-secondary">
-                        <button type="button" id="load-example-button" class="btn-green" disabled>Load Example</button>
+                <!-- Metrics -->
+                <section
+                  id="performance-metrics"
+                  class="metrics-section metrics-section--top"
+                  aria-label="Performance metrics"
+                >
+                  <div class="metrics-grid metrics-grid--4col">
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">Messages</div>
+                      <div class="metrics-row">
+                        <span>sent</span
+                        ><span
+                          ><span id="metric-sent" class="metrics-val">0</span
+                          ><span class="metrics-sep"> / </span
+                          ><span
+                            id="metric-bytes-sent"
+                            class="metrics-val--muted"
+                            >0 B</span
+                          ></span
+                        >
                       </div>
-                      <div class="button-row button-row-primary">
-                        <button type="button" id="clear-button" class="btn-secondary" disabled>Clear</button>
-                        <button type="submit" class="btn-primary" disabled>Send</button>
+                      <div class="metrics-row">
+                        <span>received</span
+                        ><span
+                          ><span id="metric-received" class="metrics-val"
+                            >0</span
+                          ><span class="metrics-sep"> / </span
+                          ><span
+                            id="metric-bytes-received"
+                            class="metrics-val--muted"
+                            >0 B</span
+                          ></span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>direct</span
+                        ><span
+                          id="metric-direct-writes"
+                          class="metrics-val--green"
+                          >0</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>dropped</span
+                        ><span
+                          id="metric-osc-in-dropped"
+                          class="metrics-val--red"
+                          >0</span
+                        >
                       </div>
                     </div>
-                  </form>
-                </div>
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">PreScheduler</div>
+                      <div class="metrics-row">
+                        <span>pending</span
+                        ><span
+                          ><span
+                            id="metric-prescheduler-pending"
+                            class="metrics-val"
+                            >0</span
+                          ><span class="metrics-sep"> / </span
+                          ><span
+                            id="metric-prescheduler-peak"
+                            class="metrics-val--muted"
+                            >0</span
+                          ></span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>sent</span
+                        ><span id="metric-prescheduler-sent" class="metrics-val"
+                          >0</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>scheduled</span
+                        ><span
+                          id="metric-bundles-scheduled"
+                          class="metrics-val--dim"
+                          >0</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>cancelled</span
+                        ><span
+                          id="metric-events-cancelled"
+                          class="metrics-val--red"
+                          >0</span
+                        >
+                      </div>
+                    </div>
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">Scheduler</div>
+                      <div class="metrics-row">
+                        <span>queue</span
+                        ><span
+                          ><span id="metric-scheduler-depth" class="metrics-val"
+                            >0</span
+                          ><span class="metrics-sep"> / </span
+                          ><span
+                            id="metric-scheduler-peak"
+                            class="metrics-val--muted"
+                            >0</span
+                          ></span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>dropped</span
+                        ><span
+                          id="metric-scheduler-dropped"
+                          class="metrics-val--red"
+                          >0</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>clock drift</span
+                        ><span id="metric-drift" class="metrics-val">0ms</span>
+                      </div>
+                    </div>
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">Processing</div>
+                      <div class="metrics-row">
+                        <span>processed</span
+                        ><span
+                          id="metric-messages-processed"
+                          class="metrics-val"
+                          >0</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>dropped</span
+                        ><span
+                          id="metric-messages-dropped"
+                          class="metrics-val--red"
+                          >0</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>seq gaps</span
+                        ><span
+                          id="metric-sequence-gaps"
+                          class="metrics-val--red"
+                          >0</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>ticks</span
+                        ><span
+                          id="metric-process-count"
+                          class="metrics-val--dim"
+                          >0</span
+                        >
+                      </div>
+                    </div>
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">Retries</div>
+                      <div class="metrics-row">
+                        <span>ok / fail</span
+                        ><span
+                          ><span
+                            id="metric-prescheduler-retries-succeeded"
+                            class="metrics-val--green"
+                            >0</span
+                          ><span class="metrics-sep"> / </span
+                          ><span
+                            id="metric-prescheduler-retries-failed"
+                            class="metrics-val--red"
+                            >0</span
+                          ></span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>queue</span
+                        ><span
+                          ><span
+                            id="metric-prescheduler-retry-queue-size"
+                            class="metrics-val"
+                            >0</span
+                          ><span class="metrics-sep"> / </span
+                          ><span
+                            id="metric-prescheduler-retry-queue-max"
+                            class="metrics-val--muted"
+                            >0</span
+                          ></span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>retried</span
+                        ><span
+                          id="metric-messages-retried"
+                          class="metrics-val--dim"
+                          >0</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>dispatches</span
+                        ><span
+                          id="metric-total-dispatches"
+                          class="metrics-val--dim"
+                          >0</span
+                        >
+                      </div>
+                    </div>
+                    <div class="metrics-panel metrics-panel--wide">
+                      <div class="metrics-panel__title">Ring Buffers</div>
+                      <div class="metrics-bar-row">
+                        <span class="metrics-bar-label">in</span>
+                        <div class="metrics-bar-track">
+                          <div
+                            id="metric-in-bar"
+                            class="metrics-bar-fill metrics-bar-fill--blue"
+                          ></div>
+                        </div>
+                        <span
+                          id="metric-in-usage"
+                          class="metrics-bar-value metrics-val"
+                          >0%</span
+                        >
+                      </div>
+                      <div class="metrics-bar-row">
+                        <span class="metrics-bar-label">out</span>
+                        <div class="metrics-bar-track">
+                          <div
+                            id="metric-out-bar"
+                            class="metrics-bar-fill metrics-bar-fill--green"
+                          ></div>
+                        </div>
+                        <span
+                          id="metric-out-usage"
+                          class="metrics-bar-value metrics-val--green"
+                          >0%</span
+                        >
+                      </div>
+                      <div class="metrics-bar-row">
+                        <span class="metrics-bar-label">dbg</span>
+                        <div class="metrics-bar-track">
+                          <div
+                            id="metric-debug-bar"
+                            class="metrics-bar-fill metrics-bar-fill--purple"
+                          ></div>
+                        </div>
+                        <span
+                          id="metric-debug-usage"
+                          class="metrics-bar-value metrics-val--purple"
+                          >0%</span
+                        >
+                      </div>
+                    </div>
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">Engine</div>
+                      <div class="metrics-row">
+                        <span>audio</span
+                        ><span
+                          id="metric-audio-state"
+                          class="metrics-val--green"
+                          >-</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>synthdefs</span
+                        ><span id="metric-synthdefs" class="metrics-val"
+                          >0</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>debug</span
+                        ><span
+                          ><span
+                            id="metric-debug-received"
+                            class="metrics-val--muted"
+                            >0</span
+                          ><span class="metrics-sep"> / </span
+                          ><span
+                            id="metric-debug-bytes-received"
+                            class="metrics-val--muted"
+                            >0 B</span
+                          ></span
+                        >
+                      </div>
+                    </div>
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">Buffers</div>
+                      <div class="metrics-row">
+                        <span>used</span
+                        ><span id="metric-buffer-used" class="metrics-val"
+                          >0 B</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>free</span
+                        ><span
+                          id="metric-buffer-free"
+                          class="metrics-val--green"
+                          >0 B</span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>allocs</span
+                        ><span
+                          id="metric-buffer-allocs"
+                          class="metrics-val--dim"
+                          >0</span
+                        >
+                      </div>
+                    </div>
+                  </div>
+                </section>
               </div>
 
-              <!-- Metrics -->
-              <div id="performance-metrics" class="metrics-section" style="margin-top: 1rem;">
-                <div class="metrics-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem;">
-                  <div class="metrics-panel">
-                    <div class="metrics-panel__title">Messages</div>
-                    <div class="metrics-row"><span>sent</span><span><span id="metric-sent" class="metrics-val">0</span><span class="metrics-sep"> / </span><span id="metric-bytes-sent" class="metrics-val--muted">0 B</span></span></div>
-                    <div class="metrics-row"><span>received</span><span><span id="metric-received" class="metrics-val">0</span><span class="metrics-sep"> / </span><span id="metric-bytes-received" class="metrics-val--muted">0 B</span></span></div>
-                    <div class="metrics-row"><span>direct</span><span id="metric-direct-writes" class="metrics-val--green">0</span></div>
-                    <div class="metrics-row"><span>dropped</span><span id="metric-osc-in-dropped" class="metrics-val--red">0</span></div>
+              <!-- Divider -->
+              <div
+                class="divider"
+                id="column-divider"
+                role="separator"
+                aria-orientation="vertical"
+              ></div>
+
+              <!-- Right Column -->
+              <aside class="right-column">
+                <section
+                  id="node-tree-panel"
+                  class="log-container node-tree-panel"
+                  aria-label="Node tree visualization"
+                >
+                  <div class="log-container-header"><h2>Node Tree</h2></div>
+                  <div
+                    id="node-tree-stats"
+                    class="node-tree-stats"
+                    aria-live="polite"
+                  >
+                    <span class="node-tree-stats__groups"
+                      >Groups: <span id="stat-groups">0</span></span
+                    >
+                    <span class="node-tree-stats__fx"
+                      >FX: <span id="stat-fx">0</span></span
+                    >
+                    <span class="node-tree-stats__samples"
+                      >Samples: <span id="stat-samples">0</span></span
+                    >
+                    <span class="node-tree-stats__synths"
+                      >Synths: <span id="stat-synths">0</span></span
+                    >
                   </div>
-                  <div class="metrics-panel">
-                    <div class="metrics-panel__title">PreScheduler</div>
-                    <div class="metrics-row"><span>pending</span><span><span id="metric-prescheduler-pending" class="metrics-val">0</span><span class="metrics-sep"> / </span><span id="metric-prescheduler-peak" class="metrics-val--muted">0</span></span></div>
-                    <div class="metrics-row"><span>sent</span><span id="metric-prescheduler-sent" class="metrics-val">0</span></div>
-                    <div class="metrics-row"><span>scheduled</span><span id="metric-bundles-scheduled" class="metrics-val--dim">0</span></div>
-                    <div class="metrics-row"><span>cancelled</span><span id="metric-events-cancelled" class="metrics-val--red">0</span></div>
+                  <div class="node-tree-viewport">
+                    <div
+                      id="node-tree-container-2d"
+                      class="node-tree-container"
+                    ></div>
+                    <div
+                      id="node-tree-container-3d"
+                      class="node-tree-container node-tree-container--3d"
+                    ></div>
+                    <button
+                      id="dim-btn"
+                      class="dim-toggle"
+                      aria-label="Toggle 2D/3D view"
+                    >
+                      2D
+                    </button>
                   </div>
-                  <div class="metrics-panel">
-                    <div class="metrics-panel__title">Scheduler</div>
-                    <div class="metrics-row"><span>queue</span><span><span id="metric-scheduler-depth" class="metrics-val">0</span><span class="metrics-sep"> / </span><span id="metric-scheduler-peak" class="metrics-val--muted">0</span></span></div>
-                    <div class="metrics-row"><span>dropped</span><span id="metric-scheduler-dropped" class="metrics-val--red">0</span></div>
-                    <div class="metrics-row"><span>clock drift</span><span id="metric-drift" class="metrics-val">0ms</span></div>
+                </section>
+
+                <!-- Logs -->
+                <section class="logs-section" aria-label="Logs">
+                  <div
+                    class="tab-buttons"
+                    role="tablist"
+                    aria-label="Log panels"
+                  >
+                    <button
+                      class="tab-button active"
+                      role="tab"
+                      aria-selected="true"
+                      aria-controls="log-debug"
+                      id="tab-debug"
+                      data-tab="debug"
+                    >
+                      Scsynth Info
+                    </button>
+                    <button
+                      class="tab-button"
+                      role="tab"
+                      aria-selected="false"
+                      aria-controls="log-osc-out"
+                      id="tab-osc-out"
+                      data-tab="osc-out"
+                    >
+                      OSC to Scsynth
+                    </button>
+                    <button
+                      class="tab-button"
+                      role="tab"
+                      aria-selected="false"
+                      aria-controls="log-osc-in"
+                      id="tab-osc-in"
+                      data-tab="osc-in"
+                    >
+                      OSC from Scsynth
+                    </button>
                   </div>
-                  <div class="metrics-panel">
-                    <div class="metrics-panel__title">Processing</div>
-                    <div class="metrics-row"><span>processed</span><span id="metric-messages-processed" class="metrics-val">0</span></div>
-                    <div class="metrics-row"><span>dropped</span><span id="metric-messages-dropped" class="metrics-val--red">0</span></div>
-                    <div class="metrics-row"><span>seq gaps</span><span id="metric-sequence-gaps" class="metrics-val--red">0</span></div>
-                    <div class="metrics-row"><span>ticks</span><span id="metric-process-count" class="metrics-val--dim">0</span></div>
+                  <div class="logs-grid">
+                    <div
+                      class="tab-content active"
+                      id="log-debug"
+                      role="tabpanel"
+                      aria-labelledby="tab-debug"
+                      data-tab-content="debug"
+                    >
+                      <div class="log-container">
+                        <div class="log-container-header">
+                          <h2>Scsynth Info</h2>
+                        </div>
+                        <div class="log-scroll-area">
+                          <pre id="debug-log"></pre>
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      class="tab-content"
+                      id="log-osc-out"
+                      role="tabpanel"
+                      aria-labelledby="tab-osc-out"
+                      data-tab-content="osc-out"
+                      hidden
+                    >
+                      <div class="log-container">
+                        <div class="log-container-header">
+                          <h2>OSC to Scsynth</h2>
+                        </div>
+                        <div
+                          id="sent-message-history"
+                          class="message-history log-scroll-area"
+                        >
+                          <p class="message-empty">No messages sent yet</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      class="tab-content"
+                      id="log-osc-in"
+                      role="tabpanel"
+                      aria-labelledby="tab-osc-in"
+                      data-tab-content="osc-in"
+                      hidden
+                    >
+                      <div class="log-container">
+                        <div class="log-container-header">
+                          <h2>OSC from Scsynth</h2>
+                        </div>
+                        <div
+                          id="message-history"
+                          class="message-history log-scroll-area"
+                        >
+                          <p class="message-empty">No messages received yet</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div class="metrics-panel">
-                    <div class="metrics-panel__title">Retries</div>
-                    <div class="metrics-row"><span>ok / fail</span><span><span id="metric-prescheduler-retries-succeeded" class="metrics-val--green">0</span><span class="metrics-sep"> / </span><span id="metric-prescheduler-retries-failed" class="metrics-val--red">0</span></span></div>
-                    <div class="metrics-row"><span>queue</span><span><span id="metric-prescheduler-retry-queue-size" class="metrics-val">0</span><span class="metrics-sep"> / </span><span id="metric-prescheduler-retry-queue-max" class="metrics-val--muted">0</span></span></div>
-                    <div class="metrics-row"><span>retried</span><span id="metric-messages-retried" class="metrics-val--dim">0</span></div>
-                    <div class="metrics-row"><span>dispatches</span><span id="metric-total-dispatches" class="metrics-val--dim">0</span></div>
-                  </div>
-                  <div class="metrics-panel metrics-panel--wide">
-                    <div class="metrics-panel__title">Ring Buffers</div>
-                    <div class="metrics-bar-row"><span class="metrics-bar-label">in</span><div class="metrics-bar-track"><div id="metric-in-bar" class="metrics-bar-fill metrics-bar-fill--blue" style="width: 0%;"></div></div><span id="metric-in-usage" class="metrics-bar-value" style="color: var(--c-blue);">0%</span></div>
-                    <div class="metrics-bar-row"><span class="metrics-bar-label">out</span><div class="metrics-bar-track"><div id="metric-out-bar" class="metrics-bar-fill metrics-bar-fill--green" style="width: 0%;"></div></div><span id="metric-out-usage" class="metrics-bar-value" style="color: #4a4;">0%</span></div>
-                    <div class="metrics-bar-row"><span class="metrics-bar-label">dbg</span><div class="metrics-bar-track"><div id="metric-debug-bar" class="metrics-bar-fill metrics-bar-fill--purple" style="width: 0%;"></div></div><span id="metric-debug-usage" class="metrics-bar-value" style="color: #a4a;">0%</span></div>
-                  </div>
-                  <div class="metrics-panel">
-                    <div class="metrics-panel__title">Engine</div>
-                    <div class="metrics-row"><span>audio</span><span id="metric-audio-state" class="metrics-val--green">-</span></div>
-                    <div class="metrics-row"><span>synthdefs</span><span id="metric-synthdefs" class="metrics-val">0</span></div>
-                    <div class="metrics-row"><span>debug</span><span><span id="metric-debug-received" style="color: #888;">0</span><span class="metrics-sep"> / </span><span id="metric-debug-bytes-received" class="metrics-val--muted">0 B</span></span></div>
-                  </div>
-                  <div class="metrics-panel">
-                    <div class="metrics-panel__title">Buffers</div>
-                    <div class="metrics-row"><span>used</span><span id="metric-buffer-used" class="metrics-val">0 B</span></div>
-                    <div class="metrics-row"><span>free</span><span id="metric-buffer-free" class="metrics-val--green">0 B</span></div>
-                    <div class="metrics-row"><span>allocs</span><span id="metric-buffer-allocs" class="metrics-val--dim">0</span></div>
-                  </div>
-                </div>
-              </div>
+                </section>
+              </aside>
             </div>
 
-            <!-- Divider -->
-            <div class="divider" id="column-divider"></div>
-
-            <!-- Right Column -->
-            <div class="right-column">
-              <div id="node-tree-panel" class="log-container" style="border-bottom: none;">
-                <div class="log-container-header"><h2>Node Tree</h2></div>
-                <div id="node-tree-stats" style="position: absolute; top: 0.25rem; left: 0.5rem; z-index: 5; font-size: 0.65em; color: #888; display: flex; gap: 10px; background: rgba(0,0,0,0.7); padding: 0.1rem 0.3rem;">
-                  <span style="color: #ff8c00;">Groups: <span id="stat-groups">0</span></span>
-                  <span style="color: #ff00ff;">FX: <span id="stat-fx">0</span></span>
-                  <span style="color: #00ffff;">Samples: <span id="stat-samples">0</span></span>
-                  <span style="color: #00ff88;">Synths: <span id="stat-synths">0</span></span>
-                </div>
-                <div style="position: relative; width: 100%; height: 220px; overflow: hidden; background: #000;">
-                  <div id="node-tree-container-2d" style="width: 100%; height: 100%; background: #000;"></div>
-                  <div id="node-tree-container-3d" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; background: #000;"></div>
-                  <button id="dim-btn" style="position: absolute; bottom: 8px; right: 8px; z-index: 10; font-size: 0.7em; padding: 2px 8px; cursor: pointer; background: #333; color: #ff8c00; border: 1px solid #ff8c00; border-radius: 3px;">2D</button>
-                </div>
+            <!-- Hue Control -->
+            <div class="hue-control">
+              <div class="hue-control__inner">
+                <label for="hue-slider" id="hue-label">Hue</label>
+                <input
+                  type="range"
+                  id="hue-slider"
+                  min="0"
+                  max="360"
+                  value="200"
+                  step="1"
+                  aria-labelledby="hue-label"
+                />
               </div>
-
-              <div class="logs-section">
-                <div class="tab-buttons">
-                  <button class="tab-button active" data-tab="debug">Scsynth Info</button>
-                  <button class="tab-button" data-tab="osc-out">OSC to Scsynth</button>
-                  <button class="tab-button" data-tab="osc-in">OSC from Scsynth</button>
-                </div>
-                <div class="logs-grid">
-                  <div class="tab-content active" data-tab-content="debug">
-                    <div class="log-container">
-                      <div class="log-container-header"><h2>Scsynth Info</h2></div>
-                      <div class="log-scroll-area"><pre id="debug-log"></pre></div>
-                    </div>
-                  </div>
-                  <div class="tab-content" data-tab-content="osc-out">
-                    <div class="log-container">
-                      <div class="log-container-header"><h2>OSC to Scsynth</h2></div>
-                      <div id="sent-message-history" class="message-history log-scroll-area">
-                        <p class="message-empty">No messages sent yet</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="tab-content" data-tab-content="osc-in">
-                    <div class="log-container">
-                      <div class="log-container-header"><h2>OSC from Scsynth</h2></div>
-                      <div id="message-history" class="message-history log-scroll-area">
-                        <p class="message-empty">No messages received yet</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Hue Control -->
-          <div class="slider-control" style="padding: 0.75rem; padding-top: 0.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; border-bottom: 1px solid #333;">
-            <div style="width: 300px">
-              <label id="hue-label">Hue</label>
-              <input type="range" id="hue-slider" min="0" max="360" value="200" step="1" />
             </div>
           </div>
         </div>
-      </div>
+      </main>
     </div>
 
-    <!-- Restart Container -->
-    <div id="restart-container" class="restart-container" style="display: none;">
+    <!-- Footer -->
+    <footer id="restart-container" class="restart-container" hidden>
       <button id="reset-button" class="restart-button">Restart</button>
-    </div>
+    </footer>
 
-    <!-- Audio Suspended Overlay -->
-    <div id="suspended-overlay" class="suspended-overlay">
-      <div class="suspended-overlay__title">Audio Suspended</div>
-      <div class="suspended-overlay__text">The browser has paused audio playback. Click below to restart.</div>
-      <button id="resume-button" class="btn-init" style="font-size: 1.25rem; padding: 0.75rem 2rem; margin-top: 1rem;">Resume Audio</button>
+    <!-- Audio Suspended Dialog -->
+    <div
+      id="suspended-overlay"
+      class="suspended-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="suspended-title"
+    >
+      <h2 id="suspended-title" class="suspended-overlay__title">
+        Audio Suspended
+      </h2>
+      <p class="suspended-overlay__text">
+        The browser has paused audio playback. Click below to restart.
+      </p>
+      <button id="resume-button" class="btn-init init-button--large">
+        Resume Audio
+      </button>
     </div>
 
     <script type="module" src="assets/app.js"></script>
