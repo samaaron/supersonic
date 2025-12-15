@@ -2251,6 +2251,9 @@ void Blip_next(Blip* unit, int inNumSamples) {
     if (numharm != unit->m_numharm || freqin != unit->m_freqin) {
         N = numharm;
         int32 maxN = (int32)((SAMPLERATE * 0.5) / freqin);
+        // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist/2
+        // This prevents division by zero in scale calculation (0.5 / N)
+        maxN = sc_max(1, maxN);
         if (N > maxN) {
             float maxfreqin;
             N = maxN;
@@ -2368,8 +2371,12 @@ void Saw_Ctor(Saw* unit) {
     unit->m_freqin = ZIN0(0);
 
     unit->m_cpstoinc = ft->mSineSize * SAMPLEDUR * 65536. * 0.5;
-    unit->m_N = (int32)((SAMPLERATE * 0.5) / unit->m_freqin);
-    unit->m_scale = 0.5 / unit->m_N;
+    int32 N = (int32)((SAMPLERATE * 0.5) / unit->m_freqin);
+    // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist/2
+    if (N < 1)
+        N = 1;
+    unit->m_N = N;
+    unit->m_scale = 0.5 / N;
     unit->m_phase = 0;
     unit->m_y1 = -0.46f;
 
@@ -2394,6 +2401,9 @@ void Saw_next(Saw* unit, int inNumSamples) {
     bool crossfade;
     if (freqin != unit->m_freqin) {
         N = (int32)((SAMPLERATE * 0.5) / freqin);
+        // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist/2
+        // This prevents division by zero in scale calculation (0.5 / N)
+        N = sc_max(1, N);
         if (N != unit->m_N) {
             float maxfreqin;
             maxfreqin = sc_max(unit->m_freqin, freqin);
@@ -2494,7 +2504,9 @@ void Saw_next(Saw* unit, int inNumSamples) {
             } phase += freq;);
     }
 
-    unit->m_y1 = y1;
+    // [SUPERSONIC] Sanitise feedback state to prevent NaN/Inf propagation
+    // Matches pattern used in DelayUGens and FilterUGens
+    unit->m_y1 = zapgremlins(y1);
     unit->m_phase = phase;
     unit->m_freqin = freqin;
 }
@@ -2508,8 +2520,12 @@ void Pulse_Ctor(Pulse* unit) {
     unit->m_freqin = ZIN0(0);
 
     unit->m_cpstoinc = ft->mSineSize * SAMPLEDUR * 65536. * 0.5;
-    unit->m_N = (int32)((SAMPLERATE * 0.5) / unit->m_freqin);
-    unit->m_scale = 0.5 / unit->m_N;
+    int32 N = (int32)((SAMPLERATE * 0.5) / unit->m_freqin);
+    // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist/2
+    if (N < 1)
+        N = 1;
+    unit->m_N = N;
+    unit->m_scale = 0.5 / N;
     unit->m_phase = 0;
     unit->m_phaseoff = 0;
     unit->m_y1 = 0.f;
@@ -2533,6 +2549,9 @@ void Pulse_next(Pulse* unit, int inNumSamples) {
 
     if (freqin != unit->m_freqin) {
         N = (int32)((SAMPLERATE * 0.5) / freqin);
+        // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist/2
+        // This prevents division by zero in scale calculation (0.5 / N)
+        N = sc_max(1, N);
         if (N != unit->m_N) {
             float maxfreqin;
             maxfreqin = sc_max(unit->m_freqin, freqin);
@@ -2715,7 +2734,9 @@ void Pulse_next(Pulse* unit, int inNumSamples) {
             phase += freq; phaseoff += phaseoff_slope;);
     }
 
-    unit->m_y1 = y1;
+    // [SUPERSONIC] Sanitise feedback state to prevent NaN/Inf propagation
+    // Matches pattern used in DelayUGens and FilterUGens
+    unit->m_y1 = zapgremlins(y1);
     unit->m_phase = phase;
     unit->m_freqin = freqin;
 }
