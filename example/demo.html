@@ -6,22 +6,10 @@
     <link rel="icon" type="image/png" href="favicon.png" />
 
     <!-- Open Graph meta tags -->
-    <meta
-      property="og:title"
-      content="SuperSonic - SuperCollider's Synthesis Engine in the Browser"
-    />
-    <meta
-      property="og:description"
-      content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation."
-    />
-    <meta
-      property="og:image"
-      content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png"
-    />
-    <meta
-      property="og:image:alt"
-      content="SuperSonic logo - SuperCollider's Synthesis Engine in the browser"
-    />
+    <meta property="og:title" content="SuperSonic - SuperCollider's Synthesis Engine in the Browser" />
+    <meta property="og:description" content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation." />
+    <meta property="og:image" content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png" />
+    <meta property="og:image:alt" content="SuperSonic logo - SuperCollider's Synthesis Engine in the browser" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:type" content="website" />
@@ -29,708 +17,161 @@
 
     <!-- Twitter Card meta tags -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta
-      name="twitter:title"
-      content="SuperSonic - SuperCollider in the Browser"
-    />
-    <meta
-      name="twitter:description"
-      content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation."
-    />
-    <meta
-      name="twitter:image"
-      content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png"
-    />
-    <meta
-      name="twitter:image:alt"
-      content="SuperSonic logo - SuperCollider's scsynth in the browser"
-    />
+    <meta name="twitter:title" content="SuperSonic - SuperCollider in the Browser" />
+    <meta name="twitter:description" content="SuperCollider's powerful scsynth audio synthesis engine running in the browser as an AudioWorklet. Zero installation." />
+    <meta name="twitter:image" content="https://sonic-pi.net/supersonic/assets/supersonic_logo_slant.png" />
+    <meta name="twitter:image:alt" content="SuperSonic logo - SuperCollider's scsynth in the browser" />
 
     <title>SuperSonic - SuperCollider's Synthesis Engine in the Browser</title>
-    <!-- D3 for hierarchical tree visualization -->
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-    <!-- Force Graph libraries for node tree visualization -->
     <script src="https://cdn.jsdelivr.net/npm/force-graph"></script>
     <script src="https://cdn.jsdelivr.net/npm/3d-force-graph"></script>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.min.css"
-    />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.min.css" />
     <link rel="stylesheet" href="assets/demo.css" />
   </head>
   <body>
     <div class="container">
-      <!-- Header -->
-      <div style="text-align: center; padding: 50px 0 0 0">
-        <img
-          src="assets/supersonic_light.png"
-          alt="SuperSonic"
-          style="
-            max-width: 100%;
-            width: 800px;
-            height: auto;
-            transform: skewY(-11deg);
-            transition: transform 0.3s ease;
-            cursor: pointer;
-          "
-          onmouseover="this.style.transform='skewY(-11deg) scale(1.05)';"
-          onmouseout="this.style.transform='skewY(-11deg) scale(1)';"
-        />
+      <!-- Hero Section -->
+      <div class="hero">
+        <img src="assets/supersonic_light.png" alt="SuperSonic" class="hero-logo" />
       </div>
       <div style="text-align: center; margin-bottom: 2rem">
-        <p
-          style="
-            transform: skewY(-11deg);
-            margin: -10px auto 40px auto;
-            font-size: 16px;
-            background: #ff1493;
-            padding: 12px;
-            display: inline-block;
-            color: white;
-            font-style: italic;
-            font-weight: bold;
-          "
-        >
-          SuperCollider audio goodness baked into your browser
-        </p>
-        <div
-          style="
-            max-width: 800px;
-            margin: 0 auto 1.5rem auto;
-            padding: 3rem 1rem 0 1rem;
-          "
-        >
-          <p
-            style="
-              font-size: 1.3rem;
-              color: #1f2937;
-              line-height: 1.7;
-              margin-bottom: 1.5rem;
-              font-style: normal;
-            "
-          >
-            <a
-              href="https://supercollider.github.io/"
-              target="_blank"
-              rel="noopener"
-              style="
-                color: #ff1493;
-                text-decoration: none;
-                transition: all 0.3s ease;
-                display: inline-block;
-              "
-              onmouseover="this.style.color='#ffd700'; this.style.transform='translateY(-2px)';"
-              onmouseout="this.style.color='#ff1493'; this.style.transform='translateY(0)';"
-              >SuperCollider</a
-            >'s powerful audio synthesis engine <emph>scsynth</emph> running in
-            the browser as an AudioWorklet.
+        <p class="hero-tagline">SuperCollider audio goodness baked into your browser</p>
+        <div class="hero-intro">
+          <p class="hero-description">
+            <a href="https://supercollider.github.io/" target="_blank" rel="noopener" class="hero-link">SuperCollider</a>'s
+            powerful audio synthesis engine <em>scsynth</em> running in the browser as an AudioWorklet.
           </p>
-          <p
-            style="
-              font-size: 1.3rem;
-              color: #1f2937;
-              line-height: 1.7;
-              margin-bottom: 1.5rem;
-              font-style: italic;
-            "
-          >
-            Zero installation.
-          </p>
-          <div
-            class="feature-boxes"
-            style="
-              display: flex;
-              flex-wrap: wrap;
-              justify-content: center;
-              gap: 1rem;
-              font-size: 0.875rem;
-              color: #4b5563;
-            "
-          >
-            <!-- AudioWorklet -->
-            <div
-              class="feature-box"
-              style="
-                background: white;
-                padding: 1rem;
-                border-left: 6px solid #ff1493;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                position: relative;
-                overflow: hidden;
-                flex: 1 1 150px;
-                max-width: 250px;
-              "
-            >
-              <div
-                style="
-                  position: absolute;
-                  top: 0;
-                  left: 0;
-                  width: 100%;
-                  height: 3px;
-                  background: linear-gradient(101deg, #ff1493 0%, #1e90ff 100%);
-                  transform: skewY(-11deg);
-                  transform-origin: top left;
-                "
-              ></div>
-              <strong
-                style="
-                  color: #ff1493;
-                  text-transform: uppercase;
-                  letter-spacing: 0.05em;
-                  font-style: italic;
-                  font-size: 1rem;
-                "
-                >AudioWorklet</strong
-              ><br />
+          <p class="hero-zero">Zero installation.</p>
+
+          <!-- Feature Boxes -->
+          <div class="feature-boxes">
+            <div class="feature-box feature-box--pink">
+              <div class="feature-box__accent feature-box__accent--pink-blue"></div>
+              <strong class="feature-box__title feature-box__title--pink">AudioWorklet</strong><br />
               Runs in a dedicated high priority audio thread
             </div>
-            <!-- WebAssembly -->
-            <div
-              class="feature-box"
-              style="
-                background: white;
-                padding: 1rem;
-                border-left: 6px solid #1e90ff;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                position: relative;
-                overflow: hidden;
-                flex: 1 1 150px;
-                max-width: 250px;
-              "
-            >
-              <div
-                style="
-                  position: absolute;
-                  top: 0;
-                  left: 0;
-                  width: 100%;
-                  height: 3px;
-                  background: linear-gradient(101deg, #1e90ff 0%, #ffd700 100%);
-                  transform: skewY(-11deg);
-                  transform-origin: top left;
-                "
-              ></div>
-              <strong
-                style="
-                  color: #1e90ff;
-                  text-transform: uppercase;
-                  letter-spacing: 0.05em;
-                  font-style: italic;
-                  font-size: 1rem;
-                "
-                >WebAssembly</strong
-              ><br />
+            <div class="feature-box feature-box--blue">
+              <div class="feature-box__accent feature-box__accent--blue-gold"></div>
+              <strong class="feature-box__title feature-box__title--blue">WebAssembly</strong><br />
               Scsynth's C++ code compiled for the web
             </div>
-            <!-- OSC API -->
-            <div
-              class="feature-box"
-              style="
-                background: white;
-                padding: 1rem;
-                border-left: 6px solid #ffd700;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                position: relative;
-                overflow: hidden;
-                flex: 1 1 150px;
-                max-width: 250px;
-              "
-            >
-              <div
-                style="
-                  position: absolute;
-                  top: 0;
-                  left: 0;
-                  width: 100%;
-                  height: 3px;
-                  background: linear-gradient(101deg, #ffd700 0%, #ff1493 100%);
-                  transform: skewY(-11deg);
-                  transform-origin: top left;
-                "
-              ></div>
-              <strong
-                style="
-                  color: #d97706;
-                  text-transform: uppercase;
-                  letter-spacing: 0.05em;
-                  font-style: italic;
-                  font-size: 1rem;
-                "
-                >OSC API</strong
-              ><br />
+            <div class="feature-box feature-box--gold">
+              <div class="feature-box__accent feature-box__accent--gold-pink"></div>
+              <strong class="feature-box__title feature-box__title--gold">OSC API</strong><br />
               Talk to the Scsynth server through its native OSC API
             </div>
           </div>
 
-          <div
-            style="
-              text-align: center;
-              margin-top: 2rem;
-              display: flex;
-              flex-direction: column;
-              gap: 1rem;
-              align-items: center;
-            "
-          >
-            <a
-              href="#demo"
-              style="
-                display: inline-block;
-                background: linear-gradient(101deg, #ff1493 0%, #1e90ff 100%);
-                color: white;
-                padding: 0.75rem 2.5rem;
-                text-decoration: none;
-                font-weight: bold;
-                font-style: italic;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                transition: all 0.3s ease;
-                box-shadow: 0 4px 6px rgba(255, 20, 147, 0.3);
-                position: relative;
-                overflow: hidden;
-              "
-              onmouseover="this.style.background='linear-gradient(101deg, #ffd700 0%, #ff1493 100%)'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 16px rgba(255, 215, 0, 0.5)';"
-              onmouseout="this.style.background='linear-gradient(101deg, #ff1493 0%, #1e90ff 100%)'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 6px rgba(255, 20, 147, 0.3)';"
-            >
-              Whizz to Demo
-            </a>
-            <div
-              style="
-                display: flex;
-                gap: 1rem;
-                flex-wrap: wrap;
-                justify-content: center;
-              "
-            >
-              <a
-                href="https://github.com/samaaron/supersonic"
-                target="_blank"
-                rel="noopener"
-                style="
-                  display: inline-block;
-                  background: linear-gradient(101deg, #1f2937 0%, #374151 100%);
-                  color: white;
-                  padding: 0.75rem 2.5rem;
-                  text-decoration: none;
-                  font-weight: bold;
-                  font-style: italic;
-                  text-transform: uppercase;
-                  letter-spacing: 0.05em;
-                  transition: all 0.3s ease;
-                  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-                  position: relative;
-                  overflow: hidden;
-                "
-                onmouseover="this.style.background='linear-gradient(101deg, #ffd700 0%, #ff1493 100%)'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 16px rgba(255, 215, 0, 0.5)';"
-                onmouseout="this.style.background='linear-gradient(101deg, #1f2937 0%, #374151 100%)'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 6px rgba(0, 0, 0, 0.2)';"
-              >
-                Open Source
-              </a>
-              <a
-                href="https://www.patreon.com/posts/introducing-in-141953467"
-                target="_blank"
-                rel="noopener"
-                style="
-                  display: inline-block;
-                  background: linear-gradient(101deg, #1f2937 0%, #374151 100%);
-                  color: white;
-                  padding: 0.75rem 2.5rem;
-                  text-decoration: none;
-                  font-weight: bold;
-                  font-style: italic;
-                  text-transform: uppercase;
-                  letter-spacing: 0.05em;
-                  transition: all 0.3s ease;
-                  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-                  position: relative;
-                  overflow: hidden;
-                "
-                onmouseover="this.style.background='linear-gradient(101deg, #ffd700 0%, #ff1493 100%)'; this.style.transform='translateY(-3px) scale(1.05)'; this.style.boxShadow='0 8px 16px rgba(255, 215, 0, 0.5)';"
-                onmouseout="this.style.background='linear-gradient(101deg, #1f2937 0%, #374151 100%)'; this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 4px 6px rgba(0, 0, 0, 0.2)';"
-              >
-                What? How? Why?
-              </a>
+          <!-- CTA Buttons -->
+          <div class="cta-container">
+            <a href="#demo" class="cta-button cta-button--primary">Whizz to Demo</a>
+            <div class="cta-row">
+              <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener" class="cta-button cta-button--secondary">Open Source</a>
+              <a href="https://www.patreon.com/posts/introducing-in-141953467" target="_blank" rel="noopener" class="cta-button cta-button--secondary">What? How? Why?</a>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Getting Started Section -->
-      <div style="background: #1f2937; padding: 3rem 1rem; margin-bottom: 3rem">
-        <div style="max-width: 1200px; margin: 0 auto">
-          <p
-            style="
-              font-size: 1.3rem;
-              font-style: italic;
-              margin-bottom: 2.5rem;
-              color: #ffd700;
-              text-align: center;
-              line-height: 1.6;
-            "
-          >
-            Sprinkle the scsynth audio engine onto your web page...
-          </p>
+      <!-- Code Section -->
+      <div class="code-section">
+        <div class="code-section__inner">
+          <p class="code-section__intro">Sprinkle the scsynth audio engine onto your web page...</p>
 
           <div class="code-snippets-container">
-            <!-- Import Box -->
             <div class="code-snippet">
-              <p
-                class="code-comment"
-                style="font-size: 0.95rem; color: #e5e7eb"
-              >
-                First, install via npm and import locally
-              </p>
-              <pre
-                style="
-                  background: #2d3748;
-                  color: #e2e8f0;
-                  padding: 0.75rem;
-                  line-height: 1.8;
-                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-                  border-radius: 8px;
-                  border-left: 4px solid #ff1493;
-                  overflow-x: auto;
-                "
-              ><code><span style="color: #75715e;">// npm install supersonic-scsynth</span>
-<span style="color: #bb86fc;">import</span> { <span style="color: #66d9ef;">SuperSonic</span> } <span style="color: #bb86fc;">from</span> <span style="color: #ffd700;">'supersonic-scsynth'</span>;</code></pre>
+              <p class="code-comment">First, install via npm and import locally</p>
+              <pre class="code-block code-block--pink"><code><span class="syn-cmt">// npm install supersonic-scsynth</span>
+<span class="syn-kw">import</span> { <span class="syn-type">SuperSonic</span> } <span class="syn-kw">from</span> <span class="syn-str">'supersonic-scsynth'</span>;</code></pre>
             </div>
 
-            <!-- Initialise Box -->
             <div class="code-snippet">
-              <p
-                class="code-comment"
-                style="font-size: 0.95rem; color: #e5e7eb"
-              >
-                Initialise and you're ready to go
-              </p>
-              <pre
-                style="
-                  background: #2d3748;
-                  color: #e2e8f0;
-                  padding: 0.75rem;
-                  line-height: 1.8;
-                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-                  border-radius: 8px;
-                  border-left: 4px solid #1e90ff;
-                  overflow-x: auto;
-                "
-              ><code><span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">baseURL</span> = <span style="color: #ffd700;">'/your/path/'</span>;
-<span style="color: #bb86fc;">const</span> <span style="color: #66d9ef;">sonic</span> = <span style="color: #bb86fc;">new</span> <span style="color: #66d9ef;">SuperSonic</span>({
-  <span style="color: #ffd700;">workerBaseURL</span>:   <span style="color: #ffd700;">`${baseURL}/workers/`</span>,
-  <span style="color: #ffd700;">wasmBaseURL</span>:     <span style="color: #ffd700;">`${baseURL}/wasm/`</span>,
-  <span style="color: #ffd700;">synthdefBaseURL</span>: <span style="color: #ffd700;">`${baseURL}/synthdefs/`</span>,
-  <span style="color: #ffd700;">sampleBaseURL</span>:   <span style="color: #ffd700;">`${baseURL}/samples/`</span>
+              <p class="code-comment">Initialise and you're ready to go</p>
+              <pre class="code-block code-block--blue"><code><span class="syn-kw">const</span> <span class="syn-type">baseURL</span> = <span class="syn-str">'/your/path/'</span>;
+<span class="syn-kw">const</span> <span class="syn-type">sonic</span> = <span class="syn-kw">new</span> <span class="syn-type">SuperSonic</span>({
+  <span class="syn-str">workerBaseURL</span>:   <span class="syn-str">`${baseURL}/workers/`</span>,
+  <span class="syn-str">wasmBaseURL</span>:     <span class="syn-str">`${baseURL}/wasm/`</span>,
+  <span class="syn-str">synthdefBaseURL</span>: <span class="syn-str">`${baseURL}/synthdefs/`</span>,
+  <span class="syn-str">sampleBaseURL</span>:   <span class="syn-str">`${baseURL}/samples/`</span>
 });
-<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">init</span>();</code></pre>
+<span class="syn-kw">await</span> sonic.<span class="syn-fn">init</span>();</code></pre>
             </div>
 
-            <!-- Play Synth Box -->
             <div class="code-snippet">
-              <p
-                class="code-comment"
-                style="font-size: 0.95rem; color: #e5e7eb"
-              >
-                Load and play a synth
-              </p>
-              <pre
-                style="
-                  background: #2d3748;
-                  color: #e2e8f0;
-                  padding: 0.75rem;
-                  font-size: 0.9rem;
-                  line-height: 1.8;
-                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-                  border-radius: 8px;
-                  border-left: 4px solid #50fa7b;
-                  overflow-x: auto;
-                "
-              ><code><span style="color: #75715e;">// Load synthdef, then play synth</span>
-<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">loadSynthDef</span>(<span style="color: #ffd700;">'sonic-pi-prophet'</span>);
-sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-prophet'</span>, <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>,
-             <span style="color: #ffd700;">'note'</span>, <span style="color: #bd93f9;">60</span>);</code></pre>
+              <p class="code-comment">Load and play a synth</p>
+              <pre class="code-block code-block--green"><code><span class="syn-cmt">// Load synthdef, then play synth</span>
+<span class="syn-kw">await</span> sonic.<span class="syn-fn">loadSynthDef</span>(<span class="syn-str">'sonic-pi-prophet'</span>);
+sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <span class="syn-str">'sonic-pi-prophet'</span>, <span class="syn-num">-1</span>, <span class="syn-num">0</span>, <span class="syn-num">0</span>,
+             <span class="syn-str">'note'</span>, <span class="syn-num">60</span>);</code></pre>
             </div>
 
-            <!-- Load Sample Box -->
             <div class="code-snippet">
-              <p
-                class="code-comment"
-                style="font-size: 0.95rem; color: #e5e7eb"
-              >
-                Load and play a sample
-              </p>
-              <pre
-                style="
-                  background: #2d3748;
-                  color: #e2e8f0;
-                  padding: 0.75rem;
-                  font-size: 0.9rem;
-                  line-height: 1.8;
-                  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-                  border-radius: 8px;
-                  border-left: 4px solid #ffd700;
-                  overflow-x: auto;
-                "
-              ><code><span style="color: #75715e;">// Load synthdef and sample, then play</span>
-sonic.<span style="color: #50fa7b;">loadSynthDef</span>(<span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>);
-sonic.<span style="color: #50fa7b;">loadSample</span>(<span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'bd_haus.flac'</span>);
-<span style="color: #bb86fc;">await</span> sonic.<span style="color: #50fa7b;">sync</span>(); <span style="color: #75715e;">// wait for loads</span>
-sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/s_new'</span>, <span style="color: #ffd700;">'sonic-pi-basic_stereo_player'</span>,
-             <span style="color: #bd93f9;">-1</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #bd93f9;">0</span>, <span style="color: #ffd700;">'buf'</span>, <span style="color: #bd93f9;">0</span>);</code></pre>
+              <p class="code-comment">Load and play a sample</p>
+              <pre class="code-block code-block--gold"><code><span class="syn-cmt">// Load synthdef and sample, then play</span>
+sonic.<span class="syn-fn">loadSynthDef</span>(<span class="syn-str">'sonic-pi-basic_stereo_player'</span>);
+sonic.<span class="syn-fn">loadSample</span>(<span class="syn-num">0</span>, <span class="syn-str">'bd_haus.flac'</span>);
+<span class="syn-kw">await</span> sonic.<span class="syn-fn">sync</span>(); <span class="syn-cmt">// wait for loads</span>
+sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <span class="syn-str">'sonic-pi-basic_stereo_player'</span>,
+             <span class="syn-num">-1</span>, <span class="syn-num">0</span>, <span class="syn-num">0</span>, <span class="syn-str">'buf'</span>, <span class="syn-num">0</span>);</code></pre>
             </div>
           </div>
 
-          <p
-            style="
-              margin-top: 3rem;
-              color: #a0aec0;
-              font-size: 0.75rem;
-              text-align: center;
-            "
-          >
-            Note: Self-hosting required +
-            <code
-              style="
-                background: #2d3748;
-                color: #ffd700;
-                padding: 0.2rem 0.5rem;
-                border-radius: 4px;
-                font-size: 0.75rem;
-              "
-              >COOP/COEP</code
-            >
-            headers — see
-            <a
-              href="https://github.com/samaaron/supersonic"
-              target="_blank"
-              rel="noopener"
-              style="
-                color: #ff1493;
-                text-decoration: none;
-                transition: all 0.3s ease;
-              "
-              onmouseover="this.style.color='#ffd700';"
-              onmouseout="this.style.color='#ff1493';"
-              >README</a
-            >
+          <p class="code-note">
+            Note: Self-hosting required + <code>COOP/COEP</code> headers — see
+            <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener">README</a>
           </p>
         </div>
       </div>
 
-      <!-- Community Support Section -->
-      <div style="max-width: 800px; margin: 0 auto 3rem auto; padding: 0 1rem">
-        <div
-          style="
-            background: white;
-            padding: 2rem 1.5rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
-              0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            border-left: 6px solid #ff1493;
-            margin-bottom: 0;
-            position: relative;
-            overflow: hidden;
-          "
-        >
-          <div
-            style="
-              position: absolute;
-              top: 0;
-              left: 0;
-              width: 100%;
-              height: 4px;
-              background: linear-gradient(
-                101deg,
-                #ff1493 0%,
-                #1e90ff 50%,
-                #ffd700 100%
-              );
-              transform: skewY(-11deg);
-              transform-origin: top left;
-            "
-          ></div>
-          <div style="text-align: center; margin-bottom: 2rem">
-            <h2
-              style="
-                font-size: 1.3rem;
-                font-weight: bold;
-                font-style: italic;
-                color: #ff1493;
-                margin-bottom: 0.75rem;
-                text-transform: none;
-                letter-spacing: 0.05em;
-              "
-            >
-              Brought to you by<br />Sam Aaron
-            </h2>
-            <p
-              style="
-                font-size: 1rem;
-                color: #4b5563;
-                line-height: 1.6;
-                max-width: 600px;
-                margin: 0 auto;
-              "
-            >
+      <!-- Sponsor Section -->
+      <div class="sponsor-section">
+        <div class="sponsor-card">
+          <div class="sponsor-card__accent"></div>
+          <div class="sponsor-header">
+            <h2 class="sponsor-title">Brought to you by<br />Sam Aaron</h2>
+            <p class="sponsor-description">
               Please consider joining the wonderful community<br />
               of supporters enabling Sam's work on<br />
               creative coding projects like this,<br />
-              <a href="https://sonic-pi.net">Sonic Pi</a> and
-              <a href="https://tau5.live">Tau5</a>.
+              <a href="https://sonic-pi.net">Sonic Pi</a> and <a href="https://tau5.live">Tau5</a>.
             </p>
           </div>
-
-          <div
-            style="
-              display: grid;
-              grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-              gap: 2rem;
-              max-width: 600px;
-              margin: 0 auto;
-            "
-          >
-            <div
-              style="
-                text-align: center;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-              "
-            >
-              <a
-                href="https://patreon.com/samaaron"
-                target="_blank"
-                rel="noopener"
-                style="
-                  display: block;
-                  transition: transform 0.3s ease, filter 0.3s ease;
-                "
-                onmouseover="this.style.transform='scale(1.1) rotate(2deg)'; this.style.filter='brightness(1.2) drop-shadow(0 0 20px rgba(255, 20, 147, 0.8))';"
-                onmouseout="this.style.transform='scale(1) rotate(0deg)'; this.style.filter='brightness(1) drop-shadow(0 0 0 transparent)';"
-              >
-                <img
-                  src="assets/patreon-button.png"
-                  alt="Support Sam via Patreon"
-                  style="
-                    width: 200px;
-                    height: 133px;
-                    object-fit: contain;
-                    display: block;
-                  "
-                />
+          <div class="sponsor-grid">
+            <div class="sponsor-item">
+              <a href="https://patreon.com/samaaron" target="_blank" rel="noopener" class="sponsor-link">
+                <img src="assets/patreon-button.png" alt="Support Sam via Patreon" class="sponsor-image" />
               </a>
-              <p
-                style="
-                  margin-top: 0.75rem;
-                  font-weight: bold;
-                  font-style: italic;
-                  color: #1f2937;
-                  font-size: 0.85rem;
-                  min-height: 2.5rem;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  text-transform: uppercase;
-                  letter-spacing: 0.05em;
-                "
-              >
-                Support Sam via Patreon
-              </p>
+              <p class="sponsor-label">Support Sam via Patreon</p>
             </div>
-
-            <div
-              style="
-                text-align: center;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-              "
-            >
-              <a
-                href="https://github.com/sponsors/samaaron"
-                target="_blank"
-                rel="noopener"
-                style="
-                  display: block;
-                  transition: transform 0.3s ease, filter 0.3s ease;
-                "
-                onmouseover="this.style.transform='scale(1.1) rotate(-2deg)'; this.style.filter='brightness(1.2) drop-shadow(0 0 20px rgba(30, 144, 255, 0.8))';"
-                onmouseout="this.style.transform='scale(1) rotate(0deg)'; this.style.filter='brightness(1) drop-shadow(0 0 0 transparent)';"
-              >
-                <img
-                  src="assets/github-sponsors-button.png"
-                  alt="Support via GitHub Sponsors"
-                  style="
-                    width: 200px;
-                    height: 133px;
-                    object-fit: contain;
-                    display: block;
-                  "
-                />
+            <div class="sponsor-item">
+              <a href="https://github.com/sponsors/samaaron" target="_blank" rel="noopener" class="sponsor-link sponsor-link--alt">
+                <img src="assets/github-sponsors-button.png" alt="Support via GitHub Sponsors" class="sponsor-image" />
               </a>
-              <p
-                style="
-                  margin-top: 0.75rem;
-                  font-weight: bold;
-                  font-style: italic;
-                  color: #1f2937;
-                  font-size: 0.85rem;
-                  min-height: 2.5rem;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  text-transform: uppercase;
-                  letter-spacing: 0.05em;
-                "
-              >
-                Support Sam via GitHub Sponsors
-              </p>
+              <p class="sponsor-label">Support Sam via GitHub Sponsors</p>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Synth UI Container -->
+      <!-- Demo Section -->
       <div id="demo"></div>
       <div id="synth-ui-container" class="synth-ui-container">
-        <!-- Unified Black Container -->
-        <div
-          class="panel dark-panel"
-          style="padding: 0.75rem; margin-bottom: 0"
-        >
-          <!-- Init Button (spans full width at top) -->
-          <div
-            id="init-button-container"
-            style="
-              height: 160px;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              margin-bottom: 0.75rem;
-              gap: 1rem;
-            "
-          >
+        <div class="panel dark-panel" style="padding: 0.75rem; margin-bottom: 0">
+          <!-- Init Button -->
+          <div id="init-button-container" style="height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 0.75rem; gap: 1rem;">
             <p style="margin: 0 0 1.5rem 0; color: #999; font-style: italic; font-size: 1.1rem; text-align: center;">
               This is a simple playful demo of SuperSonic's audio engine - have fun making noise!
             </p>
-            <button
-              id="init-button"
-              class="btn-init"
-              style="font-size: 1.25rem; padding: 0.75rem 2rem"
-            >
-              Boot Demo
-            </button>
+            <button id="init-button" class="btn-init" style="font-size: 1.25rem; padding: 0.75rem 2rem">Boot Demo</button>
           </div>
 
-          <!-- Scope Visualiser (spans full width at top) -->
-          <div
-            id="scope-container"
-            style="height: 160px; margin-bottom: 0.75rem; display: none"
-          >
+          <!-- Scope Visualiser -->
+          <div id="scope-container" style="height: 160px; margin-bottom: 0.75rem; display: none">
             <canvas id="scope-canvas" class="scope-canvas"></canvas>
           </div>
 
-          <!-- Loading log - sibling to main-layout-grid to escape grayscale filter -->
+          <!-- Loading Log -->
           <div id="loading-log" class="loading-log">
             <div class="loading-log-inner">
               <div class="loading-log-header">
@@ -742,44 +183,24 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
           </div>
 
           <div class="main-layout-grid">
-            <!-- Left Column: Tabs (Playground / OSC API) -->
+            <!-- Left Column -->
             <div class="left-column">
-              <!-- Main Content Tabs -->
               <div class="main-tabs" style="padding: 0; margin-bottom: 1rem">
-                <button
-                  class="main-tab-button active"
-                  data-main-tab="playground"
-                >
-                  Playground
-                </button>
-                <button class="main-tab-button" data-main-tab="osc-api">
-                  OSC API
-                </button>
+                <button class="main-tab-button active" data-main-tab="playground">Playground</button>
+                <button class="main-tab-button" data-main-tab="osc-api">OSC API</button>
               </div>
 
-              <!-- Playground Tab Content -->
-              <div
-                class="main-tab-content active"
-                data-main-tab-content="playground"
-              >
-                <!-- 2D Synth Pad -->
+              <!-- Playground Tab -->
+              <div class="main-tab-content active" data-main-tab-content="playground">
                 <div class="synth-pad-section">
                   <div class="synth-pad-container">
                     <div id="synth-pad" class="synth-pad">
                       <div class="synth-pad-grid"></div>
                       <canvas id="trail-canvas" class="trail-canvas"></canvas>
-                      <div id="synth-pad-prompt" class="synth-pad-prompt">
-                        Click/Tap & Drag
-                      </div>
+                      <div id="synth-pad-prompt" class="synth-pad-prompt">Click/Tap & Drag</div>
                       <div id="synth-pad-crosshair" class="synth-pad-crosshair">
-                        <div
-                          id="synth-pad-crosshair-h"
-                          class="synth-pad-crosshair-h"
-                        ></div>
-                        <div
-                          id="synth-pad-crosshair-v"
-                          class="synth-pad-crosshair-v"
-                        ></div>
+                        <div id="synth-pad-crosshair-h" class="synth-pad-crosshair-h"></div>
+                        <div id="synth-pad-crosshair-v" class="synth-pad-crosshair-v"></div>
                       </div>
                       <div id="synth-pad-touch" class="synth-pad-touch"></div>
                       <div id="synth-pad-coords" class="synth-pad-coords">
@@ -836,7 +257,6 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                         <option value="zawa">Zawa</option>
                       </select>
                     </div>
-
                     <div class="slider-control">
                       <label>Loop Sample</label>
                       <select id="loop-select">
@@ -848,116 +268,39 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                         <option value="loop_tabla">Tabla</option>
                       </select>
                     </div>
-
                     <div class="slider-control">
                       <label>Random Arp</label>
-                      <button
-                        id="random-arp-toggle"
-                        class="toggle-button"
-                        data-active="true"
-                      >
-                        On
-                      </button>
+                      <button id="random-arp-toggle" class="toggle-button" data-active="true">On</button>
                     </div>
-
                     <div class="slider-control">
-                      <label>
-                        BPM
-                        <span id="bpm-value" class="slider-value">120</span>
-                      </label>
-                      <input
-                        type="range"
-                        id="bpm-slider"
-                        min="20"
-                        max="500"
-                        value="120"
-                        step="1"
-                      />
+                      <label>BPM <span id="bpm-value" class="slider-value">120</span></label>
+                      <input type="range" id="bpm-slider" min="20" max="500" value="120" step="1" />
                     </div>
-
                     <div class="slider-control">
-                      <label>
-                        Root Note
-                        <span id="root-note-value" class="slider-value"
-                          >60</span
-                        >
-                      </label>
-                      <input
-                        type="range"
-                        id="root-note-slider"
-                        min="24"
-                        max="96"
-                        value="60"
-                        step="1"
-                      />
+                      <label>Root Note <span id="root-note-value" class="slider-value">60</span></label>
+                      <input type="range" id="root-note-slider" min="24" max="96" value="60" step="1" />
                     </div>
-
                     <div class="slider-control">
-                      <label>
-                        Octaves
-                        <span id="octaves-value" class="slider-value">2</span>
-                      </label>
-                      <input
-                        type="range"
-                        id="octaves-slider"
-                        min="1"
-                        max="5"
-                        value="2"
-                        step="1"
-                      />
+                      <label>Octaves <span id="octaves-value" class="slider-value">2</span></label>
+                      <input type="range" id="octaves-slider" min="1" max="5" value="2" step="1" />
                     </div>
-
                     <div class="slider-control">
-                      <label>
-                        Attack
-                        <span id="attack-value" class="slider-value">0.00</span>
-                      </label>
-                      <input
-                        type="range"
-                        id="attack-slider"
-                        min="0"
-                        max="2"
-                        value="0"
-                        step="0.01"
-                      />
+                      <label>Attack <span id="attack-value" class="slider-value">0.00</span></label>
+                      <input type="range" id="attack-slider" min="0" max="2" value="0" step="0.01" />
                     </div>
-
                     <div class="slider-control">
-                      <label>
-                        Release
-                        <span id="release-value" class="slider-value"
-                          >0.10</span
-                        >
-                      </label>
-                      <input
-                        type="range"
-                        id="release-slider"
-                        min="0"
-                        max="5"
-                        value="0.1"
-                        step="0.01"
-                      />
+                      <label>Release <span id="release-value" class="slider-value">0.10</span></label>
+                      <input type="range" id="release-slider" min="0" max="5" value="0.1" step="0.01" />
                     </div>
                   </div>
                 </div>
               </div>
 
-              <!-- OSC API Tab Content -->
+              <!-- OSC API Tab -->
               <div class="main-tab-content" data-main-tab-content="osc-api">
-                <!-- Error/Warning Messages -->
                 <div id="error-message" class="hidden alert alert-error">
-                  <svg
-                    class="alert-icon"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    ></path>
+                  <svg class="alert-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                   </svg>
                   <div>
                     <h3 class="alert-title">Error</h3>
@@ -966,278 +309,111 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 </div>
 
                 <div id="warning-message" class="hidden alert alert-warning">
-                  <svg
-                    class="alert-icon"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                    ></path>
+                  <svg class="alert-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
                   </svg>
-                  <div>
-                    <p id="warning-text" class="alert-text"></p>
-                  </div>
+                  <div><p id="warning-text" class="alert-text"></p></div>
                 </div>
 
-                <!-- Welcome Guide -->
                 <div class="welcome-guide">
                   <h2>Welcome to SuperSonic</h2>
-
                   <ol>
-                    <li>
-                      <span class="welcome-text">
-                        <strong>Available Synths</strong> — Many synths are
-                        pre-loaded and ready to use:
-                        <code class="welcome-code-block"
-                          >sonic-pi-beep, sonic-pi-dsaw, sonic-pi-prophet,
-                          sonic-pi-tb303, sonic-pi-fm...</code
-                        >
-                      </span>
-                    </li>
-
-                    <li>
-                      <span class="welcome-text">
-                        <strong>Play a Synth</strong> — Create a synth using
-                        <span class="welcome-code">/s_new</span>:
-                      </span>
-                      <code class="welcome-code-block"
-                        >/s_new sonic-pi-beep -1 0 0 note 72</code
-                      >
-                      <span
-                        class="welcome-text"
-                        style="font-size: 0.85em; opacity: 0.9"
-                      >
-                        The <span class="welcome-code">-1</span> auto-assigns a
-                        node ID, <span class="welcome-code">note</span> sets the
-                        MIDI pitch
-                      </span>
-                    </li>
-
-                    <li>
-                      <span class="welcome-text">
-                        <strong>Load Loop Samples</strong> — Click "Load
-                        Samples" to load these pre-configured loops into buffers
-                        1-6:
-                      </span>
-                      <code class="welcome-code-block"
-                        >Buffer 1: loop_amen.flac Buffer 2: loop_breakbeat.flac
-                        Buffer 3: loop_compus.flac Buffer 4: loop_garzul.flac
-                        Buffer 5: loop_industrial.flac Buffer 6:
-                        loop_tabla.flac</code
-                      >
-                      <span
-                        class="welcome-text"
-                        style="font-size: 0.85em; opacity: 0.9"
-                      >
-                        After loading, use these buffer IDs (1-6) to play the
-                        loops
-                      </span>
-                    </li>
-
-                    <li>
-                      <span class="welcome-text">
-                        <strong>Load Additional Samples</strong> — Click "Load
-                        Samples" for API samples, or load custom ones:
-                      </span>
-                      <code class="welcome-code-block"
-                        >/b_allocRead 10 ambi_choir.flac /b_allocRead 11
-                        bd_haus.flac /b_allocRead 12 elec_ping.flac</code
-                      >
-                      <span
-                        class="welcome-text"
-                        style="font-size: 0.85em; opacity: 0.9"
-                      >
-                        The first number is the buffer ID (use 10+ to avoid 1-6
-                        which are reserved for pre-loaded loops)
-                      </span>
-                    </li>
-
-                    <li>
-                      <span class="welcome-text">
-                        <strong>Trigger Samples</strong> — Play samples using
-                        the stereo or mono player:
-                      </span>
-                      <code class="welcome-code-block"
-                        >/s_new sonic-pi-basic_stereo_player -1 0 0 buf 1 /s_new
-                        sonic-pi-basic_stereo_player -1 0 0 buf 3 rate 1.2</code
-                      >
-                      <span
-                        class="welcome-text"
-                        style="font-size: 0.85em; opacity: 0.9"
-                      >
-                        <span class="welcome-code">buf</span> uses the buffer ID
-                        (1-6 for pre-loaded loops),
-                        <span class="welcome-code">rate</span> changes playback
-                        speed
-                      </span>
-                    </li>
-
-                    <li>
-                      <span class="welcome-text">
-                        <strong>Schedule Sequences</strong> — Add times at the
-                        start to create rhythms:
-                      </span>
-                      <code class="welcome-code-block"
-                        >0.0 /s_new sonic-pi-beep -1 0 0 note 60 0.5 /s_new
-                        sonic-pi-beep -1 0 0 note 64 1.0 /s_new sonic-pi-beep -1
-                        0 0 note 67</code
-                      >
-                    </li>
-
-                    <li>
-                      <span class="welcome-text">
-                        <strong>Explore!</strong> — Check out the
-                        <a
-                          href="https://doc.sccode.org/Reference/Server-Command-Reference.html"
-                          target="_blank"
-                          class="welcome-link"
-                          >scsynth OSC docs</a
-                        >
-                        or switch to the Playground tab to jam with the
-                        interactive synth pad!
-                      </span>
-                    </li>
+                    <li><span class="welcome-text"><strong>Available Synths</strong> — Many synths are pre-loaded and ready to use:<code class="welcome-code-block">sonic-pi-beep, sonic-pi-dsaw, sonic-pi-prophet, sonic-pi-tb303, sonic-pi-fm...</code></span></li>
+                    <li><span class="welcome-text"><strong>Play a Synth</strong> — Create a synth using <span class="welcome-code">/s_new</span>:</span><code class="welcome-code-block">/s_new sonic-pi-beep -1 0 0 note 72</code><span class="welcome-text" style="font-size: 0.85em; opacity: 0.9">The <span class="welcome-code">-1</span> auto-assigns a node ID, <span class="welcome-code">note</span> sets the MIDI pitch</span></li>
+                    <li><span class="welcome-text"><strong>Load Loop Samples</strong> — Click "Load Samples" to load these pre-configured loops into buffers 1-6:</span><code class="welcome-code-block">Buffer 1: loop_amen.flac Buffer 2: loop_breakbeat.flac Buffer 3: loop_compus.flac Buffer 4: loop_garzul.flac Buffer 5: loop_industrial.flac Buffer 6: loop_tabla.flac</code><span class="welcome-text" style="font-size: 0.85em; opacity: 0.9">After loading, use these buffer IDs (1-6) to play the loops</span></li>
+                    <li><span class="welcome-text"><strong>Load Additional Samples</strong> — Click "Load Samples" for API samples, or load custom ones:</span><code class="welcome-code-block">/b_allocRead 10 ambi_choir.flac /b_allocRead 11 bd_haus.flac /b_allocRead 12 elec_ping.flac</code><span class="welcome-text" style="font-size: 0.85em; opacity: 0.9">The first number is the buffer ID (use 10+ to avoid 1-6 which are reserved for pre-loaded loops)</span></li>
+                    <li><span class="welcome-text"><strong>Trigger Samples</strong> — Play samples using the stereo or mono player:</span><code class="welcome-code-block">/s_new sonic-pi-basic_stereo_player -1 0 0 buf 1 /s_new sonic-pi-basic_stereo_player -1 0 0 buf 3 rate 1.2</code><span class="welcome-text" style="font-size: 0.85em; opacity: 0.9"><span class="welcome-code">buf</span> uses the buffer ID (1-6 for pre-loaded loops), <span class="welcome-code">rate</span> changes playback speed</span></li>
+                    <li><span class="welcome-text"><strong>Schedule Sequences</strong> — Add times at the start to create rhythms:</span><code class="welcome-code-block">0.0 /s_new sonic-pi-beep -1 0 0 note 60 0.5 /s_new sonic-pi-beep -1 0 0 note 64 1.0 /s_new sonic-pi-beep -1 0 0 note 67</code></li>
+                    <li><span class="welcome-text"><strong>Explore!</strong> — Check out the <a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" class="welcome-link">scsynth OSC docs</a> or switch to the Playground tab to jam with the interactive synth pad!</span></li>
                   </ol>
-
-                  <p class="welcome-quickstart">
-                    <span class="welcome-label">Quick Start:</span>
-                    Click "Load Example" to load up some example API calls then
-                    hit "Send".
-                  </p>
+                  <p class="welcome-quickstart"><span class="welcome-label">Quick Start:</span> Click "Load Example" to load up some example API calls then hit "Send".</p>
                 </div>
 
-                <!-- Send Message / OSC API -->
                 <div>
                   <h2>Choose your own OSC...</h2>
                   <form id="message-form">
                     <div class="form-group" style="margin-bottom: 0.5rem">
-                      <textarea
-                        id="message-input"
-                        placeholder="Single: /s_new sonic-pi-beep 1001 0 0 note 72&#10;Scheduled:&#10;0 /s_new 1 0 0 note 60&#10;0.5 /s_new 2 0 0 note 64"
-                        rows="10"
-                        disabled
-                        spellcheck="false"
-                        autocomplete="off"
-                        autocorrect="off"
-                        autocapitalize="off"
-                      ></textarea>
+                      <textarea id="message-input" placeholder="Single: /s_new sonic-pi-beep 1001 0 0 note 72&#10;Scheduled:&#10;0 /s_new 1 0 0 note 60&#10;0.5 /s_new 2 0 0 note 64" rows="10" disabled spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
                     </div>
                     <div class="button-container">
                       <div class="button-row button-row-secondary">
-                        <button
-                          type="button"
-                          id="load-example-button"
-                          class="btn-green"
-                          disabled
-                        >
-                          Load Example
-                        </button>
+                        <button type="button" id="load-example-button" class="btn-green" disabled>Load Example</button>
                       </div>
                       <div class="button-row button-row-primary">
-                        <button
-                          type="button"
-                          id="clear-button"
-                          class="btn-secondary"
-                          disabled
-                        >
-                          Clear
-                        </button>
-                        <button type="submit" class="btn-primary" disabled>
-                          Send
-                        </button>
+                        <button type="button" id="clear-button" class="btn-secondary" disabled>Clear</button>
+                        <button type="submit" class="btn-primary" disabled>Send</button>
                       </div>
                     </div>
                   </form>
                 </div>
-                <!-- End Send Message / OSC API div -->
               </div>
-              <!-- End OSC API Tab Content -->
 
-              <!-- Performance Metrics (below tabs in left column) -->
+              <!-- Metrics -->
               <div id="performance-metrics" class="metrics-section" style="margin-top: 1rem;">
                 <div class="metrics-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem;">
-                  <!-- Row 1 -->
-                  <!-- Messages -->
-                  <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Messages</div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>sent</span><span><span id="metric-sent" style="color: #ffd700">0</span><span style="color: #444"> / </span><span id="metric-bytes-sent" style="color: #555">0 B</span></span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>received</span><span><span id="metric-received" style="color: #ffd700">0</span><span style="color: #444"> / </span><span id="metric-bytes-received" style="color: #555">0 B</span></span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>direct</span><span id="metric-direct-writes" style="color: #4a4">0</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>dropped</span><span id="metric-osc-in-dropped" style="color: #a44">0</span></div>
+                  <div class="metrics-panel">
+                    <div class="metrics-panel__title">Messages</div>
+                    <div class="metrics-row"><span>sent</span><span><span id="metric-sent" class="metrics-val">0</span><span class="metrics-sep"> / </span><span id="metric-bytes-sent" class="metrics-val--muted">0 B</span></span></div>
+                    <div class="metrics-row"><span>received</span><span><span id="metric-received" class="metrics-val">0</span><span class="metrics-sep"> / </span><span id="metric-bytes-received" class="metrics-val--muted">0 B</span></span></div>
+                    <div class="metrics-row"><span>direct</span><span id="metric-direct-writes" class="metrics-val--green">0</span></div>
+                    <div class="metrics-row"><span>dropped</span><span id="metric-osc-in-dropped" class="metrics-val--red">0</span></div>
                   </div>
-                  <!-- PreScheduler -->
-                  <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">PreScheduler</div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>pending</span><span><span id="metric-prescheduler-pending" style="color: #ffd700">0</span><span style="color: #444"> / </span><span id="metric-prescheduler-peak" style="color: #555">0</span></span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>sent</span><span id="metric-prescheduler-sent" style="color: #ffd700">0</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>scheduled</span><span id="metric-bundles-scheduled" style="color: #666">0</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>cancelled</span><span id="metric-events-cancelled" style="color: #a44">0</span></div>
+                  <div class="metrics-panel">
+                    <div class="metrics-panel__title">PreScheduler</div>
+                    <div class="metrics-row"><span>pending</span><span><span id="metric-prescheduler-pending" class="metrics-val">0</span><span class="metrics-sep"> / </span><span id="metric-prescheduler-peak" class="metrics-val--muted">0</span></span></div>
+                    <div class="metrics-row"><span>sent</span><span id="metric-prescheduler-sent" class="metrics-val">0</span></div>
+                    <div class="metrics-row"><span>scheduled</span><span id="metric-bundles-scheduled" class="metrics-val--dim">0</span></div>
+                    <div class="metrics-row"><span>cancelled</span><span id="metric-events-cancelled" class="metrics-val--red">0</span></div>
                   </div>
-                  <!-- Scheduler -->
-                  <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Scheduler</div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>queue</span><span><span id="metric-scheduler-depth" style="color: #ffd700">0</span><span style="color: #444"> / </span><span id="metric-scheduler-peak" style="color: #555">0</span></span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>dropped</span><span id="metric-scheduler-dropped" style="color: #a44">0</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>clock drift</span><span id="metric-drift" style="color: #ffd700">0ms</span></div>
+                  <div class="metrics-panel">
+                    <div class="metrics-panel__title">Scheduler</div>
+                    <div class="metrics-row"><span>queue</span><span><span id="metric-scheduler-depth" class="metrics-val">0</span><span class="metrics-sep"> / </span><span id="metric-scheduler-peak" class="metrics-val--muted">0</span></span></div>
+                    <div class="metrics-row"><span>dropped</span><span id="metric-scheduler-dropped" class="metrics-val--red">0</span></div>
+                    <div class="metrics-row"><span>clock drift</span><span id="metric-drift" class="metrics-val">0ms</span></div>
                   </div>
-                  <!-- Processing -->
-                  <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Processing</div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>processed</span><span id="metric-messages-processed" style="color: #ffd700">0</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>dropped</span><span id="metric-messages-dropped" style="color: #a44">0</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>seq gaps</span><span id="metric-sequence-gaps" style="color: #a44">0</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>ticks</span><span id="metric-process-count" style="color: #666">0</span></div>
+                  <div class="metrics-panel">
+                    <div class="metrics-panel__title">Processing</div>
+                    <div class="metrics-row"><span>processed</span><span id="metric-messages-processed" class="metrics-val">0</span></div>
+                    <div class="metrics-row"><span>dropped</span><span id="metric-messages-dropped" class="metrics-val--red">0</span></div>
+                    <div class="metrics-row"><span>seq gaps</span><span id="metric-sequence-gaps" class="metrics-val--red">0</span></div>
+                    <div class="metrics-row"><span>ticks</span><span id="metric-process-count" class="metrics-val--dim">0</span></div>
                   </div>
-                  <!-- Row 2 -->
-                  <!-- Retries -->
-                  <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Retries</div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>ok / fail</span><span><span id="metric-prescheduler-retries-succeeded" style="color: #4a4">0</span><span style="color: #444"> / </span><span id="metric-prescheduler-retries-failed" style="color: #a44">0</span></span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>queue</span><span><span id="metric-prescheduler-retry-queue-size" style="color: #ffd700">0</span><span style="color: #444"> / </span><span id="metric-prescheduler-retry-queue-max" style="color: #555">0</span></span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>retried</span><span id="metric-messages-retried" style="color: #666">0</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>dispatches</span><span id="metric-total-dispatches" style="color: #666">0</span></div>
+                  <div class="metrics-panel">
+                    <div class="metrics-panel__title">Retries</div>
+                    <div class="metrics-row"><span>ok / fail</span><span><span id="metric-prescheduler-retries-succeeded" class="metrics-val--green">0</span><span class="metrics-sep"> / </span><span id="metric-prescheduler-retries-failed" class="metrics-val--red">0</span></span></div>
+                    <div class="metrics-row"><span>queue</span><span><span id="metric-prescheduler-retry-queue-size" class="metrics-val">0</span><span class="metrics-sep"> / </span><span id="metric-prescheduler-retry-queue-max" class="metrics-val--muted">0</span></span></div>
+                    <div class="metrics-row"><span>retried</span><span id="metric-messages-retried" class="metrics-val--dim">0</span></div>
+                    <div class="metrics-row"><span>dispatches</span><span id="metric-total-dispatches" class="metrics-val--dim">0</span></div>
                   </div>
-                  <!-- Ring Buffers -->
-                  <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.8rem 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Ring Buffers</div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem;"><span style="color: #888; width: 20px">in</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-in-bar" style="height: 100%; background: #1e90ff; width: 0%; transition: width 0.3s;"></div></div><span id="metric-in-usage" style="color: #1e90ff; width: 28px; text-align: right;">0%</span></div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem;"><span style="color: #888; width: 20px">out</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-out-bar" style="height: 100%; background: #4a4; width: 0%; transition: width 0.3s;"></div></div><span id="metric-out-usage" style="color: #4a4; width: 28px; text-align: right;">0%</span></div>
-                    <div style="display: flex; align-items: center; gap: 0.5rem;"><span style="color: #888; width: 20px">dbg</span><div style="flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden;"><div id="metric-debug-bar" style="height: 100%; background: #a4a; width: 0%; transition: width 0.3s;"></div></div><span id="metric-debug-usage" style="color: #a4a; width: 28px; text-align: right;">0%</span></div>
+                  <div class="metrics-panel metrics-panel--wide">
+                    <div class="metrics-panel__title">Ring Buffers</div>
+                    <div class="metrics-bar-row"><span class="metrics-bar-label">in</span><div class="metrics-bar-track"><div id="metric-in-bar" class="metrics-bar-fill metrics-bar-fill--blue" style="width: 0%;"></div></div><span id="metric-in-usage" class="metrics-bar-value" style="color: var(--c-blue);">0%</span></div>
+                    <div class="metrics-bar-row"><span class="metrics-bar-label">out</span><div class="metrics-bar-track"><div id="metric-out-bar" class="metrics-bar-fill metrics-bar-fill--green" style="width: 0%;"></div></div><span id="metric-out-usage" class="metrics-bar-value" style="color: #4a4;">0%</span></div>
+                    <div class="metrics-bar-row"><span class="metrics-bar-label">dbg</span><div class="metrics-bar-track"><div id="metric-debug-bar" class="metrics-bar-fill metrics-bar-fill--purple" style="width: 0%;"></div></div><span id="metric-debug-usage" class="metrics-bar-value" style="color: #a4a;">0%</span></div>
                   </div>
-                  <!-- Engine State -->
-                  <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Engine</div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>audio</span><span id="metric-audio-state" style="color: #4a4">-</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>synthdefs</span><span id="metric-synthdefs" style="color: #ffd700">0</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>debug</span><span><span id="metric-debug-received" style="color: #888">0</span><span style="color: #444"> / </span><span id="metric-debug-bytes-received" style="color: #555">0 B</span></span></div>
+                  <div class="metrics-panel">
+                    <div class="metrics-panel__title">Engine</div>
+                    <div class="metrics-row"><span>audio</span><span id="metric-audio-state" class="metrics-val--green">-</span></div>
+                    <div class="metrics-row"><span>synthdefs</span><span id="metric-synthdefs" class="metrics-val">0</span></div>
+                    <div class="metrics-row"><span>debug</span><span><span id="metric-debug-received" style="color: #888;">0</span><span class="metrics-sep"> / </span><span id="metric-debug-bytes-received" class="metrics-val--muted">0 B</span></span></div>
                   </div>
-                  <!-- Buffer Pool -->
-                  <div style="background: #1a1a1a; border-radius: 4px; padding: 0.3rem 0.4rem;">
-                    <div style="color: #666; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.15rem;">Buffers</div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>used</span><span id="metric-buffer-used" style="color: #ffd700">0 B</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>free</span><span id="metric-buffer-free" style="color: #4a4">0 B</span></div>
-                    <div style="display: flex; justify-content: space-between; color: #888;"><span>allocs</span><span id="metric-buffer-allocs" style="color: #666">0</span></div>
+                  <div class="metrics-panel">
+                    <div class="metrics-panel__title">Buffers</div>
+                    <div class="metrics-row"><span>used</span><span id="metric-buffer-used" class="metrics-val">0 B</span></div>
+                    <div class="metrics-row"><span>free</span><span id="metric-buffer-free" class="metrics-val--green">0 B</span></div>
+                    <div class="metrics-row"><span>allocs</span><span id="metric-buffer-allocs" class="metrics-val--dim">0</span></div>
                   </div>
                 </div>
               </div>
             </div>
-            <!-- End Left Column -->
 
-            <!-- Draggable Divider -->
+            <!-- Divider -->
             <div class="divider" id="column-divider"></div>
 
-            <!-- Right Column: Logs (Always Visible) -->
+            <!-- Right Column -->
             <div class="right-column">
-              <!-- Node Tree Visualization -->
               <div id="node-tree-panel" class="log-container" style="border-bottom: none;">
-                <div class="log-container-header">
-                  <h2>Node Tree</h2>
-                </div>
+                <div class="log-container-header"><h2>Node Tree</h2></div>
                 <div id="node-tree-stats" style="position: absolute; top: 0.25rem; left: 0.5rem; z-index: 5; font-size: 0.65em; color: #888; display: flex; gap: 10px; background: rgba(0,0,0,0.7); padding: 0.1rem 0.3rem;">
                   <span style="color: #ff8c00;">Groups: <span id="stat-groups">0</span></span>
                   <span style="color: #ff00ff;">FX: <span id="stat-fx">0</span></span>
@@ -1251,152 +427,61 @@ sonic.<span style="color: #50fa7b;">send</span>(<span style="color: #ffd700;">'/
                 </div>
               </div>
 
-              <!-- Logs Section -->
               <div class="logs-section">
-                <!-- Tab buttons (mobile only) -->
                 <div class="tab-buttons">
-                  <button class="tab-button active" data-tab="debug">
-                    Scsynth Info
-                  </button>
-                  <button class="tab-button" data-tab="osc-out">
-                    OSC to Scsynth
-                  </button>
-                  <button class="tab-button" data-tab="osc-in">
-                    OSC from Scsynth
-                  </button>
+                  <button class="tab-button active" data-tab="debug">Scsynth Info</button>
+                  <button class="tab-button" data-tab="osc-out">OSC to Scsynth</button>
+                  <button class="tab-button" data-tab="osc-in">OSC from Scsynth</button>
                 </div>
-
-                <!-- Logs stacked vertically -->
                 <div class="logs-grid">
-                  <!-- Debug Log -->
                   <div class="tab-content active" data-tab-content="debug">
                     <div class="log-container">
-                      <div class="log-container-header">
-                        <h2>Scsynth Info</h2>
-                      </div>
-                      <div class="log-scroll-area">
-                        <pre id="debug-log"></pre>
-                      </div>
+                      <div class="log-container-header"><h2>Scsynth Info</h2></div>
+                      <div class="log-scroll-area"><pre id="debug-log"></pre></div>
                     </div>
                   </div>
-
-                  <!-- OSC to scsynth -->
                   <div class="tab-content" data-tab-content="osc-out">
                     <div class="log-container">
-                      <div class="log-container-header">
-                        <h2>OSC to Scsynth</h2>
-                      </div>
-                      <div
-                        id="sent-message-history"
-                        class="message-history log-scroll-area"
-                      >
+                      <div class="log-container-header"><h2>OSC to Scsynth</h2></div>
+                      <div id="sent-message-history" class="message-history log-scroll-area">
                         <p class="message-empty">No messages sent yet</p>
                       </div>
                     </div>
                   </div>
-
-                  <!-- OSC from scsynth -->
                   <div class="tab-content" data-tab-content="osc-in">
                     <div class="log-container">
-                      <div class="log-container-header">
-                        <h2>OSC from Scsynth</h2>
-                      </div>
-                      <div
-                        id="message-history"
-                        class="message-history log-scroll-area"
-                      >
+                      <div class="log-container-header"><h2>OSC from Scsynth</h2></div>
+                      <div id="message-history" class="message-history log-scroll-area">
                         <p class="message-empty">No messages received yet</p>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-              <!-- End Logs Section -->
             </div>
-            <!-- End Right Column -->
           </div>
-          <!-- End Main Layout Grid -->
 
-          <!-- Hue Control (Full Width) -->
-          <div
-            class="slider-control"
-            style="
-              padding: 0.75rem;
-              padding-top: 0.5rem;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              gap: 0.3rem;
-              border-bottom: 1px solid #333;
-            "
-          >
+          <!-- Hue Control -->
+          <div class="slider-control" style="padding: 0.75rem; padding-top: 0.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; border-bottom: 1px solid #333;">
             <div style="width: 300px">
               <label id="hue-label">Hue</label>
-              <input
-                type="range"
-                id="hue-slider"
-                min="0"
-                max="360"
-                value="200"
-                step="1"
-              />
+              <input type="range" id="hue-slider" min="0" max="360" value="200" step="1" />
             </div>
           </div>
         </div>
-        <!-- End Unified Black Container -->
       </div>
-      <!-- End Synth UI Container -->
-
     </div>
 
-    <div id="restart-container" style="display: none; text-align: center; padding: 1rem 0;">
-      <button
-        id="reset-button"
-        style="
-          background: transparent;
-          border: 1px solid #6b7280;
-          color: #6b7280;
-          padding: 0.25rem 0.75rem;
-          font-size: 0.75rem;
-          font-family: inherit;
-          cursor: pointer;
-        "
-      >
-        Restart
-      </button>
+    <!-- Restart Container -->
+    <div id="restart-container" class="restart-container" style="display: none;">
+      <button id="reset-button" class="restart-button">Restart</button>
     </div>
 
     <!-- Audio Suspended Overlay -->
-    <div
-      id="suspended-overlay"
-      style="
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.85);
-        z-index: 1000;
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-        gap: 1rem;
-      "
-    >
-      <div style="color: #ff6600; font-size: 1.5rem; font-weight: bold;">
-        Audio Suspended
-      </div>
-      <div style="color: #9ca3af; font-size: 0.875rem; max-width: 300px; text-align: center;">
-        The browser has paused audio playback. Click below to restart.
-      </div>
-      <button
-        id="resume-button"
-        class="btn-init"
-        style="font-size: 1.25rem; padding: 0.75rem 2rem; margin-top: 1rem;"
-      >
-        Resume Audio
-      </button>
+    <div id="suspended-overlay" class="suspended-overlay">
+      <div class="suspended-overlay__title">Audio Suspended</div>
+      <div class="suspended-overlay__text">The browser has paused audio playback. Click below to restart.</div>
+      <button id="resume-button" class="btn-init" style="font-size: 1.25rem; padding: 0.75rem 2rem; margin-top: 1rem;">Resume Audio</button>
     </div>
 
     <script type="module" src="assets/app.js"></script>

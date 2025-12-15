@@ -3,13 +3,40 @@ import { NodeTreeViz } from './node_tree_viz.js';
 
 // ===== CONFIGURATION =====
 const DEV_MODE = false;
-const NTP_EPOCH_OFFSET = 2208988800;
-const LOOKAHEAD = 0.1;
+const NTP_EPOCH_OFFSET = 2208988800;  // Seconds between Unix epoch (1970) and NTP epoch (1900)
+const LOOKAHEAD = 0.1;                // Seconds to schedule ahead for timing accuracy
 
-// Groups and buses
-const GROUP_ARP = 100, GROUP_FX = 101, GROUP_LOOPS = 102, GROUP_KICK = 103;
-const FX_BUS_SYNTH_TO_LPF = 20, FX_BUS_LPF_TO_REVERB = 22, FX_BUS_OUTPUT = 0;
-const FX_LPF_NODE = 2000, FX_REVERB_NODE = 2001;
+// OSC bundle header: ASCII "#bundle\0"
+const OSC_BUNDLE_HEADER = new Uint8Array([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00]);
+
+// Scsynth node groups (keep synths organized in the node tree)
+const GROUP_ARP = 100;
+const GROUP_FX = 101;
+const GROUP_LOOPS = 102;
+const GROUP_KICK = 103;
+
+// Audio buses for FX chain routing
+const FX_BUS_SYNTH_TO_LPF = 20;   // Synths output here
+const FX_BUS_LPF_TO_REVERB = 22;  // LPF outputs to reverb
+const FX_BUS_OUTPUT = 0;          // Final output (main out)
+
+// FX node IDs
+const FX_LPF_NODE = 2000;
+const FX_REVERB_NODE = 2001;
+
+// Available synthdefs (Sonic Pi synths)
+const FX_SYNTHDEFS = ['sonic-pi-fx_lpf', 'sonic-pi-fx_reverb', 'sonic-pi-basic_stereo_player'];
+const INSTRUMENT_SYNTHDEFS = [
+  'sonic-pi-bass_foundation', 'sonic-pi-beep', 'sonic-pi-blade', 'sonic-pi-bnoise',
+  'sonic-pi-chipbass', 'sonic-pi-chiplead', 'sonic-pi-dark_ambience', 'sonic-pi-dpulse',
+  'sonic-pi-dsaw', 'sonic-pi-dtri', 'sonic-pi-fm', 'sonic-pi-gabberkick',
+  'sonic-pi-hollow', 'sonic-pi-mod_dsaw', 'sonic-pi-mod_fm', 'sonic-pi-mod_pulse',
+  'sonic-pi-mod_saw', 'sonic-pi-mod_sine', 'sonic-pi-mod_tri', 'sonic-pi-noise',
+  'sonic-pi-organ_tonewheel', 'sonic-pi-pluck', 'sonic-pi-pretty_bell', 'sonic-pi-prophet',
+  'sonic-pi-pulse', 'sonic-pi-rhodey', 'sonic-pi-rodeo', 'sonic-pi-saw',
+  'sonic-pi-square', 'sonic-pi-subpulse', 'sonic-pi-supersaw', 'sonic-pi-tb303',
+  'sonic-pi-tech_saws', 'sonic-pi-tri', 'sonic-pi-winwood_lead', 'sonic-pi-zawa'
+];
 
 // Loop sample configuration
 const LOOP_CONFIG = {
@@ -89,7 +116,8 @@ function createOSCBundle(ntpTime, messages) {
   const bundle = new Uint8Array(size);
   const view = new DataView(bundle.buffer);
 
-  bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], 0);
+  // Write header and NTP timestamp (8 bytes header + 8 bytes timestamp)
+  bundle.set(OSC_BUNDLE_HEADER, 0);
   view.setUint32(8, Math.floor(ntpTime), false);
   view.setUint32(12, Math.floor((ntpTime % 1) * 0x100000000), false);
 
@@ -638,20 +666,7 @@ class LoopScheduler {
 async function loadSynthdefs(type) {
   if (synthdefsLoaded[type]) return;
 
-  const defs = type === 'fx'
-    ? ['sonic-pi-fx_lpf', 'sonic-pi-fx_reverb', 'sonic-pi-basic_stereo_player']
-    : [
-        'sonic-pi-bass_foundation', 'sonic-pi-beep', 'sonic-pi-blade', 'sonic-pi-bnoise',
-        'sonic-pi-chipbass', 'sonic-pi-chiplead', 'sonic-pi-dark_ambience', 'sonic-pi-dpulse',
-        'sonic-pi-dsaw', 'sonic-pi-dtri', 'sonic-pi-fm', 'sonic-pi-gabberkick',
-        'sonic-pi-hollow', 'sonic-pi-mod_dsaw', 'sonic-pi-mod_fm', 'sonic-pi-mod_pulse',
-        'sonic-pi-mod_saw', 'sonic-pi-mod_sine', 'sonic-pi-mod_tri', 'sonic-pi-noise',
-        'sonic-pi-organ_tonewheel', 'sonic-pi-pluck', 'sonic-pi-pretty_bell', 'sonic-pi-prophet',
-        'sonic-pi-pulse', 'sonic-pi-rhodey', 'sonic-pi-rodeo', 'sonic-pi-saw',
-        'sonic-pi-square', 'sonic-pi-subpulse', 'sonic-pi-supersaw', 'sonic-pi-tb303',
-        'sonic-pi-tech_saws', 'sonic-pi-tri', 'sonic-pi-winwood_lead', 'sonic-pi-zawa'
-      ];
-
+  const defs = type === 'fx' ? FX_SYNTHDEFS : INSTRUMENT_SYNTHDEFS;
   await orchestrator.loadSynthDefs(defs);
   if (type === 'instruments') await orchestrator.sync(Math.floor(Math.random() * 1000000));
   synthdefsLoaded[type] = true;
