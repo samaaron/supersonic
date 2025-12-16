@@ -694,6 +694,15 @@ function updateMetrics(m) {
 const scopeCanvas = $("scope-canvas");
 const scopeCtx = scopeCanvas?.getContext("2d");
 
+function resizeScope() {
+  if (!scopeCanvas || !scopeCtx) return;
+  const dpr = window.devicePixelRatio || 1;
+  scopeCanvas.width = scopeCanvas.offsetWidth * dpr;
+  scopeCanvas.height = scopeCanvas.offsetHeight * dpr;
+  scopeCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform before scaling
+  scopeCtx.scale(dpr, dpr);
+}
+
 function setupScope() {
   if (!orchestrator?.audioContext || !orchestrator.workletNode) return;
 
@@ -705,10 +714,8 @@ function setupScope() {
   orchestrator.workletNode.connect(analyser);
   analyser.connect(orchestrator.audioContext.destination);
 
-  const dpr = window.devicePixelRatio || 1;
-  scopeCanvas.width = scopeCanvas.offsetWidth * dpr;
-  scopeCanvas.height = scopeCanvas.offsetHeight * dpr;
-  scopeCtx.scale(dpr, dpr);
+  resizeScope();
+  window.addEventListener("resize", resizeScope);
   drawScope();
 }
 
