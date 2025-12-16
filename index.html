@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SuperSonic Downloads</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.6;
+    }
+    h1 { color: #333; }
+    .download-section {
+      background: #f5f5f5;
+      padding: 1.5rem;
+      border-radius: 8px;
+      margin: 1.5rem 0;
+    }
+    .download-section h2 {
+      margin-top: 0;
+    }
+    a {
+      color: #0066cc;
+    }
+    .primary-link {
+      display: inline-block;
+      background: #0066cc;
+      color: white;
+      padding: 0.75rem 1.5rem;
+      border-radius: 4px;
+      text-decoration: none;
+      margin: 0.5rem 0.5rem 0.5rem 0;
+    }
+    .primary-link:hover {
+      background: #0052a3;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+    }
+    li {
+      padding: 0.5rem 0;
+      border-bottom: 1px solid #eee;
+    }
+    li:last-child {
+      border-bottom: none;
+    }
+    code {
+      background: #e8e8e8;
+      padding: 0.2rem 0.4rem;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <h1>SuperSonic</h1>
+  <p>SuperCollider's scsynth audio engine running in the browser via WebAssembly.</p>
+
+  <div class="download-section">
+    <h2>Quick Start</h2>
+    <a class="primary-link" href="stable/supersonic-dist.zip">Download Stable</a>
+    <a class="primary-link" href="latest/supersonic-dist.zip">Download Latest</a>
+    <p style="margin-bottom:0"><strong>Stable:</strong> Last tagged release<br>
+    <strong>Latest:</strong> Current main branch (may have unreleased changes)</p>
+  </div>
+
+  <div class="download-section">
+    <h2>All Versions</h2>
+    <ul id="versions">
+        <li><a href="v0.17.3/supersonic-dist.zip">v0.17.3</a> — <a href="v0.17.3/">Browse files</a></li>
+    </ul>
+  </div>
+
+  <div class="download-section">
+    <h2>Usage</h2>
+    <pre><code>curl -O https://samaaron.github.io/supersonic/stable/supersonic-dist.zip
+unzip supersonic-dist.zip -d supersonic</code></pre>
+  </div>
+
+  <p><a href="https://github.com/samaaron/supersonic">GitHub Repository</a></p>
+</body>
+</html>
