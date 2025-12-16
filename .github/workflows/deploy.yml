@@ -11,12 +11,10 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: "build-${{ github.ref }}"
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
@@ -78,9 +76,6 @@ jobs:
           cp -r packages/supersonic-scsynth-samples/samples/* dist/samples/
           echo "Copied $(ls -1 dist/samples/ | wc -l) sample files"
 
-      - name: Copy pages template to dist
-        run: cp -r .github/pages dist/.github-pages
-
       - name: Create zip archive
         run: |
           mkdir -p supersonic
@@ -128,88 +123,3 @@ jobs:
             supersonic.zip
           generate_release_notes: true
 
-  deploy-pages:
-    needs: build-and-test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      - name: Download zip artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: zip
-
-      - name: Checkout gh-pages branch
-        uses: actions/checkout@v4
-        with:
-          path: gh-pages
-          fetch-depth: 0
-
-      - name: Setup gh-pages branch
-        run: |
-          cd gh-pages
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git fetch origin gh-pages 2>/dev/null; then
-            echo "gh-pages branch exists, checking out..."
-            git checkout gh-pages
-          else
-            echo "Creating gh-pages branch..."
-            git checkout --orphan gh-pages
-            git reset --hard
-            touch .nojekyll
-            git add .nojekyll
-            git commit -m "Initialize gh-pages"
-          fi
-
-      - name: Determine version
-        id: version
-        run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "version=latest" >> $GITHUB_OUTPUT
-            echo "is_tag=false" >> $GITHUB_OUTPUT
-          else
-            VERSION="${{ github.ref_name }}"
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-            echo "is_tag=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Deploy to version directory
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          echo "Deploying to $VERSION/"
-
-          rm -rf "gh-pages/$VERSION"
-          cp -r dist "gh-pages/$VERSION"
-
-      - name: Update stable and latest (for tags only)
-        if: steps.version.outputs.is_tag == 'true'
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          echo "Updating stable/ and latest/ to point to $VERSION"
-
-          rm -rf gh-pages/stable
-          cp -r dist gh-pages/stable
-
-          rm -rf gh-pages/latest
-          cp -r dist gh-pages/latest
-
-      - name: Copy edge zip and index.html
-        run: |
-          cp supersonic-dist.zip gh-pages/supersonic-edge.zip
-          cp dist/.github-pages/index.html gh-pages/index.html
-
-      - name: Commit and push
-        run: |
-          cd gh-pages
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git diff --staged --quiet || git commit -m "Deploy ${{ steps.version.outputs.version }}"
-          git push --set-upstream origin gh-pages
