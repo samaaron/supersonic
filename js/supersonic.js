@@ -44,6 +44,105 @@ export class SuperSonic {
       oscLib.readPacket(data, options),
   };
 
+  /**
+   * Inspect a SuperSonic instance or raw SharedArrayBuffer
+   * Returns a snapshot of the current SAB state for debugging
+   *
+   * @param {SuperSonic|Object} target - Instance or {sab, ringBufferBase, layout}
+   * @returns {Object} Parsed SAB state
+   *
+   * @example
+   * // From instance
+   * const info = SuperSonic.inspect(sonic);
+   *
+   * // From raw components
+   * const info = SuperSonic.inspect({
+   *   sab: sharedArrayBuffer,
+   *   ringBufferBase: 16777216,
+   *   layout: bufferConstants
+   * });
+   */
+  static inspect(target) {
+    let sab, ringBufferBase, layout;
+
+    if (target instanceof SuperSonic) {
+      sab = target.sharedBuffer;
+      ringBufferBase = target.ringBufferBase;
+      layout = target.bufferConstants;
+    } else if (target && target.sab) {
+      sab = target.sab;
+      ringBufferBase = target.ringBufferBase ?? 0;
+      layout = target.layout;
+    } else {
+      throw new Error('SuperSonic.inspect() requires an instance or {sab, ringBufferBase, layout}');
+    }
+
+    if (!sab || !layout) {
+      return { error: 'Not initialized - sab or layout missing' };
+    }
+
+    const atomicView = new Int32Array(sab);
+    const controlBase = ringBufferBase + layout.CONTROL_START;
+
+    // Read control pointers
+    const control = {
+      inHead: Atomics.load(atomicView, (controlBase + 0) / 4),
+      inTail: Atomics.load(atomicView, (controlBase + 4) / 4),
+      outHead: Atomics.load(atomicView, (controlBase + 8) / 4),
+      outTail: Atomics.load(atomicView, (controlBase + 12) / 4),
+      debugHead: Atomics.load(atomicView, (controlBase + 16) / 4),
+      debugTail: Atomics.load(atomicView, (controlBase + 20) / 4),
+      inSequence: Atomics.load(atomicView, (controlBase + 24) / 4),
+      outSequence: Atomics.load(atomicView, (controlBase + 28) / 4),
+      debugSequence: Atomics.load(atomicView, (controlBase + 32) / 4),
+      statusFlags: Atomics.load(atomicView, (controlBase + 36) / 4),
+      inWriteLock: Atomics.load(atomicView, (controlBase + 40) / 4),
+    };
+
+    // Read timing
+    const ntpStartView = new Float64Array(sab, ringBufferBase + layout.NTP_START_TIME_START, 1);
+    const driftView = new Int32Array(sab, ringBufferBase + layout.DRIFT_OFFSET_START, 1);
+    const globalView = new Int32Array(sab, ringBufferBase + layout.GLOBAL_OFFSET_START, 1);
+
+    const timing = {
+      ntpStartTime: ntpStartView[0],
+      driftOffsetMs: Atomics.load(driftView, 0),
+      globalOffsetMs: Atomics.load(globalView, 0),
+    };
+
+    // Calculate buffer usage
+    const inUsed = (control.inHead - control.inTail + layout.IN_BUFFER_SIZE) % layout.IN_BUFFER_SIZE;
+    const outUsed = (control.outHead - control.outTail + layout.OUT_BUFFER_SIZE) % layout.OUT_BUFFER_SIZE;
+    const debugUsed = (control.debugHead - control.debugTail + layout.DEBUG_BUFFER_SIZE) % layout.DEBUG_BUFFER_SIZE;
+
+    const bufferUsage = {
+      in: { bytes: inUsed, percent: (inUsed / layout.IN_BUFFER_SIZE) * 100 },
+      out: { bytes: outUsed, percent: (outUsed / layout.OUT_BUFFER_SIZE) * 100 },
+      debug: { bytes: debugUsed, percent: (debugUsed / layout.DEBUG_BUFFER_SIZE) * 100 },
+    };
+
+    // Read metrics
+    const metricsView = new Uint32Array(sab, ringBufferBase + layout.METRICS_START, layout.METRICS_SIZE / 4);
+    const metrics = {
+      processCount: metricsView[MetricsOffsets.PROCESS_COUNT],
+      messagesProcessed: metricsView[MetricsOffsets.MESSAGES_PROCESSED],
+      messagesDropped: metricsView[MetricsOffsets.MESSAGES_DROPPED],
+      schedulerQueueDepth: metricsView[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
+      schedulerQueueMax: metricsView[MetricsOffsets.SCHEDULER_QUEUE_MAX],
+      schedulerQueueDropped: metricsView[MetricsOffsets.SCHEDULER_QUEUE_DROPPED],
+    };
+
+    return {
+      layout,
+      ringBufferBase,
+      control,
+      timing,
+      bufferUsage,
+      metrics,
+      sabByteLength: sab.byteLength,
+    };
+  }
+
   // Private implementation
   #audioContext;
   #workletNode;
@@ -1305,6 +1404,14 @@ export class SuperSonic {
       initDuration: null,
     };
 
+    // Dev mode: remove from debug helper
+    if (__DEV__ && typeof window !== 'undefined' && window.__supersonic__) {
+      const idx = window.__supersonic__.instances.indexOf(this);
+      if (idx !== -1) {
+        window.__supersonic__.instances.splice(idx, 1);
+      }
+    }
+
     if (__DEV__) console.log("[SuperSonic] Shutdown complete");
   }
 
@@ -1671,6 +1778,22 @@ export class SuperSonic {
       capabilities: this.#capabilities,
       bootStats: this.bootStats,
     });
+
+    // Dev mode: expose instance for debugging via DevTools
+    if (__DEV__ && typeof window !== 'undefined') {
+      if (!window.__supersonic__) {
+        const ss = window.__supersonic__ = { instances: [] };
+        Object.defineProperties(ss, {
+          primary: { get: () => ss.instances[0] },
+          layout: { get: () => ss.primary?.bufferConstants },
+        });
+        ss.metrics = () => ss.primary?.getMetrics();
+        ss.tree = () => ss.primary?.getTree();
+        ss.inspect = () => ss.primary ? SuperSonic.inspect(ss.primary) : null;
+      }
+      window.__supersonic__.instances.push(this);
+      console.log('[SuperSonic] Debug: window.__supersonic__ available');
+    }
   }
 
   /**
