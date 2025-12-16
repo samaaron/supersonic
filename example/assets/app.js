@@ -1286,10 +1286,13 @@ $("random-arp-toggle")?.addEventListener("click", function () {
   this.textContent = uiState.randomArp ? "On" : "Off";
 });
 
-// Hue slider with rainbow mode
+// Hue slider with rainbow mode at extremes (slow left, fast right)
 let rainbowMode = false,
   rainbowHue = 0,
+  rainbowSpeed = 0.2,
   rainbowAnimationId = null;
+
+const hueLabel = $("hue-label");
 
 function applyHueFilter(hue) {
   const filter = `hue-rotate(${hue}deg) saturate(2)`;
@@ -1300,19 +1303,29 @@ function applyHueFilter(hue) {
 
 function animateRainbow() {
   if (!rainbowMode) return;
-  rainbowHue = (rainbowHue + 0.5) % 360;
+  rainbowHue = (rainbowHue + rainbowSpeed) % 360;
   applyHueFilter(rainbowHue);
   rainbowAnimationId = requestAnimationFrame(animateRainbow);
 }
 
 $("hue-slider")?.addEventListener("input", (e) => {
   const val = parseInt(e.target.value);
-  if (val === 360) {
+  if (val === 0) {
+    rainbowSpeed = 0.2;
+    if (hueLabel) hueLabel.textContent = "Hue (Slow Rainbow)";
+    if (!rainbowMode) {
+      rainbowMode = true;
+      animateRainbow();
+    }
+  } else if (val === 360) {
+    rainbowSpeed = 1.5;
+    if (hueLabel) hueLabel.textContent = "Hue (Fast Rainbow)";
     if (!rainbowMode) {
       rainbowMode = true;
       animateRainbow();
     }
   } else {
+    if (hueLabel) hueLabel.textContent = "Hue";
     if (rainbowMode) {
       rainbowMode = false;
       cancelAnimationFrame(rainbowAnimationId);
