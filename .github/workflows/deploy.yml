@@ -114,13 +114,17 @@ jobs:
       - name: Setup gh-pages branch
         run: |
           cd gh-pages
-          git fetch origin gh-pages:gh-pages 2>/dev/null || {
+          if git fetch origin gh-pages 2>/dev/null; then
+            echo "gh-pages branch exists, checking out..."
+            git checkout gh-pages
+          else
             echo "Creating gh-pages branch..."
             git checkout --orphan gh-pages
-            git rm -rf .
-            git commit --allow-empty -m "Initialize gh-pages"
-          }
-          git checkout gh-pages
+            git reset --hard
+            touch .nojekyll
+            git add .nojekyll
+            git commit -m "Initialize gh-pages"
+          fi
 
       - name: Determine version
         id: version
