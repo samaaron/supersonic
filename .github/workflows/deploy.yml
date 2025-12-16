@@ -78,20 +78,55 @@ jobs:
           cp -r packages/supersonic-scsynth-samples/samples/* dist/samples/
           echo "Copied $(ls -1 dist/samples/ | wc -l) sample files"
 
-      - name: Create zip archive of dist
-        run: |
-          cd dist
-          zip -r ../supersonic-dist.zip .
-          cd ..
+      - name: Copy pages template to dist
+        run: cp -r .github/pages dist/.github-pages
 
-      - name: Copy zip to dist for deployment
-        run: cp supersonic-dist.zip dist/
+      - name: Create zip archive
+        run: |
+          mkdir -p supersonic
+          cp -r dist/* supersonic/
+          rm -rf supersonic/.github-pages
+          zip -r supersonic-dist.zip supersonic
+          rm -rf supersonic
+          cp supersonic-dist.zip dist/
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zip
+          path: supersonic-dist.zip
+
+  # Create GitHub Release for tags
+  release:
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download zip artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: zip
+
+      - name: Prepare release assets
+        run: |
+          VERSION="${{ github.ref_name }}"
+          cp supersonic-dist.zip "supersonic-${VERSION}.zip"
+          cp supersonic-dist.zip supersonic.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            supersonic-${{ github.ref_name }}.zip
+            supersonic.zip
+          generate_release_notes: true
 
   deploy-pages:
     needs: build-and-test
@@ -104,6 +139,11 @@ jobs:
         with:
           name: dist
           path: dist/
+
+      - name: Download zip artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: zip
 
       - name: Checkout gh-pages branch
         uses: actions/checkout@v4
@@ -160,113 +200,10 @@ jobs:
           rm -rf gh-pages/latest
           cp -r dist gh-pages/latest
 
-      - name: Generate index.html
+      - name: Copy edge zip and index.html
         run: |
-          cd gh-pages
-
-          # Find all version directories
-          VERSIONS=$(ls -d v*/ 2>/dev/null | sed 's/\///' | sort -V -r || echo "")
-          LATEST_TAG=$(echo "$VERSIONS" | head -1)
-
-          cat > index.html << 'HTMLEOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>SuperSonic Downloads</title>
-            <style>
-              body {
-                font-family: system-ui, -apple-system, sans-serif;
-                max-width: 800px;
-                margin: 2rem auto;
-                padding: 0 1rem;
-                line-height: 1.6;
-              }
-              h1 { color: #333; }
-              .download-section {
-                background: #f5f5f5;
-                padding: 1.5rem;
-                border-radius: 8px;
-                margin: 1.5rem 0;
-              }
-              .download-section h2 {
-                margin-top: 0;
-              }
-              a {
-                color: #0066cc;
-              }
-              .primary-link {
-                display: inline-block;
-                background: #0066cc;
-                color: white;
-                padding: 0.75rem 1.5rem;
-                border-radius: 4px;
-                text-decoration: none;
-                margin: 0.5rem 0.5rem 0.5rem 0;
-              }
-              .primary-link:hover {
-                background: #0052a3;
-              }
-              ul {
-                list-style: none;
-                padding: 0;
-              }
-              li {
-                padding: 0.5rem 0;
-                border-bottom: 1px solid #eee;
-              }
-              li:last-child {
-                border-bottom: none;
-              }
-              code {
-                background: #e8e8e8;
-                padding: 0.2rem 0.4rem;
-                border-radius: 3px;
-              }
-            </style>
-          </head>
-          <body>
-            <h1>SuperSonic</h1>
-            <p>SuperCollider's scsynth audio engine running in the browser via WebAssembly.</p>
-
-            <div class="download-section">
-              <h2>Quick Start</h2>
-              <a class="primary-link" href="stable/supersonic-dist.zip">Download Stable</a>
-              <a class="primary-link" href="latest/supersonic-dist.zip">Download Latest</a>
-              <p style="margin-bottom:0"><strong>Stable:</strong> Last tagged release<br>
-              <strong>Latest:</strong> Current main branch (may have unreleased changes)</p>
-            </div>
-
-            <div class="download-section">
-              <h2>All Versions</h2>
-              <ul id="versions">
-          HTMLEOF
-
-          # Add version links
-          for v in $VERSIONS; do
-            echo "        <li><a href=\"$v/supersonic-dist.zip\">$v</a> — <a href=\"$v/\">Browse files</a></li>" >> index.html
-          done
-
-          # If no versions yet
-          if [ -z "$VERSIONS" ]; then
-            echo "        <li>No tagged releases yet</li>" >> index.html
-          fi
-
-          cat >> index.html << 'HTMLEOF'
-              </ul>
-            </div>
-
-            <div class="download-section">
-              <h2>Usage</h2>
-              <pre><code>curl -O https://samaaron.github.io/supersonic/stable/supersonic-dist.zip
-          unzip supersonic-dist.zip -d supersonic</code></pre>
-            </div>
-
-            <p><a href="https://github.com/samaaron/supersonic">GitHub Repository</a></p>
-          </body>
-          </html>
-          HTMLEOF
+          cp supersonic-dist.zip gh-pages/supersonic-edge.zip
+          cp dist/.github-pages/index.html gh-pages/index.html
 
       - name: Commit and push
         run: |

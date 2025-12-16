@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SuperSonic Downloads</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.min.css" />
+  <style>
+    :root {
+      --c-orange: #ff8c00;
+      --c-gold: #ffd700;
+      --c-pink: #ff1493;
+      --c-blue: #1e90ff;
+      --c-gray-200: #f3f4f6;
+      --c-gray-300: #e5e7eb;
+      --c-gray-600: #6b7280;
+      --c-gray-800: #1f2937;
+      --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, "Courier New", monospace;
+    }
+
+    /* Reset & base */
+    body, h1, h2, h3, p { margin: 0; }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: var(--font-mono);
+      background: linear-gradient(135deg, var(--c-gray-200) 0%, var(--c-gray-300) 100%);
+      color: var(--c-gray-800);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 1rem 3rem 1rem;
+    }
+    h1, h2, h3 {
+      font-weight: bold;
+      font-style: italic;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    h2 { font-size: 1.125rem; margin-bottom: 0.75rem; color: var(--c-orange); }
+    a { color: var(--c-pink); text-decoration: none; }
+    a:hover { color: var(--c-gold); }
+
+    /* Hero */
+    .hero { text-align: center; padding: 50px 0 0 0; }
+    .hero-logo {
+      max-width: 100%;
+      width: 800px;
+      height: auto;
+      transform: skewY(-11deg);
+      transition: transform 0.3s ease;
+    }
+    .hero-logo:hover { transform: skewY(-11deg) scale(1.05); }
+    .hero-tagline {
+      transform: skewY(-11deg);
+      margin: -10px auto 40px auto;
+      font-size: 16px;
+      background: var(--c-pink);
+      padding: 12px;
+      display: inline-block;
+      color: white;
+      font-style: italic;
+      font-weight: bold;
+    }
+    .hero-intro {
+      max-width: 800px;
+      margin: 0 auto 1.5rem auto;
+      padding: 3rem 1rem 0 1rem;
+      text-align: center;
+    }
+    .hero-description {
+      font-size: 1.3rem;
+      color: var(--c-gray-800);
+      line-height: 1.7;
+      margin-bottom: 1rem;
+    }
+    .hero-link { color: var(--c-pink); transition: color 0.3s ease; }
+    .hero-link:hover { color: var(--c-gold); }
+
+    /* Buttons */
+    .btn {
+      display: inline-block;
+      padding: 0.75rem 2rem;
+      text-decoration: none;
+      font-weight: bold;
+      font-style: italic;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      transition: all 0.3s ease;
+      color: white;
+    }
+    .btn:hover {
+      transform: translateY(-3px) scale(1.05);
+      color: white;
+    }
+    .btn--primary {
+      background: linear-gradient(101deg, var(--c-pink) 0%, var(--c-blue) 100%);
+      box-shadow: 0 4px 6px rgba(255, 20, 147, 0.3);
+    }
+    .btn--secondary {
+      background: linear-gradient(101deg, #1f2937 0%, #374151 100%);
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+    }
+    .btn--primary:hover,
+    .btn--secondary:hover {
+      background: linear-gradient(101deg, var(--c-gold) 0%, var(--c-pink) 100%);
+      box-shadow: 0 8px 16px rgba(255, 215, 0, 0.5);
+    }
+
+    /* Download boxes */
+    .download-boxes {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 1rem;
+      font-size: 0.875rem;
+      color: #4b5563;
+    }
+    .download-box {
+      background: white;
+      padding: 1rem;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      position: relative;
+      overflow: hidden;
+      flex: 1 1 150px;
+      max-width: 250px;
+      text-align: center;
+    }
+    .download-box--pink { border-left: 6px solid var(--c-pink); }
+    .download-box--blue { border-left: 6px solid var(--c-blue); }
+    .download-box__accent {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      transform: skewY(-11deg);
+      transform-origin: top left;
+    }
+    .download-box__accent--pink-blue { background: linear-gradient(101deg, var(--c-pink) 0%, var(--c-blue) 100%); }
+    .download-box__accent--blue-gold { background: linear-gradient(101deg, var(--c-blue) 0%, var(--c-gold) 100%); }
+    .download-box__title {
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-style: italic;
+      font-size: 1.1rem;
+      font-weight: bold;
+      margin-bottom: 0.5rem;
+    }
+    .download-box__title--pink { color: var(--c-pink); }
+    .download-box__title--blue { color: var(--c-blue); }
+    .download-box__text {
+      display: block;
+      margin-top: 0.25rem;
+      margin-bottom: 1rem;
+    }
+    .download-box .btn {
+      padding: 0.5rem 1.5rem;
+      font-size: 0.9rem;
+    }
+
+    /* CTA nav */
+    .cta-nav {
+      text-align: center;
+      margin-top: 2rem;
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* Releases box */
+    .releases-box {
+      background: white;
+      padding: 1.5rem 2rem;
+      margin: 1.5rem auto;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      max-width: 500px;
+      text-align: center;
+      border-left: 6px solid var(--c-gold);
+      position: relative;
+      overflow: hidden;
+    }
+    .releases-box::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: linear-gradient(101deg, var(--c-gold) 0%, var(--c-pink) 100%);
+      transform: skewY(-11deg);
+      transform-origin: top left;
+    }
+    .releases-box h2 {
+      color: var(--c-gold);
+      margin-top: 0;
+    }
+    .release-list { list-style: none; padding: 0; margin: 1rem 0; text-align: left; }
+    .release-list li {
+      padding: 0.5rem 0;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .release-list li:last-child { border-bottom: none; }
+    .release-version { color: var(--c-orange); font-weight: bold; }
+    .release-links { display: flex; gap: 1rem; font-size: 0.9rem; }
+    .loading { color: var(--c-gray-600); font-style: italic; }
+    .note { font-size: 0.875rem; color: var(--c-gray-600); margin-top: 0.5rem; }
+
+    /* Terminal boxes */
+    .terminal-boxes {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      margin: 2rem auto;
+    }
+    .terminal-box {
+      width: 100%;
+      max-width: 100%;
+    }
+    .terminal-box h3 {
+      color: var(--c-gray-600);
+      font-size: 0.8rem;
+      margin-bottom: 0.5rem;
+      text-align: center;
+    }
+    .terminal-box pre {
+      text-align: left;
+      margin: 0;
+      overflow-x: auto;
+      white-space: pre;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .terminal-box code { flex: 1; }
+
+    /* Code styling */
+    code {
+      background: rgba(255,140,0,0.15);
+      color: var(--c-orange);
+      padding: 0.2rem 0.4rem;
+      border-radius: 3px;
+      border: 1px solid rgba(255,140,0,0.3);
+    }
+    pre {
+      background: #1f2937;
+      color: var(--c-gold);
+      padding: 1rem;
+      overflow-x: auto;
+      font-size: 0.875rem;
+      line-height: 1.6;
+    }
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: inherit;
+    }
+
+    /* Copy button */
+    .copy-btn {
+      background: transparent;
+      border: none;
+      color: var(--c-gray-600);
+      cursor: pointer;
+      padding: 0.5rem;
+      transition: color 0.2s;
+      flex-shrink: 0;
+    }
+    .copy-btn:hover { color: var(--c-gold); }
+    .copy-btn svg { width: 18px; height: 18px; }
+
+    /* Utilities */
+    .text-center { text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="hero">
+      <a href="https://sonic-pi.net/supersonic/demo.html">
+        <img src="https://sonic-pi.net/supersonic/assets/supersonic_light.png" alt="SuperSonic" class="hero-logo" />
+      </a>
+    </header>
+
+    <div class="text-center">
+      <p class="hero-tagline">SuperCollider audio goodness baked into your browser</p>
+    </div>
+
+    <section class="hero-intro">
+      <p class="hero-description">
+        Download <a href="https://supercollider.github.io/" target="_blank" class="hero-link">SuperCollider</a>'s <em>scsynth</em> audio engine for the web, bundled with synths and samples ready to use.
+      </p>
+    </section>
+
+    <div class="download-boxes">
+      <div class="download-box download-box--pink">
+        <div class="download-box__accent download-box__accent--pink-blue"></div>
+        <strong class="download-box__title download-box__title--pink">Stable</strong>
+        <span class="download-box__text">Latest tested and tagged release</span>
+        <a class="btn btn--primary" href="https://github.com/samaaron/supersonic/releases/latest/download/supersonic.zip">Download Stable</a>
+      </div>
+      <div class="download-box download-box--blue">
+        <div class="download-box__accent download-box__accent--blue-gold"></div>
+        <strong class="download-box__title download-box__title--blue">Edge</strong>
+        <span class="download-box__text">Latest build from main branch</span>
+        <a class="btn btn--secondary" href="supersonic-edge.zip">Download Edge</a>
+      </div>
+    </div>
+
+    <nav class="cta-nav">
+      <a class="btn btn--secondary" href="https://sonic-pi.net/supersonic/demo.html">Live Demo</a>
+      <a class="btn btn--secondary" href="https://github.com/samaaron/supersonic">GitHub</a>
+      <a class="btn btn--secondary" href="https://github.com/samaaron/supersonic#readme">Documentation</a>
+    </nav>
+
+    <div class="releases-box">
+      <h2>Previous Releases</h2>
+      <ul class="release-list" id="release-list">
+        <li class="loading">Loading releases...</li>
+      </ul>
+      <p class="note"><a href="https://github.com/samaaron/supersonic/releases">View all releases on GitHub</a></p>
+    </div>
+
+    <div class="terminal-boxes">
+      <div class="terminal-box">
+        <h3>Stable</h3>
+        <pre><code>curl -LO https://github.com/samaaron/supersonic/releases/latest/download/supersonic.zip</code><button class="copy-btn" title="Copy to clipboard"></button></pre>
+      </div>
+      <div class="terminal-box">
+        <h3>Edge</h3>
+        <pre><code>curl -LO https://samaaron.github.io/supersonic/supersonic-edge.zip</code><button class="copy-btn" title="Copy to clipboard"></button></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // SVG icons
+    const ICON_COPY = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>';
+    const ICON_CHECK = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>';
+
+    // Initialize copy buttons
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.innerHTML = ICON_COPY;
+      btn.addEventListener('click', () => {
+        const code = btn.parentElement.querySelector('code').textContent;
+        navigator.clipboard.writeText(code).then(() => {
+          btn.innerHTML = ICON_CHECK;
+          setTimeout(() => btn.innerHTML = ICON_COPY, 1500);
+        });
+      });
+    });
+
+    // Load releases from GitHub API
+    (async function loadReleases() {
+      const list = document.getElementById('release-list');
+      try {
+        const response = await fetch('https://api.github.com/repos/samaaron/supersonic/releases');
+        const releases = await response.json();
+
+        if (!releases.length) {
+          list.innerHTML = '<li>No releases yet</li>';
+          return;
+        }
+
+        list.innerHTML = releases.map(release => {
+          const zip = release.assets.find(a => a.name.endsWith('.zip'));
+          const downloadUrl = zip ? zip.browser_download_url : release.zipball_url;
+          return `<li>
+            <span class="release-version">${release.tag_name}</span>
+            <span class="release-links">
+              <a href="${downloadUrl}">Download</a>
+              <a href="${release.html_url}">Release Notes</a>
+            </span>
+          </li>`;
+        }).join('');
+      } catch (err) {
+        list.innerHTML = '<li>Could not load releases. <a href="https://github.com/samaaron/supersonic/releases">View on GitHub</a></li>';
+      }
+    })();
+  </script>
+</body>
+</html>
