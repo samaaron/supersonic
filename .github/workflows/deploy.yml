@@ -114,6 +114,8 @@ jobs:
       - name: Setup gh-pages branch
         run: |
           cd gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           if git fetch origin gh-pages 2>/dev/null; then
             echo "gh-pages branch exists, checking out..."
             git checkout gh-pages
