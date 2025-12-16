@@ -1,6 +1,6 @@
 {
   "name": "supersonic-scsynth-bundle",
-  "version": "0.17.3",
+  "version": "0.17.4",
   "description": "Complete SuperSonic bundle: scsynth engine + Sonic Pi synthdefs and samples",
   "main": "index.js",
   "type": "module",
