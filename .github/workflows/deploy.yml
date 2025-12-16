@@ -148,14 +148,17 @@ jobs:
           rm -rf "gh-pages/$VERSION"
           cp -r dist "gh-pages/$VERSION"
 
-      - name: Update stable (for tags only)
+      - name: Update stable and latest (for tags only)
         if: steps.version.outputs.is_tag == 'true'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          echo "Updating stable/ to point to $VERSION"
+          echo "Updating stable/ and latest/ to point to $VERSION"
 
           rm -rf gh-pages/stable
           cp -r dist gh-pages/stable
+
+          rm -rf gh-pages/latest
+          cp -r dist gh-pages/latest
 
       - name: Generate index.html
         run: |
@@ -272,4 +275,4 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --staged --quiet || git commit -m "Deploy ${{ steps.version.outputs.version }}"
-          git push
+          git push --set-upstream origin gh-pages
