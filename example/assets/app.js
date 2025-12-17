@@ -4,7 +4,7 @@ import { NodeTreeViz } from "./node_tree_viz.js";
 // ===== CONFIGURATION =====
 const DEV_MODE = false;
 const NTP_EPOCH_OFFSET = 2208988800; // Seconds between Unix epoch (1970) and NTP epoch (1900)
-const LOOKAHEAD = 0.1; // Seconds to schedule ahead for timing accuracy
+const LOOKAHEAD = 0.2; // Seconds to schedule ahead for timing accuracy
 
 // OSC bundle header: ASCII "#bundle\0"
 const OSC_BUNDLE_HEADER = new Uint8Array([
