@@ -15,17 +15,17 @@ RUN --mount=type=cache,id=em-cache,target=/em_cache \
     --mount=type=cache,id=npm-cache,target=/root/.npm \
 	EM_CACHE=/em_cache bash build.sh
 
-FROM ruby:slim-trixie AS runtime
+FROM node:22-slim AS runtime
 
 WORKDIR /app
 
-COPY ./example/Gemfile /app/Gemfile
-
-RUN bundle install
+RUN npm install -g serve
 
 COPY ./example /app
 COPY --from=build /build/dist /app/dist
 COPY --from=build /build/dist/synthdefs /app/dist/synthdefs
 COPY --from=build /build/dist/samples /app/dist/samples
 
-CMD ["bundle", "exec", "ruby", "server.rb"]
+EXPOSE 3000
+
+CMD ["serve", "-l", "3000"]

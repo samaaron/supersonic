@@ -6,16 +6,13 @@ Send and receive OSC, view debug output, built-in scope and load Sonic Pi synthd
 
 ## Running
 
-You need Ruby installed. This runs a simple HTTP server with the required COOP/COEP headers.
+Start the server (uses `serve.json` for COOP/COEP headers):
 
-Start the server:
 ```bash
-ruby server.rb
+npx serve
 ```
 
-Then open the URL printed to the terminal.
-
-If you prefer a different web server, ensure it sets the required headers and serves this example directory.
+Then open the URL printed to the terminal (e.g., http://localhost:3000/demo.html).
 
 
 

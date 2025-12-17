@@ -34,21 +34,28 @@ Without these headers, you'll see errors like:
 
 ### Example Server Configurations
 
-**Ruby (WEBrick)**
+**serve (npx)**
 
-See `example/server.rb` in the repository for a complete example.
+Create a `serve.json` file:
 
-```ruby
-server = WEBrick::HTTPServer.new(Port: 8002)
-server.config[:MimeTypes]['wasm'] = 'application/wasm'
+```json
+{
+  "headers": [
+    {
+      "source": "**/*",
+      "headers": [
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    }
+  ]
+}
+```
 
-# Add COOP/COEP headers to all responses
-server.mount_proc '/' do |req, res|
-  res['Cross-Origin-Opener-Policy'] = 'same-origin'
-  res['Cross-Origin-Embedder-Policy'] = 'require-corp'
-  res['Cross-Origin-Resource-Policy'] = 'cross-origin'
-  # ... serve files
-end
+Then run:
+
+```bash
+npx serve
 ```
 
 **Nginx**
@@ -131,11 +138,11 @@ Check that:
 
 ## Testing Locally
 
-The easiest way to test locally is using the included Ruby server:
+The easiest way to test locally is using npx serve:
 
 ```bash
-ruby example/server.rb
-# Open http://localhost:8002/demo.html
+cd example && npx serve
+# Open http://localhost:3000/demo.html
 ```
 
 Or use Docker:
