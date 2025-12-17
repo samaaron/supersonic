@@ -4,9 +4,9 @@ import { test, expect } from "@playwright/test";
  * Prescheduler Cancellation Tests
  *
  * Tests verify that:
- * 1. cancelTag() removes all bundles with a specific tag (any editor)
- * 2. cancelEditor() removes all bundles from a specific editor (any tag)
- * 3. cancelEditorTag() removes bundles matching both editor AND tag
+ * 1. cancelTag() removes all bundles with a specific tag (any session)
+ * 2. cancelSession() removes all bundles from a specific session (any tag)
+ * 3. cancelSessionTag() removes bundles matching both session AND tag
  * 4. Cancelled bundles never reach the ring buffer/SAB
  */
 
@@ -26,7 +26,7 @@ test.describe("Prescheduler Cancellation", () => {
     });
   });
 
-  test("cancelTag removes all bundles with matching tag (any editor)", async ({ page }) => {
+  test("cancelTag removes all bundles with matching tag (any session)", async ({ page }) => {
     const result = await page.evaluate(async () => {
       // NTP helpers
       const NTP_EPOCH_OFFSET = 2208988800;
@@ -69,10 +69,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
+        baseURL: "/dist/",
       });
 
       await sonic.init();
@@ -85,22 +82,22 @@ test.describe("Prescheduler Cancellation", () => {
       // Schedule bundles 10 seconds in future (stays in prescheduler heap)
       const baseNTP = getCurrentNTP() + 10.0;
 
-      // Send 10 bundles with tag 'run_1' from editor 0
+      // Send 10 bundles with tag 'run_1' from session 0
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 10000 + i);
-        sonic.sendOSC(bundle, { editorId: 0, runTag: 'run_1' });
+        sonic.sendOSC(bundle, { sessionId: 0, runTag: 'run_1' });
       }
 
-      // Send 10 bundles with tag 'run_1' from editor 1
+      // Send 10 bundles with tag 'run_1' from session 1
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 11000 + i);
-        sonic.sendOSC(bundle, { editorId: 1, runTag: 'run_1' });
+        sonic.sendOSC(bundle, { sessionId: 1, runTag: 'run_1' });
       }
 
-      // Send 10 bundles with tag 'run_2' from editor 0
+      // Send 10 bundles with tag 'run_2' from session 0
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 12000 + i);
-        sonic.sendOSC(bundle, { editorId: 0, runTag: 'run_2' });
+        sonic.sendOSC(bundle, { sessionId: 0, runTag: 'run_2' });
       }
 
       // Wait for bundles to reach prescheduler
@@ -124,7 +121,7 @@ test.describe("Prescheduler Cancellation", () => {
         pendingAfterSend,
         pendingAfterCancel,
         cancelledCount,
-        expectedCancelled: 20,  // 10 from editor 0 + 10 from editor 1
+        expectedCancelled: 20,  // 10 from session 0 + 10 from session 1
         expectedRemaining: 10,  // 10 with tag 'run_2'
       };
     });
@@ -139,7 +136,7 @@ test.describe("Prescheduler Cancellation", () => {
     expect(result.pendingAfterCancel).toBe(result.expectedRemaining);
   });
 
-  test("cancelEditor removes all bundles from matching editor (any tag)", async ({ page }) => {
+  test("cancelSession removes all bundles from matching session (any tag)", async ({ page }) => {
     const result = await page.evaluate(async () => {
       // NTP helpers
       const NTP_EPOCH_OFFSET = 2208988800;
@@ -182,10 +179,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
+        baseURL: "/dist/",
       });
 
       await sonic.init();
@@ -198,22 +192,22 @@ test.describe("Prescheduler Cancellation", () => {
       // Schedule bundles 10 seconds in future
       const baseNTP = getCurrentNTP() + 10.0;
 
-      // Send 10 bundles from editor 1 with tag 'a'
+      // Send 10 bundles from session 1 with tag 'a'
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 20000 + i);
-        sonic.sendOSC(bundle, { editorId: 1, runTag: 'a' });
+        sonic.sendOSC(bundle, { sessionId: 1, runTag: 'a' });
       }
 
-      // Send 10 bundles from editor 1 with tag 'b'
+      // Send 10 bundles from session 1 with tag 'b'
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 21000 + i);
-        sonic.sendOSC(bundle, { editorId: 1, runTag: 'b' });
+        sonic.sendOSC(bundle, { sessionId: 1, runTag: 'b' });
       }
 
-      // Send 10 bundles from editor 2 with tag 'a'
+      // Send 10 bundles from session 2 with tag 'a'
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 22000 + i);
-        sonic.sendOSC(bundle, { editorId: 2, runTag: 'a' });
+        sonic.sendOSC(bundle, { sessionId: 2, runTag: 'a' });
       }
 
       // Wait for bundles to reach prescheduler
@@ -222,8 +216,8 @@ test.describe("Prescheduler Cancellation", () => {
       const metricsAfterSend = sonic.getMetrics();
       const pendingAfterSend = metricsAfterSend.preschedulerPending || 0;
 
-      // Cancel all bundles from editor 1 (should remove 20, leave 10)
-      sonic.cancelEditor(1);
+      // Cancel all bundles from session 1 (should remove 20, leave 10)
+      sonic.cancelSession(1);
 
       // Wait for cancel to process
       await new Promise(r => setTimeout(r, 100));
@@ -237,12 +231,12 @@ test.describe("Prescheduler Cancellation", () => {
         pendingAfterSend,
         pendingAfterCancel,
         cancelledCount,
-        expectedCancelled: 20,  // All from editor 1
-        expectedRemaining: 10,  // From editor 2
+        expectedCancelled: 20,  // All from session 1
+        expectedRemaining: 10,  // From session 2
       };
     });
 
-    console.log(`\ncancelEditor test:`);
+    console.log(`\ncancelSession test:`);
     console.log(`  Pending after send: ${result.pendingAfterSend}`);
     console.log(`  Pending after cancel: ${result.pendingAfterCancel}`);
     console.log(`  Cancelled: ${result.cancelledCount} (expected ${result.expectedCancelled})`);
@@ -252,7 +246,7 @@ test.describe("Prescheduler Cancellation", () => {
     expect(result.pendingAfterCancel).toBe(result.expectedRemaining);
   });
 
-  test("cancelEditorTag removes only bundles matching both editor AND tag", async ({ page }) => {
+  test("cancelSessionTag removes only bundles matching both session AND tag", async ({ page }) => {
     const result = await page.evaluate(async () => {
       // NTP helpers
       const NTP_EPOCH_OFFSET = 2208988800;
@@ -295,10 +289,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
+        baseURL: "/dist/",
       });
 
       await sonic.init();
@@ -311,22 +302,22 @@ test.describe("Prescheduler Cancellation", () => {
       // Schedule bundles 10 seconds in future
       const baseNTP = getCurrentNTP() + 10.0;
 
-      // Send 10 bundles: editor=1, tag='a'
+      // Send 10 bundles: session=1, tag='a'
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 30000 + i);
-        sonic.sendOSC(bundle, { editorId: 1, runTag: 'a' });
+        sonic.sendOSC(bundle, { sessionId: 1, runTag: 'a' });
       }
 
-      // Send 10 bundles: editor=1, tag='b'
+      // Send 10 bundles: session=1, tag='b'
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 31000 + i);
-        sonic.sendOSC(bundle, { editorId: 1, runTag: 'b' });
+        sonic.sendOSC(bundle, { sessionId: 1, runTag: 'b' });
       }
 
-      // Send 10 bundles: editor=2, tag='a'
+      // Send 10 bundles: session=2, tag='a'
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 32000 + i);
-        sonic.sendOSC(bundle, { editorId: 2, runTag: 'a' });
+        sonic.sendOSC(bundle, { sessionId: 2, runTag: 'a' });
       }
 
       // Wait for bundles to reach prescheduler
@@ -335,8 +326,8 @@ test.describe("Prescheduler Cancellation", () => {
       const metricsAfterSend = sonic.getMetrics();
       const pendingAfterSend = metricsAfterSend.preschedulerPending || 0;
 
-      // Cancel only bundles matching editor=1 AND tag='a' (should remove 10, leave 20)
-      sonic.cancelEditorTag(1, 'a');
+      // Cancel only bundles matching session=1 AND tag='a' (should remove 10, leave 20)
+      sonic.cancelSessionTag(1, 'a');
 
       // Wait for cancel to process
       await new Promise(r => setTimeout(r, 100));
@@ -350,12 +341,12 @@ test.describe("Prescheduler Cancellation", () => {
         pendingAfterSend,
         pendingAfterCancel,
         cancelledCount,
-        expectedCancelled: 10,  // Only editor=1, tag='a'
-        expectedRemaining: 20,  // editor=1/tag='b' + editor=2/tag='a'
+        expectedCancelled: 10,  // Only session=1, tag='a'
+        expectedRemaining: 20,  // session=1/tag='b' + session=2/tag='a'
       };
     });
 
-    console.log(`\ncancelEditorTag test:`);
+    console.log(`\ncancelSessionTag test:`);
     console.log(`  Pending after send: ${result.pendingAfterSend}`);
     console.log(`  Pending after cancel: ${result.pendingAfterCancel}`);
     console.log(`  Cancelled: ${result.cancelledCount} (expected ${result.expectedCancelled})`);
@@ -408,10 +399,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
+        baseURL: "/dist/",
       });
 
       await sonic.init();
@@ -428,7 +416,7 @@ test.describe("Prescheduler Cancellation", () => {
       // Send 20 bundles with tag 'to_cancel'
       for (let i = 0; i < 20; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 40000 + i);
-        sonic.sendOSC(bundle, { editorId: 0, runTag: 'to_cancel' });
+        sonic.sendOSC(bundle, { sessionId: 0, runTag: 'to_cancel' });
       }
 
       // Wait for bundles to reach prescheduler
@@ -531,10 +519,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
+        baseURL: "/dist/",
       });
 
       await sonic.init();
@@ -547,18 +532,18 @@ test.describe("Prescheduler Cancellation", () => {
       // Schedule bundles 10 seconds in future
       const baseNTP = getCurrentNTP() + 10.0;
 
-      // Send bundles with various editors and tags
+      // Send bundles with various sessions and tags
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 50000 + i);
-        sonic.sendOSC(bundle, { editorId: 0, runTag: 'run_1' });
+        sonic.sendOSC(bundle, { sessionId: 0, runTag: 'run_1' });
       }
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 51000 + i);
-        sonic.sendOSC(bundle, { editorId: 1, runTag: 'run_2' });
+        sonic.sendOSC(bundle, { sessionId: 1, runTag: 'run_2' });
       }
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.001), 52000 + i);
-        sonic.sendOSC(bundle, { editorId: 2, runTag: 'run_3' });
+        sonic.sendOSC(bundle, { sessionId: 2, runTag: 'run_3' });
       }
 
       // Wait for bundles to reach prescheduler

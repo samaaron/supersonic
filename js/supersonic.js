@@ -1070,7 +1070,7 @@ export class SuperSonic {
   }
 
   /**
-   * Cancel all scheduled OSC bundles with a specific tag (any editor)
+   * Cancel all scheduled OSC bundles with a specific tag (any session)
    * @param {string} runTag - The tag to cancel
    */
   cancelTag(runTag) {
@@ -1079,22 +1079,22 @@ export class SuperSonic {
   }
 
   /**
-   * Cancel all scheduled OSC bundles from a specific editor (any tag)
-   * @param {number} editorId - The editor ID to cancel
+   * Cancel all scheduled OSC bundles from a specific session (any tag)
+   * @param {number} sessionId - The session ID to cancel
    */
-  cancelEditor(editorId) {
-    this.#ensureInitialized("cancel by editor");
-    this.#osc.cancelEditor(editorId);
+  cancelSession(sessionId) {
+    this.#ensureInitialized("cancel by session");
+    this.#osc.cancelSession(sessionId);
   }
 
   /**
-   * Cancel all scheduled OSC bundles matching both editor and tag
-   * @param {number} editorId - The editor ID
+   * Cancel all scheduled OSC bundles matching both session and tag
+   * @param {number} sessionId - The session ID
    * @param {string} runTag - The tag
    */
-  cancelEditorTag(editorId, runTag) {
-    this.#ensureInitialized("cancel by editor and tag");
-    this.#osc.cancelEditorTag(editorId, runTag);
+  cancelSessionTag(sessionId, runTag) {
+    this.#ensureInitialized("cancel by session and tag");
+    this.#osc.cancelSessionTag(sessionId, runTag);
   }
 
   /**
