@@ -48,11 +48,22 @@ Take a look at `example/simple.html` for a minimal working example.
 
 ## Installation
 
-Grab the latest pre-built distribution and host it on your server:
+Grab the latest pre-built distribution from [GitHub Releases](https://github.com/samaaron/supersonic/releases) and host it on your server:
 
 ```bash
-curl -O https://samaaron.github.io/supersonic/supersonic-dist.zip
-unzip supersonic-dist.zip
+curl -LO https://github.com/samaaron/supersonic/releases/latest/download/supersonic.zip
+unzip supersonic.zip
+```
+
+This gives you:
+
+```
+supersonic/
+├── supersonic.js      # Main library
+├── wasm/              # WebAssembly binaries
+├── workers/           # Web Workers
+├── synthdefs/         # 120 synth definitions
+└── samples/           # 206 audio samples
 ```
 
 Or install via npm:
