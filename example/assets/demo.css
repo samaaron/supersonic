@@ -949,7 +949,7 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   justify-content: center;
 }
 
-.code-snippet pre { width: 650px; max-width: 650px; margin: 0; font-size: 0.9rem; }
+.code-snippet pre { width: 650px; max-width: 650px; margin: 0; font-size: 0.85rem; }
 
 .code-snippet .code-comment {
   flex: 1;
@@ -1215,6 +1215,12 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 .code-block--green { border-left: 4px solid #50fa7b; }
 .code-block--gold { border-left: 4px solid var(--c-gold); }
 
+.code-break { display: none; }
+
+@media (max-width: 1023px) {
+  .code-break { display: inline; }
+}
+
 /* ===== DOWNLOAD SECTION ===== */
 .download-section-container {
   padding: 0 2rem 2rem;
@@ -1267,6 +1273,15 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 
 .download-button:hover::before {
   left: 100%;
+}
+
+.download-button__break { display: none; }
+.download-button__nobreak { display: inline; }
+
+@media (max-width: 480px) {
+  .download-button { text-align: center; }
+  .download-button__break { display: inline; }
+  .download-button__nobreak { display: none; }
 }
 
 .download-arrow {
@@ -1404,16 +1419,6 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   box-shadow: 0 0 30px rgba(255, 20, 147, 0.6), 0 0 60px rgba(255, 20, 147, 0.3), 0 0 90px rgba(255, 20, 147, 0.15);
   animation: none;
 }
-
-.sponsor-link {
-  display: block;
-  transition: filter 0.3s ease;
-}
-
-.sponsor-item:hover .sponsor-link {
-  filter: brightness(1.1);
-}
-
 
 .sponsor-image { width: 200px; height: 133px; object-fit: contain; display: block; }
 
@@ -1636,7 +1641,12 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 
 /* ===== SPONSOR TEXT ===== */
 .sponsor-title span { display: block; }
-.sponsor-description span { display: block; }
+.sponsor-description span { display: inline; }
+.sponsor-description span:last-child { display: block; }
+
+@media (max-width: 768px) {
+  .sponsor-description span { display: block; }
+}
 
 /* ===== WELCOME GUIDE IMPROVEMENTS ===== */
 .welcome-text--small { font-size: 0.85em; opacity: 0.9; display: block; margin-top: 0.25rem; }
