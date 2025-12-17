@@ -53,6 +53,7 @@ cp "$PROJECT_ROOT/example/assets/app.js" "$TEMP_DIR/assets/"
 cp "$PROJECT_ROOT/example/assets/demo.css" "$TEMP_DIR/assets/"
 cp "$PROJECT_ROOT/example/assets/node_tree_viz.js" "$TEMP_DIR/assets/"
 cp "$PROJECT_ROOT/example/assets/"*.png "$TEMP_DIR/assets/"
+cp "$PROJECT_ROOT/example/assets/"*.svg "$TEMP_DIR/assets/"
 # Ensure all assets are world-readable
 chmod 644 "$TEMP_DIR/assets/"*
 
