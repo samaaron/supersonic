@@ -73,10 +73,10 @@ dist/
 Start the test server:
 
 ```bash
-ruby example/server.rb
+cd example && npx serve
 ```
 
-Open http://localhost:8002/demo.html
+Open http://localhost:3000/demo.html
 
 ## Docker
 

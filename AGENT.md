@@ -31,9 +31,9 @@ This compiles all the assets and places the results in the dist dir.
 
 ## Running
 
-There's a test webserver implemented in Ruby that sets the correct headers. Run:
+Start the test server from the example directory:
 
-ruby example/server.rb
+cd example && npx serve
 
 
 ## Example
