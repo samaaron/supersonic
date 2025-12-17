@@ -25,4 +25,17 @@ Without these headers you'll see: `SharedArrayBuffer is not defined`
 ## More Info
 
 - Full documentation: https://github.com/samaaron/supersonic
-- Live demo: https://samaaron.github.io/supersonic/demo.html
+- Live demo: https://sonic-pi.net/supersonic/demo.html
+
+## Support
+
+Please consider joining the community of supporters enabling Sam's work on creative coding projects:
+
+- Patreon: https://patreon.com/samaaron
+- GitHub Sponsors: https://github.com/sponsors/samaaron
+
+## License
+
+GPL v3 - Source code available at https://github.com/samaaron/supersonic
+
+This is a derivative work of [SuperCollider](https://supercollider.github.io/) by James McCartney and the SuperCollider community.
