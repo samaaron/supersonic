@@ -119,48 +119,40 @@
             </li>
           </ul>
 
-          <!-- CTA -->
-          <nav class="cta-container" aria-label="Primary actions">
-            <a href="#demo" class="cta-button cta-button--primary"
-              >Whizz to Demo</a
-            >
-            <div class="cta-row">
-              <a
-                href="https://github.com/samaaron/supersonic"
-                target="_blank"
-                rel="noopener"
-                class="cta-button cta-button--secondary"
-                >Open Source</a
-              >
-              <a
-                href="https://www.patreon.com/posts/introducing-in-141953467"
-                target="_blank"
-                rel="noopener"
-                class="cta-button cta-button--secondary"
-                >What? How? Why?</a
-              >
-            </div>
-          </nav>
-        </section>
+          </section>
       </div>
+
+      <!-- Download Section -->
+      <section class="download-section-container">
+        <div class="download-section">
+          <span class="download-arrow">⬇</span>
+          <a
+            href="https://github.com/samaaron/supersonic/releases/latest/download/supersonic.zip"
+            class="download-button"
+            download
+          >
+            Download Latest Release
+          </a>
+          <a href="#demo" class="cta-button cta-button--primary cta-button--whizz"
+            >Whizz to Demo</a
+          >
+        </div>
+      </section>
 
       <!-- Code Examples -->
       <section class="code-section" aria-labelledby="code-heading">
         <div class="code-section__inner">
           <h2 id="code-heading" class="visually-hidden">Code Examples</h2>
-          <p class="code-section__intro">
-            Sprinkle the scsynth audio engine onto your web page...
-          </p>
 
+          <p class="code-section__step">Sprinkle it onto your web page...</p>
           <div class="code-snippets-container">
             <figure class="code-snippet">
               <figcaption class="code-comment">
-                First, install via npm and import locally
+                Import SuperSonic
               </figcaption>
               <pre
                 class="code-block code-block--pink"
-              ><code><span class="syn-cmt">// npm install supersonic-scsynth</span>
-<span class="syn-kw">import</span> { <span class="syn-type">SuperSonic</span> } <span class="syn-kw">from</span> <span class="syn-str">'supersonic-scsynth'</span>;</code></pre>
+              ><code><span class="syn-kw">import</span> { <span class="syn-type">SuperSonic</span> } <span class="syn-kw">from</span> <span class="syn-str">'/supersonic/supersonic.js'</span>;</code></pre>
             </figure>
 
             <figure class="code-snippet">
@@ -170,7 +162,7 @@
               <pre
                 class="code-block code-block--blue"
               ><code><span class="syn-kw">const</span> <span class="syn-type">sonic</span> = <span class="syn-kw">new</span> <span class="syn-type">SuperSonic</span>({
-  <span class="syn-str">baseURL</span>: <span class="syn-str">'/your/path/'</span>
+  <span class="syn-str">baseURL</span>: <span class="syn-str">'/supersonic/'</span>
 });
 <span class="syn-kw">await</span> sonic.<span class="syn-fn">init</span>();</code></pre>
             </figure>
@@ -223,6 +215,22 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
               <span>Brought to you by</span>
               <span>Sam Aaron</span>
             </h2>
+            <div class="cta-row cta-row--sponsor">
+              <a
+                href="https://github.com/samaaron/supersonic"
+                target="_blank"
+                rel="noopener"
+                class="cta-button cta-button--secondary"
+                >Open Source</a
+              >
+              <a
+                href="https://www.patreon.com/posts/introducing-in-141953467"
+                target="_blank"
+                rel="noopener"
+                class="cta-button cta-button--secondary"
+                >What? How? Why?</a
+              >
+            </div>
             <p class="sponsor-description">
               <span>Please consider joining the wonderful community</span>
               <span>of supporters enabling Sam's work on</span>
