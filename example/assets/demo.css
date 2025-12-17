@@ -1293,7 +1293,8 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   cursor: pointer;
 }
 
-.download-section:hover .download-arrow {
+.download-arrow:hover,
+.download-section:has(.download-button:hover) .download-arrow {
   animation: bounce 1s ease-in-out infinite;
   transform-origin: center;
 }
