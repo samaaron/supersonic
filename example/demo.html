@@ -169,12 +169,8 @@
               </figcaption>
               <pre
                 class="code-block code-block--blue"
-              ><code><span class="syn-kw">const</span> <span class="syn-type">baseURL</span> = <span class="syn-str">'/your/path/'</span>;
-<span class="syn-kw">const</span> <span class="syn-type">sonic</span> = <span class="syn-kw">new</span> <span class="syn-type">SuperSonic</span>({
-  <span class="syn-str">workerBaseURL</span>:   <span class="syn-str">`${baseURL}/workers/`</span>,
-  <span class="syn-str">wasmBaseURL</span>:     <span class="syn-str">`${baseURL}/wasm/`</span>,
-  <span class="syn-str">synthdefBaseURL</span>: <span class="syn-str">`${baseURL}/synthdefs/`</span>,
-  <span class="syn-str">sampleBaseURL</span>:   <span class="syn-str">`${baseURL}/samples/`</span>
+              ><code><span class="syn-kw">const</span> <span class="syn-type">sonic</span> = <span class="syn-kw">new</span> <span class="syn-type">SuperSonic</span>({
+  <span class="syn-str">baseURL</span>: <span class="syn-str">'/your/path/'</span>
 });
 <span class="syn-kw">await</span> sonic.<span class="syn-fn">init</span>();</code></pre>
             </figure>

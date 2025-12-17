@@ -212,20 +212,25 @@ export class SuperSonic {
     this.#bufferManager = null;
     this.loadedSynthDefs = new Map();  // name -> Uint8Array (cached for recover())
 
-    // Configuration - require explicit base URLs for workers and WASM
+    // Configuration - derive URLs from baseURL or require explicit URLs
     // This ensures SuperSonic works correctly in bundled/vendored environments
-    if (!options.workerBaseURL || !options.wasmBaseURL) {
+    const baseURL = options.baseURL;
+    const workerBaseURL = options.workerBaseURL || (baseURL ? `${baseURL}workers/` : null);
+    const wasmBaseURL = options.wasmBaseURL || (baseURL ? `${baseURL}wasm/` : null);
+
+    if (!workerBaseURL || !wasmBaseURL) {
       throw new Error(
-        "SuperSonic requires workerBaseURL and wasmBaseURL options. Example:\n" +
+        "SuperSonic requires baseURL or explicit workerBaseURL and wasmBaseURL options. Example:\n" +
+          "new SuperSonic({\n" +
+          '  baseURL: "/supersonic/"\n' +
+          "})\n" +
+          "// or\n" +
           "new SuperSonic({\n" +
           '  workerBaseURL: "/supersonic/workers/",\n' +
           '  wasmBaseURL: "/supersonic/wasm/"\n' +
           "})"
       );
     }
-
-    const workerBaseURL = options.workerBaseURL;
-    const wasmBaseURL = options.wasmBaseURL;
 
     const worldOptions = { ...defaultWorldOptions, ...options.scsynthOptions };
 
@@ -251,8 +256,9 @@ export class SuperSonic {
     };
 
     // Resource loading configuration (private)
-    this.#sampleBaseURL = options.sampleBaseURL || null;
-    this.#synthdefBaseURL = options.synthdefBaseURL || null;
+    // Derive from baseURL if not explicitly provided
+    this.#sampleBaseURL = options.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null);
+    this.#synthdefBaseURL = options.synthdefBaseURL || (baseURL ? `${baseURL}synthdefs/` : null);
 
     // Fetch retry configuration
     this.#fetchRetryConfig = {

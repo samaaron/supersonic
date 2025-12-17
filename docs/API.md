@@ -92,13 +92,24 @@
 ```javascript
 import { SuperSonic } from "supersonic-scsynth";
 
-const baseURL = "/supersonic"; // Configure for your setup
+// Simple: use baseURL to derive all paths
 const supersonic = new SuperSonic({
-  workerBaseURL:   `${baseURL}/workers/`,   // Required
-  wasmBaseURL:     `${baseURL}/wasm/`,      // Required
-  synthdefBaseURL: `${baseURL}/synthdefs/`, // Optional
-  sampleBaseURL:   `${baseURL}/samples/`,   // Optional
-  scsynthOptions:  { numBuffers: 4096 }     // Optional
+  baseURL: "/supersonic/"
+});
+// Derives: workers/, wasm/, synthdefs/, samples/
+
+// Or explicit paths (baseURL not required)
+const supersonic = new SuperSonic({
+  workerBaseURL:   "/supersonic/workers/",
+  wasmBaseURL:     "/supersonic/wasm/",
+  synthdefBaseURL: "/supersonic/synthdefs/",
+  sampleBaseURL:   "/supersonic/samples/"
+});
+
+// Mix: baseURL with overrides
+const supersonic = new SuperSonic({
+  baseURL: "/supersonic/",
+  sampleBaseURL: "/cdn/samples/"  // absolute override
 });
 ```
 
@@ -106,13 +117,16 @@ const supersonic = new SuperSonic({
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `workerBaseURL` | Yes | Base URL for worker scripts |
-| `wasmBaseURL` | Yes | Base URL for WASM files |
+| `baseURL` | No* | Base URL - derives `workers/`, `wasm/`, `synthdefs/`, `samples/` subdirectories |
+| `workerBaseURL` | No* | Base URL for worker scripts (overrides baseURL) |
+| `wasmBaseURL` | No* | Base URL for WASM files (overrides baseURL) |
 | `synthdefBaseURL` | No | Base URL for synthdef files (used by `loadSynthDef`) |
 | `sampleBaseURL` | No | Base URL for sample files (used by `loadSample`) |
 | `scsynthOptions` | No | Server options (see below) |
 | `preschedulerCapacity` | No | Max pending events in JS prescheduler (default: 65536) |
 | `debugMaxLineLength` | No | Truncate debug messages longer than this (default: 0 = no truncation) |
+
+\* Either `baseURL` or both `workerBaseURL` and `wasmBaseURL` must be provided.
 
 ### Server Options (`scsynthOptions`)
 
