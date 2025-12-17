@@ -1389,10 +1389,7 @@ $("init-button").addEventListener("click", async () => {
     addLoadingLogEntry("Initialising SuperSonic...");
 
     orchestrator = new SuperSonic({
-      workerBaseURL: "dist/workers/",
-      wasmBaseURL: "dist/wasm/",
-      sampleBaseURL: "dist/samples/",
-      synthdefBaseURL: "dist/synthdefs/",
+      baseURL: "dist/",
     });
 
     let bootPhase = true;

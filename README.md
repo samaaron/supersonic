@@ -23,12 +23,8 @@ Import SuperSonic and initialise it:
 ```javascript
 import { SuperSonic } from "supersonic-scsynth";
 
-const baseURL = "/supersonic"; // Configure for your setup
 const supersonic = new SuperSonic({
-  workerBaseURL: `${baseURL}/workers/`,
-  wasmBaseURL: `${baseURL}/wasm/`,
-  synthdefBaseURL: `${baseURL}/synthdefs/`,
-  sampleBaseURL: `${baseURL}/samples/`,
+  baseURL: "/supersonic/"
 });
 await supersonic.init();
 ```
