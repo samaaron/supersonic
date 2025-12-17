@@ -207,7 +207,7 @@ export default class ScsynthOSC {
      * - OSC bundles are scheduled based on audioTimeS (target audio time)
      *
      * @param {Uint8Array} oscData - Binary OSC data (message or bundle)
-     * @param {Object} options - Optional metadata (editorId, runTag, audioTimeS, currentTimeS)
+     * @param {Object} options - Optional metadata (sessionId, runTag, audioTimeS, currentTimeS)
      */
     send(oscData, options = {}) {
         if (!this.initialized) {
@@ -215,12 +215,12 @@ export default class ScsynthOSC {
             return;
         }
 
-        const { editorId = 0, runTag = '', audioTimeS = null, currentTimeS = null } = options;
+        const { sessionId = 0, runTag = '', audioTimeS = null, currentTimeS = null } = options;
 
         this.workers.oscOut.postMessage({
             type: 'send',
             oscData: oscData,
-            editorId: editorId,
+            sessionId: sessionId,
             runTag: runTag,
             audioTimeS: audioTimeS,
             currentTimeS: currentTimeS
@@ -248,32 +248,32 @@ export default class ScsynthOSC {
     }
 
     /**
-     * Cancel scheduled OSC bundles by editor and tag
+     * Cancel scheduled OSC bundles by session and tag
      */
-    cancelEditorTag(editorId, runTag) {
+    cancelSessionTag(sessionId, runTag) {
         if (!this.initialized) return;
 
         this.workers.oscOut.postMessage({
-            type: 'cancelEditorTag',
-            editorId,
+            type: 'cancelSessionTag',
+            sessionId,
             runTag
         });
     }
 
     /**
-     * Cancel all scheduled OSC bundles from an editor
+     * Cancel all scheduled OSC bundles from a session
      */
-    cancelEditor(editorId) {
+    cancelSession(sessionId) {
         if (!this.initialized) return;
 
         this.workers.oscOut.postMessage({
-            type: 'cancelEditor',
-            editorId
+            type: 'cancelSession',
+            sessionId
         });
     }
 
     /**
-     * Cancel all scheduled OSC bundles with a specific tag (any editor)
+     * Cancel all scheduled OSC bundles with a specific tag (any session)
      */
     cancelTag(runTag) {
         if (!this.initialized) return;

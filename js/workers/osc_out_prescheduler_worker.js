@@ -24,7 +24,7 @@ let CONTROL_INDICES = {};
 let metricsView = null;
 
 // Priority queue implemented as binary min-heap
-// Entries: { ntpTime, seq, editorId, runTag, oscData }
+// Entries: { ntpTime, seq, sessionId, runTag, oscData }
 let eventHeap = [];
 let periodicTimer = null;    // Single periodic timer (25ms interval)
 let sequenceCounter = 0;
@@ -274,7 +274,7 @@ const processRetryQueue = () => {
  * Non-bundles or bundles without timestamps are dispatched immediately
  * Returns false if rejected due to backpressure
  */
-const scheduleEvent = (oscData, editorId, runTag) => {
+const scheduleEvent = (oscData, sessionId, runTag) => {
     // Backpressure: reject if total pending work exceeds limit
     const totalPending = eventHeap.length + retryQueue.length;
     if (totalPending >= maxPendingMessages) {
@@ -302,7 +302,7 @@ const scheduleEvent = (oscData, editorId, runTag) => {
     const event = {
         ntpTime,
         seq: sequenceCounter++,
-        editorId: editorId || 0,
+        sessionId: sessionId || 0,
         runTag: runTag || '',
         oscData
     };
@@ -498,12 +498,12 @@ const heapify = () => {
     }
 };
 
-const cancelEditorTag = (editorId, runTag) => {
-    cancelBy((event) => event.editorId === editorId && event.runTag === runTag);
+const cancelSessionTag = (sessionId, runTag) => {
+    cancelBy((event) => event.sessionId === sessionId && event.runTag === runTag);
 };
 
-const cancelEditor = (editorId) => {
-    cancelBy((event) => event.editorId === editorId);
+const cancelSession = (sessionId) => {
+    cancelBy((event) => event.sessionId === sessionId);
 };
 
 const cancelTag = (runTag) => {
@@ -604,7 +604,7 @@ self.addEventListener('message', (event) => {
                 // scheduleEvent() will dispatch immediately if not a bundle
                 scheduleEvent(
                     data.oscData,
-                    data.editorId || 0,
+                    data.sessionId || 0,
                     data.runTag || ''
                 );
                 break;
@@ -613,14 +613,14 @@ self.addEventListener('message', (event) => {
                 processImmediate(data.oscData);
                 break;
 
-            case 'cancelEditorTag':
+            case 'cancelSessionTag':
                 if (data.runTag !== undefined && data.runTag !== null && data.runTag !== '') {
-                    cancelEditorTag(data.editorId || 0, data.runTag);
+                    cancelSessionTag(data.sessionId || 0, data.runTag);
                 }
                 break;
 
-            case 'cancelEditor':
-                cancelEditor(data.editorId || 0);
+            case 'cancelSession':
+                cancelSession(data.sessionId || 0);
                 break;
 
             case 'cancelTag':
