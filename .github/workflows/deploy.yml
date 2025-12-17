@@ -81,6 +81,9 @@ jobs:
           mkdir -p supersonic
           cp -r dist/* supersonic/
           rm -rf supersonic/.github-pages
+          # Add README with version
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          sed "s/{{VERSION}}/$VERSION/" docs/README.dist.md > supersonic/README.md
           zip -r supersonic-dist.zip supersonic
           rm -rf supersonic
           cp supersonic-dist.zip dist/
