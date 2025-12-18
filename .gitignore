@@ -1,6 +1,5 @@
 .history
 dist/
-src/build_info.h
 
 # Node.js dependencies
 node_modules/

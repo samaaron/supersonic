@@ -240,7 +240,6 @@ export class SuperSonic {
       workletUrl:
         options.workletUrl || workerBaseURL + "scsynth_audio_worklet.js",
       workerBaseURL: workerBaseURL,
-      development: false,
       audioContextOptions: {
         latencyHint: "interactive", // hint to push for lowest latency possible
         sampleRate: 48000, // only requested rate - actual rate is determined by hardware
@@ -392,7 +391,6 @@ export class SuperSonic {
   /**
    * Initialize the audio worklet system
    * @param {Object} config - Optional configuration overrides
-   * @param {boolean} config.development - Use cache-busted WASM files (default: false)
    * @param {string} config.wasmUrl - Custom WASM URL
    * @param {string} config.workletUrl - Custom worklet URL
    * @param {Object} config.audioContextOptions - AudioContext options
@@ -1599,26 +1597,6 @@ export class SuperSonic {
     });
   }
 
-  async #loadWasmManifest() {
-    const manifestUrl = this.#config.wasmBaseURL + "manifest.json";
-
-    try {
-      const response = await fetch(manifestUrl);
-      if (!response.ok) {
-        return;
-      }
-
-      const manifest = await response.json();
-      this.#config.wasmUrl = this.#config.wasmBaseURL + manifest.wasmFile;
-      if (__DEV__)
-        console.log(
-          `[SuperSonic] WASM: ${manifest.wasmFile} (${manifest.buildId}, git: ${manifest.gitHash})`
-        );
-    } catch (error) {
-      // Manifest failed to load - use default filename
-    }
-  }
-
   /**
    * Load WASM binary - uses cache if available (for fast recover())
    */
@@ -1627,11 +1605,6 @@ export class SuperSonic {
     if (this.#cachedWasmBytes) {
       if (__DEV__) console.log('[SuperSonic] Using cached WASM bytes');
       return this.#cachedWasmBytes;
-    }
-
-    // In development mode, load manifest for cache-busted filename
-    if (this.#config.development) {
-      await this.#loadWasmManifest();
     }
 
     const wasmName = this.#config.wasmUrl.split('/').pop();
