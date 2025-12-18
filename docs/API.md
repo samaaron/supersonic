@@ -125,6 +125,10 @@ const supersonic = new SuperSonic({
 | `scsynthOptions` | No | Server options (see below) |
 | `preschedulerCapacity` | No | Max pending events in JS prescheduler (default: 65536) |
 | `debugMaxLineLength` | No | Truncate debug messages longer than this (default: 0 = no truncation) |
+| `debug` | No | Log all debug messages to console (scsynth, OSC in, OSC out) |
+| `debugScsynth` | No | Log scsynth debug messages to console |
+| `debugOscIn` | No | Log incoming OSC messages to console |
+| `debugOscOut` | No | Log outgoing OSC messages to console |
 
 \* Either `baseURL` or both `workerBaseURL` and `wasmBaseURL` must be provided.
 
