@@ -250,13 +250,25 @@ export class SuperSonic {
       worldOptions: worldOptions,
       // Prescheduler capacity (max pending events in JS heap)
       preschedulerCapacity: options.preschedulerCapacity || 65536,
-      // Debug message truncation (0 = no truncation)
-      debugMaxLineLength: options.debugMaxLineLength ?? 0,
-      // Debug logging to console (runtime flags)
+      // Activity event truncation (for custom log UIs)
+      activityEvent: {
+        maxLineLength: options.activityEvent?.maxLineLength ?? 200,
+        scsynth: options.activityEvent?.scsynth ?? null,
+        oscIn: options.activityEvent?.oscIn ?? null,
+        oscOut: options.activityEvent?.oscOut ?? null,
+      },
+      // Console debug logging (runtime flags)
       debug: options.debug ?? false,                     // Enable all debug logging
       debugScsynth: options.debugScsynth ?? false,       // Log scsynth debug messages
       debugOscIn: options.debugOscIn ?? false,           // Log incoming OSC messages
       debugOscOut: options.debugOscOut ?? false,         // Log outgoing OSC messages
+      // Console debug truncation (for readability)
+      activityConsoleLog: {
+        maxLineLength: options.activityConsoleLog?.maxLineLength ?? 200,
+        scsynth: options.activityConsoleLog?.scsynth ?? null,
+        oscIn: options.activityConsoleLog?.oscIn ?? null,
+        oscOut: options.activityConsoleLog?.oscOut ?? null,
+      },
     };
 
     // Resource loading configuration (private)
@@ -1025,12 +1037,13 @@ export class SuperSonic {
 
     // Debug logging for outgoing OSC
     if (this.#config.debug || this.#config.debugOscOut) {
+      const maxLen = this.#config.activityConsoleLog.oscOut ?? this.#config.activityConsoleLog.maxLineLength;
       const argsStr = args.map(a => {
         if (a instanceof Uint8Array || a instanceof ArrayBuffer) {
           return `<${a.byteLength || a.length} bytes>`;
         }
         const str = JSON.stringify(a);
-        return str.length > 64 ? str.slice(0, 64) + '...' : str;
+        return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
       }).join(', ');
       console.log(`[OSC →] ${address}${argsStr ? ' ' + argsStr : ''}`);
     }
@@ -1733,25 +1746,28 @@ export class SuperSonic {
 
       // Debug logging for incoming OSC
       if (this.#config.debug || this.#config.debugOscIn) {
+        const maxLen = this.#config.activityConsoleLog.oscIn ?? this.#config.activityConsoleLog.maxLineLength;
         const argsStr = msg.args?.map(a => {
           const str = JSON.stringify(a);
-          return str.length > 64 ? str.slice(0, 64) + '...' : str;
+          return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
         }).join(', ') || '';
         console.log(`[OSC ←] ${msg.address}${argsStr ? ' ' + argsStr : ''}`);
       }
     });
 
     this.#osc.onDebugMessage((msg) => {
-      // Truncate long debug lines if configured (e.g. synthdef binary dumps)
-      const maxLen = this.#config.debugMaxLineLength;
-      if (maxLen > 0 && msg.text && msg.text.length > maxLen) {
-        msg = { ...msg, text: msg.text.slice(0, maxLen) + '...' };
+      // Truncate for event emission (custom log UIs)
+      const eventMaxLen = this.#config.activityEvent.scsynth ?? this.#config.activityEvent.maxLineLength;
+      if (eventMaxLen > 0 && msg.text && msg.text.length > eventMaxLen) {
+        msg = { ...msg, text: msg.text.slice(0, eventMaxLen) + '...' };
       }
       this.#emit('debug', msg);
 
       // Debug logging for scsynth messages
       if (this.#config.debug || this.#config.debugScsynth) {
-        console.log(`[scsynth] ${msg.text}`);
+        const maxLen = this.#config.activityConsoleLog.scsynth ?? this.#config.activityConsoleLog.maxLineLength;
+        const text = msg.text.length > maxLen ? msg.text.slice(0, maxLen) + '...' : msg.text;
+        console.log(`[scsynth] ${text}`);
       }
     });
 
