@@ -124,13 +124,59 @@ const supersonic = new SuperSonic({
 | `sampleBaseURL` | No | Base URL for sample files (used by `loadSample`) |
 | `scsynthOptions` | No | Server options (see below) |
 | `preschedulerCapacity` | No | Max pending events in JS prescheduler (default: 65536) |
-| `debugMaxLineLength` | No | Truncate debug messages longer than this (default: 0 = no truncation) |
+| `activityEvent` | No | Event emission truncation options (see below) |
 | `debug` | No | Log all debug messages to console (scsynth, OSC in, OSC out) |
 | `debugScsynth` | No | Log scsynth debug messages to console |
 | `debugOscIn` | No | Log incoming OSC messages to console |
 | `debugOscOut` | No | Log outgoing OSC messages to console |
+| `activityConsoleLog` | No | Console output truncation options (see below) |
 
 \* Either `baseURL` or both `workerBaseURL` and `wasmBaseURL` must be provided.
+
+### Activity Event Options (`activityEvent`)
+
+Control truncation of event emission for custom log UIs:
+
+```javascript
+const supersonic = new SuperSonic({
+  baseURL: "/supersonic/",
+  activityEvent: {
+    maxLineLength: 200,  // Global default (default: 200)
+    scsynth: 500,        // Override for scsynth messages
+  }
+});
+```
+
+| Option | Description |
+|--------|-------------|
+| `maxLineLength` | Default max chars for event emission (default: 200) |
+| `scsynth` | Override max chars for scsynth debug events |
+| `oscIn` | Reserved for future use |
+| `oscOut` | Reserved for future use |
+
+### Activity Console Log Options (`activityConsoleLog`)
+
+Control truncation of console debug output:
+
+```javascript
+const supersonic = new SuperSonic({
+  baseURL: "/supersonic/",
+  debug: true,
+  activityConsoleLog: {
+    maxLineLength: 200,  // Global default (default: 200)
+    scsynth: 500,        // Override for scsynth messages
+    oscIn: 100,          // Override for incoming OSC
+    oscOut: 100,         // Override for outgoing OSC
+  }
+});
+```
+
+| Option | Description |
+|--------|-------------|
+| `maxLineLength` | Default max chars for all console output (default: 200) |
+| `scsynth` | Override max chars for scsynth messages |
+| `oscIn` | Override max chars for incoming OSC args |
+| `oscOut` | Override max chars for outgoing OSC args |
 
 ### Server Options (`scsynthOptions`)
 
