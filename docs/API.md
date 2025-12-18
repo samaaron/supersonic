@@ -155,7 +155,6 @@ await supersonic.init();
 
 ```javascript
 await supersonic.init({
-  development: true,  // Use cache-busted WASM (for dev)
   audioContextOptions: {
     sampleRate: 44100,      // Request specific sample rate
     latencyHint: "playback" // "interactive" (default), "balanced", or "playback"
@@ -165,7 +164,6 @@ await supersonic.init({
 
 | Option | Description |
 |--------|-------------|
-| `development` | Enable development mode with cache-busted WASM files |
 | `wasmUrl` | Override the WASM file URL |
 | `workletUrl` | Override the worklet script URL |
 | `audioContextOptions` | Options passed to the AudioContext constructor |

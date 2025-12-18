@@ -7,7 +7,6 @@
 */
 
 #include "audio_processor.h"
-#include "build_info.h"  // Build hash and timestamp
 #include <emscripten/webaudio.h>
 #include <algorithm>
 #include <cstring>

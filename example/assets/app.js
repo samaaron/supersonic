@@ -1468,7 +1468,7 @@ $("init-button").addEventListener("click", async () => {
       hideOverlay("suspended-overlay"),
     );
 
-    await orchestrator.init({ development: DEV_MODE });
+    await orchestrator.init();
 
     const c2d = $("node-tree-container-2d"),
       c3d = $("node-tree-container-3d");
