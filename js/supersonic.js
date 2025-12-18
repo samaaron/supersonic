@@ -252,6 +252,11 @@ export class SuperSonic {
       preschedulerCapacity: options.preschedulerCapacity || 65536,
       // Debug message truncation (0 = no truncation)
       debugMaxLineLength: options.debugMaxLineLength ?? 0,
+      // Debug logging to console (runtime flags)
+      debug: options.debug ?? false,                     // Enable all debug logging
+      debugScsynth: options.debugScsynth ?? false,       // Log scsynth debug messages
+      debugOscIn: options.debugOscIn ?? false,           // Log incoming OSC messages
+      debugOscOut: options.debugOscOut ?? false,         // Log outgoing OSC messages
     };
 
     // Resource loading configuration (private)
@@ -1017,6 +1022,19 @@ export class SuperSonic {
 
     const message = { address, args: oscArgs };
     const oscData = SuperSonic.osc.encode(message);
+
+    // Debug logging for outgoing OSC
+    if (this.#config.debug || this.#config.debugOscOut) {
+      const argsStr = args.map(a => {
+        if (a instanceof Uint8Array || a instanceof ArrayBuffer) {
+          return `<${a.byteLength || a.length} bytes>`;
+        }
+        const str = JSON.stringify(a);
+        return str.length > 64 ? str.slice(0, 64) + '...' : str;
+      }).join(', ');
+      console.log(`[OSC →] ${address}${argsStr ? ' ' + argsStr : ''}`);
+    }
+
     return this.sendOSC(oscData);
   }
 
@@ -1712,6 +1730,15 @@ export class SuperSonic {
       }
 
       this.#emit('message', msg);
+
+      // Debug logging for incoming OSC
+      if (this.#config.debug || this.#config.debugOscIn) {
+        const argsStr = msg.args?.map(a => {
+          const str = JSON.stringify(a);
+          return str.length > 64 ? str.slice(0, 64) + '...' : str;
+        }).join(', ') || '';
+        console.log(`[OSC ←] ${msg.address}${argsStr ? ' ' + argsStr : ''}`);
+      }
     });
 
     this.#osc.onDebugMessage((msg) => {
@@ -1721,6 +1748,11 @@ export class SuperSonic {
         msg = { ...msg, text: msg.text.slice(0, maxLen) + '...' };
       }
       this.#emit('debug', msg);
+
+      // Debug logging for scsynth messages
+      if (this.#config.debug || this.#config.debugScsynth) {
+        console.log(`[scsynth] ${msg.text}`);
+      }
     });
 
     this.#osc.onError((error, workerName) => {
