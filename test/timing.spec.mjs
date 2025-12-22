@@ -81,7 +81,7 @@ test.describe('Timing and Drift', () => {
       const driftBeforeSuspend = sonic.getMetrics().driftOffsetMs;
 
       // Suspend the AudioContext
-      await sonic.audioContext.suspend();
+      await sonic.node.context.suspend();
 
       // Wait a bit in suspended state (clock won't advance)
       await new Promise(r => setTimeout(r, 2000));

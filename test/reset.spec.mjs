@@ -374,11 +374,11 @@ test.describe("SuperSonic reset()", () => {
 
       try {
         await sonic.init();
-        const firstContext = sonic.audioContext;
+        const firstContext = sonic.node.context;
         const firstState = firstContext.state;
 
         await sonic.reset();
-        const secondContext = sonic.audioContext;
+        const secondContext = sonic.node.context;
         const secondState = secondContext.state;
 
         return {

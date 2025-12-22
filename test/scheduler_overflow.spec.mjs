@@ -167,7 +167,7 @@ test.describe("Scheduler Queue Overflow", () => {
           1
         );
         const ntpStartTime = ntpStartView[0];
-        const currentContextTime = sonic.audioContext.currentTime;
+        const currentContextTime = sonic.node.context.currentTime;
         const currentNTP = currentContextTime + ntpStartTime;
 
         // Schedule bundles 300ms in the future

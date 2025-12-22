@@ -488,7 +488,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
 
       // First init
       await sonic.init();
-      const firstContext = sonic.audioContext;
+      const firstContext = sonic.node.context;
 
       // Second init without destroy - what happens?
       let errorOnSecondInit = null;
@@ -498,7 +498,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
         errorOnSecondInit = e.message;
       }
 
-      const secondContext = sonic.audioContext;
+      const secondContext = sonic.node.context;
 
       return {
         success: true,
@@ -927,7 +927,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
 
-      const ctx = sonic.audioContext;
+      const ctx = sonic.node.context;
 
       // Rapid suspend/resume cycles
       for (let i = 0; i < 5; i++) {
@@ -1454,7 +1454,7 @@ test.describe("Memory Stability", () => {
         await sonic.init();
 
         // Store reference to check it gets closed
-        contexts.push(sonic.audioContext);
+        contexts.push(sonic.node.context);
 
         await sonic.destroy();
       }
