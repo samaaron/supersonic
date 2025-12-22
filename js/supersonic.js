@@ -146,6 +146,7 @@ export class SuperSonic {
   // Private implementation
   #audioContext;
   #workletNode;
+  #node = null;
   #osc;
   #wasmMemory;
   #sharedBuffer;
@@ -240,6 +241,10 @@ export class SuperSonic {
       workletUrl:
         options.workletUrl || workerBaseURL + "scsynth_audio_worklet.js",
       workerBaseURL: workerBaseURL,
+      // External AudioContext (optional - if not provided, one will be created)
+      audioContext: options.audioContext || null,
+      // Auto-connect to destination (default: true)
+      autoConnect: options.autoConnect !== false,
       audioContextOptions: {
         latencyHint: "interactive", // hint to push for lowest latency possible
         sampleRate: 48000, // only requested rate - actual rate is determined by hardware
@@ -1135,19 +1140,12 @@ export class SuperSonic {
   }
 
   /**
-   * Get AudioContext instance (read-only)
-   * @returns {AudioContext} The AudioContext instance
+   * Get the audio node wrapper for routing
+   * Exposes connect/disconnect methods and context
+   * @returns {Object|null} Frozen node wrapper, or null before init()
    */
-  get audioContext() {
-    return this.#audioContext;
-  }
-
-  /**
-   * Get AudioWorkletNode instance (read-only)
-   * @returns {AudioWorkletNode} The AudioWorkletNode instance
-   */
-  get workletNode() {
-    return this.#workletNode;
+  get node() {
+    return this.#node;
   }
 
   /**
@@ -1576,7 +1574,12 @@ export class SuperSonic {
   }
 
   #initializeAudioContext() {
-    this.#audioContext = new AudioContext(this.#config.audioContextOptions);
+    // Use provided AudioContext or create a new one
+    if (this.#config.audioContext) {
+      this.#audioContext = this.#config.audioContext;
+    } else {
+      this.#audioContext = new AudioContext(this.#config.audioContextOptions);
+    }
 
     // Forward AudioContext state changes as SuperSonic events
     this.#audioContext.addEventListener('statechange', () => {
@@ -1685,8 +1688,13 @@ export class SuperSonic {
       }
     );
 
-    // Connect to audio graph to trigger process() calls
-    this.#workletNode.connect(this.#audioContext.destination);
+    // Only auto-connect if enabled (default: true)
+    if (this.#config.autoConnect) {
+      this.#workletNode.connect(this.#audioContext.destination);
+    }
+
+    // Create the public node wrapper
+    this.#node = this.#createNodeWrapper();
 
     // Initialize AudioWorklet with SharedArrayBuffer
     this.#workletNode.port.postMessage({
@@ -1705,6 +1713,21 @@ export class SuperSonic {
 
     // Wait for worklet initialization
     await this.#waitForWorkletInit();
+  }
+
+  /**
+   * Create a frozen wrapper around the worklet node
+   * Exposes only safe routing methods, hides internal port
+   */
+  #createNodeWrapper() {
+    const worklet = this.#workletNode;
+    return Object.freeze({
+      connect: (dest, output, input) => worklet.connect(dest, output, input),
+      disconnect: (dest, output, input) => worklet.disconnect(dest, output, input),
+      get context() { return worklet.context; },
+      get numberOfOutputs() { return worklet.numberOfOutputs; },
+      get channelCount() { return worklet.channelCount; },
+    });
   }
 
   /**

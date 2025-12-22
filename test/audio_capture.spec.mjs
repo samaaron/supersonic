@@ -621,7 +621,7 @@ test.describe("OSC Bundle Timing", () => {
 
         // Start capture and record AudioContext time at that moment
         sonic.startCapture();
-        const captureStartContextTime = sonic.audioContext.currentTime;
+        const captureStartContextTime = sonic.node.context.currentTime;
 
         // Schedule synth 100ms in the future using AudioContext-based NTP
         // This is the same time reference the WASM scheduler uses

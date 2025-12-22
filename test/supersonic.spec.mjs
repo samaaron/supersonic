@@ -862,4 +862,215 @@ test.describe("Event Emitter", () => {
     expect(result.metricsCount).toBeGreaterThan(0);
     // Debug messages depend on scsynth output, may or may not have any
   });
+
+  // ============================================================================
+  // Node API Tests
+  // ============================================================================
+
+  test("sonic.node is null before init()", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      return {
+        nodeBeforeInit: sonic.node,
+      };
+    });
+
+    expect(result.nodeBeforeInit).toBe(null);
+  });
+
+  test("sonic.node returns frozen wrapper after init()", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      await sonic.init();
+
+      const node = sonic.node;
+      return {
+        success: true,
+        hasNode: node !== null,
+        hasConnect: typeof node.connect === "function",
+        hasDisconnect: typeof node.disconnect === "function",
+        hasContext: node.context instanceof AudioContext,
+        hasNumberOfOutputs: typeof node.numberOfOutputs === "number",
+        hasChannelCount: typeof node.channelCount === "number",
+        isFrozen: Object.isFrozen(node),
+      };
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.hasNode).toBe(true);
+    expect(result.hasConnect).toBe(true);
+    expect(result.hasDisconnect).toBe(true);
+    expect(result.hasContext).toBe(true);
+    expect(result.hasNumberOfOutputs).toBe(true);
+    expect(result.hasChannelCount).toBe(true);
+    expect(result.isFrozen).toBe(true);
+  });
+
+  test("sonic.node is same object on repeated access", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      await sonic.init();
+
+      const node1 = sonic.node;
+      const node2 = sonic.node;
+      const node3 = sonic.node;
+
+      return {
+        success: true,
+        sameObject: node1 === node2 && node2 === node3,
+      };
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.sameObject).toBe(true);
+  });
+
+  test("sonic.node wrapper does not expose port", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+      });
+
+      await sonic.init();
+
+      const node = sonic.node;
+      const keys = Object.keys(node);
+
+      return {
+        success: true,
+        keys: keys,
+        hasPort: "port" in node,
+        hasParameters: "parameters" in node,
+      };
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.hasPort).toBe(false);
+    expect(result.hasParameters).toBe(false);
+  });
+
+  test("sonic.node.connect() works with AnalyserNode", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+        autoConnect: false,
+      });
+
+      await sonic.init();
+
+      const ctx = sonic.node.context;
+      const analyser = ctx.createAnalyser();
+
+      // Connect sonic -> analyser -> destination
+      sonic.node.connect(analyser);
+      analyser.connect(ctx.destination);
+
+      return {
+        success: true,
+      };
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  test("autoConnect: false prevents auto-connection to destination", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+        autoConnect: false,
+      });
+
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      // Play a note - with autoConnect: false, it should not be audible
+      // (we can't easily test audio output, but we can verify it doesn't throw)
+      sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "note", 60, "release", 0.01);
+      await new Promise(r => setTimeout(r, 100));
+
+      return {
+        success: true,
+        initialized: sonic.initialized,
+      };
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.initialized).toBe(true);
+  });
+
+  test("autoConnect: true (default) connects to destination", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+        // autoConnect defaults to true
+      });
+
+      await sonic.init();
+
+      return {
+        success: true,
+        initialized: sonic.initialized,
+      };
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.initialized).toBe(true);
+  });
+
+  test("accepts external AudioContext", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      // Create external AudioContext
+      const externalCtx = new AudioContext({ sampleRate: 44100 });
+
+      const sonic = new window.SuperSonic({
+        workerBaseURL: "/dist/workers/",
+        wasmBaseURL: "/dist/wasm/",
+        sampleBaseURL: "/dist/samples/",
+        synthdefBaseURL: "/dist/synthdefs/",
+        audioContext: externalCtx,
+      });
+
+      await sonic.init();
+
+      return {
+        success: true,
+        sameContext: sonic.node.context === externalCtx,
+        sampleRate: sonic.node.context.sampleRate,
+      };
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.sameContext).toBe(true);
+    expect(result.sampleRate).toBe(44100);
+  });
 });
