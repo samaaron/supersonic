@@ -368,6 +368,6 @@ export default class ScsynthOSC {
         };
 
         this.initialized = false;
-        if (__DEV__) console.log('[ScsynthOSC] All workers terminated');
+        if (__DEV__) console.log('[Dbg-ScsynthOSC] All workers terminated');
     }
 }
