@@ -384,14 +384,16 @@ extern "C" {
             NodeTree_Add(&g_world->mTopGroup->mNode, tree_header, tree_entries);
         }
 
+
+        worklet_debug(R"(
+░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀
+░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░
+░▀▀▀░▀▀▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀)");
         worklet_debug("v%d.%d.%d (scsynth %d.%d.%d) %.0fkHz %dch",
                      SUPERSONIC_VERSION_MAJOR, SUPERSONIC_VERSION_MINOR, SUPERSONIC_VERSION_PATCH,
                      SC_VersionMajor, SC_VersionMinor, SC_VersionPatch,
                      sample_rate / 1000, options.mNumOutputBusChannels);
-        worklet_debug("░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀");
-        worklet_debug("░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░");
-        worklet_debug("░▀▀▀░▀▀▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀");
-        worklet_debug("scsynth-nrt ready...");
+        worklet_debug("scsynth ready...");
     }
 
     // Main audio processing function - called every audio frame (128 samples)

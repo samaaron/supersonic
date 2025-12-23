@@ -542,16 +542,16 @@ export class SuperSonic {
       return false;
     }
 
-    if (__DEV__) console.log('[SuperSonic] Attempting recovery...');
+    if (__DEV__) console.log('[Dbg-SuperSonic] Attempting recovery...');
 
     // Try quick resume first - if worklet is still running, just resync timing
     if (await this.#resume()) {
-      if (__DEV__) console.log('[SuperSonic] Quick resume succeeded');
+      if (__DEV__) console.log('[Dbg-SuperSonic] Quick resume succeeded');
       return true;
     }
 
     // Worklet was killed, do full reload
-    if (__DEV__) console.log('[SuperSonic] Resume failed, doing full reload');
+    if (__DEV__) console.log('[Dbg-SuperSonic] Resume failed, doing full reload');
     this.#emit('recover:start');
     const success = await this.#reload();
     this.#emit('recover:complete', { success });
@@ -575,7 +575,7 @@ export class SuperSonic {
       return false;
     }
 
-    if (__DEV__) console.log('[SuperSonic] Starting reload...');
+    if (__DEV__) console.log('[Dbg-SuperSonic] Starting reload...');
 
     // Save cached synthdef bytes before partial shutdown
     const cachedSynthDefs = new Map(this.loadedSynthDefs);
@@ -584,7 +584,7 @@ export class SuperSonic {
     const cachedBuffers = this.#bufferManager?.getAllocatedBuffers() || [];
 
     if (__DEV__) {
-      console.log(`[SuperSonic] Caching ${cachedSynthDefs.size} synthdefs, ${cachedBuffers.length} buffers`);
+      console.log(`[Dbg-SuperSonic] Caching ${cachedSynthDefs.size} synthdefs, ${cachedBuffers.length} buffers`);
     }
 
     // Partial shutdown - preserve SharedArrayBuffer and BufferManager
@@ -597,7 +597,7 @@ export class SuperSonic {
     for (const [name, data] of cachedSynthDefs) {
       try {
         await this.send('/d_recv', data);
-        if (__DEV__) console.log(`[SuperSonic] Restored synthdef: ${name}`);
+        if (__DEV__) console.log(`[Dbg-SuperSonic] Restored synthdef: ${name}`);
       } catch (e) {
         console.error(`[SuperSonic] Failed to restore synthdef ${name}:`, e);
       }
@@ -616,13 +616,13 @@ export class SuperSonic {
           buf.sampleRate,
           uuid
         );
-        if (__DEV__) console.log(`[SuperSonic] Restored buffer: ${buf.bufnum}`);
+        if (__DEV__) console.log(`[Dbg-SuperSonic] Restored buffer: ${buf.bufnum}`);
       } catch (e) {
         console.error(`[SuperSonic] Failed to restore buffer ${buf.bufnum}:`, e);
       }
     }
 
-    if (__DEV__) console.log('[SuperSonic] Reload complete');
+    if (__DEV__) console.log('[Dbg-SuperSonic] Reload complete');
     return true;
   }
 
@@ -632,7 +632,7 @@ export class SuperSonic {
    * @private
    */
   async #partialShutdown() {
-    if (__DEV__) console.log("[SuperSonic] Partial shutdown (preserving buffers)...");
+    if (__DEV__) console.log("[Dbg-SuperSonic] Partial shutdown (preserving buffers)...");
 
     // Stop timers
     this.#stopDriftOffsetTimer();
@@ -685,7 +685,7 @@ export class SuperSonic {
    * @private
    */
   async #partialInit() {
-    if (__DEV__) console.log("[SuperSonic] Partial init (reusing buffers)...");
+    if (__DEV__) console.log("[Dbg-SuperSonic] Partial init (reusing buffers)...");
 
     this.#initializing = true;
     this.bootStats.initStartTime = performance.now();
@@ -1197,7 +1197,7 @@ export class SuperSonic {
 
       if (__DEV__)
         console.log(
-          `[SuperSonic] Sent synthdef from ${path} (${synthdefData.length} bytes)`
+          `[Dbg-SuperSonic] Sent synthdef from ${path} (${synthdefData.length} bytes)`
         );
 
       return {
@@ -1240,7 +1240,7 @@ export class SuperSonic {
     const successCount = Object.values(results).filter((r) => r.success).length;
     if (__DEV__)
       console.log(
-        `[SuperSonic] Sent ${successCount}/${names.length} synthdef loads`
+        `[Dbg-SuperSonic] Sent ${successCount}/${names.length} synthdef loads`
       );
 
     return results;
@@ -1373,7 +1373,7 @@ export class SuperSonic {
       return;
     }
 
-    if (__DEV__) console.log("[SuperSonic] Shutting down...");
+    if (__DEV__) console.log("[Dbg-SuperSonic] Shutting down...");
 
     // Emit shutdown event before teardown
     this.#emit("shutdown");
@@ -1445,7 +1445,7 @@ export class SuperSonic {
       }
     }
 
-    if (__DEV__) console.log("[SuperSonic] Shutdown complete");
+    if (__DEV__) console.log("[Dbg-SuperSonic] Shutdown complete");
   }
 
   /**
@@ -1459,7 +1459,7 @@ export class SuperSonic {
    * // sonic is now unusable, create a new instance if needed
    */
   async destroy() {
-    if (__DEV__) console.log("[SuperSonic] Destroying...");
+    if (__DEV__) console.log("[Dbg-SuperSonic] Destroying...");
 
     // Emit destroy event to give listeners one last chance to clean up
     this.#emit("destroy");
@@ -1473,7 +1473,7 @@ export class SuperSonic {
     // Clear all listeners - this instance is now unusable
     this.#listeners.clear();
 
-    if (__DEV__) console.log("[SuperSonic] Destroyed");
+    if (__DEV__) console.log("[Dbg-SuperSonic] Destroyed");
   }
 
   /**
@@ -1488,12 +1488,12 @@ export class SuperSonic {
    * // sonic is now re-initialized and ready to use
    */
   async reset(config = {}) {
-    if (__DEV__) console.log("[SuperSonic] Resetting...");
+    if (__DEV__) console.log("[Dbg-SuperSonic] Resetting...");
 
     await this.shutdown();
     await this.init(config);
 
-    if (__DEV__) console.log("[SuperSonic] Reset complete");
+    if (__DEV__) console.log("[Dbg-SuperSonic] Reset complete");
   }
 
   /**
@@ -1637,7 +1637,7 @@ export class SuperSonic {
   async #loadWasm() {
     // Return cached WASM if available (fast path for recover())
     if (this.#cachedWasmBytes) {
-      if (__DEV__) console.log('[SuperSonic] Using cached WASM bytes');
+      if (__DEV__) console.log('[Dbg-SuperSonic] Using cached WASM bytes');
       return this.#cachedWasmBytes;
     }
 
@@ -1754,7 +1754,7 @@ export class SuperSonic {
         // Note: synthdef bytes are already cached in loadSynthDef() after sending /d_recv
         const synthName = msg.args[0];
         if (__DEV__ && synthName) {
-          console.log(`[SuperSonic] Synthdef confirmed: ${synthName}`);
+          console.log(`[Dbg-SuperSonic] Synthdef confirmed: ${synthName}`);
         }
       } else if (msg.address === "/synced" && msg.args.length > 0) {
         // Handle /synced responses for sync operations
@@ -1819,7 +1819,7 @@ export class SuperSonic {
 
     if (__DEV__)
       console.log(
-        `[SuperSonic] Initialization complete in ${this.bootStats.initDuration.toFixed(
+        `[Dbg-SuperSonic] Initialization complete in ${this.bootStats.initDuration.toFixed(
           2
         )}ms`
       );
@@ -1842,7 +1842,7 @@ export class SuperSonic {
         ss.inspect = () => ss.primary ? SuperSonic.inspect(ss.primary) : null;
       }
       window.__supersonic__.instances.push(this);
-      console.log('[SuperSonic] Debug: window.__supersonic__ available');
+      console.log('[Dbg-SuperSonic] Debug: window.__supersonic__ available');
     }
   }
 
@@ -1888,7 +1888,7 @@ export class SuperSonic {
             if (event.data.bufferConstants !== undefined) {
               if (__DEV__)
                 console.log(
-                  "[SuperSonic] Received bufferConstants from worklet"
+                  "[Dbg-SuperSonic] Received bufferConstants from worklet"
                 );
               this.#bufferConstants = event.data.bufferConstants;
 
@@ -1901,7 +1901,7 @@ export class SuperSonic {
               // Initialize NTP timing (blocks until audio is flowing)
               if (__DEV__)
                 console.log(
-                  "[SuperSonic] Initializing NTP timing (waiting for audio to flow)..."
+                  "[Dbg-SuperSonic] Initializing NTP timing (waiting for audio to flow)..."
                 );
               await this.#initializeNTPTiming();
 
@@ -1916,7 +1916,7 @@ export class SuperSonic {
 
             if (__DEV__)
               console.log(
-                "[SuperSonic] Calling resolve() for worklet initialization"
+                "[Dbg-SuperSonic] Calling resolve() for worklet initialization"
               );
             resolve();
           } else {
@@ -2245,7 +2245,7 @@ export class SuperSonic {
       1
     );
 
-    if (__DEV__) console.log("[SuperSonic] Shared views initialized");
+    if (__DEV__) console.log("[Dbg-SuperSonic] Shared views initialized");
   }
 
   /**
@@ -2316,7 +2316,7 @@ export class SuperSonic {
 
     if (__DEV__)
       console.log(
-        `[SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(
+        `[Dbg-SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(
           6
         )}s (NTP=${currentNTP.toFixed(
           3
@@ -2354,7 +2354,7 @@ export class SuperSonic {
 
     if (__DEV__)
       console.log(
-        `[SuperSonic] Drift offset: ${driftMs}ms (expected=${expectedContextTime.toFixed(
+        `[Dbg-SuperSonic] Drift offset: ${driftMs}ms (expected=${expectedContextTime.toFixed(
           3
         )}s, actual=${timestamp.contextTime.toFixed(
           3
@@ -2403,7 +2403,7 @@ export class SuperSonic {
 
     if (__DEV__)
       console.log(
-        `[SuperSonic] Timing resynced after resume: start=${ntpStartTime.toFixed(6)}s`
+        `[Dbg-SuperSonic] Timing resynced after resume: start=${ntpStartTime.toFixed(6)}s`
       );
   }
 
@@ -2422,7 +2422,7 @@ export class SuperSonic {
 
     if (__DEV__)
       console.log(
-        `[SuperSonic] Started drift offset correction (every ${DRIFT_UPDATE_INTERVAL_MS}ms)`
+        `[Dbg-SuperSonic] Started drift offset correction (every ${DRIFT_UPDATE_INTERVAL_MS}ms)`
       );
   }
 

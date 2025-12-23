@@ -87,7 +87,7 @@ export class BufferManager {
 
         const poolSizeMB = (bufferPoolConfig.size / (1024 * 1024)).toFixed(0);
         const poolOffsetMB = (bufferPoolConfig.start / (1024 * 1024)).toFixed(0);
-        if (__DEV__) console.log(`[BufferManager] Initialized: ${poolSizeMB}MB pool at offset ${poolOffsetMB}MB`);
+        if (__DEV__) console.log(`[Dbg-BufferManager] Initialized: ${poolSizeMB}MB pool at offset ${poolOffsetMB}MB`);
     }
 
     #resolveAudioPath(scPath) {
@@ -674,7 +674,7 @@ export class BufferManager {
             throw new Error('BufferManager.updateAudioContext requires audioContext');
         }
         this.#audioContext = audioContext;
-        if (__DEV__) console.log('[BufferManager] AudioContext updated');
+        if (__DEV__) console.log('[Dbg-BufferManager] AudioContext updated');
     }
 
     /**
@@ -731,6 +731,6 @@ export class BufferManager {
         // Clear buffer locks
         this.#bufferLocks.clear();
 
-        if (__DEV__) console.log('[BufferManager] Destroyed');
+        if (__DEV__) console.log('[Dbg-BufferManager] Destroyed');
     }
 }
