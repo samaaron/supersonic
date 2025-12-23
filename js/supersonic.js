@@ -1774,7 +1774,7 @@ export class SuperSonic {
           const str = JSON.stringify(a);
           return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
         }).join(', ') || '';
-        console.log(`[OSC ←] ${msg.address}${argsStr ? ' ' + argsStr : ''}`);
+        console.log(`[← OSC] ${msg.address}${argsStr ? ' ' + argsStr : ''}`);
       }
     });
 
@@ -1790,7 +1790,7 @@ export class SuperSonic {
       if (this.#config.debug || this.#config.debugScsynth) {
         const maxLen = this.#config.activityConsoleLog.scsynth ?? this.#config.activityConsoleLog.maxLineLength;
         const text = msg.text.length > maxLen ? msg.text.slice(0, maxLen) + '...' : msg.text;
-        console.log(`[scsynth] ${text}`);
+        console.log(`[synth] ${text}`);
       }
     });
 
