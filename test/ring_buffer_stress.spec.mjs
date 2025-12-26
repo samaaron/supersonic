@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, skipIfPostMessage } from "./fixtures.mjs";
 
 // 15 minute timeout for stress tests - CI runners can be slow
 test.setTimeout(15 * 60 * 1000);
@@ -10,12 +10,19 @@ test.setTimeout(15 * 60 * 1000);
  * by rapidly sending OSC messages from multiple sources (main thread
  * direct writes and worker writes).
  *
+ * NOTE: These tests require SAB mode - they test the SharedArrayBuffer
+ * ring buffer directly. Automatically skipped in postMessage mode.
+ *
  * Issue: https://github.com/samaaron/supersonic/issues/2
  * Symptoms: "Command not found: @␙#", garbage node IDs, "Bundle too large"
  */
 
 test.describe("Ring Buffer Stress Test", () => {
-  test("rapid OSC messages should not cause corruption", async ({ page }) => {
+  // Skip all tests in this describe block if running in postMessage mode
+  test.beforeEach(async ({ sonicMode }) => {
+    skipIfPostMessage(sonicMode, 'Ring buffer stress tests require SAB mode');
+  });
+  test("rapid OSC messages should not cause corruption", async ({ page, sonicConfig }) => {
     // Collect all console output for analysis
     const consoleMessages = [];
     const errors = [];
@@ -46,13 +53,8 @@ test.describe("Ring Buffer Stress Test", () => {
     });
 
     // Run the stress test
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const debugMessages = [];
       sonic.on('debug', (msg) => {
@@ -128,7 +130,7 @@ test.describe("Ring Buffer Stress Test", () => {
       } catch (err) {
         return { success: false, error: err.message, debugMessages };
       }
-    });
+    }, sonicConfig);
 
     console.log(`Sent ${result.messagesSent} messages`);
     console.log(`Debug messages: ${result.debugCount}`);
@@ -153,7 +155,7 @@ test.describe("Ring Buffer Stress Test", () => {
     ).length).toBe(0);
   });
 
-  test("concurrent timed bundles should not cause corruption", async ({ page }) => {
+  test("concurrent timed bundles should not cause corruption", async ({ page, sonicConfig }) => {
     // This test focuses on timed bundles which go through the scheduler
     const errors = [];
 
@@ -172,13 +174,8 @@ test.describe("Ring Buffer Stress Test", () => {
       timeout: 10000,
     });
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const debugMessages = [];
       sonic.on('debug', (msg) => {
@@ -264,7 +261,7 @@ test.describe("Ring Buffer Stress Test", () => {
       } catch (err) {
         return { success: false, error: err.message };
       }
-    });
+    }, sonicConfig);
 
     console.log(`Sent ${result.bundlesSent} timed bundles`);
 
@@ -278,7 +275,7 @@ test.describe("Ring Buffer Stress Test", () => {
     expect(errors.length).toBe(0);
   });
 
-  test("mixed immediate and timed messages concurrently", async ({ page }) => {
+  test("mixed immediate and timed messages concurrently", async ({ page, sonicConfig }) => {
     // This test simulates the actual demo behavior:
     // - Immediate n_set messages from pad movement (direct write path)
     // - Timed s_new bundles from arpeggiator (worker path)
@@ -302,13 +299,8 @@ test.describe("Ring Buffer Stress Test", () => {
       timeout: 10000,
     });
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const debugMessages = [];
       sonic.on('debug', (msg) => {
@@ -415,7 +407,7 @@ test.describe("Ring Buffer Stress Test", () => {
       } catch (err) {
         return { success: false, error: err.message };
       }
-    });
+    }, sonicConfig);
 
     console.log(`Sent ${result.immediateCount} immediate + ${result.timedCount} timed = ${result.immediateCount + result.timedCount} total`);
 

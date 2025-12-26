@@ -17,6 +17,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
 
+        // Transport mode: 'sab' or 'postMessage'
+        this.mode = 'sab';
+
         this.sharedBuffer = null;
         this.wasmModule = null;
         this.wasmInstance = null;
@@ -30,7 +33,13 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.lastAudioBufferPtr = 0;
         this.lastWasmBufferSize = 0;
 
-        // Views into SharedArrayBuffer
+        // Node tree version tracking (for postMessage mode)
+        this.lastTreeVersion = -1;
+        this.treeSnapshotsSent = 0;
+        this.lastTreeSendTime = -1; // AudioContext time of last send (-1 = never)
+        this.treeSnapshotMinInterval = 0.05; // Max 20 snapshots/sec (50ms in seconds)
+
+        // Views into SharedArrayBuffer (or WASM memory in postMessage mode)
         this.atomicView = null;
         this.uint8View = null;
         this.dataView = null;
@@ -53,6 +62,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             WASM_ERROR: 1 << 2,
             FRAGMENTED_MSG: 1 << 3
         };
+
+        // PostMessage mode: queue for incoming OSC messages
+        this.oscQueue = [];
 
         // Listen for messages from main thread
         this.port.onmessage = this.handleMessage.bind(this);
@@ -151,9 +163,20 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             IN_WRITE_LOCK: (ringBufferBase + CONTROL_START + 40) / 4
         };
 
-        // Create metrics view into the metrics region of SharedArrayBuffer
-        const metricsBase = ringBufferBase + METRICS_START;
-        this.metricsView = new Uint32Array(this.sharedBuffer, metricsBase, this.bufferConstants.METRICS_SIZE / 4);
+        // Create views - source depends on mode
+        if (this.mode === 'sab') {
+            // SAB mode: views into SharedArrayBuffer
+            const metricsBase = ringBufferBase + METRICS_START;
+            this.metricsView = new Uint32Array(this.sharedBuffer, metricsBase, this.bufferConstants.METRICS_SIZE / 4);
+        } else {
+            // PostMessage mode: views into WASM memory
+            // Note: atomicView/uint8View/dataView are set up here for ring buffer access
+            this.atomicView = new Int32Array(this.wasmMemory.buffer);
+            this.uint8View = new Uint8Array(this.wasmMemory.buffer);
+            this.dataView = new DataView(this.wasmMemory.buffer);
+            const metricsBase = ringBufferBase + METRICS_START;
+            this.metricsView = new Uint32Array(this.wasmMemory.buffer, metricsBase, this.bufferConstants.METRICS_SIZE / 4);
+        }
     }
 
     // Write worldOptions to SharedArrayBuffer for C++ to read
@@ -188,7 +211,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         uint32View[15] = this.worldOptions.verbosity || 0;
     }
 
-    // Write debug message to SharedArrayBuffer DEBUG ring buffer
+    // Write debug message to DEBUG ring buffer
     js_debug(message) {
         if (!this.uint8View || !this.atomicView || !this.CONTROL_INDICES || !this.ringBufferBase) {
             return;
@@ -210,7 +233,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             }
 
             const debugHeadIndex = this.CONTROL_INDICES.DEBUG_HEAD;
-            const currentHead = Atomics.load(this.atomicView, debugHeadIndex);
+            const currentHead = this.atomicLoad(debugHeadIndex);
             const spaceToEnd = DEBUG_BUFFER_SIZE - currentHead;
 
             let writePos = currentHead;
@@ -228,35 +251,361 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
             // Update head pointer (publish message)
             const newHead = writePos + bytes.length;
-            Atomics.store(this.atomicView, debugHeadIndex, newHead);
+            this.atomicStore(debugHeadIndex, newHead);
         } catch (err) {
             // Silently fail in real-time audio context
+        }
+    }
+
+    // Atomic-safe load - uses Atomics in SAB mode, regular access in postMessage mode
+    atomicLoad(index) {
+        if (this.mode === 'sab') {
+            return Atomics.load(this.atomicView, index);
+        } else {
+            return this.atomicView[index];
+        }
+    }
+
+    // Atomic-safe store - uses Atomics in SAB mode, regular access in postMessage mode
+    atomicStore(index, value) {
+        if (this.mode === 'sab') {
+            Atomics.store(this.atomicView, index, value);
+        } else {
+            this.atomicView[index] = value;
+        }
+    }
+
+    // Write queued OSC messages to the IN ring buffer (postMessage mode)
+    drainOscQueue() {
+        if (this.oscQueue.length === 0) return;
+
+        const IN_BUFFER_START = this.bufferConstants.IN_BUFFER_START;
+        const IN_BUFFER_SIZE = this.bufferConstants.IN_BUFFER_SIZE;
+        const MESSAGE_MAGIC = this.bufferConstants.MESSAGE_MAGIC;
+        const MESSAGE_HEADER_SIZE = this.bufferConstants.MESSAGE_HEADER_SIZE;
+
+        const inBufferStart = this.ringBufferBase + IN_BUFFER_START;
+
+        while (this.oscQueue.length > 0) {
+            const oscData = this.oscQueue[0];
+            const messageLength = oscData.byteLength;
+            const totalLength = MESSAGE_HEADER_SIZE + messageLength;
+            const alignedLength = (totalLength + 3) & ~3;  // Align to 4 bytes
+
+            // Get current head/tail
+            const head = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
+            const tail = this.atomicLoad(this.CONTROL_INDICES.IN_TAIL);
+
+            // Calculate available space
+            let available;
+            if (head >= tail) {
+                available = IN_BUFFER_SIZE - head + tail - 1;
+            } else {
+                available = tail - head - 1;
+            }
+
+            // Check if message fits
+            if (alignedLength > available) {
+                // Buffer full, leave message in queue for next frame
+                break;
+            }
+
+            // Remove from queue
+            this.oscQueue.shift();
+
+            // Write message header
+            // NOTE: length field must be the TOTAL length including header (for tail advancement)
+            let writePos = head;
+            this.dataView.setUint32(inBufferStart + writePos, MESSAGE_MAGIC, true);
+            this.dataView.setUint32(inBufferStart + writePos + 4, alignedLength, true);
+            const sequence = this.atomicLoad(this.CONTROL_INDICES.IN_SEQUENCE);
+            this.dataView.setUint32(inBufferStart + writePos + 8, sequence, true);
+            this.dataView.setUint32(inBufferStart + writePos + 12, 0, true);  // padding
+            this.atomicStore(this.CONTROL_INDICES.IN_SEQUENCE, sequence + 1);
+
+            // Write message data
+            const oscBytes = new Uint8Array(oscData);
+            for (let i = 0; i < messageLength; i++) {
+                this.uint8View[inBufferStart + writePos + MESSAGE_HEADER_SIZE + i] = oscBytes[i];
+            }
+
+            // Update head
+            const newHead = (writePos + alignedLength) % IN_BUFFER_SIZE;
+            this.atomicStore(this.CONTROL_INDICES.IN_HEAD, newHead);
+        }
+    }
+
+    // Read OSC replies from OUT ring buffer and send via postMessage
+    readOscReplies() {
+        const OUT_BUFFER_START = this.bufferConstants.OUT_BUFFER_START;
+        const OUT_BUFFER_SIZE = this.bufferConstants.OUT_BUFFER_SIZE;
+        const MESSAGE_MAGIC = this.bufferConstants.MESSAGE_MAGIC;
+        const PADDING_MAGIC = this.bufferConstants.PADDING_MAGIC;
+        const MESSAGE_HEADER_SIZE = this.bufferConstants.MESSAGE_HEADER_SIZE;
+
+        const outBufferStart = this.ringBufferBase + OUT_BUFFER_START;
+        const messages = [];
+
+        let head = this.atomicLoad(this.CONTROL_INDICES.OUT_HEAD);
+        let tail = this.atomicLoad(this.CONTROL_INDICES.OUT_TAIL);
+
+        while (head !== tail) {
+            // Read magic
+            const magic = this.dataView.getUint32(outBufferStart + tail, true);
+
+            // Check for padding marker
+            if (magic === PADDING_MAGIC) {
+                // Wrap around to beginning
+                tail = 0;
+                continue;
+            }
+
+            if (magic !== MESSAGE_MAGIC) {
+                // Invalid magic, skip byte
+                tail = (tail + 1) % OUT_BUFFER_SIZE;
+                continue;
+            }
+
+            // Read header
+            const length = this.dataView.getUint32(outBufferStart + tail + 4, true);
+            const sequence = this.dataView.getUint32(outBufferStart + tail + 8, true);
+
+            // Validate length (length includes header)
+            if (length < MESSAGE_HEADER_SIZE || length > OUT_BUFFER_SIZE) {
+                tail = (tail + 1) % OUT_BUFFER_SIZE;
+                continue;
+            }
+
+            // Read message data (length includes header, so payload is length - header)
+            const payloadLength = length - MESSAGE_HEADER_SIZE;
+            const oscData = new Uint8Array(payloadLength);
+            for (let i = 0; i < payloadLength; i++) {
+                oscData[i] = this.uint8View[outBufferStart + tail + MESSAGE_HEADER_SIZE + i];
+            }
+
+            messages.push({ oscData: oscData.buffer, sequence });
+
+            // Advance tail by aligned total length (already includes header)
+            const alignedLength = (length + 3) & ~3;
+            tail = (tail + alignedLength) % OUT_BUFFER_SIZE;
+        }
+
+        // Update tail
+        this.atomicStore(this.CONTROL_INDICES.OUT_TAIL, tail);
+
+        // Send messages via postMessage
+        if (messages.length > 0) {
+            this.port.postMessage({
+                type: 'oscReplies',
+                messages: messages
+            });
+        }
+    }
+
+    // Read node tree from WASM memory and send via postMessage if version changed
+    checkAndSendNodeTree(audioTime) {
+        if (!this.bufferConstants || !this.wasmMemory || this.ringBufferBase === null) {
+            return;
+        }
+
+        const bc = this.bufferConstants;
+        const treeBase = this.ringBufferBase + bc.NODE_TREE_START;
+
+        // Read just the version first (second uint32 in header)
+        const headerView = new Uint32Array(this.wasmMemory.buffer, treeBase, 2);
+        const version = headerView[1];
+
+        // Only send if version changed
+        if (version === this.lastTreeVersion) {
+            return;
+        }
+
+        // Rate limit: max 20 snapshots/sec (50ms interval)
+        // Use AudioContext time for stable timing
+        if (this.lastTreeSendTime >= 0 && audioTime - this.lastTreeSendTime < this.treeSnapshotMinInterval) {
+            return; // Skip this frame, will catch up on next check
+        }
+        this.lastTreeVersion = version;
+        this.lastTreeSendTime = audioTime;
+
+        const nodeCount = headerView[0];
+
+        // Read node entries
+        const entriesBase = treeBase + bc.NODE_TREE_HEADER_SIZE;
+        const maxNodes = bc.NODE_TREE_MAX_NODES;
+        const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 56 bytes
+        const defNameSize = bc.NODE_TREE_DEF_NAME_SIZE; // 32 bytes
+
+        const dataView = new DataView(this.wasmMemory.buffer, entriesBase, maxNodes * entrySize);
+
+        // Collect non-empty entries
+        const nodes = [];
+        let foundCount = 0;
+        for (let i = 0; i < maxNodes && foundCount < nodeCount; i++) {
+            const byteOffset = i * entrySize;
+            const id = dataView.getInt32(byteOffset, true);
+            if (id === -1) continue; // Empty slot
+            foundCount++;
+
+            // Read def_name (32 bytes starting at byte 24)
+            const defNameStart = entriesBase + byteOffset + 24;
+            const defNameBytes = new Uint8Array(this.wasmMemory.buffer, defNameStart, defNameSize);
+            // Find null terminator and convert to string
+            let defName = '';
+            for (let j = 0; j < defNameSize && defNameBytes[j] !== 0; j++) {
+                defName += String.fromCharCode(defNameBytes[j]);
+            }
+
+            nodes.push({
+                id,
+                parentId: dataView.getInt32(byteOffset + 4, true),
+                isGroup: dataView.getInt32(byteOffset + 8, true) === 1,
+                prevId: dataView.getInt32(byteOffset + 12, true),
+                nextId: dataView.getInt32(byteOffset + 16, true),
+                headId: dataView.getInt32(byteOffset + 20, true),
+                defName
+            });
+        }
+
+        // Send tree snapshot via postMessage
+        this.treeSnapshotsSent++;
+        this.port.postMessage({
+            type: 'nodeTree',
+            nodeCount,
+            version,
+            nodes,
+            snapshotsSent: this.treeSnapshotsSent
+        });
+    }
+
+    // Read debug messages from DEBUG ring buffer and send via postMessage
+    readDebugMessages() {
+        const DEBUG_BUFFER_START = this.bufferConstants.DEBUG_BUFFER_START;
+        const DEBUG_BUFFER_SIZE = this.bufferConstants.DEBUG_BUFFER_SIZE;
+        const MESSAGE_MAGIC = this.bufferConstants.MESSAGE_MAGIC;
+        const PADDING_MAGIC = this.bufferConstants.PADDING_MAGIC;
+        const MESSAGE_HEADER_SIZE = this.bufferConstants.MESSAGE_HEADER_SIZE;
+
+        const debugBufferStart = this.ringBufferBase + DEBUG_BUFFER_START;
+        const messages = [];
+
+        let head = this.atomicLoad(this.CONTROL_INDICES.DEBUG_HEAD);
+        let tail = this.atomicLoad(this.CONTROL_INDICES.DEBUG_TAIL);
+
+        while (head !== tail) {
+            // Check for padding marker
+            const magic = this.dataView.getUint32(debugBufferStart + tail, true);
+
+            if (magic === PADDING_MAGIC) {
+                tail = 0;
+                continue;
+            }
+
+            if (magic !== MESSAGE_MAGIC) {
+                // Invalid magic, skip byte
+                tail = (tail + 1) % DEBUG_BUFFER_SIZE;
+                continue;
+            }
+
+            // Read header
+            const length = this.dataView.getUint32(debugBufferStart + tail + 4, true);
+            const sequence = this.dataView.getUint32(debugBufferStart + tail + 8, true);
+
+            // Validate length
+            if (length < MESSAGE_HEADER_SIZE || length > DEBUG_BUFFER_SIZE) {
+                tail = (tail + 1) % DEBUG_BUFFER_SIZE;
+                continue;
+            }
+
+            // Read payload as raw bytes (TextDecoder not available in AudioWorklet)
+            // Send raw bytes to debug_worker for decoding
+            const payloadLength = length - MESSAGE_HEADER_SIZE;
+            const payloadStart = debugBufferStart + tail + MESSAGE_HEADER_SIZE;
+            const msgBytes = new Uint8Array(payloadLength);
+            for (let i = 0; i < payloadLength; i++) {
+                msgBytes[i] = this.uint8View[payloadStart + i];
+            }
+
+            messages.push({
+                bytes: msgBytes.buffer,
+                sequence: sequence
+            });
+
+            // Advance tail
+            tail = (tail + length) % DEBUG_BUFFER_SIZE;
+        }
+
+        // Update tail
+        this.atomicStore(this.CONTROL_INDICES.DEBUG_TAIL, tail);
+
+        // Send raw bytes to be decoded by debug_worker
+        if (messages.length > 0) {
+            this.port.postMessage({
+                type: 'debugRawBatch',
+                messages: messages
+            }, messages.map(m => m.bytes));  // Transfer ArrayBuffers for efficiency
         }
     }
 
     async handleMessage(event) {
         const { data } = event;
 
+        // Debug: log all message types
+        if (data.type !== 'osc' && data.type !== 'init' && data.type !== 'loadWasm') {
+            console.log('[AudioWorklet] Received message type:', data.type);
+        }
+
         try {
-            if (data.type === 'init' && data.sharedBuffer) {
-                // Receive SharedArrayBuffer
-                this.sharedBuffer = data.sharedBuffer;
-                this.atomicView = new Int32Array(this.sharedBuffer);
-                this.uint8View = new Uint8Array(this.sharedBuffer);
-                this.dataView = new DataView(this.sharedBuffer);
+            // Handle OSC messages (postMessage mode)
+            if (data.type === 'osc') {
+                if (this.mode === 'postMessage') {
+                    // Queue OSC message for processing in next audio frame
+                    if (data.oscData) {
+                        this.oscQueue.push(data.oscData);
+                    }
+                }
+                return;
+            }
+
+            if (data.type === 'init') {
+                // Set mode from init message
+                this.mode = data.mode || 'sab';
+
+                if (this.mode === 'sab' && data.sharedBuffer) {
+                    // SAB mode: receive SharedArrayBuffer
+                    this.sharedBuffer = data.sharedBuffer;
+                    this.atomicView = new Int32Array(this.sharedBuffer);
+                    this.uint8View = new Uint8Array(this.sharedBuffer);
+                    this.dataView = new DataView(this.sharedBuffer);
+                }
+                // PostMessage mode: memory will be created locally in loadWasm
             }
 
             if (data.type === 'loadWasm') {
                 // Load WASM module (standalone version)
                 if (data.wasmBytes) {
-                    // Use the memory passed from orchestrator (already created)
-                    const memory = data.wasmMemory;
-                    if (!memory) {
-                        this.port.postMessage({
-                            type: 'error',
-                            error: 'No WASM memory provided!'
+                    let memory;
+
+                    if (this.mode === 'sab') {
+                        // SAB mode: use the memory passed from orchestrator
+                        memory = data.wasmMemory;
+                        if (!memory) {
+                            this.port.postMessage({
+                                type: 'error',
+                                error: 'No WASM memory provided!'
+                            });
+                            return;
+                        }
+                    } else {
+                        // PostMessage mode: create memory locally
+                        // Note: WASM was compiled with --shared-memory, so we must use shared: true
+                        // The memory just isn't shared with the main thread in this mode
+                        const memoryPages = data.memoryPages || 1280;  // 80MB default
+                        memory = new WebAssembly.Memory({
+                            initial: memoryPages,
+                            maximum: memoryPages,
+                            shared: true
                         });
-                        return;
                     }
 
                     // Save memory reference for later use (WASM imports memory, doesn't export it)
@@ -413,6 +762,94 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 }
             }
 
+            // Timing API for postMessage mode
+            if (data.type === 'setNTPStartTime') {
+                // Write NTP start time to WASM memory (Float64)
+                if (this.wasmMemory && this.ringBufferBase !== null && this.bufferConstants) {
+                    const offset = this.ringBufferBase + this.bufferConstants.NTP_START_TIME_START;
+                    const view = new Float64Array(this.wasmMemory.buffer, offset, 1);
+                    view[0] = data.ntpStartTime;
+                }
+            }
+
+            if (data.type === 'setDriftOffset') {
+                // Write drift offset to WASM memory (Int32, milliseconds)
+                if (this.wasmMemory && this.ringBufferBase !== null && this.bufferConstants) {
+                    const offset = this.ringBufferBase + this.bufferConstants.DRIFT_OFFSET_START;
+                    const view = new Int32Array(this.wasmMemory.buffer, offset, 1);
+                    view[0] = data.driftOffsetMs;
+                }
+            }
+
+            if (data.type === 'setGlobalOffset') {
+                // Write global offset to WASM memory (Int32, milliseconds)
+                if (this.wasmMemory && this.ringBufferBase !== null && this.bufferConstants) {
+                    const offset = this.ringBufferBase + this.bufferConstants.GLOBAL_OFFSET_START;
+                    const view = new Int32Array(this.wasmMemory.buffer, offset, 1);
+                    view[0] = data.globalOffsetMs;
+                }
+            }
+
+            if (data.type === 'getMetrics') {
+                // Return metrics snapshot for postMessage mode
+                const m = this.metricsView;
+                const metrics = m ? {
+                    workletProcessCount: m[MetricsOffsets.PROCESS_COUNT],
+                    workletMessagesProcessed: m[MetricsOffsets.MESSAGES_PROCESSED],
+                    workletMessagesDropped: m[MetricsOffsets.MESSAGES_DROPPED],
+                    workletSchedulerDepth: m[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
+                    workletSchedulerMax: m[MetricsOffsets.SCHEDULER_QUEUE_MAX],
+                    workletSchedulerDropped: m[MetricsOffsets.SCHEDULER_QUEUE_DROPPED],
+                    workletSequenceGaps: m[MetricsOffsets.SEQUENCE_GAPS],
+                    preschedulerPending: m[MetricsOffsets.PRESCHEDULER_PENDING],
+                    preschedulerPeak: m[MetricsOffsets.PRESCHEDULER_PEAK],
+                    preschedulerSent: m[MetricsOffsets.PRESCHEDULER_SENT],
+                    debugMessagesReceived: m[MetricsOffsets.DEBUG_MESSAGES_RECEIVED],
+                    debugBytesReceived: m[MetricsOffsets.DEBUG_BYTES_RECEIVED],
+                    mainMessagesSent: m[MetricsOffsets.MESSAGES_SENT],
+                    mainBytesSent: m[MetricsOffsets.BYTES_SENT],
+                } : null;
+                this.port.postMessage({
+                    type: 'metricsSnapshot',
+                    requestId: data.requestId,
+                    metrics: metrics
+                });
+            }
+
+            // Handle buffer data copy (postMessage mode sample loading)
+            if (data.type === 'copyBufferData') {
+                try {
+                    const { copyId, ptr, data: bufferData } = data;
+
+                    if (!this.wasmMemory || !this.wasmMemory.buffer) {
+                        throw new Error('WASM memory not initialized');
+                    }
+
+                    // Copy the Float32 data to WASM memory at the specified offset
+                    const floatData = new Float32Array(bufferData);
+                    const wasmFloatView = new Float32Array(this.wasmMemory.buffer, ptr, floatData.length);
+                    wasmFloatView.set(floatData);
+
+                    if (__DEV__) {
+                        console.log(`[AudioWorklet] Copied ${floatData.length} samples to WASM memory at offset ${ptr}`);
+                    }
+
+                    this.port.postMessage({
+                        type: 'bufferCopied',
+                        copyId: copyId,
+                        success: true
+                    });
+                } catch (copyError) {
+                    console.error('[AudioWorklet] Buffer copy failed:', copyError);
+                    this.port.postMessage({
+                        type: 'bufferCopied',
+                        copyId: data.copyId,
+                        success: false,
+                        error: copyError.message
+                    });
+                }
+            }
+
         } catch (error) {
             console.error('[AudioWorklet] Error handling message:', error);
             this.port.postMessage({
@@ -424,11 +861,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     }
 
     process(inputs, outputs, parameters) {
-        // DEBUG: Log first call
-        if (__DEV__ && !this._everCalled) {
-            this._everCalled = true;
-            console.log('[AudioWorklet] process() called for first time');
-        }
+        this.processCallCount++;
 
         if (!this.isInitialized) {
             return true;
@@ -436,6 +869,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
         try {
             if (this.wasmInstance && this.wasmInstance.exports.process_audio) {
+                // PostMessage mode: drain queued OSC messages to ring buffer before processing
+                if (this.mode === 'postMessage') {
+                    this.drainOscQueue();
+                }
+
                 // CRITICAL: Access AudioContext currentTime correctly
                 // In AudioWorkletGlobalScope, currentTime is a bare global variable (not on globalThis)
                 // We use a different variable name to avoid shadowing
@@ -489,14 +927,24 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     }
                 }
 
-                // Notify waiting worker only occasionally to reduce overhead
-                // Most of the time the worker isn't waiting anyway
-                if (this.atomicView && (this.processCallCount % 16 === 0)) {
-                    Atomics.notify(this.atomicView, this.CONTROL_INDICES.OUT_HEAD, 1);
+                // PostMessage mode: read OSC replies, debug messages, and node tree updates
+                if (this.mode === 'postMessage') {
+                    this.readOscReplies();
+                    this.readDebugMessages();
+                    this.checkAndSendNodeTree(audioContextTime);
+                } else {
+                    // SAB mode: Notify waiting worker when there's data to read
+                    // Atomics.notify() is cheap when no one is waiting, so notify every frame
+                    if (this.atomicView) {
+                        const head = this.atomicLoad(this.CONTROL_INDICES.OUT_HEAD);
+                        const tail = this.atomicLoad(this.CONTROL_INDICES.OUT_TAIL);
+                        if (head !== tail) {
+                            Atomics.notify(this.atomicView, this.CONTROL_INDICES.OUT_HEAD, 1);
+                        }
+                    }
                 }
 
                 // Periodic status check - reduced frequency
-                this.processCallCount++;
                 if (this.processCallCount % 3750 === 0) {  // Every ~10 seconds instead of 1
                     this.checkStatus();
                 }
@@ -506,7 +954,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         } catch (error) {
             console.error('[AudioWorklet] process() error:', error);
             console.error('[AudioWorklet] Stack:', error.stack);
-            if (this.atomicView) {
+            if (this.atomicView && this.mode === 'sab') {
                 Atomics.or(this.atomicView, this.CONTROL_INDICES.STATUS_FLAGS, this.STATUS_FLAGS.WASM_ERROR);
             }
         }
@@ -517,7 +965,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     checkStatus() {
         if (!this.atomicView) return;
 
-        const statusFlags = Atomics.load(this.atomicView, this.CONTROL_INDICES.STATUS_FLAGS);
+        const statusFlags = this.atomicLoad(this.CONTROL_INDICES.STATUS_FLAGS);
 
         if (statusFlags !== this.STATUS_FLAGS.OK) {
             const status = {
@@ -527,14 +975,14 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 fragmented: !!(statusFlags & this.STATUS_FLAGS.FRAGMENTED_MSG)
             };
 
-            // Get current metrics
+            // Get current metrics (use regular array access - metricsView is Uint32Array)
             const metrics = {
-                processCount: Atomics.load(this.metricsView, MetricsOffsets.PROCESS_COUNT),
-                messagesProcessed: Atomics.load(this.metricsView, MetricsOffsets.MESSAGES_PROCESSED),
-                messagesDropped: Atomics.load(this.metricsView, MetricsOffsets.MESSAGES_DROPPED),
-                schedulerQueueDepth: Atomics.load(this.metricsView, MetricsOffsets.SCHEDULER_QUEUE_DEPTH),
-                schedulerQueueMax: Atomics.load(this.metricsView, MetricsOffsets.SCHEDULER_QUEUE_MAX),
-                schedulerQueueDropped: Atomics.load(this.metricsView, MetricsOffsets.SCHEDULER_QUEUE_DROPPED)
+                processCount: this.metricsView[MetricsOffsets.PROCESS_COUNT],
+                messagesProcessed: this.metricsView[MetricsOffsets.MESSAGES_PROCESSED],
+                messagesDropped: this.metricsView[MetricsOffsets.MESSAGES_DROPPED],
+                schedulerQueueDepth: this.metricsView[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
+                schedulerQueueMax: this.metricsView[MetricsOffsets.SCHEDULER_QUEUE_MAX],
+                schedulerQueueDropped: this.metricsView[MetricsOffsets.SCHEDULER_QUEUE_DROPPED]
             };
 
             this.port.postMessage({
@@ -546,7 +994,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
             // Clear non-persistent flags
             const persistentFlags = statusFlags & (this.STATUS_FLAGS.BUFFER_FULL);
-            Atomics.store(this.atomicView, this.CONTROL_INDICES.STATUS_FLAGS, persistentFlags);
+            this.atomicStore(this.CONTROL_INDICES.STATUS_FLAGS, persistentFlags);
         }
     }
 }

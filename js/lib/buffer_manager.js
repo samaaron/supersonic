@@ -6,6 +6,10 @@
  * - Allocate memory in buffer pool
  * - Copy decoded audio to SharedArrayBuffer
  * - Manage concurrent buffer operations
+ *
+ * Supports two modes:
+ * - 'sab': Direct SharedArrayBuffer access (default)
+ * - 'postMessage': Buffer loading via worklet (NOT YET IMPLEMENTED)
  */
 
 import { MemPool } from '@thi.ng/malloc';
@@ -14,6 +18,7 @@ const BUFFER_POOL_ALIGNMENT = 8;  // Float64 alignment
 
 export class BufferManager {
     // Private configuration
+    #mode;
     #sampleBaseURL;
     #assetLoader;
 
@@ -22,35 +27,54 @@ export class BufferManager {
     #sharedBuffer;
     #bufferPool;
     #bufferPoolSize;
+    #bufferPoolStart;
     #allocatedBuffers;
     #pendingBufferOps;
     #bufferLocks;
 
+    // postMessage mode: worklet port for sending sample data
+    #workletPort;
+
     constructor(options) {
         const {
+            mode = 'sab',
             audioContext,
             sharedBuffer,
             bufferPoolConfig,
             sampleBaseURL,
             maxBuffers = 1024,
-            assetLoader = null
+            assetLoader = null,
+            workletPort = null
         } = options;
+
+        this.#mode = mode;
 
         // Validate required dependencies
         if (!audioContext) {
             throw new Error('BufferManager requires audioContext');
         }
-        if (!sharedBuffer || !(sharedBuffer instanceof SharedArrayBuffer)) {
-            throw new Error('BufferManager requires sharedBuffer (SharedArrayBuffer)');
+
+        // SAB mode requires SharedArrayBuffer
+        if (mode === 'sab') {
+            if (!sharedBuffer || !(sharedBuffer instanceof SharedArrayBuffer)) {
+                throw new Error('BufferManager requires sharedBuffer (SharedArrayBuffer) in SAB mode');
+            }
+            if (!bufferPoolConfig || typeof bufferPoolConfig !== 'object') {
+                throw new Error('BufferManager requires bufferPoolConfig (object with start, size, align)');
+            }
+            if (!Number.isFinite(bufferPoolConfig.start) || bufferPoolConfig.start < 0) {
+                throw new Error('bufferPoolConfig.start must be a non-negative number');
+            }
+            if (!Number.isFinite(bufferPoolConfig.size) || bufferPoolConfig.size <= 0) {
+                throw new Error('bufferPoolConfig.size must be a positive number');
+            }
         }
-        if (!bufferPoolConfig || typeof bufferPoolConfig !== 'object') {
-            throw new Error('BufferManager requires bufferPoolConfig (object with start, size, align)');
-        }
-        if (!Number.isFinite(bufferPoolConfig.start) || bufferPoolConfig.start < 0) {
-            throw new Error('bufferPoolConfig.start must be a non-negative number');
-        }
-        if (!Number.isFinite(bufferPoolConfig.size) || bufferPoolConfig.size <= 0) {
-            throw new Error('bufferPoolConfig.size must be a positive number');
+
+        // postMessage mode requires bufferPoolConfig (workletPort set later via setWorkletPort)
+        if (mode === 'postMessage') {
+            if (!bufferPoolConfig || typeof bufferPoolConfig !== 'object') {
+                throw new Error('BufferManager requires bufferPoolConfig in postMessage mode');
+            }
         }
 
         // Validate optional dependencies
@@ -62,15 +86,31 @@ export class BufferManager {
         this.#sharedBuffer = sharedBuffer;
         this.#sampleBaseURL = sampleBaseURL;
         this.#assetLoader = assetLoader;
+        this.#workletPort = workletPort;
 
-        // Create and own buffer pool
-        this.#bufferPool = new MemPool({
-            buf: sharedBuffer,
-            start: bufferPoolConfig.start,
-            size: bufferPoolConfig.size,
-            align: BUFFER_POOL_ALIGNMENT
-        });
-        this.#bufferPoolSize = bufferPoolConfig.size;
+        if (mode === 'sab') {
+            // Create and own buffer pool (SAB mode only)
+            this.#bufferPool = new MemPool({
+                buf: sharedBuffer,
+                start: bufferPoolConfig.start,
+                size: bufferPoolConfig.size,
+                align: BUFFER_POOL_ALIGNMENT
+            });
+            this.#bufferPoolSize = bufferPoolConfig.size;
+            this.#bufferPoolStart = bufferPoolConfig.start;
+        } else {
+            // postMessage mode: create a local ArrayBuffer for MemPool bookkeeping
+            // The actual data lives in the worklet's WASM memory, but we track allocations here
+            const localBuffer = new ArrayBuffer(bufferPoolConfig.start + bufferPoolConfig.size);
+            this.#bufferPool = new MemPool({
+                buf: localBuffer,
+                start: bufferPoolConfig.start,
+                size: bufferPoolConfig.size,
+                align: BUFFER_POOL_ALIGNMENT
+            });
+            this.#bufferPoolSize = bufferPoolConfig.size;
+            this.#bufferPoolStart = bufferPoolConfig.start;
+        }
 
         // Create and own buffer state
         this.#allocatedBuffers = new Map();  // bufnum -> { ptr, size, pendingToken, ... }
@@ -87,7 +127,23 @@ export class BufferManager {
 
         const poolSizeMB = (bufferPoolConfig.size / (1024 * 1024)).toFixed(0);
         const poolOffsetMB = (bufferPoolConfig.start / (1024 * 1024)).toFixed(0);
-        if (__DEV__) console.log(`[Dbg-BufferManager] Initialized: ${poolSizeMB}MB pool at offset ${poolOffsetMB}MB`);
+        if (__DEV__) console.log(`[Dbg-BufferManager] Initialized (${mode} mode): ${poolSizeMB}MB pool at offset ${poolOffsetMB}MB`);
+    }
+
+    /**
+     * Set the worklet port for postMessage mode buffer operations
+     * Must be called after AudioWorklet is initialized
+     * @param {MessagePort} port - The worklet node's port
+     */
+    setWorkletPort(port) {
+        if (this.#mode !== 'postMessage') {
+            return; // Only needed for postMessage mode
+        }
+        if (!port) {
+            throw new Error('BufferManager.setWorkletPort() requires a valid port');
+        }
+        this.#workletPort = port;
+        if (__DEV__) console.log('[Dbg-BufferManager] Worklet port set for buffer operations');
     }
 
     #resolveAudioPath(scPath) {
@@ -255,7 +311,7 @@ export class BufferManager {
                 }
             }
 
-            this.#writeToSharedBuffer(ptr, interleaved);
+            await this.#writeBufferData(ptr, interleaved);
             const sizeBytes = interleaved.length * 4;
 
             return {
@@ -269,6 +325,7 @@ export class BufferManager {
     }
 
     async prepareFromFile(params) {
+
         const {
             bufnum,
             path,
@@ -326,7 +383,7 @@ export class BufferManager {
                 }
             }
 
-            this.#writeToSharedBuffer(ptr, interleaved);
+            await this.#writeBufferData(ptr, interleaved);
             const sizeBytes = interleaved.length * 4;
 
             return {
@@ -340,6 +397,7 @@ export class BufferManager {
     }
 
     async prepareEmpty(params) {
+
         const {
             bufnum,
             numFrames,
@@ -370,7 +428,7 @@ export class BufferManager {
             // Allocate and zero-initialize buffer
             const ptr = this.#malloc(totalSamples);
             const interleaved = new Float32Array(totalSamples);
-            this.#writeToSharedBuffer(ptr, interleaved);
+            await this.#writeBufferData(ptr, interleaved);
             const sizeBytes = interleaved.length * 4;
 
             return {
@@ -415,9 +473,56 @@ export class BufferManager {
         return ptr;
     }
 
-    #writeToSharedBuffer(ptr, data) {
-        const heap = new Float32Array(this.#sharedBuffer, ptr, data.length);
-        heap.set(data);
+    /**
+     * Write buffer data to memory
+     * SAB mode: writes directly to SharedArrayBuffer
+     * postMessage mode: sends to worklet and waits for copy confirmation
+     */
+    async #writeBufferData(ptr, data) {
+        if (this.#mode === 'sab') {
+            // SAB mode: direct write to SharedArrayBuffer
+            const heap = new Float32Array(this.#sharedBuffer, ptr, data.length);
+            heap.set(data);
+        } else {
+            // postMessage mode: send data to worklet for copying to WASM memory
+            const copyId = crypto.randomUUID();
+
+            const copyComplete = new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Buffer copy to WASM memory timed out'));
+                }, 10000);
+
+                const handler = (event) => {
+                    const msg = event.data;
+                    if (msg.type === 'bufferCopied' && msg.copyId === copyId) {
+                        this.#workletPort.removeEventListener('message', handler);
+                        clearTimeout(timeout);
+                        if (msg.success) {
+                            resolve();
+                        } else {
+                            reject(new Error(msg.error || 'Buffer copy failed'));
+                        }
+                    }
+                };
+
+                this.#workletPort.addEventListener('message', handler);
+            });
+
+            // Send data to worklet - use transferable for efficiency
+            const dataBuffer = data.buffer.slice(
+                data.byteOffset,
+                data.byteOffset + data.byteLength
+            );
+
+            this.#workletPort.postMessage({
+                type: 'copyBufferData',
+                copyId,
+                ptr,
+                data: dataBuffer
+            }, [dataBuffer]);
+
+            await copyComplete;
+        }
     }
 
     #createPendingOperation(uuid, bufnum, timeoutMs) {
@@ -641,6 +746,9 @@ export class BufferManager {
      * @returns {Object} Stats including total, available, used
      */
     getStats() {
+        if (!this.#bufferPool) {
+            return { total: 0, available: 0, used: 0, allocations: 0 };
+        }
         return this.#bufferPool.stats();
     }
 

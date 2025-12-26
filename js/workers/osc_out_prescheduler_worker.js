@@ -4,12 +4,19 @@
     - Single priority queue of future bundles/events
     - One timer driving dispatch (no per-event setTimeout storm)
     - Tag-based cancellation to drop pending runs before they hit WASM
+
+    Supports two modes:
+    - 'sab': Writes directly to SharedArrayBuffer ring buffer (default)
+    - 'postMessage': Dispatches via postMessage to main thread
 */
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { writeToRingBuffer } from '../lib/ring_buffer_writer.js';
 
-// Shared memory for ring buffer writing
+// Transport mode: 'sab' or 'postMessage'
+let mode = 'sab';
+
+// Shared memory for ring buffer writing (SAB mode only)
 let sharedBuffer = null;
 let ringBufferBase = null;
 let bufferConstants = null;
@@ -17,11 +24,18 @@ let atomicView = null;
 let dataView = null;
 let uint8View = null;
 
-// Ring buffer control indices
+// Ring buffer control indices (SAB mode only)
 let CONTROL_INDICES = {};
 
-// Metrics view (for writing stats to SAB)
+// Metrics view (for writing stats to SAB, SAB mode only)
 let metricsView = null;
+
+// PostMessage mode metrics (tracked locally)
+let postMessageMetrics = {
+    scheduled: 0,
+    dispatched: 0,
+    cancelled: 0,
+};
 
 // Priority queue implemented as binary min-heap
 // Entries: { ntpTime, seq, sessionId, runTag, oscData }
@@ -143,10 +157,24 @@ const updateMetrics = () => {
 };
 
 /**
- * Write OSC message to ring buffer using shared module
+ * Dispatch OSC message to WASM
+ * In SAB mode: writes to ring buffer
+ * In postMessage mode: sends via postMessage to main thread
  * Returns true if successful, false if failed (caller should queue for retry)
  */
-const writeOSCToRingBuffer = (oscMessage, isRetry) => {
+const dispatchOSCMessage = (oscMessage, isRetry, timestamp = null) => {
+    if (mode === 'postMessage') {
+        // PostMessage mode: send to main thread for forwarding to worklet
+        self.postMessage({
+            type: 'dispatch',
+            oscData: oscMessage,
+            timestamp: timestamp,
+        });
+        postMessageMetrics.dispatched++;
+        return true;  // postMessage doesn't fail
+    }
+
+    // SAB mode: write to ring buffer
     if (!sharedBuffer || !atomicView) {
         console.error('[PreScheduler] Not initialized for ring buffer writing');
         return false;
@@ -231,7 +259,7 @@ const processRetryQueue = () => {
         const item = retryQueue[i];
 
         // Try to write
-        const success = writeOSCToRingBuffer(item.oscData, true);
+        const success = dispatchOSCMessage(item.oscData, true);
 
         if (success) {
             // Success - remove from queue
@@ -287,7 +315,7 @@ const scheduleEvent = (oscData, sessionId, runTag) => {
     if (ntpTime === null) {
         // Not a bundle - dispatch immediately to ring buffer
         schedulerLog('[PreScheduler] Non-bundle message, dispatching immediately');
-        const success = writeOSCToRingBuffer(oscData, false);
+        const success = dispatchOSCMessage(oscData, false);
         if (!success) {
             // Queue for retry
             queueForRetry(oscData, 'immediate message');
@@ -442,7 +470,7 @@ const checkAndDispatch = () => {
                         'early=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
                         'remaining=' + eventHeap.length);
 
-            const success = writeOSCToRingBuffer(nextEvent.oscData, false);
+            const success = dispatchOSCMessage(nextEvent.oscData, false);
             if (!success) {
                 // Queue for retry
                 queueForRetry(nextEvent.oscData, 'scheduled bundle NTP=' + nextEvent.ntpTime.toFixed(3));
@@ -560,13 +588,13 @@ const processImmediate = (oscData) => {
     if (isBundle(oscData)) {
         const messages = extractMessagesFromBundle(oscData);
         for (let i = 0; i < messages.length; i++) {
-            const success = writeOSCToRingBuffer(messages[i], false);
+            const success = dispatchOSCMessage(messages[i], false);
             if (!success) {
                 queueForRetry(messages[i], 'immediate bundle message ' + i);
             }
         }
     } else {
-        const success = writeOSCToRingBuffer(oscData, false);
+        const success = dispatchOSCMessage(oscData, false);
         if (!success) {
             queueForRetry(oscData, 'immediate message');
         }
@@ -580,22 +608,27 @@ self.addEventListener('message', (event) => {
     try {
         switch (data.type) {
             case 'init':
-                sharedBuffer = data.sharedBuffer;
-                ringBufferBase = data.ringBufferBase;
-                bufferConstants = data.bufferConstants;
+                // Set transport mode (default to 'sab' for backwards compatibility)
+                mode = data.mode || 'sab';
 
                 // Apply config overrides
                 if (data.maxPendingMessages) {
                     maxPendingMessages = data.maxPendingMessages;
                 }
 
-                // Initialize SharedArrayBuffer views (including offset)
-                initSharedBuffer();
+                if (mode === 'sab') {
+                    // SAB mode: initialize ring buffer access
+                    sharedBuffer = data.sharedBuffer;
+                    ringBufferBase = data.ringBufferBase;
+                    bufferConstants = data.bufferConstants;
+                    initSharedBuffer();
+                }
+                // PostMessage mode: no SAB initialization needed
 
                 // Start periodic polling
                 startPeriodicPolling();
 
-                schedulerLog('[OSCPreSchedulerWorker] Initialized with NTP-based scheduling, capacity=' + maxPendingMessages);
+                schedulerLog('[OSCPreSchedulerWorker] Initialized with NTP-based scheduling, mode=' + mode + ', capacity=' + maxPendingMessages);
                 self.postMessage({ type: 'initialized' });
                 break;
 

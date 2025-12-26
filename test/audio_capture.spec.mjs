@@ -4,6 +4,9 @@
  * Tests that verify actual audio output from synths using the
  * SharedArrayBuffer audio capture mechanism.
  *
+ * NOTE: These tests require SAB mode - audio capture reads directly from
+ * SharedArrayBuffer. They are automatically skipped in postMessage mode.
+ *
  * These tests verify:
  * - Synths produce audio output
  * - Audio characteristics (amplitude, rough frequency)
@@ -11,18 +14,12 @@
  * - Timing accuracy via OSC bundles
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, skipIfPostMessage } from "./fixtures.mjs";
 
-// =============================================================================
-// TEST UTILITIES
-// =============================================================================
-
-const SONIC_CONFIG = {
-  workerBaseURL: "/dist/workers/",
-  wasmBaseURL: "/dist/wasm/",
-  sampleBaseURL: "/dist/samples/",
-  synthdefBaseURL: "/dist/synthdefs/",
-};
+// Skip all tests in this file if running in postMessage mode
+test.beforeEach(async ({ sonicMode }) => {
+  skipIfPostMessage(sonicMode, 'Audio capture requires SAB mode');
+});
 
 // Audio analysis helpers (inlined for page.evaluate)
 const AUDIO_HELPERS = `
@@ -80,7 +77,7 @@ function findFirstNonSilent(samples, sampleRate, threshold = 0.001) {
 // =============================================================================
 
 test.describe("Audio Capture API", () => {
-  test("startCapture and stopCapture work correctly", async ({ page }) => {
+  test("startCapture and stopCapture work correctly", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -117,7 +114,7 @@ test.describe("Audio Capture API", () => {
         hasRight: captured.right instanceof Float32Array,
         maxDuration: sonic.getMaxCaptureDuration(),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.initialEnabled).toBe(false);
     expect(result.initialFrames).toBe(0);
@@ -132,7 +129,7 @@ test.describe("Audio Capture API", () => {
     expect(result.maxDuration).toBe(1); // 1 second at 48kHz
   });
 
-  test("capture buffer size matches configuration", async ({ page }) => {
+  test("capture buffer size matches configuration", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -146,7 +143,7 @@ test.describe("Audio Capture API", () => {
         captureSampleRate: bc.AUDIO_CAPTURE_SAMPLE_RATE,
         expectedSeconds: bc.AUDIO_CAPTURE_FRAMES / bc.AUDIO_CAPTURE_SAMPLE_RATE,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Should be 1 second at 48kHz stereo
     expect(result.captureFrames).toBe(48000); // 48000 * 1
@@ -161,7 +158,7 @@ test.describe("Audio Capture API", () => {
 // =============================================================================
 
 test.describe("Synth Audio Output", () => {
-  test("sonic-pi-beep produces audio output", async ({ page }) => {
+  test("sonic-pi-beep produces audio output", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -199,7 +196,7 @@ test.describe("Synth Audio Output", () => {
           peak,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     expect(result.frames).toBeGreaterThan(0);
@@ -209,7 +206,7 @@ test.describe("Synth Audio Output", () => {
     expect(result.peak).toBeLessThanOrEqual(1.0); // Should not clip
   });
 
-  test("synth amplitude responds to amp control", async ({ page }) => {
+  test("synth amplitude responds to amp control", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -244,7 +241,7 @@ test.describe("Synth Audio Output", () => {
           ratio: highRMS / lowRMS,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // Higher amp should produce higher RMS
@@ -253,7 +250,7 @@ test.describe("Synth Audio Output", () => {
     expect(result.ratio).toBeGreaterThan(2); // 0.5/0.1 = 5, but envelope affects this
   });
 
-  test("frequency responds to note control", async ({ page }) => {
+  test("frequency responds to note control", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -293,7 +290,7 @@ test.describe("Synth Audio Output", () => {
           ratio: highFreq / lowFreq,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // Higher note should produce higher frequency
@@ -303,7 +300,7 @@ test.describe("Synth Audio Output", () => {
     expect(result.highFreq).toBeGreaterThan(result.lowFreq);
   });
 
-  test("control bus mapping affects synth frequency", async ({ page }) => {
+  test("control bus mapping affects synth frequency", async ({ page, sonicConfig }) => {
     // This test verifies that /n_map actually works - that mapping a control
     // to a bus causes the synth to read its value from the bus
     await page.goto("/test/harness.html");
@@ -357,7 +354,7 @@ test.describe("Synth Audio Output", () => {
           ratio: freqAfter / freqBefore,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // After mapping to bus with note 72, frequency should be significantly higher
@@ -367,7 +364,7 @@ test.describe("Synth Audio Output", () => {
     expect(result.ratio).toBeGreaterThan(2);
   });
 
-  test("control bus value changes affect mapped synth in real-time", async ({ page }) => {
+  test("control bus value changes affect mapped synth in real-time", async ({ page, sonicConfig }) => {
     // This test verifies that changing a bus value dynamically updates the synth
     await page.goto("/test/harness.html");
 
@@ -421,7 +418,7 @@ test.describe("Synth Audio Output", () => {
           ratio: freqHigh / freqLow,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // Changing the bus value should change the synth's frequency in real-time
@@ -430,7 +427,7 @@ test.describe("Synth Audio Output", () => {
     expect(result.ratio).toBeGreaterThan(2);
   });
 
-  test("multiple synths produce combined output", async ({ page }) => {
+  test("multiple synths produce combined output", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -467,7 +464,7 @@ test.describe("Synth Audio Output", () => {
           ratio: doubleRMS / singleRMS,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // Two synths should be louder than one
@@ -476,7 +473,7 @@ test.describe("Synth Audio Output", () => {
     expect(result.ratio).toBeGreaterThan(1.1);
   });
 
-  test("freed synth stops producing audio", async ({ page }) => {
+  test("freed synth stops producing audio", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -536,7 +533,7 @@ test.describe("Synth Audio Output", () => {
           totalMs: (captured.frames / sampleRate) * 1000,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // Synth should have produced audio at some point
@@ -551,7 +548,7 @@ test.describe("Synth Audio Output", () => {
 // =============================================================================
 
 test.describe("Stereo Output", () => {
-  test("stereo capture provides both channels", async ({ page }) => {
+  test("stereo capture provides both channels", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -580,7 +577,7 @@ test.describe("Stereo Output", () => {
           bothHaveAudio: leftRMS > 0.001 && rightRMS > 0.001,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     expect(result.channels).toBe(2);
@@ -597,7 +594,7 @@ test.describe("Stereo Output", () => {
 // =============================================================================
 
 test.describe("OSC Bundle Timing", () => {
-  test("timed bundle executes at scheduled time", async ({ page }) => {
+  test("timed bundle executes at scheduled time", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -683,7 +680,7 @@ test.describe("OSC Bundle Timing", () => {
           absTimingErrorMs: Math.abs(timingErrorMs),
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     expect(result.hasAudio).toBe(true);
@@ -692,7 +689,7 @@ test.describe("OSC Bundle Timing", () => {
     expect(result.absTimingErrorMs).toBeLessThan(5);
   });
 
-  test("immediate bundle (timetag 1) executes immediately", async ({ page }) => {
+  test("immediate bundle (timetag 1) executes immediately", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -749,7 +746,7 @@ test.describe("OSC Bundle Timing", () => {
           hasAudio: firstNonZero > 0,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     expect(result.hasAudio).toBe(true);
@@ -757,7 +754,7 @@ test.describe("OSC Bundle Timing", () => {
     expect(result.latencyMs).toBeLessThan(10);
   });
 
-  test("past timetag bundle executes immediately", async ({ page }) => {
+  test("past timetag bundle executes immediately", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -814,7 +811,7 @@ test.describe("OSC Bundle Timing", () => {
           hasAudio: firstNonZero > 0,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     expect(result.hasAudio).toBe(true);
@@ -828,7 +825,7 @@ test.describe("OSC Bundle Timing", () => {
 // =============================================================================
 
 test.describe("FFT UGens", () => {
-  test("FFT/IFFT passthrough produces audio output", async ({ page }) => {
+  test("FFT/IFFT passthrough produces audio output", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -868,7 +865,7 @@ test.describe("FFT UGens", () => {
           frames: captured.frames,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // FFT passthrough should produce audio
@@ -877,7 +874,7 @@ test.describe("FFT UGens", () => {
     expect(result.peak).toBeGreaterThan(0.05);
   });
 
-  test("PV_BrickWall filters frequencies", async ({ page }) => {
+  test("PV_BrickWall filters frequencies", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -927,7 +924,7 @@ test.describe("FFT UGens", () => {
           rmsRatio: lowPassRMS / allPassRMS,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     expect(result.hasAllPassAudio).toBe(true);
@@ -936,7 +933,7 @@ test.describe("FFT UGens", () => {
     expect(result.allPassRMS).toBeGreaterThan(0.01);
   });
 
-  test("PV_MagFreeze synth can be instantiated", async ({ page }) => {
+  test("PV_MagFreeze synth can be instantiated", async ({ page, sonicConfig }) => {
     // Note: PV_MagFreeze currently produces very low output with Green FFT backend.
     // This test verifies the synth can be loaded and instantiated without crashing.
     // Full functionality testing is deferred until we can investigate the low output issue.
@@ -964,14 +961,14 @@ test.describe("FFT UGens", () => {
         // The synth was created successfully if we get here without errors
         return { success: true };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // The test passes if the synths were created without crashing
     expect(result.success).toBe(true);
   });
 
-  test("different FFT sizes work correctly", async ({ page }) => {
+  test("different FFT sizes work correctly", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -1020,7 +1017,7 @@ test.describe("FFT UGens", () => {
 
         return results;
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // All FFT sizes should produce audio
@@ -1030,7 +1027,7 @@ test.describe("FFT UGens", () => {
     }
   });
 
-  test("FFT latency increases with buffer size", async ({ page }) => {
+  test("FFT latency increases with buffer size", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -1079,7 +1076,7 @@ test.describe("FFT UGens", () => {
           sampleRate,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // Both should eventually produce audio

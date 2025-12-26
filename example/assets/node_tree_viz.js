@@ -465,6 +465,7 @@ export class NodeTreeViz {
 
     const tree = this.supersonic.getTree();
     if (tree.version === this.lastVersion) return;
+    console.log(`[NodeTreeViz] Updating: version ${this.lastVersion} -> ${tree.version}, nodes: ${tree.nodeCount}`);
     this.lastVersion = tree.version;
 
     // Build node map

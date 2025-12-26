@@ -704,15 +704,15 @@ function resizeScope() {
 }
 
 function setupScope() {
-  if (!orchestrator?.audioContext || !orchestrator.workletNode) return;
+  if (!orchestrator?.node?.context) return;
 
-  analyser = orchestrator.audioContext.createAnalyser();
+  analyser = orchestrator.node.context.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.8;
 
-  orchestrator.workletNode.disconnect();
-  orchestrator.workletNode.connect(analyser);
-  analyser.connect(orchestrator.audioContext.destination);
+  orchestrator.node.disconnect();
+  orchestrator.node.connect(analyser);
+  analyser.connect(orchestrator.node.context.destination);
 
   resizeScope();
   window.addEventListener("resize", resizeScope);
@@ -1390,6 +1390,7 @@ $("init-button").addEventListener("click", async () => {
 
     orchestrator = new SuperSonic({
       baseURL: "dist/",
+      mode: "postMessage",
     });
 
     let bootPhase = true;
@@ -1418,7 +1419,9 @@ $("init-button").addEventListener("click", async () => {
       updateStatus("loading_assets");
       if (DEV_MODE) window.orchestrator = orchestrator;
 
-      await Promise.all([loadAllLoopSamples(), initFXChain()]);
+      // Load samples and initialize FX chain
+      await loadAllLoopSamples();
+      await initFXChain();
 
       bootPhase = false;
       stopLoadingSpinner();

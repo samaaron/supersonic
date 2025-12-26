@@ -519,8 +519,8 @@ extern "C" {
                 }
 
                 // RT-SAFE message processing - no malloc!
-                // Setup reply address
-                ReplyAddress reply_addr;
+                // Setup reply address - zero-initialize for consistent comparison in /notify
+                ReplyAddress reply_addr = {};
                 reply_addr.mProtocol = kWeb;
                 reply_addr.mReplyFunc = osc_reply_to_ring_buffer;
                 reply_addr.mReplyData = nullptr;
@@ -960,7 +960,9 @@ bool ring_buffer_write(
 void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
     using namespace scsynth;  // Access globals from scsynth namespace
 
-    if (!control || !shared_memory) return;
+    if (!control || !shared_memory) {
+        return;
+    }
 
     // Use unified ring buffer write with full protection
     ring_buffer_write(
