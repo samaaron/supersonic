@@ -487,7 +487,6 @@ export class SuperSonic {
       const wasmBytes = await this.#loadWasm();
       await this.#initializeAudioWorklet(wasmBytes);
       await this.#initializeOSC();
-      this.#setupMessageHandlers();
       this.#startPerformanceMonitoring();
       await this.#finishInitialization();
     } catch (error) {
@@ -736,7 +735,6 @@ export class SuperSonic {
       const wasmBytes = await this.#loadWasm();
       await this.#initializeAudioWorklet(wasmBytes);
       await this.#initializeOSC();
-      this.#setupMessageHandlers();
       this.#startPerformanceMonitoring();
       await this.#finishInitialization();
     } catch (error) {
@@ -1773,6 +1771,14 @@ export class SuperSonic {
     // Create the public node wrapper
     this.#node = this.#createNodeWrapper();
 
+    // Start the message port BEFORE setting up handlers
+    // MessagePort doesn't deliver messages until start() is called
+    this.#workletNode.port.start();
+
+    // Set up message handlers BEFORE sending init to worklet
+    // This ensures we don't miss any early messages like initial nodeTree snapshot
+    this.#setupMessageHandlers();
+
     const mode = this.#config.mode;
 
     // Initialize AudioWorklet with mode and SharedArrayBuffer (SAB mode only)
@@ -2027,6 +2033,12 @@ export class SuperSonic {
               console.warn(
                 "[SuperSonic] Warning: bufferConstants not provided by worklet"
               );
+            }
+
+            // PostMessage mode: set initial tree from initialized message
+            // This ensures getTree() returns valid data immediately after init()
+            if (this.#config.mode === 'postMessage' && event.data.initialTree) {
+              this.#cachedNodeTree = event.data.initialTree;
             }
 
             if (__DEV__)
