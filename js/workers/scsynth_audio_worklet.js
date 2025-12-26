@@ -402,33 +402,20 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         }
     }
 
-    // Read node tree from WASM memory and send via postMessage if version changed
-    checkAndSendNodeTree(audioTime) {
+    // Read node tree from WASM memory and return the tree data
+    // Returns null if not ready, otherwise { nodeCount, version, nodes }
+    readNodeTree() {
         if (!this.bufferConstants || !this.wasmMemory || this.ringBufferBase === null) {
-            return;
+            return null;
         }
 
         const bc = this.bufferConstants;
         const treeBase = this.ringBufferBase + bc.NODE_TREE_START;
 
-        // Read just the version first (second uint32 in header)
+        // Read header (nodeCount, version)
         const headerView = new Uint32Array(this.wasmMemory.buffer, treeBase, 2);
-        const version = headerView[1];
-
-        // Only send if version changed
-        if (version === this.lastTreeVersion) {
-            return;
-        }
-
-        // Rate limit: max 20 snapshots/sec (50ms interval)
-        // Use AudioContext time for stable timing
-        if (this.lastTreeSendTime >= 0 && audioTime - this.lastTreeSendTime < this.treeSnapshotMinInterval) {
-            return; // Skip this frame, will catch up on next check
-        }
-        this.lastTreeVersion = version;
-        this.lastTreeSendTime = audioTime;
-
         const nodeCount = headerView[0];
+        const version = headerView[1];
 
         // Read node entries
         const entriesBase = treeBase + bc.NODE_TREE_HEADER_SIZE;
@@ -467,13 +454,34 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             });
         }
 
+        return { nodeCount, version, nodes };
+    }
+
+    // Read node tree from WASM memory and send via postMessage if version changed
+    checkAndSendNodeTree(audioTime) {
+        const tree = this.readNodeTree();
+        if (!tree) return;
+
+        const { version } = tree;
+
+        // Only send if version changed
+        if (version === this.lastTreeVersion) {
+            return;
+        }
+
+        // Rate limit: max 20 snapshots/sec (50ms interval)
+        // Use AudioContext time for stable timing
+        if (this.lastTreeSendTime >= 0 && audioTime - this.lastTreeSendTime < this.treeSnapshotMinInterval) {
+            return; // Skip this frame, will catch up on next check
+        }
+        this.lastTreeVersion = version;
+        this.lastTreeSendTime = audioTime;
+
         // Send tree snapshot via postMessage
         this.treeSnapshotsSent++;
         this.port.postMessage({
             type: 'nodeTree',
-            nodeCount,
-            version,
-            nodes,
+            ...tree,
             snapshotsSent: this.treeSnapshotsSent
         });
     }
@@ -679,12 +687,16 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                             this.isInitialized = true;
 
+                            // Include initial tree for postMessage mode (deterministic init)
+                            const initialTree = this.mode === 'postMessage' ? this.readNodeTree() : undefined;
+
                             this.port.postMessage({
                                 type: 'initialized',
                                 success: true,
                                 ringBufferBase: this.ringBufferBase,
                                 bufferConstants: this.bufferConstants,
-                                exports: Object.keys(this.wasmInstance.exports)
+                                exports: Object.keys(this.wasmInstance.exports),
+                                initialTree
                             });
                         }
                     }
@@ -711,12 +723,16 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                             this.isInitialized = true;
 
+                            // Include initial tree for postMessage mode (deterministic init)
+                            const initialTree = this.mode === 'postMessage' ? this.readNodeTree() : undefined;
+
                             this.port.postMessage({
                                 type: 'initialized',
                                 success: true,
                                 ringBufferBase: this.ringBufferBase,
                                 bufferConstants: this.bufferConstants,
-                                exports: Object.keys(this.wasmInstance.exports)
+                                exports: Object.keys(this.wasmInstance.exports),
+                                initialTree
                             });
                         }
                     }
