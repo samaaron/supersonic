@@ -7,28 +7,18 @@
  * See docs/OSC_TESTING_PLAN.md for the full testing plan.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.mjs";
 
 // =============================================================================
 // TEST UTILITIES
 // =============================================================================
-
-/**
- * Standard SuperSonic initialization config
- */
-const SONIC_CONFIG = {
-  workerBaseURL: "/dist/workers/",
-  wasmBaseURL: "/dist/wasm/",
-  sampleBaseURL: "/dist/samples/",
-  synthdefBaseURL: "/dist/synthdefs/",
-};
 
 // =============================================================================
 // /n_free - FREE NODES
 // =============================================================================
 
 test.describe("/n_free semantic tests", () => {
-  test("frees single synth and removes from tree", async ({ page }) => {
+  test("frees single synth and removes from tree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -56,14 +46,14 @@ test.describe("/n_free semantic tests", () => {
         countBefore: treeBefore.nodeCount,
         countAfter: treeAfter.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.existedBefore).toBe(true);
     expect(result.existsAfter).toBe(false);
     expect(result.countAfter).toBe(result.countBefore - 1);
   });
 
-  test("frees multiple nodes in single command", async ({ page }) => {
+  test("frees multiple nodes in single command", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -97,14 +87,14 @@ test.describe("/n_free semantic tests", () => {
         totalBefore: treeBefore.nodeCount,
         totalAfter: treeAfter.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.countBefore).toBe(3);
     expect(result.countAfter).toBe(0);
     expect(result.totalAfter).toBe(result.totalBefore - 3);
   });
 
-  test("freeing non-existent node does not error", async ({ page }) => {
+  test("freeing non-existent node does not error", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -135,7 +125,7 @@ test.describe("/n_free semantic tests", () => {
         synthStillExists,
         countUnchanged: treeBefore.nodeCount === treeAfter.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.noError).toBe(true);
     expect(result.synthStillExists).toBe(true);
@@ -185,7 +175,7 @@ test.describe("/n_free semantic tests", () => {
         nodeCountBefore: treeBefore.nodeCount,
         nodeCountAfter: treeAfter.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.groupExistedBefore).toBe(true);
     expect(result.synthsInGroupBefore).toBe(3);
@@ -197,7 +187,7 @@ test.describe("/n_free semantic tests", () => {
     expect(result.nodeCountAfter).toBe(result.nodeCountBefore - 4);
   });
 
-  test("sends /n_end notification when node freed", async ({ page }) => {
+  test("sends /n_end notification when node freed", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -228,7 +218,7 @@ test.describe("/n_free semantic tests", () => {
         nEndNodeId: nEndMsg?.args?.[0],
         nEndParentId: nEndMsg?.args?.[1],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.receivedNEnd).toBe(true);
     expect(result.nEndNodeId).toBe(1000);
@@ -264,13 +254,13 @@ test.describe("/n_free semantic tests", () => {
         countUnchanged:
           treeAfterFirstFree.nodeCount === treeAfterSecondFree.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.noError).toBe(true);
     expect(result.countUnchanged).toBe(true);
   });
 
-  test("freeing nested groups frees entire subtree", async ({ page }) => {
+  test("freeing nested groups frees entire subtree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -305,7 +295,7 @@ test.describe("/n_free semantic tests", () => {
         synth1001ExistsAfter: treeAfter.nodes.some((n) => n.id === 1001),
         freedCount: treeBefore.nodeCount - treeAfter.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.group100ExistsBefore).toBe(true);
     expect(result.group101ExistsBefore).toBe(true);
@@ -324,7 +314,7 @@ test.describe("/n_free semantic tests", () => {
 // =============================================================================
 
 test.describe("/n_set semantic tests", () => {
-  test("sets control by name", async ({ page }) => {
+  test("sets control by name", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -359,7 +349,7 @@ test.describe("/n_set semantic tests", () => {
         controlName: reply?.args?.[1],
         value: reply?.args?.[2],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.gotReply).toBe(true);
     expect(result.nodeId).toBe(1000);
@@ -367,7 +357,7 @@ test.describe("/n_set semantic tests", () => {
     expect(result.value).toBe(72);
   });
 
-  test("sets control by index", async ({ page }) => {
+  test("sets control by index", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -408,13 +398,13 @@ test.describe("/n_set semantic tests", () => {
         value: reply?.args?.[2],
         expectedValue: newValue,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.gotReply).toBe(true);
     expect(result.value).toBeCloseTo(result.expectedValue, 5);
   });
 
-  test("sets multiple controls in single command", async ({ page }) => {
+  test("sets multiple controls in single command", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -457,14 +447,14 @@ test.describe("/n_set semantic tests", () => {
         ampValue: ampReply?.args?.[2],
         panValue: panReply?.args?.[2],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.noteValue).toBe(64);
     expect(result.ampValue).toBeCloseTo(0.25, 5);
     expect(result.panValue).toBeCloseTo(-0.5, 5);
   });
 
-  test("setting control on group affects all children", async ({ page }) => {
+  test("setting control on group affects all children", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -533,13 +523,13 @@ test.describe("/n_set semantic tests", () => {
         ampValues,
         allMatch: ampValues.every((v) => Math.abs(v - 0.1) < 0.001),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.allMatch).toBe(true);
     expect(result.ampValues).toHaveLength(3);
   });
 
-  test("setting non-existent control does not error", async ({ page }) => {
+  test("setting non-existent control does not error", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -566,7 +556,7 @@ test.describe("/n_set semantic tests", () => {
         noError: true,
         synthStillExists: synthExists,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.noError).toBe(true);
     expect(result.synthStillExists).toBe(true);
@@ -578,7 +568,7 @@ test.describe("/n_set semantic tests", () => {
 // =============================================================================
 
 test.describe("/n_setn semantic tests", () => {
-  test("sets sequential controls by index", async ({ page }) => {
+  test("sets sequential controls by index", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -614,7 +604,7 @@ test.describe("/n_setn semantic tests", () => {
         count: reply?.args?.[2],
         values: reply?.args?.slice(3),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.gotReply).toBe(true);
     expect(result.nodeId).toBe(1000);
@@ -625,7 +615,7 @@ test.describe("/n_setn semantic tests", () => {
     expect(result.values[2]).toBeCloseTo(0.333, 3);
   });
 
-  test("sets sequential controls by name", async ({ page }) => {
+  test("sets sequential controls by name", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -656,7 +646,7 @@ test.describe("/n_setn semantic tests", () => {
       return {
         noteValue: noteReply?.args?.[2],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.noteValue).toBe(72);
   });
@@ -667,7 +657,7 @@ test.describe("/n_setn semantic tests", () => {
 // =============================================================================
 
 test.describe("/n_fill semantic tests", () => {
-  test("fills range of controls with single value", async ({ page }) => {
+  test("fills range of controls with single value", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -702,7 +692,7 @@ test.describe("/n_fill semantic tests", () => {
         values,
         allMatch: values?.every((v) => Math.abs(v - 0.5) < 0.001),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.gotReply).toBe(true);
     expect(result.allMatch).toBe(true);
@@ -719,7 +709,7 @@ test.describe("/n_map semantic tests", () => {
   // These tests verify the commands execute without error and the synth continues running.
   // Actual mapping behavior would need to be verified via audio output testing.
 
-  test("mapped control reads from bus", async ({ page }) => {
+  test("mapped control reads from bus", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -743,12 +733,12 @@ test.describe("/n_map semantic tests", () => {
       await sonic.send("/n_free", 1000);
 
       return { synthExists };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synthExists).toBe(true);
   });
 
-  test("unmap with bus index -1", async ({ page }) => {
+  test("unmap with bus index -1", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -797,12 +787,12 @@ test.describe("/n_map semantic tests", () => {
       return {
         noteValue: reply?.args?.[2],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.noteValue).toBe(84);
   });
 
-  test("maps multiple controls in single command", async ({ page }) => {
+  test("maps multiple controls in single command", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -829,7 +819,7 @@ test.describe("/n_map semantic tests", () => {
       await sonic.send("/n_free", 1000);
 
       return { synthExists };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synthExists).toBe(true);
   });
@@ -840,7 +830,7 @@ test.describe("/n_map semantic tests", () => {
 // =============================================================================
 
 test.describe("/s_new semantic tests", () => {
-  test("creates synth with specified ID", async ({ page }) => {
+  test("creates synth with specified ID", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -863,7 +853,7 @@ test.describe("/s_new semantic tests", () => {
         defName: synth?.defName,
         isGroup: synth?.isGroup,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.exists).toBe(true);
     expect(result.id).toBe(1234);
@@ -873,7 +863,7 @@ test.describe("/s_new semantic tests", () => {
 
   // Auto-generated IDs with -1 create negative IDs (e.g., -2147483640, -2147483632, ...)
   // These DO appear in the SAB tree for visualization purposes.
-  test("auto-generates ID with -1", async ({ page }) => {
+  test("auto-generates ID with -1", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -898,7 +888,7 @@ test.describe("/s_new semantic tests", () => {
         autoSynthFound: !!autoSynth,
         autoSynthId: autoSynth?.id,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // SAB tree now includes auto-assigned negative IDs
     expect(result.nodeCountAfter).toBe(result.nodeCountBefore + 1);
@@ -906,7 +896,7 @@ test.describe("/s_new semantic tests", () => {
     expect(result.autoSynthId).toBeLessThan(0);
   });
 
-  test("add action 0 - adds to head of group", async ({ page }) => {
+  test("add action 0 - adds to head of group", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -938,7 +928,7 @@ test.describe("/s_new semantic tests", () => {
         synth1001PrevId: synth1001?.prevId,
         synth1001NextId: synth1001?.nextId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // 1001 at head: prevId = -1, nextId = 1000
     // 1000 at tail: prevId = 1001, nextId = -1
@@ -948,7 +938,7 @@ test.describe("/s_new semantic tests", () => {
     expect(result.synth1000NextId).toBe(-1);
   });
 
-  test("add action 1 - adds to tail of group", async ({ page }) => {
+  test("add action 1 - adds to tail of group", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -983,7 +973,7 @@ test.describe("/s_new semantic tests", () => {
         synth1002PrevId: synth1002?.prevId,
         synth1002NextId: synth1002?.nextId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // 1000 at head: prevId = -1, nextId = 1001
     expect(result.synth1000PrevId).toBe(-1);
@@ -996,7 +986,7 @@ test.describe("/s_new semantic tests", () => {
     expect(result.synth1002NextId).toBe(-1);
   });
 
-  test("add action 2 - adds before target node", async ({ page }) => {
+  test("add action 2 - adds before target node", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1026,7 +1016,7 @@ test.describe("/s_new semantic tests", () => {
         synth1000PrevId: synth1000?.prevId,
         synth1000NextId: synth1000?.nextId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // 1001 at head (before 1000): prevId=-1, nextId=1000
     expect(result.synth1001PrevId).toBe(-1);
@@ -1036,7 +1026,7 @@ test.describe("/s_new semantic tests", () => {
     expect(result.synth1000NextId).toBe(-1);
   });
 
-  test("add action 3 - adds after target node", async ({ page }) => {
+  test("add action 3 - adds after target node", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1064,13 +1054,13 @@ test.describe("/s_new semantic tests", () => {
         synth1000NextId: synth1000?.nextId,
         synth1001PrevId: synth1001?.prevId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synth1000NextId).toBe(1001);
     expect(result.synth1001PrevId).toBe(1000);
   });
 
-  test("add action 4 - replaces target node", async ({ page }) => {
+  test("add action 4 - replaces target node", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1104,7 +1094,7 @@ test.describe("/s_new semantic tests", () => {
         synth1001ParentId: synth1001After?.parentId,
         synth1000ParentIdBefore: synth1000Before?.parentId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synth1000ExistedBefore).toBe(true);
     expect(result.synth1000ExistsAfter).toBe(false); // Old synth freed
@@ -1112,7 +1102,7 @@ test.describe("/s_new semantic tests", () => {
     expect(result.synth1001ParentId).toBe(result.synth1000ParentIdBefore);
   });
 
-  test("sets controls at creation time", async ({ page }) => {
+  test("sets controls at creation time", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1165,14 +1155,14 @@ test.describe("/s_new semantic tests", () => {
         ampValue: ampReply?.args?.[2],
         panValue: panReply?.args?.[2],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.noteValue).toBe(72);
     expect(result.ampValue).toBeCloseTo(0.25, 5);
     expect(result.panValue).toBeCloseTo(-0.75, 5);
   });
 
-  test("sends /n_go notification on creation", async ({ page }) => {
+  test("sends /n_go notification on creation", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1215,7 +1205,7 @@ test.describe("/s_new semantic tests", () => {
         nextId: nGoMsg?.args?.[3],
         isGroup: nGoMsg?.args?.[4],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.receivedNGo).toBe(true);
     expect(result.nodeId).toBe(1000);
@@ -1223,7 +1213,7 @@ test.describe("/s_new semantic tests", () => {
     expect(result.isGroup).toBe(0); // Synth, not group
   });
 
-  test("non-existent synthdef fails gracefully", async ({ page }) => {
+  test("non-existent synthdef fails gracefully", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1247,7 +1237,7 @@ test.describe("/s_new semantic tests", () => {
         synthExists,
         gotFailMessage: !!failMsg,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synthExists).toBe(false);
     // May or may not get /fail depending on implementation
@@ -1259,7 +1249,7 @@ test.describe("/s_new semantic tests", () => {
 // =============================================================================
 
 test.describe("/g_new semantic tests", () => {
-  test("creates group with specified ID", async ({ page }) => {
+  test("creates group with specified ID", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1282,7 +1272,7 @@ test.describe("/g_new semantic tests", () => {
         defName: group?.defName,
         parentId: group?.parentId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.exists).toBe(true);
     expect(result.id).toBe(100);
@@ -1293,7 +1283,7 @@ test.describe("/g_new semantic tests", () => {
 
   // Auto-generated IDs with -1 create negative IDs (e.g., -2147483640, -2147483632, ...)
   // These DO appear in the SAB tree for visualization purposes.
-  test("auto-generates ID with -1", async ({ page }) => {
+  test("auto-generates ID with -1", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1317,7 +1307,7 @@ test.describe("/g_new semantic tests", () => {
         autoGroupFound: !!autoGroup,
         autoGroupId: autoGroup?.id,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // SAB tree now includes auto-assigned negative IDs
     expect(result.nodeCountAfter).toBe(result.nodeCountBefore + 1);
@@ -1325,7 +1315,7 @@ test.describe("/g_new semantic tests", () => {
     expect(result.autoGroupId).toBeLessThan(0);
   });
 
-  test("creates multiple groups in single command", async ({ page }) => {
+  test("creates multiple groups in single command", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1355,7 +1345,7 @@ test.describe("/g_new semantic tests", () => {
         group101NextId: group101?.nextId,
         group102PrevId: group102?.prevId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.group100Exists).toBe(true);
     expect(result.group101Exists).toBe(true);
@@ -1367,7 +1357,7 @@ test.describe("/g_new semantic tests", () => {
     expect(result.group102PrevId).toBe(101);
   });
 
-  test("nested groups create proper hierarchy", async ({ page }) => {
+  test("nested groups create proper hierarchy", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1394,7 +1384,7 @@ test.describe("/g_new semantic tests", () => {
       await sonic.send("/n_free", 100);
 
       return result;
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.group100Parent).toBe(0);
     expect(result.group101Parent).toBe(100);
@@ -1402,7 +1392,7 @@ test.describe("/g_new semantic tests", () => {
     expect(result.group103Parent).toBe(102);
   });
 
-  test("all add actions work correctly", async ({ page }) => {
+  test("all add actions work correctly", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1445,7 +1435,7 @@ test.describe("/g_new semantic tests", () => {
         g103Next: g103?.nextId,
         g102Prev: g102?.prevId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // 101 -> 104 -> 103 -> 102
     expect(result.g101Next).toBe(104);
@@ -1462,7 +1452,7 @@ test.describe("/g_new semantic tests", () => {
 // =============================================================================
 
 test.describe("/b_alloc and /b_free semantic tests", () => {
-  test("allocates buffer with correct parameters", async ({ page }) => {
+  test("allocates buffer with correct parameters", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1492,7 +1482,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
         channels: info?.args?.[2],
         sampleRate: info?.args?.[3],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.bufnum).toBe(0);
     expect(result.frames).toBe(44100);
@@ -1500,7 +1490,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
     expect(result.sampleRate).toBeGreaterThan(0);
   });
 
-  test("allocates stereo buffer", async ({ page }) => {
+  test("allocates stereo buffer", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1526,7 +1516,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
         frames: info?.args?.[1],
         channels: info?.args?.[2],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.frames).toBe(22050);
     expect(result.channels).toBe(2);
@@ -1573,14 +1563,14 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
         framesAfter,
         channelsAfter,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.framesBefore).toBe(1024);
     expect(result.framesAfter).toBe(2048);
     expect(result.channelsAfter).toBe(2);
   });
 
-  test("freed buffer data is cleared on re-allocation", async ({ page }) => {
+  test("freed buffer data is cleared on re-allocation", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1619,12 +1609,12 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
         values,
         allZero: values.every((v) => v === 0),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.allZero).toBe(true);
   });
 
-  test("multiple buffers are independent", async ({ page }) => {
+  test("multiple buffers are independent", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1682,7 +1672,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
         val1,
         val2,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.buf0Frames).toBe(1000);
     expect(result.buf1Frames).toBe(2000);
@@ -1692,7 +1682,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
     expect(result.val2).toBeCloseTo(0.3, 5);
   });
 
-  test("/b_zero actually zeros buffer contents", async ({ page }) => {
+  test("/b_zero actually zeros buffer contents", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1733,7 +1723,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
         valueBefore,
         valueAfter,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.valueBefore).toBeCloseTo(0.999, 3);
     expect(result.valueAfter).toBe(0);
@@ -1745,7 +1735,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
 // =============================================================================
 
 test.describe("/n_run semantic tests", () => {
-  test("pauses synth with flag 0", async ({ page }) => {
+  test("pauses synth with flag 0", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1782,13 +1772,13 @@ test.describe("/n_run semantic tests", () => {
         receivedNOff: !!nOffMsg,
         synthExists,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.receivedNOff).toBe(true);
     expect(result.synthExists).toBe(true);
   });
 
-  test("resumes synth with flag 1", async ({ page }) => {
+  test("resumes synth with flag 1", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1821,12 +1811,12 @@ test.describe("/n_run semantic tests", () => {
       return {
         receivedNOn: !!nOnMsg,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.receivedNOn).toBe(true);
   });
 
-  test("pauses and resumes multiple nodes", async ({ page }) => {
+  test("pauses and resumes multiple nodes", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1860,7 +1850,7 @@ test.describe("/n_run semantic tests", () => {
         pausedCount: nOffMsgs.length,
         pausedIds,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.pausedCount).toBe(3);
     expect(result.pausedIds).toContain(1000);
@@ -1868,7 +1858,7 @@ test.describe("/n_run semantic tests", () => {
     expect(result.pausedIds).toContain(1002);
   });
 
-  test("pausing group pauses all children", async ({ page }) => {
+  test("pausing group pauses all children", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1902,7 +1892,7 @@ test.describe("/n_run semantic tests", () => {
         groupPaused,
         nOffCount: nOffMsgs.length,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.groupPaused).toBe(true);
   });
@@ -1913,7 +1903,7 @@ test.describe("/n_run semantic tests", () => {
 // =============================================================================
 
 test.describe("/n_order semantic tests", () => {
-  test("reorders nodes to head of group", async ({ page }) => {
+  test("reorders nodes to head of group", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1950,7 +1940,7 @@ test.describe("/n_order semantic tests", () => {
         synth1002NextId: synth1002?.nextId,
         synth1000PrevId: synth1000?.prevId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // 1002 should now be at head
     expect(result.headBefore).toBe(1000);
@@ -1959,7 +1949,7 @@ test.describe("/n_order semantic tests", () => {
     expect(result.synth1000PrevId).toBe(1002); // 1000 is now after 1002
   });
 
-  test("reorders multiple nodes", async ({ page }) => {
+  test("reorders multiple nodes", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1996,7 +1986,7 @@ test.describe("/n_order semantic tests", () => {
         synth1002Next: synth1002?.nextId,
         synth1000Prev: synth1000?.prevId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.headId).toBe(1003);
     expect(result.synth1003Next).toBe(1002);
@@ -2005,7 +1995,7 @@ test.describe("/n_order semantic tests", () => {
     expect(result.synth1000Prev).toBe(1002);
   });
 
-  test("reorders nodes to tail of group", async ({ page }) => {
+  test("reorders nodes to tail of group", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2039,7 +2029,7 @@ test.describe("/n_order semantic tests", () => {
         synth1000PrevId: synth1000?.prevId,
         synth1002NextId: synth1002?.nextId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.headId).toBe(1001);
     expect(result.synth1000NextId).toBe(-1); // 1000 is now last
@@ -2053,7 +2043,7 @@ test.describe("/n_order semantic tests", () => {
 // =============================================================================
 
 test.describe("/g_queryTree semantic tests", () => {
-  test("returns correct tree structure", async ({ page }) => {
+  test("returns correct tree structure", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2084,7 +2074,7 @@ test.describe("/g_queryTree semantic tests", () => {
         hasReply: !!reply,
         args: reply?.args,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasReply).toBe(true);
     // Format: [flag, nodeID, numChildren, ...]
@@ -2095,7 +2085,7 @@ test.describe("/g_queryTree semantic tests", () => {
     expect(result.args[4]).toBe(2); // group 100 has 2 children
   });
 
-  test("returns synth control values with flag 1", async ({ page }) => {
+  test("returns synth control values with flag 1", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2136,7 +2126,7 @@ test.describe("/g_queryTree semantic tests", () => {
         // With flag 1, synth entries include control count and values
         argsLength: reply?.args?.length,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasReply).toBe(true);
     expect(result.flag).toBe(1);
@@ -2144,7 +2134,7 @@ test.describe("/g_queryTree semantic tests", () => {
     expect(result.argsLength).toBeGreaterThan(5);
   });
 
-  test("control values set via /n_set are reflected in /g_queryTree", async ({ page }) => {
+  test("control values set via /n_set are reflected in /g_queryTree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2206,7 +2196,7 @@ test.describe("/g_queryTree semantic tests", () => {
         controlValues,
         rawArgs: args,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasReply).toBe(true);
     // Verify the control values we set via /n_set are reflected
@@ -2214,7 +2204,7 @@ test.describe("/g_queryTree semantic tests", () => {
     expect(result.controlValues.amp).toBeCloseTo(0.25, 2);
   });
 
-  test("control values mapped to bus are reflected in /g_queryTree", async ({ page }) => {
+  test("control values mapped to bus are reflected in /g_queryTree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2285,7 +2275,7 @@ test.describe("/g_queryTree semantic tests", () => {
         noteValue: controlValues.note,
         rawArgs: args,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasReply).toBe(true);
     // When mapped to a control bus, scsynth returns the bus index as a string "cN"
@@ -2294,7 +2284,7 @@ test.describe("/g_queryTree semantic tests", () => {
     expect(result.noteValue).toBe("c0");  // Mapped to control bus 0
   });
 
-  test("SAB tree matches /g_queryTree response", async ({ page }) => {
+  test("SAB tree matches /g_queryTree response", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2341,7 +2331,7 @@ test.describe("/g_queryTree semantic tests", () => {
         sabNodeIds: sabTree.nodes.map((n) => n.id).sort((a, b) => a - b),
         queryNodeIds: [...new Set(queryNodeIds)].sort((a, b) => a - b),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Both should have same nodes (excluding implementation details)
     expect(result.sabNodeCount).toBe(6); // root + 2 groups + 3 synths
@@ -2359,7 +2349,7 @@ test.describe("/g_queryTree semantic tests", () => {
 // =============================================================================
 
 test.describe("/b_gen semantic tests", () => {
-  test("sine1 generates single harmonic", async ({ page }) => {
+  test("sine1 generates single harmonic", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2403,13 +2393,13 @@ test.describe("/b_gen semantic tests", () => {
         // Peak should be near 1.0 (normalized)
         hasPeak: quarterSamples.some((s) => Math.abs(s) > 0.5),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasData).toBe(true);
     expect(result.hasPeak).toBe(true);
   });
 
-  test("sine1 generates multiple harmonics", async ({ page }) => {
+  test("sine1 generates multiple harmonics", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2442,12 +2432,12 @@ test.describe("/b_gen semantic tests", () => {
         hasData: samples.some((s) => s !== 0),
         samples,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasData).toBe(true);
   });
 
-  test("sine2 generates partials at specific frequencies", async ({ page }) => {
+  test("sine2 generates partials at specific frequencies", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2479,12 +2469,12 @@ test.describe("/b_gen semantic tests", () => {
       return {
         hasData: samples.some((s) => s !== 0),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasData).toBe(true);
   });
 
-  test("cheby generates Chebyshev polynomial", async ({ page }) => {
+  test("cheby generates Chebyshev polynomial", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2516,7 +2506,7 @@ test.describe("/b_gen semantic tests", () => {
       return {
         hasData: samples.some((s) => s !== 0),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasData).toBe(true);
   });
@@ -2527,7 +2517,7 @@ test.describe("/b_gen semantic tests", () => {
 // =============================================================================
 
 test.describe("Control bus semantic tests", () => {
-  test("/c_set sets single bus value", async ({ page }) => {
+  test("/c_set sets single bus value", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2552,13 +2542,13 @@ test.describe("Control bus semantic tests", () => {
         busIndex: reply?.args?.[0],
         value: reply?.args?.[1],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.busIndex).toBe(0);
     expect(result.value).toBeCloseTo(0.75, 5);
   });
 
-  test("/c_set sets multiple buses", async ({ page }) => {
+  test("/c_set sets multiple buses", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2583,14 +2573,14 @@ test.describe("Control bus semantic tests", () => {
       }
 
       return { values };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.values[0]).toBeCloseTo(0.1, 5);
     expect(result.values[1]).toBeCloseTo(0.2, 5);
     expect(result.values[2]).toBeCloseTo(0.3, 5);
   });
 
-  test("/c_setn sets sequential bus values", async ({ page }) => {
+  test("/c_setn sets sequential bus values", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2616,7 +2606,7 @@ test.describe("Control bus semantic tests", () => {
         count: reply?.args?.[1],
         values: reply?.args?.slice(2),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.startIndex).toBe(5);
     expect(result.count).toBe(5);
@@ -2627,7 +2617,7 @@ test.describe("Control bus semantic tests", () => {
     expect(result.values[4]).toBeCloseTo(0.9, 5);
   });
 
-  test("/c_fill fills range with single value", async ({ page }) => {
+  test("/c_fill fills range with single value", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2653,7 +2643,7 @@ test.describe("Control bus semantic tests", () => {
         values,
         allMatch: values.every((v) => Math.abs(v - 0.42) < 0.001),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.values).toHaveLength(5);
     expect(result.allMatch).toBe(true);
@@ -2665,7 +2655,7 @@ test.describe("Control bus semantic tests", () => {
 // =============================================================================
 
 test.describe("Error handling tests", () => {
-  test("invalid node ID returns error", async ({ page }) => {
+  test("invalid node ID returns error", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2686,12 +2676,12 @@ test.describe("Error handling tests", () => {
       return {
         receivedNInfo: !!nInfoMsg,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.receivedNInfo).toBe(false);
   });
 
-  test("duplicate node ID fails gracefully", async ({ page }) => {
+  test("duplicate node ID fails gracefully", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2721,13 +2711,13 @@ test.describe("Error handling tests", () => {
         countAfter,
         countUnchanged: countBefore === countAfter,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Second synth should not be created
     expect(result.countUnchanged).toBe(true);
   });
 
-  test("freeing root group is prevented", async ({ page }) => {
+  test("freeing root group is prevented", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2746,13 +2736,13 @@ test.describe("Error handling tests", () => {
         rootExistsBefore: treeBefore.nodes.some((n) => n.id === 0),
         rootExistsAfter: treeAfter.nodes.some((n) => n.id === 0),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.rootExistsBefore).toBe(true);
     expect(result.rootExistsAfter).toBe(true);
   });
 
-  test("setting controls on non-existent node is handled", async ({ page }) => {
+  test("setting controls on non-existent node is handled", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2779,13 +2769,13 @@ test.describe("Error handling tests", () => {
         noError: true,
         synthStillExists: synthExists,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.noError).toBe(true);
     expect(result.synthStillExists).toBe(true);
   });
 
-  test("buffer operations on invalid buffer handled", async ({ page }) => {
+  test("buffer operations on invalid buffer handled", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2807,7 +2797,7 @@ test.describe("Error handling tests", () => {
         // Non-allocated buffer should report 0 frames
         frames: reply?.args?.[1],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasReply).toBe(true);
     expect(result.frames).toBe(0);
@@ -2853,7 +2843,7 @@ test.describe("Malformed input robustness tests", () => {
         serverResponsive: !!statusReply,
         numGroups: statusReply?.args?.[3],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
     expect(result.numGroups).toBeGreaterThanOrEqual(1);
@@ -2951,7 +2941,7 @@ test.describe("Malformed input robustness tests", () => {
         debugMessages: debugMessages.map((m) => m.text).filter(Boolean),
         allMessages: messages.map((m) => m.address),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
     expect(result.hasUGenError).toBe(true);
@@ -3007,13 +2997,13 @@ test.describe("Malformed input robustness tests", () => {
       return {
         serverResponsive: !!statusReply,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
   });
 
   // Test 4: Empty synthdef data
-  test("empty synthdef data handled gracefully", async ({ page }) => {
+  test("empty synthdef data handled gracefully", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     // Capture console errors from the page
@@ -3064,7 +3054,7 @@ test.describe("Malformed input robustness tests", () => {
         debugMessages: debugMessages.map((m) => m.text).filter(Boolean),
         allMessages: messages.map((m) => m.address),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverWorkedBefore).toBe(true);
     expect(result.serverResponsive).toBe(true);
@@ -3106,7 +3096,7 @@ test.describe("Malformed input robustness tests", () => {
       return {
         serverResponsive: !!statusReply,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
   });
@@ -3145,7 +3135,7 @@ test.describe("Malformed input robustness tests", () => {
         serverResponsive: !!statusReply,
         synthNotCreated: countBefore === countAfter,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
     expect(result.synthNotCreated).toBe(true);
@@ -3184,7 +3174,7 @@ test.describe("Malformed input robustness tests", () => {
       return {
         serverResponsive: !!statusReply,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
   });
@@ -3223,7 +3213,7 @@ test.describe("Malformed input robustness tests", () => {
         serverResponsive: !!statusReply,
         groupNotCreated: countBefore === countAfter,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
     expect(result.groupNotCreated).toBe(true);
@@ -3268,14 +3258,14 @@ test.describe("Malformed input robustness tests", () => {
         serverResponsive: !!statusReply,
         synthStillExists: synthExists,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
     expect(result.synthStillExists).toBe(true);
   });
 
   // Test 10: /b_alloc with extreme values
-  test("/b_alloc with extreme values handled gracefully", async ({ page }) => {
+  test("/b_alloc with extreme values handled gracefully", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -3303,7 +3293,7 @@ test.describe("Malformed input robustness tests", () => {
       return {
         serverResponsive: !!statusReply,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
   });
@@ -3342,7 +3332,7 @@ test.describe("Malformed input robustness tests", () => {
       return {
         serverResponsive: !!statusReply,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
   });
@@ -3388,14 +3378,14 @@ test.describe("Malformed input robustness tests", () => {
         serverResponsive: !!statusReply,
         numGroups: statusReply?.args?.[3],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
     expect(result.numGroups).toBeGreaterThanOrEqual(1);
   });
 
   // Test 13: Unknown OSC command handled gracefully
-  test("unknown OSC command handled gracefully", async ({ page }) => {
+  test("unknown OSC command handled gracefully", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -3419,13 +3409,13 @@ test.describe("Malformed input robustness tests", () => {
       return {
         serverResponsive: !!statusReply,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.serverResponsive).toBe(true);
   });
 
   // Test 14: Valid synthdef still works after malformed ones
-  test("valid synthdef loads after malformed attempts", async ({ page }) => {
+  test("valid synthdef loads after malformed attempts", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -3469,7 +3459,7 @@ test.describe("Malformed input robustness tests", () => {
       return {
         synthCreated: synthExists,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synthCreated).toBe(true);
   });
@@ -3480,7 +3470,7 @@ test.describe("Malformed input robustness tests", () => {
 // =============================================================================
 
 test.describe("/d_freeAll semantic tests", () => {
-  test("frees all loaded synthdefs", async ({ page }) => {
+  test("frees all loaded synthdefs", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -3516,7 +3506,7 @@ test.describe("/d_freeAll semantic tests", () => {
         synthdefCountBefore,
         synthdefCountAfter,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synthdefCountBefore).toBeGreaterThan(0);
     expect(result.synthdefCountAfter).toBe(0);
@@ -3528,7 +3518,7 @@ test.describe("/d_freeAll semantic tests", () => {
 // =============================================================================
 
 test.describe("/n_mapn semantic tests", () => {
-  test("maps multiple sequential controls to buses", async ({ page }) => {
+  test("maps multiple sequential controls to buses", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -3556,7 +3546,7 @@ test.describe("/n_mapn semantic tests", () => {
       await sonic.send("/n_free", 1000);
 
       return { synthExists };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synthExists).toBe(true);
   });
@@ -3567,7 +3557,7 @@ test.describe("/n_mapn semantic tests", () => {
 // =============================================================================
 
 test.describe("/s_noid semantic tests", () => {
-  test("removes synth node ID (assigns hidden ID)", async ({ page }) => {
+  test("removes synth node ID (assigns hidden ID)", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -3595,7 +3585,7 @@ test.describe("/s_noid semantic tests", () => {
         nodeCountBefore: treeBefore.nodeCount,
         nodeCountAfter: treeAfter.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Synth should exist before
     expect(result.synthExistsBefore).toBe(true);
@@ -3611,7 +3601,7 @@ test.describe("/s_noid semantic tests", () => {
 // =============================================================================
 
 test.describe("/n_mapa semantic tests", () => {
-  test("maps control to audio bus", async ({ page }) => {
+  test("maps control to audio bus", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -3635,7 +3625,7 @@ test.describe("/n_mapa semantic tests", () => {
       await sonic.send("/n_free", 1000);
 
       return { synthExists };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synthExists).toBe(true);
   });
@@ -3646,7 +3636,7 @@ test.describe("/n_mapa semantic tests", () => {
 // =============================================================================
 
 test.describe("/n_mapan semantic tests", () => {
-  test("maps multiple sequential controls to audio buses", async ({ page }) => {
+  test("maps multiple sequential controls to audio buses", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -3670,7 +3660,7 @@ test.describe("/n_mapan semantic tests", () => {
       await sonic.send("/n_free", 1000);
 
       return { synthExists };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synthExists).toBe(true);
   });

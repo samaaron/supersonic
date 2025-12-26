@@ -1,14 +1,7 @@
-import { test, expect } from '@playwright/test';
-
-const SUPERSONIC_CONFIG = `{
-  workerBaseURL: '/dist/workers/',
-  wasmBaseURL: '/dist/wasm/',
-  sampleBaseURL: '/dist/samples/',
-  synthdefBaseURL: '/dist/synthdefs/',
-}`;
+import { test, expect } from './fixtures.mjs';
 
 test.describe('Recovery and Caching', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, sonicConfig }) => {
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
         console.error('Browser console error:', msg.text());
@@ -21,13 +14,9 @@ test.describe('Recovery and Caching', () => {
     });
   });
 
-  test('synthdef is cached after /d_recv via send()', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('synthdef is cached after /d_recv via send()', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef('sonic-pi-beep');
@@ -37,19 +26,15 @@ test.describe('Recovery and Caching', () => {
 
       await sonic.destroy();
       return { cached, cacheSize };
-    });
+    }, sonicConfig);
 
     expect(result.cached).toBe(true);
     expect(result.cacheSize).toBe(1);
   });
 
-  test('synthdef is cached when sent via OSC API', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('synthdef is cached when sent via OSC API', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
 
@@ -65,18 +50,14 @@ test.describe('Recovery and Caching', () => {
 
       await sonic.destroy();
       return { cached };
-    });
+    }, sonicConfig);
 
     expect(result.cached).toBe(true);
   });
 
-  test('/d_free removes synthdef from cache', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('/d_free removes synthdef from cache', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef('sonic-pi-beep');
@@ -87,19 +68,15 @@ test.describe('Recovery and Caching', () => {
 
       await sonic.destroy();
       return { beforeFree, afterFree };
-    });
+    }, sonicConfig);
 
     expect(result.beforeFree).toBe(true);
     expect(result.afterFree).toBe(false);
   });
 
-  test('/d_freeAll clears synthdef cache', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('/d_freeAll clears synthdef cache', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef('sonic-pi-beep');
@@ -110,19 +87,15 @@ test.describe('Recovery and Caching', () => {
 
       await sonic.destroy();
       return { beforeFreeAll, afterFreeAll };
-    });
+    }, sonicConfig);
 
     expect(result.beforeFreeAll).toBe(1);
     expect(result.afterFreeAll).toBe(0);
   });
 
-  test('reset() clears synthdef cache', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('reset() clears synthdef cache', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef('sonic-pi-beep');
@@ -133,19 +106,15 @@ test.describe('Recovery and Caching', () => {
 
       await sonic.destroy();
       return { beforeReset, afterReset };
-    });
+    }, sonicConfig);
 
     expect(result.beforeReset).toBe(1);
     expect(result.afterReset).toBe(0);
   });
 
-  test('recover() restores cached synthdefs after reset', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('recover() restores cached synthdefs after reset', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef('sonic-pi-beep');
@@ -157,37 +126,31 @@ test.describe('Recovery and Caching', () => {
 
       await sonic.destroy();
       return { beforeRecover, afterRecover, stillHasBeep };
-    });
+    }, sonicConfig);
 
     expect(result.beforeRecover).toBe(1);
     expect(result.afterRecover).toBe(1);
     expect(result.stillHasBeep).toBe(true);
   });
 
-  test('recover() returns true on success', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-      });
+  test('recover() returns true on success', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       const success = await sonic.recover();
 
       await sonic.destroy();
       return { success };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test('recover() returns true when audio is already running', async ({ page }) => {
+  test('recover() returns true when audio is already running', async ({ page, sonicConfig }) => {
     // Tests the quick-resume path of recover() when AudioContext is already running
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       // AudioContext should already be running, so recover() should succeed via quick resume
@@ -195,18 +158,14 @@ test.describe('Recovery and Caching', () => {
 
       await sonic.destroy();
       return { success };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test('loading:start and loading:complete events fire for samples', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        sampleBaseURL: '/dist/samples/',
-      });
+  test('loading:start and loading:complete events fire for samples', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const events = [];
       sonic.on('loading:start', (e) => events.push({ event: 'start', ...e }));
@@ -219,7 +178,7 @@ test.describe('Recovery and Caching', () => {
 
       const sampleEvents = events.filter(e => e.type === 'sample');
       return { sampleEvents };
-    });
+    }, sonicConfig);
 
     expect(result.sampleEvents.length).toBe(2);
     expect(result.sampleEvents[0].event).toBe('start');
@@ -230,13 +189,9 @@ test.describe('Recovery and Caching', () => {
     expect(result.sampleEvents[1].size).toBeGreaterThan(0);
   });
 
-  test('loading events fire for synthdefs', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('loading events fire for synthdefs', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const events = [];
       sonic.on('loading:start', (e) => events.push({ event: 'start', ...e }));
@@ -249,7 +204,7 @@ test.describe('Recovery and Caching', () => {
 
       const synthdefEvents = events.filter(e => e.type === 'synthdef');
       return { synthdefEvents };
-    });
+    }, sonicConfig);
 
     expect(result.synthdefEvents.length).toBe(2);
     expect(result.synthdefEvents[0].event).toBe('start');
@@ -258,14 +213,9 @@ test.describe('Recovery and Caching', () => {
     expect(result.synthdefEvents[1].size).toBeGreaterThan(0);
   });
 
-  test('recover() preserves loaded samples', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        sampleBaseURL: '/dist/samples/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('recover() preserves loaded samples', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSample(42, 'loop_amen.flac');
@@ -287,19 +237,14 @@ test.describe('Recovery and Caching', () => {
 
       await sonic.destroy();
       return { synthCreated };
-    });
+    }, sonicConfig);
 
     expect(result.synthCreated).toBe(true);
   });
 
-  test('buffer data survives full reload path', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        sampleBaseURL: '/dist/samples/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('buffer data survives full reload path', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -345,7 +290,7 @@ test.describe('Recovery and Caching', () => {
         reloadPathTaken,
         preserved: framesBefore === framesAfter && framesBefore > 0,
       };
-    });
+    }, sonicConfig);
 
     expect(result.framesBefore).toBeGreaterThan(0);
     expect(result.framesAfter).toBe(result.framesBefore);
@@ -353,14 +298,9 @@ test.describe('Recovery and Caching', () => {
     expect(result.preserved).toBe(true);
   });
 
-  test('/b_allocFile buffer survives full reload', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        sampleBaseURL: '/dist/samples/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('/b_allocFile buffer survives full reload', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -397,21 +337,16 @@ test.describe('Recovery and Caching', () => {
         framesAfter,
         preserved: framesBefore === framesAfter && framesBefore > 0,
       };
-    });
+    }, sonicConfig);
 
     expect(result.framesBefore).toBeGreaterThan(0);
     expect(result.framesAfter).toBe(result.framesBefore);
     expect(result.preserved).toBe(true);
   });
 
-  test('multiple buffers survive reload with correct buffer IDs', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        sampleBaseURL: '/dist/samples/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('multiple buffers survive reload with correct buffer IDs', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -465,7 +400,7 @@ test.describe('Recovery and Caching', () => {
                       before.buf30 === after.buf30 &&
                       before.buf10 > 0,
       };
-    });
+    }, sonicConfig);
 
     expect(result.before.buf10).toBeGreaterThan(0);
     expect(result.before.buf20).toBeGreaterThan(0);
@@ -476,14 +411,9 @@ test.describe('Recovery and Caching', () => {
     expect(result.allPreserved).toBe(true);
   });
 
-  test('buffer sample data is preserved after recover', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-        sampleBaseURL: '/dist/samples/',
-        synthdefBaseURL: '/dist/synthdefs/',
-      });
+  test('buffer sample data is preserved after recover', async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -526,7 +456,7 @@ test.describe('Recovery and Caching', () => {
         allMatch,
         count: samplesBefore.length,
       };
-    });
+    }, sonicConfig);
 
     expect(result.count).toBe(10);
     expect(result.allMatch).toBe(true);

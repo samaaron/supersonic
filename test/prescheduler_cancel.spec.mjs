@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.mjs";
 
 /**
  * Prescheduler Cancellation Tests
@@ -11,7 +11,7 @@ import { test, expect } from "@playwright/test";
  */
 
 test.describe("Prescheduler Cancellation", () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, sonicConfig }) => {
     page.on("console", (msg) => {
       if (msg.type() === "error") {
         console.error("Browser console error:", msg.text());
@@ -26,8 +26,8 @@ test.describe("Prescheduler Cancellation", () => {
     });
   });
 
-  test("cancelTag removes all bundles with matching tag (any session)", async ({ page }) => {
-    const result = await page.evaluate(async () => {
+  test("cancelTag removes all bundles with matching tag (any session)", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
       // NTP helpers
       const NTP_EPOCH_OFFSET = 2208988800;
       const getCurrentNTP = () => {
@@ -68,9 +68,7 @@ test.describe("Prescheduler Cancellation", () => {
         return bundle;
       };
 
-      const sonic = new window.SuperSonic({
-        baseURL: "/dist/",
-      });
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDefs(["sonic-pi-beep"]);
@@ -124,7 +122,7 @@ test.describe("Prescheduler Cancellation", () => {
         expectedCancelled: 20,  // 10 from session 0 + 10 from session 1
         expectedRemaining: 10,  // 10 with tag 'run_2'
       };
-    });
+    }, sonicConfig);
 
     console.log(`\ncancelTag test:`);
     console.log(`  Pending after send: ${result.pendingAfterSend}`);
@@ -136,8 +134,8 @@ test.describe("Prescheduler Cancellation", () => {
     expect(result.pendingAfterCancel).toBe(result.expectedRemaining);
   });
 
-  test("cancelSession removes all bundles from matching session (any tag)", async ({ page }) => {
-    const result = await page.evaluate(async () => {
+  test("cancelSession removes all bundles from matching session (any tag)", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
       // NTP helpers
       const NTP_EPOCH_OFFSET = 2208988800;
       const getCurrentNTP = () => {
@@ -178,9 +176,7 @@ test.describe("Prescheduler Cancellation", () => {
         return bundle;
       };
 
-      const sonic = new window.SuperSonic({
-        baseURL: "/dist/",
-      });
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDefs(["sonic-pi-beep"]);
@@ -234,7 +230,7 @@ test.describe("Prescheduler Cancellation", () => {
         expectedCancelled: 20,  // All from session 1
         expectedRemaining: 10,  // From session 2
       };
-    });
+    }, sonicConfig);
 
     console.log(`\ncancelSession test:`);
     console.log(`  Pending after send: ${result.pendingAfterSend}`);
@@ -246,8 +242,8 @@ test.describe("Prescheduler Cancellation", () => {
     expect(result.pendingAfterCancel).toBe(result.expectedRemaining);
   });
 
-  test("cancelSessionTag removes only bundles matching both session AND tag", async ({ page }) => {
-    const result = await page.evaluate(async () => {
+  test("cancelSessionTag removes only bundles matching both session AND tag", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
       // NTP helpers
       const NTP_EPOCH_OFFSET = 2208988800;
       const getCurrentNTP = () => {
@@ -288,9 +284,7 @@ test.describe("Prescheduler Cancellation", () => {
         return bundle;
       };
 
-      const sonic = new window.SuperSonic({
-        baseURL: "/dist/",
-      });
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDefs(["sonic-pi-beep"]);
@@ -344,7 +338,7 @@ test.describe("Prescheduler Cancellation", () => {
         expectedCancelled: 10,  // Only session=1, tag='a'
         expectedRemaining: 20,  // session=1/tag='b' + session=2/tag='a'
       };
-    });
+    }, sonicConfig);
 
     console.log(`\ncancelSessionTag test:`);
     console.log(`  Pending after send: ${result.pendingAfterSend}`);
@@ -356,8 +350,8 @@ test.describe("Prescheduler Cancellation", () => {
     expect(result.pendingAfterCancel).toBe(result.expectedRemaining);
   });
 
-  test("cancelled bundles never reach the ring buffer", async ({ page }) => {
-    const result = await page.evaluate(async () => {
+  test("cancelled bundles never reach the ring buffer", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
       // NTP helpers
       const NTP_EPOCH_OFFSET = 2208988800;
       const getCurrentNTP = () => {
@@ -398,9 +392,7 @@ test.describe("Prescheduler Cancellation", () => {
         return bundle;
       };
 
-      const sonic = new window.SuperSonic({
-        baseURL: "/dist/",
-      });
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDefs(["sonic-pi-beep"]);
@@ -454,7 +446,7 @@ test.describe("Prescheduler Cancellation", () => {
         sentFinal,
         sentDuringTest: sentFinal - sentBefore,
       };
-    });
+    }, sonicConfig);
 
     console.log(`\nCancelled bundles never reach ring buffer:`);
     console.log(`  Pending after send: ${result.pendingAfterSend}`);
@@ -476,8 +468,8 @@ test.describe("Prescheduler Cancellation", () => {
     expect(result.sentDuringTest).toBe(0);
   });
 
-  test("cancelAllScheduled clears entire prescheduler queue", async ({ page }) => {
-    const result = await page.evaluate(async () => {
+  test("cancelAllScheduled clears entire prescheduler queue", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
       // NTP helpers
       const NTP_EPOCH_OFFSET = 2208988800;
       const getCurrentNTP = () => {
@@ -518,9 +510,7 @@ test.describe("Prescheduler Cancellation", () => {
         return bundle;
       };
 
-      const sonic = new window.SuperSonic({
-        baseURL: "/dist/",
-      });
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDefs(["sonic-pi-beep"]);
@@ -568,7 +558,7 @@ test.describe("Prescheduler Cancellation", () => {
         pendingAfterCancel,
         cancelledCount,
       };
-    });
+    }, sonicConfig);
 
     console.log(`\ncancelAllScheduled test:`);
     console.log(`  Pending after send: ${result.pendingAfterSend}`);

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.mjs";
 
 /**
  * Scheduler Queue Overflow Test
@@ -16,13 +16,6 @@ import { test, expect } from "@playwright/test";
 const SCHEDULER_CAPACITY = 128;
 const OVERFLOW_AMOUNT = 200; // Much more aggressive - send 3x+ capacity
 const TOTAL_MESSAGES = SCHEDULER_CAPACITY + OVERFLOW_AMOUNT;
-
-const SONIC_CONFIG = {
-  workerBaseURL: "/dist/workers/",
-  wasmBaseURL: "/dist/wasm/",
-  sampleBaseURL: "/dist/samples/",
-  synthdefBaseURL: "/dist/synthdefs/",
-};
 
 // Audio analysis helpers
 const AUDIO_HELPERS = `
@@ -53,7 +46,7 @@ function hasAudio(samples) {
 `;
 
 test.describe("Scheduler Queue Overflow", () => {
-  test(`sending ${TOTAL_MESSAGES} timed bundles should not drop any messages`, async ({ page }) => {
+  test(`sending ${TOTAL_MESSAGES} timed bundles should not drop any messages`, async ({ page, sonicConfig }) => {
     const errors = [];
     const debugLogs = [];
 
@@ -75,15 +68,10 @@ test.describe("Scheduler Queue Overflow", () => {
     });
 
     const result = await page.evaluate(async (config) => {
-      const { TOTAL_MESSAGES, helpers } = config;
+      const { TOTAL_MESSAGES, helpers, sonicConfig } = config;
       eval(helpers); // Load audio analysis functions
 
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+      const sonic = new window.SuperSonic(sonicConfig);
 
       const debugMessages = [];
       sonic.on('debug', (msg) => {
@@ -309,7 +297,7 @@ test.describe("Scheduler Queue Overflow", () => {
       } catch (err) {
         return { success: false, error: err.message };
       }
-    }, { TOTAL_MESSAGES, helpers: AUDIO_HELPERS });
+    }, { TOTAL_MESSAGES, helpers: AUDIO_HELPERS, sonicConfig });
 
     console.log(`\nScheduler Overflow Test Results:`);
     if (result.error) {
@@ -387,7 +375,7 @@ test.describe("Scheduler Queue Overflow", () => {
     expect(result.overflowErrors?.length || 0).toBe(0);
   });
 
-  test("verify scheduler capacity is 128", async ({ page }) => {
+  test("verify scheduler capacity is 128", async ({ page, sonicConfig }) => {
     // Sanity check: send exactly 128 messages - should all fit
     await page.goto("/test/harness.html");
 
@@ -395,13 +383,8 @@ test.describe("Scheduler Queue Overflow", () => {
       timeout: 10000,
     });
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const debugMessages = [];
       sonic.on('debug', (msg) => debugMessages.push(msg));
@@ -474,7 +457,7 @@ test.describe("Scheduler Queue Overflow", () => {
         schedulerMax: metricsAfter.workletSchedulerMax,
         overflowErrors: debugMessages.filter(m => m.text?.includes("queue full")).length
       };
-    });
+    }, sonicConfig);
 
     console.log(`\nCapacity test: sent ${result.sent}, dropped ${result.droppedCount}, max depth ${result.schedulerMax}`);
 
@@ -483,20 +466,15 @@ test.describe("Scheduler Queue Overflow", () => {
     expect(result.droppedCount).toBe(0);
   });
 
-  test("oversized scheduled bundle throws error", async ({ page }) => {
+  test("oversized scheduled bundle throws error", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     await page.waitForFunction(() => window.supersonicReady === true, {
       timeout: 10000,
     });
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
 
@@ -575,7 +553,7 @@ test.describe("Scheduler Queue Overflow", () => {
         errorContainsSize: errorThrown?.includes('too large'),
         errorContainsLimit: errorThrown?.includes(String(slotSize)),
       };
-    });
+    }, sonicConfig);
 
     console.log(`\nSize limit test: slot=${result.slotSize}, bundle=${result.bundleSize}`);
     console.log(`Error: ${result.errorThrown}`);
@@ -585,20 +563,15 @@ test.describe("Scheduler Queue Overflow", () => {
     expect(result.errorContainsLimit).toBe(true);
   });
 
-  test("bundle within size limit succeeds", async ({ page }) => {
+  test("bundle within size limit succeeds", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     await page.waitForFunction(() => window.supersonicReady === true, {
       timeout: 10000,
     });
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDefs(["sonic-pi-beep"]);
@@ -652,7 +625,7 @@ test.describe("Scheduler Queue Overflow", () => {
         errorThrown,
         withinLimit: bundle.length <= slotSize,
       };
-    });
+    }, sonicConfig);
 
     console.log(`\nNormal bundle test: slot=${result.slotSize}, bundle=${result.bundleSize}, within limit=${result.withinLimit}`);
 
@@ -660,20 +633,15 @@ test.describe("Scheduler Queue Overflow", () => {
     expect(result.errorThrown).toBeNull();
   });
 
-  test("immediate bundle bypasses size limit", async ({ page }) => {
+  test("immediate bundle bypasses size limit", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     await page.waitForFunction(() => window.supersonicReady === true, {
       timeout: 10000,
     });
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
 
@@ -735,7 +703,7 @@ test.describe("Scheduler Queue Overflow", () => {
         bundleSize: oversizedImmediate.length,
         errorThrown,
       };
-    });
+    }, sonicConfig);
 
     console.log(`\nImmediate bypass test: slot=${result.slotSize}, bundle=${result.bundleSize}`);
     console.log(`Error: ${result.errorThrown || 'none (bypassed as expected)'}`);

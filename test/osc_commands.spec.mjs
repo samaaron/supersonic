@@ -6,37 +6,18 @@
  * falling back to OSC replies for commands that return specific data.
  */
 
-import { test, expect } from "@playwright/test";
-
-// Helper to boot supersonic and return instance
-const bootSupersonic = async (page) => {
-  return await page.evaluate(async () => {
-    const sonic = new window.SuperSonic({
-      workerBaseURL: "/dist/workers/",
-      wasmBaseURL: "/dist/wasm/",
-      sampleBaseURL: "/dist/samples/",
-      synthdefBaseURL: "/dist/synthdefs/",
-    });
-    await sonic.init();
-    return true;
-  });
-};
+import { test, expect } from "./fixtures.mjs";
 
 // =============================================================================
 // TOP-LEVEL COMMANDS
 // =============================================================================
 
 test.describe("Top-level Commands", () => {
-  test("/status - returns server status", async ({ page }) => {
+  test("/status - returns server status", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -54,7 +35,7 @@ test.describe("Top-level Commands", () => {
         numGroups: statusReply?.args?.[3],
         numSynthDefs: statusReply?.args?.[4],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.numGroups).toBeGreaterThanOrEqual(1); // At least root group
@@ -63,16 +44,11 @@ test.describe("Top-level Commands", () => {
     expect(typeof result.numSynthDefs).toBe("number");
   });
 
-  test("/sync - waits for async commands", async ({ page }) => {
+  test("/sync - waits for async commands", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -85,22 +61,17 @@ test.describe("Top-level Commands", () => {
         (m) => m.address === "/synced" && m.args[0] === 42
       );
       return { success: !!syncedMsg, id: syncedMsg?.args?.[0] };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.id).toBe(42);
   });
 
-  test("/version - returns server version", async ({ page }) => {
+  test("/version - returns server version", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -118,7 +89,7 @@ test.describe("Top-level Commands", () => {
         majorVersion: versionReply?.args?.[1],
         minorVersion: versionReply?.args?.[2],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(typeof result.programName).toBe("string");
@@ -126,16 +97,11 @@ test.describe("Top-level Commands", () => {
     expect(typeof result.minorVersion).toBe("number");
   });
 
-  test("/notify - registers for notifications", async ({ page }) => {
+  test("/notify - registers for notifications", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -148,21 +114,16 @@ test.describe("Top-level Commands", () => {
         (m) => m.address === "/done" && m.args[0] === "/notify"
       );
       return { success: !!doneMsg };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("/error - throws error (unsupported in SuperSonic)", async ({ page }) => {
+  test("/error - throws error (unsupported in SuperSonic)", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       try {
@@ -171,22 +132,17 @@ test.describe("Top-level Commands", () => {
       } catch (e) {
         return { threw: true, message: e.message };
       }
-    });
+    }, sonicConfig);
 
     expect(result.threw).toBe(true);
     expect(result.message).toContain("not supported");
   });
 
-  test("/clearSched - throws error (unsupported in SuperSonic)", async ({ page }) => {
+  test("/clearSched - throws error (unsupported in SuperSonic)", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       try {
@@ -195,22 +151,17 @@ test.describe("Top-level Commands", () => {
       } catch (e) {
         return { threw: true, message: e.message };
       }
-    });
+    }, sonicConfig);
 
     expect(result.threw).toBe(true);
     expect(result.message).toContain("not supported");
   });
 
-  test("/dumpOSC - throws error (unsupported in SuperSonic)", async ({ page }) => {
+  test("/dumpOSC - throws error (unsupported in SuperSonic)", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       try {
@@ -219,7 +170,7 @@ test.describe("Top-level Commands", () => {
       } catch (e) {
         return { threw: true, message: e.message };
       }
-    });
+    }, sonicConfig);
 
     expect(result.threw).toBe(true);
     expect(result.message).toContain("not supported");
@@ -231,16 +182,11 @@ test.describe("Top-level Commands", () => {
 // =============================================================================
 
 test.describe("Synthdef Commands", () => {
-  test("/d_recv - loads synthdef from bytes and increases synthdef count", async ({ page }) => {
+  test("/d_recv - loads synthdef from bytes and increases synthdef count", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -275,22 +221,17 @@ test.describe("Synthdef Commands", () => {
         defsAfter,
         countIncreased: defsAfter > defsBefore,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.countIncreased).toBe(true);
   });
 
-  test("/d_free - frees synthdef", async ({ page }) => {
+  test("/d_free - frees synthdef", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -321,7 +262,7 @@ test.describe("Synthdef Commands", () => {
         defsAfter,
         freed: defsAfter < defsBefore,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.freed).toBe(true);
@@ -333,16 +274,11 @@ test.describe("Synthdef Commands", () => {
 // =============================================================================
 
 test.describe("Node Commands", () => {
-  test("/n_free - frees nodes", async ({ page }) => {
+  test("/n_free - frees nodes", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -368,7 +304,7 @@ test.describe("Node Commands", () => {
         countBefore: treeBefore.nodeCount,
         countAfter: treeAfter.nodeCount,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.hasSynthBefore).toBe(true);
@@ -376,16 +312,11 @@ test.describe("Node Commands", () => {
     expect(result.countAfter).toBe(result.countBefore - 1);
   });
 
-  test("/n_run - turns nodes on/off", async ({ page }) => {
+  test("/n_run - turns nodes on/off", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -418,23 +349,18 @@ test.describe("Node Commands", () => {
         gotOffNotification: !!offMsg,
         gotOnNotification: !!onMsg,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.gotOffNotification).toBe(true);
     expect(result.gotOnNotification).toBe(true);
   });
 
-  test("/n_set - sets node control values", async ({ page }) => {
+  test("/n_set - sets node control values", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -475,23 +401,18 @@ test.describe("Node Commands", () => {
         controlName: reply?.args?.[1],
         value: reply?.args?.[2],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.nodeId).toBe(1000);
     expect(result.value).toBe(72);
   });
 
-  test("/n_setn - sets sequential control values", async ({ page }) => {
+  test("/n_setn - sets sequential control values", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -510,21 +431,16 @@ test.describe("Node Commands", () => {
       await sonic.send("/n_free", 1000);
 
       return { success: true };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("/n_query - queries node info", async ({ page }) => {
+  test("/n_query - queries node info", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -552,7 +468,7 @@ test.describe("Node Commands", () => {
         parentId: infoMsg?.args?.[1],
         isGroup: infoMsg?.args?.[4],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.nodeId).toBe(1000);
@@ -560,16 +476,11 @@ test.describe("Node Commands", () => {
     expect(result.isGroup).toBe(0); // Synth, not group
   });
 
-  test("/n_before - moves node before another", async ({ page }) => {
+  test("/n_before - moves node before another", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -603,7 +514,7 @@ test.describe("Node Commands", () => {
         prevId: moveMsg?.args?.[2],
         nextId: moveMsg?.args?.[3],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.movedNodeId).toBe(1000);
@@ -612,16 +523,11 @@ test.describe("Node Commands", () => {
     expect(result.nextId).toBe(1001); // 1001 is now after 1000
   });
 
-  test("/n_after - moves node after another", async ({ page }) => {
+  test("/n_after - moves node after another", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -655,7 +561,7 @@ test.describe("Node Commands", () => {
         prevId: moveMsg?.args?.[2],
         nextId: moveMsg?.args?.[3],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.movedNodeId).toBe(1001);
@@ -664,16 +570,11 @@ test.describe("Node Commands", () => {
     expect(result.nextId).toBe(-1); // 1001 is now at tail
   });
 
-  test("/n_order - reorders nodes", async ({ page }) => {
+  test("/n_order - reorders nodes", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -711,23 +612,18 @@ test.describe("Node Commands", () => {
         node1001_prevId: move1001?.args?.[2],
         node1001_nextId: move1001?.args?.[3],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.node1001_prevId).toBe(1000); // 1000 is before 1001
     expect(result.node1001_nextId).toBe(1002); // 1002 is after 1001
   });
 
-  test("/n_map - maps control to control bus", async ({ page }) => {
+  test("/n_map - maps control to control bus", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -748,7 +644,7 @@ test.describe("Node Commands", () => {
       await sonic.send("/n_free", 1000);
 
       return { success: true };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
@@ -759,16 +655,11 @@ test.describe("Node Commands", () => {
 // =============================================================================
 
 test.describe("Synth Commands", () => {
-  test("/s_new - creates synth", async ({ page }) => {
+  test("/s_new - creates synth", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -799,7 +690,7 @@ test.describe("Synth Commands", () => {
         isGroup: synth?.isGroup,
         defName: synth?.defName,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.id).toBe(1000);
@@ -808,16 +699,11 @@ test.describe("Synth Commands", () => {
     expect(result.defName).toBe("sonic-pi-beep");
   });
 
-  test("/s_new with add actions", async ({ page }) => {
+  test("/s_new with add actions", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -880,22 +766,17 @@ test.describe("Synth Commands", () => {
         success: true,
         synthCount: synthsInGroup.length,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.synthCount).toBe(4);
   });
 
-  test("/s_get - gets synth control value", async ({ page }) => {
+  test("/s_get - gets synth control value", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -931,7 +812,7 @@ test.describe("Synth Commands", () => {
         control: reply?.args?.[1],
         value: reply?.args?.[2],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.nodeId).toBe(1000);
@@ -939,16 +820,11 @@ test.describe("Synth Commands", () => {
     expect(result.value).toBe(60);
   });
 
-  test("/s_getn - gets sequential control values", async ({ page }) => {
+  test("/s_getn - gets sequential control values", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -974,7 +850,7 @@ test.describe("Synth Commands", () => {
         startIndex: reply?.args?.[1],
         count: reply?.args?.[2],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.nodeId).toBe(1000);
@@ -988,16 +864,11 @@ test.describe("Synth Commands", () => {
 // =============================================================================
 
 test.describe("Group Commands", () => {
-  test("/g_new - creates group", async ({ page }) => {
+  test("/g_new - creates group", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
 
@@ -1017,7 +888,7 @@ test.describe("Group Commands", () => {
         isGroup: group?.isGroup,
         defName: group?.defName,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.id).toBe(100);
@@ -1026,16 +897,11 @@ test.describe("Group Commands", () => {
     expect(result.defName).toBe("group");
   });
 
-  test("/p_new - creates parallel group", async ({ page }) => {
+  test("/p_new - creates parallel group", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
 
@@ -1053,23 +919,18 @@ test.describe("Group Commands", () => {
         id: group?.id,
         isGroup: group?.isGroup,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.id).toBe(100);
     expect(result.isGroup).toBe(true);
   });
 
-  test("/g_head - moves node to head of group", async ({ page }) => {
+  test("/g_head - moves node to head of group", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1105,7 +966,7 @@ test.describe("Group Commands", () => {
         prevId: moveMsg?.args?.[2],
         nextId: moveMsg?.args?.[3],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.movedNodeId).toBe(1001);
@@ -1114,16 +975,11 @@ test.describe("Group Commands", () => {
     expect(result.nextId).toBe(1000); // 1000 is now after 1001
   });
 
-  test("/g_tail - moves node to tail of group", async ({ page }) => {
+  test("/g_tail - moves node to tail of group", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1159,7 +1015,7 @@ test.describe("Group Commands", () => {
         prevId: moveMsg?.args?.[2],
         nextId: moveMsg?.args?.[3],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.movedNodeId).toBe(1000);
@@ -1168,16 +1024,11 @@ test.describe("Group Commands", () => {
     expect(result.nextId).toBe(-1); // Tail has no next
   });
 
-  test("/g_freeAll - frees all nodes in group", async ({ page }) => {
+  test("/g_freeAll - frees all nodes in group", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -1213,7 +1064,7 @@ test.describe("Group Commands", () => {
         countAfter,
         groupStillExists,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.countBefore).toBe(3);
@@ -1221,16 +1072,11 @@ test.describe("Group Commands", () => {
     expect(result.groupStillExists).toBe(true); // Group itself not freed
   });
 
-  test("/g_deepFree - deep frees all synths", async ({ page }) => {
+  test("/g_deepFree - deep frees all synths", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -1264,7 +1110,7 @@ test.describe("Group Commands", () => {
         synthsAfter,
         groupsRemain,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.synthsBefore).toBe(2);
@@ -1278,16 +1124,11 @@ test.describe("Group Commands", () => {
 // =============================================================================
 
 test.describe("Buffer Commands", () => {
-  test("/b_alloc - allocates buffer", async ({ page }) => {
+  test("/b_alloc - allocates buffer", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1319,7 +1160,7 @@ test.describe("Buffer Commands", () => {
         channels: infoMsg?.args?.[2],
         sampleRate: infoMsg?.args?.[3],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.bufnum).toBe(0);
@@ -1327,16 +1168,11 @@ test.describe("Buffer Commands", () => {
     expect(result.channels).toBe(2);
   });
 
-  test("/b_free - frees buffer", async ({ page }) => {
+  test("/b_free - frees buffer", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1355,21 +1191,16 @@ test.describe("Buffer Commands", () => {
       );
 
       return { success: !!doneMsg };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("/b_zero - zeros buffer", async ({ page }) => {
+  test("/b_zero - zeros buffer", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1391,21 +1222,16 @@ test.describe("Buffer Commands", () => {
       await sonic.send("/b_free", 0);
 
       return { success: !!doneMsg };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("/b_set and /b_get - sets and gets samples", async ({ page }) => {
+  test("/b_set and /b_get - sets and gets samples", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1439,7 +1265,7 @@ test.describe("Buffer Commands", () => {
         index2: reply?.args?.[5],
         value2: reply?.args?.[6],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.bufnum).toBe(0);
@@ -1456,13 +1282,8 @@ test.describe("Buffer Commands", () => {
   }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1493,7 +1314,7 @@ test.describe("Buffer Commands", () => {
         count: reply?.args?.[2],
         values: reply?.args?.slice(3),
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.bufnum).toBe(0);
@@ -1505,16 +1326,11 @@ test.describe("Buffer Commands", () => {
     expect(result.values[3]).toBeCloseTo(0.4, 5);
   });
 
-  test("/b_fill - fills buffer with value", async ({ page }) => {
+  test("/b_fill - fills buffer with value", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1542,22 +1358,17 @@ test.describe("Buffer Commands", () => {
         success: !!reply,
         value: reply?.args?.[2],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.value).toBeCloseTo(0.5, 5);
   });
 
-  test("/b_gen sine1 - generates sine wave", async ({ page }) => {
+  test("/b_gen sine1 - generates sine wave", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1590,22 +1401,17 @@ test.describe("Buffer Commands", () => {
         success: !!doneMsg,
         peakValue: valueReply?.args?.[2],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(Math.abs(result.peakValue)).toBeGreaterThan(0.9); // Should be near 1.0
   });
 
-  test("/b_query - queries buffer info", async ({ page }) => {
+  test("/b_query - queries buffer info", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1643,7 +1449,7 @@ test.describe("Buffer Commands", () => {
           sampleRate: infoMsg?.args?.[7],
         },
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.buf0.bufnum).toBe(0);
@@ -1660,16 +1466,11 @@ test.describe("Buffer Commands", () => {
 // =============================================================================
 
 test.describe("Control Bus Commands", () => {
-  test("/c_set and /c_get - sets and gets bus value", async ({ page }) => {
+  test("/c_set and /c_get - sets and gets bus value", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1691,7 +1492,7 @@ test.describe("Control Bus Commands", () => {
         success: !!reply,
         values: reply?.args,
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.values[0]).toBe(0);
@@ -1707,13 +1508,8 @@ test.describe("Control Bus Commands", () => {
   }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1737,7 +1533,7 @@ test.describe("Control Bus Commands", () => {
         count: reply?.args?.[1],
         values: reply?.args?.slice(2),
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.startIndex).toBe(0);
@@ -1748,16 +1544,11 @@ test.describe("Control Bus Commands", () => {
     expect(result.values[3]).toBeCloseTo(400, 1);
   });
 
-  test("/c_fill - fills buses with value", async ({ page }) => {
+  test("/c_fill - fills buses with value", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
@@ -1779,7 +1570,7 @@ test.describe("Control Bus Commands", () => {
         success: !!reply,
         value: reply?.args?.[1],
       };
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.value).toBeCloseTo(0.5, 5);
