@@ -11,18 +11,11 @@
  * of the scsynth node tree for visualization purposes.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.mjs";
 
 // =============================================================================
 // TEST UTILITIES
 // =============================================================================
-
-const SONIC_CONFIG = {
-  workerBaseURL: "/dist/workers/",
-  wasmBaseURL: "/dist/wasm/",
-  sampleBaseURL: "/dist/samples/",
-  synthdefBaseURL: "/dist/synthdefs/",
-};
 
 /**
  * Helper to parse /g_queryTree.reply into a structured tree
@@ -80,7 +73,7 @@ function parseQueryTreeReply(args, includeControls = false) {
 // =============================================================================
 
 test.describe("getTree() basic functionality", () => {
-  test("returns empty tree before initialization", async ({ page }) => {
+  test("returns empty tree before initialization", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -88,14 +81,14 @@ test.describe("getTree() basic functionality", () => {
       // Don't call init()
       const tree = sonic.getTree();
       return tree;
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.nodeCount).toBe(0);
     expect(result.version).toBe(0);
     expect(result.nodes).toEqual([]);
   });
 
-  test("returns root group after initialization", async ({ page }) => {
+  test("returns root group after initialization", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -104,7 +97,7 @@ test.describe("getTree() basic functionality", () => {
 
       const tree = sonic.getTree();
       return tree;
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.nodeCount).toBe(1);
     expect(result.nodes.length).toBe(1);
@@ -116,7 +109,7 @@ test.describe("getTree() basic functionality", () => {
     expect(rootGroup.parentId).toBe(-1);
   });
 
-  test("returns correct structure shape for all fields", async ({ page }) => {
+  test("returns correct structure shape for all fields", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -149,7 +142,7 @@ test.describe("getTree() basic functionality", () => {
             }
           : null,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasNodeCount).toBe(true);
     expect(result.hasVersion).toBe(true);
@@ -170,7 +163,7 @@ test.describe("getTree() basic functionality", () => {
 // =============================================================================
 
 test.describe("getTree() version counter", () => {
-  test("version increments on node creation", async ({ page }) => {
+  test("version increments on node creation", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -194,13 +187,13 @@ test.describe("getTree() version counter", () => {
       await sonic.send("/n_free", 1000, 1001);
 
       return { v1, v2, v3 };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.v2).toBeGreaterThan(result.v1);
     expect(result.v3).toBeGreaterThan(result.v2);
   });
 
-  test("version increments on node removal", async ({ page }) => {
+  test("version increments on node removal", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -219,12 +212,12 @@ test.describe("getTree() version counter", () => {
       const vAfter = sonic.getTree().version;
 
       return { vBefore, vAfter };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.vAfter).toBeGreaterThan(result.vBefore);
   });
 
-  test("version increments on node move", async ({ page }) => {
+  test("version increments on node move", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -248,12 +241,12 @@ test.describe("getTree() version counter", () => {
       await sonic.send("/n_free", 1000, 1001);
 
       return { vBefore, vAfter };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.vAfter).toBeGreaterThan(result.vBefore);
   });
 
-  test("version unchanged when tree unchanged", async ({ page }) => {
+  test("version unchanged when tree unchanged", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -276,7 +269,7 @@ test.describe("getTree() version counter", () => {
       await sonic.send("/n_free", 1000);
 
       return { v1, v2 };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.v1).toBe(result.v2);
   });
@@ -287,7 +280,7 @@ test.describe("getTree() version counter", () => {
 // =============================================================================
 
 test.describe("getTree() vs /g_queryTree comparison", () => {
-  test("node count matches /g_queryTree", async ({ page }) => {
+  test("node count matches /g_queryTree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -348,7 +341,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
         sabNodesLength: sabTree.nodes.length,
         oscNodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // SAB should report same count as nodes array length
     expect(result.sabNodeCount).toBe(result.sabNodesLength);
@@ -357,7 +350,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
     expect(result.oscNodeCount).toBe(6);
   });
 
-  test("all node IDs match /g_queryTree", async ({ page }) => {
+  test("all node IDs match /g_queryTree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -413,12 +406,12 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
         sabNodeIds: sabTree.nodes.map((n) => n.id).sort((a, b) => a - b),
         oscNodeIds: oscNodeIds.sort((a, b) => a - b),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.sabNodeIds).toEqual(result.oscNodeIds);
   });
 
-  test("synthdef names match /g_queryTree", async ({ page }) => {
+  test("synthdef names match /g_queryTree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -465,7 +458,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
         oscSynth1000: oscSynthNames[1000],
         oscSynth1001: oscSynthNames[1001],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.sabSynth1000).toBe("sonic-pi-beep");
     expect(result.sabSynth1001).toBe("sonic-pi-saw");
@@ -473,7 +466,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
     expect(result.sabSynth1001).toBe(result.oscSynth1001);
   });
 
-  test("isGroup matches /g_queryTree (numChildren >= 0 vs -1)", async ({ page }) => {
+  test("isGroup matches /g_queryTree (numChildren >= 0 vs -1)", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -519,7 +512,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
         oscGroup100: oscIsGroup[100],
         oscSynth1000: oscIsGroup[1000],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.sabRoot).toBe(true);
     expect(result.sabGroup100).toBe(true);
@@ -535,7 +528,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
 // =============================================================================
 
 test.describe("getTree() vs /n_query comparison", () => {
-  test("parentId matches /n_info response", async ({ page }) => {
+  test("parentId matches /n_info response", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -578,7 +571,7 @@ test.describe("getTree() vs /n_query comparison", () => {
         hasInfo100: !!info100,
         hasInfo1000: !!info1000,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasInfo100).toBe(true);
     expect(result.hasInfo1000).toBe(true);
@@ -588,7 +581,7 @@ test.describe("getTree() vs /n_query comparison", () => {
     expect(result.sabSynth1000Parent).toBe(result.oscSynth1000Parent);
   });
 
-  test("prevId and nextId match /n_info response", async ({ page }) => {
+  test("prevId and nextId match /n_info response", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -639,7 +632,7 @@ test.describe("getTree() vs /n_query comparison", () => {
         osc1001: { prev: info1001?.args[2], next: info1001?.args[3] },
         osc1002: { prev: info1002?.args[2], next: info1002?.args[3] },
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Verify SAB matches OSC
     expect(result.sab1000.prev).toBe(result.osc1000.prev);
@@ -658,7 +651,7 @@ test.describe("getTree() vs /n_query comparison", () => {
     expect(result.sab1002.next).toBe(-1); // Last in chain
   });
 
-  test("headId matches /n_info group head", async ({ page }) => {
+  test("headId matches /n_info group head", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -698,7 +691,7 @@ test.describe("getTree() vs /n_query comparison", () => {
         oscTailId: info100?.args[6],
         hasInfo100: !!info100,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.hasInfo100).toBe(true);
     expect(result.sabHeadId).toBe(1000);
@@ -712,7 +705,7 @@ test.describe("getTree() vs /n_query comparison", () => {
 // =============================================================================
 
 test.describe("getTree() node lifecycle", () => {
-  test("synth appears after /s_new", async ({ page }) => {
+  test("synth appears after /s_new", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -741,7 +734,7 @@ test.describe("getTree() node lifecycle", () => {
           node1000: treeAfter.nodes.find((n) => n.id === 1000),
         },
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.before.has1000).toBe(false);
     expect(result.after.has1000).toBe(true);
@@ -750,7 +743,7 @@ test.describe("getTree() node lifecycle", () => {
     expect(result.after.node1000.isGroup).toBe(false);
   });
 
-  test("group appears after /g_new", async ({ page }) => {
+  test("group appears after /g_new", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -778,7 +771,7 @@ test.describe("getTree() node lifecycle", () => {
           node100: treeAfter.nodes.find((n) => n.id === 100),
         },
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.before.has100).toBe(false);
     expect(result.after.has100).toBe(true);
@@ -787,7 +780,7 @@ test.describe("getTree() node lifecycle", () => {
     expect(result.after.node100.isGroup).toBe(true);
   });
 
-  test("node disappears after /n_free", async ({ page }) => {
+  test("node disappears after /n_free", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -815,14 +808,14 @@ test.describe("getTree() node lifecycle", () => {
           has1000: treeAfter.nodes.some((n) => n.id === 1000),
         },
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.before.has1000).toBe(true);
     expect(result.after.has1000).toBe(false);
     expect(result.after.nodeCount).toBe(result.before.nodeCount - 1);
   });
 
-  test("children removed with /g_freeAll", async ({ page }) => {
+  test("children removed with /g_freeAll", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -859,7 +852,7 @@ test.describe("getTree() node lifecycle", () => {
           has1001: treeAfter.nodes.some((n) => n.id === 1001),
         },
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.before.has100).toBe(true);
     expect(result.before.has1000).toBe(true);
@@ -876,7 +869,7 @@ test.describe("getTree() node lifecycle", () => {
 // =============================================================================
 
 test.describe("getTree() node movement", () => {
-  test("/n_before updates sibling links", async ({ page }) => {
+  test("/n_before updates sibling links", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -915,7 +908,7 @@ test.describe("getTree() node movement", () => {
           n1002: { prev: getBefore(treeAfter, 1002)?.prevId, next: getBefore(treeAfter, 1002)?.nextId },
         },
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Before: 1000 -> 1001 -> 1002
     expect(result.before.n1000.prev).toBe(-1);
@@ -932,7 +925,7 @@ test.describe("getTree() node movement", () => {
     expect(result.after.n1001.next).toBe(-1); // 1001 is now last
   });
 
-  test("/n_after updates sibling links", async ({ page }) => {
+  test("/n_after updates sibling links", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -962,7 +955,7 @@ test.describe("getTree() node movement", () => {
         n1001: { prev: getNode(1001)?.prevId, next: getNode(1001)?.nextId },
         n1002: { prev: getNode(1002)?.prevId, next: getNode(1002)?.nextId },
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // After: 1001 -> 1002 -> 1000
     expect(result.n1001.prev).toBe(-1); // 1001 is now first
@@ -973,7 +966,7 @@ test.describe("getTree() node movement", () => {
     expect(result.n1000.next).toBe(-1); // 1000 is now last
   });
 
-  test("/g_head moves node to group head", async ({ page }) => {
+  test("/g_head moves node to group head", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1002,14 +995,14 @@ test.describe("getTree() node movement", () => {
         afterHeadId: treeAfter.nodes.find((n) => n.id === 100)?.headId,
         after1001Prev: treeAfter.nodes.find((n) => n.id === 1001)?.prevId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.beforeHeadId).toBe(1000);
     expect(result.afterHeadId).toBe(1001);
     expect(result.after1001Prev).toBe(-1); // 1001 is now first
   });
 
-  test("/g_tail moves node to group tail", async ({ page }) => {
+  test("/g_tail moves node to group tail", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1036,14 +1029,14 @@ test.describe("getTree() node movement", () => {
         after1000Next: treeAfter.nodes.find((n) => n.id === 1000)?.nextId,
         after1001Next: treeAfter.nodes.find((n) => n.id === 1001)?.nextId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.afterHeadId).toBe(1001); // 1001 is now head
     expect(result.after1000Next).toBe(-1); // 1000 is now last
     expect(result.after1001Next).toBe(1000);
   });
 
-  test("moving node between groups updates parentId", async ({ page }) => {
+  test("moving node between groups updates parentId", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1073,7 +1066,7 @@ test.describe("getTree() node movement", () => {
         group100HeadAfter: treeAfter.nodes.find((n) => n.id === 100)?.headId,
         group200HeadAfter: treeAfter.nodes.find((n) => n.id === 200)?.headId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.beforeParent).toBe(100);
     expect(result.afterParent).toBe(200);
@@ -1087,7 +1080,7 @@ test.describe("getTree() node movement", () => {
 // =============================================================================
 
 test.describe("getTree() complex hierarchies", () => {
-  test("deeply nested groups", async ({ page }) => {
+  test("deeply nested groups", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1115,7 +1108,7 @@ test.describe("getTree() complex hierarchies", () => {
         g102Parent: tree.nodes.find((n) => n.id === 102)?.parentId,
         synth1000Parent: tree.nodes.find((n) => n.id === 1000)?.parentId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.nodeCount).toBe(5); // root, 100, 101, 102, 1000
     expect(result.rootChildren).toBe(100);
@@ -1125,7 +1118,7 @@ test.describe("getTree() complex hierarchies", () => {
     expect(result.synth1000Parent).toBe(102);
   });
 
-  test("multiple synths in multiple groups", async ({ page }) => {
+  test("multiple synths in multiple groups", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1167,7 +1160,7 @@ test.describe("getTree() complex hierarchies", () => {
         synth1000Parent: tree.nodes.find((n) => n.id === 1000)?.parentId,
         synth2000Parent: tree.nodes.find((n) => n.id === 2000)?.parentId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.nodeCount).toBe(7); // root + 2 groups + 4 synths
     expect(result.groupCount).toBe(3); // root, 100, 200
@@ -1178,7 +1171,7 @@ test.describe("getTree() complex hierarchies", () => {
     expect(result.synth2000Parent).toBe(200);
   });
 
-  test("sibling order preserved across operations", async ({ page }) => {
+  test("sibling order preserved across operations", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1210,7 +1203,7 @@ test.describe("getTree() complex hierarchies", () => {
       await sonic.send("/n_free", 1000, 1001, 1002, 1003, 1004);
 
       return { chain };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Newest at head (addAction 0 = head)
     expect(result.chain).toEqual([1004, 1003, 1002, 1001, 1000]);
@@ -1225,7 +1218,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
   // Note: Auto-assigned IDs (using -1) result in negative node IDs from scsynth.
   // These ARE included in the SAB tree for visualization purposes.
 
-  test("auto-assigned synth ID (-1) appears in SAB tree with negative ID", async ({ page }) => {
+  test("auto-assigned synth ID (-1) appears in SAB tree with negative ID", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1253,7 +1246,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
         newSynthId: newSynth?.id,
         newSynthDefName: newSynth?.defName,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Auto-assigned IDs are now included in the SAB tree
     expect(result.countAfter).toBe(result.countBefore + 1);
@@ -1262,7 +1255,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
     expect(result.newSynthDefName).toBe("sonic-pi-beep");
   });
 
-  test("auto-assigned group ID (-1) appears in SAB tree with negative ID", async ({ page }) => {
+  test("auto-assigned group ID (-1) appears in SAB tree with negative ID", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1288,7 +1281,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
         newGroupFound: !!newGroup,
         newGroupId: newGroup?.id,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Auto-assigned IDs are now included in the SAB tree
     expect(result.countAfter).toBe(result.countBefore + 1);
@@ -1296,7 +1289,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
     expect(result.newGroupId).toBeLessThan(0);
   });
 
-  test("explicit positive IDs appear in tree correctly", async ({ page }) => {
+  test("explicit positive IDs appear in tree correctly", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1322,7 +1315,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
         synthFound: !!synth,
         synth,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.countAfter).toBe(result.countBefore + 1);
     expect(result.synthFound).toBe(true);
@@ -1366,7 +1359,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
         nGoCount: nGoMessages.length,
         nGoNodeIds: nGoMessages.map((m) => m.args[0]),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // SAB tree should include auto-assigned synths (for visualization)
     expect(result.synthInSabTree).toBe(true);
@@ -1384,7 +1377,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
 // =============================================================================
 
 test.describe("getTree() edge cases", () => {
-  test("empty group has headId -1", async ({ page }) => {
+  test("empty group has headId -1", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1401,12 +1394,12 @@ test.describe("getTree() edge cases", () => {
       await sonic.send("/n_free", 100);
 
       return { headId: group100?.headId };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.headId).toBe(-1);
   });
 
-  test("synth has headId -1 (only groups have children)", async ({ page }) => {
+  test("synth has headId -1 (only groups have children)", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1424,12 +1417,12 @@ test.describe("getTree() edge cases", () => {
       await sonic.send("/n_free", 1000);
 
       return { headId: synth?.headId };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.headId).toBe(-1);
   });
 
-  test("first child has prevId -1", async ({ page }) => {
+  test("first child has prevId -1", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1448,12 +1441,12 @@ test.describe("getTree() edge cases", () => {
       await sonic.send("/n_free", 100);
 
       return { prevId: synth?.prevId };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.prevId).toBe(-1);
   });
 
-  test("last child has nextId -1", async ({ page }) => {
+  test("last child has nextId -1", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1473,12 +1466,12 @@ test.describe("getTree() edge cases", () => {
       await sonic.send("/n_free", 100);
 
       return { nextId: lastSynth?.nextId };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.nextId).toBe(-1);
   });
 
-  test("root group has parentId -1", async ({ page }) => {
+  test("root group has parentId -1", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1489,12 +1482,12 @@ test.describe("getTree() edge cases", () => {
       const root = tree.nodes.find((n) => n.id === 0);
 
       return { parentId: root?.parentId };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.parentId).toBe(-1);
   });
 
-  test("handles rapid create/free cycles", async ({ page }) => {
+  test("handles rapid create/free cycles", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1517,14 +1510,14 @@ test.describe("getTree() edge cases", () => {
         nodeCount: tree.nodeCount,
         synthCount: tree.nodes.filter((n) => !n.isGroup).length,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // All synths should be freed, only root remains
     expect(result.nodeCount).toBe(1);
     expect(result.synthCount).toBe(0);
   });
 
-  test("handles many concurrent synths", async ({ page }) => {
+  test("handles many concurrent synths", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1557,7 +1550,7 @@ test.describe("getTree() edge cases", () => {
         synthCount,
         afterNodeCount: treeAfter.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.nodeCount).toBe(101); // root + 100 synths
     expect(result.synthCount).toBe(100);
@@ -1570,7 +1563,7 @@ test.describe("getTree() edge cases", () => {
 // =============================================================================
 
 test.describe("getTree() defName handling", () => {
-  test("groups have defName 'group'", async ({ page }) => {
+  test("groups have defName 'group'", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1591,14 +1584,14 @@ test.describe("getTree() defName handling", () => {
         group100DefName: tree.nodes.find((n) => n.id === 100)?.defName,
         group101DefName: tree.nodes.find((n) => n.id === 101)?.defName,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.rootDefName).toBe("group");
     expect(result.group100DefName).toBe("group");
     expect(result.group101DefName).toBe("group");
   });
 
-  test("synths have correct synthdef names", async ({ page }) => {
+  test("synths have correct synthdef names", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1621,14 +1614,14 @@ test.describe("getTree() defName handling", () => {
         synth1001: tree.nodes.find((n) => n.id === 1001)?.defName,
         synth1002: tree.nodes.find((n) => n.id === 1002)?.defName,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.synth1000).toBe("sonic-pi-beep");
     expect(result.synth1001).toBe("sonic-pi-saw");
     expect(result.synth1002).toBe("sonic-pi-prophet");
   });
 
-  test("long synthdef names are truncated but usable", async ({ page }) => {
+  test("long synthdef names are truncated but usable", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1650,7 +1643,7 @@ test.describe("getTree() defName handling", () => {
         defName: synth?.defName,
         defNameLength: synth?.defName?.length,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.defName).toBe("sonic-pi-piano");
     expect(result.defNameLength).toBeLessThanOrEqual(32); // NODE_TREE_DEF_NAME_SIZE
@@ -1662,7 +1655,7 @@ test.describe("getTree() defName handling", () => {
 // =============================================================================
 
 test.describe("getTree() error scenarios", () => {
-  test("freeing non-existent node doesn't corrupt tree", async ({ page }) => {
+  test("freeing non-existent node doesn't corrupt tree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1691,7 +1684,7 @@ test.describe("getTree() error scenarios", () => {
         has1000Before: treeBefore.nodes.some((n) => n.id === 1000),
         has1000After: treeAfter.nodes.some((n) => n.id === 1000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Tree should remain unchanged
     expect(result.beforeCount).toBe(result.afterCount);
@@ -1699,7 +1692,7 @@ test.describe("getTree() error scenarios", () => {
     expect(result.has1000After).toBe(true);
   });
 
-  test("double-free doesn't corrupt tree", async ({ page }) => {
+  test("double-free doesn't corrupt tree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1730,7 +1723,7 @@ test.describe("getTree() error scenarios", () => {
         has1000After: treeAfter.nodes.some((n) => n.id === 1000),
         has1001After: treeAfter.nodes.some((n) => n.id === 1001),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Only one node should be removed
     expect(result.beforeCount).toBe(3); // root + 1000 + 1001
@@ -1739,7 +1732,7 @@ test.describe("getTree() error scenarios", () => {
     expect(result.has1001After).toBe(true);
   });
 
-  test("moving non-existent node doesn't corrupt tree", async ({ page }) => {
+  test("moving non-existent node doesn't corrupt tree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1767,7 +1760,7 @@ test.describe("getTree() error scenarios", () => {
         node1000Before: treeBefore.nodes.find((n) => n.id === 1000),
         node1000After: treeAfter.nodes.find((n) => n.id === 1000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Tree should remain unchanged
     expect(result.beforeCount).toBe(result.afterCount);
@@ -1775,7 +1768,7 @@ test.describe("getTree() error scenarios", () => {
     expect(result.node1000Before.nextId).toBe(result.node1000After.nextId);
   });
 
-  test("moving to non-existent target doesn't corrupt tree", async ({ page }) => {
+  test("moving to non-existent target doesn't corrupt tree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1803,14 +1796,14 @@ test.describe("getTree() error scenarios", () => {
         node1000Before: treeBefore.nodes.find((n) => n.id === 1000),
         node1000After: treeAfter.nodes.find((n) => n.id === 1000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Tree should remain unchanged
     expect(result.beforeCount).toBe(result.afterCount);
     expect(result.node1000Before.parentId).toBe(result.node1000After.parentId);
   });
 
-  test("creating synth in non-existent group doesn't corrupt tree", async ({ page }) => {
+  test("creating synth in non-existent group doesn't corrupt tree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1831,14 +1824,14 @@ test.describe("getTree() error scenarios", () => {
         afterCount: treeAfter.nodeCount,
         has1000: treeAfter.nodes.some((n) => n.id === 1000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Synth should not be created
     expect(result.afterCount).toBe(result.beforeCount);
     expect(result.has1000).toBe(false);
   });
 
-  test("creating group in non-existent parent doesn't corrupt tree", async ({ page }) => {
+  test("creating group in non-existent parent doesn't corrupt tree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1858,14 +1851,14 @@ test.describe("getTree() error scenarios", () => {
         afterCount: treeAfter.nodeCount,
         has100: treeAfter.nodes.some((n) => n.id === 100),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Group should not be created
     expect(result.afterCount).toBe(result.beforeCount);
     expect(result.has100).toBe(false);
   });
 
-  test("g_freeAll on non-existent group doesn't corrupt tree", async ({ page }) => {
+  test("g_freeAll on non-existent group doesn't corrupt tree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1894,7 +1887,7 @@ test.describe("getTree() error scenarios", () => {
         has100: treeAfter.nodes.some((n) => n.id === 100),
         has1000: treeAfter.nodes.some((n) => n.id === 1000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Tree should remain unchanged
     expect(result.beforeCount).toBe(result.afterCount);
@@ -1902,7 +1895,7 @@ test.describe("getTree() error scenarios", () => {
     expect(result.has1000).toBe(true);
   });
 
-  test("reusing freed node ID works correctly", async ({ page }) => {
+  test("reusing freed node ID works correctly", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1936,7 +1929,7 @@ test.describe("getTree() error scenarios", () => {
         node1000ParentId: node1000?.parentId,
         node1000IsGroup: node1000?.isGroup,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.afterFreeHas1000).toBe(false);
     expect(result.afterFreeCount).toBe(1); // Just root
@@ -1946,7 +1939,7 @@ test.describe("getTree() error scenarios", () => {
     expect(result.node1000IsGroup).toBe(false);
   });
 
-  test("creating duplicate node ID fails gracefully", async ({ page }) => {
+  test("creating duplicate node ID fails gracefully", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -1973,13 +1966,13 @@ test.describe("getTree() error scenarios", () => {
         beforeCount: treeBefore.nodeCount,
         afterCount: treeAfter.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Should not create duplicate - count unchanged
     expect(result.afterCount).toBe(result.beforeCount);
   });
 
-  test("g_head to non-existent group doesn't corrupt tree", async ({ page }) => {
+  test("g_head to non-existent group doesn't corrupt tree", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2006,7 +1999,7 @@ test.describe("getTree() error scenarios", () => {
         node1000BeforeParent: treeBefore.nodes.find((n) => n.id === 1000)?.parentId,
         node1000AfterParent: treeAfter.nodes.find((n) => n.id === 1000)?.parentId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Parent should remain unchanged
     expect(result.node1000BeforeParent).toBe(100);
@@ -2019,7 +2012,7 @@ test.describe("getTree() error scenarios", () => {
 // =============================================================================
 
 test.describe("getTree() complex movement patterns", () => {
-  test("chain of moves: rotate nodes in circle", async ({ page }) => {
+  test("chain of moves: rotate nodes in circle", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2066,13 +2059,13 @@ test.describe("getTree() complex movement patterns", () => {
         chain1: walkChain(tree1),
         chain2: walkChain(tree2),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.chain1).toEqual([1003, 1000, 1001, 1002]);
     expect(result.chain2).toEqual([1002, 1003, 1000, 1001]);
   });
 
-  test("swap two adjacent nodes", async ({ page }) => {
+  test("swap two adjacent nodes", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2105,7 +2098,7 @@ test.describe("getTree() complex movement patterns", () => {
         n1000: { prev: n1000.prevId, next: n1000.nextId },
         n1002: { prev: n1002.prevId, next: n1002.nextId },
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // 1001 -> 1000 -> 1002
     expect(result.n1001.prev).toBe(-1);
@@ -2116,7 +2109,7 @@ test.describe("getTree() complex movement patterns", () => {
     expect(result.n1002.next).toBe(-1);
   });
 
-  test("swap two non-adjacent nodes", async ({ page }) => {
+  test("swap two non-adjacent nodes", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2157,12 +2150,12 @@ test.describe("getTree() complex movement patterns", () => {
       };
 
       return { chain: walkChain(tree) };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.chain).toEqual([1003, 1001, 1002, 1000]);
   });
 
-  test("move node through multiple groups", async ({ page }) => {
+  test("move node through multiple groups", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2213,7 +2206,7 @@ test.describe("getTree() complex movement patterns", () => {
         g300Head3: tree3.nodes.find((n) => n.id === 300)?.headId,
         g100Head4: tree4.nodes.find((n) => n.id === 100)?.headId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.parent1).toBe(100);
     expect(result.parent2).toBe(200);
@@ -2227,7 +2220,7 @@ test.describe("getTree() complex movement patterns", () => {
     expect(result.g100Head4).toBe(1000);
   });
 
-  test("reverse a chain of nodes", async ({ page }) => {
+  test("reverse a chain of nodes", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2272,12 +2265,12 @@ test.describe("getTree() complex movement patterns", () => {
       };
 
       return { chain: walkChain(tree) };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.chain).toEqual([1003, 1002, 1001, 1000]);
   });
 
-  test("interleave two chains", async ({ page }) => {
+  test("interleave two chains", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2336,14 +2329,14 @@ test.describe("getTree() complex movement patterns", () => {
           (id) => tree.nodes.find((n) => n.id === id)?.parentId
         ),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.chain100).toEqual([1001, 2001, 1002, 2002, 1003, 2003]);
     expect(result.chain200).toEqual([]); // Group 200 should be empty
     expect(result.allParents).toEqual([100, 100, 100]); // All B nodes moved to group 100
   });
 
-  test("move group with children to different parent", async ({ page }) => {
+  test("move group with children to different parent", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2384,7 +2377,7 @@ test.describe("getTree() complex movement patterns", () => {
         g101ParentAfter: treeAfter.nodes.find((n) => n.id === 101)?.parentId,
         synth1000ParentAfter: treeAfter.nodes.find((n) => n.id === 1000)?.parentId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.g100ParentBefore).toBe(0);
     expect(result.g200HeadBefore).toBe(-1);
@@ -2395,7 +2388,7 @@ test.describe("getTree() complex movement patterns", () => {
     expect(result.synth1000ParentAfter).toBe(101);
   });
 
-  test("rapid sequential moves maintain consistency", async ({ page }) => {
+  test("rapid sequential moves maintain consistency", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2450,7 +2443,7 @@ test.describe("getTree() complex movement patterns", () => {
           tree.nodes.some((n) => n.id === id)
         ),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.nodeCount).toBe(6); // root + 5 synths
     expect(result.chainLength).toBe(5);
@@ -2458,7 +2451,7 @@ test.describe("getTree() complex movement patterns", () => {
     expect(result.allSynthsPresent).toBe(true);
   });
 
-  test("move node to its current position (no-op)", async ({ page }) => {
+  test("move node to its current position (no-op)", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2501,7 +2494,7 @@ test.describe("getTree() complex movement patterns", () => {
         versionBefore,
         versionAfter: treeAfter.version,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // Chain should remain unchanged
     expect(result.chainBefore).toEqual([1000, 1001, 1002]);
@@ -2514,7 +2507,7 @@ test.describe("getTree() complex movement patterns", () => {
 // =============================================================================
 
 test.describe("getTree() /g_deepFree behavior", () => {
-  test("g_deepFree removes all synths in nested hierarchy", async ({ page }) => {
+  test("g_deepFree removes all synths in nested hierarchy", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2556,7 +2549,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
         // Synth outside (2000) should remain
         has2000After: treeAfter.nodes.some((n) => n.id === 2000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.beforeCount).toBe(6); // root + 100 + 101 + 1000 + 1001 + 2000
     expect(result.afterCount).toBe(4); // root + 100 + 101 + 2000
@@ -2567,7 +2560,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
     expect(result.has2000After).toBe(true);
   });
 
-  test("g_deepFree on empty group hierarchy is no-op", async ({ page }) => {
+  test("g_deepFree on empty group hierarchy is no-op", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2597,7 +2590,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
         has101: treeAfter.nodes.some((n) => n.id === 101),
         has102: treeAfter.nodes.some((n) => n.id === 102),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.beforeCount).toBe(result.afterCount);
     expect(result.has100).toBe(true);
@@ -2605,7 +2598,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
     expect(result.has102).toBe(true);
   });
 
-  test("g_deepFree preserves sibling groups", async ({ page }) => {
+  test("g_deepFree preserves sibling groups", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2643,7 +2636,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
         g100HeadAfter: treeAfter.nodes.find((n) => n.id === 100)?.headId,
         g200HeadAfter: treeAfter.nodes.find((n) => n.id === 200)?.headId,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.beforeCount).toBe(5); // root + 100 + 200 + 1000 + 2000
     expect(result.afterCount).toBe(4); // root + 100 + 200 + 2000
@@ -2655,7 +2648,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
     expect(result.g200HeadAfter).toBe(2000); // Still has synth
   });
 
-  test("g_deepFree on root group clears all synths", async ({ page }) => {
+  test("g_deepFree on root group clears all synths", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2689,7 +2682,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
         groupCountAfter: groupsAfter.length,
         groupIds: groupsAfter.map((g) => g.id).sort((a, b) => a - b),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.beforeCount).toBe(6); // root + 100 + 101 + 1000 + 1001 + 1002
     expect(result.synthCountAfter).toBe(0); // All synths freed
@@ -2697,7 +2690,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
     expect(result.groupIds).toEqual([0, 100, 101]);
   });
 
-  test("g_deepFree vs g_freeAll: deepFree keeps nested groups", async ({ page }) => {
+  test("g_deepFree vs g_freeAll: deepFree keeps nested groups", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2744,7 +2737,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
         freeAllHas201: afterFreeAll.nodes.some((n) => n.id === 201),
         freeAllHas2000: afterFreeAll.nodes.some((n) => n.id === 2000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // g_deepFree: frees synths recursively but keeps groups
     expect(result.deepFreeHas100).toBe(true);
@@ -2757,7 +2750,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
     expect(result.freeAllHas2000).toBe(false);
   });
 
-  test("g_deepFree updates version counter", async ({ page }) => {
+  test("g_deepFree updates version counter", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2781,12 +2774,12 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/n_free", 100);
 
       return { versionBefore, versionAfter };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.versionAfter).toBeGreaterThan(result.versionBefore);
   });
 
-  test("g_deepFree on deeply nested structure", async ({ page }) => {
+  test("g_deepFree on deeply nested structure", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2838,7 +2831,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
           (id) => !treeAfter.nodes.some((n) => n.id === id)
         ),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.groupCountBefore).toBe(6); // root + 5 groups
     expect(result.synthCountBefore).toBe(5);
@@ -2848,7 +2841,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
     expect(result.allSynthsGone).toBe(true);
   });
 
-  test("g_deepFree on non-existent group is no-op", async ({ page }) => {
+  test("g_deepFree on non-existent group is no-op", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2877,14 +2870,14 @@ test.describe("getTree() /g_deepFree behavior", () => {
         has100: treeAfter.nodes.some((n) => n.id === 100),
         has1000: treeAfter.nodes.some((n) => n.id === 1000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.beforeCount).toBe(result.afterCount);
     expect(result.has100).toBe(true);
     expect(result.has1000).toBe(true);
   });
 
-  test("g_deepFree on synth node is no-op", async ({ page }) => {
+  test("g_deepFree on synth node is no-op", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2913,7 +2906,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
         has1000: treeAfter.nodes.some((n) => n.id === 1000),
         has1001: treeAfter.nodes.some((n) => n.id === 1001),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     // g_deepFree on a synth should be a no-op (or at most affect nothing)
     expect(result.has1000).toBe(true);

@@ -1,7 +1,7 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.mjs';
 
 test.describe('Timing and Drift', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, sonicConfig }) => {
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
         console.error('Browser console error:', msg.text());
@@ -14,16 +14,13 @@ test.describe('Timing and Drift', () => {
     });
   });
 
-  test('drift stays within acceptable bounds after boot', async ({ page }) => {
+  test('drift stays within acceptable bounds after boot', async ({ page, sonicConfig }) => {
     // This test verifies that the NTP timing initialization doesn't have a race condition
     // that causes large drift values. The drift should stay close to 0 (within 500ms)
     // after the first drift timer fires (15 seconds).
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
 
@@ -50,7 +47,7 @@ test.describe('Timing and Drift', () => {
         // Drift growth rate: if drift is growing, this indicates a problem
         driftGrowth: Math.abs(driftLater - driftAfterTimer)
       };
-    });
+    }, sonicConfig);
 
     // Before the timer fires, drift should be 0 (initial value)
     expect(result.driftBeforeTimer).toBe(0);
@@ -64,15 +61,12 @@ test.describe('Timing and Drift', () => {
     expect(result.driftGrowth).toBeLessThan(100);
   });
 
-  test('drift resets after resume from suspended state', async ({ page }) => {
+  test('drift resets after resume from suspended state', async ({ page, sonicConfig }) => {
     // This test verifies that when AudioContext resumes from suspended state,
     // the timing is properly resynced and drift is reset to near 0
 
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-      });
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       await sonic.init();
 
@@ -100,7 +94,7 @@ test.describe('Timing and Drift', () => {
         driftBeforeSuspend,
         driftAfterResume
       };
-    });
+    }, sonicConfig);
 
     // After resume, drift should be reset to near 0
     expect(Math.abs(result.driftAfterResume)).toBeLessThan(500);

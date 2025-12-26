@@ -11,14 +11,7 @@
  * MIDI note 127 = ~12,543 Hz. Notes above 127 may cause issues.
  */
 
-import { test, expect } from "@playwright/test";
-
-const SONIC_CONFIG = {
-  workerBaseURL: "/dist/workers/",
-  wasmBaseURL: "/dist/wasm/",
-  sampleBaseURL: "/dist/samples/",
-  synthdefBaseURL: "/dist/synthdefs/",
-};
+import { test, expect } from "./fixtures.mjs";
 
 const AUDIO_HELPERS = `
 function calculateRMS(samples, start = 0, end = samples.length) {
@@ -63,7 +56,7 @@ function countNaN(samples) {
 `;
 
 test.describe("ChipLead High Pitch Bug", () => {
-  test("chiplead high note no longer corrupts engine", async ({ page }) => {
+  test("chiplead high note no longer corrupts engine", async ({ page, sonicConfig }) => {
     // This test verifies the N=0 guard fix - high notes beyond Nyquist/2
     // no longer produce NaN values that corrupt the engine
     await page.goto("/test/harness.html");
@@ -128,7 +121,7 @@ test.describe("ChipLead High Pitch Bug", () => {
 
         return { results };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     console.log("\nChipLead NaN corruption test:");
@@ -154,7 +147,7 @@ test.describe("ChipLead High Pitch Bug", () => {
     expect(after.rms).toBeGreaterThan(0.001);
   });
 
-  test("chiplead with FX chain - high note no longer corrupts FX", async ({ page }) => {
+  test("chiplead with FX chain - high note no longer corrupts FX", async ({ page, sonicConfig }) => {
     // This test replicates the demo setup where synths route through LPF -> Reverb
     // Previously NaN values from high notes would propagate and corrupt the FX chain
     await page.goto("/test/harness.html");
@@ -247,7 +240,7 @@ test.describe("ChipLead High Pitch Bug", () => {
 
         return { results };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     console.log("\nChipLead with FX chain corruption test:");
@@ -273,7 +266,7 @@ test.describe("ChipLead High Pitch Bug", () => {
     expect(after.rms).toBeGreaterThan(0.001);
   });
 
-  test("chiplead synth MIDI notes 96 to 156 (5 octaves)", async ({ page }) => {
+  test("chiplead synth MIDI notes 96 to 156 (5 octaves)", async ({ page, sonicConfig }) => {
     // Test individual MIDI notes incrementing by 1 to find where it breaks
     await page.goto("/test/harness.html");
 
@@ -354,7 +347,7 @@ test.describe("ChipLead High Pitch Bug", () => {
           totalWithNaN: results.filter(r => r.hasNaN).length,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     // Log summary
@@ -390,7 +383,7 @@ test.describe("ChipLead High Pitch Bug", () => {
     expect(result.totalFailed).toBe(0);
   });
 
-  test("beep synth control - MIDI notes 96 to 156", async ({ page }) => {
+  test("beep synth control - MIDI notes 96 to 156", async ({ page, sonicConfig }) => {
     // Control test: verify that beep synth handles the same notes
     // This helps determine if the issue is chiplead-specific
     await page.goto("/test/harness.html");
@@ -466,7 +459,7 @@ test.describe("ChipLead High Pitch Bug", () => {
           totalWithNaN: results.filter(r => r.hasNaN).length,
         };
       },
-      { sonic: SONIC_CONFIG, helpers: AUDIO_HELPERS }
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
     console.log("\nBeep synth control test: MIDI 96 to 156");

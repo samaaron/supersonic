@@ -10,21 +10,14 @@
  * - Maximum throughput stress
  */
 
-import { test, expect } from "@playwright/test";
-
-const SONIC_CONFIG = {
-  workerBaseURL: "/dist/workers/",
-  wasmBaseURL: "/dist/wasm/",
-  sampleBaseURL: "/dist/samples/",
-  synthdefBaseURL: "/dist/synthdefs/",
-};
+import { test, expect } from "./fixtures.mjs";
 
 // =============================================================================
 // PARALLEL SAMPLE LOADING
 // =============================================================================
 
 test.describe("Parallel Sample Loading", () => {
-  test("loads 10 samples in parallel without corruption", async ({ page }) => {
+  test("loads 10 samples in parallel without corruption", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -66,7 +59,7 @@ test.describe("Parallel Sample Loading", () => {
         allHaveFrames: bufferInfos.every(info => info.args[1] > 0),
         bufferNumbers: bufferInfos.map(info => info.args[0]).sort((a, b) => a - b),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.loadedCount).toBe(10);
@@ -74,7 +67,7 @@ test.describe("Parallel Sample Loading", () => {
     expect(result.bufferNumbers).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
-  test("loads same buffer repeatedly in rapid succession", async ({ page }) => {
+  test("loads same buffer repeatedly in rapid succession", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -111,7 +104,7 @@ test.describe("Parallel Sample Loading", () => {
         frames: bufferInfo?.args[1],
         channels: bufferInfo?.args[2],
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.hasBuffer).toBe(true);
@@ -119,7 +112,7 @@ test.describe("Parallel Sample Loading", () => {
     expect(result.frames).toBeGreaterThan(0);
   });
 
-  test("parallel sample load while synthdef loading", async ({ page }) => {
+  test("parallel sample load while synthdef loading", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -156,7 +149,7 @@ test.describe("Parallel Sample Loading", () => {
         synthdefsLoaded,
         synthExists,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.synthdefsLoaded).toBeGreaterThanOrEqual(2);
@@ -169,7 +162,7 @@ test.describe("Parallel Sample Loading", () => {
 // =============================================================================
 
 test.describe("Synth Create/Destroy Races", () => {
-  test("rapid create and immediate free - 100 cycles", async ({ page }) => {
+  test("rapid create and immediate free - 100 cycles", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -196,13 +189,13 @@ test.describe("Synth Create/Destroy Races", () => {
         nodeCount: tree.nodeCount,
         onlyRootRemains: tree.nodeCount === 1 && tree.nodes[0].id === 0,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.onlyRootRemains).toBe(true);
   });
 
-  test("free synth before it's created (reversed order)", async ({ page }) => {
+  test("free synth before it's created (reversed order)", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -229,14 +222,14 @@ test.describe("Synth Create/Destroy Races", () => {
         success: true,
         synthExists,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     // The synth should exist because OSC messages are processed in order
     expect(result.synthExists).toBe(true);
   });
 
-  test("interleaved create/free with overlapping IDs", async ({ page }) => {
+  test("interleaved create/free with overlapping IDs", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -270,14 +263,14 @@ test.describe("Synth Create/Destroy Races", () => {
         existingIds,
         nodeCount: tree.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     // Should have synths 1000 and 1001 remaining
     expect(result.existingIds).toEqual([1000, 1001]);
   });
 
-  test("mass synth creation then mass free", async ({ page }) => {
+  test("mass synth creation then mass free", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -310,7 +303,7 @@ test.describe("Synth Create/Destroy Races", () => {
         countAfterCreate: treeAfterCreate.nodeCount,
         countAfterFree: treeAfterFree.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.countAfterCreate).toBe(201); // 200 synths + root group
@@ -323,7 +316,7 @@ test.describe("Synth Create/Destroy Races", () => {
 // =============================================================================
 
 test.describe("Operations During State Transitions", () => {
-  test("send OSC while reset() is in progress", async ({ page }) => {
+  test("send OSC while reset() is in progress", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -365,14 +358,14 @@ test.describe("Operations During State Transitions", () => {
         initialized: sonic.initialized,
         hasNewSynth: tree.nodes.some(n => n.id === 3000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.initialized).toBe(true);
     expect(result.hasNewSynth).toBe(true);
   });
 
-  test("loadSynthDef during heavy OSC traffic", async ({ page }) => {
+  test("loadSynthDef during heavy OSC traffic", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -413,14 +406,14 @@ test.describe("Operations During State Transitions", () => {
         bothSynthsCreated: tree.nodes.some(n => n.id === 1000) && tree.nodes.some(n => n.id === 1001),
         synthdefsLoaded: sonic.loadedSynthDefs.size,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.bothSynthsCreated).toBe(true);
     expect(result.synthdefsLoaded).toBeGreaterThanOrEqual(2);
   });
 
-  test("loadSample during synth playback", async ({ page }) => {
+  test("loadSample during synth playback", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -466,7 +459,7 @@ test.describe("Operations During State Transitions", () => {
         synthCount,
         buffersLoaded: !!bufferInfo && bufferInfo.args[1] > 0,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.synthCount).toBe(20);
@@ -479,7 +472,7 @@ test.describe("Operations During State Transitions", () => {
 // =============================================================================
 
 test.describe("Truly Nefarious Edge Cases", () => {
-  test("double init() call", async ({ page }) => {
+  test("double init() call", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -506,14 +499,14 @@ test.describe("Truly Nefarious Edge Cases", () => {
         sameContext: firstContext === secondContext,
         initialized: sonic.initialized,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.initialized).toBe(true);
     // Either it should error or handle gracefully
   });
 
-  test("operations after destroy() - should fail gracefully", async ({ page }) => {
+  test("operations after destroy() - should fail gracefully", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -557,13 +550,13 @@ test.describe("Truly Nefarious Edge Cases", () => {
         errorCount: errors.length,
         errors,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     // Should have gotten errors but not crashed
   });
 
-  test("extreme node ID values", async ({ page }) => {
+  test("extreme node ID values", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -604,13 +597,13 @@ test.describe("Truly Nefarious Edge Cases", () => {
         results,
         finalNodeCount: tree.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.finalNodeCount).toBe(1); // Only root group
   });
 
-  test("negative buffer numbers", async ({ page }) => {
+  test("negative buffer numbers", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -634,13 +627,13 @@ test.describe("Truly Nefarious Edge Cases", () => {
         success: true,
         results,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     // All should have errored or been handled gracefully
   });
 
-  test("hundreds of parameters in single message", async ({ page }) => {
+  test("hundreds of parameters in single message", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -675,12 +668,12 @@ test.describe("Truly Nefarious Edge Cases", () => {
         error,
         nodeCount: tree.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("unicode and special characters in strings", async ({ page }) => {
+  test("unicode and special characters in strings", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -713,12 +706,12 @@ test.describe("Truly Nefarious Edge Cases", () => {
 
       await sonic.sync(1);
       return { success: true, results };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("send() with wrong argument types", async ({ page }) => {
+  test("send() with wrong argument types", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -751,12 +744,12 @@ test.describe("Truly Nefarious Edge Cases", () => {
 
       await sonic.sync(1);
       return { success: true, results };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("sync() with extreme IDs", async ({ page }) => {
+  test("sync() with extreme IDs", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -780,12 +773,12 @@ test.describe("Truly Nefarious Edge Cases", () => {
       }
 
       return { success: true, results };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("group creation with invalid parent", async ({ page }) => {
+  test("group creation with invalid parent", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -823,13 +816,13 @@ test.describe("Truly Nefarious Edge Cases", () => {
         // scsynth may or may not create groups with invalid parents
         // The test passes if it doesn't crash
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     // Test passes if we get here without crashing - scsynth behavior varies
   });
 
-  test("circular group reference attempt", async ({ page }) => {
+  test("circular group reference attempt", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -857,13 +850,13 @@ test.describe("Truly Nefarious Edge Cases", () => {
         nodeCount: tree.nodeCount,
         nodes: tree.nodes.map(n => ({ id: n.id, parent: n.parentId })),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     // scsynth should prevent circular references
   });
 
-  test("OSC bundle with nested bundles 10 levels deep", async ({ page }) => {
+  test("OSC bundle with nested bundles 10 levels deep", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -912,13 +905,13 @@ test.describe("Truly Nefarious Edge Cases", () => {
         nodeCount: tree.nodeCount,
         synthCreated: tree.nodes.some(n => n.id === 1000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     // Should either work or fail gracefully
   });
 
-  test("rapid AudioContext state manipulation", async ({ page }) => {
+  test("rapid AudioContext state manipulation", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -948,14 +941,14 @@ test.describe("Truly Nefarious Edge Cases", () => {
         finalState: ctx.state,
         nodeCount: tree.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.finalState).toBe("running");
     expect(result.nodeCount).toBe(1); // Only root
   });
 
-  test("messages during garbage collection pressure", async ({ page }) => {
+  test("messages during garbage collection pressure", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -990,7 +983,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
         success: true,
         nodeCount: tree.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.nodeCount).toBe(1);
@@ -1002,7 +995,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
 // =============================================================================
 
 test.describe("Timing Window Exploits", () => {
-  test("send message at exact sync completion", async ({ page }) => {
+  test("send message at exact sync completion", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1031,13 +1024,13 @@ test.describe("Timing Window Exploits", () => {
         nodeCount: tree.nodeCount,
         bothSynthsExist: tree.nodes.some(n => n.id === 1000) && tree.nodes.some(n => n.id === 1001),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.bothSynthsExist).toBe(true);
   });
 
-  test("timed bundles landing exactly on process() boundary", async ({ page }) => {
+  test("timed bundles landing exactly on process() boundary", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1088,13 +1081,13 @@ test.describe("Timing Window Exploits", () => {
         success: true,
         finalNodeCount: tree.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.finalNodeCount).toBe(1);
   });
 
-  test("race between listener callback and next operation", async ({ page }) => {
+  test("race between listener callback and next operation", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1130,14 +1123,14 @@ test.describe("Timing Window Exploits", () => {
         operationsInCallback,
         finalNodeCount: tree.nodeCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.operationsInCallback).toBeGreaterThan(0);
     expect(result.finalNodeCount).toBe(1);
   });
 
-  test("promise rejection during batch operations", async ({ page }) => {
+  test("promise rejection during batch operations", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1177,7 +1170,7 @@ test.describe("Timing Window Exploits", () => {
         rejected,
         total: results.length,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     // Most should succeed
@@ -1190,7 +1183,7 @@ test.describe("Timing Window Exploits", () => {
 // =============================================================================
 
 test.describe("Memory Stability", () => {
-  test("repeated reset cycles don't leak memory", async ({ page }) => {
+  test("repeated reset cycles don't leak memory", async ({ page, sonicConfig }) => {
     test.setTimeout(60000);
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
@@ -1229,14 +1222,14 @@ test.describe("Memory Stability", () => {
         completedCycles,
         stillWorks: tree.nodes.some(n => n.id === 1000),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.completedCycles).toBe(10);
     expect(result.stillWorks).toBe(true);
   });
 
-  test("JS heap doesn't grow unboundedly during synth churn", async ({ page }) => {
+  test("JS heap doesn't grow unboundedly during synth churn", async ({ page, sonicConfig }) => {
     test.setTimeout(60000);
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
@@ -1291,7 +1284,7 @@ test.describe("Memory Stability", () => {
         heapGrowthMB,
         heapSamplesMB: heapSamples.map(h => h / (1024 * 1024)),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
 
@@ -1301,7 +1294,7 @@ test.describe("Memory Stability", () => {
     }
   });
 
-  test("event listeners are cleaned up after destroy", async ({ page }) => {
+  test("event listeners are cleaned up after destroy", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1337,13 +1330,13 @@ test.describe("Memory Stability", () => {
         success: true,
         instancesCreated: instances.length,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.instancesCreated).toBe(10);
   });
 
-  test("message listener accumulation detection", async ({ page }) => {
+  test("message listener accumulation detection", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1382,14 +1375,14 @@ test.describe("Memory Stability", () => {
         listenerFiredCorrectly: callsForOneMessage >= 1,
         offWorked: callsAfterOff < callsForOneMessage,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.listenerFiredCorrectly).toBe(true);
     expect(result.offWorked).toBe(true);
   });
 
-  test("SharedArrayBuffer not corrupted after heavy use", async ({ page }) => {
+  test("SharedArrayBuffer not corrupted after heavy use", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1433,7 +1426,7 @@ test.describe("Memory Stability", () => {
         treeValid,
         finalProcessCount: finalMetrics.workletProcessCount,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.processCountIncreased).toBe(true);
@@ -1442,7 +1435,7 @@ test.describe("Memory Stability", () => {
     expect(result.treeValid).toBe(true);
   });
 
-  test("repeated init/destroy cycles don't leak AudioContexts", async ({ page }) => {
+  test("repeated init/destroy cycles don't leak AudioContexts", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1469,7 +1462,7 @@ test.describe("Memory Stability", () => {
         closedCount,
         allClosed: closedCount === contexts.length,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.allClosed).toBe(true);
@@ -1481,7 +1474,7 @@ test.describe("Memory Stability", () => {
 // =============================================================================
 
 test.describe("Memory Leak Triggers", () => {
-  test("abandoned sync promises don't leak", async ({ page }) => {
+  test("abandoned sync promises don't leak", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1532,7 +1525,7 @@ test.describe("Memory Leak Triggers", () => {
         finalHeapMB: finalHeap / (1024 * 1024),
         growthMB: (finalHeap - initialHeap) / (1024 * 1024),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     if (result.hasMemoryAPI) {
@@ -1540,7 +1533,7 @@ test.describe("Memory Leak Triggers", () => {
     }
   });
 
-  test("repeatedly adding/removing same listener doesn't leak", async ({ page }) => {
+  test("repeatedly adding/removing same listener doesn't leak", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1571,7 +1564,7 @@ test.describe("Memory Leak Triggers", () => {
         hasMemoryAPI: !!performance.memory,
         growthMB: (finalHeap - initialHeap) / (1024 * 1024),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     if (result.hasMemoryAPI) {
@@ -1579,7 +1572,7 @@ test.describe("Memory Leak Triggers", () => {
     }
   });
 
-  test("listener with closure capturing large object doesn't leak after off()", async ({ page }) => {
+  test("listener with closure capturing large object doesn't leak after off()", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1627,7 +1620,7 @@ test.describe("Memory Leak Triggers", () => {
         reclaimedMB,
         percentReclaimed: addedMB > 0 ? (reclaimedMB / addedMB) * 100 : 100,
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     if (result.hasMemoryAPI && result.addedMB > 1) {
@@ -1636,7 +1629,7 @@ test.describe("Memory Leak Triggers", () => {
     }
   });
 
-  test("loadSynthDef repeated calls don't accumulate", async ({ page }) => {
+  test("loadSynthDef repeated calls don't accumulate", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1669,7 +1662,7 @@ test.describe("Memory Leak Triggers", () => {
         loadedCount,
         growthMB: (finalHeap - initialHeap) / (1024 * 1024),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.loadedCount).toBe(1); // Should only be in set once
@@ -1678,7 +1671,7 @@ test.describe("Memory Leak Triggers", () => {
     }
   });
 
-  test("loadSample to same buffer repeatedly doesn't accumulate", async ({ page }) => {
+  test("loadSample to same buffer repeatedly doesn't accumulate", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1708,7 +1701,7 @@ test.describe("Memory Leak Triggers", () => {
         hasMemoryAPI: !!performance.memory,
         growthMB: (finalHeap - initialHeap) / (1024 * 1024),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     if (result.hasMemoryAPI) {
@@ -1717,7 +1710,7 @@ test.describe("Memory Leak Triggers", () => {
     }
   });
 
-  test("message event handler memory pressure", async ({ page }) => {
+  test("message event handler memory pressure", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1759,7 +1752,7 @@ test.describe("Memory Leak Triggers", () => {
         messageCount,
         growthMB: (finalHeap - initialHeap) / (1024 * 1024),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.messageCount).toBeGreaterThan(0);
@@ -1768,7 +1761,7 @@ test.describe("Memory Leak Triggers", () => {
     }
   });
 
-  test("OSC message creation doesn't leak", async ({ page }) => {
+  test("OSC message creation doesn't leak", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1812,7 +1805,7 @@ test.describe("Memory Leak Triggers", () => {
         hasMemoryAPI: !!performance.memory,
         growthMB: (finalHeap - initialHeap) / (1024 * 1024),
       };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     if (result.hasMemoryAPI) {
@@ -1827,7 +1820,7 @@ test.describe("Memory Leak Triggers", () => {
 // =============================================================================
 
 test.describe("Evil Float Values", () => {
-  test("NaN in synth parameters doesn't crash", async ({ page }) => {
+  test("NaN in synth parameters doesn't crash", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1854,12 +1847,12 @@ test.describe("Evil Float Values", () => {
       await sonic.destroy();
 
       return { success: true, nodeCount: tree.nodeCount };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("Infinity in synth parameters doesn't crash", async ({ page }) => {
+  test("Infinity in synth parameters doesn't crash", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1883,12 +1876,12 @@ test.describe("Evil Float Values", () => {
 
       await sonic.destroy();
       return { success: true };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("subnormal floats don't cause issues", async ({ page }) => {
+  test("subnormal floats don't cause issues", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1909,12 +1902,12 @@ test.describe("Evil Float Values", () => {
 
       await sonic.destroy();
       return { success: true };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("extreme float values don't crash", async ({ page }) => {
+  test("extreme float values don't crash", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1941,7 +1934,7 @@ test.describe("Evil Float Values", () => {
 
       await sonic.destroy();
       return { success: true };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
@@ -1952,7 +1945,7 @@ test.describe("Evil Float Values", () => {
 // =============================================================================
 
 test.describe("Rapid Lifecycle Abuse", () => {
-  test("10 rapid init/destroy cycles", async ({ page }) => {
+  test("10 rapid init/destroy cycles", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1963,13 +1956,13 @@ test.describe("Rapid Lifecycle Abuse", () => {
         await sonic.destroy();
       }
       return { success: true, cycles: 10 };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     expect(result.cycles).toBe(10);
   });
 
-  test("init/destroy with operations in between", async ({ page }) => {
+  test("init/destroy with operations in between", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -1985,12 +1978,12 @@ test.describe("Rapid Lifecycle Abuse", () => {
         await sonic.destroy();
       }
       return { success: true };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("reset() called 20 times rapidly", async ({ page }) => {
+  test("reset() called 20 times rapidly", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -2008,7 +2001,7 @@ test.describe("Rapid Lifecycle Abuse", () => {
 
       await sonic.destroy();
       return { success: true };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
@@ -2019,7 +2012,7 @@ test.describe("Rapid Lifecycle Abuse", () => {
 // =============================================================================
 
 test.describe("Promise Flooding", () => {
-  test("1000 sync() calls without await", async ({ page }) => {
+  test("1000 sync() calls without await", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -2041,14 +2034,14 @@ test.describe("Promise Flooding", () => {
 
       await sonic.destroy();
       return { success: true, fulfilled, total: 1000 };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
     // At least some should succeed (server might drop some under load)
     expect(result.fulfilled).toBeGreaterThan(0);
   });
 
-  test("1000 send() calls without await", async ({ page }) => {
+  test("1000 send() calls without await", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -2072,12 +2065,12 @@ test.describe("Promise Flooding", () => {
       await sonic.destroy();
 
       return { success: true, nodeCount: tree.nodeCount };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });
 
-  test("loadSample() and loadSynthDef() called 100 times each without await", async ({ page }) => {
+  test("loadSample() and loadSynthDef() called 100 times each without await", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -2100,7 +2093,7 @@ test.describe("Promise Flooding", () => {
 
       await sonic.destroy();
       return { success: true };
-    }, SONIC_CONFIG);
+    }, sonicConfig);
 
     expect(result.success).toBe(true);
   });

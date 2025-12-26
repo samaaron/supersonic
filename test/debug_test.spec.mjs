@@ -1,15 +1,6 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.mjs";
 
-const POSTMESSAGE_CONFIG = {
-  mode: 'postMessage',
-  workerBaseURL: "/dist/workers/",
-  wasmBaseURL: "/dist/wasm/",
-  sampleBaseURL: "/dist/samples/",
-  synthdefBaseURL: "/dist/synthdefs/",
-  debug: true,
-};
-
-test("debug OSC replies", async ({ page }) => {
+test("debug OSC replies", async ({ page, sonicConfig }) => {
   const logs = [];
   page.on("console", (msg) => {
     logs.push("[" + msg.type() + "] " + msg.text());
@@ -59,7 +50,7 @@ test("debug OSC replies", async ({ page }) => {
       messageCount: allMessages.length,
       messages: allMessages.map(m => m.address),
     };
-  }, POSTMESSAGE_CONFIG);
+  }, sonicConfig);
 
   console.log("Result:", result);
   console.log("Relevant logs:");
