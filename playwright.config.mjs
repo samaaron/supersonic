@@ -20,11 +20,20 @@ export default defineConfig({
     },
   },
 
+  // Run tests in both SAB and postMessage modes
   projects: [
     {
-      name: "chromium",
+      name: "SAB",
       use: {
         browserName: "chromium",
+        supersonicMode: "sab",
+      },
+    },
+    {
+      name: "postMessage",
+      use: {
+        browserName: "chromium",
+        supersonicMode: "postMessage",
       },
     },
   ],

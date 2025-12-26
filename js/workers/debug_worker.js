@@ -14,7 +14,10 @@
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 
-// Ring buffer configuration
+// Transport mode: 'sab' or 'postMessage'
+let mode = 'sab';
+
+// Ring buffer configuration (SAB mode only)
 let sharedBuffer = null;
 let ringBufferBase = null;
 let atomicView = null;
@@ -236,6 +239,41 @@ const clear = () => {
 };
 
 /**
+ * Decode raw bytes from postMessage mode
+ * Called when AudioWorklet sends debugRawBatch messages
+ */
+const decodeRawMessages = (rawMessages) => {
+    const messages = [];
+
+    for (const raw of rawMessages) {
+        try {
+            const bytes = new Uint8Array(raw.bytes);
+            let text = textDecoder.decode(bytes);
+
+            // Remove trailing newline if present
+            if (text.endsWith('\n')) {
+                text = text.slice(0, -1);
+            }
+
+            messages.push({
+                text: text,
+                timestamp: performance.now(),
+                sequence: raw.sequence
+            });
+        } catch (err) {
+            console.error('[DebugWorker] Failed to decode message:', err);
+        }
+    }
+
+    if (messages.length > 0) {
+        self.postMessage({
+            type: 'debug',
+            messages
+        });
+    }
+};
+
+/**
  * Handle messages from main thread
  */
 self.addEventListener('message', (event) => {
@@ -244,12 +282,18 @@ self.addEventListener('message', (event) => {
     try {
         switch (data.type) {
             case 'init':
-                initRingBuffer(data.sharedBuffer, data.ringBufferBase, data.bufferConstants);
+                mode = data.mode || 'sab';
+                if (mode === 'sab') {
+                    initRingBuffer(data.sharedBuffer, data.ringBufferBase, data.bufferConstants);
+                }
                 self.postMessage({ type: 'initialized' });
                 break;
 
             case 'start':
-                start();
+                if (mode === 'sab') {
+                    start();
+                }
+                // In postMessage mode, we just wait for debugRaw messages
                 break;
 
             case 'stop':
@@ -257,7 +301,16 @@ self.addEventListener('message', (event) => {
                 break;
 
             case 'clear':
-                clear();
+                if (mode === 'sab') {
+                    clear();
+                }
+                break;
+
+            case 'debugRaw':
+                // PostMessage mode: decode raw bytes from AudioWorklet
+                if (data.messages) {
+                    decodeRawMessages(data.messages);
+                }
                 break;
 
             default:

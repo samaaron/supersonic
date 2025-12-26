@@ -182,6 +182,10 @@ export class SuperSonic {
   #driftView;
   #globalOffsetView;
 
+  // Local storage for timing values (used in postMessage mode where SAB views don't exist)
+  #localDriftMs = 0;
+  #localGlobalOffsetMs = 0;
+
   // Runtime metrics
   #metricsIntervalId = null;
   #metricsGatherInProgress = false;
@@ -193,8 +197,18 @@ export class SuperSonic {
   // Track AudioContext state for recovery detection
   #previousAudioContextState = null;
 
+  // Pending metrics request for postMessage mode (async request/response)
+  #pendingMetricsRequest = null;
+
+  // Cached worklet metrics for postMessage mode (updated periodically)
+  #cachedWorkletMetrics = null;
+
   // Cached WASM bytes for fast recover() - skip network fetch on re-init
   #cachedWasmBytes = null;
+
+  // Cached node tree for postMessage mode (received from worklet via postMessage)
+  // Worklet reads tree from WASM memory and sends snapshots when version changes
+  #cachedNodeTree = { nodeCount: 0, version: 0, nodes: [] };
 
   constructor(options = {}) {
     this.#initialized = false;
@@ -235,7 +249,13 @@ export class SuperSonic {
 
     const worldOptions = { ...defaultWorldOptions, ...options.scsynthOptions };
 
+    // Transport mode: 'postMessage' or 'sab' (SharedArrayBuffer)
+    // Default to 'postMessage' for widest compatibility (works without COOP/COEP headers)
+    const mode = options.mode || 'postMessage';
+
     this.#config = {
+      // Transport mode
+      mode: mode,
       wasmUrl: options.wasmUrl || wasmBaseURL + "scsynth-nrt.wasm",
       wasmBaseURL: wasmBaseURL,
       workletUrl:
@@ -313,6 +333,14 @@ export class SuperSonic {
    */
   get initializing() {
     return this.#initializing;
+  }
+
+  /**
+   * Get transport mode (read-only)
+   * @returns {'sab' | 'postMessage'}
+   */
+  get mode() {
+    return this.#config.mode;
   }
 
   // ============================================================================
@@ -452,7 +480,7 @@ export class SuperSonic {
 
     try {
       this.#setAndValidateCapabilities();
-      this.#initializeSharedMemory();
+      this.#initializeMemory();
       this.#initializeAudioContext();
       this.#initializeBufferManager();
       this.#initializeOSCRewriter();
@@ -461,7 +489,7 @@ export class SuperSonic {
       await this.#initializeOSC();
       this.#setupMessageHandlers();
       this.#startPerformanceMonitoring();
-      this.#finishInitialization();
+      await this.#finishInitialization();
     } catch (error) {
       this.#initializing = false;
       this.#initPromise = null;
@@ -691,7 +719,7 @@ export class SuperSonic {
     this.bootStats.initStartTime = performance.now();
 
     try {
-      // Skip #initializeSharedMemory - reuse existing
+      // Skip #initializeMemory - reuse existing
       // Skip #initializeBufferManager - reuse existing
 
       this.#initializeAudioContext();
@@ -710,7 +738,7 @@ export class SuperSonic {
       await this.#initializeOSC();
       this.#setupMessageHandlers();
       this.#startPerformanceMonitoring();
-      this.#finishInitialization();
+      await this.#finishInitialization();
     } catch (error) {
       this.#initializing = false;
       this.#initPromise = null;
@@ -752,7 +780,17 @@ export class SuperSonic {
    * animate();
    */
   getTree() {
-    if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {
+    if (!this.#initialized) {
+      return { nodeCount: 0, version: 0, nodes: [] };
+    }
+
+    // PostMessage mode: use cached tree (updated via postMessage from worklet)
+    if (this.#config.mode === 'postMessage') {
+      return this.#cachedNodeTree;
+    }
+
+    // SAB mode: read directly from SharedArrayBuffer
+    if (!this.#sharedBuffer || !this.#bufferConstants) {
       return { nodeCount: 0, version: 0, nodes: [] };
     }
 
@@ -1080,10 +1118,24 @@ export class SuperSonic {
       return; // Direct write succeeded
     }
 
-    // Size guard: reject oversized scheduled bundles
+    // Calculate timing first to determine if this needs scheduling
+    const timing = this.#calculateBundleWait(preparedData);
+
+    // PostMessage mode: send immediate messages directly to worklet (bypass prescheduler)
+    // This is faster (1 hop vs 3) and the prescheduler is only needed for scheduled messages
+    if (this.#config.mode === 'postMessage' && !timing) {
+      this.#workletNode.port.postMessage({
+        type: 'osc',
+        oscData: preparedData
+      });
+      return;
+    }
+
+    // Size guard: reject oversized SCHEDULED bundles only
     // These would exceed the C++ scheduler's slot size and be silently dropped
+    // Immediate messages bypass the scheduler, so no size limit applies
     const slotSize = this.#bufferConstants?.scheduler_slot_size;
-    if (slotSize && preparedData.length > slotSize) {
+    if (timing && slotSize && preparedData.length > slotSize) {
       throw new Error(
         `OSC bundle too large to schedule (${preparedData.length} > ${slotSize} bytes). ` +
         `Use immediate timestamp (0 or 1) for large messages, or reduce bundle size.`
@@ -1092,7 +1144,6 @@ export class SuperSonic {
 
     // Fall back to worker for future-scheduled bundles, buffer-full, or wrap-around cases
     // Worker has retry queue for buffer-full scenarios
-    const timing = this.#calculateBundleWait(preparedData);
     const sendOptions = { ...options };
 
     if (timing) {
@@ -1428,6 +1479,9 @@ export class SuperSonic {
     this.#driftView = null;
     this.#globalOffsetView = null;
 
+    // Reset cached node tree (used in postMessage mode)
+    this.#cachedNodeTree = { nodeCount: 0, version: 0, nodes: [] };
+
     // Reset timing state
     this.#initialNTPStartTime = undefined;
 
@@ -1509,39 +1563,48 @@ export class SuperSonic {
       webWorker: typeof Worker !== "undefined",
     };
 
-    // Check for required features
-    const required = [
-      "audioWorklet",
-      "sharedArrayBuffer",
-      "crossOriginIsolated",
-      "atomics",
-      "webWorker",
-    ];
+    const mode = this.#config.mode;
+
+    // Base requirements for all modes
+    const required = ["audioWorklet", "webWorker"];
+
+    // SAB mode requires additional capabilities
+    if (mode === 'sab') {
+      required.push("sharedArrayBuffer", "crossOriginIsolated", "atomics");
+    }
+
     const missing = required.filter((f) => !this.#capabilities[f]);
 
     if (missing.length > 0) {
       const error = new Error(
-        `Missing required features: ${missing.join(", ")}`
+        `Missing required features for ${mode} mode: ${missing.join(", ")}`
       );
 
-      // Special case for cross-origin isolation
-      if (!this.#capabilities.crossOriginIsolated) {
+      // Special case for cross-origin isolation in SAB mode
+      if (mode === 'sab' && !this.#capabilities.crossOriginIsolated) {
         if (this.#capabilities.sharedArrayBuffer) {
           error.message +=
             "\n\nSharedArrayBuffer is available but cross-origin isolation is not enabled. " +
             "Please ensure COOP and COEP headers are set correctly:\n" +
             "  Cross-Origin-Opener-Policy: same-origin\n" +
-            "  Cross-Origin-Embedder-Policy: require-corp";
+            "  Cross-Origin-Embedder-Policy: require-corp\n\n" +
+            "Alternatively, use mode: 'postMessage' which doesn't require these headers.";
         } else {
           error.message +=
             "\n\nSharedArrayBuffer is not available. This may be due to:\n" +
             "1. Missing COOP/COEP headers\n" +
             "2. Browser doesn't support SharedArrayBuffer\n" +
-            "3. Browser security settings";
+            "3. Browser security settings\n\n" +
+            "Consider using mode: 'postMessage' which doesn't require SharedArrayBuffer.";
         }
       }
 
       throw error;
+    }
+
+    // Validate mode value
+    if (mode !== 'sab' && mode !== 'postMessage') {
+      throw new Error(`Invalid mode: '${mode}'. Use 'sab' or 'postMessage'.`);
     }
 
     return this.#capabilities;
@@ -1553,24 +1616,35 @@ export class SuperSonic {
    */
 
   /**
-   * Initialize shared WebAssembly memory
+   * Initialize WebAssembly memory
+   * In SAB mode: creates shared memory accessible from main thread
+   * In postMessage mode: worklet will create its own memory
    */
-  #initializeSharedMemory() {
-    // Memory layout (from memory_layout.js):
-    // 0-16MB:   WASM heap (scsynth C++ allocations)
-    // 16-17MB:  Ring buffers (~1MB):
-    //           - OSC IN: 768KB, OSC OUT: 128KB, DEBUG: 64KB
-    //           - Control structures, metrics, NTP timing: ~96B
-    // 17-80MB:  Buffer pool (audio sample storage, 63MB)
-    // Total: 80MB
+  #initializeMemory() {
     const memConfig = this.#config.memory;
+    const mode = this.#config.mode;
 
-    this.#wasmMemory = new WebAssembly.Memory({
-      initial: memConfig.totalPages,
-      maximum: memConfig.totalPages,
-      shared: true,
-    });
-    this.#sharedBuffer = this.#wasmMemory.buffer;
+    if (mode === 'sab') {
+      // SAB mode: create shared memory accessible from main thread
+      // Memory layout (from memory_layout.js):
+      // 0-16MB:   WASM heap (scsynth C++ allocations)
+      // 16-17MB:  Ring buffers (~1MB):
+      //           - OSC IN: 768KB, OSC OUT: 128KB, DEBUG: 64KB
+      //           - Control structures, metrics, NTP timing: ~96B
+      // 17-80MB:  Buffer pool (audio sample storage, 63MB)
+      // Total: 80MB
+      this.#wasmMemory = new WebAssembly.Memory({
+        initial: memConfig.totalPages,
+        maximum: memConfig.totalPages,
+        shared: true,
+      });
+      this.#sharedBuffer = this.#wasmMemory.buffer;
+    } else {
+      // PostMessage mode: worklet creates its own memory
+      // Main thread doesn't need direct access to WASM memory
+      this.#wasmMemory = null;
+      this.#sharedBuffer = null;
+    }
   }
 
   #initializeAudioContext() {
@@ -1611,7 +1685,10 @@ export class SuperSonic {
   }
 
   #initializeBufferManager() {
+    const mode = this.#config.mode;
+
     this.#bufferManager = new BufferManager({
+      mode: mode,
       audioContext: this.#audioContext,
       sharedBuffer: this.#sharedBuffer,
       bufferPoolConfig: {
@@ -1696,23 +1773,38 @@ export class SuperSonic {
     // Create the public node wrapper
     this.#node = this.#createNodeWrapper();
 
-    // Initialize AudioWorklet with SharedArrayBuffer
+    const mode = this.#config.mode;
+
+    // Initialize AudioWorklet with mode and SharedArrayBuffer (SAB mode only)
     this.#workletNode.port.postMessage({
       type: "init",
-      sharedBuffer: this.#sharedBuffer,
+      mode: mode,
+      sharedBuffer: mode === 'sab' ? this.#sharedBuffer : null,
     });
 
-    // Send WASM bytes, memory, worldOptions, and actual sample rate
-    this.#workletNode.port.postMessage({
+    // Send WASM bytes, memory/pages, worldOptions, and actual sample rate
+    const loadWasmMsg = {
       type: "loadWasm",
       wasmBytes: wasmBytes,
-      wasmMemory: this.#wasmMemory,
       worldOptions: this.#config.worldOptions,
-      sampleRate: this.#audioContext.sampleRate, // Pass actual AudioContext sample rate
-    });
+      sampleRate: this.#audioContext.sampleRate,
+    };
+
+    if (mode === 'sab') {
+      // SAB mode: pass shared WASM memory
+      loadWasmMsg.wasmMemory = this.#wasmMemory;
+    } else {
+      // postMessage mode: pass memory size so worklet can create its own
+      loadWasmMsg.memoryPages = this.#config.memoryPages || 1280;  // 80MB default
+    }
+
+    this.#workletNode.port.postMessage(loadWasmMsg);
 
     // Wait for worklet initialization
     await this.#waitForWorkletInit();
+
+    // Set worklet port for BufferManager (postMessage mode buffer operations)
+    this.#bufferManager.setWorkletPort(this.#workletNode.port);
   }
 
   /**
@@ -1722,8 +1814,8 @@ export class SuperSonic {
   #createNodeWrapper() {
     const worklet = this.#workletNode;
     return Object.freeze({
-      connect: (dest, output, input) => worklet.connect(dest, output, input),
-      disconnect: (dest, output, input) => worklet.disconnect(dest, output, input),
+      connect: (...args) => worklet.connect(...args),
+      disconnect: (...args) => worklet.disconnect(...args),
       get context() { return worklet.context; },
       get numberOfOutputs() { return worklet.numberOfOutputs; },
       get channelCount() { return worklet.channelCount; },
@@ -1743,6 +1835,15 @@ export class SuperSonic {
     });
 
     this.#osc.onParsedOSC((msg) => {
+      // Debug: log all /n_* messages and /done for /notify
+      if (__DEV__ && msg.address) {
+        if (msg.address.startsWith('/n_')) {
+          console.log(`[OSC] Received ${msg.address}:`, msg.args);
+        } else if (msg.address === '/done' && msg.args?.[0] === '/notify') {
+          console.log(`[OSC] Received /done for /notify:`, msg.args);
+        }
+      }
+
       // Handle internal /supersonic/ messages
       if (msg.address === "/supersonic/buffer/freed") {
         this.#bufferManager?.handleBufferFreed(msg.args);
@@ -1799,19 +1900,31 @@ export class SuperSonic {
       this.#emit('error', new Error(`${workerName}: ${error}`));
     });
 
-    // Initialize ScsynthOSC with SharedArrayBuffer, ring buffer base, and buffer constants
-    await this.#osc.init(
-      this.#sharedBuffer,
-      this.#ringBufferBase,
-      this.#bufferConstants,
-      { preschedulerCapacity: this.#config.preschedulerCapacity }
-    );
+    // Initialize ScsynthOSC based on mode
+    const mode = this.#config.mode;
+
+    if (mode === 'sab') {
+      await this.#osc.init({
+        mode: 'sab',
+        sharedBuffer: this.#sharedBuffer,
+        ringBufferBase: this.#ringBufferBase,
+        bufferConstants: this.#bufferConstants,
+        preschedulerCapacity: this.#config.preschedulerCapacity
+      });
+    } else {
+      // PostMessage mode: use worklet port for communication
+      await this.#osc.init({
+        mode: 'postMessage',
+        workletPort: this.#workletNode.port,
+        preschedulerCapacity: this.#config.preschedulerCapacity
+      });
+    }
   }
 
   /**
    * Complete initialization and trigger callbacks
    */
-  #finishInitialization() {
+  async #finishInitialization() {
     this.#initialized = true;
     this.#initializing = false;
     this.bootStats.initDuration =
@@ -1892,13 +2005,15 @@ export class SuperSonic {
                 );
               this.#bufferConstants = event.data.bufferConstants;
 
-              // Initialize shared views for metrics and timing
-              this.#initSharedViews();
+              if (this.#config.mode === 'sab') {
+                // SAB mode: initialize shared views for metrics and timing
+                this.#initSharedViews();
 
-              // Initialize direct writer for low-latency ring buffer writes
-              this.#initializeDirectWriter();
+                // Initialize direct writer for low-latency ring buffer writes
+                this.#initializeDirectWriter();
+              }
 
-              // Initialize NTP timing (blocks until audio is flowing)
+              // Initialize NTP timing (works in both modes - SAB writes directly, postMessage sends to worklet)
               if (__DEV__)
                 console.log(
                   "[Dbg-SuperSonic] Initializing NTP timing (waiting for audio to flow)..."
@@ -1947,8 +2062,9 @@ export class SuperSonic {
      * Note: Worklet metrics (processCount, bufferOverruns, etc.) are read directly from
      * SharedArrayBuffer in #getWorkletMetrics(). The worklet no longer sends 'metrics'
      * messages, and 'getMetrics' requests are not used (SAB reads are synchronous).
+     * Use addEventListener to allow multiple listeners (e.g., ScsynthOSC in postMessage mode)
      */
-    this.#workletNode.port.onmessage = (event) => {
+    this.#workletNode.port.addEventListener('message', (event) => {
       const { data } = event;
 
       switch (data.type) {
@@ -1974,8 +2090,38 @@ export class SuperSonic {
           // Version from worklet - stored for getInfo()
           this.#version = data.version;
           break;
+
+        case "metricsSnapshot":
+          // Metrics response from worklet (postMessage mode)
+          // Cache the metrics for synchronous access
+          if (data.metrics) {
+            this.#cachedWorkletMetrics = data.metrics;
+          }
+          if (this.#pendingMetricsRequest && data.requestId === this.#pendingMetricsRequest.id) {
+            this.#pendingMetricsRequest.resolve(data.metrics);
+            this.#pendingMetricsRequest = null;
+          }
+          break;
+
+        case "nodeTree":
+          // Node tree snapshot from worklet (postMessage mode)
+          // Worklet reads tree from WASM memory and sends when version changes
+          this.#cachedNodeTree = {
+            nodeCount: data.nodeCount,
+            version: data.version,
+            nodes: data.nodes,
+            snapshotsSent: data.snapshotsSent  // Track how many snapshots have been sent
+          };
+          break;
+
+        default:
+          // Log unexpected message types for debugging
+          if (__DEV__ && data.type && !['oscReplies', 'oscReply', 'debugBatch', 'debugRawBatch', 'initialized', 'bufferLoaded', 'timeOffset'].includes(data.type)) {
+            console.log("[DEBUG] Unknown worklet message type:", data.type);
+          }
+          break;
       }
-    };
+    });
   }
 
   /**
@@ -2027,6 +2173,47 @@ export class SuperSonic {
       mainMessagesSent: m[MetricsOffsets.MESSAGES_SENT],
       mainBytesSent: m[MetricsOffsets.BYTES_SENT],
     };
+  }
+
+  /**
+   * Request metrics from worklet via postMessage (for postMessage mode)
+   * Returns a promise that resolves with metrics from the worklet
+   * @returns {Promise<Object|null>}
+   * @private
+   */
+  async #requestWorkletMetrics(timeoutMs = 1000) {
+    if (!this.#workletNode) {
+      return null;
+    }
+
+    // Cancel any pending request
+    if (this.#pendingMetricsRequest) {
+      this.#pendingMetricsRequest.resolve(null);
+    }
+
+    const requestId = Date.now() + Math.random();
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        if (this.#pendingMetricsRequest?.id === requestId) {
+          this.#pendingMetricsRequest = null;
+          resolve(null);
+        }
+      }, timeoutMs);
+
+      this.#pendingMetricsRequest = {
+        id: requestId,
+        resolve: (metrics) => {
+          clearTimeout(timeout);
+          resolve(metrics);
+        }
+      };
+
+      this.#workletNode.port.postMessage({
+        type: 'getMetrics',
+        requestId: requestId
+      });
+    });
   }
 
   /**
@@ -2106,13 +2293,22 @@ export class SuperSonic {
   #gatherMetrics() {
     const startTime = performance.now();
 
-    // All metrics read from SAB in one call
-    const metrics = this.#getSABMetrics() || {};
+    let metrics;
 
-    // Buffer usage (calculated from SAB head/tail pointers)
-    const bufferUsage = this.#getBufferUsage();
-    if (bufferUsage) {
-      Object.assign(metrics, bufferUsage);
+    if (this.mode === 'postMessage') {
+      // In postMessage mode, use cached worklet metrics
+      // Fire off async request to update cache for next time
+      this.#requestWorkletMetrics().catch(() => {});
+      metrics = this.#cachedWorkletMetrics ? { ...this.#cachedWorkletMetrics } : {};
+    } else {
+      // SAB mode: read metrics directly from SharedArrayBuffer
+      metrics = this.#getSABMetrics() || {};
+
+      // Buffer usage (calculated from SAB head/tail pointers)
+      const bufferUsage = this.#getBufferUsage();
+      if (bufferUsage) {
+        Object.assign(metrics, bufferUsage);
+      }
     }
 
     // Drift offset (milliseconds)
@@ -2152,10 +2348,13 @@ export class SuperSonic {
     // Clear any existing interval
     this.#stopPerformanceMonitoring();
 
-    const intervalMs = this.#metricsInterval;
+    // Use slower interval in postMessage mode (1000ms vs 100ms)
+    // because metrics require async round-trip to worklet
+    const intervalMs = this.mode === 'postMessage' ? 1000 : this.#metricsInterval;
 
     // Request metrics periodically
-    // All metrics are read from SAB (<0.1ms) - fully synchronous
+    // SAB mode: metrics read from SAB (<0.1ms) - fully synchronous
+    // postMessage mode: uses cached metrics, async update for next interval
     this.#metricsIntervalId = setInterval(() => {
       // Only gather metrics if there are listeners
       if (!this.#listeners.has('metrics') || this.#listeners.get('metrics').size === 0) {
@@ -2308,8 +2507,17 @@ export class SuperSonic {
     // NTP time at AudioContext start = current NTP - current AudioContext time
     const ntpStartTime = calculateNTPStartTime(currentNTP, timestamp.contextTime);
 
-    // Write to SharedArrayBuffer (write-once)
-    this.#ntpStartView[0] = ntpStartTime;
+    // Write to memory (SAB directly, or via postMessage)
+    if (this.#config.mode === 'sab') {
+      // SAB mode: write directly to SharedArrayBuffer
+      this.#ntpStartView[0] = ntpStartTime;
+    } else {
+      // PostMessage mode: send to worklet
+      this.#workletNode.port.postMessage({
+        type: 'setNTPStartTime',
+        ntpStartTime: ntpStartTime
+      });
+    }
 
     // Store for drift calculation
     this.#initialNTPStartTime = ntpStartTime;
@@ -2349,8 +2557,20 @@ export class SuperSonic {
     // Compare to actual contextTime to get drift
     const driftMs = calculateDriftMs(expectedContextTime, timestamp.contextTime);
 
-    // Write to SharedArrayBuffer using cached view
-    Atomics.store(this.#driftView, 0, driftMs);
+    // Store locally for use in #calculateBundleWait
+    this.#localDriftMs = driftMs;
+
+    // Write to memory (SAB directly, or via postMessage)
+    if (this.#config.mode === 'sab') {
+      // SAB mode: write directly to SharedArrayBuffer
+      Atomics.store(this.#driftView, 0, driftMs);
+    } else {
+      // PostMessage mode: send to worklet
+      this.#workletNode.port.postMessage({
+        type: 'setDriftOffset',
+        driftOffsetMs: driftMs
+      });
+    }
 
     if (__DEV__)
       console.log(
@@ -2472,20 +2692,20 @@ export class SuperSonic {
       return null;
     }
 
-    // Read NTP start time using cached view (write-once value)
-    const ntpStartTime = this.#ntpStartView[0];
+    // Read NTP start time (SAB view or local value)
+    const ntpStartTime = this.#ntpStartView?.[0] ?? this.#initialNTPStartTime ?? 0;
 
     if (ntpStartTime === 0) {
       console.warn("[SuperSonic] NTP start time not yet initialized");
       return null;
     }
 
-    // Read current drift offset using cached view (milliseconds)
-    const driftMs = Atomics.load(this.#driftView, 0);
+    // Read current drift offset (SAB view or local value)
+    const driftMs = this.#driftView ? Atomics.load(this.#driftView, 0) : this.#localDriftMs;
     const driftSeconds = driftMs / 1000.0;
 
-    // Read global offset using cached view (milliseconds)
-    const globalMs = Atomics.load(this.#globalOffsetView, 0);
+    // Read global offset (SAB view or local value)
+    const globalMs = this.#globalOffsetView ? Atomics.load(this.#globalOffsetView, 0) : this.#localGlobalOffsetMs;
     const globalSeconds = globalMs / 1000.0;
 
     const totalOffset = ntpStartTime + driftSeconds + globalSeconds;

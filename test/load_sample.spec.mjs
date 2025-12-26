@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.mjs";
 
 test.describe("SuperSonic loadSample()", () => {
   test.beforeEach(async ({ page }) => {
@@ -22,14 +22,9 @@ test.describe("SuperSonic loadSample()", () => {
     });
   });
 
-  test("loads sample by simple filename", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("loads sample by simple filename", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -59,7 +54,7 @@ test.describe("SuperSonic loadSample()", () => {
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
       }
-    });
+    }, sonicConfig);
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
@@ -69,14 +64,9 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.sampleRate).toBeGreaterThan(0);
   });
 
-  test("loads sample by absolute path", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("loads sample by absolute path", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -104,7 +94,7 @@ test.describe("SuperSonic loadSample()", () => {
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
       }
-    });
+    }, sonicConfig);
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
@@ -112,14 +102,9 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.numFrames).toBeGreaterThan(0);
   });
 
-  test("path with ./ prefix bypasses sampleBaseURL", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("path with ./ prefix bypasses sampleBaseURL", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       try {
         await sonic.init();
@@ -139,21 +124,16 @@ test.describe("SuperSonic loadSample()", () => {
                            !err.message.includes("/dist/samples/./nonexistent.flac"),
         };
       }
-    });
+    }, sonicConfig);
 
     // Should fail with 404, but path should not have sampleBaseURL prepended
     expect(result.success).toBe(false);
     expect(result.pathNotPrepended).toBe(true);
   });
 
-  test("loads multiple samples into different buffers", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("loads multiple samples into different buffers", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -187,7 +167,7 @@ test.describe("SuperSonic loadSample()", () => {
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
       }
-    });
+    }, sonicConfig);
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
@@ -200,14 +180,9 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.buffers[2].numFrames).toBeGreaterThan(0);
   });
 
-  test("can play loaded sample with synth", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("can play loaded sample with synth", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       try {
         await sonic.init();
@@ -229,8 +204,14 @@ test.describe("SuperSonic loadSample()", () => {
         );
         await sonic.sync(2);
 
-        // Check node tree has the synth
-        const tree = sonic.getTree();
+        // Wait for tree update in postMessage mode
+        let tree;
+        const start = Date.now();
+        while (Date.now() - start < 2000) {
+          tree = sonic.getTree();
+          if (tree.nodes.some((n) => n.id === 1000)) break;
+          await new Promise(r => setTimeout(r, 20));
+        }
 
         return {
           success: true,
@@ -240,21 +221,16 @@ test.describe("SuperSonic loadSample()", () => {
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
       }
-    });
+    }, sonicConfig);
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
     expect(result.hasSynth).toBe(true);
   });
 
-  test("rejects path with directory traversal", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("rejects path with directory traversal", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       try {
         await sonic.init();
@@ -270,20 +246,15 @@ test.describe("SuperSonic loadSample()", () => {
           isTraversalError: err.message.includes(".."),
         };
       }
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(false);
     expect(result.isTraversalError).toBe(true);
   });
 
-  test("rejects path with backslash", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("rejects path with backslash", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       try {
         await sonic.init();
@@ -299,20 +270,15 @@ test.describe("SuperSonic loadSample()", () => {
           isBackslashError: err.message.includes("forward slashes"),
         };
       }
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(false);
     expect(result.isBackslashError).toBe(true);
   });
 
-  test("handles non-existent sample file", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("handles non-existent sample file", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       try {
         await sonic.init();
@@ -328,20 +294,15 @@ test.describe("SuperSonic loadSample()", () => {
           isFetchError: err.message.includes("404") || err.message.includes("Failed to fetch"),
         };
       }
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(false);
     expect(result.isFetchError).toBe(true);
   });
 
-  test("loads sample with startFrame parameter", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("loads sample with startFrame parameter", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -381,7 +342,7 @@ test.describe("SuperSonic loadSample()", () => {
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
       }
-    });
+    }, sonicConfig);
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
@@ -389,14 +350,9 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.partialFrames).toBeLessThan(result.fullFrames);
   });
 
-  test("loads sample with numFrames parameter", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("loads sample with numFrames parameter", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -422,21 +378,16 @@ test.describe("SuperSonic loadSample()", () => {
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
       }
-    });
+    }, sonicConfig);
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
     expect(result.actualFrames).toBe(result.requestedFrames);
   });
 
-  test("replaces existing buffer content", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("replaces existing buffer content", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -474,7 +425,7 @@ test.describe("SuperSonic loadSample()", () => {
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
       }
-    });
+    }, sonicConfig);
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
@@ -483,14 +434,9 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.secondFrames).toBeGreaterThan(0);
   });
 
-  test("loads sample from inline blob via /b_allocFile", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("loads sample from inline blob via /b_allocFile", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -526,7 +472,7 @@ test.describe("SuperSonic loadSample()", () => {
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
       }
-    });
+    }, sonicConfig);
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
@@ -537,14 +483,9 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.blobSize).toBeGreaterThan(0);
   });
 
-  test("/b_allocFile can play loaded sample with synth", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("/b_allocFile can play loaded sample with synth", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       try {
         await sonic.init();
@@ -570,8 +511,14 @@ test.describe("SuperSonic loadSample()", () => {
         );
         await sonic.sync(2);
 
-        // Check node tree has the synth
-        const tree = sonic.getTree();
+        // Wait for tree update in postMessage mode
+        let tree;
+        const start = Date.now();
+        while (Date.now() - start < 2000) {
+          tree = sonic.getTree();
+          if (tree.nodes.some((n) => n.id === 1000)) break;
+          await new Promise(r => setTimeout(r, 20));
+        }
 
         return {
           success: true,
@@ -581,21 +528,16 @@ test.describe("SuperSonic loadSample()", () => {
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
       }
-    });
+    }, sonicConfig);
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
     expect(result.hasSynth).toBe(true);
   });
 
-  test("/b_allocFile rejects missing blob argument", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("/b_allocFile rejects missing blob argument", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       try {
         await sonic.init();
@@ -611,20 +553,15 @@ test.describe("SuperSonic loadSample()", () => {
           isBlobError: err.message.includes("blob"),
         };
       }
-    });
+    }, sonicConfig);
 
     expect(result.success).toBe(false);
     expect(result.isBlobError).toBe(true);
   });
 
-  test("/b_allocFile buffer survives recover()", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        workerBaseURL: "/dist/workers/",
-        wasmBaseURL: "/dist/wasm/",
-        sampleBaseURL: "/dist/samples/",
-        synthdefBaseURL: "/dist/synthdefs/",
-      });
+  test("/b_allocFile buffer survives recover()", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
 
       const messages = [];
       sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
@@ -664,7 +601,7 @@ test.describe("SuperSonic loadSample()", () => {
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
       }
-    });
+    }, sonicConfig);
 
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);

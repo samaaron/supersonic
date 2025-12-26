@@ -10,23 +10,33 @@ import osc from '../vendor/osc.js/osc.js';
 
 /**
  * ScsynthOSC - OSC communication layer for scsynth
- * Manages OSC IN, OSC OUT, and DEBUG workers
+ *
+ * Supports two modes:
+ * - 'sab': Uses SharedArrayBuffer ring buffers with polling workers
+ * - 'postMessage': Uses MessagePort for communication (no SAB required)
+ *
  * Provides clean API for sending/receiving OSC and debug messages
  */
 
 export default class ScsynthOSC {
     constructor(workerBaseURL = null) {
-        this.workerBaseURL = workerBaseURL;  // Optional custom base URL for workers
+        this.workerBaseURL = workerBaseURL;
+
+        // Transport mode: 'sab' or 'postMessage'
+        this.mode = 'sab';
+
+        // Worklet port for postMessage mode
+        this.workletPort = null;
 
         this.workers = {
-            oscOut: null,      // Scheduler worker (now also writes directly to ring buffer)
-            oscIn: null,
-            debug: null
+            oscOut: null,      // Scheduler worker (both modes)
+            oscIn: null,       // SAB mode only: polls OUT ring buffer
+            debug: null        // Both modes: SAB polls ring buffer, postMessage decodes raw bytes
         };
 
         this.callbacks = {
-            onRawOSC: null,         // Raw binary OSC callback
-            onParsedOSC: null,      // Parsed OSC callback
+            onRawOSC: null,
+            onParsedOSC: null,
             onDebugMessage: null,
             onError: null,
             onInitialized: null
@@ -39,56 +49,120 @@ export default class ScsynthOSC {
     }
 
     /**
-     * Initialize all workers with SharedArrayBuffer
+     * Initialize OSC communication
+     *
+     * @param {Object} config - Configuration object
+     * @param {string} [config.mode='sab'] - Transport mode: 'sab' or 'postMessage'
+     * @param {SharedArrayBuffer} [config.sharedBuffer] - Required for SAB mode
+     * @param {number} [config.ringBufferBase] - Required for SAB mode
+     * @param {Object} [config.bufferConstants] - Required for SAB mode
+     * @param {MessagePort} [config.workletPort] - Required for postMessage mode
+     * @param {number} [config.preschedulerCapacity=65536] - Max pending messages
      */
-    async init(sharedBuffer, ringBufferBase, bufferConstants, options = {}) {
+    async init(config = {}) {
         if (this.initialized) {
             console.warn('[ScsynthOSC] Already initialized');
             return;
         }
 
-        this.sharedBuffer = sharedBuffer;
-        this.ringBufferBase = ringBufferBase;
-        this.bufferConstants = bufferConstants;
-        this.preschedulerCapacity = options.preschedulerCapacity || 65536;
+        this.mode = config.mode || 'sab';
+        this.preschedulerCapacity = config.preschedulerCapacity || 65536;
+
+        if (this.mode === 'sab') {
+            await this.#initSABMode(config);
+        } else if (this.mode === 'postMessage') {
+            await this.#initPostMessageMode(config);
+        } else {
+            throw new Error(`Unknown mode: ${this.mode}`);
+        }
+
+        this.initialized = true;
+
+        if (this.callbacks.onInitialized) {
+            this.callbacks.onInitialized();
+        }
+    }
+
+    /**
+     * Initialize SAB mode - uses ring buffers and polling workers
+     */
+    async #initSABMode(config) {
+        this.sharedBuffer = config.sharedBuffer;
+        this.ringBufferBase = config.ringBufferBase;
+        this.bufferConstants = config.bufferConstants;
+
+        if (!this.sharedBuffer || !this.bufferConstants) {
+            throw new Error('SAB mode requires sharedBuffer and bufferConstants');
+        }
 
         try {
             // Create all workers
-            // osc_out_prescheduler_worker.js handles scheduling/tag cancellation AND writes directly to ring buffer
-            // osc_in_worker.js handles receiving OSC messages from scsynth
-            // debug_worker.js handles receiving debug messages from scsynth
-
-            // workerBaseURL is required (validated in SuperSonic constructor)
             this.workers.oscOut = new Worker(this.workerBaseURL + 'osc_out_prescheduler_worker.js', {type: 'module'});
             this.workers.oscIn = new Worker(this.workerBaseURL + 'osc_in_worker.js', {type: 'module'});
             this.workers.debug = new Worker(this.workerBaseURL + 'debug_worker.js', {type: 'module'});
 
             // Set up worker message handlers
-            this.setupWorkerHandlers();
+            this.#setupSABWorkerHandlers();
 
             // Initialize all workers with SharedArrayBuffer
             const initPromises = [
-                this.initWorker(this.workers.oscOut, 'OSC SCHEDULER+WRITER', {
+                this.#initWorker(this.workers.oscOut, 'OSC SCHEDULER+WRITER', {
+                    mode: 'sab',
                     maxPendingMessages: this.preschedulerCapacity
                 }),
-                this.initWorker(this.workers.oscIn, 'OSC IN'),
-                this.initWorker(this.workers.debug, 'DEBUG')
+                this.#initWorker(this.workers.oscIn, 'OSC IN'),
+                this.#initWorker(this.workers.debug, 'DEBUG')
             ];
 
             await Promise.all(initPromises);
 
-            // Start the workers
+            // Start polling workers
             this.workers.oscIn.postMessage({ type: 'start' });
             this.workers.debug.postMessage({ type: 'start' });
 
-            this.initialized = true;
-
-            if (this.callbacks.onInitialized) {
-                this.callbacks.onInitialized();
+        } catch (error) {
+            console.error('[ScsynthOSC] SAB mode initialization failed:', error);
+            if (this.callbacks.onError) {
+                this.callbacks.onError(error);
             }
+            throw error;
+        }
+    }
+
+    /**
+     * Initialize postMessage mode - uses MessagePort for communication
+     */
+    async #initPostMessageMode(config) {
+        this.workletPort = config.workletPort;
+
+        if (!this.workletPort) {
+            throw new Error('postMessage mode requires workletPort');
+        }
+
+        try {
+            // Create prescheduler and debug workers
+            // Debug worker handles text decoding (TextDecoder not available in AudioWorklet)
+            this.workers.oscOut = new Worker(this.workerBaseURL + 'osc_out_prescheduler_worker.js', {type: 'module'});
+            this.workers.debug = new Worker(this.workerBaseURL + 'debug_worker.js', {type: 'module'});
+
+            // Set up handlers
+            this.#setupPostMessageHandlers();
+
+            // Initialize workers
+            const initPromises = [
+                this.#initWorker(this.workers.oscOut, 'OSC SCHEDULER', {
+                    mode: 'postMessage',
+                    maxPendingMessages: this.preschedulerCapacity
+                }),
+                this.#initWorker(this.workers.debug, 'DEBUG', {
+                    mode: 'postMessage'
+                })
+            ];
+
+            await Promise.all(initPromises);
 
         } catch (error) {
-            console.error('[ScsynthOSC] Initialization failed:', error);
+            console.error('[ScsynthOSC] postMessage mode initialization failed:', error);
             if (this.callbacks.onError) {
                 this.callbacks.onError(error);
             }
@@ -99,7 +173,7 @@ export default class ScsynthOSC {
     /**
      * Initialize a single worker
      */
-    initWorker(worker, name, extraConfig = {}) {
+    #initWorker(worker, name, extraConfig = {}) {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error(`${name} worker initialization timeout`));
@@ -114,49 +188,34 @@ export default class ScsynthOSC {
             };
 
             worker.addEventListener('message', handler);
-            worker.postMessage({
+
+            // Build init message based on mode
+            const initMsg = {
                 type: 'init',
-                sharedBuffer: this.sharedBuffer,
-                ringBufferBase: this.ringBufferBase,
-                bufferConstants: this.bufferConstants,
                 ...extraConfig
-            });
+            };
+
+            // SAB mode needs buffer info
+            if (this.mode === 'sab' && this.sharedBuffer) {
+                initMsg.sharedBuffer = this.sharedBuffer;
+                initMsg.ringBufferBase = this.ringBufferBase;
+                initMsg.bufferConstants = this.bufferConstants;
+            }
+
+            worker.postMessage(initMsg);
         });
     }
 
     /**
-     * Set up message handlers for all workers
+     * Set up handlers for SAB mode workers
      */
-    setupWorkerHandlers() {
-        // OSC IN worker handler
+    #setupSABWorkerHandlers() {
+        // OSC IN worker handler - receives OSC replies from scsynth
         this.workers.oscIn.onmessage = (event) => {
             const data = event.data;
             switch (data.type) {
                 case 'messages':
-                    data.messages.forEach(msg => {
-                        if (!msg.oscData) return;
-
-                        // First, fire raw OSC callback if registered
-                        if (this.callbacks.onRawOSC) {
-                            this.callbacks.onRawOSC({
-                                oscData: msg.oscData,
-                                sequence: msg.sequence
-                            });
-                        }
-
-                        // Then, parse and fire parsed OSC callback if registered
-                        if (this.callbacks.onParsedOSC) {
-                            try {
-                                // Use custom options to ensure args is always an array
-                                const options = { metadata: false, unpackSingleArgs: false };
-                                const decoded = osc.readPacket(msg.oscData, options);
-                                // Pass the decoded message with address and args
-                                this.callbacks.onParsedOSC(decoded);
-                            } catch (e) {
-                                console.error('[ScsynthOSC] Failed to decode OSC message:', e, msg);
-                            }
-                        }
-                    });
+                    this.#handleOSCMessages(data.messages);
                     break;
                 case 'error':
                     console.error('[ScsynthOSC] OSC IN error:', data.error);
@@ -187,10 +246,36 @@ export default class ScsynthOSC {
             }
         };
 
-        // OSC OUT worker handler (mainly for errors)
+        // OSC OUT worker handler (errors only in SAB mode)
+        this.workers.oscOut.onmessage = (event) => {
+            const data = event.data;
+            if (data.type === 'error') {
+                console.error('[ScsynthOSC] OSC OUT error:', data.error);
+                if (this.callbacks.onError) {
+                    this.callbacks.onError(data.error, 'oscOut');
+                }
+            }
+        };
+    }
+
+    /**
+     * Set up handlers for postMessage mode
+     */
+    #setupPostMessageHandlers() {
+        // Prescheduler dispatches messages to us, we forward to worklet
         this.workers.oscOut.onmessage = (event) => {
             const data = event.data;
             switch (data.type) {
+                case 'dispatch':
+                    // Forward OSC message to worklet
+                    if (this.workletPort) {
+                        this.workletPort.postMessage({
+                            type: 'osc',
+                            oscData: data.oscData,
+                            timestamp: data.timestamp
+                        });
+                    }
+                    break;
                 case 'error':
                     console.error('[ScsynthOSC] OSC OUT error:', data.error);
                     if (this.callbacks.onError) {
@@ -199,15 +284,88 @@ export default class ScsynthOSC {
                     break;
             }
         };
+
+        // Debug worker handler - receives decoded messages
+        this.workers.debug.onmessage = (event) => {
+            const data = event.data;
+            switch (data.type) {
+                case 'debug':
+                    if (this.callbacks.onDebugMessage) {
+                        data.messages.forEach(msg => {
+                            this.callbacks.onDebugMessage(msg);
+                        });
+                    }
+                    break;
+                case 'error':
+                    console.error('[ScsynthOSC] DEBUG error:', data.error);
+                    if (this.callbacks.onError) {
+                        this.callbacks.onError(data.error, 'debug');
+                    }
+                    break;
+            }
+        };
+
+        // Worklet sends OSC replies and debug messages to us
+        // Use addEventListener to avoid conflicts with other port listeners
+        this.workletPort.addEventListener('message', (event) => {
+            const data = event.data;
+            switch (data.type) {
+                case 'oscReply':
+                    // OSC reply from scsynth
+                    if (data.oscData) {
+                        this.#handleOSCMessages([{ oscData: data.oscData }]);
+                    }
+                    break;
+                case 'oscReplies':
+                    // Batch of OSC replies
+                    if (data.messages) {
+                        this.#handleOSCMessages(data.messages);
+                    }
+                    break;
+                case 'debugRawBatch':
+                    // Raw debug bytes from worklet - forward to debug_worker for decoding
+                    if (this.workers.debug && data.messages) {
+                        this.workers.debug.postMessage({
+                            type: 'debugRaw',
+                            messages: data.messages
+                        });
+                    }
+                    break;
+                // Other worklet messages (bufferLoaded, etc.) handled elsewhere
+            }
+        });
+    }
+
+    /**
+     * Handle incoming OSC messages (shared by both modes)
+     */
+    #handleOSCMessages(messages) {
+        messages.forEach(msg => {
+            if (!msg.oscData) return;
+
+            // Fire raw OSC callback
+            if (this.callbacks.onRawOSC) {
+                this.callbacks.onRawOSC({
+                    oscData: msg.oscData,
+                    sequence: msg.sequence
+                });
+            }
+
+            // Parse and fire parsed OSC callback
+            if (this.callbacks.onParsedOSC) {
+                try {
+                    const options = { metadata: false, unpackSingleArgs: false };
+                    const decoded = osc.readPacket(msg.oscData, options);
+                    this.callbacks.onParsedOSC(decoded);
+                } catch (e) {
+                    console.error('[ScsynthOSC] Failed to decode OSC message:', e, msg);
+                }
+            }
+        });
     }
 
     /**
      * Send OSC data (message or bundle)
-     * - OSC messages are sent immediately
-     * - OSC bundles are scheduled based on audioTimeS (target audio time)
-     *
-     * @param {Uint8Array} oscData - Binary OSC data (message or bundle)
-     * @param {Object} options - Optional metadata (sessionId, runTag, audioTimeS, currentTimeS)
      */
     send(oscData, options = {}) {
         if (!this.initialized) {
@@ -229,11 +387,6 @@ export default class ScsynthOSC {
 
     /**
      * Send OSC data immediately, ignoring any bundle timestamps
-     * - Extracts all messages from bundles
-     * - Sends all messages immediately to scsynth
-     * - For applications that don't expect server-side scheduling
-     *
-     * @param {Uint8Array} oscData - Binary OSC data (message or bundle)
      */
     sendImmediate(oscData) {
         if (!this.initialized) {
@@ -295,16 +448,18 @@ export default class ScsynthOSC {
         });
     }
 
-
     /**
-     * Clear debug buffer
+     * Clear debug buffer (SAB mode only)
      */
     clearDebug() {
         if (!this.initialized) return;
 
-        this.workers.debug.postMessage({
-            type: 'clear'
-        });
+        if (this.mode === 'sab' && this.workers.debug) {
+            this.workers.debug.postMessage({
+                type: 'clear'
+            });
+        }
+        // In postMessage mode, debug buffer is managed by worklet
     }
 
     /**
@@ -367,6 +522,7 @@ export default class ScsynthOSC {
             debug: null
         };
 
+        this.workletPort = null;
         this.initialized = false;
         if (__DEV__) console.log('[Dbg-ScsynthOSC] All workers terminated');
     }
