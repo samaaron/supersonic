@@ -18,6 +18,7 @@
           button.textContent = "Booting scsynth...";
 
           sonic = new SuperSonic({
+            debug: true,
             workerBaseURL: "../dist/workers/",
             wasmBaseURL: "../dist/wasm/",
             sampleBaseURL: "../dist/samples/",

@@ -11,23 +11,50 @@
 - _AudioWorklet_ - runs in a dedicated high priority audio thread
 - _WebAssembly_ - scsynth's C++ code compiled for the web
 - _OSC API_ - talk to the scsynth server through its native OSC API
+- _Zero Config CDN_ - works directly from unpkg with no server setup
 
 **[Try the live demo](https://sonic-pi.net/supersonic/demo.html)**
 
 ## Getting Started
 
-Injecting the full power of SuperCollider's scsynth audio engine into your browser is simple.
+### CDN (Zero Config)
 
-Import SuperSonic and initialise it:
+The simplest way to use SuperSonic - no server setup required:
+
+```html
+<script type="module">
+  import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
+
+  const supersonic = new SuperSonic();
+  await supersonic.init();
+  await supersonic.loadSynthDef("sonic-pi-prophet");
+  supersonic.send("/s_new", "sonic-pi-prophet", -1, 0, 0, "note", 60);
+</script>
+```
+
+All URLs are auto-detected from the import path. See `example/cdn.html` for a working example.
+
+### Self-Hosted
+
+You can also host the files yourself:
 
 ```javascript
-import { SuperSonic } from "supersonic-scsynth";
+import { SuperSonic } from "./supersonic/supersonic.js";
 
+const supersonic = new SuperSonic();  // URLs auto-detected from import path
+await supersonic.init();
+```
+
+Or with explicit configuration:
+
+```javascript
 const supersonic = new SuperSonic({
   baseURL: "/supersonic/"
 });
 await supersonic.init();
 ```
+
+### Playing Sounds
 
 Load and play a synth:
 
@@ -44,11 +71,27 @@ await supersonic.loadSample(0, "loop_amen.flac");
 supersonic.send("/s_new", "sonic-pi-basic_stereo_player", -1, 0, 0, "buf", 0);
 ```
 
-Take a look at `example/simple.html` for a minimal working example.
+See `example/simple.html` for a minimal working example.
 
 ## Installation
 
-Grab the latest pre-built distribution from [GitHub Releases](https://github.com/samaaron/supersonic/releases) and host it on your server:
+### Option 1: CDN (Recommended for Getting Started)
+
+No installation needed - just import directly:
+
+```javascript
+import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
+```
+
+### Option 2: npm
+
+```bash
+npm install supersonic-scsynth
+```
+
+### Option 3: Self-Hosted Bundle
+
+Download the pre-built distribution from [GitHub Releases](https://github.com/samaaron/supersonic/releases):
 
 ```bash
 curl -LO https://github.com/samaaron/supersonic/releases/latest/download/supersonic.zip
@@ -62,17 +105,9 @@ supersonic/
 ├── supersonic.js      # Main library
 ├── wasm/              # WebAssembly binaries
 ├── workers/           # Web Workers
-├── synthdefs/         # 120 synth definitions
+├── synthdefs/         # 127 synth definitions
 └── samples/           # 206 audio samples
 ```
-
-Or install via npm:
-
-```bash
-npm install supersonic-scsynth-bundle
-```
-
-**Note:** SuperSonic must be self-hosted due to browser security requirements around SharedArrayBuffer. It cannot be loaded from a CDN. See [Browser Setup](docs/BROWSER_SETUP.md) for the details.
 
 ## Documentation
 

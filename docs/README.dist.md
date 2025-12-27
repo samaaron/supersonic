@@ -7,8 +7,8 @@ SuperCollider's powerful scsynth audio synthesis engine running in the browser.
 ```javascript
 import { SuperSonic } from '/supersonic/supersonic.js';
 
-const sonic = new SuperSonic({ baseURL: '/supersonic/' });
-await sonic.init();
+const supersonic = new SuperSonic({ baseURL: '/supersonic/' });
+await supersonic.init();
 ```
 
 ## Required Server Headers
