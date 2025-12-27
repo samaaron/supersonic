@@ -183,12 +183,32 @@ export default class ScsynthOSC {
 
             await Promise.all(initPromises);
 
+            // Process any early debug messages that were buffered before we were ready
+            if (config.earlyDebugMessages && config.earlyDebugMessages.length > 0) {
+                for (const data of config.earlyDebugMessages) {
+                    this.handleDebugRaw(data);
+                }
+            }
+
         } catch (error) {
             console.error('[ScsynthOSC] postMessage mode initialization failed:', error);
             if (this.callbacks.onError) {
                 this.callbacks.onError(error);
             }
             throw error;
+        }
+    }
+
+    /**
+     * Handle raw debug bytes from worklet (postMessage mode)
+     * Called by supersonic.js when it receives debugRawBatch messages
+     */
+    handleDebugRaw(data) {
+        if (this.workers.debug && data.messages) {
+            this.workers.debug.postMessage({
+                type: 'debugRaw',
+                messages: data.messages
+            });
         }
     }
 
@@ -348,15 +368,8 @@ export default class ScsynthOSC {
                         this.#handleOSCMessages(data.messages);
                     }
                     break;
-                case 'debugRawBatch':
-                    // Raw debug bytes from worklet - forward to debug_worker for decoding
-                    if (this.workers.debug && data.messages) {
-                        this.workers.debug.postMessage({
-                            type: 'debugRaw',
-                            messages: data.messages
-                        });
-                    }
-                    break;
+                // Note: debugRawBatch is handled by supersonic.js and forwarded via handleDebugRaw()
+                // This ensures early messages (before this listener exists) are not lost
                 // Other worklet messages (bufferLoaded, etc.) handled elsewhere
             }
         });
