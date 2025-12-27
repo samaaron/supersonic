@@ -33,6 +33,51 @@ import { defaultWorldOptions } from "./scsynth_options.js";
 import * as MetricsOffsets from "./lib/metrics_offsets.js";
 import { addWorkletModule, createWorker } from "./lib/worker_loader.js";
 
+// Derive default base URL from module location
+// This enables zero-config CDN usage: import from unpkg and it just works
+const MODULE_URL = import.meta.url;
+
+/**
+ * Parse the module URL to extract base paths for CDN usage
+ * Handles unpkg.com pattern: https://unpkg.com/supersonic-scsynth@X.Y.Z/dist/supersonic.js
+ */
+function deriveDefaultURLs() {
+  try {
+    const url = new URL(MODULE_URL);
+
+    // Get the directory containing supersonic.js
+    const baseURL = MODULE_URL.substring(0, MODULE_URL.lastIndexOf('/') + 1);
+
+    // Check if this is an unpkg URL to derive sibling package URLs
+    const unpkgMatch = MODULE_URL.match(/^(https:\/\/unpkg\.com\/)supersonic-scsynth@([^/]+)\/dist\/supersonic\.js$/);
+
+    if (unpkgMatch) {
+      const cdnBase = unpkgMatch[1];
+      const version = unpkgMatch[2];
+      return {
+        baseURL,
+        sampleBaseURL: `${cdnBase}supersonic-scsynth-samples@${version}/samples/`,
+        synthdefBaseURL: `${cdnBase}supersonic-scsynth-synthdefs@${version}/synthdefs/`,
+      };
+    }
+
+    // For non-unpkg URLs, just use the base directory
+    return {
+      baseURL,
+      sampleBaseURL: null,
+      synthdefBaseURL: null,
+    };
+  } catch {
+    return {
+      baseURL: null,
+      sampleBaseURL: null,
+      synthdefBaseURL: null,
+    };
+  }
+}
+
+const DEFAULT_URLS = deriveDefaultURLs();
+
 /**
  * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
  */
@@ -226,9 +271,9 @@ export class SuperSonic {
     this.#bufferManager = null;
     this.loadedSynthDefs = new Map();  // name -> Uint8Array (cached for recover())
 
-    // Configuration - derive URLs from baseURL or require explicit URLs
-    // This ensures SuperSonic works correctly in bundled/vendored environments
-    const baseURL = options.baseURL;
+    // Configuration - derive URLs from baseURL, import.meta.url, or require explicit URLs
+    // Priority: explicit options > baseURL option > auto-detected from import.meta.url
+    const baseURL = options.baseURL || DEFAULT_URLS.baseURL;
     const workerBaseURL = options.workerBaseURL || (baseURL ? `${baseURL}workers/` : null);
     const wasmBaseURL = options.wasmBaseURL || (baseURL ? `${baseURL}wasm/` : null);
 
@@ -298,9 +343,9 @@ export class SuperSonic {
     };
 
     // Resource loading configuration (private)
-    // Derive from baseURL if not explicitly provided
-    this.#sampleBaseURL = options.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null);
-    this.#synthdefBaseURL = options.synthdefBaseURL || (baseURL ? `${baseURL}synthdefs/` : null);
+    // Priority: explicit options > baseURL option > auto-detected from import.meta.url (for CDN)
+    this.#sampleBaseURL = options.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null) || DEFAULT_URLS.sampleBaseURL;
+    this.#synthdefBaseURL = options.synthdefBaseURL || (baseURL ? `${baseURL}synthdefs/` : null) || DEFAULT_URLS.synthdefBaseURL;
 
     // Fetch retry configuration
     this.#fetchRetryConfig = {
