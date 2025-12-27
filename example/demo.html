@@ -107,19 +107,17 @@
           <p class="code-section__step">Drop pro-grade audio synthesis into your web page&hellip;</p>
           <div class="code-snippets-container">
             <figure class="code-snippet">
-              <figcaption class="code-comment">Import SuperSonic</figcaption>
+              <figcaption class="code-comment">Import from CDN (or self-host)</figcaption>
               <pre
                 class="code-block code-block--pink"
-              ><code><span class="syn-kw">import</span> { <span class="syn-type">SuperSonic</span> } <span class="syn-kw">from</span> <span class="syn-str">'/supersonic/supersonic.js'</span>;</code></pre>
+              ><code><span class="syn-kw">import</span> { <span class="syn-type">SuperSonic</span> } <span class="syn-kw">from</span> <span class="syn-str">'https://unpkg.com/supersonic-scsynth'</span>;</code></pre>
             </figure>
 
             <figure class="code-snippet">
-              <figcaption class="code-comment">Initialise and you're ready to go</figcaption>
+              <figcaption class="code-comment">Initialise — zero config needed</figcaption>
               <pre
                 class="code-block code-block--blue"
-              ><code><span class="syn-kw">const</span> <span class="syn-type">sonic</span> = <span class="syn-kw">new</span> <span class="syn-type">SuperSonic</span>({
-  <span class="syn-str">baseURL</span>: <span class="syn-str">'/supersonic/'</span>
-});
+              ><code><span class="syn-kw">const</span> <span class="syn-type">sonic</span> = <span class="syn-kw">new</span> <span class="syn-type">SuperSonic</span>();
 <span class="syn-kw">await</span> sonic.<span class="syn-fn">init</span>();</code></pre>
             </figure>
 
@@ -145,7 +143,7 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
           </div>
 
           <p class="code-note">
-            Note: Self-hosting required + <code>COOP/COEP</code> headers — see
+            Works directly from CDN — no server setup needed. See
             <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener">README</a>
           </p>
         </div>

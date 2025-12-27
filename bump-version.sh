@@ -21,6 +21,9 @@ set -e
 #   9. packages/supersonic-scsynth-samples/index.js - UNPKG_BASE constant
 #  10. packages/supersonic-scsynth-samples/index.js - JSDELIVR_BASE constant
 #
+# Documentation version examples (1):
+#  11. docs/CDN.md - pinned version example
+#
 # C++ version constants (1):
 #  11. src/audio_processor.cpp - SUPERSONIC_VERSION_MINOR constant
 #

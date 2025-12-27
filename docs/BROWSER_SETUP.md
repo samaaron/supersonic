@@ -1,6 +1,35 @@
 # Browser Setup
 
-SuperSonic requires some specific browser features and server configuration to work properly.
+SuperSonic works in all modern browsers. Configuration requirements depend on which transport mode you use.
+
+## Transport Modes
+
+SuperSonic supports two transport modes:
+
+| Mode | Headers Required | Latency | Use Case |
+|------|------------------|---------|----------|
+| `postMessage` (default) | None | Higher | CDN, simple hosting, getting started |
+| `sab` | COOP/COEP | Lower | Production apps needing minimal latency |
+
+### PostMessage Mode (Default)
+
+Works everywhere with no special server configuration:
+
+```javascript
+const supersonic = new SuperSonic();  // postMessage is the default
+await supersonic.init();
+```
+
+This mode uses MessagePort for communication. It's slightly higher latency but works on any static host (GitHub Pages, Netlify, Vercel, S3, etc.) without COOP/COEP headers.
+
+### SAB Mode (SharedArrayBuffer)
+
+For lower latency, use SAB mode - but this requires specific server headers:
+
+```javascript
+const supersonic = new SuperSonic({ mode: 'sab' });
+await supersonic.init();
+```
 
 ## Browser Requirements
 
@@ -10,27 +39,28 @@ SuperSonic requires some specific browser features and server configuration to w
 - Safari 15.2+
 
 **Required features:**
-- SharedArrayBuffer
 - AudioWorklet
-- WebAssembly with threads
+- WebAssembly
+- SharedArrayBuffer (SAB mode only)
 
-## Server Headers
+## Server Headers (SAB Mode Only)
 
-Your server must send these HTTP headers for SharedArrayBuffer to work:
+If using `mode: 'sab'`, your server must send these HTTP headers:
 
 ```
 Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
-Cross-Origin-Resource-Policy: cross-origin
 ```
 
 ### Why These Headers?
 
 SharedArrayBuffer was disabled in browsers after the Spectre vulnerability was discovered. These headers re-enable it by isolating your page from other origins, preventing potential timing attacks.
 
-Without these headers, you'll see errors like:
+Without these headers in SAB mode, you'll see errors like:
 - `SharedArrayBuffer is not defined`
 - `Cannot construct a SharedArrayBuffer`
+
+**Solution:** Either add the headers (see below) or use the default `postMessage` mode.
 
 ### Example Server Configurations
 
@@ -67,7 +97,6 @@ server {
 
     add_header Cross-Origin-Opener-Policy same-origin;
     add_header Cross-Origin-Embedder-Policy require-corp;
-    add_header Cross-Origin-Resource-Policy cross-origin;
 
     location ~ \.wasm$ {
         types { application/wasm wasm; }
@@ -81,7 +110,6 @@ server {
 <IfModule mod_headers.c>
     Header set Cross-Origin-Opener-Policy "same-origin"
     Header set Cross-Origin-Embedder-Policy "require-corp"
-    Header set Cross-Origin-Resource-Policy "cross-origin"
 </IfModule>
 
 AddType application/wasm .wasm
@@ -96,7 +124,6 @@ const app = express();
 app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
 });
 
@@ -119,7 +146,9 @@ document.getElementById('start-button').addEventListener('click', async () => {
 
 ### "SharedArrayBuffer is not defined"
 
-Your server isn't sending the required COOP/COEP headers. Check your server configuration.
+You're using SAB mode but your server isn't sending COOP/COEP headers. Either:
+1. Configure your server to send the headers (see above)
+2. Or use the default `postMessage` mode which doesn't require headers
 
 ### Audio doesn't play
 
@@ -133,21 +162,18 @@ The browser may be blocking audio. Some browsers require user interaction before
 
 Check that:
 1. The `.wasm` file is being served with `Content-Type: application/wasm`
-2. The `wasmBaseURL` path is correct
+2. The `wasmBaseURL` path is correct (or let it auto-detect from import path)
 3. CORS headers allow loading from your domain
 
 ## Testing Locally
 
-The easiest way to test locally is using npx serve:
+The easiest way to test locally:
 
 ```bash
 cd example && npx serve
 # Open http://localhost:3000/demo.html
 ```
 
-Or use Docker:
+No special headers needed - the default `postMessage` mode just works.
 
-```bash
-docker build -t supersonic .
-docker run --rm -it -p 8002:8002 supersonic
-```
+For SAB mode testing, use the `serve.json` configuration shown above.

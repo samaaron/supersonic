@@ -92,13 +92,17 @@
 ```javascript
 import { SuperSonic } from "supersonic-scsynth";
 
-// Simple: use baseURL to derive all paths
+// Zero config - URLs auto-detected from import path
+// Works with CDN imports and local imports
+const supersonic = new SuperSonic();
+
+// Or with explicit baseURL
 const supersonic = new SuperSonic({
   baseURL: "/supersonic/"
 });
 // Derives: workers/, wasm/, synthdefs/, samples/
 
-// Or explicit paths (baseURL not required)
+// Or explicit paths
 const supersonic = new SuperSonic({
   workerBaseURL:   "/supersonic/workers/",
   wasmBaseURL:     "/supersonic/wasm/",
@@ -117,11 +121,12 @@ const supersonic = new SuperSonic({
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `baseURL` | No* | Base URL - derives `workers/`, `wasm/`, `synthdefs/`, `samples/` subdirectories |
-| `workerBaseURL` | No* | Base URL for worker scripts (overrides baseURL) |
-| `wasmBaseURL` | No* | Base URL for WASM files (overrides baseURL) |
+| `baseURL` | No | Base URL - derives `workers/`, `wasm/`, `synthdefs/`, `samples/` subdirectories. Auto-detected from import path if not provided. |
+| `workerBaseURL` | No | Base URL for worker scripts (overrides baseURL) |
+| `wasmBaseURL` | No | Base URL for WASM files (overrides baseURL) |
 | `synthdefBaseURL` | No | Base URL for synthdef files (used by `loadSynthDef`) |
 | `sampleBaseURL` | No | Base URL for sample files (used by `loadSample`) |
+| `mode` | No | Transport mode: `'postMessage'` (default) or `'sab'`. PostMessage works everywhere; SAB requires COOP/COEP headers but has lower latency. |
 | `scsynthOptions` | No | Server options (see below) |
 | `preschedulerCapacity` | No | Max pending events in JS prescheduler (default: 65536) |
 | `activityEvent` | No | Event emission truncation options (see below) |
@@ -131,7 +136,7 @@ const supersonic = new SuperSonic({
 | `debugOscOut` | No | Log outgoing OSC messages to console |
 | `activityConsoleLog` | No | Console output truncation options (see below) |
 
-\* Either `baseURL` or both `workerBaseURL` and `wasmBaseURL` must be provided.
+**Note:** All URL options are auto-detected from the import path when loading from CDN (unpkg). For local hosting, either provide `baseURL` or ensure the import path structure matches `supersonic.js` with sibling `workers/`, `wasm/`, etc. directories.
 
 ### Activity Event Options (`activityEvent`)
 

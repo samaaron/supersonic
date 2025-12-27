@@ -1,128 +1,129 @@
-# CDN & Self-Hosting
+# CDN Usage
 
-Browser security means the core files must live on your server.
+SuperSonic works directly from CDN with zero configuration.
 
-## Why Self-Hosting is Required
+## Zero-Config CDN
 
-SuperSonic uses SharedArrayBuffer for real-time audio communication between JavaScript and the WASM engine. This requires workers to run on the same origin as your page.
+The simplest way to use SuperSonic - just import and go:
 
-Even with proper COOP/COEP headers, browsers block cross-origin workers from using SharedArrayBuffer.
+```html
+<script type="module">
+  import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
 
-**What this means:**
-
-```javascript
-// This won't work - cross-origin workers are blocked
-import { SuperSonic } from 'https://cdn.example.com/supersonic.js';
-
-// This works - same origin as your page
-import { SuperSonic } from './supersonic.js';
+  document.getElementById('play').onclick = async () => {
+    const supersonic = new SuperSonic();
+    await supersonic.init();
+    await supersonic.loadSynthDef("sonic-pi-beep");
+    supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60);
+  };
+</script>
 ```
 
-## What Must Be Self-Hosted
+All URLs are auto-detected from the import path:
+- Workers load from the same CDN path
+- Synthdefs load from `supersonic-scsynth-synthdefs` package
+- Samples load from `supersonic-scsynth-samples` package
 
-These files must be served from your own domain:
+No server setup, no COOP/COEP headers, no configuration needed.
 
-- `supersonic.js` - Main entry point
-- `workers/*.js` - All worker files
-- `wasm/*.wasm` - WebAssembly files
+## How It Works
 
-## What Can Use CDN
+SuperSonic uses two techniques to work from CDN:
 
-Synthdefs and samples are just data files, not workers. They can be loaded from anywhere:
+1. **PostMessage Mode** (default) - Uses MessagePort instead of SharedArrayBuffer, avoiding the need for COOP/COEP headers
 
-- `synthdefs/*.scsyndef` - Synth definitions
-- `samples/*.flac` - Audio samples
+2. **Blob URL Workers** - Fetches worker scripts and creates Blob URLs, bypassing cross-origin worker restrictions
 
-## Hybrid Approach
+## Version Pinning
 
-The recommended setup: self-host the core, use CDN for assets.
+For production, pin to a specific version:
 
 ```javascript
-import { SuperSonic } from "supersonic-scsynth";
+import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.21.6";
+```
 
-const baseURL = "/supersonic"; // Configure for your setup
+This ensures synthdefs and samples also load from matching version packages.
+
+## Alternative CDNs
+
+SuperSonic works with any npm CDN:
+
+**unpkg (recommended)**
+```javascript
+import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
+```
+
+**jsDelivr**
+```javascript
+import { SuperSonic } from "https://cdn.jsdelivr.net/npm/supersonic-scsynth@latest";
+```
+
+## Self-Hosting
+
+For production apps, you may prefer to self-host. SuperSonic auto-detects paths from the import location:
+
+```javascript
+import { SuperSonic } from "./supersonic/supersonic.js";
+
+const supersonic = new SuperSonic();  // Paths auto-detected
+await supersonic.init();
+```
+
+Or with explicit configuration:
+
+```javascript
 const supersonic = new SuperSonic({
-  // Must be self-hosted (workers use SharedArrayBuffer)
-  workerBaseURL: `${baseURL}/workers/`,
-  wasmBaseURL:   `${baseURL}/wasm/`,
-
-  // Can use CDN (just data files)
-  synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
-  sampleBaseURL:   "https://unpkg.com/supersonic-scsynth-samples@latest/samples/"
+  baseURL: "/supersonic/"
 });
 ```
 
-This gives you:
-- Small self-hosted footprint (~450KB JS + ~1.5MB WASM)
-- CDN-cached synthdefs and samples (~34MB)
-
-## Setting Up Self-Hosting
-
-**1. Download the core files:**
-
-```bash
-curl -O https://samaaron.github.io/supersonic/supersonic-dist.zip
-unzip supersonic-dist.zip
-```
-
-**2. Copy to your web server:**
+### Self-Hosted Directory Structure
 
 ```
 your-site/
-├── supersonic.js
-├── workers/
-│   ├── scsynth_audio_worklet.js
-│   ├── osc_in_worker.js
-│   ├── osc_out_prescheduler_worker.js
-│   └── debug_worker.js
-└── wasm/
-    └── scsynth-nrt.wasm
+├── supersonic/
+│   ├── supersonic.js
+│   ├── workers/
+│   │   ├── scsynth_audio_worklet.js
+│   │   ├── osc_in_worker.js
+│   │   ├── osc_out_prescheduler_worker.js
+│   │   └── debug_worker.js
+│   ├── wasm/
+│   │   └── scsynth-nrt.wasm
+│   ├── synthdefs/     # Optional - can use CDN
+│   └── samples/       # Optional - can use CDN
 ```
 
-**3. Configure headers:**
+### Hybrid: Self-Host Core, CDN for Assets
 
-Your server must send COOP/COEP headers. See [Browser Setup](BROWSER_SETUP.md).
-
-**4. Use in your code:**
+Self-host the small core files, use CDN for large assets:
 
 ```javascript
-import { SuperSonic } from "supersonic-scsynth";
-
-const baseURL = "/supersonic"; // Configure for your setup
 const supersonic = new SuperSonic({
-  workerBaseURL:   `${baseURL}/workers/`,
-  wasmBaseURL:     `${baseURL}/wasm/`,
-  synthdefBaseURL: `${baseURL}/synthdefs/`,
-  sampleBaseURL:   `${baseURL}/samples/`
+  baseURL: "/supersonic/",
+  synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
+  sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/"
 });
 ```
 
-## Example: Complete Self-Hosted Setup
+## SAB Mode (Advanced)
 
-If you want everything local (no CDN at all):
+For lowest latency, use SharedArrayBuffer mode. This requires COOP/COEP headers but provides direct memory access:
 
 ```javascript
-import { SuperSonic } from "supersonic-scsynth";
-
-const baseURL = "/supersonic"; // Configure for your setup
-const supersonic = new SuperSonic({
-  workerBaseURL:   `${baseURL}/workers/`,
-  wasmBaseURL:     `${baseURL}/wasm/`,
-  synthdefBaseURL: `${baseURL}/synthdefs/`,
-  sampleBaseURL:   `${baseURL}/samples/`
-});
-
-await supersonic.init();
-await supersonic.loadSynthDef("sonic-pi-beep");
-supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60);
+const supersonic = new SuperSonic({ mode: 'sab' });
 ```
+
+See [Browser Setup](BROWSER_SETUP.md) for header configuration.
+
+**Note:** SAB mode with CDN requires your page to have COOP/COEP headers, even though the files come from CDN.
 
 ## npm Packages
 
-The npm packages exist for convenience, but remember they must be bundled and deployed to your server:
+Install for bundling or local development:
 
 ```bash
-npm install supersonic-scsynth-bundle
+npm install supersonic-scsynth           # Core library
+npm install supersonic-scsynth-synthdefs # Synth definitions
+npm install supersonic-scsynth-samples   # Audio samples
 ```
-
-Then copy the files from `node_modules/` to your public directory, or configure your bundler to include them.
