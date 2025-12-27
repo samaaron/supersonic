@@ -7,6 +7,7 @@
 */
 
 import { Transport } from './transport.js';
+import { createWorker } from '../worker_loader.js';
 
 /**
  * PostMessage Transport
@@ -85,7 +86,8 @@ export class PostMessageTransport extends Transport {
 
         // Reuse the existing prescheduler worker with postMessage mode
         // It will dispatch messages to us instead of writing to ring buffer
-        this.#preschedulerWorker = new Worker(
+        // Uses Blob URL if cross-origin (enables CDN-only deployment)
+        this.#preschedulerWorker = await createWorker(
             this.#workerBaseURL + 'osc_out_prescheduler_worker.js',
             { type: 'module' }
         );

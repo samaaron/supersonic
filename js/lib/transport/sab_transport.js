@@ -9,6 +9,7 @@
 import { Transport } from './transport.js';
 import { writeToRingBuffer } from '../ring_buffer_writer.js';
 import { DirectWriter } from '../direct_writer.js';
+import { createWorker } from '../worker_loader.js';
 
 /**
  * SAB (SharedArrayBuffer) Transport
@@ -98,19 +99,15 @@ export class SABTransport extends Transport {
             return;
         }
 
-        // Spawn workers
-        this.#oscOutWorker = new Worker(
-            this.#workerBaseURL + 'osc_out_prescheduler_worker.js',
-            { type: 'module' }
-        );
-        this.#oscInWorker = new Worker(
-            this.#workerBaseURL + 'osc_in_worker.js',
-            { type: 'module' }
-        );
-        this.#debugWorker = new Worker(
-            this.#workerBaseURL + 'debug_worker.js',
-            { type: 'module' }
-        );
+        // Spawn workers (uses Blob URL if cross-origin)
+        const [oscOutWorker, oscInWorker, debugWorker] = await Promise.all([
+            createWorker(this.#workerBaseURL + 'osc_out_prescheduler_worker.js', { type: 'module' }),
+            createWorker(this.#workerBaseURL + 'osc_in_worker.js', { type: 'module' }),
+            createWorker(this.#workerBaseURL + 'debug_worker.js', { type: 'module' })
+        ]);
+        this.#oscOutWorker = oscOutWorker;
+        this.#oscInWorker = oscInWorker;
+        this.#debugWorker = debugWorker;
 
         // Set up message handlers
         this.#setupWorkerHandlers();
