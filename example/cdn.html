@@ -9,8 +9,8 @@
     <button id="play">Play Amen Break</button>
 
     <script type="module">
-      // Everything from CDN - works without COOP/COEP headers
-      import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.21.3/dist/supersonic.js";
+      // Everything from CDN - all URLs auto-detected from import path
+      import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.21.5/dist/supersonic.js";
 
       const button = document.getElementById("play");
       let sonic = null;
@@ -19,15 +19,7 @@
         if (!sonic) {
           button.textContent = "Booting scsynth...";
 
-          sonic = new SuperSonic({
-            // All assets from CDN
-            workerBaseURL: "https://unpkg.com/supersonic-scsynth@0.21.3/dist/workers/",
-            wasmBaseURL: "https://unpkg.com/supersonic-scsynth@0.21.3/dist/wasm/",
-            sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@0.21.3/samples/",
-            synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@0.21.3/synthdefs/",
-            // postMessage mode works without COOP/COEP headers
-            mode: "postMessage",
-          });
+          sonic = new SuperSonic();
 
           await sonic.init();
           await sonic.loadSynthDefs(["sonic-pi-basic_stereo_player"]);
