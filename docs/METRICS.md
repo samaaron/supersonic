@@ -1,6 +1,9 @@
 # Metrics
 
-Performance metrics read directly from SharedArrayBuffer - no message passing overhead, so you can poll at 60fps if needed.
+Performance metrics for monitoring SuperSonic's internal state.
+
+- **SAB mode**: Reads directly from SharedArrayBuffer with zero overhead
+- **PostMessage mode**: Reads from a cached snapshot (worklet sends updates every 25ms by default)
 
 ## Quick Start
 
@@ -170,4 +173,8 @@ supersonic.on('metrics', (metrics) => {
 
 ## Performance
 
-`getMetrics()` takes less than 0.1ms - it's just reading from shared memory. The default 100ms polling interval adds negligible CPU load.
+**SAB mode**: `getMetrics()` takes less than 0.1ms - it's just reading from shared memory.
+
+**PostMessage mode**: `getMetrics()` reads from a cached snapshot that the worklet sends every 25ms (configurable via `snapshotIntervalMs`). The snapshot includes both metrics and node tree data in a single transfer.
+
+The default 100ms polling interval for the `'metrics'` event adds negligible CPU load in either mode.
