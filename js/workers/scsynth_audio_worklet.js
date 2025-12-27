@@ -602,10 +602,6 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     async handleMessage(event) {
         const { data } = event;
 
-        // Debug: log all message types
-        if (data.type !== 'osc' && data.type !== 'init' && data.type !== 'loadWasm') {
-            console.log('[AudioWorklet] Received message type:', data.type);
-        }
 
         try {
             // Handle OSC messages (postMessage mode)

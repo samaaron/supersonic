@@ -254,6 +254,10 @@ export class SuperSonic {
   #cachedSnapshotBuffer = null;
   #snapshotsSent = 0;
 
+  // Buffer for early debugRawBatch messages (before scsynth_osc.js is initialized)
+  #earlyDebugMessages = [];
+  #debugRawHandler = null;
+
   constructor(options = {}) {
     this.#initialized = false;
     this.#initializing = false;
@@ -2008,8 +2012,17 @@ export class SuperSonic {
       await this.#osc.init({
         mode: 'postMessage',
         workletPort: this.#workletNode.port,
-        preschedulerCapacity: this.#config.preschedulerCapacity
+        preschedulerCapacity: this.#config.preschedulerCapacity,
+        earlyDebugMessages: this.#earlyDebugMessages
       });
+
+      // Register handler for future debugRawBatch messages
+      this.#debugRawHandler = (data) => {
+        this.#osc.handleDebugRaw(data);
+      };
+
+      // Clear the early messages buffer
+      this.#earlyDebugMessages = [];
     }
   }
 
@@ -2210,9 +2223,19 @@ export class SuperSonic {
           }
           break;
 
+        case "debugRawBatch":
+          // Raw debug bytes from worklet - forward to handler or buffer for later
+          if (this.#debugRawHandler) {
+            this.#debugRawHandler(data);
+          } else {
+            // Buffer early messages for replay when scsynth_osc.js is ready
+            this.#earlyDebugMessages.push(data);
+          }
+          break;
+
         default:
           // Log unexpected message types for debugging
-          if (__DEV__ && data.type && !['oscReplies', 'oscReply', 'debugBatch', 'debugRawBatch', 'initialized', 'bufferLoaded', 'timeOffset'].includes(data.type)) {
+          if (__DEV__ && data.type && !['oscReplies', 'oscReply', 'debugBatch', 'debugRawBatch', 'initialized', 'bufferLoaded', 'bufferCopied', 'timeOffset'].includes(data.type)) {
             console.log("[DEBUG] Unknown worklet message type:", data.type);
           }
           break;
