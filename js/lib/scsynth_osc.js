@@ -7,6 +7,7 @@
 */
 
 import osc from '../vendor/osc.js/osc.js';
+import { createWorker } from './worker_loader.js';
 
 /**
  * ScsynthOSC - OSC communication layer for scsynth
@@ -108,10 +109,15 @@ export default class ScsynthOSC {
         }
 
         try {
-            // Create all workers
-            this.workers.oscOut = new Worker(this.workerBaseURL + 'osc_out_prescheduler_worker.js', {type: 'module'});
-            this.workers.oscIn = new Worker(this.workerBaseURL + 'osc_in_worker.js', {type: 'module'});
-            this.workers.debug = new Worker(this.workerBaseURL + 'debug_worker.js', {type: 'module'});
+            // Create all workers (uses Blob URL if cross-origin)
+            const [oscOutWorker, oscInWorker, debugWorker] = await Promise.all([
+                createWorker(this.workerBaseURL + 'osc_out_prescheduler_worker.js', {type: 'module'}),
+                createWorker(this.workerBaseURL + 'osc_in_worker.js', {type: 'module'}),
+                createWorker(this.workerBaseURL + 'debug_worker.js', {type: 'module'})
+            ]);
+            this.workers.oscOut = oscOutWorker;
+            this.workers.oscIn = oscInWorker;
+            this.workers.debug = debugWorker;
 
             // Set up worker message handlers
             this.#setupSABWorkerHandlers();
@@ -152,10 +158,14 @@ export default class ScsynthOSC {
         }
 
         try {
-            // Create prescheduler and debug workers
+            // Create prescheduler and debug workers (uses Blob URL if cross-origin)
             // Debug worker handles text decoding (TextDecoder not available in AudioWorklet)
-            this.workers.oscOut = new Worker(this.workerBaseURL + 'osc_out_prescheduler_worker.js', {type: 'module'});
-            this.workers.debug = new Worker(this.workerBaseURL + 'debug_worker.js', {type: 'module'});
+            const [oscOutWorker, debugWorker] = await Promise.all([
+                createWorker(this.workerBaseURL + 'osc_out_prescheduler_worker.js', {type: 'module'}),
+                createWorker(this.workerBaseURL + 'debug_worker.js', {type: 'module'})
+            ]);
+            this.workers.oscOut = oscOutWorker;
+            this.workers.debug = debugWorker;
 
             // Set up handlers
             this.#setupPostMessageHandlers();

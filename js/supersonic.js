@@ -31,6 +31,7 @@ import {
 import { MemoryLayout } from "./memory_layout.js";
 import { defaultWorldOptions } from "./scsynth_options.js";
 import * as MetricsOffsets from "./lib/metrics_offsets.js";
+import { addWorkletModule, createWorker } from "./lib/worker_loader.js";
 
 /**
  * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
@@ -1785,8 +1786,8 @@ export class SuperSonic {
    * Initialize AudioWorklet with WASM
    */
   async #initializeAudioWorklet(wasmBytes) {
-    // Load AudioWorklet processor
-    await this.#audioContext.audioWorklet.addModule(this.#config.workletUrl);
+    // Load AudioWorklet processor (uses Blob URL if cross-origin)
+    await addWorkletModule(this.#audioContext.audioWorklet, this.#config.workletUrl);
 
     // Create AudioWorkletNode
     // Configure with numberOfInputs: 0 to act as a source node
