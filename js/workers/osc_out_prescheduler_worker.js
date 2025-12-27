@@ -27,14 +27,88 @@ let uint8View = null;
 // Ring buffer control indices (SAB mode only)
 let CONTROL_INDICES = {};
 
-// Metrics view (for writing stats to SAB, SAB mode only)
+// Metrics view (for writing stats)
+// SAB mode: view into SharedArrayBuffer
+// postMessage mode: view into local ArrayBuffer (sent periodically)
 let metricsView = null;
+let localMetricsBuffer = null;  // postMessage mode only - local buffer to send
 
-// PostMessage mode metrics (tracked locally)
-let postMessageMetrics = {
-    scheduled: 0,
-    dispatched: 0,
-    cancelled: 0,
+// Metrics send timer (postMessage mode only)
+let metricsSendTimer = null;
+let metricsSendIntervalMs = 25;  // Default, can be overridden by snapshotIntervalMs config
+
+// ============================================================================
+// METRICS HELPERS (work in both SAB and postMessage modes)
+// ============================================================================
+
+/**
+ * Store a value at a metrics offset
+ * Uses Atomics in SAB mode, direct access in postMessage mode
+ */
+const metricsStore = (offset, value) => {
+    if (!metricsView) return;
+    if (mode === 'sab') {
+        Atomics.store(metricsView, offset, value);
+    } else {
+        metricsView[offset] = value;
+    }
+};
+
+/**
+ * Load a value from a metrics offset
+ * Uses Atomics in SAB mode, direct access in postMessage mode
+ */
+const metricsLoad = (offset) => {
+    if (!metricsView) return 0;
+    if (mode === 'sab') {
+        return Atomics.load(metricsView, offset);
+    } else {
+        return metricsView[offset];
+    }
+};
+
+/**
+ * Add to a value at a metrics offset
+ * Uses Atomics in SAB mode, direct access in postMessage mode
+ */
+const metricsAdd = (offset, value) => {
+    if (!metricsView) return;
+    if (mode === 'sab') {
+        Atomics.add(metricsView, offset, value);
+    } else {
+        metricsView[offset] += value;
+    }
+};
+
+/**
+ * Start periodic sending of metrics buffer to main thread (postMessage mode only)
+ */
+const startMetricsSending = () => {
+    if (mode !== 'postMessage' || metricsSendTimer !== null) return;
+
+    const sendMetrics = () => {
+        if (localMetricsBuffer && metricsView) {
+            // Send a copy of the metrics buffer
+            self.postMessage({
+                type: 'preschedulerMetrics',
+                metrics: new Uint32Array(localMetricsBuffer.slice(0))
+            });
+        }
+        metricsSendTimer = setTimeout(sendMetrics, metricsSendIntervalMs);
+    };
+
+    sendMetrics();
+    schedulerLog('[PreScheduler] Started metrics sending (every ' + metricsSendIntervalMs + 'ms)');
+};
+
+/**
+ * Stop periodic sending of metrics (postMessage mode only)
+ */
+const stopMetricsSending = () => {
+    if (metricsSendTimer !== null) {
+        clearTimeout(metricsSendTimer);
+        metricsSendTimer = null;
+    }
 };
 
 // Priority queue implemented as binary min-heap
@@ -139,20 +213,20 @@ const initSharedBuffer = () => {
 };
 
 /**
- * Write metrics to SharedArrayBuffer
- * Increments use Atomics.add() for thread safety, stores use Atomics.store()
+ * Write metrics to buffer (SAB or local)
+ * Uses helper functions that work in both modes
  */
 const updateMetrics = () => {
     if (!metricsView) return;
 
-    // Update current values (use Atomics.store for absolute values)
-    Atomics.store(metricsView, MetricsOffsets.PRESCHEDULER_PENDING, eventHeap.length);
+    // Update current values
+    metricsStore(MetricsOffsets.PRESCHEDULER_PENDING, eventHeap.length);
 
     // Update max if current exceeds it
     const currentPending = eventHeap.length;
-    const currentMax = Atomics.load(metricsView, MetricsOffsets.PRESCHEDULER_PEAK);
+    const currentMax = metricsLoad(MetricsOffsets.PRESCHEDULER_PEAK);
     if (currentPending > currentMax) {
-        Atomics.store(metricsView, MetricsOffsets.PRESCHEDULER_PEAK, currentPending);
+        metricsStore(MetricsOffsets.PRESCHEDULER_PEAK, currentPending);
     }
 };
 
@@ -170,7 +244,7 @@ const dispatchOSCMessage = (oscMessage, isRetry, timestamp = null) => {
             oscData: oscMessage,
             timestamp: timestamp,
         });
-        postMessageMetrics.dispatched++;
+        metricsAdd(MetricsOffsets.PRESCHEDULER_SENT, 1);
         return true;  // postMessage doesn't fail
     }
 
@@ -209,8 +283,8 @@ const dispatchOSCMessage = (oscMessage, isRetry, timestamp = null) => {
         return false;
     }
 
-    // Update SAB metrics
-    if (metricsView) Atomics.add(metricsView, MetricsOffsets.PRESCHEDULER_SENT, 1);
+    // Update metrics
+    metricsAdd(MetricsOffsets.PRESCHEDULER_SENT, 1);
     return true;
 };
 
@@ -222,7 +296,7 @@ const queueForRetry = (oscData, context) => {
     const totalPending = eventHeap.length + retryQueue.length;
     if (totalPending >= maxPendingMessages) {
         console.error('[PreScheduler] Backpressure: dropping retry (' + totalPending + ' pending)');
-        if (metricsView) Atomics.add(metricsView, MetricsOffsets.RETRIES_FAILED, 1);
+        metricsAdd(MetricsOffsets.RETRIES_FAILED, 1);
         return;
     }
 
@@ -233,13 +307,11 @@ const queueForRetry = (oscData, context) => {
         queuedAt: performance.now()
     });
 
-    // Update SAB metrics
-    if (metricsView) {
-        Atomics.store(metricsView, MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
-        const currentMax = Atomics.load(metricsView, MetricsOffsets.RETRY_QUEUE_MAX);
-        if (retryQueue.length > currentMax) {
-            Atomics.store(metricsView, MetricsOffsets.RETRY_QUEUE_MAX, retryQueue.length);
-        }
+    // Update metrics
+    metricsStore(MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
+    const currentMax = metricsLoad(MetricsOffsets.RETRY_QUEUE_MAX);
+    if (retryQueue.length > currentMax) {
+        metricsStore(MetricsOffsets.RETRY_QUEUE_MAX, retryQueue.length);
     }
 
     schedulerLog('[PreScheduler] Queued message for retry:', context, 'queue size:', retryQueue.length);
@@ -264,28 +336,24 @@ const processRetryQueue = () => {
         if (success) {
             // Success - remove from queue
             retryQueue.splice(i, 1);
-            if (metricsView) {
-                Atomics.add(metricsView, MetricsOffsets.RETRIES_SUCCEEDED, 1);
-                Atomics.add(metricsView, MetricsOffsets.MESSAGES_RETRIED, 1);
-                Atomics.store(metricsView, MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
-            }
+            metricsAdd(MetricsOffsets.RETRIES_SUCCEEDED, 1);
+            metricsAdd(MetricsOffsets.MESSAGES_RETRIED, 1);
+            metricsStore(MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
             schedulerLog('[PreScheduler] Retry succeeded for:', item.context,
                         'after', item.retryCount + 1, 'attempts');
             // Don't increment i - we removed an item
         } else {
             // Failed - increment retry count
             item.retryCount++;
-            if (metricsView) Atomics.add(metricsView, MetricsOffsets.MESSAGES_RETRIED, 1);
+            metricsAdd(MetricsOffsets.MESSAGES_RETRIED, 1);
 
             if (item.retryCount >= MAX_RETRIES_PER_MESSAGE) {
                 // Give up on this message
                 const errorMsg = `Ring buffer full - dropped message after ${MAX_RETRIES_PER_MESSAGE} retries (${item.context})`;
                 console.error('[PreScheduler]', errorMsg);
                 retryQueue.splice(i, 1);
-                if (metricsView) {
-                    Atomics.add(metricsView, MetricsOffsets.RETRIES_FAILED, 1);
-                    Atomics.store(metricsView, MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
-                }
+                metricsAdd(MetricsOffsets.RETRIES_FAILED, 1);
+                metricsStore(MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
                 // Notify main thread so onError callback fires
                 self.postMessage({ type: 'error', error: errorMsg });
                 // Don't increment i - we removed an item
@@ -337,8 +405,8 @@ const scheduleEvent = (oscData, sessionId, runTag) => {
 
     heapPush(event);
 
-    if (metricsView) Atomics.add(metricsView, MetricsOffsets.BUNDLES_SCHEDULED, 1);
-    updateMetrics();  // Update SAB with current queue depth and peak
+    metricsAdd(MetricsOffsets.BUNDLES_SCHEDULED, 1);
+    updateMetrics();  // Update buffer with current queue depth and peak
 
     schedulerLog('[PreScheduler] Scheduled bundle:',
                  'NTP=' + ntpTime.toFixed(3),
@@ -459,10 +527,10 @@ const checkAndDispatch = () => {
         if (nextEvent.ntpTime <= lookaheadTime) {
             // Ready to dispatch
             heapPop();
-            updateMetrics();  // Update SAB with current queue depth
+            updateMetrics();  // Update buffer with current queue depth
 
             const timeUntilExec = nextEvent.ntpTime - currentNTP;
-            if (metricsView) Atomics.add(metricsView, MetricsOffsets.TOTAL_DISPATCHES, 1);
+            metricsAdd(MetricsOffsets.TOTAL_DISPATCHES, 1);
 
             schedulerLog('[PreScheduler] Dispatching bundle:',
                         'NTP=' + nextEvent.ntpTime.toFixed(3),
@@ -514,8 +582,8 @@ const cancelBy = (predicate) => {
     if (removed > 0) {
         eventHeap = remaining;
         heapify();
-        if (metricsView) Atomics.add(metricsView, MetricsOffsets.EVENTS_CANCELLED, removed);
-        updateMetrics();  // Update SAB with current queue depth
+        metricsAdd(MetricsOffsets.EVENTS_CANCELLED, removed);
+        updateMetrics();  // Update buffer with current queue depth
         schedulerLog('[PreScheduler] Cancelled ' + removed + ' events, ' + eventHeap.length + ' remaining');
     }
 };
@@ -543,9 +611,9 @@ const cancelAllTags = () => {
         return;
     }
     const cancelled = eventHeap.length;
-    if (metricsView) Atomics.add(metricsView, MetricsOffsets.EVENTS_CANCELLED, cancelled);
+    metricsAdd(MetricsOffsets.EVENTS_CANCELLED, cancelled);
     eventHeap = [];
-    updateMetrics();  // Update SAB (sets eventsPending to 0)
+    updateMetrics();  // Update buffer (sets eventsPending to 0)
     schedulerLog('[PreScheduler] Cancelled all ' + cancelled + ' events');
     // Note: Periodic timer continues running (it will just find empty queue)
 };
@@ -615,6 +683,9 @@ self.addEventListener('message', (event) => {
                 if (data.maxPendingMessages) {
                     maxPendingMessages = data.maxPendingMessages;
                 }
+                if (data.snapshotIntervalMs) {
+                    metricsSendIntervalMs = data.snapshotIntervalMs;
+                }
 
                 if (mode === 'sab') {
                     // SAB mode: initialize ring buffer access
@@ -622,8 +693,16 @@ self.addEventListener('message', (event) => {
                     ringBufferBase = data.ringBufferBase;
                     bufferConstants = data.bufferConstants;
                     initSharedBuffer();
+                } else {
+                    // postMessage mode: create local metrics buffer with same layout as SAB
+                    // Size matches METRICS_SIZE (128 bytes = 32 uint32s)
+                    const METRICS_SIZE = 128;
+                    localMetricsBuffer = new ArrayBuffer(METRICS_SIZE);
+                    metricsView = new Uint32Array(localMetricsBuffer);
+
+                    // Start periodic sending of metrics
+                    startMetricsSending();
                 }
-                // PostMessage mode: no SAB initialization needed
 
                 // Start periodic polling
                 startPeriodicPolling();

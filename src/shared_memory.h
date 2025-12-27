@@ -59,11 +59,11 @@ constexpr uint32_t OUT_BUFFER_START   = IN_BUFFER_START + IN_BUFFER_SIZE;
 constexpr uint32_t DEBUG_BUFFER_START = OUT_BUFFER_START + OUT_BUFFER_SIZE;
 constexpr uint32_t CONTROL_START      = DEBUG_BUFFER_START + DEBUG_BUFFER_SIZE;
 constexpr uint32_t METRICS_START      = CONTROL_START + CONTROL_SIZE;
-constexpr uint32_t NTP_START_TIME_START = METRICS_START + METRICS_SIZE;
+constexpr uint32_t NODE_TREE_START = METRICS_START + METRICS_SIZE;  // Contiguous with METRICS for efficient postMessage copying
+constexpr uint32_t NTP_START_TIME_START = NODE_TREE_START + NODE_TREE_SIZE;
 constexpr uint32_t DRIFT_OFFSET_START = NTP_START_TIME_START + NTP_START_TIME_SIZE;
 constexpr uint32_t GLOBAL_OFFSET_START = DRIFT_OFFSET_START + DRIFT_OFFSET_SIZE;
-constexpr uint32_t NODE_TREE_START = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
-constexpr uint32_t AUDIO_CAPTURE_START = NODE_TREE_START + NODE_TREE_SIZE;
+constexpr uint32_t AUDIO_CAPTURE_START = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
 
 // Total buffer size (for validation)
 constexpr uint32_t TOTAL_BUFFER_SIZE  = AUDIO_CAPTURE_START + AUDIO_CAPTURE_SIZE;
@@ -211,18 +211,19 @@ struct BufferLayout {
     uint32_t control_size;
     uint32_t metrics_start;
     uint32_t metrics_size;
-    uint32_t ntp_start_time_start;
-    uint32_t ntp_start_time_size;
-    uint32_t drift_offset_start;
-    uint32_t drift_offset_size;
-    uint32_t global_offset_start;
-    uint32_t global_offset_size;
+    // NODE_TREE is now contiguous with METRICS for efficient postMessage copying
     uint32_t node_tree_start;
     uint32_t node_tree_size;
     uint32_t node_tree_header_size;
     uint32_t node_tree_entry_size;
     uint32_t node_tree_def_name_size;
     uint32_t node_tree_max_nodes;
+    uint32_t ntp_start_time_start;
+    uint32_t ntp_start_time_size;
+    uint32_t drift_offset_start;
+    uint32_t drift_offset_size;
+    uint32_t global_offset_start;
+    uint32_t global_offset_size;
     uint32_t audio_capture_start;
     uint32_t audio_capture_size;
     uint32_t audio_capture_header_size;
@@ -251,18 +252,19 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     CONTROL_SIZE,
     METRICS_START,
     METRICS_SIZE,
-    NTP_START_TIME_START,
-    NTP_START_TIME_SIZE,
-    DRIFT_OFFSET_START,
-    DRIFT_OFFSET_SIZE,
-    GLOBAL_OFFSET_START,
-    GLOBAL_OFFSET_SIZE,
+    // NODE_TREE now contiguous with METRICS
     NODE_TREE_START,
     NODE_TREE_SIZE,
     NODE_TREE_HEADER_SIZE,
     NODE_TREE_ENTRY_SIZE,
     NODE_TREE_DEF_NAME_SIZE,
     NODE_TREE_MAX_NODES,
+    NTP_START_TIME_START,
+    NTP_START_TIME_SIZE,
+    DRIFT_OFFSET_START,
+    DRIFT_OFFSET_SIZE,
+    GLOBAL_OFFSET_START,
+    GLOBAL_OFFSET_SIZE,
     AUDIO_CAPTURE_START,
     AUDIO_CAPTURE_SIZE,
     AUDIO_CAPTURE_HEADER_SIZE,

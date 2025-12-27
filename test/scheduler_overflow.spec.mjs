@@ -46,7 +46,9 @@ function hasAudio(samples) {
 `;
 
 test.describe("Scheduler Queue Overflow", () => {
+  // Audio capture requires SharedArrayBuffer - not available in postMessage mode
   test(`sending ${TOTAL_MESSAGES} timed bundles should not drop any messages`, async ({ page, sonicConfig }) => {
+    test.skip(sonicConfig.mode === 'postMessage', 'Audio capture requires SharedArrayBuffer');
     const errors = [];
     const debugLogs = [];
 

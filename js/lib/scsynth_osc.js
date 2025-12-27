@@ -46,6 +46,18 @@ export default class ScsynthOSC {
         this.sharedBuffer = null;
         this.ringBufferBase = null;
         this.bufferConstants = null;
+
+        // Cached prescheduler metrics for postMessage mode
+        // (prescheduler worker can't write to worklet's WASM memory, so it sends metrics via postMessage)
+        this.cachedPreschedulerMetrics = null;
+    }
+
+    /**
+     * Get cached prescheduler metrics (postMessage mode only)
+     * @returns {Uint32Array|null} Raw metrics array, or null if not in postMessage mode
+     */
+    getPreschedulerMetrics() {
+        return this.cachedPreschedulerMetrics;
     }
 
     /**
@@ -275,6 +287,10 @@ export default class ScsynthOSC {
                             timestamp: data.timestamp
                         });
                     }
+                    break;
+                case 'preschedulerMetrics':
+                    // Cache prescheduler metrics (worklet can't access prescheduler's local buffer)
+                    this.cachedPreschedulerMetrics = data.metrics;
                     break;
                 case 'error':
                     console.error('[ScsynthOSC] OSC OUT error:', data.error);

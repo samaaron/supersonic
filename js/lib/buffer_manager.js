@@ -216,14 +216,14 @@ export class BufferManager {
             await this.#awaitPendingReplacement(bufnum);
 
             // Execute the actual operation (loading file or allocating empty buffer)
-            const { ptr, sizeBytes, numFrames, numChannels, sampleRate, ...extraProps } = await operation();
+            const { ptr, sizeBytes, numFrames, numChannels, sampleRate, source, ...extraProps } = await operation();
             allocatedPtr = ptr;
 
             // Register pending operation
             const { uuid, allocationComplete } = this.#registerPending(bufnum, timeoutMs);
             pendingToken = uuid;
             this.#recordAllocation(bufnum, allocatedPtr, sizeBytes, uuid, allocationComplete, {
-                numFrames, numChannels, sampleRate
+                numFrames, numChannels, sampleRate, source
             });
             allocationRegistered = true;
 
@@ -391,7 +391,9 @@ export class BufferManager {
                 sizeBytes,
                 numFrames: framesRequested,
                 numChannels,
-                sampleRate: audioBuffer.sampleRate
+                sampleRate: audioBuffer.sampleRate,
+                // postMessage mode: store source for recovery (re-load from path)
+                source: this.#mode === 'postMessage' ? { type: 'file', path, startFrame, numFrames, channels } : null
             };
         });
     }
@@ -574,7 +576,10 @@ export class BufferManager {
             pendingPromise,
             previousAllocation: previousEntry
                 ? { ptr: previousEntry.ptr, size: previousEntry.size }
-                : null
+                : null,
+            // postMessage mode: keep source info for recovery (re-load from path)
+            // SAB mode: data persists in SharedArrayBuffer, only need /b_allocPtr
+            source: metadata.source || null
         };
         this.#allocatedBuffers.set(bufnum, entry);
         return entry;
@@ -754,8 +759,9 @@ export class BufferManager {
 
     /**
      * Get all allocated buffers for recovery
-     * Returns info needed to re-send /b_allocPtr to scsynth after a soft reset
-     * @returns {Array<{bufnum: number, ptr: number, numFrames: number, numChannels: number, sampleRate: number}>}
+     * SAB mode: returns info needed to re-send /b_allocPtr (data persists in SAB)
+     * postMessage mode: returns source info for re-loading (WASM memory destroyed)
+     * @returns {Array<{bufnum, ptr, numFrames, numChannels, sampleRate, source?}>}
      */
     getAllocatedBuffers() {
         const buffers = [];
@@ -766,7 +772,8 @@ export class BufferManager {
                 ptr: entry.ptr,
                 numFrames: entry.numFrames,
                 numChannels: entry.numChannels,
-                sampleRate: entry.sampleRate
+                sampleRate: entry.sampleRate,
+                source: entry.source || null
             });
         }
         return buffers;
