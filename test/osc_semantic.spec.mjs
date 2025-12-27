@@ -133,7 +133,7 @@ test.describe("/n_free semantic tests", () => {
   });
 
   test("freeing group frees the group and all its children", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -226,7 +226,7 @@ test.describe("/n_free semantic tests", () => {
   });
 
   test("freeing already-freed node is idempotent (no error)", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -1523,7 +1523,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
   });
 
   test("re-allocating buffer replaces previous allocation", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -2811,7 +2811,7 @@ test.describe("Error handling tests", () => {
 test.describe("Malformed input robustness tests", () => {
   // Test 1: Malformed synthdef with truncated header
   test("malformed synthdef - truncated header handled gracefully", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -2851,7 +2851,7 @@ test.describe("Malformed input robustness tests", () => {
 
   // Test 2: Synthdef with invalid/unknown UGen name
   test("synthdef with unknown UGen name handled gracefully", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -2949,7 +2949,7 @@ test.describe("Malformed input robustness tests", () => {
 
   // Test 3: Synthdef with excessively long name
   test("synthdef with excessively long name handled gracefully", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -3063,7 +3063,7 @@ test.describe("Malformed input robustness tests", () => {
 
   // Test 5: Random garbage data as synthdef
   test("random garbage data as synthdef handled gracefully", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -3103,7 +3103,7 @@ test.describe("Malformed input robustness tests", () => {
 
   // Test 6: /s_new with non-existent synthdef
   test("/s_new with non-existent synthdef handled gracefully", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -3143,7 +3143,7 @@ test.describe("Malformed input robustness tests", () => {
 
   // Test 7: Invalid add action in /s_new
   test("/s_new with invalid add action handled gracefully", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -3181,7 +3181,7 @@ test.describe("Malformed input robustness tests", () => {
 
   // Test 8: /g_new with invalid target node
   test("/g_new with non-existent target node handled gracefully", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -3221,7 +3221,7 @@ test.describe("Malformed input robustness tests", () => {
 
   // Test 9: /n_set with wrong argument types
   test("/n_set with wrong argument types handled gracefully", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -3300,7 +3300,7 @@ test.describe("Malformed input robustness tests", () => {
 
   // Test 11: /b_set with out-of-bounds index
   test("/b_set with out-of-bounds index handled gracefully", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -3339,7 +3339,7 @@ test.describe("Malformed input robustness tests", () => {
 
   // Test 12: Rapid fire of malformed commands doesn't crash
   test("rapid fire of malformed commands handled gracefully", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 

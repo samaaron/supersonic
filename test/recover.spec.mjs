@@ -411,6 +411,9 @@ test.describe('Recovery and Caching', () => {
     expect(result.allPreserved).toBe(true);
   });
 
+  // Buffer data recovery:
+  // SAB mode: data persists in SharedArrayBuffer, just re-register pointer
+  // postMessage mode: re-loads samples from source path (WASM memory destroyed on recover)
   test('buffer sample data is preserved after recover', async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);

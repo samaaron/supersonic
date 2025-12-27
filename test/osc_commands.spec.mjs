@@ -1278,7 +1278,7 @@ test.describe("Buffer Commands", () => {
   });
 
   test("/b_setn and /b_getn - sets and gets sequential samples", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
@@ -1504,7 +1504,7 @@ test.describe("Control Bus Commands", () => {
   });
 
   test("/c_setn and /c_getn - sets and gets sequential bus values", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 

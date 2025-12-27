@@ -33,6 +33,7 @@ export class PostMessageTransport extends Transport {
     // State
     #initialized = false;
     #preschedulerCapacity;
+    #snapshotIntervalMs;
 
     // Metrics
     #messagesSent = 0;
@@ -49,12 +50,14 @@ export class PostMessageTransport extends Transport {
      * @param {Function} config.getAudioContextTime - Returns AudioContext.currentTime
      * @param {Function} config.getNTPStartTime - Returns NTP start time
      * @param {number} [config.preschedulerCapacity=65536] - Max pending messages
+     * @param {number} [config.snapshotIntervalMs=25] - Interval for metrics/tree snapshots
      */
     constructor(config) {
         super({ ...config, mode: 'postMessage' });
 
         this.#workerBaseURL = config.workerBaseURL;
         this.#preschedulerCapacity = config.preschedulerCapacity || 65536;
+        this.#snapshotIntervalMs = config.snapshotIntervalMs || 25;
         this.#getAudioContextTime = config.getAudioContextTime;
         this.#getNTPStartTime = config.getNTPStartTime;
     }
@@ -262,6 +265,7 @@ export class PostMessageTransport extends Transport {
                 type: 'init',
                 mode: 'postMessage',  // Use postMessage dispatch mode
                 maxPendingMessages: this.#preschedulerCapacity,
+                snapshotIntervalMs: this.#snapshotIntervalMs,
                 // No sharedBuffer, ringBufferBase, or bufferConstants needed
             });
         });

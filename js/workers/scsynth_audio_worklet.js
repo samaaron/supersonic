@@ -37,7 +37,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.lastTreeVersion = -1;
         this.treeSnapshotsSent = 0;
         this.lastTreeSendTime = -1; // AudioContext time of last send (-1 = never)
-        this.treeSnapshotMinInterval = 0.05; // Max 20 snapshots/sec (50ms in seconds)
+        this.treeSnapshotMinInterval = 0.025; // Max 40 snapshots/sec (25ms in seconds)
 
         // Views into SharedArrayBuffer (or WASM memory in postMessage mode)
         this.atomicView = null;
@@ -91,6 +91,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         const uint8View = new Uint8Array(memory.buffer, layoutPtr, 140);
 
         // Extract constants (order matches BufferLayout struct in shared_memory.h)
+        // NOTE: NODE_TREE is now contiguous with METRICS for efficient postMessage copying
         this.bufferConstants = {
             IN_BUFFER_START: uint32View[0],
             IN_BUFFER_SIZE: uint32View[1],
@@ -102,18 +103,19 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             CONTROL_SIZE: uint32View[7],
             METRICS_START: uint32View[8],
             METRICS_SIZE: uint32View[9],
-            NTP_START_TIME_START: uint32View[10],
-            NTP_START_TIME_SIZE: uint32View[11],
-            DRIFT_OFFSET_START: uint32View[12],
-            DRIFT_OFFSET_SIZE: uint32View[13],
-            GLOBAL_OFFSET_START: uint32View[14],
-            GLOBAL_OFFSET_SIZE: uint32View[15],
-            NODE_TREE_START: uint32View[16],
-            NODE_TREE_SIZE: uint32View[17],
-            NODE_TREE_HEADER_SIZE: uint32View[18],
-            NODE_TREE_ENTRY_SIZE: uint32View[19],
-            NODE_TREE_DEF_NAME_SIZE: uint32View[20],
-            NODE_TREE_MAX_NODES: uint32View[21],
+            // NODE_TREE now immediately follows METRICS
+            NODE_TREE_START: uint32View[10],
+            NODE_TREE_SIZE: uint32View[11],
+            NODE_TREE_HEADER_SIZE: uint32View[12],
+            NODE_TREE_ENTRY_SIZE: uint32View[13],
+            NODE_TREE_DEF_NAME_SIZE: uint32View[14],
+            NODE_TREE_MAX_NODES: uint32View[15],
+            NTP_START_TIME_START: uint32View[16],
+            NTP_START_TIME_SIZE: uint32View[17],
+            DRIFT_OFFSET_START: uint32View[18],
+            DRIFT_OFFSET_SIZE: uint32View[19],
+            GLOBAL_OFFSET_START: uint32View[20],
+            GLOBAL_OFFSET_SIZE: uint32View[21],
             AUDIO_CAPTURE_START: uint32View[22],
             AUDIO_CAPTURE_SIZE: uint32View[23],
             AUDIO_CAPTURE_HEADER_SIZE: uint32View[24],
@@ -457,33 +459,75 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         return { nodeCount, version, nodes };
     }
 
-    // Read node tree from WASM memory and send via postMessage if version changed
-    checkAndSendNodeTree(audioTime) {
-        const tree = this.readNodeTree();
-        if (!tree) return;
+    // Read metrics from WASM memory as raw Uint32Array
+    // Returns null if not ready, otherwise a copy of the metrics buffer
+    // Same layout as SAB - can be used directly with MetricsOffsets
+    readMetrics() {
+        if (!this.metricsView) {
+            return null;
+        }
+        // Return a copy of the raw buffer (same layout as SAB)
+        return new Uint32Array(this.metricsView);
+    }
 
-        const { version } = tree;
+    // Read metrics + node tree from WASM memory and send via postMessage
+    // Sends immediately on tree version change, OR on interval (for metrics updates)
+    // METRICS and NODE_TREE are contiguous in memory - copy as one atomic unit
+    checkAndSendSnapshot(audioTime) {
+        // Check if tree version changed (need to read header to check)
+        const bc = this.bufferConstants;
+        if (!bc || !this.wasmMemory || this.ringBufferBase === null) return;
 
-        // Only send if version changed
-        if (version === this.lastTreeVersion) {
-            return;
+        const treeBase = this.ringBufferBase + bc.NODE_TREE_START;
+        const headerView = new Uint32Array(this.wasmMemory.buffer, treeBase, 2);
+        const currentVersion = headerView[1];
+        const versionChanged = currentVersion !== this.lastTreeVersion;
+
+        if (versionChanged) {
+            // Tree changed - send immediately and reset timer
+            this.lastTreeVersion = currentVersion;
+            this.lastTreeSendTime = audioTime;
+        } else {
+            // No tree change - check if interval has elapsed (for metrics updates)
+            if (this.lastTreeSendTime >= 0 && audioTime - this.lastTreeSendTime < this.treeSnapshotMinInterval) {
+                return; // Skip this frame, will send on next interval
+            }
+            this.lastTreeSendTime = audioTime;
         }
 
-        // Rate limit: max 20 snapshots/sec (50ms interval)
-        // Use AudioContext time for stable timing
-        if (this.lastTreeSendTime >= 0 && audioTime - this.lastTreeSendTime < this.treeSnapshotMinInterval) {
-            return; // Skip this frame, will catch up on next check
-        }
-        this.lastTreeVersion = version;
-        this.lastTreeSendTime = audioTime;
+        // Single memcopy of contiguous METRICS + NODE_TREE region
+        const buffer = this.readMetricsAndTreeBuffer();
+        if (!buffer) return;
 
-        // Send tree snapshot via postMessage
+        // Send as transferable - main thread parses
         this.treeSnapshotsSent++;
         this.port.postMessage({
-            type: 'nodeTree',
-            ...tree,
+            type: 'snapshot',
+            buffer,
             snapshotsSent: this.treeSnapshotsSent
-        });
+        }, [buffer]);
+    }
+
+    // Read metrics + node tree as one contiguous memory copy
+    // Returns raw ArrayBuffer (transferable) or null if not ready
+    // Main thread parses the buffer - keeps worklet fast
+    readMetricsAndTreeBuffer() {
+        if (!this.bufferConstants || !this.wasmMemory || this.ringBufferBase === null) {
+            return null;
+        }
+
+        const bc = this.bufferConstants;
+
+        // Single memcopy of entire contiguous region: METRICS + NODE_TREE
+        const metricsBase = this.ringBufferBase + bc.METRICS_START;
+        const totalSize = bc.METRICS_SIZE + bc.NODE_TREE_SIZE;
+        const view = new Uint8Array(this.wasmMemory.buffer, metricsBase, totalSize);
+
+        // Copy to new buffer (will be transferred)
+        const buffer = new ArrayBuffer(totalSize);
+        new Uint8Array(buffer).set(view);
+
+        return buffer;
     }
 
     // Read debug messages from DEBUG ring buffer and send via postMessage
@@ -578,6 +622,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             if (data.type === 'init') {
                 // Set mode from init message
                 this.mode = data.mode || 'sab';
+
+                // Set snapshot interval (postMessage mode) - convert ms to seconds for AudioContext time
+                if (data.snapshotIntervalMs) {
+                    this.treeSnapshotMinInterval = data.snapshotIntervalMs / 1000;
+                }
 
                 if (this.mode === 'sab' && data.sharedBuffer) {
                     // SAB mode: receive SharedArrayBuffer
@@ -687,17 +736,19 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                             this.isInitialized = true;
 
-                            // Include initial tree for postMessage mode (deterministic init)
-                            const initialTree = this.mode === 'postMessage' ? this.readNodeTree() : undefined;
+                            // Include initial snapshot buffer for postMessage mode
+                            const initialSnapshot = this.mode === 'postMessage' ? this.readMetricsAndTreeBuffer() : undefined;
 
-                            this.port.postMessage({
+                            const msg = {
                                 type: 'initialized',
                                 success: true,
                                 ringBufferBase: this.ringBufferBase,
                                 bufferConstants: this.bufferConstants,
                                 exports: Object.keys(this.wasmInstance.exports),
-                                initialTree
-                            });
+                                initialSnapshot
+                            };
+                            // Transfer the buffer if present
+                            this.port.postMessage(msg, initialSnapshot ? [initialSnapshot] : []);
                         }
                     }
                 } else if (data.wasmInstance) {
@@ -723,17 +774,19 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                             this.isInitialized = true;
 
-                            // Include initial tree for postMessage mode (deterministic init)
-                            const initialTree = this.mode === 'postMessage' ? this.readNodeTree() : undefined;
+                            // Include initial snapshot buffer for postMessage mode
+                            const initialSnapshot = this.mode === 'postMessage' ? this.readMetricsAndTreeBuffer() : undefined;
 
-                            this.port.postMessage({
+                            const msg = {
                                 type: 'initialized',
                                 success: true,
                                 ringBufferBase: this.ringBufferBase,
                                 bufferConstants: this.bufferConstants,
                                 exports: Object.keys(this.wasmInstance.exports),
-                                initialTree
-                            });
+                                initialSnapshot
+                            };
+                            // Transfer the buffer if present
+                            this.port.postMessage(msg, initialSnapshot ? [initialSnapshot] : []);
                         }
                     }
                 }
@@ -807,24 +860,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             }
 
             if (data.type === 'getMetrics') {
-                // Return metrics snapshot for postMessage mode
-                const m = this.metricsView;
-                const metrics = m ? {
-                    workletProcessCount: m[MetricsOffsets.PROCESS_COUNT],
-                    workletMessagesProcessed: m[MetricsOffsets.MESSAGES_PROCESSED],
-                    workletMessagesDropped: m[MetricsOffsets.MESSAGES_DROPPED],
-                    workletSchedulerDepth: m[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
-                    workletSchedulerMax: m[MetricsOffsets.SCHEDULER_QUEUE_MAX],
-                    workletSchedulerDropped: m[MetricsOffsets.SCHEDULER_QUEUE_DROPPED],
-                    workletSequenceGaps: m[MetricsOffsets.SEQUENCE_GAPS],
-                    preschedulerPending: m[MetricsOffsets.PRESCHEDULER_PENDING],
-                    preschedulerPeak: m[MetricsOffsets.PRESCHEDULER_PEAK],
-                    preschedulerSent: m[MetricsOffsets.PRESCHEDULER_SENT],
-                    debugMessagesReceived: m[MetricsOffsets.DEBUG_MESSAGES_RECEIVED],
-                    debugBytesReceived: m[MetricsOffsets.DEBUG_BYTES_RECEIVED],
-                    mainMessagesSent: m[MetricsOffsets.MESSAGES_SENT],
-                    mainBytesSent: m[MetricsOffsets.BYTES_SENT],
-                } : null;
+                // Return raw metrics buffer for postMessage mode
+                // Same layout as SAB - can be used directly with MetricsOffsets
+                const metrics = this.metricsView ? new Uint32Array(this.metricsView) : null;
                 this.port.postMessage({
                     type: 'metricsSnapshot',
                     requestId: data.requestId,
@@ -947,7 +985,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 if (this.mode === 'postMessage') {
                     this.readOscReplies();
                     this.readDebugMessages();
-                    this.checkAndSendNodeTree(audioContextTime);
+                    this.checkAndSendSnapshot(audioContextTime);
                 } else {
                     // SAB mode: Notify waiting worker when there's data to read
                     // Atomics.notify() is cheap when no one is waiting, so notify every frame

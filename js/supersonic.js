@@ -200,15 +200,13 @@ export class SuperSonic {
   // Pending metrics request for postMessage mode (async request/response)
   #pendingMetricsRequest = null;
 
-  // Cached worklet metrics for postMessage mode (updated periodically)
-  #cachedWorkletMetrics = null;
-
   // Cached WASM bytes for fast recover() - skip network fetch on re-init
   #cachedWasmBytes = null;
 
-  // Cached node tree for postMessage mode (received from worklet via postMessage)
-  // Worklet reads tree from WASM memory and sends snapshots when version changes
-  #cachedNodeTree = { nodeCount: 0, version: 0, nodes: [] };
+  // Cached snapshot buffer for postMessage mode (METRICS + NODE_TREE contiguous)
+  // Worklet copies this region and sends as transferable on interval
+  #cachedSnapshotBuffer = null;
+  #snapshotsSent = 0;
 
   constructor(options = {}) {
     this.#initialized = false;
@@ -256,6 +254,8 @@ export class SuperSonic {
     this.#config = {
       // Transport mode
       mode: mode,
+      // Snapshot interval in ms (postMessage mode only) - how often tree/metrics snapshots are sent
+      snapshotIntervalMs: options.snapshotIntervalMs ?? 25,
       wasmUrl: options.wasmUrl || wasmBaseURL + "scsynth-nrt.wasm",
       wasmBaseURL: wasmBaseURL,
       workletUrl:
@@ -630,23 +630,46 @@ export class SuperSonic {
       }
     }
 
-    // Re-register buffers with scsynth (data already in SharedArrayBuffer)
+    // Re-register buffers with scsynth
+    // SAB mode: data persists in SharedArrayBuffer, just re-register pointer
+    // postMessage mode: WASM memory destroyed, need to re-load from source
     for (const buf of cachedBuffers) {
       try {
-        const uuid = crypto.randomUUID();
-        await this.send(
-          '/b_allocPtr',
-          buf.bufnum,
-          buf.ptr,
-          buf.numFrames,
-          buf.numChannels,
-          buf.sampleRate,
-          uuid
-        );
-        if (__DEV__) console.log(`[Dbg-SuperSonic] Restored buffer: ${buf.bufnum}`);
+        if (this.#config.mode === 'postMessage' && buf.source) {
+          // postMessage mode: re-load sample from source
+          if (buf.source.type === 'file') {
+            await this.loadSample(
+              buf.bufnum,
+              buf.source.path,
+              buf.source.startFrame || 0,
+              buf.source.numFrames || 0
+            );
+            if (__DEV__) console.log(`[Dbg-SuperSonic] Re-loaded buffer: ${buf.bufnum} from ${buf.source.path}`);
+          } else {
+            console.warn(`[SuperSonic] Unknown buffer source type: ${buf.source.type}`);
+          }
+        } else {
+          // SAB mode: data persists, just re-register pointer
+          const uuid = crypto.randomUUID();
+          await this.send(
+            '/b_allocPtr',
+            buf.bufnum,
+            buf.ptr,
+            buf.numFrames,
+            buf.numChannels,
+            buf.sampleRate,
+            uuid
+          );
+          if (__DEV__) console.log(`[Dbg-SuperSonic] Restored buffer: ${buf.bufnum}`);
+        }
       } catch (e) {
         console.error(`[SuperSonic] Failed to restore buffer ${buf.bufnum}:`, e);
       }
+    }
+
+    // Sync to ensure all restored assets are processed by scsynth
+    if (cachedSynthDefs.size > 0 || cachedBuffers.length > 0) {
+      await this.sync();
     }
 
     if (__DEV__) console.log('[Dbg-SuperSonic] Reload complete');
@@ -782,32 +805,40 @@ export class SuperSonic {
       return { nodeCount: 0, version: 0, nodes: [] };
     }
 
-    // PostMessage mode: use cached tree (updated via postMessage from worklet)
+    // Determine source buffer:
+    // SAB mode: read from SharedArrayBuffer at ringBufferBase + METRICS_START
+    // postMessage mode: read from cached snapshot buffer (starts at offset 0)
+    let buffer, treeOffset;
     if (this.#config.mode === 'postMessage') {
-      return this.#cachedNodeTree;
-    }
-
-    // SAB mode: read directly from SharedArrayBuffer
-    if (!this.#sharedBuffer || !this.#bufferConstants) {
-      return { nodeCount: 0, version: 0, nodes: [] };
+      if (!this.#cachedSnapshotBuffer || !this.#bufferConstants) {
+        return { nodeCount: 0, version: 0, nodes: [] };
+      }
+      buffer = this.#cachedSnapshotBuffer;
+      // Snapshot buffer layout: METRICS (at 0) then NODE_TREE (at METRICS_SIZE)
+      treeOffset = this.#bufferConstants.METRICS_SIZE;
+    } else {
+      if (!this.#sharedBuffer || !this.#bufferConstants) {
+        return { nodeCount: 0, version: 0, nodes: [] };
+      }
+      buffer = this.#sharedBuffer;
+      treeOffset = this.#ringBufferBase + this.#bufferConstants.NODE_TREE_START;
     }
 
     const bc = this.#bufferConstants;
-    const treeBase = this.#ringBufferBase + bc.NODE_TREE_START;
 
     // Read header (2 x uint32)
-    const headerView = new Uint32Array(this.#sharedBuffer, treeBase, 2);
+    const headerView = new Uint32Array(buffer, treeOffset, 2);
     const nodeCount = headerView[0];
     const version = headerView[1];
 
     // Read entries - each entry is 56 bytes: 6 int32s (24 bytes) + def_name (32 bytes)
-    const entriesBase = treeBase + bc.NODE_TREE_HEADER_SIZE;
+    const entriesBase = treeOffset + bc.NODE_TREE_HEADER_SIZE;
     const maxNodes = bc.NODE_TREE_MAX_NODES;
     const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 56 bytes
     const defNameSize = bc.NODE_TREE_DEF_NAME_SIZE; // 32 bytes
 
     // Use DataView for mixed int32/string access
-    const dataView = new DataView(this.#sharedBuffer, entriesBase, maxNodes * entrySize);
+    const dataView = new DataView(buffer, entriesBase, maxNodes * entrySize);
     const textDecoder = new TextDecoder('utf-8');
 
     // Collect non-empty entries
@@ -822,11 +853,11 @@ export class SuperSonic {
       foundCount++;
 
       // Read def_name (32 bytes starting at byte 24 of entry)
-      // Note: Must copy from SharedArrayBuffer to regular ArrayBuffer for TextDecoder
+      // Must copy from SharedArrayBuffer to regular ArrayBuffer for TextDecoder
       const defNameStart = entriesBase + byteOffset + 24;
-      const defNameShared = new Uint8Array(this.#sharedBuffer, defNameStart, defNameSize);
+      const defNameView = new Uint8Array(buffer, defNameStart, defNameSize);
       const defNameBytes = new Uint8Array(defNameSize);
-      defNameBytes.set(defNameShared); // Copy to non-shared buffer
+      defNameBytes.set(defNameView); // Copy to non-shared buffer
       // Find null terminator
       let nullIndex = defNameBytes.indexOf(0);
       if (nullIndex === -1) nullIndex = defNameSize;
@@ -1370,6 +1401,12 @@ export class SuperSonic {
 
     // Wait for /synced response
     await syncPromise;
+
+    // In postMessage mode, wait briefly for tree snapshot to arrive
+    // Wait 2x the snapshot interval to ensure at least one update
+    if (this.#config.mode === 'postMessage') {
+      await new Promise(r => setTimeout(r, this.#config.snapshotIntervalMs * 2));
+    }
   }
 
   /**
@@ -1477,8 +1514,9 @@ export class SuperSonic {
     this.#driftView = null;
     this.#globalOffsetView = null;
 
-    // Reset cached node tree (used in postMessage mode)
-    this.#cachedNodeTree = { nodeCount: 0, version: 0, nodes: [] };
+    // Reset cached snapshot buffer (used in postMessage mode)
+    this.#cachedSnapshotBuffer = null;
+    this.#snapshotsSent = 0;
 
     // Reset timing state
     this.#initialNTPStartTime = undefined;
@@ -1786,6 +1824,7 @@ export class SuperSonic {
       type: "init",
       mode: mode,
       sharedBuffer: mode === 'sab' ? this.#sharedBuffer : null,
+      snapshotIntervalMs: this.#config.snapshotIntervalMs,
     });
 
     // Send WASM bytes, memory/pages, worldOptions, and actual sample rate
@@ -2035,10 +2074,10 @@ export class SuperSonic {
               );
             }
 
-            // PostMessage mode: set initial tree from initialized message
-            // This ensures getTree() returns valid data immediately after init()
-            if (this.#config.mode === 'postMessage' && event.data.initialTree) {
-              this.#cachedNodeTree = event.data.initialTree;
+            // PostMessage mode: set initial snapshot buffer
+            // This ensures getTree() and getMetrics() return valid data immediately after init()
+            if (this.#config.mode === 'postMessage' && event.data.initialSnapshot) {
+              this.#cachedSnapshotBuffer = event.data.initialSnapshot;
             }
 
             if (__DEV__)
@@ -2104,26 +2143,24 @@ export class SuperSonic {
           break;
 
         case "metricsSnapshot":
-          // Metrics response from worklet (postMessage mode)
-          // Cache the metrics for synchronous access
-          if (data.metrics) {
-            this.#cachedWorkletMetrics = data.metrics;
-          }
+          // Legacy metrics response - now handled via combined snapshot
+          // Keep for backwards compatibility but forward to snapshot handler
           if (this.#pendingMetricsRequest && data.requestId === this.#pendingMetricsRequest.id) {
-            this.#pendingMetricsRequest.resolve(data.metrics);
+            const metricsView = this.#cachedSnapshotBuffer
+              ? new Uint32Array(this.#cachedSnapshotBuffer, 0, 32)
+              : null;
+            this.#pendingMetricsRequest.resolve(metricsView);
             this.#pendingMetricsRequest = null;
           }
           break;
 
-        case "nodeTree":
-          // Node tree snapshot from worklet (postMessage mode)
-          // Worklet reads tree from WASM memory and sends when version changes
-          this.#cachedNodeTree = {
-            nodeCount: data.nodeCount,
-            version: data.version,
-            nodes: data.nodes,
-            snapshotsSent: data.snapshotsSent  // Track how many snapshots have been sent
-          };
+        case "snapshot":
+          // Combined snapshot from worklet (postMessage mode)
+          // Raw ArrayBuffer: METRICS + NODE_TREE contiguous - same layout as SAB
+          if (data.buffer) {
+            this.#cachedSnapshotBuffer = data.buffer;
+            this.#snapshotsSent = data.snapshotsSent;
+          }
           break;
 
         default:
@@ -2137,17 +2174,13 @@ export class SuperSonic {
   }
 
   /**
-   * Get all metrics from SharedArrayBuffer
+   * Get metrics from a Uint32Array buffer
    * Layout defined in src/shared_memory.h and js/lib/metrics_offsets.js
-   * @returns {Object|null}
+   * @param {Uint32Array} m - Metrics buffer
+   * @returns {Object} Metrics object
    * @private
    */
-  #getSABMetrics() {
-    if (!this.#metricsView) {
-      return null;
-    }
-
-    const m = this.#metricsView;
+  #getMetricsFromBuffer(m) {
     return {
       // Worklet metrics (written by WASM)
       workletProcessCount: m[MetricsOffsets.PROCESS_COUNT],
@@ -2185,6 +2218,18 @@ export class SuperSonic {
       mainMessagesSent: m[MetricsOffsets.MESSAGES_SENT],
       mainBytesSent: m[MetricsOffsets.BYTES_SENT],
     };
+  }
+
+  /**
+   * Get all metrics from SharedArrayBuffer
+   * @returns {Object|null}
+   * @private
+   */
+  #getSABMetrics() {
+    if (!this.#metricsView) {
+      return null;
+    }
+    return this.#getMetricsFromBuffer(this.#metricsView);
   }
 
   /**
@@ -2297,8 +2342,28 @@ export class SuperSonic {
   }
 
   /**
+   * Overlay prescheduler metrics into the snapshot buffer
+   * Prescheduler metrics are contiguous at offsets 6-16 (11 uint32s)
+   * @private
+   */
+  #overlayPreschedulerMetrics() {
+    if (!this.#cachedSnapshotBuffer) return;
+
+    const preschedulerMetrics = this.#osc?.getPreschedulerMetrics();
+    if (!preschedulerMetrics) return;
+
+    // Get a view into the metrics portion of the snapshot buffer
+    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 32);
+
+    // Single memcpy of contiguous prescheduler metrics (offsets 6-16)
+    const start = MetricsOffsets.PRESCHEDULER_PENDING;  // 6
+    const count = MetricsOffsets.RETRY_QUEUE_MAX - start + 1;  // 11
+    metricsView.set(preschedulerMetrics.subarray(start, start + count), start);
+  }
+
+  /**
    * Gather metrics from all sources (worklet, OSC, internal counters)
-   * All metrics are read synchronously from SAB
+   * Both SAB and postMessage modes read from a Uint32Array with same layout
    * @returns {SuperSonicMetrics}
    * @private
    */
@@ -2308,10 +2373,16 @@ export class SuperSonic {
     let metrics;
 
     if (this.mode === 'postMessage') {
-      // In postMessage mode, use cached worklet metrics
-      // Fire off async request to update cache for next time
-      this.#requestWorkletMetrics().catch(() => {});
-      metrics = this.#cachedWorkletMetrics ? { ...this.#cachedWorkletMetrics } : {};
+      // In postMessage mode: overlay prescheduler metrics, then read from snapshot buffer
+      this.#overlayPreschedulerMetrics();
+
+      // Read metrics from snapshot buffer (offset 0, same layout as SAB)
+      if (this.#cachedSnapshotBuffer) {
+        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 32);
+        metrics = this.#getMetricsFromBuffer(metricsView);
+      } else {
+        metrics = {};
+      }
     } else {
       // SAB mode: read metrics directly from SharedArrayBuffer
       metrics = this.#getSABMetrics() || {};

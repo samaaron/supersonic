@@ -56,7 +56,9 @@ function countNaN(samples) {
 `;
 
 test.describe("ChipLead High Pitch Bug", () => {
+  // Audio capture requires SharedArrayBuffer - not available in postMessage mode
   test("chiplead high note no longer corrupts engine", async ({ page, sonicConfig }) => {
+    test.skip(sonicConfig.mode === 'postMessage', 'Audio capture requires SharedArrayBuffer');
     // This test verifies the N=0 guard fix - high notes beyond Nyquist/2
     // no longer produce NaN values that corrupt the engine
     await page.goto("/test/harness.html");
@@ -148,6 +150,7 @@ test.describe("ChipLead High Pitch Bug", () => {
   });
 
   test("chiplead with FX chain - high note no longer corrupts FX", async ({ page, sonicConfig }) => {
+    test.skip(sonicConfig.mode === 'postMessage', 'Audio capture requires SharedArrayBuffer');
     // This test replicates the demo setup where synths route through LPF -> Reverb
     // Previously NaN values from high notes would propagate and corrupt the FX chain
     await page.goto("/test/harness.html");
@@ -267,6 +270,7 @@ test.describe("ChipLead High Pitch Bug", () => {
   });
 
   test("chiplead synth MIDI notes 96 to 156 (5 octaves)", async ({ page, sonicConfig }) => {
+    test.skip(sonicConfig.mode === 'postMessage', 'Audio capture requires SharedArrayBuffer');
     // Test individual MIDI notes incrementing by 1 to find where it breaks
     await page.goto("/test/harness.html");
 
@@ -384,6 +388,7 @@ test.describe("ChipLead High Pitch Bug", () => {
   });
 
   test("beep synth control - MIDI notes 96 to 156", async ({ page, sonicConfig }) => {
+    test.skip(sonicConfig.mode === 'postMessage', 'Audio capture requires SharedArrayBuffer');
     // Control test: verify that beep synth handles the same notes
     // This helps determine if the issue is chiplead-specific
     await page.goto("/test/harness.html");

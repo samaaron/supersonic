@@ -1324,7 +1324,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
   });
 
   test("OSC notifications skip negative IDs (matching upstream scsynth behavior)", async ({
-    page,
+    page, sonicConfig,
   }) => {
     await page.goto("/test/harness.html");
 
