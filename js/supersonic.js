@@ -343,9 +343,10 @@ export class SuperSonic {
     };
 
     // Resource loading configuration (private)
-    // Priority: explicit options > baseURL option > auto-detected from import.meta.url (for CDN)
-    this.#sampleBaseURL = options.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null) || DEFAULT_URLS.sampleBaseURL;
-    this.#synthdefBaseURL = options.synthdefBaseURL || (baseURL ? `${baseURL}synthdefs/` : null) || DEFAULT_URLS.synthdefBaseURL;
+    // Priority: explicit options > CDN sibling packages (for unpkg) > baseURL-derived paths
+    // For CDN usage, synthdefs/samples are in separate packages, not in dist/
+    this.#sampleBaseURL = options.sampleBaseURL || DEFAULT_URLS.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null);
+    this.#synthdefBaseURL = options.synthdefBaseURL || DEFAULT_URLS.synthdefBaseURL || (baseURL ? `${baseURL}synthdefs/` : null);
 
     // Fetch retry configuration
     this.#fetchRetryConfig = {
