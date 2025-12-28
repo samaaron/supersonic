@@ -79,7 +79,7 @@
 | [`initialized`](#initialized-read-only) | Whether engine is initialised (read-only) |
 | [`initializing`](#initializing-read-only) | Whether engine is currently initialising (read-only) |
 | [`audioContext`](#audiocontext-read-only) | The Web Audio AudioContext (read-only) |
-| `workletNode` | The AudioWorkletNode (read-only) |
+| [`node`](#node-read-only) | Audio node wrapper for Web Audio connections (read-only) |
 | [`loadedSynthDefs`](#loadedsynthdefs-read-only) | Set of loaded synthdef names (read-only) |
 | [`bootStats`](#bootstats-read-only) | Boot timing information (read-only) |
 
@@ -674,6 +674,57 @@ The underlying Web Audio AudioContext.
 const ctx = supersonic.audioContext;
 console.log('Sample rate:', ctx.sampleRate);
 ```
+
+### `node` (read-only)
+
+A wrapper around the AudioWorkletNode that provides a clean interface for Web Audio connections.
+
+**Properties:**
+
+| Property | Description |
+|----------|-------------|
+| `input` | The AudioWorkletNode to connect external sources to |
+| `context` | The AudioContext (same as `audioContext`) |
+| `numberOfInputs` | Number of input channels (from scsynth config) |
+| `numberOfOutputs` | Number of output channels (from scsynth config) |
+| `channelCount` | Channel count of the worklet node |
+
+**Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `connect(destination)` | Connect SuperSonic's output to another AudioNode |
+| `disconnect(destination?)` | Disconnect from a destination (or all if no argument) |
+
+**Connecting external audio sources (e.g., microphone):**
+
+```javascript
+// Get mic stream
+const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+const micSource = audioContext.createMediaStreamSource(stream);
+
+// Connect mic to SuperSonic input
+micSource.connect(supersonic.node.input);
+
+// Audio flows through scsynth's input buses (bus 2+ by default)
+// Use In.ar(2) in a synthdef to read the mic signal
+```
+
+**Connecting SuperSonic output to other nodes:**
+
+```javascript
+// Create an analyser for visualization
+const analyser = supersonic.audioContext.createAnalyser();
+
+// Connect SuperSonic output to analyser (in addition to speakers)
+supersonic.node.connect(analyser);
+
+// Read frequency data
+const data = new Uint8Array(analyser.frequencyBinCount);
+analyser.getByteFrequencyData(data);
+```
+
+**Note:** The `input` property exposes the raw AudioWorkletNode for connecting external sources.
 
 ### `loadedSynthDefs` (read-only)
 
