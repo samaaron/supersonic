@@ -30,6 +30,10 @@ export class PostMessageTransport extends Transport {
     // Callbacks
     #onReplyCallback;
     #onDebugCallback;
+    #onErrorCallback;
+
+    // Cached prescheduler metrics (prescheduler sends via postMessage)
+    #cachedPreschedulerMetrics = null;
 
     // State
     #initialized = false;
@@ -218,6 +222,50 @@ export class PostMessageTransport extends Transport {
         this.#onDebugCallback = callback;
     }
 
+    onError(callback) {
+        this.#onErrorCallback = callback;
+    }
+
+    /**
+     * Handle raw debug bytes from worklet (postMessage mode)
+     * Forwards to debug worker for text decoding
+     * @param {Object} data - { messages: Array<{bytes, sequence}> }
+     */
+    handleDebugRaw(data) {
+        if (this.#preschedulerWorker && data.messages) {
+            // Debug worker is not used in postMessage mode for raw bytes
+            // We need to create a debug worker or handle this differently
+            // For now, decode here using TextDecoder
+            const textDecoder = new TextDecoder('utf-8');
+            for (const raw of data.messages) {
+                try {
+                    const bytes = new Uint8Array(raw.bytes);
+                    let text = textDecoder.decode(bytes);
+                    if (text.endsWith('\n')) {
+                        text = text.slice(0, -1);
+                    }
+                    if (this.#onDebugCallback) {
+                        this.#onDebugCallback({
+                            text: text,
+                            timestamp: performance.now(),
+                            sequence: raw.sequence
+                        });
+                    }
+                } catch (err) {
+                    console.error('[PostMessageTransport] Failed to decode debug message:', err);
+                }
+            }
+        }
+    }
+
+    /**
+     * Get cached prescheduler metrics (postMessage mode only)
+     * @returns {Uint32Array|null}
+     */
+    getPreschedulerMetrics() {
+        return this.#cachedPreschedulerMetrics;
+    }
+
     getMetrics() {
         return {
             messagesSent: this.#messagesSent,
@@ -275,10 +323,14 @@ export class PostMessageTransport extends Transport {
 
     #handleWorkletMessage(data) {
         switch (data.type) {
-            case 'oscReply':
-                // OSC reply from scsynth
-                if (this.#onReplyCallback && data.oscData) {
-                    this.#onReplyCallback(data.oscData);
+            case 'oscReplies':
+                // OSC replies from scsynth (batch of messages)
+                if (this.#onReplyCallback && data.messages) {
+                    for (const msg of data.messages) {
+                        if (msg.oscData) {
+                            this.#onReplyCallback(msg.oscData);
+                        }
+                    }
                 }
                 break;
 
@@ -302,6 +354,9 @@ export class PostMessageTransport extends Transport {
             case 'error':
                 console.error('[PostMessageTransport] Worklet error:', data.error);
                 this.#messagesDropped++;
+                if (this.#onErrorCallback) {
+                    this.#onErrorCallback(data.error, 'worklet');
+                }
                 break;
         }
     }
@@ -319,9 +374,17 @@ export class PostMessageTransport extends Transport {
                 }
                 break;
 
+            case 'preschedulerMetrics':
+                // Cache prescheduler metrics for retrieval
+                this.#cachedPreschedulerMetrics = data.metrics;
+                break;
+
             case 'error':
                 console.error('[PostMessageTransport] Prescheduler error:', data.error);
                 this.#messagesDropped++;
+                if (this.#onErrorCallback) {
+                    this.#onErrorCallback(data.error, 'oscOut');
+                }
                 break;
         }
     }

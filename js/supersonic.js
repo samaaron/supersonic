@@ -11,7 +11,7 @@
  * Coordinates SharedArrayBuffer, WASM, AudioWorklet, and IO Workers
  */
 
-import ScsynthOSC from "./lib/scsynth_osc.js";
+import { createTransport } from "./lib/transport/index.js";
 import { BufferManager } from "./lib/buffer_manager.js";
 import { AssetLoader } from "./lib/asset_loader.js";
 import { OSCRewriter } from "./lib/osc_rewriter.js";
@@ -379,7 +379,7 @@ export class SuperSonic {
 
     if (this.#osc) {
       this.#osc.cancelAll();
-      this.#osc.terminate();
+      this.#osc.dispose();
       this.#osc = null;
     }
 
@@ -594,7 +594,7 @@ export class SuperSonic {
       sendOptions.currentTimeS = timing.currentTimeS;
     }
 
-    this.#osc.send(preparedData, sendOptions);
+    this.#osc.sendWithOptions(preparedData, sendOptions);
   }
 
   cancelTag(runTag) {
@@ -736,7 +736,7 @@ export class SuperSonic {
 
     if (this.#osc) {
       this.#osc.cancelAll();
-      this.#osc.terminate();
+      this.#osc.dispose();
       this.#osc = null;
     }
 
@@ -952,35 +952,66 @@ export class SuperSonic {
   }
 
   async #initializeOSC() {
-    this.#osc = new ScsynthOSC(this.#config.workerBaseURL);
+    const mode = this.#config.mode;
+    const bc = this.#metricsReader.bufferConstants;
+    const ringBufferBase = this.#metricsReader.ringBufferBase;
+    const sharedBuffer = this.#metricsReader.sharedBuffer;
 
-    this.#osc.onRawOSC((msg) => this.#eventEmitter.emit('message:raw', msg));
+    // Create transport based on mode
+    const transportConfig = {
+      workerBaseURL: this.#config.workerBaseURL,
+      preschedulerCapacity: this.#config.preschedulerCapacity,
+      getAudioContextTime: () => this.#audioContext?.currentTime ?? 0,
+      getNTPStartTime: () => this.#ntpTiming?.getNTPStartTime() ?? 0,
+    };
 
-    this.#osc.onParsedOSC((msg) => {
-      if (msg.address === "/supersonic/buffer/freed") {
-        this.#bufferManager?.handleBufferFreed(msg.args);
-      } else if (msg.address === "/supersonic/buffer/allocated") {
-        this.#bufferManager?.handleBufferAllocated(msg.args);
-      } else if (msg.address === "/synced" && msg.args.length > 0) {
-        const syncId = msg.args[0];
-        if (this.#syncListeners?.has(syncId)) {
-          this.#syncListeners.get(syncId)(msg);
+    if (mode === 'sab') {
+      transportConfig.sharedBuffer = sharedBuffer;
+      transportConfig.ringBufferBase = ringBufferBase;
+      transportConfig.bufferConstants = bc;
+    }
+
+    this.#osc = createTransport(mode, transportConfig);
+
+    // Handle raw OSC replies - parse and dispatch
+    this.#osc.onReply((oscData) => {
+      // Emit raw message event
+      this.#eventEmitter.emit('message:raw', { oscData });
+
+      // Parse OSC and emit parsed message
+      try {
+        const options = { metadata: false, unpackSingleArgs: false };
+        const msg = oscLib.readPacket(oscData, options);
+
+        // Handle special messages
+        if (msg.address === "/supersonic/buffer/freed") {
+          this.#bufferManager?.handleBufferFreed(msg.args);
+        } else if (msg.address === "/supersonic/buffer/allocated") {
+          this.#bufferManager?.handleBufferAllocated(msg.args);
+        } else if (msg.address === "/synced" && msg.args.length > 0) {
+          const syncId = msg.args[0];
+          if (this.#syncListeners?.has(syncId)) {
+            this.#syncListeners.get(syncId)(msg);
+          }
         }
-      }
 
-      this.#eventEmitter.emit('message', msg);
+        this.#eventEmitter.emit('message', msg);
 
-      if (this.#config.debug || this.#config.debugOscIn) {
-        const maxLen = this.#config.activityConsoleLog.oscIn ?? this.#config.activityConsoleLog.maxLineLength;
-        const argsStr = msg.args?.map(a => {
-          const str = JSON.stringify(a);
-          return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
-        }).join(', ') || '';
-        console.log(`[← OSC] ${msg.address}${argsStr ? ' ' + argsStr : ''}`);
+        if (this.#config.debug || this.#config.debugOscIn) {
+          const maxLen = this.#config.activityConsoleLog.oscIn ?? this.#config.activityConsoleLog.maxLineLength;
+          const argsStr = msg.args?.map(a => {
+            const str = JSON.stringify(a);
+            return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
+          }).join(', ') || '';
+          console.log(`[← OSC] ${msg.address}${argsStr ? ' ' + argsStr : ''}`);
+        }
+      } catch (e) {
+        console.error('[SuperSonic] Failed to decode OSC message:', e);
       }
     });
 
-    this.#osc.onDebugMessage((msg) => {
+    // Handle debug messages
+    this.#osc.onDebug((msg) => {
       const eventMaxLen = this.#config.activityEvent.scsynth ?? this.#config.activityEvent.maxLineLength;
       if (eventMaxLen > 0 && msg.text?.length > eventMaxLen) {
         msg = { ...msg, text: msg.text.slice(0, eventMaxLen) + '...' };
@@ -994,32 +1025,24 @@ export class SuperSonic {
       }
     });
 
+    // Handle errors
     this.#osc.onError((error, workerName) => {
       console.error(`[SuperSonic] ${workerName} error:`, error);
       this.#eventEmitter.emit('error', new Error(`${workerName}: ${error}`));
     });
 
-    const mode = this.#config.mode;
-    const bc = this.#metricsReader.bufferConstants;
-    const ringBufferBase = this.#metricsReader.ringBufferBase;
-    const sharedBuffer = this.#metricsReader.sharedBuffer;
-
+    // Initialize transport
     if (mode === 'sab') {
-      await this.#osc.init({
-        mode: 'sab',
-        sharedBuffer: sharedBuffer,
-        ringBufferBase: ringBufferBase,
-        bufferConstants: bc,
-        preschedulerCapacity: this.#config.preschedulerCapacity
-      });
+      await this.#osc.initialize();
     } else {
-      await this.#osc.init({
-        mode: 'postMessage',
-        workletPort: this.#workletNode.port,
-        preschedulerCapacity: this.#config.preschedulerCapacity,
-        earlyDebugMessages: this.#earlyDebugMessages
-      });
+      await this.#osc.initialize(this.#workletNode.port);
 
+      // Handle early debug messages that arrived before transport was ready
+      if (this.#earlyDebugMessages?.length > 0) {
+        for (const data of this.#earlyDebugMessages) {
+          this.#osc.handleDebugRaw(data);
+        }
+      }
       this.#debugRawHandler = (data) => this.#osc.handleDebugRaw(data);
       this.#earlyDebugMessages = [];
     }

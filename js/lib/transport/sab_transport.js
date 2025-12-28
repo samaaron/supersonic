@@ -43,6 +43,7 @@ export class SABTransport extends Transport {
     // Callbacks
     #onReplyCallback;
     #onDebugCallback;
+    #onErrorCallback;
 
     // State
     #initialized = false;
@@ -52,6 +53,9 @@ export class SABTransport extends Transport {
     #messagesSent = 0;
     #messagesDropped = 0;
     #bytesSent = 0;
+
+    // Cached prescheduler metrics (worker sends via postMessage)
+    #cachedPreschedulerMetrics = null;
 
     /**
      * @param {Object} config
@@ -248,6 +252,10 @@ export class SABTransport extends Transport {
         this.#onDebugCallback = callback;
     }
 
+    onError(callback) {
+        this.#onErrorCallback = callback;
+    }
+
     getMetrics() {
         return {
             messagesSent: this.#messagesSent,
@@ -339,6 +347,9 @@ export class SABTransport extends Transport {
                 });
             } else if (data.type === 'error') {
                 console.error('[SABTransport] OSC IN error:', data.error);
+                if (this.#onErrorCallback) {
+                    this.#onErrorCallback(data.error, 'oscIn');
+                }
             }
         };
 
@@ -351,16 +362,32 @@ export class SABTransport extends Transport {
                 });
             } else if (data.type === 'error') {
                 console.error('[SABTransport] DEBUG error:', data.error);
+                if (this.#onErrorCallback) {
+                    this.#onErrorCallback(data.error, 'debug');
+                }
             }
         };
 
-        // OSC OUT worker - mainly for errors
+        // OSC OUT worker - handles metrics and errors
         this.#oscOutWorker.onmessage = (event) => {
             const data = event.data;
-            if (data.type === 'error') {
+            if (data.type === 'preschedulerMetrics') {
+                this.#cachedPreschedulerMetrics = data.metrics;
+            } else if (data.type === 'error') {
                 console.error('[SABTransport] OSC OUT error:', data.error);
                 this.#messagesDropped++;
+                if (this.#onErrorCallback) {
+                    this.#onErrorCallback(data.error, 'oscOut');
+                }
             }
         };
+    }
+
+    /**
+     * Get cached prescheduler metrics
+     * @returns {Uint32Array|null}
+     */
+    getPreschedulerMetrics() {
+        return this.#cachedPreschedulerMetrics;
     }
 }

@@ -85,6 +85,14 @@ export class Transport {
     }
 
     /**
+     * Register callback for transport errors
+     * @param {function(string, string): void} callback - Receives (error, workerName)
+     */
+    onError(callback) {
+        throw new Error('Abstract method - implement in subclass');
+    }
+
+    /**
      * Get current transport metrics
      * @returns {TransportMetrics}
      */
