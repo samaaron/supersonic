@@ -993,9 +993,9 @@ export class SuperSonic {
     this.#osc = createTransport(mode, transportConfig);
 
     // Handle raw OSC replies - parse and dispatch
-    this.#osc.onReply((oscData) => {
+    this.#osc.onReply((oscData, sequence) => {
       // Emit raw message event
-      this.#eventEmitter.emit('message:raw', { oscData });
+      this.#eventEmitter.emit('message:raw', { oscData, sequence });
 
       // Parse OSC and emit parsed message
       try {
