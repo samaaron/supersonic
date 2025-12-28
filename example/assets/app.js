@@ -1419,10 +1419,7 @@ $("init-button").addEventListener("click", async () => {
       updateStatus("loading_assets");
       if (DEV_MODE) window.orchestrator = orchestrator;
 
-      // Load samples and initialize FX chain
-      await loadAllLoopSamples();
-      await initFXChain();
-
+      // Samples and FX chain are initialized in 'setup' event
       bootPhase = false;
       stopLoadingSpinner();
       addLoadingLogEntry("Ready", "complete");
@@ -1454,11 +1451,16 @@ $("init-button").addEventListener("click", async () => {
       flashTab("debug");
     });
 
-    orchestrator.on("shutdown", () => {
+    // Rebuild group structure on setup (fires on both init and recover)
+    orchestrator.on("setup", async () => {
+      // Reset state - in postMessage mode, WASM memory is destroyed on recover
       fxChainInitialized = false;
       fxChainInitializing = null;
       synthdefsLoaded = { fx: false, instruments: false };
       samplesLoaded = { kick: false, loops: false };
+
+      await loadAllLoopSamples();
+      await initFXChain();
     });
 
     orchestrator.on("audiocontext:suspended", () =>
