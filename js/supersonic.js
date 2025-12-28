@@ -17,38 +17,26 @@ import { AssetLoader } from "./lib/asset_loader.js";
 import { OSCRewriter } from "./lib/osc_rewriter.js";
 import { DirectWriter } from "./lib/direct_writer.js";
 import { extractSynthDefName } from "./lib/synthdef_parser.js";
-import {
-  calculateCurrentNTP,
-  calculateNTPStartTime,
-  calculateDriftMs,
-} from "./lib/timing_utils.js";
+import { EventEmitter } from "./lib/event_emitter.js";
+import { MetricsReader } from "./lib/metrics_reader.js";
+import { NTPTiming } from "./lib/ntp_timing.js";
+import { AudioCapture } from "./lib/audio_capture.js";
+import { inspect, parseNodeTree } from "./lib/inspector.js";
 import oscLib from "./vendor/osc.js/osc.js";
-import {
-  DRIFT_UPDATE_INTERVAL_MS,
-  SYNC_TIMEOUT_MS,
-  WORKLET_INIT_TIMEOUT_MS,
-} from "./timing_constants.js";
+import { SYNC_TIMEOUT_MS, WORKLET_INIT_TIMEOUT_MS } from "./timing_constants.js";
 import { MemoryLayout } from "./memory_layout.js";
 import { defaultWorldOptions } from "./scsynth_options.js";
-import * as MetricsOffsets from "./lib/metrics_offsets.js";
-import { addWorkletModule, createWorker } from "./lib/worker_loader.js";
+import { addWorkletModule } from "./lib/worker_loader.js";
 
 // Derive default base URL from module location
-// This enables zero-config CDN usage: import from unpkg and it just works
 const MODULE_URL = import.meta.url;
 
 /**
  * Parse the module URL to extract base paths for CDN usage
- * Handles unpkg.com pattern: https://unpkg.com/supersonic-scsynth@X.Y.Z/dist/supersonic.js
  */
 function deriveDefaultURLs() {
   try {
-    const url = new URL(MODULE_URL);
-
-    // Get the directory containing supersonic.js
     const baseURL = MODULE_URL.substring(0, MODULE_URL.lastIndexOf('/') + 1);
-
-    // Check if this is an unpkg URL to derive sibling package URLs
     const unpkgMatch = MODULE_URL.match(/^(https:\/\/unpkg\.com\/)supersonic-scsynth@([^/]+)\/dist\/supersonic\.js$/);
 
     if (unpkgMatch) {
@@ -61,18 +49,9 @@ function deriveDefaultURLs() {
       };
     }
 
-    // For non-unpkg URLs, just use the base directory
-    return {
-      baseURL,
-      sampleBaseURL: null,
-      synthdefBaseURL: null,
-    };
+    return { baseURL, sampleBaseURL: null, synthdefBaseURL: null };
   } catch {
-    return {
-      baseURL: null,
-      sampleBaseURL: null,
-      synthdefBaseURL: null,
-    };
+    return { baseURL: null, sampleBaseURL: null, synthdefBaseURL: null };
   }
 }
 
@@ -86,107 +65,14 @@ export class SuperSonic {
   // Expose OSC utilities as static methods
   static osc = {
     encode: (message) => oscLib.writePacket(message),
-    decode: (data, options = { metadata: false }) =>
-      oscLib.readPacket(data, options),
+    decode: (data, options = { metadata: false }) => oscLib.readPacket(data, options),
   };
 
   /**
    * Inspect a SuperSonic instance or raw SharedArrayBuffer
-   * Returns a snapshot of the current SAB state for debugging
-   *
-   * @param {SuperSonic|Object} target - Instance or {sab, ringBufferBase, layout}
-   * @returns {Object} Parsed SAB state
-   *
-   * @example
-   * // From instance
-   * const info = SuperSonic.inspect(sonic);
-   *
-   * // From raw components
-   * const info = SuperSonic.inspect({
-   *   sab: sharedArrayBuffer,
-   *   ringBufferBase: 16777216,
-   *   layout: bufferConstants
-   * });
    */
   static inspect(target) {
-    let sab, ringBufferBase, layout;
-
-    if (target instanceof SuperSonic) {
-      sab = target.sharedBuffer;
-      ringBufferBase = target.ringBufferBase;
-      layout = target.bufferConstants;
-    } else if (target && target.sab) {
-      sab = target.sab;
-      ringBufferBase = target.ringBufferBase ?? 0;
-      layout = target.layout;
-    } else {
-      throw new Error('SuperSonic.inspect() requires an instance or {sab, ringBufferBase, layout}');
-    }
-
-    if (!sab || !layout) {
-      return { error: 'Not initialized - sab or layout missing' };
-    }
-
-    const atomicView = new Int32Array(sab);
-    const controlBase = ringBufferBase + layout.CONTROL_START;
-
-    // Read control pointers
-    const control = {
-      inHead: Atomics.load(atomicView, (controlBase + 0) / 4),
-      inTail: Atomics.load(atomicView, (controlBase + 4) / 4),
-      outHead: Atomics.load(atomicView, (controlBase + 8) / 4),
-      outTail: Atomics.load(atomicView, (controlBase + 12) / 4),
-      debugHead: Atomics.load(atomicView, (controlBase + 16) / 4),
-      debugTail: Atomics.load(atomicView, (controlBase + 20) / 4),
-      inSequence: Atomics.load(atomicView, (controlBase + 24) / 4),
-      outSequence: Atomics.load(atomicView, (controlBase + 28) / 4),
-      debugSequence: Atomics.load(atomicView, (controlBase + 32) / 4),
-      statusFlags: Atomics.load(atomicView, (controlBase + 36) / 4),
-      inWriteLock: Atomics.load(atomicView, (controlBase + 40) / 4),
-    };
-
-    // Read timing
-    const ntpStartView = new Float64Array(sab, ringBufferBase + layout.NTP_START_TIME_START, 1);
-    const driftView = new Int32Array(sab, ringBufferBase + layout.DRIFT_OFFSET_START, 1);
-    const globalView = new Int32Array(sab, ringBufferBase + layout.GLOBAL_OFFSET_START, 1);
-
-    const timing = {
-      ntpStartTime: ntpStartView[0],
-      driftOffsetMs: Atomics.load(driftView, 0),
-      globalOffsetMs: Atomics.load(globalView, 0),
-    };
-
-    // Calculate buffer usage
-    const inUsed = (control.inHead - control.inTail + layout.IN_BUFFER_SIZE) % layout.IN_BUFFER_SIZE;
-    const outUsed = (control.outHead - control.outTail + layout.OUT_BUFFER_SIZE) % layout.OUT_BUFFER_SIZE;
-    const debugUsed = (control.debugHead - control.debugTail + layout.DEBUG_BUFFER_SIZE) % layout.DEBUG_BUFFER_SIZE;
-
-    const bufferUsage = {
-      in: { bytes: inUsed, percent: (inUsed / layout.IN_BUFFER_SIZE) * 100 },
-      out: { bytes: outUsed, percent: (outUsed / layout.OUT_BUFFER_SIZE) * 100 },
-      debug: { bytes: debugUsed, percent: (debugUsed / layout.DEBUG_BUFFER_SIZE) * 100 },
-    };
-
-    // Read metrics
-    const metricsView = new Uint32Array(sab, ringBufferBase + layout.METRICS_START, layout.METRICS_SIZE / 4);
-    const metrics = {
-      processCount: metricsView[MetricsOffsets.PROCESS_COUNT],
-      messagesProcessed: metricsView[MetricsOffsets.MESSAGES_PROCESSED],
-      messagesDropped: metricsView[MetricsOffsets.MESSAGES_DROPPED],
-      schedulerQueueDepth: metricsView[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
-      schedulerQueueMax: metricsView[MetricsOffsets.SCHEDULER_QUEUE_MAX],
-      schedulerQueueDropped: metricsView[MetricsOffsets.SCHEDULER_QUEUE_DROPPED],
-    };
-
-    return {
-      layout,
-      ringBufferBase,
-      control,
-      timing,
-      bufferUsage,
-      metrics,
-      sabByteLength: sab.byteLength,
-    };
+    return inspect(target);
   }
 
   // Private implementation
@@ -195,14 +81,9 @@ export class SuperSonic {
   #node = null;
   #osc;
   #wasmMemory;
-  #sharedBuffer;
-  #ringBufferBase;
-  #bufferConstants;
   #bufferManager;
   #oscRewriter;
-  #driftOffsetTimer;
   #syncListeners;
-  #initialNTPStartTime;
   #sampleBaseURL;
   #synthdefBaseURL;
   #fetchRetryConfig;
@@ -214,47 +95,30 @@ export class SuperSonic {
   #version;
   #config;
 
+  // Extracted modules
+  #eventEmitter;
+  #metricsReader;
+  #ntpTiming;
+  #audioCapture;
+
   // Direct ring buffer write (bypasses worker for low-latency non-bundle messages)
   #directWriter;
-
-  // Shared atomic view for reading control pointers (buffer usage metrics)
-  #atomicView;
-
-  // Cached metrics view (avoids creating new Uint32Array on every read)
-  #metricsView;
-
-  // Cached views for NTP timing (avoids creating new TypedArrays on every read)
-  #ntpStartView;
-  #driftView;
-  #globalOffsetView;
-
-  // Local storage for timing values (used in postMessage mode where SAB views don't exist)
-  #localDriftMs = 0;
-  #localGlobalOffsetMs = 0;
 
   // Runtime metrics
   #metricsIntervalId = null;
   #metricsGatherInProgress = false;
   #metricsInterval = 100;
 
-  // Event emitter
-  #listeners = new Map();
-
   // Track AudioContext state for recovery detection
   #previousAudioContextState = null;
 
-  // Pending metrics request for postMessage mode (async request/response)
-  #pendingMetricsRequest = null;
-
-  // Cached WASM bytes for fast recover() - skip network fetch on re-init
+  // Cached WASM bytes for fast recover()
   #cachedWasmBytes = null;
 
-  // Cached snapshot buffer for postMessage mode (METRICS + NODE_TREE contiguous)
-  // Worklet copies this region and sends as transferable on interval
-  #cachedSnapshotBuffer = null;
+  // Snapshot tracking (postMessage mode)
   #snapshotsSent = 0;
 
-  // Buffer for early debugRawBatch messages (before scsynth_osc.js is initialized)
+  // Buffer for early debugRawBatch messages
   #earlyDebugMessages = [];
   #debugRawHandler = null;
 
@@ -265,79 +129,58 @@ export class SuperSonic {
     this.#capabilities = {};
     this.#version = null;
 
-    // Core components (private)
-    this.#sharedBuffer = null;
-    this.#ringBufferBase = null;
-    this.#bufferConstants = null;
+    // Initialize extracted modules
+    this.#eventEmitter = new EventEmitter();
+    this.#metricsReader = new MetricsReader({ mode: options.mode || 'postMessage' });
+    this.#audioCapture = new AudioCapture({});
+
+    // Core components
     this.#audioContext = null;
     this.#workletNode = null;
-    this.#osc = null; // ScsynthOSC instance for OSC communication
+    this.#osc = null;
     this.#bufferManager = null;
-    this.loadedSynthDefs = new Map();  // name -> Uint8Array (cached for recover())
+    this.loadedSynthDefs = new Map();
 
-    // Configuration - derive URLs from baseURL, import.meta.url, or require explicit URLs
-    // Priority: explicit options > baseURL option > auto-detected from import.meta.url
+    // Configuration
     const baseURL = options.baseURL || DEFAULT_URLS.baseURL;
     const workerBaseURL = options.workerBaseURL || (baseURL ? `${baseURL}workers/` : null);
     const wasmBaseURL = options.wasmBaseURL || (baseURL ? `${baseURL}wasm/` : null);
 
     if (!workerBaseURL || !wasmBaseURL) {
       throw new Error(
-        "SuperSonic requires baseURL or explicit workerBaseURL and wasmBaseURL options. Example:\n" +
-          "new SuperSonic({\n" +
-          '  baseURL: "/supersonic/"\n' +
-          "})\n" +
-          "// or\n" +
-          "new SuperSonic({\n" +
-          '  workerBaseURL: "/supersonic/workers/",\n' +
-          '  wasmBaseURL: "/supersonic/wasm/"\n' +
-          "})"
+        "SuperSonic requires baseURL or explicit workerBaseURL and wasmBaseURL options."
       );
     }
 
     const worldOptions = { ...defaultWorldOptions, ...options.scsynthOptions };
-
-    // Transport mode: 'postMessage' or 'sab' (SharedArrayBuffer)
-    // Default to 'postMessage' for widest compatibility (works without COOP/COEP headers)
     const mode = options.mode || 'postMessage';
 
     this.#config = {
-      // Transport mode
       mode: mode,
-      // Snapshot interval in ms (postMessage mode only) - how often tree/metrics snapshots are sent
       snapshotIntervalMs: options.snapshotIntervalMs ?? 25,
       wasmUrl: options.wasmUrl || wasmBaseURL + "scsynth-nrt.wasm",
       wasmBaseURL: wasmBaseURL,
-      workletUrl:
-        options.workletUrl || workerBaseURL + "scsynth_audio_worklet.js",
+      workletUrl: options.workletUrl || workerBaseURL + "scsynth_audio_worklet.js",
       workerBaseURL: workerBaseURL,
-      // External AudioContext (optional - if not provided, one will be created)
       audioContext: options.audioContext || null,
-      // Auto-connect to destination (default: true)
       autoConnect: options.autoConnect !== false,
       audioContextOptions: {
-        latencyHint: "interactive", // hint to push for lowest latency possible
-        sampleRate: 48000, // only requested rate - actual rate is determined by hardware
+        latencyHint: "interactive",
+        sampleRate: 48000,
       },
-      // Build-time memory layout (constant)
       memory: MemoryLayout,
-      // Runtime world options (merged defaults + user overrides)
       worldOptions: worldOptions,
-      // Prescheduler capacity (max pending events in JS heap)
       preschedulerCapacity: options.preschedulerCapacity || 65536,
-      // Activity event truncation (for custom log UIs)
       activityEvent: {
         maxLineLength: options.activityEvent?.maxLineLength ?? 200,
         scsynth: options.activityEvent?.scsynth ?? null,
         oscIn: options.activityEvent?.oscIn ?? null,
         oscOut: options.activityEvent?.oscOut ?? null,
       },
-      // Console debug logging (runtime flags)
-      debug: options.debug ?? false,                     // Enable all debug logging
-      debugScsynth: options.debugScsynth ?? false,       // Log scsynth debug messages
-      debugOscIn: options.debugOscIn ?? false,           // Log incoming OSC messages
-      debugOscOut: options.debugOscOut ?? false,         // Log outgoing OSC messages
-      // Console debug truncation (for readability)
+      debug: options.debug ?? false,
+      debugScsynth: options.debugScsynth ?? false,
+      debugOscIn: options.debugOscIn ?? false,
+      debugOscOut: options.debugOscOut ?? false,
       activityConsoleLog: {
         maxLineLength: options.activityConsoleLog?.maxLineLength ?? 200,
         scsynth: options.activityConsoleLog?.scsynth ?? null,
@@ -346,186 +189,62 @@ export class SuperSonic {
       },
     };
 
-    // Resource loading configuration (private)
-    // Priority: explicit options > CDN sibling packages (for unpkg) > baseURL-derived paths
-    // For CDN usage, synthdefs/samples are in separate packages, not in dist/
     this.#sampleBaseURL = options.sampleBaseURL || DEFAULT_URLS.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null);
     this.#synthdefBaseURL = options.synthdefBaseURL || DEFAULT_URLS.synthdefBaseURL || (baseURL ? `${baseURL}synthdefs/` : null);
 
-    // Fetch retry configuration
     this.#fetchRetryConfig = {
       maxRetries: options.fetchMaxRetries ?? 3,
       baseDelay: options.fetchRetryDelay ?? 1000,
     };
 
-    // Create asset loader for fetching samples and synthdefs
     this.#assetLoader = new AssetLoader({
-      onLoadingEvent: (event, data) => this.#emit(event, data),
+      onLoadingEvent: (event, data) => this.#eventEmitter.emit(event, data),
       maxRetries: this.#fetchRetryConfig.maxRetries,
       baseDelay: this.#fetchRetryConfig.baseDelay,
     });
 
-    // Boot statistics (one-time metrics)
     this.bootStats = {
       initStartTime: null,
       initDuration: null,
     };
   }
 
-  /**
-   * Get initialization status (read-only)
-   */
-  get initialized() {
-    return this.#initialized;
-  }
-
-  /**
-   * Get initialization in-progress status (read-only)
-   */
-  get initializing() {
-    return this.#initializing;
-  }
-
-  /**
-   * Get transport mode (read-only)
-   * @returns {'sab' | 'postMessage'}
-   */
-  get mode() {
-    return this.#config.mode;
-  }
-
   // ============================================================================
-  // EVENT EMITTER API
+  // PUBLIC GETTERS
   // ============================================================================
 
-  /**
-   * Subscribe to an event
-   * @param {string} event - Event name: 'ready', 'loading:start', 'loading:complete', 'metrics', 'message', 'message:sent', 'message:raw', 'debug', 'error'
-   * @param {Function} callback - Function to call when event fires
-   * @returns {Function} Unsubscribe function
-   * @example
-   * sonic.on('ready', (info) => console.log('Ready!', info));
-   * sonic.on('loading:start', (e) => console.log(`Loading ${e.type}: ${e.name}`));
-   * sonic.on('loading:complete', (e) => console.log(`Loaded ${e.type}: ${e.name} (${e.size} bytes)`));
-   * sonic.on('metrics', (m) => console.log('Messages:', m.mainMessagesSent));
-   * sonic.on('message', (msg) => console.log('OSC in:', msg.address));
-   */
-  on(event, callback) {
-    if (typeof callback !== 'function') {
-      throw new Error('Callback must be a function');
-    }
-    if (!this.#listeners.has(event)) {
-      this.#listeners.set(event, new Set());
-    }
-    this.#listeners.get(event).add(callback);
-    return () => this.off(event, callback);
-  }
-
-  /**
-   * Unsubscribe from an event
-   * @param {string} event - Event name
-   * @param {Function} callback - Function to remove
-   * @returns {this} For chaining
-   */
-  off(event, callback) {
-    const listeners = this.#listeners.get(event);
-    if (listeners) {
-      listeners.delete(callback);
-    }
-    return this;
-  }
-
-  /**
-   * Subscribe to an event once (auto-unsubscribes after first call)
-   * @param {string} event - Event name
-   * @param {Function} callback - Function to call once
-   * @returns {this} For chaining
-   */
-  once(event, callback) {
-    const wrapper = (...args) => {
-      this.off(event, wrapper);
-      callback(...args);
-    };
-    return this.on(event, wrapper);
-  }
-
-  /**
-   * Remove all listeners for an event, or all listeners entirely
-   * @param {string} [event] - Event name. If omitted, removes ALL listeners.
-   * @returns {this} For chaining
-   * @example
-   * // Remove all 'message' listeners
-   * sonic.removeAllListeners('message');
-   * // Remove ALL listeners
-   * sonic.removeAllListeners();
-   */
-  removeAllListeners(event) {
-    if (event === undefined) {
-      this.#listeners.clear();
-    } else {
-      this.#listeners.delete(event);
-    }
-    return this;
-  }
-
-  /**
-   * Emit an event to all listeners
-   * @param {string} event - Event name
-   * @param {...*} args - Arguments to pass to listeners
-   * @private
-   */
-  #emit(event, ...args) {
-    const listeners = this.#listeners.get(event);
-    if (listeners) {
-      for (const callback of listeners) {
-        try {
-          callback(...args);
-        } catch (error) {
-          console.error(`[SuperSonic] Error in ${event} listener:`, error);
-        }
-      }
-    }
-  }
+  get initialized() { return this.#initialized; }
+  get initializing() { return this.#initializing; }
+  get mode() { return this.#config.mode; }
+  get bufferConstants() { return this.#metricsReader.bufferConstants; }
+  get ringBufferBase() { return this.#metricsReader.ringBufferBase; }
+  get sharedBuffer() { return this.#metricsReader.sharedBuffer; }
+  get node() { return this.#node; }
+  get osc() { return this.#osc; }
 
   // ============================================================================
+  // EVENT EMITTER DELEGATION
+  // ============================================================================
 
-  /**
-   * Initialize the audio worklet system
-   * @param {Object} config - Optional configuration overrides
-   * @param {string} config.wasmUrl - Custom WASM URL
-   * @param {string} config.workletUrl - Custom worklet URL
-   * @param {Object} config.audioContextOptions - AudioContext options
-   */
+  on(event, callback) { return this.#eventEmitter.on(event, callback); }
+  off(event, callback) { this.#eventEmitter.off(event, callback); return this; }
+  once(event, callback) { this.#eventEmitter.once(event, callback); return this; }
+  removeAllListeners(event) { this.#eventEmitter.removeAllListeners(event); return this; }
+
+  // ============================================================================
+  // INITIALIZATION
+  // ============================================================================
+
   async init(config = {}) {
-    if (this.#initialized) {
-      return;
-    }
-
-    // Return existing promise if initialization is already in progress
-    // This prevents race conditions when init() is called concurrently
-    if (this.#initPromise) {
-      return this.#initPromise;
-    }
+    if (this.#initialized) return;
+    if (this.#initPromise) return this.#initPromise;
 
     this.#initPromise = this.#doInit(config);
     return this.#initPromise;
   }
 
-  /**
-   * Internal initialization implementation
-   * @private
-   */
   async #doInit(config) {
-    // Merge config with defaults
-    this.#config = {
-      ...this.#config,
-      ...config,
-      audioContextOptions: {
-        ...this.#config.audioContextOptions,
-        ...(config.audioContextOptions || {}),
-      },
-    };
-
+    this.#config = { ...this.#config, ...config };
     this.#initializing = true;
     this.bootStats.initStartTime = performance.now();
 
@@ -544,44 +263,51 @@ export class SuperSonic {
       this.#initializing = false;
       this.#initPromise = null;
       console.error("[SuperSonic] Initialization failed:", error);
-
-      this.#emit('error', error);
-
+      this.#eventEmitter.emit('error', error);
       throw error;
     }
   }
 
-  /**
-   * Get metrics snapshot on-demand (synchronous)
-   * @returns {Object} Current metrics from all sources
-   */
+  // ============================================================================
+  // METRICS API
+  // ============================================================================
+
   getMetrics() {
     return this.#gatherMetrics();
   }
 
-  /**
-   * Set metrics polling interval and restart the timer
-   * @param {number} ms - Polling interval in milliseconds
-   */
   setMetricsInterval(ms) {
     this.#metricsInterval = ms;
     this.#startPerformanceMonitoring();
   }
 
-  /**
-   * Stop periodic metrics polling
-   */
   stopMetricsPolling() {
     this.#stopPerformanceMonitoring();
   }
 
-  /**
-   * Resume audio processing after interruption (internal)
-   * Resumes AudioContext, verifies worklet is running, and resyncs timing.
-   * @returns {Promise<boolean>} true if audio is running, false if resume failed
-   */
+  // ============================================================================
+  // RECOVERY API
+  // ============================================================================
+
+  async recover() {
+    if (!this.#initialized) return false;
+
+    if (__DEV__) console.log('[Dbg-SuperSonic] Attempting recovery...');
+
+    if (await this.#resume()) {
+      if (__DEV__) console.log('[Dbg-SuperSonic] Quick resume succeeded');
+      return true;
+    }
+
+    if (__DEV__) console.log('[Dbg-SuperSonic] Resume failed, doing full reload');
+    this.#eventEmitter.emit('recover:start');
+    const success = await this.#reload();
+    this.#eventEmitter.emit('recover:complete', { success });
+    return success;
+  }
+
   async #resume() {
-    if (!this.#audioContext || !this.#metricsView) {
+    if (!this.#audioContext || !this.#metricsReader.getMetricsView()) {
       return false;
     }
 
@@ -591,155 +317,63 @@ export class SuperSonic {
       // Resume may fail
     }
 
-    // Check if worklet is processing
-    const count1 = this.#metricsView[MetricsOffsets.PROCESS_COUNT];
+    const metricsView = this.#metricsReader.getMetricsView();
+    const count1 = metricsView[0]; // PROCESS_COUNT
     await new Promise(resolve => setTimeout(resolve, 200));
-    const count2 = this.#metricsView[MetricsOffsets.PROCESS_COUNT];
+    const count2 = metricsView[0];
 
     const isRunning = count2 > count1;
-
     if (isRunning) {
-      this.#resyncTiming();
+      this.#ntpTiming.resync();
     }
 
     return isRunning;
   }
 
-  /**
-   * Smart recovery - tries resume() first, falls back to reload() if needed.
-   * This is the recommended method for handling audio interruptions.
-   *
-   * @returns {Promise<boolean>} true if audio is running after recovery
-   * @example
-   * document.addEventListener('visibilitychange', async () => {
-   *   if (!document.hidden) await sonic.recover();
-   * });
-   */
-  async recover() {
-    if (!this.#initialized) {
-      return false;
-    }
-
-    if (__DEV__) console.log('[Dbg-SuperSonic] Attempting recovery...');
-
-    // Try quick resume first - if worklet is still running, just resync timing
-    if (await this.#resume()) {
-      if (__DEV__) console.log('[Dbg-SuperSonic] Quick resume succeeded');
-      return true;
-    }
-
-    // Worklet was killed, do full reload
-    if (__DEV__) console.log('[Dbg-SuperSonic] Resume failed, doing full reload');
-    this.#emit('recover:start');
-    const success = await this.#reload();
-    this.#emit('recover:complete', { success });
-    return success;
-  }
-
-  /**
-   * Full reset with cached asset restoration (internal)
-   * Preserves SharedArrayBuffer and buffer data, only reinitializes:
-   * - AudioContext
-   * - AudioWorklet
-   * - WASM (from cache)
-   * - OSC workers
-   *
-   * After reinit, restores:
-   * - Synthdefs (re-sent from cache)
-   * - Buffers (re-registered with scsynth via /b_allocPtr)
-   */
   async #reload() {
-    if (!this.#initialized) {
-      return false;
-    }
+    if (!this.#initialized) return false;
 
-    if (__DEV__) console.log('[Dbg-SuperSonic] Starting reload...');
-
-    // Save cached synthdef bytes before partial shutdown
     const cachedSynthDefs = new Map(this.loadedSynthDefs);
-
-    // Get allocated buffers before partial shutdown (buffer data stays in SharedArrayBuffer)
     const cachedBuffers = this.#bufferManager?.getAllocatedBuffers() || [];
 
-    if (__DEV__) {
-      console.log(`[Dbg-SuperSonic] Caching ${cachedSynthDefs.size} synthdefs, ${cachedBuffers.length} buffers`);
-    }
-
-    // Partial shutdown - preserve SharedArrayBuffer and BufferManager
     await this.#partialShutdown();
-
-    // Reinitialize (reuses existing SharedArrayBuffer)
     await this.#partialInit();
 
-    // Re-send cached synthdefs (instant - bytes in memory)
+    // Restore synthdefs
     for (const [name, data] of cachedSynthDefs) {
       try {
         await this.send('/d_recv', data);
-        if (__DEV__) console.log(`[Dbg-SuperSonic] Restored synthdef: ${name}`);
       } catch (e) {
         console.error(`[SuperSonic] Failed to restore synthdef ${name}:`, e);
       }
     }
 
-    // Re-register buffers with scsynth
-    // SAB mode: data persists in SharedArrayBuffer, just re-register pointer
-    // postMessage mode: WASM memory destroyed, need to re-load from source
+    // Restore buffers
     for (const buf of cachedBuffers) {
       try {
         if (this.#config.mode === 'postMessage' && buf.source) {
-          // postMessage mode: re-load sample from source
           if (buf.source.type === 'file') {
-            await this.loadSample(
-              buf.bufnum,
-              buf.source.path,
-              buf.source.startFrame || 0,
-              buf.source.numFrames || 0
-            );
-            if (__DEV__) console.log(`[Dbg-SuperSonic] Re-loaded buffer: ${buf.bufnum} from ${buf.source.path}`);
-          } else {
-            console.warn(`[SuperSonic] Unknown buffer source type: ${buf.source.type}`);
+            await this.loadSample(buf.bufnum, buf.source.path, buf.source.startFrame || 0, buf.source.numFrames || 0);
           }
         } else {
-          // SAB mode: data persists, just re-register pointer
           const uuid = crypto.randomUUID();
-          await this.send(
-            '/b_allocPtr',
-            buf.bufnum,
-            buf.ptr,
-            buf.numFrames,
-            buf.numChannels,
-            buf.sampleRate,
-            uuid
-          );
-          if (__DEV__) console.log(`[Dbg-SuperSonic] Restored buffer: ${buf.bufnum}`);
+          await this.send('/b_allocPtr', buf.bufnum, buf.ptr, buf.numFrames, buf.numChannels, buf.sampleRate, uuid);
         }
       } catch (e) {
         console.error(`[SuperSonic] Failed to restore buffer ${buf.bufnum}:`, e);
       }
     }
 
-    // Sync to ensure all restored assets are processed by scsynth
     if (cachedSynthDefs.size > 0 || cachedBuffers.length > 0) {
       await this.sync();
     }
 
-    if (__DEV__) console.log('[Dbg-SuperSonic] Reload complete');
     return true;
   }
 
-  /**
-   * Partial shutdown - preserves SharedArrayBuffer and BufferManager
-   * Used by #reload() to maintain buffer data across restart
-   * @private
-   */
   async #partialShutdown() {
-    if (__DEV__) console.log("[Dbg-SuperSonic] Partial shutdown (preserving buffers)...");
-
-    // Stop timers
-    this.#stopDriftOffsetTimer();
+    this.#ntpTiming?.stopDriftTimer();
     this.#stopPerformanceMonitoring();
-
-    // Clear sync listeners
     this.#syncListeners?.clear();
     this.#syncListeners = null;
 
@@ -759,53 +393,23 @@ export class SuperSonic {
       this.#audioContext = null;
     }
 
-    // DO NOT destroy BufferManager or SharedArrayBuffer
-    // Buffer data persists in memory
-
     this.#initialized = false;
     this.loadedSynthDefs.clear();
-
-    // Reset init promise so #partialInit can proceed
     this.#initPromise = null;
-
-    // Reset ring buffer and control views (will be recreated)
-    this.#ringBufferBase = null;
-    this.#bufferConstants = null;
     this.#directWriter = null;
-    this.#atomicView = null;
-    this.#metricsView = null;
-    this.#ntpStartView = null;
-    this.#driftView = null;
-    this.#globalOffsetView = null;
-    this.#initialNTPStartTime = undefined;
+    this.#ntpTiming?.reset();
   }
 
-  /**
-   * Partial init - reuses existing SharedArrayBuffer and BufferManager
-   * Used by #reload() after #partialShutdown()
-   * @private
-   */
   async #partialInit() {
-    if (__DEV__) console.log("[Dbg-SuperSonic] Partial init (reusing buffers)...");
-
     this.#initializing = true;
     this.bootStats.initStartTime = performance.now();
 
     try {
-      // Skip #initializeMemory - reuse existing
-      // Skip #initializeBufferManager - reuse existing
-
       this.#initializeAudioContext();
-
-      // Update BufferManager with new AudioContext
-      // (needed for any future decodeAudioData calls)
       if (this.#bufferManager) {
         this.#bufferManager.updateAudioContext(this.#audioContext);
       }
-
-      // Recreate OSCRewriter (was nulled in shutdown)
       this.#initializeOSCRewriter();
-
       const wasmBytes = await this.#loadWasm();
       await this.#initializeAudioWorklet(wasmBytes);
       await this.#initializeOSC();
@@ -815,311 +419,96 @@ export class SuperSonic {
       this.#initializing = false;
       this.#initPromise = null;
       console.error("[SuperSonic] Partial init failed:", error);
-      this.#emit('error', error);
+      this.#eventEmitter.emit('error', error);
       throw error;
     }
   }
 
-  /**
-   * Get a snapshot of the scsynth node tree for visualization.
-   *
-   * Returns all synths and groups currently running, with their hierarchy
-   * and ordering. Use the `version` field to detect changes efficiently.
-   *
-   * @returns {Object} Tree snapshot:
-   *   - `version` {number} - Changes whenever the tree changes. Compare with
-   *     previous value to skip re-renders when nothing changed.
-   *   - `nodeCount` {number} - Number of nodes (synths + groups)
-   *   - `nodes` {Array} - All nodes, each with:
-   *     - `id` - Node ID
-   *     - `parentId` - Parent group (-1 for root)
-   *     - `isGroup` - true for groups, false for synths
-   *     - `defName` - Synthdef name, or "group"
-   *     - `headId` - First child for groups (-1 if empty or synth)
-   *     - `prevId`, `nextId` - Siblings (-1 at ends)
-   *
-   * @example
-   * // Render tree only when it changes
-   * let lastVersion = 0;
-   * function animate() {
-   *   const tree = sonic.getTree();
-   *   if (tree.version !== lastVersion) {
-   *     lastVersion = tree.version;
-   *     renderTree(tree.nodes);
-   *   }
-   *   requestAnimationFrame(animate);
-   * }
-   * animate();
-   */
+  // ============================================================================
+  // NODE TREE API
+  // ============================================================================
+
   getTree() {
     if (!this.#initialized) {
       return { nodeCount: 0, version: 0, nodes: [] };
     }
 
-    // Determine source buffer:
-    // SAB mode: read from SharedArrayBuffer at ringBufferBase + METRICS_START
-    // postMessage mode: read from cached snapshot buffer (starts at offset 0)
+    const bc = this.#metricsReader.bufferConstants;
+    if (!bc) {
+      return { nodeCount: 0, version: 0, nodes: [] };
+    }
+
     let buffer, treeOffset;
     if (this.#config.mode === 'postMessage') {
-      if (!this.#cachedSnapshotBuffer || !this.#bufferConstants) {
+      const snapshot = this.#metricsReader.getSnapshotBuffer();
+      if (!snapshot) {
         return { nodeCount: 0, version: 0, nodes: [] };
       }
-      buffer = this.#cachedSnapshotBuffer;
-      // Snapshot buffer layout: METRICS (at 0) then NODE_TREE (at METRICS_SIZE)
-      treeOffset = this.#bufferConstants.METRICS_SIZE;
+      buffer = snapshot;
+      treeOffset = bc.METRICS_SIZE;
     } else {
-      if (!this.#sharedBuffer || !this.#bufferConstants) {
+      const sab = this.#metricsReader.sharedBuffer;
+      if (!sab) {
         return { nodeCount: 0, version: 0, nodes: [] };
       }
-      buffer = this.#sharedBuffer;
-      treeOffset = this.#ringBufferBase + this.#bufferConstants.NODE_TREE_START;
+      buffer = sab;
+      treeOffset = this.#metricsReader.ringBufferBase + bc.NODE_TREE_START;
     }
 
-    const bc = this.#bufferConstants;
-
-    // Read header (2 x uint32)
-    const headerView = new Uint32Array(buffer, treeOffset, 2);
-    const nodeCount = headerView[0];
-    const version = headerView[1];
-
-    // Read entries - each entry is 56 bytes: 6 int32s (24 bytes) + def_name (32 bytes)
-    const entriesBase = treeOffset + bc.NODE_TREE_HEADER_SIZE;
-    const maxNodes = bc.NODE_TREE_MAX_NODES;
-    const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 56 bytes
-    const defNameSize = bc.NODE_TREE_DEF_NAME_SIZE; // 32 bytes
-
-    // Use DataView for mixed int32/string access
-    const dataView = new DataView(buffer, entriesBase, maxNodes * entrySize);
-    const textDecoder = new TextDecoder('utf-8');
-
-    // Collect non-empty entries
-    // Note: We scan all slots, not just nodeCount, because slots can be sparse after removals
-    // Only skip slots where id === -1 (empty marker)
-    const nodes = [];
-    let foundCount = 0;
-    for (let i = 0; i < maxNodes && foundCount < nodeCount; i++) {
-      const byteOffset = i * entrySize;
-      const id = dataView.getInt32(byteOffset, true); // little-endian
-      if (id === -1) continue; // Empty slot
-      foundCount++;
-
-      // Read def_name (32 bytes starting at byte 24 of entry)
-      // Must copy from SharedArrayBuffer to regular ArrayBuffer for TextDecoder
-      const defNameStart = entriesBase + byteOffset + 24;
-      const defNameView = new Uint8Array(buffer, defNameStart, defNameSize);
-      const defNameBytes = new Uint8Array(defNameSize);
-      defNameBytes.set(defNameView); // Copy to non-shared buffer
-      // Find null terminator
-      let nullIndex = defNameBytes.indexOf(0);
-      if (nullIndex === -1) nullIndex = defNameSize;
-      const defName = textDecoder.decode(defNameBytes.subarray(0, nullIndex));
-
-      nodes.push({
-        id,
-        parentId: dataView.getInt32(byteOffset + 4, true),
-        isGroup: dataView.getInt32(byteOffset + 8, true) === 1,
-        prevId: dataView.getInt32(byteOffset + 12, true),
-        nextId: dataView.getInt32(byteOffset + 16, true),
-        headId: dataView.getInt32(byteOffset + 20, true),
-        defName
-      });
-    }
-
-    return { nodeCount, version, nodes };
-  }
-
-  /**
-   * Get buffer constants (for testing/debugging)
-   * @returns {Object} Buffer layout constants
-   */
-  get bufferConstants() {
-    return this.#bufferConstants;
-  }
-
-  /**
-   * Get ring buffer base address (for testing/debugging)
-   * @returns {number} Base address in WASM memory
-   */
-  get ringBufferBase() {
-    return this.#ringBufferBase;
-  }
-
-  /**
-   * Get shared buffer (for testing/debugging)
-   * @returns {SharedArrayBuffer} The shared memory buffer
-   */
-  get sharedBuffer() {
-    return this.#sharedBuffer;
+    return parseNodeTree(buffer, treeOffset, bc);
   }
 
   // ============================================================================
-  // AUDIO CAPTURE API (for testing)
+  // AUDIO CAPTURE API
   // ============================================================================
 
-  /**
-   * Start capturing audio output to the shared buffer
-   * Useful for testing audio output verification
-   * @example
-   * sonic.startCapture();
-   * sonic.send('/s_new', 'sonic-pi-beep', 1000, 0, 0);
-   * await sonic.wait(500);
-   * const audio = sonic.stopCapture();
-   * // audio is { sampleRate, channels, frames, left, right }
-   */
   startCapture() {
-    if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {
-      throw new Error('SuperSonic not initialized');
-    }
-
-    const bc = this.#bufferConstants;
-    const headerOffset = this.#ringBufferBase + bc.AUDIO_CAPTURE_START;
-
-    // Use Atomics for cross-thread access
-    const headerView = new Uint32Array(this.#sharedBuffer, headerOffset, 4);
-
-    // Reset head position and enable capture
-    Atomics.store(headerView, 1, 0);  // head = 0
-    Atomics.store(headerView, 0, 1);  // enabled = 1
+    this.#ensureInitialized("start capture");
+    this.#audioCapture.start();
   }
 
-  /**
-   * Stop capturing audio and return captured data
-   * @returns {Object} Captured audio data with sampleRate, channels, frames, left, right arrays
-   */
   stopCapture() {
-    if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {
-      throw new Error('SuperSonic not initialized');
-    }
-
-    const bc = this.#bufferConstants;
-    const headerOffset = this.#ringBufferBase + bc.AUDIO_CAPTURE_START;
-
-    // Read header
-    const headerView = new Uint32Array(this.#sharedBuffer, headerOffset, 4);
-
-    // Disable capture first
-    Atomics.store(headerView, 0, 0);  // enabled = 0
-
-    // Read captured data
-    const head = Atomics.load(headerView, 1);  // frames captured
-    const sampleRate = headerView[2];
-    const channels = headerView[3];
-
-    // Read audio data (interleaved: L0, R0, L1, R1, ...)
-    const dataOffset = headerOffset + bc.AUDIO_CAPTURE_HEADER_SIZE;
-    const dataView = new Float32Array(this.#sharedBuffer, dataOffset, head * channels);
-
-    // Deinterleave into separate channel arrays (copy to non-shared buffer)
-    const left = new Float32Array(head);
-    const right = channels > 1 ? new Float32Array(head) : null;
-
-    for (let i = 0; i < head; i++) {
-      left[i] = dataView[i * channels];
-      if (right) {
-        right[i] = dataView[i * channels + 1];
-      }
-    }
-
-    return {
-      sampleRate,
-      channels,
-      frames: head,
-      left,
-      right
-    };
+    this.#ensureInitialized("stop capture");
+    return this.#audioCapture.stop();
   }
 
-  /**
-   * Check if audio capture is currently enabled
-   * @returns {boolean} True if capture is enabled
-   */
   isCaptureEnabled() {
-    if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {
-      return false;
-    }
-
-    const bc = this.#bufferConstants;
-    const headerOffset = this.#ringBufferBase + bc.AUDIO_CAPTURE_START;
-    const headerView = new Uint32Array(this.#sharedBuffer, headerOffset, 1);
-    return Atomics.load(headerView, 0) === 1;
+    return this.#audioCapture.isEnabled();
   }
 
-  /**
-   * Get current capture position in frames
-   * @returns {number} Number of frames captured so far
-   */
   getCaptureFrames() {
-    if (!this.#initialized || !this.#sharedBuffer || !this.#bufferConstants) {
-      return 0;
-    }
-
-    const bc = this.#bufferConstants;
-    const headerOffset = this.#ringBufferBase + bc.AUDIO_CAPTURE_START;
-    const headerView = new Uint32Array(this.#sharedBuffer, headerOffset, 2);
-    return Atomics.load(headerView, 1);
+    return this.#audioCapture.getFrameCount();
   }
 
-  /**
-   * Get maximum capture duration in seconds
-   * @returns {number} Maximum capture duration based on buffer size and sample rate
-   */
   getMaxCaptureDuration() {
-    if (!this.#bufferConstants) return 0;
-    const bc = this.#bufferConstants;
-    // AUDIO_CAPTURE_SAMPLE_RATE is the configured capture rate from shared_memory.h
-    // The actual sample rate may differ and is set by WASM at init
-    return bc.AUDIO_CAPTURE_FRAMES / (bc.AUDIO_CAPTURE_SAMPLE_RATE || 48000);
+    return this.#audioCapture.getMaxDuration();
   }
 
   // ============================================================================
+  // OSC MESSAGING API
+  // ============================================================================
 
-  /**
-   * Send OSC message with simplified syntax (auto-detects types)
-   * @param {string} address - OSC address
-   * @param {...*} args - Arguments (numbers, strings, Uint8Array)
-   * @example
-   * sonic.send('/notify', 1);
-   * sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0);
-   * sonic.send('/n_set', 1000, 'freq', 440.0, 'amp', 0.5);
-   */
   async send(address, ...args) {
     this.#ensureInitialized("send OSC messages");
 
-    // Block filesystem-based commands (no filesystem in WASM)
-    if (address === "/d_load" || address === "/d_loadDir") {
-      throw new Error(
-        `${address} is not supported in SuperSonic (no filesystem). Use loadSynthDef() or send /d_recv with synthdef bytes instead.`
-      );
-    }
-    if (address === "/b_read" || address === "/b_readChannel") {
-      throw new Error(
-        `${address} is not supported in SuperSonic (no filesystem). Use loadSample() to load audio into a buffer.`
-      );
-    }
-    if (address === "/b_write" || address === "/b_close") {
-      throw new Error(
-        `${address} is not supported in SuperSonic (no filesystem). Writing audio files is not available in the browser.`
-      );
+    // Block unsupported commands
+    const blocked = {
+      "/d_load": "Use loadSynthDef() or send /d_recv with synthdef bytes instead.",
+      "/d_loadDir": "Use loadSynthDef() or send /d_recv with synthdef bytes instead.",
+      "/b_read": "Use loadSample() to load audio into a buffer.",
+      "/b_readChannel": "Use loadSample() to load audio into a buffer.",
+      "/b_write": "Writing audio files is not available in the browser.",
+      "/b_close": "Writing audio files is not available in the browser.",
+      "/clearSched": "Bundle scheduling works differently in the browser AudioWorklet environment.",
+      "/dumpOSC": "Use browser developer tools to inspect OSC messages.",
+      "/error": "Error notifications are always enabled.",
+    };
+
+    if (blocked[address]) {
+      throw new Error(`${address} is not supported in SuperSonic. ${blocked[address]}`);
     }
 
-    // Block commands that have no effect in SuperSonic's NRT mode
-    if (address === "/clearSched") {
-      throw new Error(
-        `/clearSched is not supported in SuperSonic. Bundle scheduling works differently in the browser AudioWorklet environment.`
-      );
-    }
-    if (address === "/dumpOSC") {
-      throw new Error(
-        `/dumpOSC is not supported in SuperSonic. Use browser developer tools to inspect OSC messages.`
-      );
-    }
-    if (address === "/error") {
-      throw new Error(
-        `/error is not supported in SuperSonic. Error notifications are always enabled.`
-      );
-    }
-
-    // Cache synthdefs for /d_recv (loading events are emitted by loadSynthDef/AssetLoader)
+    // Cache synthdefs for /d_recv
     if (address === "/d_recv") {
       const synthdefBytes = args[0];
       if (synthdefBytes instanceof Uint8Array || synthdefBytes instanceof ArrayBuffer) {
@@ -1129,7 +518,7 @@ export class SuperSonic {
       }
     }
 
-    // Track synthdef frees locally (server doesn't send confirmation)
+    // Track synthdef frees
     if (address === "/d_free") {
       for (const name of args) {
         if (typeof name === "string") {
@@ -1141,30 +530,21 @@ export class SuperSonic {
     }
 
     const oscArgs = args.map((arg) => {
-      if (typeof arg === "string") {
-        return { type: "s", value: arg };
-      } else if (typeof arg === "number") {
-        return { type: Number.isInteger(arg) ? "i" : "f", value: arg };
-      } else if (arg instanceof Uint8Array || arg instanceof ArrayBuffer) {
-        return {
-          type: "b",
-          value: arg instanceof ArrayBuffer ? new Uint8Array(arg) : arg,
-        };
-      } else {
-        throw new Error(`Unsupported argument type: ${typeof arg}`);
+      if (typeof arg === "string") return { type: "s", value: arg };
+      if (typeof arg === "number") return { type: Number.isInteger(arg) ? "i" : "f", value: arg };
+      if (arg instanceof Uint8Array || arg instanceof ArrayBuffer) {
+        return { type: "b", value: arg instanceof ArrayBuffer ? new Uint8Array(arg) : arg };
       }
+      throw new Error(`Unsupported argument type: ${typeof arg}`);
     });
 
     const message = { address, args: oscArgs };
     const oscData = SuperSonic.osc.encode(message);
 
-    // Debug logging for outgoing OSC
     if (this.#config.debug || this.#config.debugOscOut) {
       const maxLen = this.#config.activityConsoleLog.oscOut ?? this.#config.activityConsoleLog.maxLineLength;
       const argsStr = args.map(a => {
-        if (a instanceof Uint8Array || a instanceof ArrayBuffer) {
-          return `<${a.byteLength || a.length} bytes>`;
-        }
+        if (a instanceof Uint8Array || a instanceof ArrayBuffer) return `<${a.byteLength || a.length} bytes>`;
         const str = JSON.stringify(a);
         return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
       }).join(', ');
@@ -1174,47 +554,33 @@ export class SuperSonic {
     return this.sendOSC(oscData);
   }
 
-  /**
-   * Send pre-encoded OSC bytes to scsynth
-   * @param {ArrayBuffer|Uint8Array} oscData - Pre-encoded OSC data
-   * @param {Object} options - Send options
-   */
   async sendOSC(oscData, options = {}) {
     this.#ensureInitialized("send OSC data");
 
     const uint8Data = this.#toUint8Array(oscData);
     const preparedData = await this.#prepareOutboundPacket(uint8Data);
 
-    this.#addMetric("mainMessagesSent");
-    this.#addMetric("mainBytesSent", preparedData.length);
+    this.#metricsReader.addMetric("mainMessagesSent");
+    this.#metricsReader.addMetric("mainBytesSent", preparedData.length);
 
-    this.#emit('message:sent', preparedData);
+    this.#eventEmitter.emit('message:sent', preparedData);
 
-    // Fast path: try direct ring buffer write for messages that don't need scheduling
-    // This bypasses the worker thread, saving ~30-50ms of worker latency
-    // Eligible: non-bundles, immediate bundles (timetag 0/1), or bundles within 200ms
+    // Fast path: try direct ring buffer write
     if (this.#directWriter?.tryWrite(preparedData)) {
-      this.#addMetric("preschedulerBypassed");
-      return; // Direct write succeeded
-    }
-
-    // Calculate timing first to determine if this needs scheduling
-    const timing = this.#calculateBundleWait(preparedData);
-
-    // PostMessage mode: send immediate messages directly to worklet (bypass prescheduler)
-    // This is faster (1 hop vs 3) and the prescheduler is only needed for scheduled messages
-    if (this.#config.mode === 'postMessage' && !timing) {
-      this.#workletNode.port.postMessage({
-        type: 'osc',
-        oscData: preparedData
-      });
+      this.#metricsReader.addMetric("preschedulerBypassed");
       return;
     }
 
-    // Size guard: reject oversized SCHEDULED bundles only
-    // These would exceed the C++ scheduler's slot size and be silently dropped
-    // Immediate messages bypass the scheduler, so no size limit applies
-    const slotSize = this.#bufferConstants?.scheduler_slot_size;
+    const timing = this.#ntpTiming?.calculateBundleWait(preparedData);
+
+    // PostMessage mode: send immediate messages directly to worklet
+    if (this.#config.mode === 'postMessage' && !timing) {
+      this.#workletNode.port.postMessage({ type: 'osc', oscData: preparedData });
+      return;
+    }
+
+    // Size guard for scheduled bundles
+    const slotSize = this.#metricsReader.bufferConstants?.scheduler_slot_size;
     if (timing && slotSize && preparedData.length > slotSize) {
       throw new Error(
         `OSC bundle too large to schedule (${preparedData.length} > ${slotSize} bytes). ` +
@@ -1222,10 +588,7 @@ export class SuperSonic {
       );
     }
 
-    // Fall back to worker for future-scheduled bundles, buffer-full, or wrap-around cases
-    // Worker has retry queue for buffer-full scenarios
     const sendOptions = { ...options };
-
     if (timing) {
       sendOptions.audioTimeS = timing.audioTimeS;
       sendOptions.currentTimeS = timing.currentTimeS;
@@ -1234,297 +597,144 @@ export class SuperSonic {
     this.#osc.send(preparedData, sendOptions);
   }
 
-  /**
-   * Cancel all scheduled OSC bundles with a specific tag (any session)
-   * @param {string} runTag - The tag to cancel
-   */
   cancelTag(runTag) {
     this.#ensureInitialized("cancel by tag");
     this.#osc.cancelTag(runTag);
   }
 
-  /**
-   * Cancel all scheduled OSC bundles from a specific session (any tag)
-   * @param {number} sessionId - The session ID to cancel
-   */
   cancelSession(sessionId) {
     this.#ensureInitialized("cancel by session");
     this.#osc.cancelSession(sessionId);
   }
 
-  /**
-   * Cancel all scheduled OSC bundles matching both session and tag
-   * @param {number} sessionId - The session ID
-   * @param {string} runTag - The tag
-   */
   cancelSessionTag(sessionId, runTag) {
     this.#ensureInitialized("cancel by session and tag");
     this.#osc.cancelSessionTag(sessionId, runTag);
   }
 
-  /**
-   * Cancel all scheduled OSC bundles
-   */
   cancelAllScheduled() {
     this.#ensureInitialized("cancel all scheduled");
     this.#osc.cancelAll();
   }
 
-  /**
-   * Get the audio node wrapper for routing
-   * Exposes connect/disconnect methods and context
-   * @returns {Object|null} Frozen node wrapper, or null before init()
-   */
-  get node() {
-    return this.#node;
-  }
+  // ============================================================================
+  // ASSET LOADING API
+  // ============================================================================
 
-  /**
-   * Get ScsynthOSC instance (read-only)
-   * @returns {ScsynthOSC} The OSC communication layer instance
-   */
-  get osc() {
-    return this.#osc;
-  }
-
-  /**
-   * Load a binary synthdef file and send it to scsynth
-   * @param {string} nameOrPath - Synthdef name (e.g. 'sonic-pi-beep') or full path/URL
-   * @returns {Promise<{name: string, size: number}>} Synthdef info
-   * @example
-   * const info = await sonic.loadSynthDef('sonic-pi-beep');  // Uses synthdefBaseURL
-   * console.log(`Loaded ${info.name} (${info.size} bytes)`);
-   */
   async loadSynthDef(nameOrPath) {
-    if (!this.#initialized) {
-      throw new Error("SuperSonic not initialized. Call init() first.");
-    }
+    this.#ensureInitialized("load synthdef");
 
-    // Resolve name to path if needed
     let path;
     if (this.#looksLikePathOrURL(nameOrPath)) {
       path = nameOrPath;
     } else {
       if (!this.#synthdefBaseURL) {
-        throw new Error(
-          "synthdefBaseURL not configured. Either provide a full path or set synthdefBaseURL in constructor options."
-        );
+        throw new Error("synthdefBaseURL not configured.");
       }
       path = `${this.#synthdefBaseURL}${nameOrPath}.scsyndef`;
     }
 
     const synthName = extractSynthDefName(path);
 
-    try {
-      // Fetch using AssetLoader (handles retry, HEAD request, loading:start event)
-      const arrayBuffer = await this.#assetLoader.fetch(path, {
-        type: 'synthdef',
-        name: synthName,
-      });
+    const arrayBuffer = await this.#assetLoader.fetch(path, { type: 'synthdef', name: synthName });
+    const synthdefData = new Uint8Array(arrayBuffer);
+    await this.send("/d_recv", synthdefData);
 
-      const synthdefData = new Uint8Array(arrayBuffer);
-
-      await this.send("/d_recv", synthdefData);
-
-      if (__DEV__)
-        console.log(
-          `[Dbg-SuperSonic] Sent synthdef from ${path} (${synthdefData.length} bytes)`
-        );
-
-      return {
-        name: synthName,
-        size: synthdefData.length,
-      };
-    } catch (error) {
-      console.error("[SuperSonic] Failed to load synthdef:", error);
-      throw error;
-    }
+    return { name: synthName, size: synthdefData.length };
   }
 
-  /**
-   * Load multiple synthdefs by name
-   * @param {string[]} names - Array of synthdef names (without .scsyndef extension)
-   * @returns {Promise<Object>} Map of name -> success/error
-   * @example
-   * const results = await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
-   */
   async loadSynthDefs(names) {
-    if (!this.#initialized) {
-      throw new Error("SuperSonic not initialized. Call init() first.");
-    }
+    this.#ensureInitialized("load synthdefs");
 
     const results = {};
-
-    // Send all /d_recv commands in parallel
     await Promise.all(
       names.map(async (name) => {
         try {
           await this.loadSynthDef(name);
           results[name] = { success: true };
         } catch (error) {
-          console.error(`[SuperSonic] Failed to load ${name}:`, error);
           results[name] = { success: false, error: error.message };
         }
       })
     );
-
-    const successCount = Object.values(results).filter((r) => r.success).length;
-    if (__DEV__)
-      console.log(
-        `[Dbg-SuperSonic] Sent ${successCount}/${names.length} synthdef loads`
-      );
-
     return results;
   }
 
-  /**
-   * Load a sample into a buffer and wait for confirmation
-   * @param {number} bufnum - Buffer number
-   * @param {string} nameOrPath - Sample filename (e.g. 'loop_amen.flac') or full path/URL
-   * @returns {Promise} Resolves when buffer is ready
-   * @example
-   * await sonic.loadSample(0, 'loop_amen.flac');  // Uses sampleBaseURL
-   * await sonic.loadSample(0, './custom/my-sample.wav');  // Full path
-   */
   async loadSample(bufnum, nameOrPath, startFrame = 0, numFrames = 0) {
     this.#ensureInitialized("load samples");
 
     const bufferInfo = await this.#bufferManager.prepareFromFile({
-      bufnum,
-      path: nameOrPath,
-      startFrame,
-      numFrames,
+      bufnum, path: nameOrPath, startFrame, numFrames,
     });
 
     await this.send(
-      "/b_allocPtr",
-      bufnum,
-      bufferInfo.ptr,
-      bufferInfo.numFrames,
-      bufferInfo.numChannels,
-      bufferInfo.sampleRate,
-      bufferInfo.uuid
+      "/b_allocPtr", bufnum, bufferInfo.ptr, bufferInfo.numFrames,
+      bufferInfo.numChannels, bufferInfo.sampleRate, bufferInfo.uuid
     );
 
     return bufferInfo.allocationComplete;
   }
 
-  /**
-   * Send /sync command and wait for /synced response
-   * Use this to ensure all previous asynchronous commands have completed
-   * @param {number} [syncId] - Optional integer identifier (defaults to random)
-   * @returns {Promise<void>}
-   * @example
-   * await sonic.loadSynthDefs(['synth1', 'synth2']);
-   * await sonic.sync(); // Wait for all synthdefs to be processed
-   */
   async sync(syncId = Math.floor(Math.random() * 2147483647)) {
-    if (!this.#initialized) {
-      throw new Error("SuperSonic not initialized. Call init() first.");
-    }
+    this.#ensureInitialized("sync");
 
     const syncPromise = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        // Clean up listener on timeout
-        if (this.#syncListeners) {
-          this.#syncListeners.delete(syncId);
-        }
+        this.#syncListeners?.delete(syncId);
         reject(new Error("Timeout waiting for /synced response"));
       }, SYNC_TIMEOUT_MS);
 
-      // Create a one-time message listener for this specific sync ID
-      const messageHandler = (msg) => {
+      const messageHandler = () => {
         clearTimeout(timeout);
-        // Remove this specific listener
         this.#syncListeners.delete(syncId);
         resolve();
       };
 
-      // Store the listener in a map keyed by sync ID
-      if (!this.#syncListeners) {
-        this.#syncListeners = new Map();
-      }
+      if (!this.#syncListeners) this.#syncListeners = new Map();
       this.#syncListeners.set(syncId, messageHandler);
     });
 
-    // Send /sync command
     await this.send("/sync", syncId);
-
-    // Wait for /synced response
     await syncPromise;
 
-    // In postMessage mode, wait briefly for tree snapshot to arrive
-    // Wait 2x the snapshot interval to ensure at least one update
     if (this.#config.mode === 'postMessage') {
       await new Promise(r => setTimeout(r, this.#config.snapshotIntervalMs * 2));
     }
   }
 
-  /**
-   * Get static boot-time information about the engine
-   * Values are fixed after init() - use getMetrics() for dynamic values
-   * @returns {Object} Static engine configuration
-   * @example
-   * const info = sonic.getInfo();
-   * console.log('Sample rate:', info.sampleRate);
-   * console.log('Buffer limit:', info.numBuffers);
-   */
+  // ============================================================================
+  // INFO API
+  // ============================================================================
+
   getInfo() {
     this.#ensureInitialized("get info");
 
     return {
-      // Audio
       sampleRate: this.#audioContext.sampleRate,
-
-      // Limits
       numBuffers: this.#config.worldOptions.numBuffers,
-
-      // Memory (bytes)
       totalMemory: this.#config.memory.totalMemory,
       wasmHeapSize: this.#config.memory.wasmHeapSize,
       bufferPoolSize: this.#config.memory.bufferPoolSize,
-
-      // Boot
       bootTimeMs: this.bootStats.initDuration,
       capabilities: { ...this.#capabilities },
-
-      // Version (may be null if not yet received)
       version: this.#version,
     };
   }
 
-  /**
-   * Shutdown SuperSonic, releasing all resources but preserving event listeners.
-   * After shutdown, you can call init() again to restart.
-   * Emits the 'shutdown' event before teardown begins.
-   * @returns {Promise<void>}
-   * @example
-   * // Shutdown due to browser audio issues
-   * await sonic.shutdown();
-   * // ... later, restart ...
-   * await sonic.init();
-   */
+  // ============================================================================
+  // LIFECYCLE API
+  // ============================================================================
+
   async shutdown() {
-    // Idempotent: if already shut down, do nothing
-    if (!this.#initialized && !this.#initializing) {
-      return;
-    }
+    if (!this.#initialized && !this.#initializing) return;
 
-    if (__DEV__) console.log("[Dbg-SuperSonic] Shutting down...");
-
-    // Emit shutdown event before teardown
-    this.#emit("shutdown");
-
-    // Stop timers
-    this.#stopDriftOffsetTimer();
+    this.#eventEmitter.emit("shutdown");
+    this.#ntpTiming?.stopDriftTimer();
     this.#stopPerformanceMonitoring();
-
-    // Clear sync listeners
     this.#syncListeners?.clear();
     this.#syncListeners = null;
 
     if (this.#osc) {
-      // Cancel all pending scheduled events before terminating
       this.#osc.cancelAll();
       this.#osc.terminate();
       this.#osc = null;
@@ -1540,7 +750,6 @@ export class SuperSonic {
       this.#audioContext = null;
     }
 
-    // BufferManager handles its own cleanup
     if (this.#bufferManager) {
       this.#bufferManager.destroy();
       this.#bufferManager = null;
@@ -1548,99 +757,30 @@ export class SuperSonic {
 
     this.#oscRewriter = null;
     this.#directWriter = null;
-    this.#sharedBuffer = null;
     this.#initialized = false;
     this.loadedSynthDefs.clear();
-
-    // Reset additional state so init() can be called again
     this.#initPromise = null;
     this.#wasmMemory = null;
-    this.#ringBufferBase = null;
-    this.#bufferConstants = null;
-
-    // Reset cached views
-    this.#atomicView = null;
-    this.#metricsView = null;
-    this.#ntpStartView = null;
-    this.#driftView = null;
-    this.#globalOffsetView = null;
-
-    // Reset cached snapshot buffer (used in postMessage mode)
-    this.#cachedSnapshotBuffer = null;
-    this.#snapshotsSent = 0;
-
-    // Reset timing state
-    this.#initialNTPStartTime = undefined;
-
-    // Reset boot stats for fresh timing
-    this.bootStats = {
-      initStartTime: null,
-      initDuration: null,
-    };
-
-    // Dev mode: remove from debug helper
-    if (__DEV__ && typeof window !== 'undefined' && window.__supersonic__) {
-      const idx = window.__supersonic__.instances.indexOf(this);
-      if (idx !== -1) {
-        window.__supersonic__.instances.splice(idx, 1);
-      }
-    }
-
-    if (__DEV__) console.log("[Dbg-SuperSonic] Shutdown complete");
+    this.#ntpTiming?.reset();
+    this.bootStats = { initStartTime: null, initDuration: null };
   }
 
-  /**
-   * Permanently destroy SuperSonic, releasing all resources AND clearing all listeners.
-   * After destroy, the instance cannot be reused - create a new SuperSonic instance instead.
-   * Emits 'destroy' event before final cleanup.
-   * @returns {Promise<void>}
-   * @example
-   * // Permanently dispose of SuperSonic (e.g., when unmounting a component)
-   * await sonic.destroy();
-   * // sonic is now unusable, create a new instance if needed
-   */
   async destroy() {
-    if (__DEV__) console.log("[Dbg-SuperSonic] Destroying...");
-
-    // Emit destroy event to give listeners one last chance to clean up
-    this.#emit("destroy");
-
-    // Shutdown all resources (this also emits 'shutdown')
+    this.#eventEmitter.emit("destroy");
     await this.shutdown();
-
-    // Clear cached WASM bytes - instance is being destroyed
     this.#cachedWasmBytes = null;
-
-    // Clear all listeners - this instance is now unusable
-    this.#listeners.clear();
-
-    if (__DEV__) console.log("[Dbg-SuperSonic] Destroyed");
+    this.#eventEmitter.clearAllListeners();
   }
 
-  /**
-   * Fully reset SuperSonic: shutdown and re-initialize.
-   * Use this to recover from browser audio suspension or other broken states.
-   * Event listeners are preserved across reset.
-   * @param {Object} [config] - Optional configuration overrides for init()
-   * @returns {Promise<void>}
-   * @example
-   * // Browser suspended audio, need to recover
-   * await sonic.reset();
-   * // sonic is now re-initialized and ready to use
-   */
   async reset(config = {}) {
-    if (__DEV__) console.log("[Dbg-SuperSonic] Resetting...");
-
     await this.shutdown();
     await this.init(config);
-
-    if (__DEV__) console.log("[Dbg-SuperSonic] Reset complete");
   }
 
-  /**
-   * Set and validate browser capabilities for required features
-   * @private
-   */
+  // ============================================================================
+  // PRIVATE: INITIALIZATION HELPERS
+  // ============================================================================
+
   #setAndValidateCapabilities() {
     this.#capabilities = {
       audioWorklet: typeof AudioWorklet !== "undefined",
@@ -1651,11 +791,8 @@ export class SuperSonic {
     };
 
     const mode = this.#config.mode;
-
-    // Base requirements for all modes
     const required = ["audioWorklet", "webWorker"];
 
-    // SAB mode requires additional capabilities
     if (mode === 'sab') {
       required.push("sharedArrayBuffer", "crossOriginIsolated", "atomics");
     }
@@ -1663,86 +800,40 @@ export class SuperSonic {
     const missing = required.filter((f) => !this.#capabilities[f]);
 
     if (missing.length > 0) {
-      const error = new Error(
-        `Missing required features for ${mode} mode: ${missing.join(", ")}`
-      );
-
-      // Special case for cross-origin isolation in SAB mode
+      const error = new Error(`Missing required features for ${mode} mode: ${missing.join(", ")}`);
       if (mode === 'sab' && !this.#capabilities.crossOriginIsolated) {
-        if (this.#capabilities.sharedArrayBuffer) {
-          error.message +=
-            "\n\nSharedArrayBuffer is available but cross-origin isolation is not enabled. " +
-            "Please ensure COOP and COEP headers are set correctly:\n" +
-            "  Cross-Origin-Opener-Policy: same-origin\n" +
-            "  Cross-Origin-Embedder-Policy: require-corp\n\n" +
-            "Alternatively, use mode: 'postMessage' which doesn't require these headers.";
-        } else {
-          error.message +=
-            "\n\nSharedArrayBuffer is not available. This may be due to:\n" +
-            "1. Missing COOP/COEP headers\n" +
-            "2. Browser doesn't support SharedArrayBuffer\n" +
-            "3. Browser security settings\n\n" +
-            "Consider using mode: 'postMessage' which doesn't require SharedArrayBuffer.";
-        }
+        error.message += "\n\nConsider using mode: 'postMessage' which doesn't require COOP/COEP headers.";
       }
-
       throw error;
     }
 
-    // Validate mode value
     if (mode !== 'sab' && mode !== 'postMessage') {
       throw new Error(`Invalid mode: '${mode}'. Use 'sab' or 'postMessage'.`);
     }
-
-    return this.#capabilities;
   }
 
-  /**
-   * Merge user-provided world options with defaults
-   * @private
-   */
-
-  /**
-   * Initialize WebAssembly memory
-   * In SAB mode: creates shared memory accessible from main thread
-   * In postMessage mode: worklet will create its own memory
-   */
   #initializeMemory() {
     const memConfig = this.#config.memory;
     const mode = this.#config.mode;
 
     if (mode === 'sab') {
-      // SAB mode: create shared memory accessible from main thread
-      // Memory layout (from memory_layout.js):
-      // 0-16MB:   WASM heap (scsynth C++ allocations)
-      // 16-17MB:  Ring buffers (~1MB):
-      //           - OSC IN: 768KB, OSC OUT: 128KB, DEBUG: 64KB
-      //           - Control structures, metrics, NTP timing: ~96B
-      // 17-80MB:  Buffer pool (audio sample storage, 63MB)
-      // Total: 80MB
       this.#wasmMemory = new WebAssembly.Memory({
         initial: memConfig.totalPages,
         maximum: memConfig.totalPages,
         shared: true,
       });
-      this.#sharedBuffer = this.#wasmMemory.buffer;
     } else {
-      // PostMessage mode: worklet creates its own memory
-      // Main thread doesn't need direct access to WASM memory
       this.#wasmMemory = null;
-      this.#sharedBuffer = null;
     }
   }
 
   #initializeAudioContext() {
-    // Use provided AudioContext or create a new one
     if (this.#config.audioContext) {
       this.#audioContext = this.#config.audioContext;
     } else {
       this.#audioContext = new AudioContext(this.#config.audioContextOptions);
     }
 
-    // Forward AudioContext state changes as SuperSonic events
     this.#audioContext.addEventListener('statechange', () => {
       const state = this.#audioContext?.state;
       if (!state) return;
@@ -1750,34 +841,24 @@ export class SuperSonic {
       const previousState = this.#previousAudioContextState;
       this.#previousAudioContextState = state;
 
-      // Resync timing when recovering from suspend/interrupt
       if (state === 'running' && (previousState === 'suspended' || previousState === 'interrupted')) {
-        this.#resyncTiming();
+        this.#ntpTiming?.resync();
       }
 
-      // Emit general statechange event
-      this.#emit('audiocontext:statechange', { state });
-
-      // Emit specific convenience events
-      if (state === 'suspended') {
-        this.#emit('audiocontext:suspended');
-      } else if (state === 'running') {
-        this.#emit('audiocontext:resumed');
-      } else if (state === 'interrupted') {
-        this.#emit('audiocontext:interrupted');
-      }
+      this.#eventEmitter.emit('audiocontext:statechange', { state });
+      if (state === 'suspended') this.#eventEmitter.emit('audiocontext:suspended');
+      else if (state === 'running') this.#eventEmitter.emit('audiocontext:resumed');
+      else if (state === 'interrupted') this.#eventEmitter.emit('audiocontext:interrupted');
     });
-
-    return this.#audioContext;
   }
 
   #initializeBufferManager() {
-    const mode = this.#config.mode;
+    const sharedBuffer = this.#config.mode === 'sab' ? this.#wasmMemory.buffer : null;
 
     this.#bufferManager = new BufferManager({
-      mode: mode,
+      mode: this.#config.mode,
       audioContext: this.#audioContext,
-      sharedBuffer: this.#sharedBuffer,
+      sharedBuffer: sharedBuffer,
       bufferPoolConfig: {
         start: this.#config.memory.bufferPoolOffset,
         size: this.#config.memory.bufferPoolSize,
@@ -1795,90 +876,51 @@ export class SuperSonic {
     });
   }
 
-  /**
-   * Load WASM binary - uses cache if available (for fast recover())
-   */
   async #loadWasm() {
-    // Return cached WASM if available (fast path for recover())
-    if (this.#cachedWasmBytes) {
-      if (__DEV__) console.log('[Dbg-SuperSonic] Using cached WASM bytes');
-      return this.#cachedWasmBytes;
-    }
+    if (this.#cachedWasmBytes) return this.#cachedWasmBytes;
 
     const wasmName = this.#config.wasmUrl.split('/').pop();
-    this.#emit('loading:start', { type: 'wasm', name: wasmName });
+    this.#eventEmitter.emit('loading:start', { type: 'wasm', name: wasmName });
 
-    let wasmResponse;
-    try {
-      wasmResponse = await fetch(this.#config.wasmUrl);
-    } catch (error) {
-      throw new Error(
-        `Failed to fetch WASM from ${this.#config.wasmUrl}: ${error.message}`
-      );
-    }
-
+    const wasmResponse = await fetch(this.#config.wasmUrl);
     if (!wasmResponse.ok) {
-      throw new Error(
-        `Failed to load WASM: ${wasmResponse.status} ${wasmResponse.statusText}`
-      );
+      throw new Error(`Failed to load WASM: ${wasmResponse.status} ${wasmResponse.statusText}`);
     }
 
     const wasmBytes = await wasmResponse.arrayBuffer();
-    this.#emit('loading:complete', { type: 'wasm', name: wasmName, size: wasmBytes.byteLength });
-
-    // Cache for future recover() calls
+    this.#eventEmitter.emit('loading:complete', { type: 'wasm', name: wasmName, size: wasmBytes.byteLength });
     this.#cachedWasmBytes = wasmBytes;
 
     return wasmBytes;
   }
 
-  /**
-   * Initialize AudioWorklet with WASM
-   */
   async #initializeAudioWorklet(wasmBytes) {
-    // Load AudioWorklet processor (uses Blob URL if cross-origin)
     await addWorkletModule(this.#audioContext.audioWorklet, this.#config.workletUrl);
 
-    // Create AudioWorkletNode
-    // Configure with numberOfInputs: 0 to act as a source node
-    // This ensures process() is called continuously without needing an input source
-    this.#workletNode = new AudioWorkletNode(
-      this.#audioContext,
-      "scsynth-processor",
-      {
-        numberOfInputs: 0,
-        numberOfOutputs: 1,
-        outputChannelCount: [2],
-      }
-    );
+    this.#workletNode = new AudioWorkletNode(this.#audioContext, "scsynth-processor", {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+    });
 
-    // Only auto-connect if enabled (default: true)
     if (this.#config.autoConnect) {
       this.#workletNode.connect(this.#audioContext.destination);
     }
 
-    // Create the public node wrapper
     this.#node = this.#createNodeWrapper();
-
-    // Start the message port BEFORE setting up handlers
-    // MessagePort doesn't deliver messages until start() is called
     this.#workletNode.port.start();
-
-    // Set up message handlers BEFORE sending init to worklet
-    // This ensures we don't miss any early messages like initial nodeTree snapshot
     this.#setupMessageHandlers();
 
     const mode = this.#config.mode;
+    const sharedBuffer = mode === 'sab' ? this.#wasmMemory.buffer : null;
 
-    // Initialize AudioWorklet with mode and SharedArrayBuffer (SAB mode only)
     this.#workletNode.port.postMessage({
       type: "init",
       mode: mode,
-      sharedBuffer: mode === 'sab' ? this.#sharedBuffer : null,
+      sharedBuffer: sharedBuffer,
       snapshotIntervalMs: this.#config.snapshotIntervalMs,
     });
 
-    // Send WASM bytes, memory/pages, worldOptions, and actual sample rate
     const loadWasmMsg = {
       type: "loadWasm",
       wasmBytes: wasmBytes,
@@ -1887,26 +929,17 @@ export class SuperSonic {
     };
 
     if (mode === 'sab') {
-      // SAB mode: pass shared WASM memory
       loadWasmMsg.wasmMemory = this.#wasmMemory;
     } else {
-      // postMessage mode: pass memory size so worklet can create its own
-      loadWasmMsg.memoryPages = this.#config.memoryPages || 1280;  // 80MB default
+      loadWasmMsg.memoryPages = this.#config.memoryPages || 1280;
     }
 
     this.#workletNode.port.postMessage(loadWasmMsg);
 
-    // Wait for worklet initialization
     await this.#waitForWorkletInit();
-
-    // Set worklet port for BufferManager (postMessage mode buffer operations)
     this.#bufferManager.setWorkletPort(this.#workletNode.port);
   }
 
-  /**
-   * Create a frozen wrapper around the worklet node
-   * Exposes only safe routing methods, hides internal port
-   */
   #createNodeWrapper() {
     const worklet = this.#workletNode;
     return Object.freeze({
@@ -1918,53 +951,25 @@ export class SuperSonic {
     });
   }
 
-  /**
-   * Initialize OSC communication layer
-   */
   async #initializeOSC() {
-    // Create ScsynthOSC instance with custom worker base URL if provided
     this.#osc = new ScsynthOSC(this.#config.workerBaseURL);
 
-    // Set up ScsynthOSC callbacks
-    this.#osc.onRawOSC((msg) => {
-      this.#emit('message:raw', msg);
-    });
+    this.#osc.onRawOSC((msg) => this.#eventEmitter.emit('message:raw', msg));
 
     this.#osc.onParsedOSC((msg) => {
-      // Debug: log all /n_* messages and /done for /notify
-      if (__DEV__ && msg.address) {
-        if (msg.address.startsWith('/n_')) {
-          console.log(`[OSC] Received ${msg.address}:`, msg.args);
-        } else if (msg.address === '/done' && msg.args?.[0] === '/notify') {
-          console.log(`[OSC] Received /done for /notify:`, msg.args);
-        }
-      }
-
-      // Handle internal /supersonic/ messages
       if (msg.address === "/supersonic/buffer/freed") {
         this.#bufferManager?.handleBufferFreed(msg.args);
       } else if (msg.address === "/supersonic/buffer/allocated") {
-        // Handle buffer allocation completion with UUID correlation
         this.#bufferManager?.handleBufferAllocated(msg.args);
-      } else if (msg.address === "/supersonic/synthdef/loaded") {
-        // Handle synthdef load confirmation from scsynth
-        // Note: synthdef bytes are already cached in loadSynthDef() after sending /d_recv
-        const synthName = msg.args[0];
-        if (__DEV__ && synthName) {
-          console.log(`[Dbg-SuperSonic] Synthdef confirmed: ${synthName}`);
-        }
       } else if (msg.address === "/synced" && msg.args.length > 0) {
-        // Handle /synced responses for sync operations
-        const syncId = msg.args[0]; // Integer sync ID
-        if (this.#syncListeners && this.#syncListeners.has(syncId)) {
-          const listener = this.#syncListeners.get(syncId);
-          listener(msg);
+        const syncId = msg.args[0];
+        if (this.#syncListeners?.has(syncId)) {
+          this.#syncListeners.get(syncId)(msg);
         }
       }
 
-      this.#emit('message', msg);
+      this.#eventEmitter.emit('message', msg);
 
-      // Debug logging for incoming OSC
       if (this.#config.debug || this.#config.debugOscIn) {
         const maxLen = this.#config.activityConsoleLog.oscIn ?? this.#config.activityConsoleLog.maxLineLength;
         const argsStr = msg.args?.map(a => {
@@ -1976,14 +981,12 @@ export class SuperSonic {
     });
 
     this.#osc.onDebugMessage((msg) => {
-      // Truncate for event emission (custom log UIs)
       const eventMaxLen = this.#config.activityEvent.scsynth ?? this.#config.activityEvent.maxLineLength;
-      if (eventMaxLen > 0 && msg.text && msg.text.length > eventMaxLen) {
+      if (eventMaxLen > 0 && msg.text?.length > eventMaxLen) {
         msg = { ...msg, text: msg.text.slice(0, eventMaxLen) + '...' };
       }
-      this.#emit('debug', msg);
+      this.#eventEmitter.emit('debug', msg);
 
-      // Debug logging for scsynth messages
       if (this.#config.debug || this.#config.debugScsynth) {
         const maxLen = this.#config.activityConsoleLog.scsynth ?? this.#config.activityConsoleLog.maxLineLength;
         const text = msg.text.length > maxLen ? msg.text.slice(0, maxLen) + '...' : msg.text;
@@ -1993,22 +996,23 @@ export class SuperSonic {
 
     this.#osc.onError((error, workerName) => {
       console.error(`[SuperSonic] ${workerName} error:`, error);
-      this.#emit('error', new Error(`${workerName}: ${error}`));
+      this.#eventEmitter.emit('error', new Error(`${workerName}: ${error}`));
     });
 
-    // Initialize ScsynthOSC based on mode
     const mode = this.#config.mode;
+    const bc = this.#metricsReader.bufferConstants;
+    const ringBufferBase = this.#metricsReader.ringBufferBase;
+    const sharedBuffer = this.#metricsReader.sharedBuffer;
 
     if (mode === 'sab') {
       await this.#osc.init({
         mode: 'sab',
-        sharedBuffer: this.#sharedBuffer,
-        ringBufferBase: this.#ringBufferBase,
-        bufferConstants: this.#bufferConstants,
+        sharedBuffer: sharedBuffer,
+        ringBufferBase: ringBufferBase,
+        bufferConstants: bc,
         preschedulerCapacity: this.#config.preschedulerCapacity
       });
     } else {
-      // PostMessage mode: use worklet port for communication
       await this.#osc.init({
         mode: 'postMessage',
         workletPort: this.#workletNode.port,
@@ -2016,38 +1020,19 @@ export class SuperSonic {
         earlyDebugMessages: this.#earlyDebugMessages
       });
 
-      // Register handler for future debugRawBatch messages
-      this.#debugRawHandler = (data) => {
-        this.#osc.handleDebugRaw(data);
-      };
-
-      // Clear the early messages buffer
+      this.#debugRawHandler = (data) => this.#osc.handleDebugRaw(data);
       this.#earlyDebugMessages = [];
     }
   }
 
-  /**
-   * Complete initialization and trigger callbacks
-   */
   async #finishInitialization() {
     this.#initialized = true;
     this.#initializing = false;
-    this.bootStats.initDuration =
-      performance.now() - this.bootStats.initStartTime;
+    this.bootStats.initDuration = performance.now() - this.bootStats.initStartTime;
 
-    if (__DEV__)
-      console.log(
-        `[Dbg-SuperSonic] Initialization complete in ${this.bootStats.initDuration.toFixed(
-          2
-        )}ms`
-      );
+    await this.#eventEmitter.emitAsync('setup');
+    this.#eventEmitter.emit('ready', { capabilities: this.#capabilities, bootStats: this.bootStats });
 
-    this.#emit('ready', {
-      capabilities: this.#capabilities,
-      bootStats: this.bootStats,
-    });
-
-    // Dev mode: expose instance for debugging via DevTools
     if (__DEV__ && typeof window !== 'undefined') {
       if (!window.__supersonic__) {
         const ss = window.__supersonic__ = { instances: [] };
@@ -2060,13 +1045,9 @@ export class SuperSonic {
         ss.inspect = () => ss.primary ? SuperSonic.inspect(ss.primary) : null;
       }
       window.__supersonic__.instances.push(this);
-      console.log('[Dbg-SuperSonic] Debug: window.__supersonic__ available');
     }
   }
 
-  /**
-   * Wait for AudioWorklet to initialize
-   */
   #waitForWorkletInit() {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -2074,15 +1055,7 @@ export class SuperSonic {
       }, WORKLET_INIT_TIMEOUT_MS);
 
       const messageHandler = async (event) => {
-        // Handle debug messages during initialization
-        if (event.data.type === "debug") {
-          // Silent during init
-          return;
-        }
-
-        // Handle error messages during initialization
         if (event.data.type === "error") {
-          console.error("[AudioWorklet] Error:", event.data.error);
           clearTimeout(timeout);
           this.#workletNode.port.removeEventListener("message", messageHandler);
           reject(new Error(event.data.error || "AudioWorklet error"));
@@ -2094,63 +1067,45 @@ export class SuperSonic {
           this.#workletNode.port.removeEventListener("message", messageHandler);
 
           if (event.data.success) {
-            // Store the ring buffer base address and constants from WASM
-            if (event.data.ringBufferBase !== undefined) {
-              this.#ringBufferBase = event.data.ringBufferBase;
-            } else {
-              console.warn(
-                "[SuperSonic] Warning: ringBufferBase not provided by worklet"
-              );
+            const ringBufferBase = event.data.ringBufferBase ?? 0;
+            const bufferConstants = event.data.bufferConstants;
+            const sharedBuffer = this.#config.mode === 'sab' ? this.#wasmMemory.buffer : null;
+
+            // Initialize metrics reader
+            this.#metricsReader.initSharedViews(sharedBuffer, ringBufferBase, bufferConstants);
+
+            // Initialize NTP timing
+            this.#ntpTiming = new NTPTiming({
+              mode: this.#config.mode,
+              audioContext: this.#audioContext,
+              workletPort: this.#workletNode.port,
+            });
+            this.#ntpTiming.initSharedViews(sharedBuffer, ringBufferBase, bufferConstants);
+            await this.#ntpTiming.initialize();
+            this.#ntpTiming.startDriftTimer();
+
+            // Initialize audio capture (SAB mode only)
+            if (this.#config.mode === 'sab') {
+              this.#audioCapture.update(sharedBuffer, ringBufferBase, bufferConstants);
+
+              // Initialize direct writer
+              this.#directWriter = new DirectWriter({
+                sharedBuffer: sharedBuffer,
+                ringBufferBase: ringBufferBase,
+                bufferConstants: bufferConstants,
+                getAudioContextTime: () => this.#audioContext?.currentTime ?? null,
+                getNTPStartTime: () => this.#ntpTiming?.getNTPStartTime() ?? 0,
+              });
             }
 
-            if (event.data.bufferConstants !== undefined) {
-              if (__DEV__)
-                console.log(
-                  "[Dbg-SuperSonic] Received bufferConstants from worklet"
-                );
-              this.#bufferConstants = event.data.bufferConstants;
-
-              if (this.#config.mode === 'sab') {
-                // SAB mode: initialize shared views for metrics and timing
-                this.#initSharedViews();
-
-                // Initialize direct writer for low-latency ring buffer writes
-                this.#initializeDirectWriter();
-              }
-
-              // Initialize NTP timing (works in both modes - SAB writes directly, postMessage sends to worklet)
-              if (__DEV__)
-                console.log(
-                  "[Dbg-SuperSonic] Initializing NTP timing (waiting for audio to flow)..."
-                );
-              await this.#initializeNTPTiming();
-
-              // Start periodic drift offset updates (small millisecond adjustments)
-              // Measures drift from initial baseline, replaces value (doesn't accumulate)
-              this.#startDriftOffsetTimer();
-            } else {
-              console.warn(
-                "[SuperSonic] Warning: bufferConstants not provided by worklet"
-              );
-            }
-
-            // PostMessage mode: set initial snapshot buffer
-            // This ensures getTree() and getMetrics() return valid data immediately after init()
+            // PostMessage mode: set initial snapshot
             if (this.#config.mode === 'postMessage' && event.data.initialSnapshot) {
-              this.#cachedSnapshotBuffer = event.data.initialSnapshot;
+              this.#metricsReader.updateSnapshot(event.data.initialSnapshot);
             }
 
-            if (__DEV__)
-              console.log(
-                "[Dbg-SuperSonic] Calling resolve() for worklet initialization"
-              );
             resolve();
           } else {
-            reject(
-              new Error(
-                event.data.error || "AudioWorklet initialization failed"
-              )
-            );
+            reject(new Error(event.data.error || "AudioWorklet initialization failed"));
           }
         }
       };
@@ -2160,384 +1115,73 @@ export class SuperSonic {
     });
   }
 
-  /**
-   * Set up message handlers for worklet
-   */
   #setupMessageHandlers() {
-    // ScsynthOSC handles all worker messages internally
-    // We only need to handle worklet messages here
-
-    /**
-     * Worklet message handler
-     *
-     * Note: Worklet metrics (processCount, bufferOverruns, etc.) are read directly from
-     * SharedArrayBuffer in #getWorkletMetrics(). The worklet no longer sends 'metrics'
-     * messages, and 'getMetrics' requests are not used (SAB reads are synchronous).
-     * Use addEventListener to allow multiple listeners (e.g., ScsynthOSC in postMessage mode)
-     */
     this.#workletNode.port.addEventListener('message', (event) => {
       const { data } = event;
 
       switch (data.type) {
         case "error":
           console.error("[Worklet] Error:", data.error);
-          if (data.diagnostics) {
-            console.error("[Worklet] Diagnostics:", data.diagnostics);
-            console.table(data.diagnostics);
-          }
-          this.#emit('error', new Error(data.error));
-          break;
-
-        case "process_debug":
-          // Debug messages - commented out to reduce console noise
-          // console.log('[Worklet] process() called:', data.count, 'initialized:', data.initialized);
-          break;
-
-        case "debug":
-          // Debug messages from AudioWorklet - silent in production
+          this.#eventEmitter.emit('error', new Error(data.error));
           break;
 
         case "version":
-          // Version from worklet - stored for getInfo()
           this.#version = data.version;
           break;
 
-        case "metricsSnapshot":
-          // Legacy metrics response - now handled via combined snapshot
-          // Keep for backwards compatibility but forward to snapshot handler
-          if (this.#pendingMetricsRequest && data.requestId === this.#pendingMetricsRequest.id) {
-            const metricsView = this.#cachedSnapshotBuffer
-              ? new Uint32Array(this.#cachedSnapshotBuffer, 0, 32)
-              : null;
-            this.#pendingMetricsRequest.resolve(metricsView);
-            this.#pendingMetricsRequest = null;
-          }
-          break;
-
         case "snapshot":
-          // Combined snapshot from worklet (postMessage mode)
-          // Raw ArrayBuffer: METRICS + NODE_TREE contiguous - same layout as SAB
           if (data.buffer) {
-            this.#cachedSnapshotBuffer = data.buffer;
+            this.#metricsReader.updateSnapshot(data.buffer);
             this.#snapshotsSent = data.snapshotsSent;
           }
           break;
 
         case "debugRawBatch":
-          // Raw debug bytes from worklet - forward to handler or buffer for later
           if (this.#debugRawHandler) {
             this.#debugRawHandler(data);
           } else {
-            // Buffer early messages for replay when scsynth_osc.js is ready
             this.#earlyDebugMessages.push(data);
           }
           break;
-
-        default:
-          // Log unexpected message types for debugging
-          if (__DEV__ && data.type && !['oscReplies', 'oscReply', 'debugBatch', 'debugRawBatch', 'initialized', 'bufferLoaded', 'bufferCopied', 'timeOffset'].includes(data.type)) {
-            console.log("[DEBUG] Unknown worklet message type:", data.type);
-          }
-          break;
       }
     });
   }
 
-  /**
-   * Get metrics from a Uint32Array buffer
-   * Layout defined in src/shared_memory.h and js/lib/metrics_offsets.js
-   * @param {Uint32Array} m - Metrics buffer
-   * @returns {Object} Metrics object
-   * @private
-   */
-  #getMetricsFromBuffer(m) {
-    return {
-      // Worklet metrics (written by WASM)
-      workletProcessCount: m[MetricsOffsets.PROCESS_COUNT],
-      workletMessagesProcessed: m[MetricsOffsets.MESSAGES_PROCESSED],
-      workletMessagesDropped: m[MetricsOffsets.MESSAGES_DROPPED],
-      workletSchedulerDepth: m[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
-      workletSchedulerMax: m[MetricsOffsets.SCHEDULER_QUEUE_MAX],
-      workletSchedulerDropped: m[MetricsOffsets.SCHEDULER_QUEUE_DROPPED],
-      workletSequenceGaps: m[MetricsOffsets.SEQUENCE_GAPS],
+  // ============================================================================
+  // PRIVATE: METRICS
+  // ============================================================================
 
-      // PreScheduler metrics (written by osc_out_prescheduler_worker.js)
-      preschedulerPending: m[MetricsOffsets.PRESCHEDULER_PENDING],
-      preschedulerPeak: m[MetricsOffsets.PRESCHEDULER_PEAK],
-      preschedulerSent: m[MetricsOffsets.PRESCHEDULER_SENT],
-      preschedulerRetriesSucceeded: m[MetricsOffsets.RETRIES_SUCCEEDED],
-      preschedulerRetriesFailed: m[MetricsOffsets.RETRIES_FAILED],
-      preschedulerBundlesScheduled: m[MetricsOffsets.BUNDLES_SCHEDULED],
-      preschedulerEventsCancelled: m[MetricsOffsets.EVENTS_CANCELLED],
-      preschedulerTotalDispatches: m[MetricsOffsets.TOTAL_DISPATCHES],
-      preschedulerMessagesRetried: m[MetricsOffsets.MESSAGES_RETRIED],
-      preschedulerRetryQueueSize: m[MetricsOffsets.RETRY_QUEUE_SIZE],
-      preschedulerRetryQueueMax: m[MetricsOffsets.RETRY_QUEUE_MAX],
-      preschedulerBypassed: m[MetricsOffsets.DIRECT_WRITES],
-
-      // OSC In metrics (written by osc_in_worker.js)
-      oscInMessagesReceived: m[MetricsOffsets.OSC_IN_MESSAGES_RECEIVED],
-      oscInMessagesDropped: m[MetricsOffsets.OSC_IN_DROPPED_MESSAGES],
-      oscInBytesReceived: m[MetricsOffsets.OSC_IN_BYTES_RECEIVED],
-
-      // Debug metrics (written by debug_worker.js)
-      debugMessagesReceived: m[MetricsOffsets.DEBUG_MESSAGES_RECEIVED],
-      debugBytesReceived: m[MetricsOffsets.DEBUG_BYTES_RECEIVED],
-
-      // Main thread metrics (written by supersonic.js)
-      mainMessagesSent: m[MetricsOffsets.MESSAGES_SENT],
-      mainBytesSent: m[MetricsOffsets.BYTES_SENT],
-    };
-  }
-
-  /**
-   * Get all metrics from SharedArrayBuffer
-   * @returns {Object|null}
-   * @private
-   */
-  #getSABMetrics() {
-    if (!this.#metricsView) {
-      return null;
-    }
-    return this.#getMetricsFromBuffer(this.#metricsView);
-  }
-
-  /**
-   * Request metrics from worklet via postMessage (for postMessage mode)
-   * Returns a promise that resolves with metrics from the worklet
-   * @returns {Promise<Object|null>}
-   * @private
-   */
-  async #requestWorkletMetrics(timeoutMs = 1000) {
-    if (!this.#workletNode) {
-      return null;
-    }
-
-    // Cancel any pending request
-    if (this.#pendingMetricsRequest) {
-      this.#pendingMetricsRequest.resolve(null);
-    }
-
-    const requestId = Date.now() + Math.random();
-
-    return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        if (this.#pendingMetricsRequest?.id === requestId) {
-          this.#pendingMetricsRequest = null;
-          resolve(null);
-        }
-      }, timeoutMs);
-
-      this.#pendingMetricsRequest = {
-        id: requestId,
-        resolve: (metrics) => {
-          clearTimeout(timeout);
-          resolve(metrics);
-        }
-      };
-
-      this.#workletNode.port.postMessage({
-        type: 'getMetrics',
-        requestId: requestId
-      });
-    });
-  }
-
-  /**
-   * Get buffer usage statistics from SAB head/tail pointers
-   * @returns {Object|null}
-   * @private
-   */
-  #getBufferUsage() {
-    if (!this.#atomicView || !this.#bufferConstants || !this.#ringBufferBase) {
-      return null;
-    }
-
-    const controlBase =
-      this.#ringBufferBase + this.#bufferConstants.CONTROL_START;
-
-    // Read head/tail pointers (reuse cached Int32Array view)
-    const view = this.#atomicView;
-    const inHead = Atomics.load(view, (controlBase + 0) / 4);
-    const inTail = Atomics.load(view, (controlBase + 4) / 4);
-    const outHead = Atomics.load(view, (controlBase + 8) / 4);
-    const outTail = Atomics.load(view, (controlBase + 12) / 4);
-    const debugHead = Atomics.load(view, (controlBase + 16) / 4);
-    const debugTail = Atomics.load(view, (controlBase + 20) / 4);
-
-    // Calculate bytes used (accounting for wrap-around)
-    const inUsed =
-      (inHead - inTail + this.#bufferConstants.IN_BUFFER_SIZE) %
-      this.#bufferConstants.IN_BUFFER_SIZE;
-    const outUsed =
-      (outHead - outTail + this.#bufferConstants.OUT_BUFFER_SIZE) %
-      this.#bufferConstants.OUT_BUFFER_SIZE;
-    const debugUsed =
-      (debugHead - debugTail + this.#bufferConstants.DEBUG_BUFFER_SIZE) %
-      this.#bufferConstants.DEBUG_BUFFER_SIZE;
-
-    return {
-      inBufferUsed: {
-        bytes: inUsed,
-        percentage: (inUsed / this.#bufferConstants.IN_BUFFER_SIZE) * 100,
-      },
-      outBufferUsed: {
-        bytes: outUsed,
-        percentage: (outUsed / this.#bufferConstants.OUT_BUFFER_SIZE) * 100,
-      },
-      debugBufferUsed: {
-        bytes: debugUsed,
-        percentage: (debugUsed / this.#bufferConstants.DEBUG_BUFFER_SIZE) * 100,
-      },
-    };
-  }
-
-  /**
-   * Add to a main thread metric in SharedArrayBuffer
-   * @param {'mainMessagesSent'|'mainBytesSent'|'preschedulerBypassed'} metric - Metric to update
-   * @param {number} [amount=1] - Amount to add
-   * @private
-   */
-  #addMetric(metric, amount = 1) {
-    if (!this.#metricsView) {
-      return;
-    }
-
-    const offsets = {
-      mainMessagesSent: MetricsOffsets.MESSAGES_SENT,
-      mainBytesSent: MetricsOffsets.BYTES_SENT,
-      preschedulerBypassed: MetricsOffsets.DIRECT_WRITES,
-    };
-    Atomics.add(this.#metricsView, offsets[metric], amount);
-  }
-
-  /**
-   * Overlay prescheduler metrics into the snapshot buffer
-   * Prescheduler metrics are contiguous at offsets 6-16 (11 uint32s)
-   * @private
-   */
-  #overlayPreschedulerMetrics() {
-    if (!this.#cachedSnapshotBuffer) return;
-
-    const preschedulerMetrics = this.#osc?.getPreschedulerMetrics();
-    if (!preschedulerMetrics) return;
-
-    // Get a view into the metrics portion of the snapshot buffer
-    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 32);
-
-    // Single memcpy of contiguous prescheduler metrics (offsets 6-16)
-    const start = MetricsOffsets.PRESCHEDULER_PENDING;  // 6
-    const count = MetricsOffsets.RETRY_QUEUE_MAX - start + 1;  // 11
-    metricsView.set(preschedulerMetrics.subarray(start, start + count), start);
-  }
-
-  /**
-   * Gather metrics from all sources (worklet, OSC, internal counters)
-   * Both SAB and postMessage modes read from a Uint32Array with same layout
-   * @returns {SuperSonicMetrics}
-   * @private
-   */
   #gatherMetrics() {
-    const startTime = performance.now();
+    const preschedulerMetrics = this.#osc?.getPreschedulerMetrics();
 
-    let metrics;
-
-    if (this.mode === 'postMessage') {
-      // In postMessage mode: overlay prescheduler metrics, then read from snapshot buffer
-      this.#overlayPreschedulerMetrics();
-
-      // Read metrics from snapshot buffer (offset 0, same layout as SAB)
-      if (this.#cachedSnapshotBuffer) {
-        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 32);
-        metrics = this.#getMetricsFromBuffer(metricsView);
-      } else {
-        metrics = {};
-      }
-    } else {
-      // SAB mode: read metrics directly from SharedArrayBuffer
-      metrics = this.#getSABMetrics() || {};
-
-      // Buffer usage (calculated from SAB head/tail pointers)
-      const bufferUsage = this.#getBufferUsage();
-      if (bufferUsage) {
-        Object.assign(metrics, bufferUsage);
-      }
-    }
-
-    // Drift offset (milliseconds)
-    metrics.driftOffsetMs = this.#getDriftOffset();
-
-    // AudioContext state (running, suspended, closed)
-    metrics.audioContextState = this.#audioContext?.state || "unknown";
-
-    // Buffer pool stats
-    if (this.#bufferManager) {
-      const poolStats = this.#bufferManager.getStats();
-      metrics.bufferPoolUsedBytes = poolStats.used.size;
-      metrics.bufferPoolAvailableBytes = poolStats.available;
-      metrics.bufferPoolAllocations = poolStats.used.count;
-    }
-
-    // Loaded synthdefs count
-    metrics.loadedSynthDefs = this.loadedSynthDefs?.size || 0;
-
-    const totalDuration = performance.now() - startTime;
-    if (totalDuration > 1) {
-      console.warn(
-        `[SuperSonic] Slow metrics gathering: ${totalDuration.toFixed(2)}ms`
-      );
-    }
-
-    return metrics;
+    return this.#metricsReader.gatherMetrics({
+      preschedulerMetrics: preschedulerMetrics,
+      driftOffsetMs: this.#ntpTiming?.getDriftOffset() ?? 0,
+      audioContextState: this.#audioContext?.state || "unknown",
+      bufferPoolStats: this.#bufferManager?.getStats(),
+      loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,
+    });
   }
 
-  /**
-   * Start performance monitoring - gathers metrics from all sources
-   * and calls the metrics callback with consolidated snapshot
-   * Uses this.metricsInterval for polling rate
-   * @private
-   */
   #startPerformanceMonitoring() {
-    // Clear any existing interval
     this.#stopPerformanceMonitoring();
 
-    // Use slower interval in postMessage mode (1000ms vs 100ms)
-    // because metrics require async round-trip to worklet
     const intervalMs = this.mode === 'postMessage' ? 1000 : this.#metricsInterval;
 
-    // Request metrics periodically
-    // SAB mode: metrics read from SAB (<0.1ms) - fully synchronous
-    // postMessage mode: uses cached metrics, async update for next interval
     this.#metricsIntervalId = setInterval(() => {
-      // Only gather metrics if there are listeners
-      if (!this.#listeners.has('metrics') || this.#listeners.get('metrics').size === 0) {
-        return;
-      }
-
-      // Prevent overlapping executions
-      if (this.#metricsGatherInProgress) {
-        console.warn(
-          `[SuperSonic] Metrics gathering took >${intervalMs}ms, skipping this interval`
-        );
-        return;
-      }
+      if (!this.#eventEmitter.hasListeners('metrics')) return;
+      if (this.#metricsGatherInProgress) return;
 
       this.#metricsGatherInProgress = true;
       try {
         const metrics = this.#gatherMetrics();
-        this.#emit('metrics', metrics);
-      } catch (error) {
-        console.error("[SuperSonic] Metrics gathering failed:", error);
+        this.#eventEmitter.emit('metrics', metrics);
       } finally {
         this.#metricsGatherInProgress = false;
       }
     }, intervalMs);
   }
 
-  /**
-   * Stop performance monitoring
-   * @private
-   */
   #stopPerformanceMonitoring() {
     if (this.#metricsIntervalId) {
       clearInterval(this.#metricsIntervalId);
@@ -2545,278 +1189,23 @@ export class SuperSonic {
     }
   }
 
+  // ============================================================================
+  // PRIVATE: UTILITIES
+  // ============================================================================
+
   #ensureInitialized(actionDescription = "perform this operation") {
     if (!this.#initialized) {
-      throw new Error(
-        `SuperSonic not initialized. Call init() before attempting to ${actionDescription}.`
-      );
+      throw new Error(`SuperSonic not initialized. Call init() before attempting to ${actionDescription}.`);
     }
   }
 
-  /**
-   * Initialize shared views for metrics and timing
-   */
-  #initSharedViews() {
-    if (
-      !this.#sharedBuffer ||
-      !this.#ringBufferBase ||
-      !this.#bufferConstants
-    ) {
-      console.warn(
-        "[SuperSonic] Cannot initialize shared views - missing buffer info"
-      );
-      return;
-    }
-
-    // Atomic view for reading control pointers (buffer usage metrics)
-    this.#atomicView = new Int32Array(this.#sharedBuffer);
-
-    // Cache metrics view for efficient reads
-    const metricsBase =
-      this.#ringBufferBase + this.#bufferConstants.METRICS_START;
-    this.#metricsView = new Uint32Array(
-      this.#sharedBuffer,
-      metricsBase,
-      this.#bufferConstants.METRICS_SIZE / 4
-    );
-
-    // Cache NTP timing views for efficient reads
-    this.#ntpStartView = new Float64Array(
-      this.#sharedBuffer,
-      this.#ringBufferBase + this.#bufferConstants.NTP_START_TIME_START,
-      1
-    );
-    this.#driftView = new Int32Array(
-      this.#sharedBuffer,
-      this.#ringBufferBase + this.#bufferConstants.DRIFT_OFFSET_START,
-      1
-    );
-    this.#globalOffsetView = new Int32Array(
-      this.#sharedBuffer,
-      this.#ringBufferBase + this.#bufferConstants.GLOBAL_OFFSET_START,
-      1
-    );
-
-    if (__DEV__) console.log("[Dbg-SuperSonic] Shared views initialized");
-  }
-
-  /**
-   * Initialize DirectWriter for low-latency ring buffer writes
-   */
-  #initializeDirectWriter() {
-    this.#directWriter = new DirectWriter({
-      sharedBuffer: this.#sharedBuffer,
-      ringBufferBase: this.#ringBufferBase,
-      bufferConstants: this.#bufferConstants,
-      getAudioContextTime: () => this.#audioContext?.currentTime ?? null,
-      getNTPStartTime: () => this.#ntpStartView?.[0] ?? 0,
-    });
-  }
-
-  /**
-   * Check if a string looks like a URL or file path (contains / or ://)
-   * Used to distinguish between simple names (e.g. 'sonic-pi-beep') and
-   * paths/URLs (e.g. './custom/synth.scsyndef' or 'http://example.com/synth.scsyndef')
-   * @param {string} str - String to check
-   * @returns {boolean} True if it looks like a path or URL
-   */
   #looksLikePathOrURL(str) {
     return str.includes("/") || str.includes("://");
   }
 
-  /**
-   * Get buffer pool statistics (internal use)
-   * @private
-   */
-  #getBufferPoolStats() {
-    return this.#bufferManager?.getStats();
-  }
-
-  /**
-   * Initialize NTP timing (write-once)
-   * Sets the NTP start time when AudioContext started
-   * Blocks until audio is actually flowing (contextTime > 0)
-   * @private
-   */
-  async #initializeNTPTiming() {
-    if (!this.#bufferConstants || !this.#audioContext) {
-      return;
-    }
-
-    // Wait for audio to actually be flowing (contextTime > 0)
-    let timestamp;
-    while (true) {
-      timestamp = this.#audioContext.getOutputTimestamp();
-      if (timestamp.contextTime > 0) {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
-    // Get synchronized snapshot of both time domains
-    const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
-    const currentNTP = calculateCurrentNTP(perfTimeMs);
-
-    // NTP time at AudioContext start = current NTP - current AudioContext time
-    const ntpStartTime = calculateNTPStartTime(currentNTP, timestamp.contextTime);
-
-    // Write to memory (SAB directly, or via postMessage)
-    if (this.#config.mode === 'sab') {
-      // SAB mode: write directly to SharedArrayBuffer
-      this.#ntpStartView[0] = ntpStartTime;
-    } else {
-      // PostMessage mode: send to worklet
-      this.#workletNode.port.postMessage({
-        type: 'setNTPStartTime',
-        ntpStartTime: ntpStartTime
-      });
-    }
-
-    // Store for drift calculation
-    this.#initialNTPStartTime = ntpStartTime;
-
-    if (__DEV__)
-      console.log(
-        `[Dbg-SuperSonic] NTP timing initialized: start=${ntpStartTime.toFixed(
-          6
-        )}s (NTP=${currentNTP.toFixed(
-          3
-        )}s, contextTime=${timestamp.contextTime.toFixed(3)}s)`
-      );
-  }
-
-  /**
-   * Update drift offset (AudioContext → NTP drift correction)
-   * CRITICAL: This REPLACES the drift value, does not accumulate
-   * @private
-   */
-  #updateDriftOffset() {
-    if (
-      !this.#bufferConstants ||
-      !this.#audioContext ||
-      this.#initialNTPStartTime === undefined
-    ) {
-      return;
-    }
-
-    // Get synchronized snapshot of both time domains (same moment in both clocks)
-    const timestamp = this.#audioContext.getOutputTimestamp();
-    const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
-    const currentNTP = calculateCurrentNTP(perfTimeMs);
-
-    // Calculate where contextTime SHOULD be based on wall clock
-    const expectedContextTime = currentNTP - this.#initialNTPStartTime;
-
-    // Compare to actual contextTime to get drift
-    const driftMs = calculateDriftMs(expectedContextTime, timestamp.contextTime);
-
-    // Store locally for use in #calculateBundleWait
-    this.#localDriftMs = driftMs;
-
-    // Write to memory (SAB directly, or via postMessage)
-    if (this.#config.mode === 'sab') {
-      // SAB mode: write directly to SharedArrayBuffer
-      Atomics.store(this.#driftView, 0, driftMs);
-    } else {
-      // PostMessage mode: send to worklet
-      this.#workletNode.port.postMessage({
-        type: 'setDriftOffset',
-        driftOffsetMs: driftMs
-      });
-    }
-
-    if (__DEV__)
-      console.log(
-        `[Dbg-SuperSonic] Drift offset: ${driftMs}ms (expected=${expectedContextTime.toFixed(
-          3
-        )}s, actual=${timestamp.contextTime.toFixed(
-          3
-        )}s, NTP=${currentNTP.toFixed(3)}s)`
-      );
-  }
-
-  /**
-   * Get current drift offset in milliseconds
-   * @returns {number} Current drift in milliseconds
-   * @private
-   */
-  #getDriftOffset() {
-    if (!this.#driftView) {
-      return 0;
-    }
-    return Atomics.load(this.#driftView, 0);
-  }
-
-  /**
-   * Resync NTP timing after recovering from suspend/interrupt
-   * Re-baselines the NTP start time and resets drift to 0
-   * @private
-   */
-  #resyncTiming() {
-    if (!this.#audioContext || !this.#ntpStartView || !this.#driftView) {
-      return;
-    }
-
-    const timestamp = this.#audioContext.getOutputTimestamp();
-    if (!timestamp || timestamp.contextTime <= 0) {
-      return;
-    }
-
-    // Recalculate NTP start time based on current state
-    const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
-    const currentNTP = calculateCurrentNTP(perfTimeMs);
-    const ntpStartTime = calculateNTPStartTime(currentNTP, timestamp.contextTime);
-
-    // Update both SAB and internal state
-    this.#ntpStartView[0] = ntpStartTime;
-    this.#initialNTPStartTime = ntpStartTime;
-
-    // Recalculate drift immediately (don't just reset to 0)
-    this.#updateDriftOffset();
-
-    if (__DEV__)
-      console.log(
-        `[Dbg-SuperSonic] Timing resynced after resume: start=${ntpStartTime.toFixed(6)}s`
-      );
-  }
-
-  /**
-   * Start periodic drift offset updates
-   * @private
-   */
-  #startDriftOffsetTimer() {
-    // Clear any existing timer
-    this.#stopDriftOffsetTimer();
-
-    // Update every DRIFT_UPDATE_INTERVAL_MS to track drift between AudioContext and performance.now()
-    this.#driftOffsetTimer = setInterval(() => {
-      this.#updateDriftOffset();
-    }, DRIFT_UPDATE_INTERVAL_MS);
-
-    if (__DEV__)
-      console.log(
-        `[Dbg-SuperSonic] Started drift offset correction (every ${DRIFT_UPDATE_INTERVAL_MS}ms)`
-      );
-  }
-
-  /**
-   * Stop periodic drift offset updates
-   * @private
-   */
-  #stopDriftOffsetTimer() {
-    if (this.#driftOffsetTimer) {
-      clearInterval(this.#driftOffsetTimer);
-      this.#driftOffsetTimer = null;
-    }
-  }
-
   #toUint8Array(data) {
-    if (data instanceof Uint8Array) {
-      return data;
-    }
-    if (data instanceof ArrayBuffer) {
-      return new Uint8Array(data);
-    }
+    if (data instanceof Uint8Array) return data;
+    if (data instanceof ArrayBuffer) return new Uint8Array(data);
     throw new Error("oscData must be ArrayBuffer or Uint8Array");
   }
 
@@ -2825,58 +1214,11 @@ export class SuperSonic {
     try {
       const decodedPacket = SuperSonic.osc.decode(uint8Data, decodeOptions);
       const { packet, changed } = await this.#oscRewriter.rewritePacket(decodedPacket);
-      if (!changed) {
-        return uint8Data;
-      }
+      if (!changed) return uint8Data;
       return SuperSonic.osc.encode(packet);
     } catch (error) {
       console.error("[SuperSonic] Failed to prepare OSC packet:", error);
       throw error;
     }
-  }
-
-  #calculateBundleWait(uint8Data) {
-    if (uint8Data.length < 16) {
-      return null;
-    }
-
-    const header = String.fromCharCode.apply(null, uint8Data.slice(0, 8));
-    if (header !== "#bundle\0") {
-      return null;
-    }
-
-    // Read NTP start time (SAB view or local value)
-    const ntpStartTime = this.#ntpStartView?.[0] ?? this.#initialNTPStartTime ?? 0;
-
-    if (ntpStartTime === 0) {
-      console.warn("[SuperSonic] NTP start time not yet initialized");
-      return null;
-    }
-
-    // Read current drift offset (SAB view or local value)
-    const driftMs = this.#driftView ? Atomics.load(this.#driftView, 0) : this.#localDriftMs;
-    const driftSeconds = driftMs / 1000.0;
-
-    // Read global offset (SAB view or local value)
-    const globalMs = this.#globalOffsetView ? Atomics.load(this.#globalOffsetView, 0) : this.#localGlobalOffsetMs;
-    const globalSeconds = globalMs / 1000.0;
-
-    const totalOffset = ntpStartTime + driftSeconds + globalSeconds;
-
-    const view = new DataView(uint8Data.buffer, uint8Data.byteOffset);
-    const ntpSeconds = view.getUint32(8, false);
-    const ntpFraction = view.getUint32(12, false);
-
-    if (ntpSeconds === 0 && (ntpFraction === 0 || ntpFraction === 1)) {
-      return null;
-    }
-
-    const ntpTimeS = ntpSeconds + ntpFraction / 0x100000000;
-    const audioTimeS = ntpTimeS - totalOffset;
-    const currentTimeS = this.#audioContext.currentTime;
-
-    // Return the target audio time, not the wait time
-    // The scheduler will handle lookahead scheduling
-    return { audioTimeS, currentTimeS };
   }
 }
