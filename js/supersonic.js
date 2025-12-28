@@ -968,8 +968,8 @@ export class SuperSonic {
       get numberOfOutputs() { return worklet.numberOfOutputs; },
       get numberOfInputs() { return worklet.numberOfInputs; },
       get channelCount() { return worklet.channelCount; },
-      // Expose actual AudioWorkletNode for input connections
-      get audioNode() { return worklet; },
+      // Expose AudioWorkletNode as input for connecting external sources
+      get input() { return worklet; },
     });
   }
 

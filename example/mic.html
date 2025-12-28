@@ -295,7 +295,7 @@
                 // Connect mic to worklet input
                 const audioContext = sonic.node.context;
                 micSource = audioContext.createMediaStreamSource(micStream);
-                micSource.connect(sonic.node.audioNode);
+                micSource.connect(sonic.node.input);
 
                 log('Mic connected. Loading synthdefs...');
 
