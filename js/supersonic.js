@@ -289,24 +289,33 @@ export class SuperSonic {
   // RECOVERY API
   // ============================================================================
 
+  /**
+   * Smart recovery - tries quick resume first, falls back to full reload.
+   * Use this when you don't know if a quick resume will work.
+   * @returns {Promise<boolean>} true if audio is running after recovery
+   */
   async recover() {
     if (!this.#initialized) return false;
 
     if (__DEV__) console.log('[Dbg-SuperSonic] Attempting recovery...');
 
-    if (await this.#resume()) {
+    if (await this.resume()) {
       if (__DEV__) console.log('[Dbg-SuperSonic] Quick resume succeeded');
       return true;
     }
 
     if (__DEV__) console.log('[Dbg-SuperSonic] Resume failed, doing full reload');
-    this.#eventEmitter.emit('recover:start');
-    const success = await this.#reload();
-    this.#eventEmitter.emit('recover:complete', { success });
-    return success;
+    return await this.reload();
   }
 
-  async #resume() {
+  /**
+   * Quick resume - just resumes AudioContext and resyncs timing.
+   * Memory and node tree are preserved. Does NOT emit 'setup' event.
+   * Use when you know the worklet is still running (e.g., tab was just backgrounded briefly).
+   * @returns {Promise<boolean>} true if worklet is running after resume
+   */
+  async resume() {
+    if (!this.#initialized) return false;
     if (!this.#audioContext || !this.#metricsReader.getMetricsView()) {
       return false;
     }
@@ -325,13 +334,22 @@ export class SuperSonic {
     const isRunning = count2 > count1;
     if (isRunning) {
       this.#ntpTiming.resync();
+      this.#eventEmitter.emit('resumed');
     }
 
     return isRunning;
   }
 
-  async #reload() {
+  /**
+   * Full reload - destroys and recreates worklet/WASM, restores synthdefs and buffers.
+   * Emits 'setup' event so you can rebuild groups, FX chains, bus routing.
+   * Use when the worklet was killed (e.g., long background, browser reclaimed memory).
+   * @returns {Promise<boolean>} true if reload succeeded
+   */
+  async reload() {
     if (!this.#initialized) return false;
+
+    this.#eventEmitter.emit('reload:start');
 
     const cachedSynthDefs = new Map(this.loadedSynthDefs);
     const cachedBuffers = this.#bufferManager?.getAllocatedBuffers() || [];
@@ -368,6 +386,7 @@ export class SuperSonic {
       await this.sync();
     }
 
+    this.#eventEmitter.emit('reload:complete', { success: true });
     return true;
   }
 

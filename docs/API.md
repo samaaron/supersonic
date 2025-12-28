@@ -9,7 +9,9 @@
 | [`init(config)`](#initconfig) | Initialise the audio engine |
 | [`shutdown()`](#shutdown) | Shut down, preserving listeners (can call `init()` again) |
 | [`destroy()`](#destroy) | Permanently destroy instance, clearing all listeners |
-| [`recover()`](#recover) | Smart recovery - tries quick resume, falls back to full reload |
+| [`recover()`](#recover) | Smart recovery - tries resume, falls back to reload |
+| [`resume()`](#resume) | Quick resume - just AudioContext, preserves memory |
+| [`reload()`](#reload) | Full reload - destroys memory, emits `setup` event |
 | [`reset(config?)`](#resetconfig) | Full teardown and re-initialize (loses all state) |
 | [`send(address, ...args)`](#sendaddress-args) | Send an OSC message |
 | [`sendOSC(data, options)`](#sendoscoscbytes-options) | Send pre-encoded OSC bytes |
@@ -36,6 +38,7 @@
 
 | Event | Description |
 |-------|-------------|
+| `setup` | Fires after init/recover, before `ready`. Async handlers are awaited. Use for groups, FX chains, bus routing. |
 | `ready` | Engine initialised and ready |
 | `loading:start` | Asset loading started (with `{ type, name }` - type is 'wasm', 'synthdef', or 'sample') |
 | `loading:complete` | Asset loading completed (with `{ type, name, size }` - size in bytes) |
@@ -51,8 +54,9 @@
 | `audiocontext:suspended` | AudioContext was suspended (browser tab backgrounded, etc.) |
 | `audiocontext:resumed` | AudioContext resumed running |
 | `audiocontext:interrupted` | AudioContext was interrupted (iOS audio session, etc.) |
-| `recover:start` | Full recovery (reload) starting - quick resume failed |
-| `recover:complete` | Full recovery completed (with `{ success }` payload) |
+| `resumed` | Quick resume succeeded (emitted by `resume()`) |
+| `reload:start` | Full reload starting (emitted by `reload()`) |
+| `reload:complete` | Full reload completed (with `{ success }` payload) |
 
 ### Node Tree
 
@@ -344,7 +348,7 @@ await supersonic.destroy();
 
 ### `recover()`
 
-Recover from audio interruption. Tries a quick AudioContext resume first, falling back to a full reload if needed. WASM and synthdefs are cached, so reload is fast. Buffer data is preserved in SharedArrayBuffer.
+Smart recovery - tries `resume()` first, falls back to `reload()` if the worklet was killed. Use this when you don't know which recovery method is needed.
 
 **Returns:** `Promise<boolean>` - true if audio is running after recovery
 
@@ -355,6 +359,42 @@ document.addEventListener('visibilitychange', async () => {
     await supersonic.recover();
   }
 });
+```
+
+### `resume()`
+
+Quick resume - just resumes the AudioContext and resyncs timing. Memory and node tree are preserved. Does **not** emit `setup` event.
+
+Use when you know the worklet is still running (e.g., tab was briefly backgrounded).
+
+**Returns:** `Promise<boolean>` - true if worklet is running after resume
+
+**Events:** Emits `resumed` on success.
+
+```javascript
+// Try quick resume first
+if (await supersonic.resume()) {
+  console.log('Quick resume worked, nodes preserved');
+} else {
+  console.log('Worklet was killed, need full reload');
+  await supersonic.reload();
+}
+```
+
+### `reload()`
+
+Full reload - destroys and recreates the worklet/WASM, then restores synthdefs and buffers from cache. Emits `setup` event so you can rebuild groups, FX chains, and bus routing.
+
+Use when the worklet was killed (e.g., long background, browser reclaimed memory).
+
+**Returns:** `Promise<boolean>` - true if reload succeeded
+
+**Events:** Emits `reload:start`, then `setup`, then `reload:complete`.
+
+```javascript
+// Force full reload (e.g., after known memory issue)
+await supersonic.reload();
+// 'setup' event handlers have run, groups/FX rebuilt
 ```
 
 ### `reset(config?)`
@@ -419,6 +459,33 @@ supersonic.once('ready', (info) => {
   console.log('Engine booted in', info.bootTimeMs, 'ms');
 });
 ```
+
+### Event: `setup`
+
+Emitted after init/recover completes, before `ready`. Async handlers are awaited. Use this for any persistent audio infrastructure that needs to exist on both initial boot and after recovery:
+
+- **Groups** - Node tree organization
+- **FX chains** - Reverb, filters, compressors
+- **Bus routing** - Synths that read/write to audio buses
+- **Persistent synths** - Always-on nodes like analyzers or mixers
+
+```javascript
+supersonic.on('setup', async () => {
+  // Create group structure
+  await supersonic.send('/g_new', 100, 0, 0);  // synths group
+  await supersonic.send('/g_new', 101, 1, 0);  // fx group (after synths)
+
+  // Create FX chain
+  await supersonic.send('/s_new', 'sonic-pi-fx_reverb', 2000, 0, 101,
+    'in_bus', 20, 'out_bus', 0, 'mix', 0.3);
+
+  await supersonic.sync();
+});
+```
+
+**Why use `setup` instead of `ready`?**
+
+In `postMessage` mode, `recover()` destroys and recreates the WASM memory, so all nodes are lost. The `setup` event lets you rebuild consistently on both initial boot and after recovery. In `sab` mode, memory persists across recovery so this is less critical - but using `setup` keeps your code portable.
 
 ### Event: `ready`
 
