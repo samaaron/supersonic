@@ -328,7 +328,7 @@ export class PostMessageTransport extends Transport {
                 if (this.#onReplyCallback && data.messages) {
                     for (const msg of data.messages) {
                         if (msg.oscData) {
-                            this.#onReplyCallback(msg.oscData);
+                            this.#onReplyCallback(msg.oscData, msg.sequence);
                         }
                     }
                 }

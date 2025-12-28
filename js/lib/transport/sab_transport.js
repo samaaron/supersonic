@@ -342,7 +342,7 @@ export class SABTransport extends Transport {
             if (data.type === 'messages' && this.#onReplyCallback) {
                 data.messages.forEach(msg => {
                     if (msg.oscData) {
-                        this.#onReplyCallback(msg.oscData);
+                        this.#onReplyCallback(msg.oscData, msg.sequence);
                     }
                 });
             } else if (data.type === 'error') {
