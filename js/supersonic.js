@@ -917,7 +917,7 @@ export class SuperSonic {
     await addWorkletModule(this.#audioContext.audioWorklet, this.#config.workletUrl);
 
     this.#workletNode = new AudioWorkletNode(this.#audioContext, "scsynth-processor", {
-      numberOfInputs: 0,
+      numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [2],
     });
@@ -966,7 +966,10 @@ export class SuperSonic {
       disconnect: (...args) => worklet.disconnect(...args),
       get context() { return worklet.context; },
       get numberOfOutputs() { return worklet.numberOfOutputs; },
+      get numberOfInputs() { return worklet.numberOfInputs; },
       get channelCount() { return worklet.channelCount; },
+      // Expose actual AudioWorkletNode for input connections
+      get audioNode() { return worklet; },
     });
   }
 

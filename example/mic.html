@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <title>SuperSonic - Mic Input Demo</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.min.css">
+    <link rel="stylesheet" href="assets/demo.css">
+    <style>
+        /* Mic demo specific styles */
+        .mic-container {
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        .mic-header {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .mic-header h1 {
+            color: var(--c-orange);
+            margin-bottom: 0.5rem;
+        }
+
+        .mic-tagline {
+            color: var(--c-gray-600);
+            font-size: 0.875rem;
+        }
+
+        .warning-box {
+            background: #fefce8;
+            border: 1px solid #fef08a;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .warning-box svg {
+            width: 24px;
+            height: 24px;
+            color: #ca8a04;
+            flex-shrink: 0;
+        }
+
+        .warning-box p {
+            margin: 0;
+            font-size: 0.875rem;
+            color: #a16207;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn-start {
+            background: var(--c-orange);
+            color: white;
+            flex: 1;
+            padding: 1rem;
+            font-size: 1rem;
+        }
+
+        .btn-start:hover:not(:disabled) {
+            background: var(--c-gold);
+            color: #000;
+        }
+
+        .btn-stop {
+            background: var(--c-pink);
+            color: white;
+            flex: 1;
+            padding: 1rem;
+            font-size: 1rem;
+        }
+
+        .btn-stop:hover:not(:disabled) {
+            background: #ff69b4;
+        }
+
+        .controls-panel {
+            background: var(--c-bg-dark-mid);
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .controls-panel h2 {
+            color: var(--c-orange);
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+        }
+
+        .slider-group {
+            margin-bottom: 1rem;
+        }
+
+        .slider-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .slider-group label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            color: var(--c-gray-300);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+        }
+
+        .slider-group label .value {
+            color: var(--c-orange);
+            font-weight: bold;
+        }
+
+        .slider-group input[type="range"] {
+            width: 100%;
+            height: 6px;
+            background: var(--c-gray-700);
+            border-radius: 0;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .slider-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--c-orange);
+            border-radius: 0;
+            cursor: pointer;
+        }
+
+        .slider-group input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: var(--c-orange);
+            border-radius: 0;
+            cursor: pointer;
+            border: none;
+        }
+
+        .fx-section {
+            border-left: 3px solid var(--c-pink);
+            padding-left: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .fx-section:last-child {
+            border-left-color: var(--c-blue);
+        }
+
+        .fx-section h3 {
+            color: var(--c-pink);
+            margin-bottom: 1rem;
+            font-size: 0.75rem;
+        }
+
+        .fx-section:last-child h3 {
+            color: var(--c-blue);
+        }
+
+        .status-box {
+            background: var(--c-bg-dark);
+            padding: 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--c-gray-400);
+            white-space: pre-wrap;
+            min-height: 60px;
+            border-left: 3px solid var(--c-orange);
+        }
+
+        .status-box.active {
+            color: var(--c-gold);
+            border-left-color: var(--c-gold);
+        }
+    </style>
+</head>
+<body>
+    <div class="mic-container">
+        <header class="mic-header">
+            <h1>Mic Input Demo</h1>
+            <p class="mic-tagline">Microphone through SuperSonic with Echo + Reverb</p>
+        </header>
+
+        <div class="warning-box">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
+                </path>
+            </svg>
+            <p><strong>Headphones recommended!</strong> Using speakers may cause feedback.</p>
+        </div>
+
+        <div class="button-row">
+            <button id="startBtn" class="btn-start" onclick="start()">Start Mic</button>
+            <button id="stopBtn" class="btn-stop" onclick="stop()" disabled>Stop</button>
+        </div>
+
+        <div class="controls-panel" id="controls" style="display: none;">
+            <h2>Effect Controls</h2>
+
+            <div class="fx-section">
+                <h3>Reverb</h3>
+                <div class="slider-group">
+                    <label>Dry/Wet Mix <span class="value" id="mixVal">0.50</span></label>
+                    <input type="range" id="mix" min="0" max="1" step="0.01" value="0.5" oninput="updateParams()">
+                </div>
+                <div class="slider-group">
+                    <label>Room Size <span class="value" id="roomVal">0.70</span></label>
+                    <input type="range" id="room" min="0" max="1" step="0.01" value="0.7" oninput="updateParams()">
+                </div>
+                <div class="slider-group">
+                    <label>Damping <span class="value" id="dampVal">0.50</span></label>
+                    <input type="range" id="damp" min="0" max="1" step="0.01" value="0.5" oninput="updateParams()">
+                </div>
+            </div>
+
+            <div class="fx-section">
+                <h3>Echo</h3>
+                <div class="slider-group">
+                    <label>Delay Time (s) <span class="value" id="delayVal">0.30</span></label>
+                    <input type="range" id="delay" min="0.05" max="1.0" step="0.01" value="0.3" oninput="updateParams()">
+                </div>
+                <div class="slider-group">
+                    <label>Decay <span class="value" id="decayVal">3.0</span></label>
+                    <input type="range" id="decay" min="0.5" max="8" step="0.1" value="3" oninput="updateParams()">
+                </div>
+                <div class="slider-group">
+                    <label>Echo Mix <span class="value" id="echoMixVal">0.30</span></label>
+                    <input type="range" id="echoMix" min="0" max="0.7" step="0.01" value="0.3" oninput="updateParams()">
+                </div>
+            </div>
+        </div>
+
+        <div id="status" class="status-box">Click "Start Mic" to begin</div>
+    </div>
+
+    <script type="module">
+        import { SuperSonic } from '/dist/supersonic.js';
+
+        let sonic = null;
+        let micStream = null;
+        let micSource = null;
+
+        // Bus layout:
+        // 0-1: Output buses (0 = main stereo out)
+        // 2-3: Input buses (2 = hardware input, where mic appears)
+        // 4+: Private buses for internal routing
+        const MIC_INPUT_BUS = 2;
+        const ECHO_BUS = 4;
+        const REVERB_BUS = 6;
+
+        function log(msg) {
+            const status = document.getElementById('status');
+            status.textContent = msg;
+            status.classList.toggle('active', msg.includes('active') || msg.includes('Mic connected'));
+            console.log(msg);
+        }
+
+        window.start = async function() {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+
+            try {
+                log('Requesting microphone access...');
+
+                // Request mic permission
+                micStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
+                log('Mic access granted. Initializing SuperSonic...');
+
+                // Initialize SuperSonic
+                sonic = new SuperSonic({
+                    workerBaseURL: '/dist/workers/',
+                    wasmBaseURL: '/dist/wasm/',
+                    synthdefBaseURL: '/dist/synthdefs/',
+                });
+
+                await sonic.init();
+                log('SuperSonic initialized. Connecting mic...');
+
+                // Connect mic to worklet input
+                const audioContext = sonic.node.context;
+                micSource = audioContext.createMediaStreamSource(micStream);
+                micSource.connect(sonic.node.audioNode);
+
+                log('Mic connected. Loading synthdefs...');
+
+                // Load the synthdefs we need
+                await Promise.all([
+                    sonic.loadSynthDef('simple_passthrough'),
+                    sonic.loadSynthDef('sonic-pi-fx_echo'),
+                    sonic.loadSynthDef('sonic-pi-fx_reverb'),
+                ]);
+
+                log('Synthdefs loaded. Creating audio graph...');
+
+                // Get initial parameter values
+                const mix = parseFloat(document.getElementById('mix').value);
+                const room = parseFloat(document.getElementById('room').value);
+                const damp = parseFloat(document.getElementById('damp').value);
+                const delay = parseFloat(document.getElementById('delay').value);
+                const decay = parseFloat(document.getElementById('decay').value);
+                const echoMix = parseFloat(document.getElementById('echoMix').value);
+
+                // Create synth graph:
+                // Mic (bus 2) -> Passthrough -> Echo (bus 4) -> Reverb (bus 6) -> Output (bus 0)
+
+                // Group for our synths
+                await sonic.send('/g_new', 1, 0, 0);
+
+                // Passthrough: read from mic input bus, write to echo bus
+                await sonic.send('/s_new', 'simple_passthrough', 1000, 1, 1,
+                    'in_bus', MIC_INPUT_BUS,
+                    'out', ECHO_BUS
+                );
+
+                // Echo: read from echo bus, write to reverb bus
+                await sonic.send('/s_new', 'sonic-pi-fx_echo', 1001, 1, 1,
+                    'in_bus', ECHO_BUS,
+                    'out_bus', REVERB_BUS,
+                    'mix', echoMix,
+                    'phase', delay,
+                    'decay', decay
+                );
+
+                // Reverb: read from reverb bus, write to main output
+                await sonic.send('/s_new', 'sonic-pi-fx_reverb', 1002, 1, 1,
+                    'in_bus', REVERB_BUS,
+                    'out_bus', 0,
+                    'mix', mix,
+                    'room', room,
+                    'damp', damp
+                );
+
+                log('Mic active with echo + reverb!\n\nSpeak into your mic - you should hear yourself with effects.\nAdjust sliders to change the sound.');
+
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                document.getElementById('controls').style.display = 'block';
+
+            } catch (err) {
+                log('Error: ' + err.message);
+                console.error(err);
+            }
+        };
+
+        window.stop = async function() {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+
+            try {
+                // Stop mic
+                if (micStream) {
+                    micStream.getTracks().forEach(track => track.stop());
+                    micStream = null;
+                }
+
+                // Disconnect mic source
+                if (micSource) {
+                    micSource.disconnect();
+                    micSource = null;
+                }
+
+                // Shutdown SuperSonic
+                if (sonic) {
+                    await sonic.destroy();
+                    sonic = null;
+                }
+
+                log('Stopped. Click "Start Mic" to begin again.');
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                document.getElementById('controls').style.display = 'none';
+
+            } catch (err) {
+                log('Error stopping: ' + err.message);
+                console.error(err);
+            }
+        };
+
+        window.updateParams = async function() {
+            if (!sonic) return;
+
+            const mix = parseFloat(document.getElementById('mix').value);
+            const room = parseFloat(document.getElementById('room').value);
+            const damp = parseFloat(document.getElementById('damp').value);
+            const delay = parseFloat(document.getElementById('delay').value);
+            const decay = parseFloat(document.getElementById('decay').value);
+            const echoMix = parseFloat(document.getElementById('echoMix').value);
+
+            document.getElementById('mixVal').textContent = mix.toFixed(2);
+            document.getElementById('roomVal').textContent = room.toFixed(2);
+            document.getElementById('dampVal').textContent = damp.toFixed(2);
+            document.getElementById('delayVal').textContent = delay.toFixed(2);
+            document.getElementById('decayVal').textContent = decay.toFixed(1);
+            document.getElementById('echoMixVal').textContent = echoMix.toFixed(2);
+
+            // Update echo parameters
+            await sonic.send('/n_set', 1001, 'mix', echoMix, 'phase', delay, 'decay', decay);
+
+            // Update reverb parameters
+            await sonic.send('/n_set', 1002, 'mix', mix, 'room', room, 'damp', damp);
+        };
+    </script>
+</body>
+</html>

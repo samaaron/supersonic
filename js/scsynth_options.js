@@ -58,14 +58,16 @@ const defaultWorldOptions = {
 
   /**
    * Number of input bus channels (hardware audio input)
-   * AudioWorklet can support input, but SuperSonic doesn't currently route it
-   * Default: 0 (audio input not implemented)
+   * Allocates space for up to N input channels from AudioContext
+   * Actual channels used depends on hardware (worklet copies min(N, actual))
+   * Default: 2 (stereo)
    */
-  numInputBusChannels: 0,
+  numInputBusChannels: 2,
 
   /**
    * Number of output bus channels (hardware audio output)
-   * WebAudio/AudioWorklet output
+   * Allocates space for up to N output channels to AudioContext
+   * Actual channels used depends on hardware (worklet copies min(N, actual))
    * Default: 2 (stereo)
    */
   numOutputBusChannels: 2,

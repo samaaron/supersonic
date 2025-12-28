@@ -36,7 +36,7 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE int get_ring_buffer_base();
     EMSCRIPTEN_KEEPALIVE const BufferLayout* get_buffer_layout();
     EMSCRIPTEN_KEEPALIVE void init_memory(double sample_rate);
-    EMSCRIPTEN_KEEPALIVE bool process_audio(double current_time);
+    EMSCRIPTEN_KEEPALIVE bool process_audio(double current_time, uint32_t active_output_channels, uint32_t active_input_channels);
     EMSCRIPTEN_KEEPALIVE int worklet_debug(const char* fmt, ...);
     EMSCRIPTEN_KEEPALIVE int worklet_debug_va(const char* fmt, va_list args);
     EMSCRIPTEN_KEEPALIVE uint32_t get_process_count();
@@ -44,8 +44,9 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE uint32_t get_messages_dropped();
     EMSCRIPTEN_KEEPALIVE uint32_t get_status_flags();
 
-    // scsynth audio output functions
+    // scsynth audio bus functions
     EMSCRIPTEN_KEEPALIVE uintptr_t get_audio_output_bus();
+    EMSCRIPTEN_KEEPALIVE uintptr_t get_audio_input_bus();
     EMSCRIPTEN_KEEPALIVE int get_audio_buffer_samples();
     EMSCRIPTEN_KEEPALIVE double get_time_offset();
 }
