@@ -201,7 +201,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         uint32View[3] = this.worldOptions.maxWireBufs || 64;
         uint32View[4] = this.worldOptions.numAudioBusChannels || 128;
         uint32View[5] = this.worldOptions.numInputBusChannels || 0;
-        uint32View[6] = this.worldOptions.numOutputBusChannels || 2;
+        uint32View[6] = this.worldOptions.numOutputBusChannels || 0;
         uint32View[7] = this.worldOptions.numControlBusChannels || 4096;
         uint32View[8] = this.worldOptions.bufLength || 128;
         uint32View[9] = this.worldOptions.realTimeMemorySize || 16384;
@@ -929,13 +929,54 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 // We use a different variable name to avoid shadowing
                 const audioContextTime = currentTime;  // Access the global currentTime directly
 
+                // Copy WebAudio input to scsynth input buses (before processing)
+                const inputChannels = inputs[0]?.length || 0;
+                const outputChannels = outputs[0]?.length || 0;
+
+                if (inputChannels > 0 && this.wasmInstance?.exports?.get_audio_input_bus) {
+                    try {
+                        const inputBusPtr = this.wasmInstance.exports.get_audio_input_bus();
+                        const numSamples = this.wasmInstance.exports.get_audio_buffer_samples();
+
+                        if (inputBusPtr && inputBusPtr > 0) {
+                            const memBuffer = this.sharedBuffer || this.wasmMemory?.buffer;
+                            if (memBuffer) {
+                                // Use configured input channels or actual input channels
+                                const configuredChannels = this.worldOptions?.numInputBusChannels || 2;
+                                const effectiveChannels = Math.min(inputChannels, configuredChannels);
+
+                                // Reuse input view if possible to avoid allocation in hot path
+                                if (!this.inputView ||
+                                    this.lastInputBusPtr !== inputBusPtr ||
+                                    this.lastInputChannels !== configuredChannels) {
+                                    this.inputView = new Float32Array(memBuffer, inputBusPtr, numSamples * configuredChannels);
+                                    this.lastInputBusPtr = inputBusPtr;
+                                    this.lastInputChannels = configuredChannels;
+                                }
+
+                                // Copy each input channel to scsynth's input buses
+                                for (let ch = 0; ch < effectiveChannels; ch++) {
+                                    if (inputs[0]?.[ch]) {
+                                        this.inputView.set(inputs[0][ch], ch * numSamples);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        // Silently fail in real-time audio context
+                    }
+                }
+
                 // C++ process_audio() now calculates NTP time internally from:
                 // - NTP_START_TIME (write-once, set during initialization)
                 // - DRIFT_OFFSET (updated every 15s by main thread)
                 // - GLOBAL_OFFSET (for future multi-system sync)
-                // DEPRECATED: Legacy timing offset views kept in memory for compatibility but unused
 
-                const keepAlive = this.wasmInstance.exports.process_audio(audioContextTime);
+                const keepAlive = this.wasmInstance.exports.process_audio(
+                    audioContextTime,
+                    outputChannels,
+                    inputChannels
+                );
 
                 // Copy scsynth audio output to AudioWorklet outputs
                 if (this.wasmInstance.exports.get_audio_output_bus && outputs[0] && outputs[0].length >= 2) {

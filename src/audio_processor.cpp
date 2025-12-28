@@ -397,10 +397,11 @@ extern "C" {
     }
 
     // Main audio processing function - called every audio frame (128 samples)
-    // current_time: AudioContext.currentTime (for reference, may not be used)
-    // current_ntp: Current NTP time from performance.now() (drift-free)
+    // current_time: AudioContext.currentTime
+    // active_output_channels: Number of output channels from AudioContext
+    // active_input_channels: Number of input channels from AudioContext
     EMSCRIPTEN_KEEPALIVE
-    bool process_audio(double current_time) {
+    bool process_audio(double current_time, uint32_t active_output_channels, uint32_t active_input_channels) {
         if (!memory_initialized) {
             return true; // Keep alive but do nothing if not initialized
         }
@@ -581,10 +582,12 @@ extern "C" {
             // AudioWorklet provides 128 samples per quantum, and we configure SC to match
             const int QUANTUM_SIZE = 128;
 
-            // Zero audio buses for this render cycle
-            // SuperCollider expects buses to start at 0.0f each frame
-            uint32_t bus_size_bytes = g_world->mNumAudioBusChannels * g_world->mBufLength * sizeof(float);
-            memset(g_world->mAudioBus, 0, bus_size_bytes);
+            // Zero OUTPUT audio buses for this render cycle
+            // SuperCollider expects output buses to start at 0.0f each frame
+            // IMPORTANT: Do NOT zero input buses - JS has already written audio data there!
+            // Layout: mAudioBus = [output buses 0..numOutputs-1][input buses][internal buses]
+            uint32_t output_bus_bytes = g_world->mNumOutputs * g_world->mBufLength * sizeof(float);
+            memset(g_world->mAudioBus, 0, output_bus_bytes);
 
             // CRITICAL: Also zero static_audio_bus to prevent accumulation across frames
             memset(static_audio_bus, 0, QUANTUM_SIZE * g_world->mNumOutputs * sizeof(float));
@@ -651,6 +654,19 @@ extern "C" {
             // Reset offset
             g_world->mSampleOffset = 0;
             g_world->mSubsampleOffset = 0.0;
+
+            // Mark input buses as "touched" so In.ar UGen reads them
+            // The JS worklet copies audio to input bus area before calling process_audio()
+            // Without this, In.ar will output silence (it checks mAudioBusTouched)
+            if (active_input_channels > 0) {
+                uint32_t active_in = std::min(active_input_channels, static_cast<uint32_t>(g_world->mNumInputs));
+                // Input buses start after output buses in mAudioBusTouched
+                int32_t* inputTouched = g_world->mAudioBusTouched + g_world->mNumOutputs;
+                const int32_t bufCounter = g_world->mBufCounter;
+                for (uint32_t i = 0; i < active_in; i++) {
+                    inputTouched[i] = bufCounter;
+                }
+            }
 
             // Run scsynth to generate audio (128 samples)
             World_Run(g_world);
@@ -805,6 +821,22 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     int get_audio_buffer_samples() {
         return 128; // AudioWorklet quantum size
+    }
+
+    // scsynth audio input accessor
+    // Returns pointer to input bus area in mAudioBus (after output buses)
+    // Layout: mAudioBus = [output buses][input buses][internal buses]
+    EMSCRIPTEN_KEEPALIVE
+    uintptr_t get_audio_input_bus() {
+        if (!memory_initialized || !g_world) {
+            return 0;
+        }
+
+        // Input buses start after output buses in mAudioBus
+        // Each bus has mBufLength samples (128)
+        return reinterpret_cast<uintptr_t>(
+            g_world->mAudioBus + (g_world->mNumOutputs * g_world->mBufLength)
+        );
     }
 
     // Return version string combining Supersonic and SuperCollider versions
