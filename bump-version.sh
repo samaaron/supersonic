@@ -3,7 +3,7 @@ set -e
 
 # SuperSonic Version Bump Script
 #
-# This script updates version numbers in exactly 11 locations:
+# This script updates version numbers in exactly 12 locations:
 #
 # Package.json version fields (4):
 #   1. package.json
@@ -25,7 +25,7 @@ set -e
 #  11. docs/CDN.md - pinned version example
 #
 # C++ version constants (1):
-#  11. src/audio_processor.cpp - SUPERSONIC_VERSION_MINOR constant
+#  12. src/audio_processor.cpp - SUPERSONIC_VERSION_MINOR constant
 #
 # Note: READMEs and error messages use @latest and don't need version updates
 
@@ -105,15 +105,18 @@ sed -i "s/\"supersonic-scsynth-samples\": \"\\^$CURRENT_VERSION\"/\"supersonic-s
 echo "✓ Updated supersonic-scsynth-samples dependency"
 
 echo ""
-echo "Step 3: Updating CDN constants in index.js files..."
-echo "----------------------------------------------------"
+echo "Step 3: Updating CDN constants and docs..."
+echo "-------------------------------------------"
 
-# Update 3 CDN constants
+# Update CDN constants and docs
 sed -i "s|supersonic-scsynth-synthdefs@$CURRENT_VERSION|supersonic-scsynth-synthdefs@$NEW_VERSION|g" "$PROJECT_ROOT/packages/supersonic-scsynth-synthdefs/index.js"
 echo "✓ Updated packages/supersonic-scsynth-synthdefs/index.js"
 
 sed -i "s|supersonic-scsynth-samples@$CURRENT_VERSION|supersonic-scsynth-samples@$NEW_VERSION|g" "$PROJECT_ROOT/packages/supersonic-scsynth-samples/index.js"
 echo "✓ Updated packages/supersonic-scsynth-samples/index.js"
+
+sed -i "s|supersonic-scsynth@$CURRENT_VERSION|supersonic-scsynth@$NEW_VERSION|g" "$PROJECT_ROOT/docs/CDN.md"
+echo "✓ Updated docs/CDN.md"
 
 echo ""
 echo "Step 4: Updating C++ version constants..."
