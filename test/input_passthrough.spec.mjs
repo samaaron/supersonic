@@ -66,7 +66,6 @@ test.describe("Input Bus Passthrough", () => {
       // Get the worklet node
       const wrapper = sonic.node;
       const audioContext = wrapper.context;
-      const workletNode = wrapper.audioNode;  // Get actual AudioWorkletNode for input
 
       // Load passthrough synthdef (reads from in_bus, outputs to out)
       await sonic.loadSynthDef("simple_passthrough");
@@ -78,15 +77,15 @@ test.describe("Input Bus Passthrough", () => {
       osc.start();
 
       // Connect oscillator directly to worklet node's input
-      osc.connect(workletNode);
+      osc.connect(wrapper.input);
 
       // Wait for audio to flow
       await new Promise(r => setTimeout(r, 100));
 
-      // Create passthrough synth that reads from input bus 32 (first input bus)
-      // and outputs to bus 0
-      const numOutputBuses = 32; // scsynth default
-      await sonic.send("/s_new", "simple_passthrough", 1000, 0, 0, "in_bus", numOutputBuses, "out", 0);
+      // Create passthrough synth that reads from input bus 2 (first input bus)
+      // Bus layout: [0-1 output][2-3 input][4+ private]
+      const inputBus = 2;
+      await sonic.send("/s_new", "simple_passthrough", 1000, 0, 0, "in_bus", inputBus, "out", 0);
 
       // Use AnalyserNode to detect audio output (works in both SAB and postMessage modes)
       const analyser = audioContext.createAnalyser();
@@ -154,8 +153,9 @@ test.describe("Input Bus Passthrough", () => {
       sonic.startCapture();
 
       // Create passthrough synth but don't connect any input
-      const numOutputBuses = 32;
-      await sonic.send("/s_new", "simple_passthrough", 1000, 0, 0, "in_bus", numOutputBuses, "out", 0);
+      // Bus layout: [0-1 output][2-3 input][4+ private]
+      const inputBus = 2;
+      await sonic.send("/s_new", "simple_passthrough", 1000, 0, 0, "in_bus", inputBus, "out", 0);
 
       await new Promise(r => setTimeout(r, 200));
 
