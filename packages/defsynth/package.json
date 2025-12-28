@@ -1,0 +1,19 @@
+{
+  "name": "defsynth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A language and framework for designing SuperCollider SynthDefs",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "parse-ugens": "node src/ugens/parser.js"
+  },
+  "keywords": [
+    "supercollider",
+    "synthdef",
+    "audio",
+    "synthesis",
+    "dsp"
+  ],
+  "license": "MIT"
+}
