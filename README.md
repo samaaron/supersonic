@@ -36,9 +36,8 @@ Try the live demo: **[sonic-pi.net/supersonic/demo.html](https://sonic-pi.net/su
 
 - [API Reference](docs/API.md) - Methods, callbacks, and configuration
 - [Server Command Reference](docs/SERVER_COMMAND_REFERENCE.md) - OSC commands for controlling scsynth
+- [Deployment](docs/DEPLOYMENT.md) - CDN, self-hosting, browser requirements
 - [Metrics](docs/METRICS.md) - Performance monitoring and debugging
-- [Browser Setup](docs/BROWSER_SETUP.md) - Required headers and browser requirements
-- [CDN and Self-Hosting](docs/CDN.md) - Deployment options and configuration
 - [Building from Source](docs/BUILDING.md) - Compiling the WASM yourself
 
 
