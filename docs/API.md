@@ -1,95 +1,111 @@
 # API Reference
 
+## Quick Start
+
+```javascript
+import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
+
+const sonic = new SuperSonic();
+
+// call init after a user interaction
+// such as a button press
+myButton.onclick = async () => {
+  await sonic.init();
+  await sonic.loadSynthDef("sonic-pi-beep");
+  sonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60);
+};
+```
+
 ## Quick Reference
 
 ### Core
 
-| Method | Description |
-|--------|-------------|
-| [`init(config)`](#initconfig) | Initialise the audio engine |
-| [`shutdown()`](#shutdown) | Shut down, preserving listeners (can call `init()` again) |
-| [`destroy()`](#destroy) | Permanently destroy instance, clearing all listeners |
-| [`recover()`](#recover) | Smart recovery - tries resume, falls back to reload |
-| [`resume()`](#resume) | Quick resume - just AudioContext, preserves memory |
-| [`reload()`](#reload) | Full reload - destroys memory, emits `setup` event |
-| [`reset(config?)`](#resetconfig) | Full teardown and re-initialize (loses all state) |
-| [`send(address, ...args)`](#sendaddress-args) | Send an OSC message |
-| [`sendOSC(data, options)`](#sendoscoscbytes-options) | Send pre-encoded OSC bytes |
-| [`sync(syncId)`](#syncsyncid) | Wait for server to process all commands |
+| Method                                               | Description                                               |
+| ---------------------------------------------------- | --------------------------------------------------------- |
+| [`init(config)`](#initconfig)                        | Initialise the audio engine                               |
+| [`shutdown()`](#shutdown)                            | Shut down, preserving listeners (can call `init()` again) |
+| [`destroy()`](#destroy)                              | Permanently destroy instance, clearing all listeners      |
+| [`recover()`](#recover)                              | Smart recovery - tries resume, falls back to reload       |
+| [`resume()`](#resume)                                | Quick resume - just AudioContext, preserves memory        |
+| [`reload()`](#reload)                                | Full reload - destroys memory, emits `setup` event        |
+| [`reset(config?)`](#resetconfig)                     | Full teardown and re-initialize (loses all state)         |
+| [`send(address, ...args)`](#sendaddress-args)        | Send an OSC message                                       |
+| [`sendOSC(data, options)`](#sendoscoscbytes-options) | Send pre-encoded OSC bytes                                |
+| [`sync(syncId)`](#syncsyncid)                        | Wait for server to process all commands                   |
 
 ### Asset Loading
 
-| Method | Description |
-|--------|-------------|
-| [`loadSynthDef(nameOrPath)`](#loadsynthdefnameorpath) | Load a synth definition |
-| [`loadSynthDefs(names)`](#loadsynthdefsnames) | Load multiple synthdefs in parallel |
-| [`loadSample(bufnum, nameOrPath)`](#loadsamplebufnum-nameorpath) | Load a sample into a buffer |
+| Method                                                           | Description                         |
+| ---------------------------------------------------------------- | ----------------------------------- |
+| [`loadSynthDef(nameOrPath)`](#loadsynthdefnameorpath)            | Load a synth definition             |
+| [`loadSynthDefs(names)`](#loadsynthdefsnames)                    | Load multiple synthdefs in parallel |
+| [`loadSample(bufnum, nameOrPath)`](#loadsamplebufnum-nameorpath) | Load a sample into a buffer         |
 
 ### Events
 
-| Method | Description |
-|--------|-------------|
-| [`on(event, callback)`](#onevent-callback) | Subscribe to an event, returns unsubscribe function |
-| [`off(event, callback)`](#offevent-callback) | Unsubscribe from an event |
-| [`once(event, callback)`](#onceevent-callback) | Subscribe to an event once |
-| [`removeAllListeners(event?)`](#removealllistenersevent) | Remove all listeners for an event (or all events) |
+| Method                                                   | Description                                         |
+| -------------------------------------------------------- | --------------------------------------------------- |
+| [`on(event, callback)`](#onevent-callback)               | Subscribe to an event, returns unsubscribe function |
+| [`off(event, callback)`](#offevent-callback)             | Unsubscribe from an event                           |
+| [`once(event, callback)`](#onceevent-callback)           | Subscribe to an event once                          |
+| [`removeAllListeners(event?)`](#removealllistenersevent) | Remove all listeners for an event (or all events)   |
 
 ### Event Types
 
-| Event | Description |
-|-------|-------------|
-| `setup` | Fires after init/recover, before `ready`. Async handlers are awaited. Use for groups, FX chains, bus routing. |
-| `ready` | Engine initialised and ready |
-| `loading:start` | Asset loading started (with `{ type, name }` - type is 'wasm', 'synthdef', or 'sample') |
-| `loading:complete` | Asset loading completed (with `{ type, name, size }` - size in bytes) |
-| `error` | Error occurred |
-| `message` | OSC message received (parsed) |
-| `message:raw` | OSC message received (with raw bytes) |
-| `message:sent` | OSC message sent |
-| `debug` | Debug output from scsynth |
-| `metrics` | Periodic metrics update |
-| `shutdown` | Engine shutting down (emitted by `shutdown()`, `reset()`, and `destroy()`) |
-| `destroy` | Engine being permanently destroyed (emitted by `destroy()` only) |
-| `audiocontext:statechange` | AudioContext state changed (with `{ state }` payload) |
-| `audiocontext:suspended` | AudioContext was suspended (browser tab backgrounded, etc.) |
-| `audiocontext:resumed` | AudioContext resumed running |
-| `audiocontext:interrupted` | AudioContext was interrupted (iOS audio session, etc.) |
-| `resumed` | Quick resume succeeded (emitted by `resume()`) |
-| `reload:start` | Full reload starting (emitted by `reload()`) |
-| `reload:complete` | Full reload completed (with `{ success }` payload) |
+| Event                      | Description                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `setup`                    | Fires after init/recover, before `ready`. Async handlers are awaited. Use for groups, FX chains, bus routing. |
+| `ready`                    | Engine initialised and ready                                                                                  |
+| `loading:start`            | Asset loading started (with `{ type, name }` - type is 'wasm', 'synthdef', or 'sample')                       |
+| `loading:complete`         | Asset loading completed (with `{ type, name, size }` - size in bytes)                                         |
+| `error`                    | Error occurred                                                                                                |
+| `message`                  | OSC message received (parsed)                                                                                 |
+| `message:raw`              | OSC message received (with raw bytes)                                                                         |
+| `message:sent`             | OSC message sent                                                                                              |
+| `debug`                    | Debug output from scsynth                                                                                     |
+| `metrics`                  | Periodic metrics update                                                                                       |
+| `shutdown`                 | Engine shutting down (emitted by `shutdown()`, `reset()`, and `destroy()`)                                    |
+| `destroy`                  | Engine being permanently destroyed (emitted by `destroy()` only)                                              |
+| `audiocontext:statechange` | AudioContext state changed (with `{ state }` payload)                                                         |
+| `audiocontext:suspended`   | AudioContext was suspended (browser tab backgrounded, etc.)                                                   |
+| `audiocontext:resumed`     | AudioContext resumed running                                                                                  |
+| `audiocontext:interrupted` | AudioContext was interrupted (iOS audio session, etc.)                                                        |
+| `resumed`                  | Quick resume succeeded (emitted by `resume()`)                                                                |
+| `reload:start`             | Full reload starting (emitted by `reload()`)                                                                  |
+| `reload:complete`          | Full reload completed (with `{ success }` payload)                                                            |
 
 ### Node Tree
 
-| Method | Description |
-|--------|-------------|
+| Method                  | Description                                             |
+| ----------------------- | ------------------------------------------------------- |
 | [`getTree()`](#gettree) | Get snapshot of synth/group hierarchy for visualization |
 
 ### Metrics
 
-| Method | Description |
-|--------|-------------|
-| [`getMetrics()`](#getmetrics) | Get metrics snapshot on demand |
-| [`setMetricsInterval(ms)`](#setmetricsintervalms) | Change polling interval |
-| [`stopMetricsPolling()`](#stopmetricspolling) | Stop the metrics timer |
+| Method                                            | Description                    |
+| ------------------------------------------------- | ------------------------------ |
+| [`getMetrics()`](#getmetrics)                     | Get metrics snapshot on demand |
+| [`setMetricsInterval(ms)`](#setmetricsintervalms) | Change polling interval        |
+| [`stopMetricsPolling()`](#stopmetricspolling)     | Stop the metrics timer         |
 
 ### Properties
 
-| Property | Description |
-|----------|-------------|
-| [`initialized`](#initialized-read-only) | Whether engine is initialised (read-only) |
-| [`initializing`](#initializing-read-only) | Whether engine is currently initialising (read-only) |
-| [`audioContext`](#audiocontext-read-only) | The Web Audio AudioContext (read-only) |
-| [`node`](#node-read-only) | Audio node wrapper for Web Audio connections (read-only) |
-| [`loadedSynthDefs`](#loadedsynthdefs-read-only) | Set of loaded synthdef names (read-only) |
-| [`bootStats`](#bootstats-read-only) | Boot timing information (read-only) |
+| Property                                        | Description                                              |
+| ----------------------------------------------- | -------------------------------------------------------- |
+| [`initialized`](#initialized-read-only)         | Whether engine is initialised (read-only)                |
+| [`initializing`](#initializing-read-only)       | Whether engine is currently initialising (read-only)     |
+| [`audioContext`](#audiocontext-read-only)       | The Web Audio AudioContext (read-only)                   |
+| [`node`](#node-read-only)                       | Audio node wrapper for Web Audio connections (read-only) |
+| [`loadedSynthDefs`](#loadedsynthdefs-read-only) | Set of loaded synthdef names (read-only)                 |
+| [`bootStats`](#bootstats-read-only)             | Boot timing information (read-only)                      |
 
 ### Advanced
 
-| Method | Description |
-|--------|-------------|
-| [`getInfo()`](#getinfo) | Get static engine configuration |
-| [`SuperSonic.osc.encode()`](#supersonicoscencodemessage) | Encode an OSC message to bytes |
-| [`SuperSonic.osc.decode()`](#supersonicoscdecodedata-options) | Decode OSC bytes to a message |
+| Method                                                        | Description                     |
+| ------------------------------------------------------------- | ------------------------------- |
+| [`getInfo()`](#getinfo)                                       | Get static engine configuration |
+| [`SuperSonic.osc.encode()`](#supersonicoscencodemessage)      | Encode an OSC message to bytes  |
+| [`SuperSonic.osc.decode()`](#supersonicoscdecodedata-options) | Decode OSC bytes to a message   |
 
 ## Creating an Instance
 
@@ -102,43 +118,43 @@ const supersonic = new SuperSonic();
 
 // Or with explicit baseURL
 const supersonic = new SuperSonic({
-  baseURL: "/supersonic/"
+  baseURL: "/supersonic/",
 });
 // Derives: workers/, wasm/, synthdefs/, samples/
 
 // Or explicit paths
 const supersonic = new SuperSonic({
-  workerBaseURL:   "/supersonic/workers/",
-  wasmBaseURL:     "/supersonic/wasm/",
+  workerBaseURL: "/supersonic/workers/",
+  wasmBaseURL: "/supersonic/wasm/",
   synthdefBaseURL: "/supersonic/synthdefs/",
-  sampleBaseURL:   "/supersonic/samples/"
+  sampleBaseURL: "/supersonic/samples/",
 });
 
 // Mix: baseURL with overrides
 const supersonic = new SuperSonic({
   baseURL: "/supersonic/",
-  sampleBaseURL: "/cdn/samples/"  // absolute override
+  sampleBaseURL: "/cdn/samples/", // absolute override
 });
 ```
 
 ### Constructor Options
 
-| Option | Required | Description |
-|--------|----------|-------------|
-| `baseURL` | No | Base URL - derives `workers/`, `wasm/`, `synthdefs/`, `samples/` subdirectories. Auto-detected from import path if not provided. |
-| `workerBaseURL` | No | Base URL for worker scripts (overrides baseURL) |
-| `wasmBaseURL` | No | Base URL for WASM files (overrides baseURL) |
-| `synthdefBaseURL` | No | Base URL for synthdef files (used by `loadSynthDef`) |
-| `sampleBaseURL` | No | Base URL for sample files (used by `loadSample`) |
-| `mode` | No | Transport mode: `'postMessage'` (default) or `'sab'`. PostMessage works everywhere; SAB requires COOP/COEP headers but has lower latency. |
-| `scsynthOptions` | No | Server options (see below) |
-| `preschedulerCapacity` | No | Max pending events in JS prescheduler (default: 65536) |
-| `activityEvent` | No | Event emission truncation options (see below) |
-| `debug` | No | Log all debug messages to console (scsynth, OSC in, OSC out) |
-| `debugScsynth` | No | Log scsynth debug messages to console |
-| `debugOscIn` | No | Log incoming OSC messages to console |
-| `debugOscOut` | No | Log outgoing OSC messages to console |
-| `activityConsoleLog` | No | Console output truncation options (see below) |
+| Option                 | Required | Description                                                                                                                               |
+| ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseURL`              | No       | Base URL - derives `workers/`, `wasm/`, `synthdefs/`, `samples/` subdirectories. Auto-detected from import path if not provided.          |
+| `workerBaseURL`        | No       | Base URL for worker scripts (overrides baseURL)                                                                                           |
+| `wasmBaseURL`          | No       | Base URL for WASM files (overrides baseURL)                                                                                               |
+| `synthdefBaseURL`      | No       | Base URL for synthdef files (used by `loadSynthDef`)                                                                                      |
+| `sampleBaseURL`        | No       | Base URL for sample files (used by `loadSample`)                                                                                          |
+| `mode`                 | No       | Transport mode: `'postMessage'` (default) or `'sab'`. PostMessage works everywhere; SAB requires COOP/COEP headers but has lower latency. |
+| `scsynthOptions`       | No       | Server options (see below)                                                                                                                |
+| `preschedulerCapacity` | No       | Max pending events in JS prescheduler (default: 65536)                                                                                    |
+| `activityEvent`        | No       | Event emission truncation options (see below)                                                                                             |
+| `debug`                | No       | Log all debug messages to console (scsynth, OSC in, OSC out)                                                                              |
+| `debugScsynth`         | No       | Log scsynth debug messages to console                                                                                                     |
+| `debugOscIn`           | No       | Log incoming OSC messages to console                                                                                                      |
+| `debugOscOut`          | No       | Log outgoing OSC messages to console                                                                                                      |
+| `activityConsoleLog`   | No       | Console output truncation options (see below)                                                                                             |
 
 **Note:** All URL options are auto-detected from the import path when loading from CDN (unpkg). For local hosting, either provide `baseURL` or ensure the import path structure matches `supersonic.js` with sibling `workers/`, `wasm/`, etc. directories.
 
@@ -150,18 +166,18 @@ Control truncation of event emission for custom log UIs:
 const supersonic = new SuperSonic({
   baseURL: "/supersonic/",
   activityEvent: {
-    maxLineLength: 200,  // Global default (default: 200)
-    scsynth: 500,        // Override for scsynth messages
-  }
+    maxLineLength: 200, // Global default (default: 200)
+    scsynth: 500, // Override for scsynth messages
+  },
 });
 ```
 
-| Option | Description |
-|--------|-------------|
+| Option          | Description                                         |
+| --------------- | --------------------------------------------------- |
 | `maxLineLength` | Default max chars for event emission (default: 200) |
-| `scsynth` | Override max chars for scsynth debug events |
-| `oscIn` | Reserved for future use |
-| `oscOut` | Reserved for future use |
+| `scsynth`       | Override max chars for scsynth debug events         |
+| `oscIn`         | Reserved for future use                             |
+| `oscOut`        | Reserved for future use                             |
 
 ### Activity Console Log Options (`activityConsoleLog`)
 
@@ -172,20 +188,20 @@ const supersonic = new SuperSonic({
   baseURL: "/supersonic/",
   debug: true,
   activityConsoleLog: {
-    maxLineLength: 200,  // Global default (default: 200)
-    scsynth: 500,        // Override for scsynth messages
-    oscIn: 100,          // Override for incoming OSC
-    oscOut: 100,         // Override for outgoing OSC
-  }
+    maxLineLength: 200, // Global default (default: 200)
+    scsynth: 500, // Override for scsynth messages
+    oscIn: 100, // Override for incoming OSC
+    oscOut: 100, // Override for outgoing OSC
+  },
 });
 ```
 
-| Option | Description |
-|--------|-------------|
+| Option          | Description                                             |
+| --------------- | ------------------------------------------------------- |
 | `maxLineLength` | Default max chars for all console output (default: 200) |
-| `scsynth` | Override max chars for scsynth messages |
-| `oscIn` | Override max chars for incoming OSC args |
-| `oscOut` | Override max chars for outgoing OSC args |
+| `scsynth`       | Override max chars for scsynth messages                 |
+| `oscIn`         | Override max chars for incoming OSC args                |
+| `oscOut`        | Override max chars for outgoing OSC args                |
 
 ### Server Options (`scsynthOptions`)
 
@@ -195,8 +211,8 @@ Override scsynth server defaults:
 const supersonic = new SuperSonic({
   // ... required options ...
   scsynthOptions: {
-    numBuffers: 4096,  // Max audio buffers (default: 1024)
-  }
+    numBuffers: 4096, // Max audio buffers (default: 1024)
+  },
 });
 ```
 
@@ -215,16 +231,16 @@ await supersonic.init();
 ```javascript
 await supersonic.init({
   audioContextOptions: {
-    sampleRate: 44100,      // Request specific sample rate
-    latencyHint: "playback" // "interactive" (default), "balanced", or "playback"
-  }
+    sampleRate: 44100, // Request specific sample rate
+    latencyHint: "playback", // "interactive" (default), "balanced", or "playback"
+  },
 });
 ```
 
-| Option | Description |
-|--------|-------------|
-| `wasmUrl` | Override the WASM file URL |
-| `workletUrl` | Override the worklet script URL |
+| Option                | Description                                    |
+| --------------------- | ---------------------------------------------- |
+| `wasmUrl`             | Override the WASM file URL                     |
+| `workletUrl`          | Override the worklet script URL                |
 | `audioContextOptions` | Options passed to the AudioContext constructor |
 
 Calling `init()` multiple times is safe - it returns immediately if already initialised, or returns the existing promise if initialisation is in progress.
@@ -268,6 +284,7 @@ for (const [name, result] of Object.entries(results)) {
 Load a sample into a buffer. Pass a filename to use `sampleBaseURL`, or provide a full path.
 
 **Parameters:**
+
 - `bufnum` - Buffer number (integer)
 - `nameOrPath` - Sample filename or full path/URL (string)
 - `startFrame` - Optional starting frame offset (integer, default: 0)
@@ -289,9 +306,9 @@ await supersonic.loadSample(0, "long-sample.flac", 1000, 1000);
 Send an OSC message. Types are auto-detected from JavaScript values.
 
 ```javascript
-supersonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60, 'amp', 0.5);
-supersonic.send('/n_free', 1000);
-supersonic.send('/b_allocRead', 0, 'bd_haus.flac');
+supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60, "amp", 0.5);
+supersonic.send("/n_free", 1000);
+supersonic.send("/b_allocRead", 0, "bd_haus.flac");
 ```
 
 ### `sendOSC(oscBytes, options)`
@@ -308,6 +325,7 @@ supersonic.sendOSC(oscData);
 Send a `/sync` command and wait for the `/synced` response. Use this to ensure all previous asynchronous commands (like `/d_recv` for synthdefs) have been processed by the server.
 
 **Parameters:**
+
 - `syncId` - Optional integer identifier (default: random). The server echoes this back in the `/synced` response.
 
 **Returns:** `Promise<void>` - Resolves when the server responds, or rejects after 10 seconds.
@@ -315,7 +333,7 @@ Send a `/sync` command and wait for the `/synced` response. Use this to ensure a
 ```javascript
 // Load synthdefs then wait for them to be ready
 await supersonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
-await supersonic.sync();  // Now safe to use the synthdefs
+await supersonic.sync(); // Now safe to use the synthdefs
 
 // Use a specific sync ID for tracking
 await supersonic.sync(42);
@@ -354,7 +372,7 @@ Smart recovery - tries `resume()` first, falls back to `reload()` if the worklet
 
 ```javascript
 // Handle visibility change (e.g., user switches back to tab)
-document.addEventListener('visibilitychange', async () => {
+document.addEventListener("visibilitychange", async () => {
   if (!document.hidden) {
     await supersonic.recover();
   }
@@ -374,9 +392,9 @@ Use when you know the worklet is still running (e.g., tab was briefly background
 ```javascript
 // Try quick resume first
 if (await supersonic.resume()) {
-  console.log('Quick resume worked, nodes preserved');
+  console.log("Quick resume worked, nodes preserved");
 } else {
-  console.log('Worklet was killed, need full reload');
+  console.log("Worklet was killed, need full reload");
   await supersonic.reload();
 }
 ```
@@ -422,8 +440,8 @@ Subscribe to events with `on()`, which returns an unsubscribe function for easy 
 
 ```javascript
 // Subscribe
-const unsubscribe = supersonic.on('message', (msg) => {
-  console.log('Received:', msg.address);
+const unsubscribe = supersonic.on("message", (msg) => {
+  console.log("Received:", msg.address);
 });
 
 // Later, unsubscribe
@@ -434,8 +452,8 @@ Multiple listeners can subscribe to the same event - each receives all events in
 
 ```javascript
 // Both listeners receive all messages
-supersonic.on('message', (msg) => console.log('Listener A:', msg.address));
-supersonic.on('message', (msg) => console.log('Listener B:', msg.address));
+supersonic.on("message", (msg) => console.log("Listener A:", msg.address));
+supersonic.on("message", (msg) => console.log("Listener B:", msg.address));
 ```
 
 ### `off(event, callback)`
@@ -444,10 +462,10 @@ Unsubscribe using the original callback reference. Alternative to using the unsu
 
 ```javascript
 const handler = (msg) => console.log(msg);
-supersonic.on('message', handler);
+supersonic.on("message", handler);
 
 // Later
-supersonic.off('message', handler);
+supersonic.off("message", handler);
 ```
 
 ### `once(event, callback)`
@@ -455,8 +473,8 @@ supersonic.off('message', handler);
 Subscribe to an event once. The listener auto-unsubscribes after the first event.
 
 ```javascript
-supersonic.once('ready', (info) => {
-  console.log('Engine booted in', info.bootTimeMs, 'ms');
+supersonic.once("ready", (info) => {
+  console.log("Engine booted in", info.bootTimeMs, "ms");
 });
 ```
 
@@ -470,14 +488,13 @@ Emitted after init/recover completes, before `ready`. Async handlers are awaited
 - **Persistent synths** - Always-on nodes like analyzers or mixers
 
 ```javascript
-supersonic.on('setup', async () => {
+supersonic.on("setup", async () => {
   // Create group structure
-  await supersonic.send('/g_new', 100, 0, 0);  // synths group
-  await supersonic.send('/g_new', 101, 1, 0);  // fx group (after synths)
+  await supersonic.send("/g_new", 100, 0, 0); // synths group
+  await supersonic.send("/g_new", 101, 1, 0); // fx group (after synths)
 
   // Create FX chain
-  await supersonic.send('/s_new', 'sonic-pi-fx_reverb', 2000, 0, 101,
-    'in_bus', 20, 'out_bus', 0, 'mix', 0.3);
+  await supersonic.send("/s_new", "sonic-pi-fx_reverb", 2000, 0, 101, "in_bus", 20, "out_bus", 0, "mix", 0.3);
 
   await supersonic.sync();
 });
@@ -492,9 +509,9 @@ In `postMessage` mode, `recover()` destroys and recreates the WASM memory, so al
 Emitted when the engine is initialised and ready to use.
 
 ```javascript
-supersonic.on('ready', (info) => {
-  console.log('Sample rate:', info.sampleRate);
-  console.log('Boot time:', info.bootTimeMs, 'ms');
+supersonic.on("ready", (info) => {
+  console.log("Sample rate:", info.sampleRate);
+  console.log("Boot time:", info.bootTimeMs, "ms");
 });
 ```
 
@@ -503,8 +520,8 @@ supersonic.on('ready', (info) => {
 Emitted when an error occurs.
 
 ```javascript
-supersonic.on('error', (error) => {
-  console.error('SuperSonic error:', error.message);
+supersonic.on("error", (error) => {
+  console.error("SuperSonic error:", error.message);
 });
 ```
 
@@ -513,9 +530,9 @@ supersonic.on('error', (error) => {
 Emitted when a parsed OSC message is received from scsynth.
 
 ```javascript
-supersonic.on('message', (msg) => {
-  console.log('Address:', msg.address);
-  console.log('Args:', msg.args);
+supersonic.on("message", (msg) => {
+  console.log("Address:", msg.address);
+  console.log("Args:", msg.args);
 });
 ```
 
@@ -524,9 +541,9 @@ supersonic.on('message', (msg) => {
 Emitted with raw OSC data including the original bytes. Useful for logging.
 
 ```javascript
-supersonic.on('message:raw', (data) => {
-  console.log('OSC bytes:', data.oscData);
-  console.log('Parsed:', data.address, data.args);
+supersonic.on("message:raw", (data) => {
+  console.log("OSC bytes:", data.oscData);
+  console.log("Parsed:", data.address, data.args);
 });
 ```
 
@@ -535,9 +552,9 @@ supersonic.on('message:raw', (data) => {
 Emitted when an OSC message is sent to scsynth.
 
 ```javascript
-supersonic.on('message:sent', (oscBytes) => {
+supersonic.on("message:sent", (oscBytes) => {
   const decoded = SuperSonic.osc.decode(oscBytes);
-  console.log('Sent:', decoded.address);
+  console.log("Sent:", decoded.address);
 });
 ```
 
@@ -546,8 +563,8 @@ supersonic.on('message:sent', (oscBytes) => {
 Emitted with debug output from scsynth.
 
 ```javascript
-supersonic.on('debug', (msg) => {
-  console.log('[scsynth]', msg.text);
+supersonic.on("debug", (msg) => {
+  console.log("[scsynth]", msg.text);
 });
 ```
 
@@ -556,9 +573,9 @@ supersonic.on('debug', (msg) => {
 Emitted periodically with performance metrics. See [Metrics](METRICS.md) for details.
 
 ```javascript
-supersonic.on('metrics', (metrics) => {
-  console.log('Messages sent:', metrics.mainMessagesSent);
-  console.log('Scheduler depth:', metrics.workletSchedulerDepth);
+supersonic.on("metrics", (metrics) => {
+  console.log("Messages sent:", metrics.mainMessagesSent);
+  console.log("Scheduler depth:", metrics.workletSchedulerDepth);
 });
 ```
 
@@ -567,8 +584,8 @@ supersonic.on('metrics', (metrics) => {
 Emitted when the engine is shutting down. Fired by `shutdown()`, `reset()`, and `destroy()`. Use this to clean up application state that depends on SuperSonic.
 
 ```javascript
-supersonic.on('shutdown', () => {
-  console.log('Engine shutting down, cleaning up...');
+supersonic.on("shutdown", () => {
+  console.log("Engine shutting down, cleaning up...");
   // Reset application state flags, stop loops, etc.
 });
 ```
@@ -578,8 +595,8 @@ supersonic.on('shutdown', () => {
 Emitted when the engine is being permanently destroyed (only fired by `destroy()`, not by `shutdown()` or `reset()`). This is your last chance to clean up before all listeners are cleared.
 
 ```javascript
-supersonic.on('destroy', () => {
-  console.log('Engine being destroyed permanently');
+supersonic.on("destroy", () => {
+  console.log("Engine being destroyed permanently");
   // Final cleanup before instance becomes unusable
 });
 ```
@@ -589,8 +606,8 @@ supersonic.on('destroy', () => {
 Emitted when the AudioContext state changes. The payload contains the new state.
 
 ```javascript
-supersonic.on('audiocontext:statechange', ({ state }) => {
-  console.log('AudioContext state:', state);
+supersonic.on("audiocontext:statechange", ({ state }) => {
+  console.log("AudioContext state:", state);
   // state is one of: 'running', 'suspended', 'interrupted', 'closed'
 });
 ```
@@ -600,8 +617,8 @@ supersonic.on('audiocontext:statechange', ({ state }) => {
 Emitted when the AudioContext is suspended. This typically happens when the browser tab is backgrounded or the system suspends audio. Use this to show a "restart" UI to the user.
 
 ```javascript
-supersonic.on('audiocontext:suspended', () => {
-  console.log('Audio suspended - show restart button');
+supersonic.on("audiocontext:suspended", () => {
+  console.log("Audio suspended - show restart button");
   showRestartUI();
 });
 ```
@@ -611,8 +628,8 @@ supersonic.on('audiocontext:suspended', () => {
 Emitted when the AudioContext resumes running after being suspended.
 
 ```javascript
-supersonic.on('audiocontext:resumed', () => {
-  console.log('Audio resumed');
+supersonic.on("audiocontext:resumed", () => {
+  console.log("Audio resumed");
   hideRestartUI();
 });
 ```
@@ -622,8 +639,8 @@ supersonic.on('audiocontext:resumed', () => {
 Emitted when the AudioContext is interrupted by the system (common on iOS when another app takes audio focus). Similar to `suspended` but triggered externally.
 
 ```javascript
-supersonic.on('audiocontext:interrupted', () => {
-  console.log('Audio interrupted by system');
+supersonic.on("audiocontext:interrupted", () => {
+  console.log("Audio interrupted by system");
   showRestartUI();
 });
 ```
@@ -634,7 +651,7 @@ Remove all listeners for an event, or all listeners entirely. Useful for cleanup
 
 ```javascript
 // Remove all 'message' listeners
-supersonic.removeAllListeners('message');
+supersonic.removeAllListeners("message");
 
 // Remove ALL listeners (use with caution)
 supersonic.removeAllListeners();
@@ -658,11 +675,11 @@ Whether the engine is currently initialising. Useful for showing loading states 
 
 ```javascript
 if (supersonic.initializing) {
-  console.log('Engine is booting...');
+  console.log("Engine is booting...");
 } else if (supersonic.initialized) {
-  console.log('Engine is ready');
+  console.log("Engine is ready");
 } else {
-  console.log('Engine not started');
+  console.log("Engine not started");
 }
 ```
 
@@ -672,7 +689,7 @@ The underlying Web Audio AudioContext.
 
 ```javascript
 const ctx = supersonic.audioContext;
-console.log('Sample rate:', ctx.sampleRate);
+console.log("Sample rate:", ctx.sampleRate);
 ```
 
 ### `node` (read-only)
@@ -681,19 +698,19 @@ A wrapper around the AudioWorkletNode that provides a clean interface for Web Au
 
 **Properties:**
 
-| Property | Description |
-|----------|-------------|
-| `input` | The AudioWorkletNode to connect external sources to |
-| `context` | The AudioContext (same as `audioContext`) |
-| `numberOfInputs` | Number of input channels (from scsynth config) |
-| `numberOfOutputs` | Number of output channels (from scsynth config) |
-| `channelCount` | Channel count of the worklet node |
+| Property          | Description                                         |
+| ----------------- | --------------------------------------------------- |
+| `input`           | The AudioWorkletNode to connect external sources to |
+| `context`         | The AudioContext (same as `audioContext`)           |
+| `numberOfInputs`  | Number of input channels (from scsynth config)      |
+| `numberOfOutputs` | Number of output channels (from scsynth config)     |
+| `channelCount`    | Channel count of the worklet node                   |
 
 **Methods:**
 
-| Method | Description |
-|--------|-------------|
-| `connect(destination)` | Connect SuperSonic's output to another AudioNode |
+| Method                     | Description                                           |
+| -------------------------- | ----------------------------------------------------- |
+| `connect(destination)`     | Connect SuperSonic's output to another AudioNode      |
 | `disconnect(destination?)` | Disconnect from a destination (or all if no argument) |
 
 **Connecting external audio sources (e.g., microphone):**
@@ -749,6 +766,7 @@ console.log(`Engine booted in ${stats.initDuration.toFixed(2)}ms`);
 ```
 
 **Properties:**
+
 - `initStartTime` - When `init()` was called (`performance.now()` timestamp)
 - `initDuration` - How long initialisation took (milliseconds)
 
@@ -816,7 +834,7 @@ animate();
 
 ```javascript
 const { nodes } = supersonic.getTree();
-const synths = nodes.filter(n => !n.isGroup);
+const synths = nodes.filter((n) => !n.isGroup);
 
 for (const synth of synths) {
   console.log(`Synth ${synth.id}: ${synth.defName}`);
@@ -827,7 +845,7 @@ for (const synth of synths) {
 
 ```javascript
 function buildNestedTree(nodes) {
-  const byId = new Map(nodes.map(n => [n.id, { ...n, children: [] }]));
+  const byId = new Map(nodes.map((n) => [n.id, { ...n, children: [] }]));
 
   for (const node of byId.values()) {
     if (node.parentId !== -1) {
@@ -845,14 +863,14 @@ Nodes are linked via `headId`/`nextId`. This is the order scsynth executes them:
 
 ```javascript
 function getChildrenInOrder(nodes, groupId) {
-  const group = nodes.find(n => n.id === groupId);
+  const group = nodes.find((n) => n.id === groupId);
   if (!group || group.headId === -1) return [];
 
   const children = [];
   let nodeId = group.headId;
 
   while (nodeId !== -1) {
-    const node = nodes.find(n => n.id === nodeId);
+    const node = nodes.find((n) => n.id === nodeId);
     if (!node) break;
     children.push(node);
     nodeId = node.nextId;
@@ -864,12 +882,12 @@ function getChildrenInOrder(nodes, groupId) {
 
 **`getTree()` vs `/g_queryTree`**
 
-| | `getTree()` | `/g_queryTree` |
-|--|-------------|----------------|
-| Latency | Instant (reads shared memory) | ~40ms round-trip |
-| Format | Flat array with links | Nested in message args |
-| Control values | Not included | Optional (flag=1) |
-| Use case | 60fps visualization | One-off queries, debugging |
+|                | `getTree()`                   | `/g_queryTree`             |
+| -------------- | ----------------------------- | -------------------------- |
+| Latency        | Instant (reads shared memory) | ~40ms round-trip           |
+| Format         | Flat array with links         | Nested in message args     |
+| Control values | Not included                  | Optional (flag=1)          |
+| Use case       | 60fps visualization           | One-off queries, debugging |
 
 `getTree()` returns node structure only - not control values. For control values, use `/g_queryTree` with flag=1 or `/n_get` for specific nodes. See [Server Command Reference](SERVER_COMMAND_REFERENCE.md).
 
@@ -883,7 +901,7 @@ Get a metrics snapshot on demand.
 
 ```javascript
 const metrics = supersonic.getMetrics();
-console.log('Messages processed:', metrics.workletMessagesProcessed);
+console.log("Messages processed:", metrics.workletMessagesProcessed);
 ```
 
 ### `setMetricsInterval(ms)`
@@ -891,7 +909,7 @@ console.log('Messages processed:', metrics.workletMessagesProcessed);
 Change the polling interval for `onMetricsUpdate`. Default is 100ms (10Hz).
 
 ```javascript
-supersonic.setMetricsInterval(500);  // Update every 500ms
+supersonic.setMetricsInterval(500); // Update every 500ms
 ```
 
 ### `stopMetricsPolling()`
@@ -910,11 +928,12 @@ Returns static configuration from boot time - things that don't change after ini
 
 ```javascript
 const info = supersonic.getInfo();
-console.log('Sample rate:', info.sampleRate);
-console.log('Boot time:', info.bootTimeMs, 'ms');
+console.log("Sample rate:", info.sampleRate);
+console.log("Boot time:", info.bootTimeMs, "ms");
 ```
 
 Returns an object containing:
+
 - `sampleRate` - Audio sample rate (e.g., 48000)
 - `numBuffers` - Maximum number of audio buffers
 - `totalMemory` - Total memory allocated (bytes)
@@ -935,8 +954,8 @@ const message = {
     { type: "s", value: "sonic-pi-beep" },
     { type: "i", value: -1 },
     { type: "i", value: 0 },
-    { type: "i", value: 0 }
-  ]
+    { type: "i", value: 0 },
+  ],
 };
 
 const bytes = SuperSonic.osc.encode(message);
@@ -948,6 +967,7 @@ const bytes = SuperSonic.osc.encode(message);
 Decode binary OSC data into a message object. Useful for debugging or logging.
 
 **Parameters:**
+
 - `data` - `Uint8Array` or `ArrayBuffer` containing OSC data
 - `options` - Optional. `{ metadata: true }` to include type info in args
 
