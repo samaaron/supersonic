@@ -97,7 +97,7 @@ const supersonic = new SuperSonic();
 
 If you want to point to your own assets, you can configure this when you create your SuperSonic instance:
 
-Set a base URL (derives subdirectories automatically)
+A. Set a base URL (derives subdirectories automatically)
 ```javascript
 const supersonic = new SuperSonic({
   baseURL: "/audio/supersonic/"
@@ -105,7 +105,7 @@ const supersonic = new SuperSonic({
 });
 ```
 
-Override individual paths
+B. Override individual paths
 ```javascript
 const supersonic = new SuperSonic({
   workerBaseURL: "/my-workers/",
@@ -115,21 +115,21 @@ const supersonic = new SuperSonic({
 });
 ```
 
-Enable SAB mode for lower latency (requires COOP/COEP headers)
+C. Enable SAB mode for lower latency (requires COOP/COEP headers)
 ```javascript
 const supersonic = new SuperSonic({
   mode: "sab"  // default is "postMessage"
 });
 ```
 
-Enable debug logging
+D. Enable debug logging
 ```javascript
 const supersonic = new SuperSonic({
   debug: true  // logs scsynth output, OSC in/out to console
 });
 ```
 
-Configure scsynth server options
+E. Configure scsynth server options
 ```javascript
 const supersonic = new SuperSonic({
   scsynthOptions: {
@@ -139,7 +139,6 @@ const supersonic = new SuperSonic({
   }
 });
 ```
-
 See [API Reference](docs/API.md) for all available options.
 
 ### 3. Boot & Play
