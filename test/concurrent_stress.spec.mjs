@@ -472,7 +472,7 @@ test.describe("Operations During State Transitions", () => {
 // =============================================================================
 
 test.describe("Truly Nefarious Edge Cases", () => {
-  test("double init() call", async ({ page, sonicConfig }) => {
+  test("init() is idempotent - second call returns immediately", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
@@ -483,7 +483,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
       await sonic.init();
       const firstContext = sonic.node.context;
 
-      // Second init without destroy - what happens?
+      // Second init - should return immediately without error
       let errorOnSecondInit = null;
       try {
         await sonic.init();
@@ -493,17 +493,48 @@ test.describe("Truly Nefarious Edge Cases", () => {
 
       const secondContext = sonic.node.context;
 
+      await sonic.destroy();
+
       return {
-        success: true,
         errorOnSecondInit,
         sameContext: firstContext === secondContext,
         initialized: sonic.initialized,
       };
     }, sonicConfig);
 
-    expect(result.success).toBe(true);
-    expect(result.initialized).toBe(true);
-    // Either it should error or handle gracefully
+    expect(result.errorOnSecondInit).toBeNull();
+    expect(result.sameContext).toBe(true);
+  });
+
+  test("concurrent init() calls only initialize once", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+    await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+
+      // Count how many times 'ready' fires
+      let readyCount = 0;
+      sonic.on('ready', () => readyCount++);
+
+      // Start two init calls concurrently
+      const promise1 = sonic.init();
+      const promise2 = sonic.init();
+
+      // Both should resolve successfully
+      await Promise.all([promise1, promise2]);
+
+      // Small delay to ensure any duplicate events would fire
+      await new Promise(r => setTimeout(r, 50));
+
+      const initialized = sonic.initialized;
+      await sonic.destroy();
+
+      return { readyCount, initialized };
+    }, sonicConfig);
+
+    // Only one initialization should happen
+    expect(result.readyCount).toBe(1);
   });
 
   test("operations after destroy() - should fail gracefully", async ({ page, sonicConfig }) => {
