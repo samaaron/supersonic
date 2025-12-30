@@ -10,7 +10,9 @@ Back in the late 90s James McCartney designed a series of live audio programming
 
 One of the many gifts from this work is **scsynth** - the core synthesis engine James created for version 3 of SuperCollider. It was at this point when he _formally separated the language from the synth engine_.
 
-This split made it possible to combine **scsynth**'s powerful audio synthesis capabilities with any existing - or yet to exist - programming language. This then lead to a suite of powerful new live coding languages using scsynth for audio synthesis.
+This split made it possible to combine **scsynth**'s powerful audio synthesis capabilities with any existing - or yet to exist - programming language.
+
+This then led to a suite of powerful new live coding languages using **scsynth** for audio synthesis.
 
 _What if you didn't just bring your language to scsynth? What if you brought scsynth to your environment?_
 
