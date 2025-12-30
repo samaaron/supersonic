@@ -173,9 +173,9 @@ export class SuperSonic {
       preschedulerCapacity: options.preschedulerCapacity || 65536,
       activityEvent: {
         maxLineLength: options.activityEvent?.maxLineLength ?? 200,
-        scsynth: options.activityEvent?.scsynth ?? null,
-        oscIn: options.activityEvent?.oscIn ?? null,
-        oscOut: options.activityEvent?.oscOut ?? null,
+        scsynthMaxLineLength: options.activityEvent?.scsynthMaxLineLength ?? null,
+        oscInMaxLineLength: options.activityEvent?.oscInMaxLineLength ?? null,
+        oscOutMaxLineLength: options.activityEvent?.oscOutMaxLineLength ?? null,
       },
       debug: options.debug ?? false,
       debugScsynth: options.debugScsynth ?? false,
@@ -183,9 +183,9 @@ export class SuperSonic {
       debugOscOut: options.debugOscOut ?? false,
       activityConsoleLog: {
         maxLineLength: options.activityConsoleLog?.maxLineLength ?? 200,
-        scsynth: options.activityConsoleLog?.scsynth ?? null,
-        oscIn: options.activityConsoleLog?.oscIn ?? null,
-        oscOut: options.activityConsoleLog?.oscOut ?? null,
+        scsynthMaxLineLength: options.activityConsoleLog?.scsynthMaxLineLength ?? null,
+        oscInMaxLineLength: options.activityConsoleLog?.oscInMaxLineLength ?? null,
+        oscOutMaxLineLength: options.activityConsoleLog?.oscOutMaxLineLength ?? null,
       },
     };
 
@@ -235,16 +235,15 @@ export class SuperSonic {
   // INITIALIZATION
   // ============================================================================
 
-  async init(config = {}) {
+  async init() {
     if (this.#initialized) return;
     if (this.#initPromise) return this.#initPromise;
 
-    this.#initPromise = this.#doInit(config);
+    this.#initPromise = this.#doInit();
     return this.#initPromise;
   }
 
-  async #doInit(config) {
-    this.#config = { ...this.#config, ...config };
+  async #doInit() {
     this.#initializing = true;
     this.bootStats.initStartTime = performance.now();
 
@@ -520,7 +519,7 @@ export class SuperSonic {
       "/b_close": "Writing audio files is not available in the browser.",
       "/clearSched": "Use cancelAllScheduled() or the fine-grained cancelTag(), cancelSession(), cancelSessionTag() methods instead.",
       "/dumpOSC": "Use browser developer tools to inspect OSC messages.",
-      "/error": "Error notifications are always enabled.",
+      "/error": "SuperSonic always enables error notifications so you never miss a /fail message.",
     };
 
     if (blocked[address]) {
@@ -561,7 +560,7 @@ export class SuperSonic {
     const oscData = SuperSonic.osc.encode(message);
 
     if (this.#config.debug || this.#config.debugOscOut) {
-      const maxLen = this.#config.activityConsoleLog.oscOut ?? this.#config.activityConsoleLog.maxLineLength;
+      const maxLen = this.#config.activityConsoleLog.oscOutMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
       const argsStr = args.map(a => {
         if (a instanceof Uint8Array || a instanceof ArrayBuffer) return `<${a.byteLength || a.length} bytes>`;
         const str = JSON.stringify(a);
@@ -1020,7 +1019,7 @@ export class SuperSonic {
         this.#eventEmitter.emit('message', msg);
 
         if (this.#config.debug || this.#config.debugOscIn) {
-          const maxLen = this.#config.activityConsoleLog.oscIn ?? this.#config.activityConsoleLog.maxLineLength;
+          const maxLen = this.#config.activityConsoleLog.oscInMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
           const argsStr = msg.args?.map(a => {
             const str = JSON.stringify(a);
             return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
@@ -1034,14 +1033,14 @@ export class SuperSonic {
 
     // Handle debug messages
     this.#osc.onDebug((msg) => {
-      const eventMaxLen = this.#config.activityEvent.scsynth ?? this.#config.activityEvent.maxLineLength;
+      const eventMaxLen = this.#config.activityEvent.scsynthMaxLineLength ?? this.#config.activityEvent.maxLineLength;
       if (eventMaxLen > 0 && msg.text?.length > eventMaxLen) {
         msg = { ...msg, text: msg.text.slice(0, eventMaxLen) + '...' };
       }
       this.#eventEmitter.emit('debug', msg);
 
       if (this.#config.debug || this.#config.debugScsynth) {
-        const maxLen = this.#config.activityConsoleLog.scsynth ?? this.#config.activityConsoleLog.maxLineLength;
+        const maxLen = this.#config.activityConsoleLog.scsynthMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
         const text = msg.text.length > maxLen ? msg.text.slice(0, maxLen) + '...' : msg.text;
         console.log(`[synth] ${text}`);
       }

@@ -1396,7 +1396,7 @@ These commands don't work in SuperSonic - the browser environment has no filesys
 |---------|--------|
 | `/clearSched` | Use `cancelAllScheduled()` or the fine-grained `cancelTag()`, `cancelSession()`, `cancelSessionTag()` methods instead |
 | `/dumpOSC` | Use browser dev tools and the `message` event instead |
-| `/error` | Not applicable in SuperSonic's architecture |
+| `/error` | SuperSonic always enables error notifications so you never miss a `/fail` message |
 
 ### Filesystem Commands
 
