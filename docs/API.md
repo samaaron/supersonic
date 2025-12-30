@@ -22,7 +22,7 @@ myButton.onclick = async () => {
 
 | Method                                               | Description                                               |
 | ---------------------------------------------------- | --------------------------------------------------------- |
-| [`init(config)`](#initconfig)                        | Initialise the audio engine                               |
+| [`init()`](#init)                                    | Initialise the audio engine                               |
 | [`shutdown()`](#shutdown)                            | Shut down, preserving listeners (can call `init()` again) |
 | [`destroy()`](#destroy)                              | Permanently destroy instance, clearing all listeners      |
 | [`recover()`](#recover)                              | Smart recovery - tries resume, falls back to reload       |
@@ -144,11 +144,19 @@ const supersonic = new SuperSonic({
 | `baseURL`              | No       | Base URL - derives `workers/`, `wasm/`, `synthdefs/`, `samples/` subdirectories. Auto-detected from import path if not provided.          |
 | `workerBaseURL`        | No       | Base URL for worker scripts (overrides baseURL)                                                                                           |
 | `wasmBaseURL`          | No       | Base URL for WASM files (overrides baseURL)                                                                                               |
+| `wasmUrl`              | No       | Full URL to the WASM file (overrides wasmBaseURL)                                                                                         |
+| `workletUrl`           | No       | Full URL to the worklet script (overrides workerBaseURL)                                                                                  |
 | `synthdefBaseURL`      | No       | Base URL for synthdef files (used by `loadSynthDef`)                                                                                      |
 | `sampleBaseURL`        | No       | Base URL for sample files (used by `loadSample`)                                                                                          |
 | `mode`                 | No       | Transport mode: `'postMessage'` (default) or `'sab'`. PostMessage works everywhere; SAB requires COOP/COEP headers but has lower latency. |
+| `audioContext`         | No       | Use an existing AudioContext instead of creating one                                                                                      |
+| `audioContextOptions`  | No       | Options passed to `new AudioContext()` (see below)                                                                                        |
+| `autoConnect`          | No       | Whether to auto-connect to `audioContext.destination` (default: true)                                                                     |
 | `scsynthOptions`       | No       | Server options (see below)                                                                                                                |
+| `snapshotIntervalMs`   | No       | Metrics snapshot interval for postMessage mode (default: 25)                                                                              |
 | `preschedulerCapacity` | No       | Max pending events in JS prescheduler (default: 65536)                                                                                    |
+| `fetchMaxRetries`      | No       | Max retries for asset fetches (default: 3)                                                                                                |
+| `fetchRetryDelay`      | No       | Base delay in ms between fetch retries (default: 1000)                                                                                    |
 | `activityEvent`        | No       | Event emission truncation options (see below)                                                                                             |
 | `debug`                | No       | Log all debug messages to console (scsynth, OSC in, OSC out)                                                                              |
 | `debugScsynth`         | No       | Log scsynth debug messages to console                                                                                                     |
@@ -160,48 +168,70 @@ const supersonic = new SuperSonic({
 
 ### Activity Event Options (`activityEvent`)
 
-Control truncation of event emission for custom log UIs:
+Control truncation of event emission for custom log UIs. The `maxLineLength` is the default; specific overrides take precedence when set.
 
 ```javascript
 const supersonic = new SuperSonic({
   baseURL: "/supersonic/",
   activityEvent: {
-    maxLineLength: 200, // Global default (default: 200)
-    scsynth: 500, // Override for scsynth messages
+    maxLineLength: 200,            // Default for all (default: 200)
+    scsynthMaxLineLength: 500,     // Override for scsynth messages
+    oscInMaxLineLength: 100,       // Override for incoming OSC
+    oscOutMaxLineLength: 100,      // Override for outgoing OSC
   },
 });
 ```
 
-| Option          | Description                                         |
-| --------------- | --------------------------------------------------- |
-| `maxLineLength` | Default max chars for event emission (default: 200) |
-| `scsynth`       | Override max chars for scsynth debug events         |
-| `oscIn`         | Reserved for future use                             |
-| `oscOut`        | Reserved for future use                             |
+| Option                 | Description                                                        |
+| ---------------------- | ------------------------------------------------------------------ |
+| `maxLineLength`        | Default max chars for event emission (default: 200)                |
+| `scsynthMaxLineLength` | Override for scsynth debug events (falls back to `maxLineLength`)  |
+| `oscInMaxLineLength`   | Override for incoming OSC args (falls back to `maxLineLength`)     |
+| `oscOutMaxLineLength`  | Override for outgoing OSC args (falls back to `maxLineLength`)     |
 
 ### Activity Console Log Options (`activityConsoleLog`)
 
-Control truncation of console debug output:
+Control truncation of console debug output. The `maxLineLength` is the default; specific overrides take precedence when set.
 
 ```javascript
 const supersonic = new SuperSonic({
   baseURL: "/supersonic/",
   debug: true,
   activityConsoleLog: {
-    maxLineLength: 200, // Global default (default: 200)
-    scsynth: 500, // Override for scsynth messages
-    oscIn: 100, // Override for incoming OSC
-    oscOut: 100, // Override for outgoing OSC
+    maxLineLength: 200,            // Default for all (default: 200)
+    scsynthMaxLineLength: 500,     // Override for scsynth messages
+    oscInMaxLineLength: 100,       // Override for incoming OSC
+    oscOutMaxLineLength: 100,      // Override for outgoing OSC
   },
 });
 ```
 
-| Option          | Description                                             |
-| --------------- | ------------------------------------------------------- |
-| `maxLineLength` | Default max chars for all console output (default: 200) |
-| `scsynth`       | Override max chars for scsynth messages                 |
-| `oscIn`         | Override max chars for incoming OSC args                |
-| `oscOut`        | Override max chars for outgoing OSC args                |
+| Option                 | Description                                                              |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `maxLineLength`        | Default max chars for all console output (default: 200)                  |
+| `scsynthMaxLineLength` | Override for scsynth messages (falls back to `maxLineLength`)            |
+| `oscInMaxLineLength`   | Override for incoming OSC args (falls back to `maxLineLength`)           |
+| `oscOutMaxLineLength`  | Override for outgoing OSC args (falls back to `maxLineLength`)           |
+
+### AudioContext Options (`audioContextOptions`)
+
+Options passed to the [AudioContext constructor](https://developer.mozilla.org/en-US/docs/Web/API/AudioContext/AudioContext):
+
+```javascript
+const supersonic = new SuperSonic({
+  audioContextOptions: {
+    sampleRate: 44100,            // Desired sample rate (default: 48000)
+    latencyHint: "playback",      // "interactive" (default), "balanced", "playback", or seconds
+  },
+});
+```
+
+| Option        | Type             | Description                                                                 |
+| ------------- | ---------------- | --------------------------------------------------------------------------- |
+| `sampleRate`  | number           | Desired sample rate in Hz (default: 48000)                                  |
+| `latencyHint` | string \| number | `"interactive"` (default), `"balanced"`, `"playback"`, or seconds as number |
+
+**Note:** The actual sample rate depends on hardware support. Use `getInfo().sampleRate` after init to check the actual rate.
 
 ### Server Options (`scsynthOptions`)
 
@@ -209,7 +239,6 @@ Override scsynth server defaults:
 
 ```javascript
 const supersonic = new SuperSonic({
-  // ... required options ...
   scsynthOptions: {
     numBuffers: 4096, // Max audio buffers (default: 1024)
   },
@@ -218,32 +247,15 @@ const supersonic = new SuperSonic({
 
 ## Core Methods
 
-### `init(config)`
+### `init()`
 
-Initialise the audio engine. Call this before anything else.
+Initialise the audio engine. Call this after a user interaction (e.g., button click) due to browser autoplay policies.
 
 ```javascript
 await supersonic.init();
 ```
 
-**Optional config overrides:**
-
-```javascript
-await supersonic.init({
-  audioContextOptions: {
-    sampleRate: 44100, // Request specific sample rate
-    latencyHint: "playback", // "interactive" (default), "balanced", or "playback"
-  },
-});
-```
-
-| Option                | Description                                    |
-| --------------------- | ---------------------------------------------- |
-| `wasmUrl`             | Override the WASM file URL                     |
-| `workletUrl`          | Override the worklet script URL                |
-| `audioContextOptions` | Options passed to the AudioContext constructor |
-
-Calling `init()` multiple times is safe - it returns immediately if already initialised, or returns the existing promise if initialisation is in progress.
+All configuration is passed to the [constructor](#constructor-options). Calling `init()` multiple times is safe - it returns immediately if already initialised, or returns the existing promise if initialisation is in progress.
 
 ### `loadSynthDef(nameOrPath)`
 
