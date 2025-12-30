@@ -16,16 +16,11 @@ npm install supersonic-scsynth supersonic-scsynth-synthdefs
 
 ## Usage
 
-**Important:** SuperSonic cannot be loaded from a CDN. You must self-host the core library and serve it with COOP/COEP headers. Synthdefs can be loaded from a CDN.
-
-### Self-hosted core with CDN synthdefs
-
 ```javascript
-// Self-hosted core library
-import { SuperSonic } from './dist/supersupersonic.js';
+import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
 
 const supersonic = new SuperSonic({
-  synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs/synthdefs/'
+  synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/'
 });
 await supersonic.init();
 
@@ -33,31 +28,12 @@ await supersonic.init();
 await supersonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-prophet']);
 ```
 
-### Self-hosted core and synthdefs
-
-Copy synthdefs to your public directory:
-
-```bash
-cp -r node_modules/supersonic-scsynth-synthdefs/synthdefs public/
-```
-
-Then use:
-
-```javascript
-import { SuperSonic } from './dist/supersupersonic.js';
-
-const supersonic = new SuperSonic({
-  synthdefBaseURL: '/synthdefs/'
-});
-await supersonic.init();
-
-await supersonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
-```
+SuperSonic works directly from CDN with zero configuration.
 
 ### Using the CDN path helper
 
 ```javascript
-import { SuperSonic } from './dist/supersupersonic.js';
+import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
 import { SYNTHDEFS_CDN } from 'supersonic-scsynth-synthdefs';
 
 const supersonic = new SuperSonic({
