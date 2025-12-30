@@ -2349,7 +2349,26 @@ test.describe("/g_queryTree semantic tests", () => {
 // =============================================================================
 
 test.describe("/b_gen semantic tests", () => {
-  test("sine1 generates single harmonic", async ({ page, sonicConfig }) => {
+  // Helper to read all samples from a buffer
+  async function readAllSamples(sonic, messages, bufNum, numSamples) {
+    const samples = [];
+    const chunkSize = 64; // Read in chunks to avoid message size limits
+    let syncId = 100;
+
+    for (let offset = 0; offset < numSamples; offset += chunkSize) {
+      const count = Math.min(chunkSize, numSamples - offset);
+      messages.length = 0;
+      await sonic.send("/b_getn", bufNum, offset, count);
+      await sonic.sync(syncId++);
+      const reply = messages.find((m) => m.address === "/b_setn");
+      if (reply) {
+        samples.push(...reply.args.slice(3));
+      }
+    }
+    return samples;
+  }
+
+  test("sine1 generates correct sine waveform structure", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -2359,156 +2378,508 @@ test.describe("/b_gen semantic tests", () => {
 
       await sonic.init();
 
-      // Allocate buffer
-      await sonic.send("/b_alloc", 0, 512, 1);
+      const bufSize = 256;
+      await sonic.send("/b_alloc", 0, bufSize, 1);
       await sonic.sync(1);
 
-      // Generate sine wave with amplitude 1.0
-      await sonic.send("/b_gen", 0, "sine1", 7, 1.0); // flags=7 (normalize, wavetable, clear)
+      // Generate pure sine wave: flag=1 (normalize only, no wavetable format)
+      await sonic.send("/b_gen", 0, "sine1", 1, 1.0);
       await sonic.sync(2);
 
-      // Read some samples to verify it's not all zeros
+      // Read all samples
+      const samples = [];
+      const chunkSize = 64;
+      let syncId = 10;
+      for (let offset = 0; offset < bufSize; offset += chunkSize) {
+        messages.length = 0;
+        await sonic.send("/b_getn", 0, offset, chunkSize);
+        await sonic.sync(syncId++);
+        const reply = messages.find((m) => m.address === "/b_setn");
+        if (reply) samples.push(...reply.args.slice(3));
+      }
+
+      await sonic.send("/b_free", 0);
+
+      // Verify sine wave properties:
+      // 1. Should start near zero (sample 0)
+      const startValue = samples[0];
+
+      // 2. Peak should be at 1/4 of the buffer (sample 64)
+      const quarterIdx = Math.floor(bufSize / 4);
+      const peakValue = samples[quarterIdx];
+
+      // 3. Should cross zero at halfway (sample 128)
+      const halfIdx = Math.floor(bufSize / 2);
+      const halfValue = samples[halfIdx];
+
+      // 4. Negative peak at 3/4 (sample 192)
+      const threeQuarterIdx = Math.floor(3 * bufSize / 4);
+      const negPeakValue = samples[threeQuarterIdx];
+
+      // 5. Find actual max and min
+      const maxVal = Math.max(...samples);
+      const minVal = Math.min(...samples);
+
+      // 6. Verify symmetry: compare first half with negated second half
+      let symmetryError = 0;
+      for (let i = 0; i < bufSize / 2; i++) {
+        symmetryError += Math.abs(samples[i] + samples[i + bufSize / 2]);
+      }
+      symmetryError /= (bufSize / 2);
+
+      return {
+        startValue,
+        peakValue,
+        halfValue,
+        negPeakValue,
+        maxVal,
+        minVal,
+        symmetryError,
+        sampleCount: samples.length,
+      };
+    }, sonicConfig);
+
+    // Verify waveform structure
+    expect(result.sampleCount).toBe(256);
+
+    // Start should be near zero
+    expect(Math.abs(result.startValue)).toBeLessThan(0.1);
+
+    // Peak at 1/4 should be close to 1.0 (normalized)
+    expect(result.peakValue).toBeGreaterThan(0.9);
+
+    // Half-way should be near zero
+    expect(Math.abs(result.halfValue)).toBeLessThan(0.1);
+
+    // Negative peak at 3/4 should be close to -1.0
+    expect(result.negPeakValue).toBeLessThan(-0.9);
+
+    // Max should be ~1.0, min should be ~-1.0 (normalized)
+    expect(result.maxVal).toBeGreaterThan(0.99);
+    expect(result.minVal).toBeLessThan(-0.99);
+
+    // Waveform should be symmetric (first half = negative of second half)
+    expect(result.symmetryError).toBeLessThan(0.01);
+  });
+
+  test("sine1 multiple harmonics produces expected composite waveform", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+
+      await sonic.init();
+
+      const bufSize = 256;
+      await sonic.send("/b_alloc", 0, bufSize, 1);
+      await sonic.sync(1);
+
+      // Generate with 3 harmonics: fundamental=1.0, 2nd=0.5, 3rd=0.25
+      // flag=0 (no normalize) so we can verify the amplitudes directly
+      await sonic.send("/b_gen", 0, "sine1", 0, 1.0, 0.5, 0.25);
+      await sonic.sync(2);
+
+      // Read all samples
+      const samples = [];
+      const chunkSize = 64;
+      let syncId = 10;
+      for (let offset = 0; offset < bufSize; offset += chunkSize) {
+        messages.length = 0;
+        await sonic.send("/b_getn", 0, offset, chunkSize);
+        await sonic.sync(syncId++);
+        const reply = messages.find((m) => m.address === "/b_setn");
+        if (reply) samples.push(...reply.args.slice(3));
+      }
+
+      await sonic.send("/b_free", 0);
+
+      // Compute expected waveform: sum of 3 harmonics
+      const expected = [];
+      for (let i = 0; i < bufSize; i++) {
+        const phase = (2 * Math.PI * i) / bufSize;
+        const val = 1.0 * Math.sin(phase) +
+                    0.5 * Math.sin(2 * phase) +
+                    0.25 * Math.sin(3 * phase);
+        expected.push(val);
+      }
+
+      // Calculate RMS error between actual and expected
+      let sumSqError = 0;
+      for (let i = 0; i < bufSize; i++) {
+        const err = samples[i] - expected[i];
+        sumSqError += err * err;
+      }
+      const rmsError = Math.sqrt(sumSqError / bufSize);
+
+      // Also verify the waveform is NOT a pure sine (has harmonics)
+      // A pure sine would have zero at sample 0 and at half
+      // But with harmonics, the zero crossings shift
+      const hasHarmonics = Math.abs(samples[0]) > 0.01 ||
+                           Math.abs(samples[bufSize / 2]) > 0.01;
+
+      return {
+        rmsError,
+        hasHarmonics,
+        sampleCount: samples.length,
+        sample0: samples[0],
+        sampleMid: samples[bufSize / 2],
+      };
+    }, sonicConfig);
+
+    expect(result.sampleCount).toBe(256);
+    // RMS error should be very small (< 1% of amplitude)
+    expect(result.rmsError).toBeLessThan(0.02);
+  });
+
+  test("sine2 generates partials at specified frequencies", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+
+      await sonic.init();
+
+      const bufSize = 256;
+      await sonic.send("/b_alloc", 0, bufSize, 1);
+      await sonic.sync(1);
+
+      // Generate with sine2: freq=1 amp=1.0, freq=4 amp=0.5
+      // (non-harmonic frequencies to distinguish from sine1)
+      await sonic.send("/b_gen", 0, "sine2", 0, 1, 1.0, 4, 0.5);
+      await sonic.sync(2);
+
+      // Read all samples
+      const samples = [];
+      const chunkSize = 64;
+      let syncId = 10;
+      for (let offset = 0; offset < bufSize; offset += chunkSize) {
+        messages.length = 0;
+        await sonic.send("/b_getn", 0, offset, chunkSize);
+        await sonic.sync(syncId++);
+        const reply = messages.find((m) => m.address === "/b_setn");
+        if (reply) samples.push(...reply.args.slice(3));
+      }
+
+      await sonic.send("/b_free", 0);
+
+      // Compute expected: sin(1*phase) + 0.5*sin(4*phase)
+      const expected = [];
+      for (let i = 0; i < bufSize; i++) {
+        const phase = (2 * Math.PI * i) / bufSize;
+        const val = 1.0 * Math.sin(1 * phase) + 0.5 * Math.sin(4 * phase);
+        expected.push(val);
+      }
+
+      // Calculate RMS error
+      let sumSqError = 0;
+      for (let i = 0; i < bufSize; i++) {
+        const err = samples[i] - expected[i];
+        sumSqError += err * err;
+      }
+      const rmsError = Math.sqrt(sumSqError / bufSize);
+
+      return {
+        rmsError,
+        sampleCount: samples.length,
+      };
+    }, sonicConfig);
+
+    expect(result.sampleCount).toBe(256);
+    expect(result.rmsError).toBeLessThan(0.02);
+  });
+
+  test("sine3 generates partials with correct phase offsets", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+
+      await sonic.init();
+
+      const bufSize = 256;
+      await sonic.send("/b_alloc", 0, bufSize, 1);
+      await sonic.sync(1);
+
+      // Generate with sine3: freq=1, amp=1.0, phase=PI/2 (cosine wave)
+      const phaseOffset = Math.PI / 2;
+      await sonic.send("/b_gen", 0, "sine3", 0, 1, 1.0, phaseOffset);
+      await sonic.sync(2);
+
+      // Read all samples
+      const samples = [];
+      const chunkSize = 64;
+      let syncId = 10;
+      for (let offset = 0; offset < bufSize; offset += chunkSize) {
+        messages.length = 0;
+        await sonic.send("/b_getn", 0, offset, chunkSize);
+        await sonic.sync(syncId++);
+        const reply = messages.find((m) => m.address === "/b_setn");
+        if (reply) samples.push(...reply.args.slice(3));
+      }
+
+      await sonic.send("/b_free", 0);
+
+      // With phase=PI/2, this should be a cosine wave
+      // Cosine starts at 1.0, crosses zero at 1/4, -1.0 at 1/2, zero at 3/4
+      const startValue = samples[0];
+      const quarterValue = samples[Math.floor(bufSize / 4)];
+      const halfValue = samples[Math.floor(bufSize / 2)];
+
+      // Compute expected cosine wave
+      const expected = [];
+      for (let i = 0; i < bufSize; i++) {
+        const phase = (2 * Math.PI * i) / bufSize;
+        expected.push(Math.sin(phase + phaseOffset)); // sin(x + PI/2) = cos(x)
+      }
+
+      let sumSqError = 0;
+      for (let i = 0; i < bufSize; i++) {
+        const err = samples[i] - expected[i];
+        sumSqError += err * err;
+      }
+      const rmsError = Math.sqrt(sumSqError / bufSize);
+
+      return {
+        startValue,
+        quarterValue,
+        halfValue,
+        rmsError,
+        sampleCount: samples.length,
+      };
+    }, sonicConfig);
+
+    expect(result.sampleCount).toBe(256);
+
+    // With phase=PI/2, should start at peak (1.0)
+    expect(result.startValue).toBeGreaterThan(0.99);
+
+    // Quarter should be near zero
+    expect(Math.abs(result.quarterValue)).toBeLessThan(0.1);
+
+    // Half should be at negative peak (-1.0)
+    expect(result.halfValue).toBeLessThan(-0.99);
+
+    // Overall waveform should match expected cosine
+    expect(result.rmsError).toBeLessThan(0.02);
+  });
+
+  test("cheby T1 generates linear transfer function", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+
+      await sonic.init();
+
+      const bufSize = 256;
+      await sonic.send("/b_alloc", 0, bufSize, 1);
+      await sonic.sync(1);
+
+      // Generate Chebyshev with T1 coefficient = 1.0
+      // T1(x) = x, but scsynth adds offset: -amp * cos(partial * π/2)
+      // For T1: offset = -1 * cos(π/2) = 0, so pure T1(x) = x
+      await sonic.send("/b_gen", 0, "cheby", 0, 1.0);
+      await sonic.sync(2);
+
+      // Read all samples
+      const samples = [];
+      const chunkSize = 64;
+      let syncId = 10;
+      for (let offset = 0; offset < bufSize; offset += chunkSize) {
+        messages.length = 0;
+        await sonic.send("/b_getn", 0, offset, chunkSize);
+        await sonic.sync(syncId++);
+        const reply = messages.find((m) => m.address === "/b_setn");
+        if (reply) samples.push(...reply.args.slice(3));
+      }
+
+      await sonic.send("/b_free", 0);
+
+      // scsynth cheby uses: amp * cos(partial * acos(phase)) + offset
+      // where phase goes from -1 to ~1 and offset = -amp * cos(partial * π/2)
+      // For T1 (partial=1): cos(1*acos(x)) = x, offset = -cos(π/2) = 0
+      // So output is just x, ranging from -1 to ~1
+      const w = 2.0 / bufSize;
+      const expected = [];
+      for (let i = 0; i < bufSize; i++) {
+        const phase = -1.0 + i * w;
+        // T1(x) = cos(acos(x)) = x, offset = 0
+        expected.push(phase);
+      }
+
+      let sumSqError = 0;
+      for (let i = 0; i < bufSize; i++) {
+        const err = samples[i] - expected[i];
+        sumSqError += err * err;
+      }
+      const rmsError = Math.sqrt(sumSqError / bufSize);
+
+      return {
+        rmsError,
+        firstSample: samples[0],
+        lastSample: samples[bufSize - 1],
+        sampleCount: samples.length,
+      };
+    }, sonicConfig);
+
+    expect(result.sampleCount).toBe(256);
+
+    // First sample at phase=-1 should be -1
+    expect(result.firstSample).toBeCloseTo(-1.0, 1);
+
+    // Last sample at phase≈0.992 should be near 1
+    expect(result.lastSample).toBeGreaterThan(0.98);
+
+    // Linear transfer function - very low RMS error
+    expect(result.rmsError).toBeLessThan(0.01);
+  });
+
+  test("cheby T2 generates correct quadratic transfer function", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+
+      await sonic.init();
+
+      const bufSize = 256;
+      await sonic.send("/b_alloc", 0, bufSize, 1);
+      await sonic.sync(1);
+
+      // Generate Chebyshev with T2 coefficient = 1.0 (first coeff is T1, second is T2)
+      // scsynth formula: amp * cos(partial * acos(phase)) + offset
+      // For T2: cos(2*acos(x)) = 2x² - 1, offset = -cos(2 * π/2) = -cos(π) = 1
+      // So output = (2x² - 1) + 1 = 2x², ranging from 0 (at x=0) to 2 (at x=±1)
+      await sonic.send("/b_gen", 0, "cheby", 0, 0, 1.0);
+      await sonic.sync(2);
+
+      // Read all samples
+      const samples = [];
+      const chunkSize = 64;
+      let syncId = 10;
+      for (let offset = 0; offset < bufSize; offset += chunkSize) {
+        messages.length = 0;
+        await sonic.send("/b_getn", 0, offset, chunkSize);
+        await sonic.sync(syncId++);
+        const reply = messages.find((m) => m.address === "/b_setn");
+        if (reply) samples.push(...reply.args.slice(3));
+      }
+
+      await sonic.send("/b_free", 0);
+
+      // Compute expected using scsynth's formula
+      const pi2 = Math.PI / 2;
+      const w = 2.0 / bufSize;
+      const partial = 2;
+      const amp = 1.0;
+      const offset = -amp * Math.cos(partial * pi2); // = -cos(π) = 1
+
+      const expected = [];
+      for (let i = 0; i < bufSize; i++) {
+        const phase = -1.0 + i * w;
+        // Clamp phase to valid acos range
+        const clampedPhase = Math.max(-1, Math.min(1, phase));
+        expected.push(amp * Math.cos(partial * Math.acos(clampedPhase)) + offset);
+      }
+
+      let sumSqError = 0;
+      for (let i = 0; i < bufSize; i++) {
+        const err = samples[i] - expected[i];
+        sumSqError += err * err;
+      }
+      const rmsError = Math.sqrt(sumSqError / bufSize);
+
+      // Verify characteristic points
+      const firstSample = samples[0];  // at phase=-1: T2(-1)+1 = 1+1 = 2
+      const midSample = samples[Math.floor(bufSize / 2)];  // at phase≈0: T2(0)+1 = -1+1 = 0
+      const lastSample = samples[bufSize - 1];  // at phase≈1: T2(1)+1 = 1+1 ≈ 2
+
+      return {
+        rmsError,
+        firstSample,
+        midSample,
+        lastSample,
+        sampleCount: samples.length,
+      };
+    }, sonicConfig);
+
+    expect(result.sampleCount).toBe(256);
+
+    // Endpoints should be ~2 (T2 formula with DC offset)
+    expect(result.firstSample).toBeCloseTo(2.0, 1);
+    expect(result.lastSample).toBeCloseTo(2.0, 0);  // slightly less due to not reaching phase=1
+
+    // Middle should be ~0
+    expect(result.midSample).toBeCloseTo(0.0, 1);
+
+    // Waveform should match expected
+    expect(result.rmsError).toBeLessThan(0.01);
+  });
+
+  test("copy transfers samples between buffers", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+
+      await sonic.init();
+
+      // Allocate two buffers
+      await sonic.send("/b_alloc", 0, 512, 1); // destination
+      await sonic.send("/b_alloc", 1, 512, 1); // source
+      await sonic.sync(1);
+
+      // Fill source buffer with sine wave
+      await sonic.send("/b_gen", 1, "sine1", 1, 1.0);
+      await sonic.sync(2);
+
+      // Read source buffer to verify it has data
       messages.length = 0;
-      await sonic.send("/b_getn", 0, 0, 8);
+      await sonic.send("/b_getn", 1, 0, 8);
       await sonic.sync(3);
+      const sourceReply = messages.find((m) => m.address === "/b_setn");
+      const sourceSamples = sourceReply?.args?.slice(3) || [];
+      const sourceHasData = sourceSamples.some((s) => s !== 0);
 
-      const reply = messages.find((m) => m.address === "/b_setn");
-      const samples = reply?.args?.slice(3) || [];
-
-      // Also get samples at quarter point (should be near peak)
-      messages.length = 0;
-      await sonic.send("/b_getn", 0, 128, 4);
+      // Copy from buffer 1 to buffer 0: destPos=0, srcBuf=1, srcPos=0, count=256
+      await sonic.send("/b_gen", 0, "copy", 0, 1, 0, 256);
       await sonic.sync(4);
 
-      const quarterReply = messages.find((m) => m.address === "/b_setn");
-      const quarterSamples = quarterReply?.args?.slice(3) || [];
-
-      // Cleanup
-      await sonic.send("/b_free", 0);
-
-      return {
-        hasData: samples.some((s) => s !== 0),
-        startSamples: samples,
-        quarterSamples,
-        // Peak should be near 1.0 (normalized)
-        hasPeak: quarterSamples.some((s) => Math.abs(s) > 0.5),
-      };
-    }, sonicConfig);
-
-    expect(result.hasData).toBe(true);
-    expect(result.hasPeak).toBe(true);
-  });
-
-  test("sine1 generates multiple harmonics", async ({ page, sonicConfig }) => {
-    await page.goto("/test/harness.html");
-
-    const result = await page.evaluate(async (config) => {
-      const sonic = new window.SuperSonic(config);
-      const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
-
-      await sonic.init();
-
-      // Allocate buffer
-      await sonic.send("/b_alloc", 0, 1024, 1);
-      await sonic.sync(1);
-
-      // Generate sine with 3 harmonics: fundamental, 2nd, 3rd
-      await sonic.send("/b_gen", 0, "sine1", 7, 1.0, 0.5, 0.25);
-      await sonic.sync(2);
-
-      // Read samples
+      // Read destination buffer
       messages.length = 0;
-      await sonic.send("/b_getn", 0, 0, 16);
-      await sonic.sync(3);
-
-      const reply = messages.find((m) => m.address === "/b_setn");
-      const samples = reply?.args?.slice(3) || [];
-
-      // Cleanup
-      await sonic.send("/b_free", 0);
-
-      return {
-        hasData: samples.some((s) => s !== 0),
-        samples,
-      };
-    }, sonicConfig);
-
-    expect(result.hasData).toBe(true);
-  });
-
-  test("sine2 generates partials at specific frequencies", async ({ page, sonicConfig }) => {
-    await page.goto("/test/harness.html");
-
-    const result = await page.evaluate(async (config) => {
-      const sonic = new window.SuperSonic(config);
-      const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
-
-      await sonic.init();
-
-      // Allocate buffer
-      await sonic.send("/b_alloc", 0, 512, 1);
-      await sonic.sync(1);
-
-      // Generate with sine2: freq1, amp1, freq2, amp2
-      await sonic.send("/b_gen", 0, "sine2", 7, 1, 1.0, 3, 0.5);
-      await sonic.sync(2);
-
-      // Read samples
-      messages.length = 0;
-      await sonic.send("/b_getn", 0, 0, 16);
-      await sonic.sync(3);
-
-      const reply = messages.find((m) => m.address === "/b_setn");
-      const samples = reply?.args?.slice(3) || [];
+      await sonic.send("/b_getn", 0, 0, 8);
+      await sonic.sync(5);
+      const destReply = messages.find((m) => m.address === "/b_setn");
+      const destSamples = destReply?.args?.slice(3) || [];
+      const destHasData = destSamples.some((s) => s !== 0);
 
       // Cleanup
       await sonic.send("/b_free", 0);
+      await sonic.send("/b_free", 1);
 
       return {
-        hasData: samples.some((s) => s !== 0),
+        sourceHasData,
+        destHasData,
+        samplesMatch: sourceSamples.length > 0 &&
+          sourceSamples.every((s, i) => Math.abs(s - destSamples[i]) < 0.0001),
       };
     }, sonicConfig);
 
-    expect(result.hasData).toBe(true);
-  });
-
-  test("cheby generates Chebyshev polynomial", async ({ page, sonicConfig }) => {
-    await page.goto("/test/harness.html");
-
-    const result = await page.evaluate(async (config) => {
-      const sonic = new window.SuperSonic(config);
-      const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
-
-      await sonic.init();
-
-      // Allocate buffer
-      await sonic.send("/b_alloc", 0, 512, 1);
-      await sonic.sync(1);
-
-      // Generate Chebyshev polynomial (for waveshaping)
-      await sonic.send("/b_gen", 0, "cheby", 7, 1.0, 0.5, 0.25);
-      await sonic.sync(2);
-
-      // Read samples
-      messages.length = 0;
-      await sonic.send("/b_getn", 0, 0, 16);
-      await sonic.sync(3);
-
-      const reply = messages.find((m) => m.address === "/b_setn");
-      const samples = reply?.args?.slice(3) || [];
-
-      // Cleanup
-      await sonic.send("/b_free", 0);
-
-      return {
-        hasData: samples.some((s) => s !== 0),
-      };
-    }, sonicConfig);
-
-    expect(result.hasData).toBe(true);
+    expect(result.sourceHasData).toBe(true);
+    expect(result.destHasData).toBe(true);
+    expect(result.samplesMatch).toBe(true);
   });
 });
 

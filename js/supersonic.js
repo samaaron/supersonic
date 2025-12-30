@@ -518,7 +518,7 @@ export class SuperSonic {
       "/b_readChannel": "Use loadSample() to load audio into a buffer.",
       "/b_write": "Writing audio files is not available in the browser.",
       "/b_close": "Writing audio files is not available in the browser.",
-      "/clearSched": "Bundle scheduling works differently in the browser AudioWorklet environment.",
+      "/clearSched": "Use cancelAllScheduled() or the fine-grained cancelTag(), cancelSession(), cancelSessionTag() methods instead.",
       "/dumpOSC": "Use browser developer tools to inspect OSC messages.",
       "/error": "Error notifications are always enabled.",
     };

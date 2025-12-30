@@ -1297,17 +1297,6 @@ Sent when a command fails.
 | 1 | string | Error message |
 | 2+ | ... | Command-specific data |
 
-### `/late`
-
-Sent when a scheduled bundle arrives too late.
-
-| Position | Type | Description |
-|----------|------|-------------|
-| 0 | int | Timestamp high 32 bits |
-| 1 | int | Timestamp low 32 bits |
-| 2 | int | Execution time high 32 bits |
-| 3 | int | Execution time low 32 bits |
-
 ---
 
 ## Node Notifications
@@ -1405,7 +1394,7 @@ These commands don't work in SuperSonic - the browser environment has no filesys
 
 | Command | Reason |
 |---------|--------|
-| `/clearSched` | Only works in scsynth's realtime mode |
+| `/clearSched` | Use `cancelAllScheduled()` or the fine-grained `cancelTag()`, `cancelSession()`, `cancelSessionTag()` methods instead |
 | `/dumpOSC` | Use browser dev tools and the `message` event instead |
 | `/error` | Not applicable in SuperSonic's architecture |
 
