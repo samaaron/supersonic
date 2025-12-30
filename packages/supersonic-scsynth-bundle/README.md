@@ -20,20 +20,15 @@ This installs all three packages as dependencies.
 
 ## Usage
 
-**Important:** SuperSonic cannot be loaded from a CDN. You must self-host the core library and serve it with COOP/COEP headers. See the [main README](https://github.com/samaaron/supersonic#cdn-usage) for details.
-
 ```javascript
-import { SuperSonic } from './dist/supersonic.js';
+import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
 
-// Synthdefs and samples can use CDN
-const supersonic = new SuperSonic({
-  sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/',
-  synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/'
-});
-
+const supersonic = new SuperSonic();
 await supersonic.init();
 await supersonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303']);
 ```
+
+SuperSonic works directly from CDN with zero configuration using the default `postMessage` mode. For lower latency, use `mode: 'sab'` which requires COOP/COEP headers.
 
 ## When to Use This
 
