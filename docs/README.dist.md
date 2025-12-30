@@ -1,26 +1,48 @@
 # SuperSonic {{VERSION}}
 
-SuperCollider's powerful scsynth audio synthesis engine running in the browser.
+SuperCollider's powerful **scsynth** audio synthesis engine running in the browser as an AudioWorklet.
 
 ## Quick Start
 
 ```javascript
-import { SuperSonic } from '/supersonic/supersonic.js';
+import { SuperSonic } from './supersonic/supersonic.js';
 
-const supersonic = new SuperSonic({ baseURL: '/supersonic/' });
+const supersonic = new SuperSonic();
 await supersonic.init();
+await supersonic.loadSynthDef('sonic-pi-beep');
+supersonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60);
 ```
 
-## Required Server Headers
+## Transport Modes
 
-Your server must send these headers for SharedArrayBuffer to work:
+SuperSonic supports two transport modes:
 
+| Mode | Headers Required | Latency | Use Case |
+|------|------------------|---------|----------|
+| `postMessage` (default) | None | Higher | Simple hosting, getting started |
+| `sab` | COOP/COEP | Lower | Production apps needing minimal latency |
+
+### PostMessage Mode (Default)
+
+Works everywhere with no special configuration:
+
+```javascript
+const supersonic = new SuperSonic();  // postMessage is default
+```
+
+### SAB Mode (SharedArrayBuffer)
+
+For lower latency, use SAB mode with required headers:
+
+```javascript
+const supersonic = new SuperSonic({ mode: 'sab' });
+```
+
+Your server must send these headers:
 ```
 Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
-
-Without these headers you'll see: `SharedArrayBuffer is not defined`
 
 ## More Info
 
