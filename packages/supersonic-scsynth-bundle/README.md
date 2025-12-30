@@ -34,8 +34,7 @@ SuperSonic works directly from CDN with zero configuration using the default `po
 
 **Use this bundle if:**
 - You want a quick start with everything included
-- You're building a Sonic Pi-compatible application
-- You want the Sonic Pi synthdefs and samples
+- You want access to all the Sonic Pi synths and samples
 
 **Use separate packages if:**
 - You want minimal package size (just install `supersonic-scsynth`)
