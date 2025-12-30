@@ -6,13 +6,15 @@
 ░▀▀▀░▀▀▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀
 ```
 
-Back in the late 90s James McCartney designed a suite of live programming environments called [SuperCollider](https://en.wikipedia.org/wiki/SuperCollider). These were systems that had both programming languages and audio runtimes designed explicitly for live realtime modification at every level - from high abstract notions at the programming language level down to the low-level synthesis components of the audio chain.
+Back in the late 90s James McCartney designed a series of live audio programming environments called [SuperCollider](https://en.wikipedia.org/wiki/SuperCollider). These were systems with both programming languages and audio runtimes carefully designed for live realtime modification at every level - from high sweeping programming language abstractions all the way down to the fine control of the low-level synthesis components of the audio chain.
 
 One of the many gifts from this work is **scsynth** - the core synthesis engine James created for version 3 of SuperCollider. It was at this point when he _formally separated the language from the synth engine_.
 
-This formal split made it possible to use **scsynth**'s powerful audio synthesis capabilities with any existing - or yet to exist - language and context.
+This split made it possible to combine **scsynth**'s powerful audio synthesis capabilities with any existing - or yet to exist - programming language. This then lead to a suite of powerful new live coding languages using scsynth for audio synthesis.
 
-This is SuperSonic. All the power of **scsynth** in your web browser.
+_What if you didn't just bring your language to scsynth? What if you brought scsynth to your environment?_
+
+This is SuperSonic. All the synthesis power of **scsynth** - modified and augmented to run in your web browser.
 
 # Welcome to SuperSonic
 
@@ -20,16 +22,16 @@ This is SuperSonic. All the power of **scsynth** in your web browser.
 
 Highlights:
 
-- _AudioWorklet_ - runs in a dedicated high priority audio thread
-- _WebAssembly_ - scsynth's original C++ code compiled for the web
-- _OSC API_ - talk to the scsynth server through its native OSC API
-- _Zero Config via CDN_ - no installation necessary - works directly from CDNs such as unpkg.
-- _Optional SAB mode_ - can use a SharedArrayBuffer (SAB) for lower latency and reduced jitter with internal comms. Requires COOP/COEP headers to enable browsers to use the SAB
+- **AudioWorklet** - runs in a dedicated high priority audio thread
+- **WebAssembly** - scsynth's original C++ code compiled for the web
+- **OSC API** - talk to the scsynth server through its native OSC API
+- **Zero Config via CDN** - no installation necessary - works directly from CDNs such as unpkg.
+- **Optional SAB mode** - can use a SharedArrayBuffer (SAB) for lower latency and reduced jitter with internal comms. Requires COOP/COEP headers to enable browsers to use the SAB
 
 
 ## Demo
 
-Try the live demo: **[sonic-pi.net/supersonic/demo.html](https://sonic-pi.net/supersonic/demo.html)**
+Try the live demo: [**sonic-pi.net/supersonic/demo.html**](https://sonic-pi.net/supersonic/demo.html)
 
 
 ## Documentation
@@ -43,7 +45,7 @@ Try the live demo: **[sonic-pi.net/supersonic/demo.html](https://sonic-pi.net/su
 
 ## Getting Started
 
-In order to use SuperSonic, you need to first install it, configure it, boot it **then play**. Luckily these are all really easy. We'll go through each in turn:
+In order to use SuperSonic, you need to first install it, configure it, boot it _then play_. Luckily these are all really easy. We'll go through each in turn:
 
 1. Install
 2. Configure
@@ -75,8 +77,8 @@ supersonic/
 ├── supersonic.js      # Main library
 ├── wasm/              # WebAssembly binaries
 ├── workers/           # Web Workers
-├── synthdefs/         # 127 synth definitions
-└── samples/           # 206 audio samples
+├── synthdefs/         # 127 (optional) synth definitions
+└── samples/           # 206 (optional) audio samples
 ```
 
 Then import from this directory:
