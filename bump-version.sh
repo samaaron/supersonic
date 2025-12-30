@@ -22,7 +22,7 @@ set -e
 #  10. packages/supersonic-scsynth-samples/index.js - JSDELIVR_BASE constant
 #
 # Documentation version examples (1):
-#  11. docs/CDN.md - pinned version example
+#  11. docs/DEPLOYMENT.md - pinned version example
 #
 # C++ version constants (1):
 #  12. src/audio_processor.cpp - SUPERSONIC_VERSION_MINOR constant
@@ -115,8 +115,8 @@ echo "✓ Updated packages/supersonic-scsynth-synthdefs/index.js"
 sed -i "s|supersonic-scsynth-samples@$CURRENT_VERSION|supersonic-scsynth-samples@$NEW_VERSION|g" "$PROJECT_ROOT/packages/supersonic-scsynth-samples/index.js"
 echo "✓ Updated packages/supersonic-scsynth-samples/index.js"
 
-sed -i "s|supersonic-scsynth@$CURRENT_VERSION|supersonic-scsynth@$NEW_VERSION|g" "$PROJECT_ROOT/docs/CDN.md"
-echo "✓ Updated docs/CDN.md"
+sed -i "s|supersonic-scsynth@$CURRENT_VERSION|supersonic-scsynth@$NEW_VERSION|g" "$PROJECT_ROOT/docs/DEPLOYMENT.md"
+echo "✓ Updated docs/DEPLOYMENT.md"
 
 echo ""
 echo "Step 4: Updating C++ version constants..."
