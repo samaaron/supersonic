@@ -35,7 +35,7 @@ import { SuperSonic } from "https://cdn.jsdelivr.net/npm/supersonic-scsynth@late
 
 For production, pin to a specific version:
 ```javascript
-import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.21.6";
+import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.23.2";
 ```
 
 ### Self-Hosted
