@@ -3,18 +3,19 @@ set -e
 
 # SuperSonic Version Bump Script
 #
-# This script updates version numbers in exactly 12 locations:
+# This script updates version numbers in exactly 13 locations:
 #
-# Package.json version fields (4):
+# Package.json version fields (5):
 #   1. package.json
-#   2. packages/supersonic-scsynth-synthdefs/package.json
-#   3. packages/supersonic-scsynth-samples/package.json
-#   4. packages/supersonic-scsynth-bundle/package.json
+#   2. packages/supersonic-scsynth-core/package.json
+#   3. packages/supersonic-scsynth-synthdefs/package.json
+#   4. packages/supersonic-scsynth-samples/package.json
+#   5. packages/supersonic-scsynth-bundle/package.json
 #
 # Bundle dependencies (3):
-#   5. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth dependency
-#   6. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-synthdefs dependency
-#   7. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-samples dependency
+#   6. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth dependency
+#   7. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-synthdefs dependency
+#   8. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-samples dependency
 #
 # CDN constants in index.js (3):
 #   8. packages/supersonic-scsynth-synthdefs/index.js - CDN_BASE constant
@@ -80,6 +81,9 @@ echo "---------------------------------------"
 # Update 4 package.json version fields
 sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PROJECT_ROOT/package.json"
 echo "✓ Updated package.json"
+
+sed -i "s/\"version\": \".*\"/\"version\": \"$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-core/package.json"
+echo "✓ Updated packages/supersonic-scsynth-core/package.json"
 
 sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-synthdefs/package.json"
 echo "✓ Updated packages/supersonic-scsynth-synthdefs/package.json"
