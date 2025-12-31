@@ -51,6 +51,10 @@ jobs:
       - name: Publish supersonic-scsynth
         run: npm publish --provenance --access public
 
+      - name: Publish supersonic-scsynth-core
+        working-directory: packages/supersonic-scsynth-core
+        run: npm publish --provenance --access public
+
       - name: Publish supersonic-scsynth-synthdefs
         working-directory: packages/supersonic-scsynth-synthdefs
         run: npm publish --provenance --access public
