@@ -1199,7 +1199,7 @@ export class SuperSonic {
 
     return this.#metricsReader.gatherMetrics({
       preschedulerMetrics: preschedulerMetrics,
-      driftOffsetMs: this.#ntpTiming?.getDriftOffset() ?? 0,
+      driftOffsetMs: 0,  // Drift is always ~0 since we resync periodically
       audioContextState: this.#audioContext?.state || "unknown",
       bufferPoolStats: this.#bufferManager?.getStats(),
       loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,

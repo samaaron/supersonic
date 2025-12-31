@@ -688,13 +688,6 @@
             view[0] = data.ntpStartTime;
           }
         }
-        if (data.type === "setDriftOffset") {
-          if (this.wasmMemory && this.ringBufferBase !== null && this.bufferConstants) {
-            const offset = this.ringBufferBase + this.bufferConstants.DRIFT_OFFSET_START;
-            const view = new Int32Array(this.wasmMemory.buffer, offset, 1);
-            view[0] = data.driftOffsetMs;
-          }
-        }
         if (data.type === "setGlobalOffset") {
           if (this.wasmMemory && this.ringBufferBase !== null && this.bufferConstants) {
             const offset = this.ringBufferBase + this.bufferConstants.GLOBAL_OFFSET_START;
