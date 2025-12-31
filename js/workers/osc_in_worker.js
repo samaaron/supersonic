@@ -1,10 +1,5 @@
-/*
-    SuperSonic - SuperCollider AudioWorklet WebAssembly port
-    Copyright (c) 2025 Sam Aaron
-
-    Based on SuperCollider by James McCartney and community
-    GPL v3 or later
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
 
 /**
  * OSC IN Worker - Receives OSC messages from scsynth

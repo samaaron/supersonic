@@ -1,14 +1,5 @@
-/*
-    SuperSonic - OSC Pre-Scheduler Worker
-    Ports the Bleep pre-scheduler design:
-    - Single priority queue of future bundles/events
-    - One timer driving dispatch (no per-event setTimeout storm)
-    - Tag-based cancellation to drop pending runs before they hit WASM
-
-    Supports two modes:
-    - 'sab': Writes directly to SharedArrayBuffer ring buffer (default)
-    - 'postMessage': Dispatches via postMessage to main thread
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { writeToRingBuffer } from '../lib/ring_buffer_writer.js';

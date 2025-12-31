@@ -1,11 +1,5 @@
-/*
-    SuperSonic - Transport Interface
-
-    Abstract interface for OSC message transport between main thread and audio worklet.
-    Two implementations:
-    - SABTransport: Uses SharedArrayBuffer ring buffers (requires crossOriginIsolated)
-    - PostMessageTransport: Uses MessagePort (works anywhere, higher latency)
-*/
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
 
 /**
  * @typedef {Object} TransportConfig

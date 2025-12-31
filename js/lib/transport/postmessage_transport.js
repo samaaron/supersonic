@@ -1,10 +1,5 @@
-/*
-    SuperSonic - PostMessage Transport
-
-    MessagePort-based transport for OSC messages.
-    Works without SharedArrayBuffer or crossOriginIsolated context.
-    Higher latency than SAB transport, but more widely deployable.
-*/
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
 
 import { Transport } from './transport.js';
 import { createWorker } from '../worker_loader.js';

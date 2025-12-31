@@ -1,10 +1,5 @@
-/*
-    SuperSonic - Worker Loader Utility
-
-    Enables loading workers from cross-origin URLs by fetching scripts
-    and creating Blob URLs. This allows SuperSonic to work entirely from CDN
-    without needing same-origin workers.
-*/
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
 
 // Cache for Blob URLs to avoid re-fetching
 const blobUrlCache = new Map();

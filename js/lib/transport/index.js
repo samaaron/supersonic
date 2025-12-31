@@ -1,11 +1,5 @@
-/*
-    SuperSonic - Transport Layer
-
-    Abstracts OSC message transport between main thread and audio worklet.
-    Two implementations:
-    - SABTransport: SharedArrayBuffer ring buffers (low latency, requires COOP/COEP)
-    - PostMessageTransport: MessagePort-based (higher latency, works anywhere)
-*/
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
 
 export { Transport } from './transport.js';
 export { SABTransport } from './sab_transport.js';

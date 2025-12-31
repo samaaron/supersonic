@@ -1,10 +1,5 @@
-/*
-    SuperSonic - SAB Transport
-
-    SharedArrayBuffer-based transport for OSC messages.
-    Uses ring buffers with atomics for lock-free communication.
-    Requires crossOriginIsolated context.
-*/
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
 
 import { Transport } from './transport.js';
 import { writeToRingBuffer } from '../ring_buffer_writer.js';

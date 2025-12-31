@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
+
 /**
  * AssetLoader - Centralized asset fetching with retry and progress reporting
  *

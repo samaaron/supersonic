@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
+
 /**
  * BufferManager - Handles loading and managing audio buffers
  *

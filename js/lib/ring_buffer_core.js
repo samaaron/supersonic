@@ -1,5 +1,8 @@
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
+
 /*
-    SuperSonic - Ring Buffer Core
+    Ring Buffer Core
     Shared module for ring buffer read/write operations.
     Used by both SAB mode (workers) and postMessage mode (audioworklet).
 

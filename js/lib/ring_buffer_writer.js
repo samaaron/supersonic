@@ -1,10 +1,5 @@
-/*
-    SuperSonic - Ring Buffer Writer
-    Shared module for writing OSC messages to the IN ring buffer.
-    Used by both main thread (supersonic.js) and prescheduler worker.
-
-    Uses a spinlock to prevent race conditions between concurrent writers.
-*/
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// Copyright (c) 2025 Sam Aaron
 
 import { writeMessageToBuffer, calculateAvailableSpace } from './ring_buffer_core.js';
 
