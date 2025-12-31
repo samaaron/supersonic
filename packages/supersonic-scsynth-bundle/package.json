@@ -31,9 +31,9 @@
     "LICENSE"
   ],
   "dependencies": {
-    "supersonic-scsynth": "^0.25.0",
-    "supersonic-scsynth-core": "^0.24.3",
-    "supersonic-scsynth-synthdefs": "^0.25.0",
-    "supersonic-scsynth-samples": "^0.25.0"
+    "supersonic-scsynth": "workspace:^",
+    "supersonic-scsynth-core": "workspace:^",
+    "supersonic-scsynth-synthdefs": "workspace:^",
+    "supersonic-scsynth-samples": "workspace:^"
   }
 }
