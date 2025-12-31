@@ -13,6 +13,7 @@
  */
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
+import { readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
 
 // Transport mode: 'sab' or 'postMessage'
 let mode = 'sab';
@@ -69,6 +70,7 @@ const initRingBuffer = (buffer, base, constants) => {
 
 /**
  * Read debug messages from buffer
+ * Uses shared ring_buffer_core for read logic
  */
 const readDebugMessages = () => {
     const head = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_HEAD);
@@ -79,77 +81,47 @@ const readDebugMessages = () => {
     }
 
     const messages = [];
-    let currentTail = tail;
-    let messagesRead = 0;
-    const maxMessages = 1000; // Process up to 1000 messages per wake
 
-    while (currentTail !== head && messagesRead < maxMessages) {
-        const bytesToEnd = bufferConstants.DEBUG_BUFFER_SIZE - currentTail;
-        if (bytesToEnd < bufferConstants.MESSAGE_HEADER_SIZE) {
-            currentTail = 0;
-            continue;
+    const { newTail, messagesRead } = readMessagesFromBuffer({
+        uint8View,
+        dataView,
+        bufferStart: ringBufferBase + bufferConstants.DEBUG_BUFFER_START,
+        bufferSize: bufferConstants.DEBUG_BUFFER_SIZE,
+        head,
+        tail,
+        messageMagic: bufferConstants.MESSAGE_MAGIC,
+        paddingMagic: bufferConstants.PADDING_MAGIC,
+        headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
+        maxMessages: 1000,
+        onMessage: (payload, sequence, length) => {
+            // Convert bytes to string using TextDecoder for proper UTF-8 handling
+            let messageText = textDecoder.decode(payload);
+
+            // Remove trailing newline if present
+            if (messageText.endsWith('\n')) {
+                messageText = messageText.slice(0, -1);
+            }
+
+            messages.push({
+                text: messageText,
+                timestamp: performance.now(),
+                sequence
+            });
+
+            // Update metrics
+            if (metricsView) {
+                Atomics.add(metricsView, MetricsOffsets.DEBUG_MESSAGES_RECEIVED, 1);
+                Atomics.add(metricsView, MetricsOffsets.DEBUG_BYTES_RECEIVED, payload.length);
+            }
+        },
+        onCorruption: (position) => {
+            console.error('[DebugWorker] Corrupted message at position', position);
         }
-
-        const readPos = ringBufferBase + bufferConstants.DEBUG_BUFFER_START + currentTail;
-
-        // Read message header (now contiguous or wrapped)
-        const magic = dataView.getUint32(readPos, true);
-
-        // Check for padding marker - skip to beginning
-        if (magic === bufferConstants.PADDING_MAGIC) {
-            currentTail = 0;
-            continue;
-        }
-
-        // Validate message magic
-        if (magic !== bufferConstants.MESSAGE_MAGIC) {
-            console.error('[DebugWorker] Corrupted message at position', currentTail);
-            // Skip this byte and continue
-            currentTail = (currentTail + 1) % bufferConstants.DEBUG_BUFFER_SIZE;
-            continue;
-        }
-
-        const length = dataView.getUint32(readPos + 4, true);
-        const sequence = dataView.getUint32(readPos + 8, true);
-
-        // Validate message length
-        if (length < bufferConstants.MESSAGE_HEADER_SIZE || length > bufferConstants.DEBUG_BUFFER_SIZE) {
-            console.error('[DebugWorker] Invalid message length:', length);
-            currentTail = (currentTail + 1) % bufferConstants.DEBUG_BUFFER_SIZE;
-            continue;
-        }
-
-        // Read payload (debug text) - now contiguous due to padding
-        const payloadLength = length - bufferConstants.MESSAGE_HEADER_SIZE;
-        const payloadStart = readPos + bufferConstants.MESSAGE_HEADER_SIZE;
-
-        // Convert bytes to string using TextDecoder for proper UTF-8 handling
-        const payloadBytes = uint8View.slice(payloadStart, payloadStart + payloadLength);
-        let messageText = textDecoder.decode(payloadBytes);
-
-        // Remove trailing newline if present
-        if (messageText.endsWith('\n')) {
-            messageText = messageText.slice(0, -1);
-        }
-
-        messages.push({
-            text: messageText,
-            timestamp: performance.now(),
-            sequence
-        });
-
-        // Move to next message
-        currentTail = (currentTail + length) % bufferConstants.DEBUG_BUFFER_SIZE;
-        messagesRead++;
-        if (metricsView) {
-            Atomics.add(metricsView, MetricsOffsets.DEBUG_MESSAGES_RECEIVED, 1);
-            Atomics.add(metricsView, MetricsOffsets.DEBUG_BYTES_RECEIVED, payloadLength);
-        }
-    }
+    });
 
     // Update tail pointer (consume messages)
     if (messagesRead > 0) {
-        Atomics.store(atomicView, CONTROL_INDICES.DEBUG_TAIL, currentTail);
+        Atomics.store(atomicView, CONTROL_INDICES.DEBUG_TAIL, newTail);
     }
 
     return messages.length > 0 ? messages : null;

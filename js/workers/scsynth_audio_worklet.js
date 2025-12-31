@@ -12,7 +12,7 @@
  */
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
-import { writeMessageToBuffer, calculateAvailableSpace } from '../lib/ring_buffer_core.js';
+import { writeMessageToBuffer, calculateAvailableSpace, readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
 
 class ScsynthProcessor extends AudioWorkletProcessor {
     constructor() {
@@ -333,62 +333,34 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     }
 
     // Read OSC replies from OUT ring buffer and send via postMessage
+    // Uses shared ring_buffer_core for read logic
     readOscReplies() {
-        const OUT_BUFFER_START = this.bufferConstants.OUT_BUFFER_START;
-        const OUT_BUFFER_SIZE = this.bufferConstants.OUT_BUFFER_SIZE;
-        const MESSAGE_MAGIC = this.bufferConstants.MESSAGE_MAGIC;
-        const PADDING_MAGIC = this.bufferConstants.PADDING_MAGIC;
-        const MESSAGE_HEADER_SIZE = this.bufferConstants.MESSAGE_HEADER_SIZE;
+        const head = this.atomicLoad(this.CONTROL_INDICES.OUT_HEAD);
+        const tail = this.atomicLoad(this.CONTROL_INDICES.OUT_TAIL);
 
-        const outBufferStart = this.ringBufferBase + OUT_BUFFER_START;
+        if (head === tail) return;
+
         const messages = [];
 
-        let head = this.atomicLoad(this.CONTROL_INDICES.OUT_HEAD);
-        let tail = this.atomicLoad(this.CONTROL_INDICES.OUT_TAIL);
-
-        while (head !== tail) {
-            // Read magic
-            const magic = this.dataView.getUint32(outBufferStart + tail, true);
-
-            // Check for padding marker
-            if (magic === PADDING_MAGIC) {
-                // Wrap around to beginning
-                tail = 0;
-                continue;
+        const { newTail, messagesRead } = readMessagesFromBuffer({
+            uint8View: this.uint8View,
+            dataView: this.dataView,
+            bufferStart: this.ringBufferBase + this.bufferConstants.OUT_BUFFER_START,
+            bufferSize: this.bufferConstants.OUT_BUFFER_SIZE,
+            head,
+            tail,
+            messageMagic: this.bufferConstants.MESSAGE_MAGIC,
+            paddingMagic: this.bufferConstants.PADDING_MAGIC,
+            headerSize: this.bufferConstants.MESSAGE_HEADER_SIZE,
+            onMessage: (payload, sequence) => {
+                messages.push({ oscData: payload.buffer, sequence });
             }
-
-            if (magic !== MESSAGE_MAGIC) {
-                // Invalid magic, skip byte
-                tail = (tail + 1) % OUT_BUFFER_SIZE;
-                continue;
-            }
-
-            // Read header
-            const length = this.dataView.getUint32(outBufferStart + tail + 4, true);
-            const sequence = this.dataView.getUint32(outBufferStart + tail + 8, true);
-
-            // Validate length (length includes header)
-            if (length < MESSAGE_HEADER_SIZE || length > OUT_BUFFER_SIZE) {
-                tail = (tail + 1) % OUT_BUFFER_SIZE;
-                continue;
-            }
-
-            // Read message data (length includes header, so payload is length - header)
-            const payloadLength = length - MESSAGE_HEADER_SIZE;
-            const oscData = new Uint8Array(payloadLength);
-            for (let i = 0; i < payloadLength; i++) {
-                oscData[i] = this.uint8View[outBufferStart + tail + MESSAGE_HEADER_SIZE + i];
-            }
-
-            messages.push({ oscData: oscData.buffer, sequence });
-
-            // Advance tail by aligned total length (already includes header)
-            const alignedLength = (length + 3) & ~3;
-            tail = (tail + alignedLength) % OUT_BUFFER_SIZE;
-        }
+        });
 
         // Update tail
-        this.atomicStore(this.CONTROL_INDICES.OUT_TAIL, tail);
+        if (messagesRead > 0) {
+            this.atomicStore(this.CONTROL_INDICES.OUT_TAIL, newTail);
+        }
 
         // Send messages via postMessage
         if (messages.length > 0) {
@@ -526,64 +498,39 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     }
 
     // Read debug messages from DEBUG ring buffer and send via postMessage
+    // Uses shared ring_buffer_core for read logic
     readDebugMessages() {
-        const DEBUG_BUFFER_START = this.bufferConstants.DEBUG_BUFFER_START;
-        const DEBUG_BUFFER_SIZE = this.bufferConstants.DEBUG_BUFFER_SIZE;
-        const MESSAGE_MAGIC = this.bufferConstants.MESSAGE_MAGIC;
-        const PADDING_MAGIC = this.bufferConstants.PADDING_MAGIC;
-        const MESSAGE_HEADER_SIZE = this.bufferConstants.MESSAGE_HEADER_SIZE;
+        const head = this.atomicLoad(this.CONTROL_INDICES.DEBUG_HEAD);
+        const tail = this.atomicLoad(this.CONTROL_INDICES.DEBUG_TAIL);
 
-        const debugBufferStart = this.ringBufferBase + DEBUG_BUFFER_START;
+        if (head === tail) return;
+
         const messages = [];
 
-        let head = this.atomicLoad(this.CONTROL_INDICES.DEBUG_HEAD);
-        let tail = this.atomicLoad(this.CONTROL_INDICES.DEBUG_TAIL);
-
-        while (head !== tail) {
-            // Check for padding marker
-            const magic = this.dataView.getUint32(debugBufferStart + tail, true);
-
-            if (magic === PADDING_MAGIC) {
-                tail = 0;
-                continue;
+        const { newTail, messagesRead } = readMessagesFromBuffer({
+            uint8View: this.uint8View,
+            dataView: this.dataView,
+            bufferStart: this.ringBufferBase + this.bufferConstants.DEBUG_BUFFER_START,
+            bufferSize: this.bufferConstants.DEBUG_BUFFER_SIZE,
+            head,
+            tail,
+            messageMagic: this.bufferConstants.MESSAGE_MAGIC,
+            paddingMagic: this.bufferConstants.PADDING_MAGIC,
+            headerSize: this.bufferConstants.MESSAGE_HEADER_SIZE,
+            onMessage: (payload, sequence) => {
+                // Send raw bytes to debug_worker for decoding
+                // (TextDecoder not available in AudioWorklet)
+                messages.push({
+                    bytes: payload.buffer,
+                    sequence
+                });
             }
-
-            if (magic !== MESSAGE_MAGIC) {
-                // Invalid magic, skip byte
-                tail = (tail + 1) % DEBUG_BUFFER_SIZE;
-                continue;
-            }
-
-            // Read header
-            const length = this.dataView.getUint32(debugBufferStart + tail + 4, true);
-            const sequence = this.dataView.getUint32(debugBufferStart + tail + 8, true);
-
-            // Validate length
-            if (length < MESSAGE_HEADER_SIZE || length > DEBUG_BUFFER_SIZE) {
-                tail = (tail + 1) % DEBUG_BUFFER_SIZE;
-                continue;
-            }
-
-            // Read payload as raw bytes (TextDecoder not available in AudioWorklet)
-            // Send raw bytes to debug_worker for decoding
-            const payloadLength = length - MESSAGE_HEADER_SIZE;
-            const payloadStart = debugBufferStart + tail + MESSAGE_HEADER_SIZE;
-            const msgBytes = new Uint8Array(payloadLength);
-            for (let i = 0; i < payloadLength; i++) {
-                msgBytes[i] = this.uint8View[payloadStart + i];
-            }
-
-            messages.push({
-                bytes: msgBytes.buffer,
-                sequence: sequence
-            });
-
-            // Advance tail
-            tail = (tail + length) % DEBUG_BUFFER_SIZE;
-        }
+        });
 
         // Update tail
-        this.atomicStore(this.CONTROL_INDICES.DEBUG_TAIL, tail);
+        if (messagesRead > 0) {
+            this.atomicStore(this.CONTROL_INDICES.DEBUG_TAIL, newTail);
+        }
 
         // Send raw bytes to be decoded by debug_worker
         if (messages.length > 0) {
