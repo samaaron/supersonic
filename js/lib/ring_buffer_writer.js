@@ -6,6 +6,8 @@
     Uses a spinlock to prevent race conditions between concurrent writers.
 */
 
+import { writeMessageToBuffer, calculateAvailableSpace } from './ring_buffer_core.js';
+
 /**
  * Try to acquire the write lock.
  * @param {Int32Array} atomicView - Int32Array view of SharedArrayBuffer
@@ -81,10 +83,11 @@ export function writeToRingBuffer({
         const head = Atomics.load(atomicView, controlIndices.IN_HEAD);
         const tail = Atomics.load(atomicView, controlIndices.IN_TAIL);
 
-        // Calculate available space
-        const available = (bufferConstants.IN_BUFFER_SIZE - 1 - head + tail) % bufferConstants.IN_BUFFER_SIZE;
+        // Calculate available space (aligned size will be computed by core)
+        const alignedSize = (totalSize + 3) & ~3;
+        const available = calculateAvailableSpace(head, tail, bufferConstants.IN_BUFFER_SIZE);
 
-        if (available < totalSize) {
+        if (available < alignedSize) {
             // Buffer full
             return false;
         }
@@ -92,57 +95,23 @@ export function writeToRingBuffer({
         // Get next sequence number atomically
         const messageSeq = Atomics.add(atomicView, controlIndices.IN_SEQUENCE, 1);
 
-        // Calculate space to end of buffer
-        const spaceToEnd = bufferConstants.IN_BUFFER_SIZE - head;
-
-        if (totalSize > spaceToEnd) {
-            // Message will wrap - write in two parts
-            const headerBytes = new Uint8Array(bufferConstants.MESSAGE_HEADER_SIZE);
-            const headerView = new DataView(headerBytes.buffer);
-            headerView.setUint32(0, bufferConstants.MESSAGE_MAGIC, true);
-            headerView.setUint32(4, totalSize, true);
-            headerView.setUint32(8, messageSeq, true);
-            headerView.setUint32(12, 0, true);
-
-            const writePos1 = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
-            const writePos2 = ringBufferBase + bufferConstants.IN_BUFFER_START;
-
-            if (spaceToEnd >= bufferConstants.MESSAGE_HEADER_SIZE) {
-                // Header fits contiguously
-                uint8View.set(headerBytes, writePos1);
-
-                // Write payload (split across boundary)
-                const payloadBytesInFirstPart = spaceToEnd - bufferConstants.MESSAGE_HEADER_SIZE;
-                uint8View.set(oscMessage.subarray(0, payloadBytesInFirstPart), writePos1 + bufferConstants.MESSAGE_HEADER_SIZE);
-                uint8View.set(oscMessage.subarray(payloadBytesInFirstPart), writePos2);
-            } else {
-                // Header is split across boundary
-                uint8View.set(headerBytes.subarray(0, spaceToEnd), writePos1);
-                uint8View.set(headerBytes.subarray(spaceToEnd), writePos2);
-
-                // All payload goes at beginning
-                const payloadOffset = bufferConstants.MESSAGE_HEADER_SIZE - spaceToEnd;
-                uint8View.set(oscMessage, writePos2 + payloadOffset);
-            }
-        } else {
-            // Message fits contiguously - write normally
-            const writePos = ringBufferBase + bufferConstants.IN_BUFFER_START + head;
-
-            // Write header
-            dataView.setUint32(writePos, bufferConstants.MESSAGE_MAGIC, true);
-            dataView.setUint32(writePos + 4, totalSize, true);
-            dataView.setUint32(writePos + 8, messageSeq, true);
-            dataView.setUint32(writePos + 12, 0, true);
-
-            // Write payload
-            uint8View.set(oscMessage, writePos + bufferConstants.MESSAGE_HEADER_SIZE);
-        }
+        // Write message using shared core logic
+        const newHead = writeMessageToBuffer({
+            uint8View,
+            dataView,
+            bufferStart: ringBufferBase + bufferConstants.IN_BUFFER_START,
+            bufferSize: bufferConstants.IN_BUFFER_SIZE,
+            head,
+            payload: oscMessage,
+            sequence: messageSeq,
+            messageMagic: bufferConstants.MESSAGE_MAGIC,
+            headerSize: bufferConstants.MESSAGE_HEADER_SIZE
+        });
 
         // CRITICAL: Ensure memory barrier before publishing head pointer
         Atomics.load(atomicView, controlIndices.IN_HEAD);
 
         // Update head pointer (publish message)
-        const newHead = (head + totalSize) % bufferConstants.IN_BUFFER_SIZE;
         Atomics.store(atomicView, controlIndices.IN_HEAD, newHead);
 
         return true;

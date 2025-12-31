@@ -12,6 +12,7 @@
  */
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
+import { writeMessageToBuffer, calculateAvailableSpace } from '../lib/ring_buffer_core.js';
 
 class ScsynthProcessor extends AudioWorkletProcessor {
     constructor() {
@@ -278,16 +279,13 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     }
 
     // Write queued OSC messages to the IN ring buffer (postMessage mode)
-    // Must handle wrap-around at buffer boundary
+    // Uses shared ring_buffer_core for wrap-around handling
     drainOscQueue() {
         if (this.oscQueue.length === 0) return;
 
-        const IN_BUFFER_START = this.bufferConstants.IN_BUFFER_START;
         const IN_BUFFER_SIZE = this.bufferConstants.IN_BUFFER_SIZE;
-        const MESSAGE_MAGIC = this.bufferConstants.MESSAGE_MAGIC;
         const MESSAGE_HEADER_SIZE = this.bufferConstants.MESSAGE_HEADER_SIZE;
-
-        const inBufferStart = this.ringBufferBase + IN_BUFFER_START;
+        const bufferStart = this.ringBufferBase + this.bufferConstants.IN_BUFFER_START;
 
         while (this.oscQueue.length > 0) {
             const oscData = this.oscQueue[0];
@@ -299,8 +297,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             const head = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
             const tail = this.atomicLoad(this.CONTROL_INDICES.IN_TAIL);
 
-            // Calculate available space (circular buffer)
-            const available = (IN_BUFFER_SIZE - 1 - head + tail) % IN_BUFFER_SIZE;
+            // Calculate available space using shared helper
+            const available = calculateAvailableSpace(head, tail, IN_BUFFER_SIZE);
 
             // Check if message fits
             if (alignedLength > available) {
@@ -311,60 +309,25 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             // Remove from queue
             this.oscQueue.shift();
 
+            // Get and increment sequence number
             const sequence = this.atomicLoad(this.CONTROL_INDICES.IN_SEQUENCE);
             this.atomicStore(this.CONTROL_INDICES.IN_SEQUENCE, sequence + 1);
 
-            // Calculate space to end of buffer
-            const spaceToEnd = IN_BUFFER_SIZE - head;
+            // Write message using shared core logic
             const oscBytes = new Uint8Array(oscData);
-
-            if (alignedLength > spaceToEnd) {
-                // Message will wrap - write in two parts
-                const headerBytes = new Uint8Array(MESSAGE_HEADER_SIZE);
-                const headerView = new DataView(headerBytes.buffer);
-                headerView.setUint32(0, MESSAGE_MAGIC, true);
-                headerView.setUint32(4, alignedLength, true);
-                headerView.setUint32(8, sequence, true);
-                headerView.setUint32(12, 0, true);  // padding
-
-                const writePos1 = inBufferStart + head;
-                const writePos2 = inBufferStart;
-
-                if (spaceToEnd >= MESSAGE_HEADER_SIZE) {
-                    // Header fits contiguously
-                    this.uint8View.set(headerBytes, writePos1);
-
-                    // Write payload (split across boundary)
-                    const payloadBytesInFirstPart = spaceToEnd - MESSAGE_HEADER_SIZE;
-                    if (payloadBytesInFirstPart > 0) {
-                        this.uint8View.set(oscBytes.subarray(0, payloadBytesInFirstPart), writePos1 + MESSAGE_HEADER_SIZE);
-                    }
-                    this.uint8View.set(oscBytes.subarray(payloadBytesInFirstPart), writePos2);
-                } else {
-                    // Header is split across boundary
-                    this.uint8View.set(headerBytes.subarray(0, spaceToEnd), writePos1);
-                    this.uint8View.set(headerBytes.subarray(spaceToEnd), writePos2);
-
-                    // All payload goes at beginning after header remainder
-                    const payloadOffset = MESSAGE_HEADER_SIZE - spaceToEnd;
-                    this.uint8View.set(oscBytes, writePos2 + payloadOffset);
-                }
-            } else {
-                // Message fits contiguously - write normally
-                const writePos = inBufferStart + head;
-
-                // Write header
-                this.dataView.setUint32(writePos, MESSAGE_MAGIC, true);
-                this.dataView.setUint32(writePos + 4, alignedLength, true);
-                this.dataView.setUint32(writePos + 8, sequence, true);
-                this.dataView.setUint32(writePos + 12, 0, true);  // padding
-
-                // Write payload
-                this.uint8View.set(oscBytes, writePos + MESSAGE_HEADER_SIZE);
-            }
+            const newHead = writeMessageToBuffer({
+                uint8View: this.uint8View,
+                dataView: this.dataView,
+                bufferStart,
+                bufferSize: IN_BUFFER_SIZE,
+                head,
+                payload: oscBytes,
+                sequence,
+                messageMagic: this.bufferConstants.MESSAGE_MAGIC,
+                headerSize: MESSAGE_HEADER_SIZE
+            });
 
             // Update head
-            const newHead = (head + alignedLength) % IN_BUFFER_SIZE;
             this.atomicStore(this.CONTROL_INDICES.IN_HEAD, newHead);
         }
     }
