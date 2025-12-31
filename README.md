@@ -185,7 +185,10 @@ SuperSonic is brought to you by Sam Aaron. Please consider joining the community
 
 ## License
 
-GPL v3 - This is a derivative work of SuperCollider
+SuperSonic uses dual licensing - see [LICENSE](LICENSE) for details.
+
+- `src/` and `js/workers/` - GPL-3.0-or-later
+- `js/lib/` and `js/supersonic.js` - MIT OR GPL-3.0-or-later
 
 
 ## Credits
