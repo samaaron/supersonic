@@ -20,7 +20,7 @@
     "bundle"
   ],
   "author": "Sam Aaron",
-  "license": "GPL-3.0-or-later",
+  "license": "SEE LICENSE IN LICENSE",
   "bugs": {
     "url": "https://github.com/samaaron/supersonic/issues"
   },
@@ -31,8 +31,9 @@
     "LICENSE"
   ],
   "dependencies": {
-    "supersonic-scsynth": "^0.1.6",
-    "supersonic-scsynth-synthdefs": "^0.1.6",
-    "supersonic-scsynth-samples": "^0.1.6"
+    "supersonic-scsynth": "^0.24.3",
+    "supersonic-scsynth-core": "^0.24.3",
+    "supersonic-scsynth-synthdefs": "^0.24.3",
+    "supersonic-scsynth-samples": "^0.24.3"
   }
 }

@@ -39,14 +39,15 @@ function deriveDefaultURLs() {
       const version = unpkgMatch[2];
       return {
         baseURL,
+        coreBaseURL: `${cdnBase}supersonic-scsynth-core@${version}/`,
         sampleBaseURL: `${cdnBase}supersonic-scsynth-samples@${version}/samples/`,
         synthdefBaseURL: `${cdnBase}supersonic-scsynth-synthdefs@${version}/synthdefs/`,
       };
     }
 
-    return { baseURL, sampleBaseURL: null, synthdefBaseURL: null };
+    return { baseURL, coreBaseURL: null, sampleBaseURL: null, synthdefBaseURL: null };
   } catch {
-    return { baseURL: null, sampleBaseURL: null, synthdefBaseURL: null };
+    return { baseURL: null, coreBaseURL: null, sampleBaseURL: null, synthdefBaseURL: null };
   }
 }
 
@@ -137,13 +138,16 @@ export class SuperSonic {
     this.loadedSynthDefs = new Map();
 
     // Configuration
+    // coreBaseURL is for WASM and workers (from supersonic-scsynth-core package)
+    // baseURL is for backwards compatibility and local development
     const baseURL = options.baseURL || DEFAULT_URLS.baseURL;
-    const workerBaseURL = options.workerBaseURL || (baseURL ? `${baseURL}workers/` : null);
-    const wasmBaseURL = options.wasmBaseURL || (baseURL ? `${baseURL}wasm/` : null);
+    const coreBaseURL = options.coreBaseURL || DEFAULT_URLS.coreBaseURL || baseURL;
+    const workerBaseURL = options.workerBaseURL || (coreBaseURL ? `${coreBaseURL}workers/` : null);
+    const wasmBaseURL = options.wasmBaseURL || (coreBaseURL ? `${coreBaseURL}wasm/` : null);
 
     if (!workerBaseURL || !wasmBaseURL) {
       throw new Error(
-        "SuperSonic requires baseURL or explicit workerBaseURL and wasmBaseURL options."
+        "SuperSonic requires coreBaseURL, baseURL, or explicit workerBaseURL and wasmBaseURL options."
       );
     }
 

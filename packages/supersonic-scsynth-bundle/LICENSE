@@ -1,27 +1,15 @@
-GNU GENERAL PUBLIC LICENSE
-Version 3, 29 June 2007
+SuperSonic Bundle - Mixed Licensing
+Copyright (c) 2025 Sam Aaron
 
-Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
-Everyone is permitted to copy and distribute verbatim copies
-of this license document, but changing it is not allowed.
+This meta-package bundles components with different licenses:
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+- supersonic-scsynth (client API): MIT
+- supersonic-scsynth-core (WASM engine + workers): GPL-3.0-or-later
+- supersonic-scsynth-synthdefs: MIT
+- supersonic-scsynth-samples: CC0
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+See each package's LICENSE file for full terms.
 
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
----
-
-SuperSonic - WebAssembly synthesis engine
-Copyright (C) 2025 Sam Aaron (where source differs from SuperCollider)
-
-Based on SuperCollider's scsynth
-Copyright (C) 2002-2023 James McCartney and SuperCollider contributors
+The most restrictive license in this bundle is GPL-3.0-or-later
+(supersonic-scsynth-core). If you need to avoid GPL obligations,
+use supersonic-scsynth directly with the core loaded from CDN.

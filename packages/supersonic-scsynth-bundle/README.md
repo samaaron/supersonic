@@ -6,7 +6,8 @@ Complete SuperSonic bundle with everything included.
 
 This is a convenience meta-package that includes:
 
-- **[supersonic-scsynth](https://www.npmjs.com/package/supersonic-scsynth)** - The core scsynth WASM engine (~450KB)
+- **[supersonic-scsynth](https://www.npmjs.com/package/supersonic-scsynth)** - MIT-licensed client API (~50KB)
+- **[supersonic-scsynth-core](https://www.npmjs.com/package/supersonic-scsynth-core)** - GPL-licensed WASM engine + workers (~450KB)
 - **[supersonic-scsynth-synthdefs](https://www.npmjs.com/package/supersonic-scsynth-synthdefs)** - All 120 Sonic Pi synthdefs (~67KB)
 - **[supersonic-scsynth-samples](https://www.npmjs.com/package/supersonic-scsynth-samples)** - All 206 Sonic Pi samples (~34MB)
 
@@ -43,12 +44,13 @@ SuperSonic works directly from CDN with zero configuration using the default `po
 
 ## Package Breakdown
 
-| Package | Size | Contains |
-|---------|------|----------|
-| `supersonic-scsynth` | ~450KB | Core WASM engine |
-| `supersonic-scsynth-synthdefs` | ~67KB | 120 Sonic Pi synthdefs |
-| `supersonic-scsynth-samples` | ~34MB | 206 Sonic Pi samples |
-| `supersonic-scsynth-bundle` | ~2KB | Meta-package (depends on all three) |
+| Package | Size | License | Contains |
+|---------|------|---------|----------|
+| `supersonic-scsynth` | ~50KB | MIT | Client API |
+| `supersonic-scsynth-core` | ~450KB | GPL-3.0 | WASM engine + workers |
+| `supersonic-scsynth-synthdefs` | ~67KB | MIT | 120 Sonic Pi synthdefs |
+| `supersonic-scsynth-samples` | ~34MB | CC0 | 206 Sonic Pi samples |
+| `supersonic-scsynth-bundle` | ~2KB | Mixed | Meta-package (depends on all four) |
 
 ## Documentation
 
@@ -56,4 +58,7 @@ See the main [SuperSonic repository](https://github.com/samaaron/supersonic) for
 
 ## License
 
-GPL-3.0-or-later
+Mixed - see individual packages:
+- `supersonic-scsynth` - GPL-3.0-or-later (engine) / MIT (client API)
+- `supersonic-scsynth-synthdefs` - MIT
+- `supersonic-scsynth-samples` - CC0

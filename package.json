@@ -30,15 +30,13 @@
     "sound"
   ],
   "author": "Sam Aaron",
-  "license": "GPL-3.0-or-later",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/samaaron/supersonic/issues"
   },
   "homepage": "https://github.com/samaaron/supersonic#readme",
   "files": [
     "dist/supersonic.js",
-    "dist/wasm/",
-    "dist/workers/",
     "README.md",
     "LICENSE"
   ],

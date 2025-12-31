@@ -94,4 +94,4 @@ These synthdefs are from [Sonic Pi](https://sonic-pi.net/) by Sam Aaron.
 
 ## License
 
-GPL-3.0-or-later
+MIT - See [LICENSE](./LICENSE)

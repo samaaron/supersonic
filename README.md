@@ -185,10 +185,14 @@ SuperSonic is brought to you by Sam Aaron. Please consider joining the community
 
 ## License
 
-SuperSonic uses dual licensing - see [LICENSE](LICENSE) for details.
+SuperSonic uses a tiered licensing model - see [LICENSE](LICENSE) for details.
 
-- `src/` and `js/workers/` - GPL-3.0-or-later
-- `js/lib/` and `js/supersonic.js` - MIT OR GPL-3.0-or-later
+| Package | License | Contains |
+|---------|---------|----------|
+| `supersonic-scsynth` | MIT | Client API |
+| `supersonic-scsynth-core` | GPL-3.0-or-later | WASM engine + workers |
+| `supersonic-scsynth-synthdefs` | MIT | Synth definitions |
+| `supersonic-scsynth-samples` | CC0 | Audio samples |
 
 
 ## Credits

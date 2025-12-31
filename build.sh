@@ -193,6 +193,16 @@ else
     echo "Warning: samples not found at $SAMPLES_SRC"
 fi
 
+# Copy WASM and workers to supersonic-scsynth-core package
+CORE_PKG_DIR="$PROJECT_ROOT/packages/supersonic-scsynth-core"
+echo "Copying WASM and workers to supersonic-scsynth-core package..."
+rm -rf "$CORE_PKG_DIR/wasm" "$CORE_PKG_DIR/workers"
+cp -r "$OUTPUT_DIR/wasm" "$CORE_PKG_DIR/wasm"
+cp -r "$OUTPUT_DIR/workers" "$CORE_PKG_DIR/workers"
+
 echo "Build complete!"
 echo "Generated files:"
 ls -lh "$OUTPUT_DIR"
+echo ""
+echo "Core package files:"
+ls -lh "$CORE_PKG_DIR"
