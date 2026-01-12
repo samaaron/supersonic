@@ -1,5 +1,129 @@
 import { test, expect } from "./fixtures.mjs";
 
+/**
+ * Generate a valid AIFF file in-memory for testing
+ * Creates a simple mono 16-bit PCM file with a sine wave
+ * @param {Object} options
+ * @param {number} options.sampleRate - Sample rate (default 44100)
+ * @param {number} options.numFrames - Number of frames (default 4410 = 0.1s)
+ * @param {number} options.numChannels - Number of channels (default 1)
+ * @param {number} options.bitsPerSample - Bits per sample (default 16)
+ * @param {number} options.frequency - Sine wave frequency (default 440)
+ * @returns {Uint8Array} AIFF file bytes
+ */
+function generateAiffFile({
+  sampleRate = 44100,
+  numFrames = 4410,
+  numChannels = 1,
+  bitsPerSample = 16,
+  frequency = 440
+} = {}) {
+  const bytesPerSample = bitsPerSample / 8;
+  const audioDataSize = numFrames * numChannels * bytesPerSample;
+
+  // COMM chunk: 8 (header) + 18 (data) = 26 bytes
+  // SSND chunk: 8 (header) + 8 (offset/blockSize) + audioDataSize
+  const commChunkSize = 18;
+  const ssndChunkSize = 8 + audioDataSize;
+  const formSize = 4 + (8 + commChunkSize) + (8 + ssndChunkSize); // AIFF + chunks
+
+  const totalSize = 12 + (8 + commChunkSize) + (8 + ssndChunkSize);
+  const buffer = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  let offset = 0;
+
+  // FORM header
+  bytes.set([0x46, 0x4F, 0x52, 0x4D], offset); // "FORM"
+  offset += 4;
+  view.setUint32(offset, formSize, false); // big-endian
+  offset += 4;
+  bytes.set([0x41, 0x49, 0x46, 0x46], offset); // "AIFF"
+  offset += 4;
+
+  // COMM chunk
+  bytes.set([0x43, 0x4F, 0x4D, 0x4D], offset); // "COMM"
+  offset += 4;
+  view.setUint32(offset, commChunkSize, false);
+  offset += 4;
+  view.setUint16(offset, numChannels, false);
+  offset += 2;
+  view.setUint32(offset, numFrames, false);
+  offset += 4;
+  view.setUint16(offset, bitsPerSample, false);
+  offset += 2;
+
+  // 80-bit extended float for sample rate
+  // Simplified encoding for common sample rates
+  const float80 = encodeFloat80(sampleRate);
+  bytes.set(float80, offset);
+  offset += 10;
+
+  // SSND chunk
+  bytes.set([0x53, 0x53, 0x4E, 0x44], offset); // "SSND"
+  offset += 4;
+  view.setUint32(offset, ssndChunkSize, false);
+  offset += 4;
+  view.setUint32(offset, 0, false); // offset
+  offset += 4;
+  view.setUint32(offset, 0, false); // blockSize
+  offset += 4;
+
+  // Generate sine wave audio data (big-endian)
+  for (let frame = 0; frame < numFrames; frame++) {
+    const t = frame / sampleRate;
+    const sample = Math.sin(2 * Math.PI * frequency * t);
+
+    for (let ch = 0; ch < numChannels; ch++) {
+      if (bitsPerSample === 16) {
+        const intSample = Math.round(sample * 32767);
+        // Big-endian 16-bit
+        bytes[offset++] = (intSample >> 8) & 0xFF;
+        bytes[offset++] = intSample & 0xFF;
+      } else if (bitsPerSample === 8) {
+        // AIFF 8-bit is signed (-128 to 127)
+        const intSample = Math.round(sample * 127);
+        bytes[offset++] = intSample & 0xFF;
+      }
+    }
+  }
+
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Encode a sample rate as 80-bit IEEE 754 extended precision float
+ * Uses BigInt for precision since mantissa values exceed JS safe integer range
+ */
+function encodeFloat80(value) {
+  const result = new Uint8Array(10);
+
+  if (value === 0) return result;
+
+  const sign = value < 0 ? 1 : 0;
+  value = Math.abs(value);
+
+  // Find exponent n where 2^n <= value < 2^(n+1)
+  const n = Math.floor(Math.log2(value));
+  const exponent = n + 16383;
+
+  // Mantissa = value * 2^(63-n), using BigInt for precision
+  // This shifts the value left by (63-n) bits, placing the integer bit at position 63
+  let mantissa = BigInt(Math.round(value)) << BigInt(63 - n);
+
+  // Write sign and exponent (15 bits)
+  result[0] = (sign << 7) | ((exponent >> 8) & 0x7F);
+  result[1] = exponent & 0xFF;
+
+  // Write mantissa (64 bits, big-endian: MSB at byte 2, LSB at byte 9)
+  for (let i = 9; i >= 2; i--) {
+    result[i] = Number(mantissa & 0xFFn);
+    mantissa = mantissa >> 8n;
+  }
+
+  return result;
+}
+
 test.describe("SuperSonic loadSample()", () => {
   test.beforeEach(async ({ page }) => {
     // Collect console errors
@@ -607,5 +731,253 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.success).toBe(true);
     expect(result.framesBefore).toBeGreaterThan(0);
     expect(result.preserved).toBe(true);
+  });
+
+  test("loads real AIFF file (ffmpeg-generated)", async ({ page, sonicConfig }) => {
+    // Test against a real AIFF file created by ffmpeg (independent implementation)
+    // This catches symmetric bugs where test generator and parser have matching errors
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+
+      try {
+        await sonic.init();
+
+        // Load real AIFF file by path
+        await sonic.loadSample(0, "bd_haus.aiff");
+        await sonic.sync(1);
+
+        // Query buffer to verify it was loaded
+        messages.length = 0;
+        await sonic.send("/b_query", 0);
+        await sonic.sync(2);
+
+        const queryReply = messages.find((m) => m.address === "/b_info");
+
+        return {
+          success: true,
+          bufnum: queryReply?.args[0],
+          numFrames: queryReply?.args[1],
+          numChannels: queryReply?.args[2],
+          sampleRate: queryReply?.args[3],
+        };
+      } catch (err) {
+        return { success: false, error: err.message, stack: err.stack };
+      }
+    }, sonicConfig);
+
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.bufnum).toBe(0);
+    expect(result.numFrames).toBeGreaterThan(0);
+    expect(result.numChannels).toBe(2); // bd_haus is stereo
+    expect(result.sampleRate).toBeGreaterThan(0);
+  });
+
+  test("loads AIFF file via /b_allocFile (16-bit mono)", async ({ page, sonicConfig }) => {
+    // Generate AIFF in Node.js context, pass to browser
+    // Use 48kHz to match AudioContext sample rate (avoids resampling frame count changes)
+    const aiffBytes = generateAiffFile({
+      sampleRate: 48000,
+      numFrames: 4800,
+      numChannels: 1,
+      bitsPerSample: 16,
+    });
+
+    const result = await page.evaluate(async ({ config, aiffData }) => {
+      const sonic = new window.SuperSonic(config);
+
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+
+      try {
+        await sonic.init();
+
+        // Load AIFF via /b_allocFile
+        const fileBytes = new Uint8Array(aiffData);
+        await sonic.send("/b_allocFile", 0, fileBytes);
+        await sonic.sync(1);
+
+        // Query buffer to verify it was loaded
+        messages.length = 0;
+        await sonic.send("/b_query", 0);
+        await sonic.sync(2);
+
+        const queryReply = messages.find((m) => m.address === "/b_info");
+
+        return {
+          success: true,
+          bufnum: queryReply?.args[0],
+          numFrames: queryReply?.args[1],
+          numChannels: queryReply?.args[2],
+          sampleRate: queryReply?.args[3],
+        };
+      } catch (err) {
+        return { success: false, error: err.message, stack: err.stack };
+      }
+    }, { config: sonicConfig, aiffData: Array.from(aiffBytes) });
+
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.bufnum).toBe(0);
+    expect(result.numFrames).toBe(4800);
+    expect(result.numChannels).toBe(1);
+    expect(result.sampleRate).toBe(48000);
+  });
+
+  test("loads AIFF file via /b_allocFile (16-bit stereo)", async ({ page, sonicConfig }) => {
+    const aiffBytes = generateAiffFile({
+      sampleRate: 48000,
+      numFrames: 2400,
+      numChannels: 2,
+      bitsPerSample: 16,
+    });
+
+    const result = await page.evaluate(async ({ config, aiffData }) => {
+      const sonic = new window.SuperSonic(config);
+
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+
+      try {
+        await sonic.init();
+
+        const fileBytes = new Uint8Array(aiffData);
+        await sonic.send("/b_allocFile", 0, fileBytes);
+        await sonic.sync(1);
+
+        messages.length = 0;
+        await sonic.send("/b_query", 0);
+        await sonic.sync(2);
+
+        const queryReply = messages.find((m) => m.address === "/b_info");
+
+        return {
+          success: true,
+          bufnum: queryReply?.args[0],
+          numFrames: queryReply?.args[1],
+          numChannels: queryReply?.args[2],
+          sampleRate: queryReply?.args[3],
+        };
+      } catch (err) {
+        return { success: false, error: err.message, stack: err.stack };
+      }
+    }, { config: sonicConfig, aiffData: Array.from(aiffBytes) });
+
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.bufnum).toBe(0);
+    expect(result.numFrames).toBe(2400);
+    expect(result.numChannels).toBe(2);
+    expect(result.sampleRate).toBe(48000);
+  });
+
+  test("loads AIFF file via /b_allocFile (8-bit mono)", async ({ page, sonicConfig }) => {
+    // Use 48kHz to match AudioContext sample rate (avoids resampling frame count changes)
+    const aiffBytes = generateAiffFile({
+      sampleRate: 48000,
+      numFrames: 4800,
+      numChannels: 1,
+      bitsPerSample: 8,
+    });
+
+    const result = await page.evaluate(async ({ config, aiffData }) => {
+      const sonic = new window.SuperSonic(config);
+
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+
+      try {
+        await sonic.init();
+
+        const fileBytes = new Uint8Array(aiffData);
+        await sonic.send("/b_allocFile", 0, fileBytes);
+        await sonic.sync(1);
+
+        messages.length = 0;
+        await sonic.send("/b_query", 0);
+        await sonic.sync(2);
+
+        const queryReply = messages.find((m) => m.address === "/b_info");
+
+        return {
+          success: true,
+          bufnum: queryReply?.args[0],
+          numFrames: queryReply?.args[1],
+          numChannels: queryReply?.args[2],
+          sampleRate: queryReply?.args[3],
+        };
+      } catch (err) {
+        return { success: false, error: err.message, stack: err.stack };
+      }
+    }, { config: sonicConfig, aiffData: Array.from(aiffBytes) });
+
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.bufnum).toBe(0);
+    expect(result.numFrames).toBe(4800);
+    expect(result.numChannels).toBe(1);
+    expect(result.sampleRate).toBe(48000);
+  });
+
+  test("AIFF buffer can be played with synth", async ({ page, sonicConfig }) => {
+    const aiffBytes = generateAiffFile({
+      sampleRate: 44100,
+      numFrames: 44100, // 1 second
+      numChannels: 1,
+      bitsPerSample: 16,
+      frequency: 440,
+    });
+
+    const result = await page.evaluate(async ({ config, aiffData }) => {
+      const sonic = new window.SuperSonic(config);
+
+      try {
+        await sonic.init();
+
+        // Load AIFF sample
+        const fileBytes = new Uint8Array(aiffData);
+        await sonic.send("/b_allocFile", 0, fileBytes);
+
+        // Load synthdef
+        await sonic.loadSynthDef("sonic-pi-basic_mono_player");
+        await sonic.sync(1);
+
+        // Play the sample
+        await sonic.send(
+          "/s_new",
+          "sonic-pi-basic_mono_player",
+          1000,
+          1,
+          0,
+          "buf",
+          0
+        );
+        await sonic.sync(2);
+
+        // Wait for tree update
+        let tree;
+        const start = Date.now();
+        while (Date.now() - start < 2000) {
+          tree = sonic.getTree();
+          if (tree.nodes.some((n) => n.id === 1000)) break;
+          await new Promise(r => setTimeout(r, 20));
+        }
+
+        return {
+          success: true,
+          nodeCount: tree.nodeCount,
+          hasSynth: tree.nodes.some((n) => n.id === 1000),
+        };
+      } catch (err) {
+        return { success: false, error: err.message, stack: err.stack };
+      }
+    }, { config: sonicConfig, aiffData: Array.from(aiffBytes) });
+
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.hasSynth).toBe(true);
   });
 });

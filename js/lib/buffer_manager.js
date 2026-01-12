@@ -16,6 +16,7 @@
  */
 
 import { MemPool } from '@thi.ng/malloc';
+import { isAiff, aiffToWav } from './aiff_converter.js';
 
 const BUFFER_POOL_ALIGNMENT = 8;  // Float64 alignment
 
@@ -131,6 +132,21 @@ export class BufferManager {
         const poolSizeMB = (bufferPoolConfig.size / (1024 * 1024)).toFixed(0);
         const poolOffsetMB = (bufferPoolConfig.start / (1024 * 1024)).toFixed(0);
         if (__DEV__) console.log(`[Dbg-BufferManager] Initialized (${mode} mode): ${poolSizeMB}MB pool at offset ${poolOffsetMB}MB`);
+    }
+
+    /**
+     * Decode audio data, converting AIFF to WAV if necessary
+     * Web Audio API doesn't support AIFF, so we convert in-memory first
+     * @param {ArrayBuffer} arrayBuffer - Raw audio file data
+     * @returns {Promise<AudioBuffer>} Decoded audio buffer
+     */
+    async #decodeAudioData(arrayBuffer) {
+        // Convert AIFF to WAV if needed (Web Audio API doesn't support AIFF)
+        if (isAiff(arrayBuffer)) {
+            if (__DEV__) console.log('[Dbg-BufferManager] Converting AIFF to WAV');
+            arrayBuffer = aiffToWav(arrayBuffer);
+        }
+        return this.#audioContext.decodeAudioData(arrayBuffer);
     }
 
     /**
@@ -279,7 +295,7 @@ export class BufferManager {
 
         // Use 30s timeout for decode (no network, but decode can be slow for large files)
         return this.#executeBufferOperation(bufnum, 30000, async () => {
-            const audioBuffer = await this.#audioContext.decodeAudioData(arrayBuffer);
+            const audioBuffer = await this.#decodeAudioData(arrayBuffer);
 
             // Calculate frame range
             const start = Math.max(0, Math.floor(startFrame || 0));
@@ -351,7 +367,7 @@ export class BufferManager {
                 name: sampleName,
             });
 
-            const audioBuffer = await this.#audioContext.decodeAudioData(arrayBuffer);
+            const audioBuffer = await this.#decodeAudioData(arrayBuffer);
 
             // Calculate frame range
             const start = Math.max(0, Math.floor(startFrame || 0));
