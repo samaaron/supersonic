@@ -115,14 +115,15 @@ export function inspect(target) {
 export function parseNodeTree(buffer, treeOffset, bufferConstants) {
   const bc = bufferConstants;
 
-  // Read header (2 x uint32)
-  const headerView = new Uint32Array(buffer, treeOffset, 2);
+  // Read header (3 x uint32)
+  const headerView = new Uint32Array(buffer, treeOffset, 3);
   const nodeCount = headerView[0];
   const version = headerView[1];
+  const droppedCount = headerView[2];
 
   // Read entries - each entry is 56 bytes: 6 int32s (24 bytes) + def_name (32 bytes)
   const entriesBase = treeOffset + bc.NODE_TREE_HEADER_SIZE;
-  const maxNodes = bc.NODE_TREE_MAX_NODES;
+  const maxNodes = bc.NODE_TREE_MIRROR_MAX_NODES;
   const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 56 bytes
   const defNameSize = bc.NODE_TREE_DEF_NAME_SIZE; // 32 bytes
 
@@ -160,5 +161,5 @@ export function parseNodeTree(buffer, treeOffset, bufferConstants) {
     });
   }
 
-  return { nodeCount, version, nodes };
+  return { nodeCount, version, droppedCount, nodes };
 }

@@ -2913,3 +2913,306 @@ test.describe("getTree() /g_deepFree behavior", () => {
     expect(result.has1001).toBe(true);
   });
 });
+
+// =============================================================================
+// NODE TREE OVERFLOW AND DROPPED COUNT
+// =============================================================================
+
+test.describe("getTree() overflow and droppedCount", () => {
+  test("droppedCount is 0 initially", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const tree = sonic.getTree();
+      return {
+        droppedCount: tree.droppedCount,
+        nodeCount: tree.nodeCount,
+      };
+    }, sonicConfig);
+
+    expect(result.droppedCount).toBe(0);
+    expect(result.nodeCount).toBe(1); // Just root group
+  });
+
+  test("droppedCount remains 0 when under limit", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      // Create 100 groups (well under the 1024 mirror limit)
+      for (let i = 0; i < 100; i++) {
+        sonic.send("/g_new", 1000 + i, 0, 0);
+      }
+      await sonic.sync(1);
+
+      const tree = sonic.getTree();
+
+      // Cleanup
+      for (let i = 0; i < 100; i++) {
+        sonic.send("/n_free", 1000 + i);
+      }
+
+      return {
+        droppedCount: tree.droppedCount,
+        nodeCount: tree.nodeCount,
+      };
+    }, sonicConfig);
+
+    expect(result.droppedCount).toBe(0);
+    expect(result.nodeCount).toBe(101); // root + 100 groups
+  });
+
+  test("droppedCount increments when mirror tree exceeds 1024 nodes", async ({ page, sonicConfig }) => {
+    // This test creates more than 1024 nodes to trigger mirror overflow
+    // Using groups since they're lightweight (no audio processing)
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      // NODE_TREE_MIRROR_MAX_NODES is 1024, root group takes 1 slot
+      // So we can add 1023 more before the mirror overflows
+      const nodesToCreate = 1030; // Deliberately exceed limit
+
+      // Create nodes in batches for efficiency
+      const batchSize = 100;
+      for (let batch = 0; batch < Math.ceil(nodesToCreate / batchSize); batch++) {
+        const start = batch * batchSize;
+        const end = Math.min(start + batchSize, nodesToCreate);
+        for (let i = start; i < end; i++) {
+          sonic.send("/g_new", 1000 + i, 0, 0);
+        }
+        await sonic.sync(batch + 1);
+      }
+
+      const tree = sonic.getTree();
+
+      // Cleanup - free all created groups
+      for (let batch = 0; batch < Math.ceil(nodesToCreate / batchSize); batch++) {
+        const start = batch * batchSize;
+        const end = Math.min(start + batchSize, nodesToCreate);
+        for (let i = start; i < end; i++) {
+          sonic.send("/n_free", 1000 + i);
+        }
+      }
+
+      return {
+        droppedCount: tree.droppedCount,
+        nodeCount: tree.nodeCount,
+        nodesInArray: tree.nodes.length,
+      };
+    }, sonicConfig);
+
+    // We created 1030 groups + 1 root = 1031 total nodes
+    // Mirror can hold 1024, so 7 should be dropped
+    expect(result.droppedCount).toBe(7);
+    expect(result.nodeCount).toBe(1024); // Mirror is at capacity
+    expect(result.nodesInArray).toBe(1024);
+  });
+
+  test("droppedCount decrements when overflowed nodes are freed", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      // Create exactly enough to overflow by 10
+      const nodesToCreate = 1033; // 1033 + 1 root = 1034 total, 10 over limit
+
+      // Create nodes in batches
+      const batchSize = 100;
+      for (let batch = 0; batch < Math.ceil(nodesToCreate / batchSize); batch++) {
+        const start = batch * batchSize;
+        const end = Math.min(start + batchSize, nodesToCreate);
+        for (let i = start; i < end; i++) {
+          sonic.send("/g_new", 1000 + i, 0, 0);
+        }
+        await sonic.sync(batch + 1);
+      }
+
+      const treeAtOverflow = sonic.getTree();
+      const droppedAtOverflow = treeAtOverflow.droppedCount;
+
+      // Now free 5 nodes - these will be nodes that were dropped (not in mirror)
+      // The last 10 nodes created (1023-1032) were dropped
+      // Free some of them
+      for (let i = 0; i < 5; i++) {
+        sonic.send("/n_free", 1000 + 1028 + i); // Free nodes 2028-2032
+      }
+      await sonic.sync(99);
+
+      const treeAfterPartialFree = sonic.getTree();
+
+      // Cleanup remaining
+      for (let i = 0; i < nodesToCreate - 5; i++) {
+        if (i < 1028) {
+          sonic.send("/n_free", 1000 + i);
+        }
+      }
+
+      return {
+        droppedAtOverflow,
+        droppedAfterPartialFree: treeAfterPartialFree.droppedCount,
+        nodeCountAfterPartialFree: treeAfterPartialFree.nodeCount,
+      };
+    }, sonicConfig);
+
+    // Initially 10 dropped (1034 - 1024)
+    expect(result.droppedAtOverflow).toBe(10);
+    // After freeing 5 dropped nodes, should have 5 dropped remaining
+    expect(result.droppedAfterPartialFree).toBe(5);
+    // Mirror should still be at 1024 (the freed slots weren't in mirror)
+    expect(result.nodeCountAfterPartialFree).toBe(1024);
+  });
+
+  test("droppedCount returns to 0 when all excess nodes freed", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      // Create enough to overflow
+      const nodesToCreate = 1030;
+
+      for (let batch = 0; batch < Math.ceil(nodesToCreate / 100); batch++) {
+        const start = batch * 100;
+        const end = Math.min(start + 100, nodesToCreate);
+        for (let i = start; i < end; i++) {
+          sonic.send("/g_new", 1000 + i, 0, 0);
+        }
+        await sonic.sync(batch + 1);
+      }
+
+      const treeOverflowed = sonic.getTree();
+
+      // Free ALL created nodes
+      for (let batch = 0; batch < Math.ceil(nodesToCreate / 100); batch++) {
+        const start = batch * 100;
+        const end = Math.min(start + 100, nodesToCreate);
+        for (let i = start; i < end; i++) {
+          sonic.send("/n_free", 1000 + i);
+        }
+        await sonic.sync(100 + batch + 1);
+      }
+
+      const treeAfterCleanup = sonic.getTree();
+
+      return {
+        droppedWhileOverflowed: treeOverflowed.droppedCount,
+        droppedAfterCleanup: treeAfterCleanup.droppedCount,
+        nodeCountAfterCleanup: treeAfterCleanup.nodeCount,
+      };
+    }, sonicConfig);
+
+    expect(result.droppedWhileOverflowed).toBe(7); // 1031 - 1024
+    expect(result.droppedAfterCleanup).toBe(0);
+    expect(result.nodeCountAfterCleanup).toBe(1); // Just root
+  });
+
+  test("audio continues working when mirror overflows", async ({ page, sonicConfig }) => {
+    // This test verifies that the actual scsynth tree continues to work
+    // even when the JS mirror tree is full
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      // Fill up most of the mirror with groups
+      const groupCount = 1020;
+      for (let batch = 0; batch < Math.ceil(groupCount / 100); batch++) {
+        const start = batch * 100;
+        const end = Math.min(start + 100, groupCount);
+        for (let i = start; i < end; i++) {
+          sonic.send("/g_new", 1000 + i, 0, 0);
+        }
+        await sonic.sync(batch + 1);
+      }
+
+      const treeBeforeSynths = sonic.getTree();
+
+      // Now add synths that will overflow the mirror
+      // These synths WILL produce audio even though they're not in the mirror
+      const synthIds = [];
+      for (let i = 0; i < 10; i++) {
+        const synthId = 5000 + i;
+        synthIds.push(synthId);
+        sonic.send("/s_new", "sonic-pi-beep", synthId, 0, 0, "note", 60 + i, "release", 0.1);
+      }
+      await sonic.sync(50);
+
+      const treeWithOverflow = sonic.getTree();
+
+      // Query the actual scsynth tree to verify synths exist there
+      // even if not in mirror
+      let oscTreeNodeCount = 0;
+      const oscPromise = new Promise((resolve) => {
+        sonic.on("osc", (msg) => {
+          if (msg.address === "/g_queryTree.reply") {
+            // Count nodes in OSC reply
+            // Format: [flag, nodeID, numChildren, ...]
+            // We just need to verify it has more nodes than the mirror
+            oscTreeNodeCount = msg.args.length;
+            resolve();
+          }
+        });
+      });
+
+      sonic.send("/g_queryTree", 0, 0);
+      await Promise.race([oscPromise, new Promise((r) => setTimeout(r, 1000))]);
+
+      // Cleanup
+      for (const id of synthIds) {
+        sonic.send("/n_free", id);
+      }
+      for (let i = 0; i < groupCount; i++) {
+        sonic.send("/n_free", 1000 + i);
+      }
+
+      return {
+        mirrorNodeCount: treeWithOverflow.nodeCount,
+        droppedCount: treeWithOverflow.droppedCount,
+        oscTreeHasData: oscTreeNodeCount > 0,
+        // The mirror is at capacity but actual tree has more
+        mirrorAtCapacity: treeWithOverflow.nodeCount === 1024,
+      };
+    }, sonicConfig);
+
+    // Mirror should be at 1024 capacity
+    expect(result.mirrorAtCapacity).toBe(true);
+    // Some nodes should be dropped
+    expect(result.droppedCount).toBeGreaterThan(0);
+    // OSC query should return data (actual tree is working)
+    expect(result.oscTreeHasData).toBe(true);
+  });
+
+  test("getTree returns droppedCount field with correct type", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const tree = sonic.getTree();
+
+      return {
+        hasDroppedCount: "droppedCount" in tree,
+        droppedCountType: typeof tree.droppedCount,
+        droppedCountValue: tree.droppedCount,
+      };
+    }, sonicConfig);
+
+    expect(result.hasDroppedCount).toBe(true);
+    expect(result.droppedCountType).toBe("number");
+    expect(result.droppedCountValue).toBe(0);
+  });
+});

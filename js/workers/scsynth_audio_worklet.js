@@ -105,7 +105,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             NODE_TREE_HEADER_SIZE: uint32View[12],
             NODE_TREE_ENTRY_SIZE: uint32View[13],
             NODE_TREE_DEF_NAME_SIZE: uint32View[14],
-            NODE_TREE_MAX_NODES: uint32View[15],
+            NODE_TREE_MIRROR_MAX_NODES: uint32View[15],
             NTP_START_TIME_START: uint32View[16],
             NTP_START_TIME_SIZE: uint32View[17],
             DRIFT_OFFSET_START: uint32View[18],
@@ -383,7 +383,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
         // Read node entries
         const entriesBase = treeBase + bc.NODE_TREE_HEADER_SIZE;
-        const maxNodes = bc.NODE_TREE_MAX_NODES;
+        const maxNodes = bc.NODE_TREE_MIRROR_MAX_NODES;
         const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 56 bytes
         const defNameSize = bc.NODE_TREE_DEF_NAME_SIZE; // 32 bytes
 

@@ -36,12 +36,17 @@ constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext sta
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in milliseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
 
-// Node tree configuration (for observing synth/group hierarchy via polling)
-constexpr uint32_t NODE_TREE_MAX_NODES = 1024; // Max nodes in tree
-constexpr uint32_t NODE_TREE_HEADER_SIZE = 8;  // node_count (4) + version (4)
+// Node tree mirror configuration (for observing synth/group hierarchy via polling)
+// This is a MIRROR of the actual scsynth node tree - the real tree can exceed this limit,
+// but only this many nodes will be visible to JavaScript. Audio continues working regardless.
+// Can be overridden at build time with -DNODE_TREE_MIRROR_MAX_NODES=N
+#ifndef NODE_TREE_MIRROR_MAX_NODES
+#define NODE_TREE_MIRROR_MAX_NODES 1024
+#endif
+constexpr uint32_t NODE_TREE_HEADER_SIZE = 12; // node_count (4) + version (4) + dropped_count (4)
 constexpr uint32_t NODE_TREE_DEF_NAME_SIZE = 32; // Max synthdef name length (including null terminator)
 constexpr uint32_t NODE_TREE_ENTRY_SIZE = 56;  // 6 x int32 (24) + def_name (32) = 56 bytes per entry
-constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MAX_NODES * NODE_TREE_ENTRY_SIZE); // ~57KB
+constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MIRROR_MAX_NODES * NODE_TREE_ENTRY_SIZE); // ~57KB
 
 // Audio capture configuration (for testing - captures audio output to SharedArrayBuffer)
 // 1 second at 48kHz stereo = 96000 samples * 4 bytes = ~375KB
@@ -152,8 +157,9 @@ enum StatusFlags : uint32_t {
 // Node tree header (at NODE_TREE_START offset in ring_buffer_storage)
 // Written by WASM, read by JS for polling
 struct alignas(4) NodeTreeHeader {
-    std::atomic<uint32_t> node_count;  // Number of active nodes
-    std::atomic<uint32_t> version;     // Incremented on each change (for change detection)
+    std::atomic<uint32_t> node_count;    // Number of active nodes in mirror tree
+    std::atomic<uint32_t> version;       // Incremented on each change (for change detection)
+    std::atomic<uint32_t> dropped_count; // Nodes not mirrored due to overflow (actual tree has more)
 };
 
 // Node entry in the tree (56 bytes = 6 x int32 + 32-byte def_name)
@@ -258,7 +264,7 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     NODE_TREE_HEADER_SIZE,
     NODE_TREE_ENTRY_SIZE,
     NODE_TREE_DEF_NAME_SIZE,
-    NODE_TREE_MAX_NODES,
+    NODE_TREE_MIRROR_MAX_NODES,
     NTP_START_TIME_START,
     NTP_START_TIME_SIZE,
     DRIFT_OFFSET_START,

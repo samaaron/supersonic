@@ -447,26 +447,26 @@ export class SuperSonic {
 
   getTree() {
     if (!this.#initialized) {
-      return { nodeCount: 0, version: 0, nodes: [] };
+      return { nodeCount: 0, version: 0, droppedCount: 0, nodes: [] };
     }
 
     const bc = this.#metricsReader.bufferConstants;
     if (!bc) {
-      return { nodeCount: 0, version: 0, nodes: [] };
+      return { nodeCount: 0, version: 0, droppedCount: 0, nodes: [] };
     }
 
     let buffer, treeOffset;
     if (this.#config.mode === 'postMessage') {
       const snapshot = this.#metricsReader.getSnapshotBuffer();
       if (!snapshot) {
-        return { nodeCount: 0, version: 0, nodes: [] };
+        return { nodeCount: 0, version: 0, droppedCount: 0, nodes: [] };
       }
       buffer = snapshot;
       treeOffset = bc.METRICS_SIZE;
     } else {
       const sab = this.#metricsReader.sharedBuffer;
       if (!sab) {
-        return { nodeCount: 0, version: 0, nodes: [] };
+        return { nodeCount: 0, version: 0, droppedCount: 0, nodes: [] };
       }
       buffer = sab;
       treeOffset = this.#metricsReader.ringBufferBase + bc.NODE_TREE_START;

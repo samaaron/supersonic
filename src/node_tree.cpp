@@ -20,7 +20,7 @@
 
 // Find index of node in tree (-1 if not found)
 int32_t NodeTree_FindIndex(int32_t nodeId, NodeEntry* entries) {
-    for (uint32_t i = 0; i < NODE_TREE_MAX_NODES; i++) {
+    for (uint32_t i = 0; i < NODE_TREE_MIRROR_MAX_NODES; i++) {
         if (entries[i].id == nodeId) {
             return static_cast<int32_t>(i);
         }
@@ -30,7 +30,7 @@ int32_t NodeTree_FindIndex(int32_t nodeId, NodeEntry* entries) {
 
 // Find first empty slot in tree (-1 if full)
 int32_t NodeTree_FindEmptySlot(NodeEntry* entries) {
-    for (uint32_t i = 0; i < NODE_TREE_MAX_NODES; i++) {
+    for (uint32_t i = 0; i < NODE_TREE_MIRROR_MAX_NODES; i++) {
         if (entries[i].id == -1) {
             return static_cast<int32_t>(i);
         }
@@ -44,7 +44,9 @@ void NodeTree_Add(Node* node, NodeTreeHeader* header, NodeEntry* entries) {
 
     int32_t slot = NodeTree_FindEmptySlot(entries);
     if (slot < 0) {
-        // Tree is full, can't add more nodes
+        // Mirror tree is full - actual scsynth tree continues working,
+        // but JS won't see this node. Increment dropped_count so JS knows.
+        header->dropped_count.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
@@ -102,13 +104,21 @@ void NodeTree_Add(Node* node, NodeTreeHeader* header, NodeEntry* entries) {
     header->version.fetch_add(1, std::memory_order_release);
 }
 
-// Remove a node from the tree (called on kNode_End)
+// Remove a node from the mirror tree (called on kNode_End)
+// IMPORTANT: This is only called from scsynth's Node_StateMsg callback when a real
+// node is being destroyed. It is never called for non-existent node IDs - those are
+// filtered out by meth_n_free before reaching Node_Delete/Node_Dtor/kNode_End.
 void NodeTree_Remove(int32_t nodeId, NodeTreeHeader* header, NodeEntry* entries) {
     if (!header || !entries) return;
 
     int32_t slot = NodeTree_FindIndex(nodeId, entries);
     if (slot < 0) {
-        // Node not found
+        // Node exists in scsynth but not in mirror - it was dropped due to overflow.
+        // Since this callback only fires for real nodes, we can safely decrement.
+        uint32_t dropped = header->dropped_count.load(std::memory_order_relaxed);
+        if (dropped > 0) {
+            header->dropped_count.fetch_sub(1, std::memory_order_relaxed);
+        }
         return;
     }
 

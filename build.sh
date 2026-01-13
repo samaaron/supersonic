@@ -60,6 +60,11 @@ SCHEDULER_SLOT_COUNT=${SCHEDULER_SLOT_COUNT:-512}
 SCHEDULER_MEMORY=$((SCHEDULER_SLOT_SIZE * SCHEDULER_SLOT_COUNT))
 echo "SCHEDULER: $SCHEDULER_SLOT_COUNT slots × $SCHEDULER_SLOT_SIZE bytes = $((SCHEDULER_MEMORY / 1024))KB"
 
+# Node tree mirror configuration (override with environment variables if needed)
+# This is a mirror of the scsynth node tree for JS observability - actual tree can exceed this
+NODE_TREE_MIRROR_MAX_NODES=${NODE_TREE_MIRROR_MAX_NODES:-1024}
+echo "NODE_TREE_MIRROR: $NODE_TREE_MIRROR_MAX_NODES max nodes"
+
 # Collect all scsynth source files
 # Note: Platform-specific and unused files have been removed from the repo entirely
 # (SC_ComPort.cpp, XenomaiLock.cpp, SC_PaUtils.cpp, sc_popen.cpp, strtod.c)
@@ -94,6 +99,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -DNDEBUG \
     -DSCHEDULER_SLOT_SIZE=$SCHEDULER_SLOT_SIZE \
     -DSCHEDULER_SLOT_COUNT=$SCHEDULER_SLOT_COUNT \
+    -DNODE_TREE_MIRROR_MAX_NODES=$NODE_TREE_MIRROR_MAX_NODES \
     -DBOOST_ASIO_HAS_PTHREADS \
     -DSTATIC_PLUGINS \
     -DNOVA_SIMD \

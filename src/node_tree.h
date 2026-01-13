@@ -24,18 +24,19 @@
     -------------
     The node tree lives in SharedArrayBuffer at NODE_TREE_START offset:
 
-    +------------------+
-    | NodeTreeHeader   |  8 bytes
-    | - node_count (4) |  Number of active nodes
-    | - version (4)    |  Change counter (for dirty checking)
-    +------------------+
-    | NodeEntry[0]     |  56 bytes per entry
-    | NodeEntry[1]     |
-    | ...              |
-    | NodeEntry[1023]  |  Up to NODE_TREE_MAX_NODES entries
-    +------------------+
+    +---------------------+
+    | NodeTreeHeader      |  12 bytes
+    | - node_count (4)    |  Number of active nodes in mirror
+    | - version (4)       |  Change counter (for dirty checking)
+    | - dropped_count (4) |  Nodes not mirrored due to overflow
+    +---------------------+
+    | NodeEntry[0]        |  56 bytes per entry
+    | NodeEntry[1]        |
+    | ...                 |
+    | NodeEntry[1023]     |  Up to NODE_TREE_MIRROR_MAX_NODES entries
+    +---------------------+
 
-    Total size: ~57KB (8 + 1024 * 56 bytes)
+    Total size: ~57KB (12 + 1024 * 56 bytes)
 
 
     NODE ENTRY STRUCTURE (56 bytes)
@@ -98,7 +99,9 @@
 
     LIMITATIONS
     -----------
-    - Maximum 1024 nodes (NODE_TREE_MAX_NODES)
+    - Maximum 1024 nodes (NODE_TREE_MIRROR_MAX_NODES) in the mirror tree
+    - If actual scsynth tree exceeds this, excess nodes are not mirrored
+      (dropped_count tracks how many; audio continues working)
     - Synthdef names truncated to 31 characters
     - No control/parameter values exposed (use OSC for that)
 
@@ -177,7 +180,7 @@ void NodeTree_Update(Node* node, NodeTreeHeader* header, NodeEntry* entries);
  *
  * @param nodeId  The node ID to search for
  * @param entries Pointer to NodeEntry array in SharedArrayBuffer
- * @return        Array index (0 to NODE_TREE_MAX_NODES-1), or -1 if not found
+ * @return        Array index (0 to NODE_TREE_MIRROR_MAX_NODES-1), or -1 if not found
  */
 int32_t NodeTree_FindIndex(int32_t nodeId, NodeEntry* entries);
 
