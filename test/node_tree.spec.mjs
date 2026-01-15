@@ -3215,4 +3215,37 @@ test.describe("getTree() overflow and droppedCount", () => {
     expect(result.droppedCountType).toBe("number");
     expect(result.droppedCountValue).toBe(0);
   });
+
+  test("warns when maxNodes exceeds mirror capacity", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    // Capture console warnings
+    const warnings = [];
+    page.on("console", (msg) => {
+      if (msg.type() === "warning") {
+        warnings.push(msg.text());
+      }
+    });
+
+    await page.evaluate(async (config) => {
+      // Override maxNodes to exceed the default mirror capacity of 1024
+      const customConfig = {
+        ...config,
+        scsynthOptions: {
+          maxNodes: 2048,
+        },
+      };
+      const sonic = new window.SuperSonic(customConfig);
+      await sonic.init();
+    }, sonicConfig);
+
+    // Check that a warning about NODE_TREE_MIRROR_MAX_NODES was logged
+    const mirrorWarning = warnings.find((w) =>
+      w.includes("NODE_TREE_MIRROR_MAX_NODES")
+    );
+    expect(mirrorWarning).toBeTruthy();
+    expect(mirrorWarning).toContain("maxNodes (2048)");
+    expect(mirrorWarning).toContain("exceeds");
+    expect(mirrorWarning).toContain("Rebuild with");
+  });
 });

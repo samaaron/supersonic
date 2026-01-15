@@ -1117,6 +1117,16 @@ export class SuperSonic {
             // Initialize metrics reader
             this.#metricsReader.initSharedViews(sharedBuffer, ringBufferBase, bufferConstants);
 
+            // Warn if maxNodes exceeds mirror capacity
+            const maxNodes = this.#config.worldOptions?.maxNodes ?? 1024;
+            const mirrorMax = bufferConstants?.NODE_TREE_MIRROR_MAX_NODES ?? 1024;
+            if (maxNodes > mirrorMax) {
+              console.warn(
+                `SuperSonic: maxNodes (${maxNodes}) exceeds NODE_TREE_MIRROR_MAX_NODES (${mirrorMax}). ` +
+                `The node tree mirror will not show all nodes. Rebuild with NODE_TREE_MIRROR_MAX_NODES=${maxNodes} to fix.`
+              );
+            }
+
             // Initialize NTP timing
             this.#ntpTiming = new NTPTiming({
               mode: this.#config.mode,
