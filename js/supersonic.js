@@ -100,11 +100,6 @@ export class SuperSonic {
   // Direct ring buffer write (bypasses worker for low-latency non-bundle messages)
   #directWriter;
 
-  // Runtime metrics
-  #metricsIntervalId = null;
-  #metricsGatherInProgress = false;
-  #metricsInterval = 100;
-
   // Track AudioContext state for recovery detection
   #previousAudioContextState = null;
 
@@ -255,7 +250,6 @@ export class SuperSonic {
       const wasmBytes = await this.#loadWasm();
       await this.#initializeAudioWorklet(wasmBytes);
       await this.#initializeOSC();
-      this.#startPerformanceMonitoring();
       await this.#finishInitialization();
     } catch (error) {
       this.#initializing = false;
@@ -272,15 +266,6 @@ export class SuperSonic {
 
   getMetrics() {
     return this.#gatherMetrics();
-  }
-
-  setMetricsInterval(ms) {
-    this.#metricsInterval = ms;
-    this.#startPerformanceMonitoring();
-  }
-
-  stopMetricsPolling() {
-    this.#stopPerformanceMonitoring();
   }
 
   // ============================================================================
@@ -390,7 +375,6 @@ export class SuperSonic {
 
   async #partialShutdown() {
     this.#ntpTiming?.stopDriftTimer();
-    this.#stopPerformanceMonitoring();
     this.#syncListeners?.clear();
     this.#syncListeners = null;
 
@@ -430,7 +414,6 @@ export class SuperSonic {
       const wasmBytes = await this.#loadWasm();
       await this.#initializeAudioWorklet(wasmBytes);
       await this.#initializeOSC();
-      this.#startPerformanceMonitoring();
       await this.#finishInitialization();
     } catch (error) {
       this.#initializing = false;
@@ -747,7 +730,6 @@ export class SuperSonic {
 
     this.#eventEmitter.emit("shutdown");
     this.#ntpTiming?.stopDriftTimer();
-    this.#stopPerformanceMonitoring();
     this.#syncListeners?.clear();
     this.#syncListeners = null;
 
@@ -1214,32 +1196,6 @@ export class SuperSonic {
       bufferPoolStats: this.#bufferManager?.getStats(),
       loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,
     });
-  }
-
-  #startPerformanceMonitoring() {
-    this.#stopPerformanceMonitoring();
-
-    const intervalMs = this.mode === 'postMessage' ? 1000 : this.#metricsInterval;
-
-    this.#metricsIntervalId = setInterval(() => {
-      if (!this.#eventEmitter.hasListeners('metrics')) return;
-      if (this.#metricsGatherInProgress) return;
-
-      this.#metricsGatherInProgress = true;
-      try {
-        const metrics = this.#gatherMetrics();
-        this.#eventEmitter.emit('metrics', metrics);
-      } finally {
-        this.#metricsGatherInProgress = false;
-      }
-    }, intervalMs);
-  }
-
-  #stopPerformanceMonitoring() {
-    if (this.#metricsIntervalId) {
-      clearInterval(this.#metricsIntervalId);
-      this.#metricsIntervalId = null;
-    }
   }
 
   // ============================================================================

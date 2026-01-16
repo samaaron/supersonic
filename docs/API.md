@@ -82,11 +82,9 @@ myButton.onclick = async () => {
 
 ### Metrics
 
-| Method                                            | Description                    |
-| ------------------------------------------------- | ------------------------------ |
-| [`getMetrics()`](#getmetrics)                     | Get metrics snapshot on demand |
-| [`setMetricsInterval(ms)`](#setmetricsintervalms) | Change polling interval        |
-| [`stopMetricsPolling()`](#stopmetricspolling)     | Stop the metrics timer         |
+| Method                        | Description                    |
+| ----------------------------- | ------------------------------ |
+| [`getMetrics()`](#getmetrics) | Get metrics snapshot on demand |
 
 ### Properties
 
@@ -580,17 +578,6 @@ supersonic.on("debug", (msg) => {
 });
 ```
 
-### Event: `metrics`
-
-Emitted periodically with performance metrics. See [Metrics](METRICS.md) for details.
-
-```javascript
-supersonic.on("metrics", (metrics) => {
-  console.log("Messages sent:", metrics.mainMessagesSent);
-  console.log("Scheduler depth:", metrics.workletSchedulerDepth);
-});
-```
-
 ### Event: `shutdown`
 
 Emitted when the engine is shutting down. Fired by `shutdown()`, `reset()`, and `destroy()`. Use this to clean up application state that depends on SuperSonic.
@@ -914,27 +901,17 @@ For monitoring performance and debugging. See [Metrics](METRICS.md) for the full
 
 ### `getMetrics()`
 
-Get a metrics snapshot on demand.
+Get a metrics snapshot on demand. Poll this from your UI update loop (e.g., `setInterval` or `requestAnimationFrame`).
 
 ```javascript
 const metrics = supersonic.getMetrics();
 console.log("Messages processed:", metrics.workletMessagesProcessed);
-```
 
-### `setMetricsInterval(ms)`
-
-Change the polling interval for `onMetricsUpdate`. Default is 100ms (10Hz).
-
-```javascript
-supersonic.setMetricsInterval(500); // Update every 500ms
-```
-
-### `stopMetricsPolling()`
-
-Stop the metrics polling timer.
-
-```javascript
-supersonic.stopMetricsPolling();
+// Typical usage: poll in your own timer
+setInterval(() => {
+  const m = supersonic.getMetrics();
+  updateUI(m);
+}, 100);
 ```
 
 ## Advanced

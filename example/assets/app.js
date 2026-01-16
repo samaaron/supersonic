@@ -1438,7 +1438,7 @@ $("init-button").addEventListener("click", async () => {
 
     orchestrator.on("message:raw", addMessage);
     orchestrator.on("message:sent", (oscData) => addSentMessage(oscData));
-    orchestrator.on("metrics", updateMetrics);
+    setInterval(() => updateMetrics(orchestrator.getMetrics()), 100);
     orchestrator.on("error", (e) => {
       showError(e.message);
       updateStatus("error");

@@ -8,51 +8,27 @@ Performance metrics for monitoring SuperSonic's internal state.
 ## Quick Start
 
 ```javascript
-// Subscribe to periodic updates (default: every 100ms)
-supersonic.on('metrics', (metrics) => {
+// Poll metrics from your UI update loop
+setInterval(() => {
+  const metrics = supersonic.getMetrics();
   console.log('Processed:', metrics.workletMessagesProcessed);
   console.log('Dropped:', metrics.workletMessagesDropped);
-});
+}, 100);
 
-// Or get a snapshot on demand
-const metrics = supersonic.getMetrics();
+// Or use requestAnimationFrame for smoother UI updates
+function updateUI() {
+  const metrics = supersonic.getMetrics();
+  // Update your UI here
+  requestAnimationFrame(updateUI);
+}
+requestAnimationFrame(updateUI);
 ```
 
 ## API
 
-### `on('metrics', callback)`
-
-Subscribe to periodic metrics updates. The timer runs from boot at 100ms intervals.
-
-```javascript
-const unsubscribe = supersonic.on('metrics', (metrics) => {
-  // Called every 100ms by default
-});
-
-// Stop receiving updates
-unsubscribe();
-```
-
-### `setMetricsInterval(ms)`
-
-Change the polling interval and restart the timer.
-
-```javascript
-supersonic.setMetricsInterval(500);  // Update every 500ms (2Hz)
-supersonic.setMetricsInterval(50);   // Update every 50ms (20Hz)
-```
-
-### `stopMetricsPolling()`
-
-Stop the metrics timer entirely.
-
-```javascript
-supersonic.stopMetricsPolling();
-```
-
 ### `getMetrics()`
 
-Get a metrics snapshot on demand. Always available, regardless of polling state.
+Get a metrics snapshot on demand.
 
 ```javascript
 const metrics = supersonic.getMetrics();
@@ -155,20 +131,22 @@ Main thread state.
 ## Example: Simple Monitor
 
 ```javascript
-supersonic.on('metrics', (metrics) => {
+setInterval(() => {
+  const metrics = supersonic.getMetrics();
+
   // Check for problems
   if (metrics.workletMessagesDropped > 0) {
     console.warn('Messages being dropped!');
   }
 
-  // Monitor buffer usage
-  if (metrics.inBufferUsed.percentage > 80) {
+  // Monitor buffer usage (SAB mode only)
+  if (metrics.inBufferUsed?.percentage > 80) {
     console.warn('Input buffer getting full:', metrics.inBufferUsed.percentage + '%');
   }
 
   // Track throughput
   console.log(`Processed: ${metrics.workletMessagesProcessed}, Sent: ${metrics.mainMessagesSent}`);
-});
+}, 100);
 ```
 
 ## Performance
@@ -176,5 +154,3 @@ supersonic.on('metrics', (metrics) => {
 **SAB mode**: `getMetrics()` takes less than 0.1ms - it's just reading from shared memory.
 
 **PostMessage mode**: `getMetrics()` reads from a cached snapshot that the worklet sends every 25ms (configurable via `snapshotIntervalMs`). The snapshot includes both metrics and node tree data in a single transfer.
-
-The default 100ms polling interval for the `'metrics'` event adds negligible CPU load in either mode.
