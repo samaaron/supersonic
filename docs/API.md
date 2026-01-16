@@ -901,17 +901,19 @@ For monitoring performance and debugging. See [Metrics](METRICS.md) for the full
 
 ### `getMetrics()`
 
-Get a metrics snapshot on demand. Poll this from your UI update loop (e.g., `setInterval` or `requestAnimationFrame`).
+Get a metrics snapshot on demand. This is a cheap local memory read in both SAB and postMessage modes - no IPC or copying occurs. Safe to call from `requestAnimationFrame` or high-frequency timers.
 
 ```javascript
 const metrics = supersonic.getMetrics();
 console.log("Messages processed:", metrics.workletMessagesProcessed);
 
-// Typical usage: poll in your own timer
-setInterval(() => {
+// Poll from requestAnimationFrame for smooth UI updates
+function updateLoop() {
   const m = supersonic.getMetrics();
-  updateUI(m);
-}, 100);
+  updateMetricsUI(m);
+  requestAnimationFrame(updateLoop);
+}
+requestAnimationFrame(updateLoop);
 ```
 
 ## Advanced

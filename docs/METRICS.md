@@ -28,7 +28,7 @@ requestAnimationFrame(updateUI);
 
 ### `getMetrics()`
 
-Get a metrics snapshot on demand.
+Get a metrics snapshot on demand. This is a cheap local memory read - safe to call from `requestAnimationFrame` or high-frequency timers without causing any IPC or copying.
 
 ```javascript
 const metrics = supersonic.getMetrics();
