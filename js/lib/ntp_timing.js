@@ -4,12 +4,13 @@
 import {
   calculateCurrentNTP,
   calculateNTPStartTime,
+  calculateDriftMs,
 } from './timing_utils.js';
 import { DRIFT_UPDATE_INTERVAL_MS } from '../timing_constants.js';
 
 /**
  * Manages NTP timing synchronization between AudioContext and wall clock.
- * Periodically resyncs to auto-correct any drift from background throttling, etc.
+ * Measures drift periodically and applies correction for accurate bundle scheduling.
  */
 export class NTPTiming {
   #mode;
@@ -20,14 +21,16 @@ export class NTPTiming {
 
   // Cached SAB views (SAB mode only)
   #ntpStartView;
+  #driftView;
   #globalOffsetView;
 
   // Local storage (postMessage mode, or fallback)
-  #ntpStartTime;
+  #initialNTPStartTime;
+  #localDriftMs = 0;
   #localGlobalOffsetMs = 0;
 
-  // Resync timer
-  #resyncTimer = null;
+  // Drift update timer
+  #driftOffsetTimer = null;
 
   /**
    * @param {Object} options
@@ -55,6 +58,11 @@ export class NTPTiming {
       this.#ntpStartView = new Float64Array(
         sharedBuffer,
         ringBufferBase + bufferConstants.NTP_START_TIME_START,
+        1
+      );
+      this.#driftView = new Int32Array(
+        sharedBuffer,
+        ringBufferBase + bufferConstants.DRIFT_OFFSET_START,
         1
       );
       this.#globalOffsetView = new Int32Array(
@@ -101,29 +109,14 @@ export class NTPTiming {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
-    // Sync timing
-    this.#updateNTPStartTime(timestamp);
-
-    if (__DEV__) {
-      console.log(
-        `[Dbg-NTPTiming] Initialized: start=${this.#ntpStartTime.toFixed(6)}s`
-      );
-    }
-  }
-
-  /**
-   * Calculate and update NTP start time from current timestamp
-   * @param {Object} timestamp - From audioContext.getOutputTimestamp()
-   */
-  #updateNTPStartTime(timestamp) {
+    // Get synchronized snapshot of both time domains
     const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
     const currentNTP = calculateCurrentNTP(perfTimeMs);
+
+    // NTP time at AudioContext start = current NTP - current AudioContext time
     const ntpStartTime = calculateNTPStartTime(currentNTP, timestamp.contextTime);
 
-    // Store locally
-    this.#ntpStartTime = ntpStartTime;
-
-    // Update memory (SAB directly, or via postMessage)
+    // Write to memory (SAB directly, or via postMessage)
     if (this.#mode === 'sab' && this.#ntpStartView) {
       this.#ntpStartView[0] = ntpStartTime;
     } else if (this.#workletPort) {
@@ -132,11 +125,62 @@ export class NTPTiming {
         ntpStartTime: ntpStartTime
       });
     }
+
+    // Store for drift calculation
+    this.#initialNTPStartTime = ntpStartTime;
+
+    if (__DEV__) {
+      console.log(
+        `[Dbg-NTPTiming] Initialized: start=${ntpStartTime.toFixed(6)}s ` +
+        `(NTP=${currentNTP.toFixed(3)}s, contextTime=${timestamp.contextTime.toFixed(3)}s)`
+      );
+    }
   }
 
   /**
-   * Resync NTP timing - recalculates NTP start time from current clocks.
-   * Called periodically to auto-correct any drift from background throttling, etc.
+   * Update drift offset (AudioContext → NTP drift correction)
+   * CRITICAL: This REPLACES the drift value, does not accumulate
+   */
+  updateDriftOffset() {
+    if (!this.#bufferConstants || !this.#audioContext || this.#initialNTPStartTime === undefined) {
+      return;
+    }
+
+    // Get synchronized snapshot of both time domains
+    const timestamp = this.#audioContext.getOutputTimestamp();
+    const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
+    const currentNTP = calculateCurrentNTP(perfTimeMs);
+
+    // Calculate where contextTime SHOULD be based on wall clock
+    const expectedContextTime = currentNTP - this.#initialNTPStartTime;
+
+    // Compare to actual contextTime to get drift
+    const driftMs = calculateDriftMs(expectedContextTime, timestamp.contextTime);
+
+    // Store locally
+    this.#localDriftMs = driftMs;
+
+    // Write to memory (SAB directly, or via postMessage to worklet which writes to WASM memory)
+    if (this.#mode === 'sab' && this.#driftView) {
+      Atomics.store(this.#driftView, 0, driftMs);
+    } else if (this.#workletPort) {
+      this.#workletPort.postMessage({
+        type: 'setDriftOffset',
+        driftOffsetMs: driftMs
+      });
+    }
+
+    if (__DEV__) {
+      console.log(
+        `[Dbg-NTPTiming] Drift: ${driftMs}ms ` +
+        `(expected=${expectedContextTime.toFixed(3)}s, actual=${timestamp.contextTime.toFixed(3)}s)`
+      );
+    }
+  }
+
+  /**
+   * Resync NTP timing after recovering from suspend/interrupt.
+   * Re-baselines the NTP start time and recalculates drift.
    */
   resync() {
     if (!this.#audioContext) {
@@ -148,37 +192,64 @@ export class NTPTiming {
       return;
     }
 
-    this.#updateNTPStartTime(timestamp);
+    // Recalculate NTP start time based on current state
+    const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
+    const currentNTP = calculateCurrentNTP(perfTimeMs);
+    const ntpStartTime = calculateNTPStartTime(currentNTP, timestamp.contextTime);
+
+    // Update both SAB/worklet and internal state
+    if (this.#mode === 'sab' && this.#ntpStartView) {
+      this.#ntpStartView[0] = ntpStartTime;
+    } else if (this.#workletPort) {
+      this.#workletPort.postMessage({
+        type: 'setNTPStartTime',
+        ntpStartTime: ntpStartTime
+      });
+    }
+    this.#initialNTPStartTime = ntpStartTime;
+
+    // Recalculate drift immediately
+    this.updateDriftOffset();
 
     if (__DEV__) {
-      console.log(`[Dbg-NTPTiming] Resynced: start=${this.#ntpStartTime.toFixed(6)}s`);
+      console.log(`[Dbg-NTPTiming] Resynced: start=${ntpStartTime.toFixed(6)}s`);
     }
   }
 
   /**
-   * Start periodic resync timer
-   * Resyncs NTP timing every interval to auto-correct any drift
+   * Start periodic drift offset updates
    */
   startDriftTimer() {
     this.stopDriftTimer();
 
-    this.#resyncTimer = setInterval(() => {
-      this.resync();
+    this.#driftOffsetTimer = setInterval(() => {
+      this.updateDriftOffset();
     }, DRIFT_UPDATE_INTERVAL_MS);
 
     if (__DEV__) {
-      console.log(`[Dbg-NTPTiming] Started resync timer (every ${DRIFT_UPDATE_INTERVAL_MS}ms)`);
+      console.log(`[Dbg-NTPTiming] Started drift timer (every ${DRIFT_UPDATE_INTERVAL_MS}ms)`);
     }
   }
 
   /**
-   * Stop periodic resync timer
+   * Stop periodic drift offset updates
    */
   stopDriftTimer() {
-    if (this.#resyncTimer) {
-      clearInterval(this.#resyncTimer);
-      this.#resyncTimer = null;
+    if (this.#driftOffsetTimer) {
+      clearInterval(this.#driftOffsetTimer);
+      this.#driftOffsetTimer = null;
     }
+  }
+
+  /**
+   * Get current drift offset in milliseconds
+   * @returns {number}
+   */
+  getDriftOffset() {
+    if (this.#driftView) {
+      return Atomics.load(this.#driftView, 0);
+    }
+    return this.#localDriftMs;
   }
 
   /**
@@ -189,7 +260,7 @@ export class NTPTiming {
     if (this.#ntpStartView) {
       return this.#ntpStartView[0];
     }
-    return this.#ntpStartTime ?? 0;
+    return this.#initialNTPStartTime ?? 0;
   }
 
   /**
@@ -224,11 +295,15 @@ export class NTPTiming {
       return null;
     }
 
+    // Read current drift offset
+    const driftMs = this.getDriftOffset();
+    const driftSeconds = driftMs / 1000.0;
+
     // Read global offset (for future multi-system sync)
     const globalMs = this.getGlobalOffset();
     const globalSeconds = globalMs / 1000.0;
 
-    const totalOffset = ntpStartTime + globalSeconds;
+    const totalOffset = ntpStartTime + driftSeconds + globalSeconds;
 
     const view = new DataView(uint8Data.buffer, uint8Data.byteOffset);
     const ntpSeconds = view.getUint32(8, false);
@@ -251,9 +326,11 @@ export class NTPTiming {
    */
   reset() {
     this.stopDriftTimer();
-    this.#ntpStartTime = undefined;
+    this.#initialNTPStartTime = undefined;
+    this.#localDriftMs = 0;
     this.#localGlobalOffsetMs = 0;
     this.#ntpStartView = null;
+    this.#driftView = null;
     this.#globalOffsetView = null;
   }
 }
