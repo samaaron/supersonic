@@ -799,7 +799,8 @@ const tree = supersonic.getTree();
 ```javascript
 {
   version: 42,          // Increments on every change
-  nodeCount: 5,         // Total nodes
+  nodeCount: 5,         // Nodes in mirror
+  droppedCount: 0,      // Nodes not mirrored due to overflow
   nodes: [
     {
       id: 0,                    // Node ID
@@ -902,6 +903,10 @@ function getChildrenInOrder(nodes, groupId) {
 | Use case       | 60fps visualization           | One-off queries, debugging |
 
 `getTree()` returns node structure only - not control values. For control values, use `/g_queryTree` with flag=1 or `/n_get` for specific nodes. See [Server Command Reference](SERVER_COMMAND_REFERENCE.md).
+
+**Mirror capacity and overflow**
+
+The node tree mirror has a capacity of 1024 nodes by default. If the actual scsynth node tree grows beyond this limit, excess nodes won't be visible to JavaScript but audio continues working normally. The `droppedCount` field indicates how many nodes were not mirrored due to this overflow - if it's greater than zero, you're seeing a partial view of the tree.
 
 ## Metrics API
 
