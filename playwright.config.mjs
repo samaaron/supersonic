@@ -3,9 +3,9 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./test",
   testMatch: "**/*.spec.mjs",
-  timeout: 60000, // 60s - WASM loading can be slow
+  timeout: 30000, // 30s default - reduced for faster feedback
   retries: 0,
-  workers: 1, // Run tests serially - they share the audio context
+  workers: '100%', // Use all available CPUs
 
   use: {
     baseURL: "http://localhost:8003",

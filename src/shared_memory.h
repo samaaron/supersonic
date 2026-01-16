@@ -43,7 +43,7 @@ constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in millis
 #ifndef NODE_TREE_MIRROR_MAX_NODES
 #define NODE_TREE_MIRROR_MAX_NODES 1024
 #endif
-constexpr uint32_t NODE_TREE_HEADER_SIZE = 12; // node_count (4) + version (4) + dropped_count (4)
+constexpr uint32_t NODE_TREE_HEADER_SIZE = 16; // node_count (4) + version (4) + dropped_count (4) + padding (4) for 8-byte alignment
 constexpr uint32_t NODE_TREE_DEF_NAME_SIZE = 32; // Max synthdef name length (including null terminator)
 constexpr uint32_t NODE_TREE_ENTRY_SIZE = 56;  // 6 x int32 (24) + def_name (32) = 56 bytes per entry
 constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MIRROR_MAX_NODES * NODE_TREE_ENTRY_SIZE); // ~57KB
@@ -160,6 +160,7 @@ struct alignas(4) NodeTreeHeader {
     std::atomic<uint32_t> node_count;    // Number of active nodes in mirror tree
     std::atomic<uint32_t> version;       // Incremented on each change (for change detection)
     std::atomic<uint32_t> dropped_count; // Nodes not mirrored due to overflow (actual tree has more)
+    uint32_t _padding;                   // Padding for 8-byte alignment of subsequent Float64 fields
 };
 
 // Node entry in the tree (56 bytes = 6 x int32 + 32-byte def_name)

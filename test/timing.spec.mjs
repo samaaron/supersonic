@@ -1,6 +1,8 @@
 import { test, expect } from './fixtures.mjs';
 
+// These tests require waiting for drift timer (15s interval) so need extended timeout
 test.describe('Timing and Drift', () => {
+  test.setTimeout(45000); // 45s for drift timer tests
   test.beforeEach(async ({ page, sonicConfig }) => {
     page.on('console', (msg) => {
       if (msg.type() === 'error') {

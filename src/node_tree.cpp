@@ -14,6 +14,7 @@
 */
 
 #include "node_tree.h"
+#include "audio_processor.h"  // For worklet_debug
 #include "scsynth/server/SC_Group.h"  // For Node, Group structs
 #include "scsynth/server/SC_SynthDef.h"  // For NodeDef (mName access)
 #include <cstring>  // For strncpy
@@ -46,7 +47,8 @@ void NodeTree_Add(Node* node, NodeTreeHeader* header, NodeEntry* entries) {
     if (slot < 0) {
         // Mirror tree is full - actual scsynth tree continues working,
         // but JS won't see this node. Increment dropped_count so JS knows.
-        header->dropped_count.fetch_add(1, std::memory_order_relaxed);
+        uint32_t new_count = header->dropped_count.fetch_add(1, std::memory_order_relaxed) + 1;
+        worklet_debug("[NodeTree] Mirror full! Node %d dropped, total dropped: %u", node->mID, new_count);
         return;
     }
 

@@ -27,18 +27,28 @@ async function measureLatency(page, config, iterations = 100) {
     const sonic = new window.SuperSonic(config);
     await sonic.init();
 
-    // Warm up - first few messages often slower
-    for (let i = 0; i < 5; i++) {
-      await new Promise((resolve) => {
+    // Helper to wait for message with timeout (fail fast, don't hang)
+    function waitForMessage(address, timeoutMs = 5000) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          sonic.off("message", handler);
+          reject(new Error(`Timeout waiting for ${address} after ${timeoutMs}ms`));
+        }, timeoutMs);
         const handler = (msg) => {
-          if (msg.address === "/status.reply") {
+          if (msg.address === address) {
+            clearTimeout(timer);
             sonic.off("message", handler);
-            resolve();
+            resolve(msg);
           }
         };
         sonic.on("message", handler);
-        sonic.send("/status");
       });
+    }
+
+    // Warm up - first few messages often slower
+    for (let i = 0; i < 5; i++) {
+      sonic.send("/status");
+      await waitForMessage("/status.reply");
     }
 
     // Measure round-trip latencies
@@ -47,16 +57,8 @@ async function measureLatency(page, config, iterations = 100) {
     for (let i = 0; i < iterations; i++) {
       const start = performance.now();
 
-      await new Promise((resolve) => {
-        const handler = (msg) => {
-          if (msg.address === "/status.reply") {
-            sonic.off("message", handler);
-            resolve();
-          }
-        };
-        sonic.on("message", handler);
-        sonic.send("/status");
-      });
+      sonic.send("/status");
+      await waitForMessage("/status.reply");
 
       const elapsed = performance.now() - start;
       latencies.push(elapsed);

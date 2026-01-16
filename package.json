@@ -11,7 +11,8 @@
     "build:release": "./build.sh --release",
     "clean": "./clean.sh",
     "dev": "cd example && npx serve",
-    "test": "playwright test --reporter=list",
+    "test": "playwright test --reporter=list --max-failures=1",
+    "test:all": "playwright test --reporter=list",
     "prepublishOnly": "./build.sh --release"
   },
   "repository": {

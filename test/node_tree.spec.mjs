@@ -2970,10 +2970,11 @@ test.describe("getTree() overflow and droppedCount", () => {
   test("droppedCount increments when mirror tree exceeds 1024 nodes", async ({ page, sonicConfig }) => {
     // This test creates more than 1024 nodes to trigger mirror overflow
     // Using groups since they're lightweight (no audio processing)
+    // NOTE: Must set maxNodes > 1024 so scsynth allows more nodes than mirror can hold
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
-      const sonic = new window.SuperSonic(config);
+      const sonic = new window.SuperSonic({ ...config, scsynthOptions: { maxNodes: 2048 } });
       await sonic.init();
 
       // NODE_TREE_MIRROR_MAX_NODES is 1024, root group takes 1 slot
@@ -3017,10 +3018,11 @@ test.describe("getTree() overflow and droppedCount", () => {
   });
 
   test("droppedCount decrements when overflowed nodes are freed", async ({ page, sonicConfig }) => {
+    // NOTE: Must set maxNodes > 1024 so scsynth allows more nodes than mirror can hold
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
-      const sonic = new window.SuperSonic(config);
+      const sonic = new window.SuperSonic({ ...config, scsynthOptions: { maxNodes: 2048 } });
       await sonic.init();
 
       // Create exactly enough to overflow by 10
@@ -3073,10 +3075,11 @@ test.describe("getTree() overflow and droppedCount", () => {
   });
 
   test("droppedCount returns to 0 when all excess nodes freed", async ({ page, sonicConfig }) => {
+    // NOTE: Must set maxNodes > 1024 so scsynth allows more nodes than mirror can hold
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
-      const sonic = new window.SuperSonic(config);
+      const sonic = new window.SuperSonic({ ...config, scsynthOptions: { maxNodes: 2048 } });
       await sonic.init();
 
       // Create enough to overflow
@@ -3120,10 +3123,11 @@ test.describe("getTree() overflow and droppedCount", () => {
   test("audio continues working when mirror overflows", async ({ page, sonicConfig }) => {
     // This test verifies that the actual scsynth tree continues to work
     // even when the JS mirror tree is full
+    // NOTE: Must set maxNodes > 1024 so scsynth allows more nodes than mirror can hold
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
-      const sonic = new window.SuperSonic(config);
+      const sonic = new window.SuperSonic({ ...config, scsynthOptions: { maxNodes: 2048 } });
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
 
@@ -3156,7 +3160,7 @@ test.describe("getTree() overflow and droppedCount", () => {
       // even if not in mirror
       let oscTreeNodeCount = 0;
       const oscPromise = new Promise((resolve) => {
-        sonic.on("osc", (msg) => {
+        sonic.on("message", (msg) => {
           if (msg.address === "/g_queryTree.reply") {
             // Count nodes in OSC reply
             // Format: [flag, nodeID, numChildren, ...]

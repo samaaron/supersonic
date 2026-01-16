@@ -869,7 +869,7 @@ test.describe("SuperSonic (SAB-only)", () => {
             NODE_TREE_SIZE: bc.NODE_TREE_SIZE,
             NODE_TREE_HEADER_SIZE: bc.NODE_TREE_HEADER_SIZE,
             NODE_TREE_ENTRY_SIZE: bc.NODE_TREE_ENTRY_SIZE,
-            NODE_TREE_MAX_NODES: bc.NODE_TREE_MAX_NODES,
+            NODE_TREE_MIRROR_MAX_NODES: bc.NODE_TREE_MIRROR_MAX_NODES,
           },
           debugMessages: debugMessages.filter(m => m.text && m.text.includes('[NodeTree]')).map(m => m.text)
         };
@@ -880,16 +880,18 @@ test.describe("SuperSonic (SAB-only)", () => {
 
     expect(result.success).toBe(true);
     expect(result.bufferConstants.NODE_TREE_START).toBeGreaterThan(0);
-    expect(result.bufferConstants.NODE_TREE_SIZE).toBe(57352);
-    expect(result.bufferConstants.NODE_TREE_HEADER_SIZE).toBe(8);
+    expect(result.bufferConstants.NODE_TREE_SIZE).toBe(57360);
+    expect(result.bufferConstants.NODE_TREE_HEADER_SIZE).toBe(16);
     expect(result.bufferConstants.NODE_TREE_ENTRY_SIZE).toBe(56);
-    expect(result.bufferConstants.NODE_TREE_MAX_NODES).toBe(1024);
+    expect(result.bufferConstants.NODE_TREE_MIRROR_MAX_NODES).toBe(1024);
 
-    expect(result.first20[0]).toBe(1);
-    expect(result.first20[1]).toBe(1);
-    expect(result.first20[2]).toBe(0);
-    expect(result.first20[3]).toBe(-1);
-    expect(result.first20[4]).toBe(1);
+    // Header: node_count (4), version (4), dropped_count (4), padding (4)
+    expect(result.first20[0]).toBe(1);  // node_count = 1 (root group)
+    expect(result.first20[1]).toBe(1);  // version = 1
+    expect(result.first20[2]).toBe(0);  // dropped_count = 0
+    // first20[3] is padding - value doesn't matter
+    // First node entry (root group): id, parent_id, is_group, prev_id, next_id, head_id
+    expect(result.first20[4]).toBe(0);  // root group id = 0
 
     expect(result.tree.nodes.length).toBe(1);
     expect(result.tree.nodes[0].id).toBe(0);

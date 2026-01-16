@@ -263,10 +263,11 @@ extern "C" {
         uint8_t* node_tree_ptr = shared_memory + NODE_TREE_START;
         memset(node_tree_ptr, 0xFF, NODE_TREE_SIZE);
 
-        // Initialize header properly (count=0, version=0)
+        // Initialize header properly (count=0, version=0, dropped_count=0)
         NodeTreeHeader* tree_header = reinterpret_cast<NodeTreeHeader*>(node_tree_ptr);
         tree_header->node_count.store(0, std::memory_order_relaxed);
         tree_header->version.store(0, std::memory_order_relaxed);
+        tree_header->dropped_count.store(0, std::memory_order_relaxed);
 
         worklet_debug("[NodeTree] Initialized at offset %u, size %u bytes",
                      NODE_TREE_START, NODE_TREE_SIZE);

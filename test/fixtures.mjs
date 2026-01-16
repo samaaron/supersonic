@@ -115,3 +115,26 @@ export const WAIT_FOR_TREE_HELPER = `
     throw new Error("Timeout waiting for tree condition");
   }
 `;
+
+/**
+ * Helper code to wait for a specific OSC message with timeout (for use inside page.evaluate).
+ * Prevents hanging if expected message never arrives - fails fast instead.
+ */
+export const WAIT_FOR_MESSAGE_HELPER = `
+  function waitForMessage(sonic, address, timeoutMs = 5000) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        sonic.off("message", handler);
+        reject(new Error("Timeout waiting for " + address + " after " + timeoutMs + "ms"));
+      }, timeoutMs);
+      const handler = (msg) => {
+        if (msg.address === address) {
+          clearTimeout(timer);
+          sonic.off("message", handler);
+          resolve(msg);
+        }
+      };
+      sonic.on("message", handler);
+    });
+  }
+`;
