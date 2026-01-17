@@ -108,7 +108,7 @@ export const WAIT_FOR_TREE_HELPER = `
   async function waitForTree(sonic, condition, timeoutMs = 2000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       if (condition(tree)) return tree;
       await new Promise(r => setTimeout(r, 20));
     }

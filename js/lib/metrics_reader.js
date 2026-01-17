@@ -250,6 +250,9 @@ export class MetricsReader {
       }
     }
 
+    // Add mode so clients know what metrics are available
+    metrics.mode = this.#mode;
+
     // Add context-provided metrics
     if (context.driftOffsetMs !== undefined) {
       metrics.driftOffsetMs = context.driftOffsetMs;

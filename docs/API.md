@@ -76,9 +76,10 @@ myButton.onclick = async () => {
 
 ### Node Tree
 
-| Method                  | Description                                             |
-| ----------------------- | ------------------------------------------------------- |
-| [`getTree()`](#gettree) | Get snapshot of synth/group hierarchy for visualization |
+| Method                        | Description                                                   |
+| ----------------------------- | ------------------------------------------------------------- |
+| [`getTree()`](#gettree)       | Get hierarchical tree structure for visualization             |
+| [`getRawTree()`](#getrawtree) | Get flat array with internal linkage pointers (for debugging) |
 
 ### Metrics
 

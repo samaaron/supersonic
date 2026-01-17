@@ -5,7 +5,7 @@ const WAIT_FOR_TREE = `
   async function waitForTree(sonic, condition, timeoutMs = 2000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       if (condition(tree)) return tree;
       await new Promise(r => setTimeout(r, 20));
     }
@@ -852,7 +852,7 @@ test.describe("SuperSonic (SAB-only)", () => {
 
         await new Promise((r) => setTimeout(r, 100));
 
-        const tree = sonic.getTree();
+        const tree = sonic.getRawTree();
 
         const bc = sonic.bufferConstants;
         const ringBufferBase = sonic.ringBufferBase;

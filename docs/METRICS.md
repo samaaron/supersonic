@@ -97,9 +97,9 @@ Messages sent to the engine.
 | `mainMessagesSent` | OSC messages sent to scsynth |
 | `mainBytesSent` | Total bytes sent |
 
-### Buffer Usage
+### Buffer Usage (SAB mode only)
 
-Ring buffer fill levels.
+Ring buffer fill levels. These metrics require atomic reads from shared memory and are only available in SAB mode. In postMessage mode, these properties will be `undefined`.
 
 | Property | Description |
 |----------|-------------|

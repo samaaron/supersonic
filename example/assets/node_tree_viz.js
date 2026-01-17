@@ -463,7 +463,7 @@ export class NodeTreeViz {
   update() {
     if (!this.supersonic?.initialized) return;
 
-    const tree = this.supersonic.getTree();
+    const tree = this.supersonic.getRawTree();
     if (tree.version === this.lastVersion) return;
     console.log(`[NodeTreeViz] Updating: version ${this.lastVersion} -> ${tree.version}, nodes: ${tree.nodeCount}`);
     this.lastVersion = tree.version;

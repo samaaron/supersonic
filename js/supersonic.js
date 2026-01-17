@@ -71,6 +71,121 @@ export class SuperSonic {
     return inspect(target);
   }
 
+  /**
+   * Get schema describing all available metrics.
+   * Useful for generating UIs or understanding metric types.
+   */
+  static getMetricsSchema() {
+    return {
+      // Meta
+      mode: { type: 'string', values: ['sab', 'postMessage'], description: 'Transport mode' },
+
+      // Worklet metrics
+      workletProcessCount: { type: 'counter', unit: 'count', description: 'Audio process() calls', modes: ['sab', 'postMessage'] },
+      workletMessagesProcessed: { type: 'counter', unit: 'count', description: 'OSC messages processed by scsynth', modes: ['sab', 'postMessage'] },
+      workletMessagesDropped: { type: 'counter', unit: 'count', description: 'Messages dropped (ring buffer full)', modes: ['sab', 'postMessage'] },
+      workletSchedulerDepth: { type: 'gauge', unit: 'count', description: 'Current scheduler queue depth', modes: ['sab', 'postMessage'] },
+      workletSchedulerMax: { type: 'gauge', unit: 'count', description: 'Peak scheduler queue depth', modes: ['sab', 'postMessage'] },
+      workletSchedulerDropped: { type: 'counter', unit: 'count', description: 'Scheduled events dropped', modes: ['sab', 'postMessage'] },
+      workletSequenceGaps: { type: 'counter', unit: 'count', description: 'Message sequence gaps detected', modes: ['sab', 'postMessage'] },
+
+      // Prescheduler metrics
+      preschedulerPending: { type: 'gauge', unit: 'count', description: 'Events waiting to be scheduled', modes: ['sab', 'postMessage'] },
+      preschedulerPeak: { type: 'gauge', unit: 'count', description: 'Peak pending events', modes: ['sab', 'postMessage'] },
+      preschedulerSent: { type: 'counter', unit: 'count', description: 'Events sent to worklet', modes: ['sab', 'postMessage'] },
+      preschedulerRetriesSucceeded: { type: 'counter', unit: 'count', description: 'Retries that succeeded', modes: ['sab', 'postMessage'] },
+      preschedulerRetriesFailed: { type: 'counter', unit: 'count', description: 'Retries that failed', modes: ['sab', 'postMessage'] },
+      preschedulerBundlesScheduled: { type: 'counter', unit: 'count', description: 'Bundles scheduled', modes: ['sab', 'postMessage'] },
+      preschedulerEventsCancelled: { type: 'counter', unit: 'count', description: 'Events cancelled', modes: ['sab', 'postMessage'] },
+      preschedulerTotalDispatches: { type: 'counter', unit: 'count', description: 'Total dispatch attempts', modes: ['sab', 'postMessage'] },
+      preschedulerMessagesRetried: { type: 'counter', unit: 'count', description: 'Messages that needed retry', modes: ['sab', 'postMessage'] },
+      preschedulerRetryQueueSize: { type: 'gauge', unit: 'count', description: 'Current retry queue size', modes: ['sab', 'postMessage'] },
+      preschedulerRetryQueueMax: { type: 'gauge', unit: 'count', description: 'Peak retry queue size', modes: ['sab', 'postMessage'] },
+      preschedulerBypassed: { type: 'counter', unit: 'count', description: 'Messages that bypassed prescheduler (direct write)', modes: ['sab', 'postMessage'] },
+
+      // OSC In metrics
+      oscInMessagesReceived: { type: 'counter', unit: 'count', description: 'OSC messages received from scsynth', modes: ['sab', 'postMessage'] },
+      oscInMessagesDropped: { type: 'counter', unit: 'count', description: 'OSC messages dropped (buffer full)', modes: ['sab', 'postMessage'] },
+      oscInBytesReceived: { type: 'counter', unit: 'bytes', description: 'Total bytes received', modes: ['sab', 'postMessage'] },
+
+      // Debug metrics
+      debugMessagesReceived: { type: 'counter', unit: 'count', description: 'Debug messages from scsynth', modes: ['sab', 'postMessage'] },
+      debugBytesReceived: { type: 'counter', unit: 'bytes', description: 'Debug bytes received', modes: ['sab', 'postMessage'] },
+
+      // Main thread metrics
+      mainMessagesSent: { type: 'counter', unit: 'count', description: 'Messages sent to scsynth', modes: ['sab', 'postMessage'] },
+      mainBytesSent: { type: 'counter', unit: 'bytes', description: 'Bytes sent to scsynth', modes: ['sab', 'postMessage'] },
+
+      // Buffer usage (SAB only)
+      inBufferUsed: { type: 'object', description: 'Input ring buffer usage', modes: ['sab'], properties: {
+        bytes: { type: 'gauge', unit: 'bytes', description: 'Bytes used' },
+        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' }
+      }},
+      outBufferUsed: { type: 'object', description: 'Output ring buffer usage', modes: ['sab'], properties: {
+        bytes: { type: 'gauge', unit: 'bytes', description: 'Bytes used' },
+        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' }
+      }},
+      debugBufferUsed: { type: 'object', description: 'Debug ring buffer usage', modes: ['sab'], properties: {
+        bytes: { type: 'gauge', unit: 'bytes', description: 'Bytes used' },
+        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' }
+      }},
+
+      // Timing
+      driftOffsetMs: { type: 'gauge', unit: 'ms', description: 'Clock drift between AudioContext and wall clock', modes: ['sab', 'postMessage'] },
+
+      // Engine state
+      audioContextState: { type: 'string', values: ['running', 'suspended', 'closed', 'interrupted'], description: 'AudioContext state', modes: ['sab', 'postMessage'] },
+      bufferPoolUsedBytes: { type: 'gauge', unit: 'bytes', description: 'Buffer pool bytes used', modes: ['sab', 'postMessage'] },
+      bufferPoolAvailableBytes: { type: 'gauge', unit: 'bytes', description: 'Buffer pool bytes available', modes: ['sab', 'postMessage'] },
+      bufferPoolAllocations: { type: 'counter', unit: 'count', description: 'Total buffer allocations', modes: ['sab', 'postMessage'] },
+      loadedSynthDefs: { type: 'gauge', unit: 'count', description: 'Number of loaded synthdefs', modes: ['sab', 'postMessage'] },
+    };
+  }
+
+  /**
+   * Get schema describing the node tree structure.
+   * Useful for generating UIs or understanding tree data.
+   */
+  static getTreeSchema() {
+    const nodeSchema = {
+      id: { type: 'number', description: 'Unique node ID' },
+      type: { type: 'string', values: ['group', 'synth'], description: 'Node type' },
+      defName: { type: 'string', description: 'Synthdef name (synths only, empty for groups)' },
+      children: { type: 'array', description: 'Child nodes (recursive)', itemSchema: '(self)' }
+    };
+    return {
+      nodeCount: { type: 'number', description: 'Total nodes in tree' },
+      version: { type: 'number', description: 'Increments on any tree change, useful for detecting updates' },
+      droppedCount: { type: 'number', description: 'Nodes that exceeded mirror capacity (tree may be incomplete)' },
+      root: {
+        type: 'object',
+        description: 'Root node of the tree (always a group with id 0)',
+        schema: nodeSchema
+      }
+    };
+  }
+
+  static getRawTreeSchema() {
+    return {
+      nodeCount: { type: 'number', description: 'Total nodes in tree' },
+      version: { type: 'number', description: 'Increments on any tree change, useful for detecting updates' },
+      droppedCount: { type: 'number', description: 'Nodes that exceeded mirror capacity (tree may be incomplete)' },
+      nodes: {
+        type: 'array',
+        description: 'Flat array of all nodes with internal linkage pointers',
+        itemSchema: {
+          id: { type: 'number', description: 'Unique node ID' },
+          parentId: { type: 'number', description: 'Parent node ID (-1 for root)' },
+          isGroup: { type: 'boolean', description: 'True if group, false if synth' },
+          prevId: { type: 'number', description: 'Previous sibling node ID (-1 if none)' },
+          nextId: { type: 'number', description: 'Next sibling node ID (-1 if none)' },
+          headId: { type: 'number', description: 'First child node ID (groups only, -1 if empty)' },
+          defName: { type: 'string', description: 'Synthdef name (synths only, empty for groups)' }
+        }
+      }
+    };
+  }
+
   // Private implementation
   #audioContext;
   #workletNode;
@@ -428,7 +543,7 @@ export class SuperSonic {
   // NODE TREE API
   // ============================================================================
 
-  getTree() {
+  getRawTree() {
     if (!this.#initialized) {
       return { nodeCount: 0, version: 0, droppedCount: 0, nodes: [] };
     }
@@ -456,6 +571,46 @@ export class SuperSonic {
     }
 
     return parseNodeTree(buffer, treeOffset, bc);
+  }
+
+  getTree() {
+    const raw = this.getRawTree();
+
+    // Build hierarchical tree from flat node list
+    const buildNode = (rawNode) => ({
+      id: rawNode.id,
+      type: rawNode.isGroup ? 'group' : 'synth',
+      defName: rawNode.defName,
+      children: []
+    });
+
+    // Create node map for efficient lookup
+    const nodeMap = new Map();
+    for (const rawNode of raw.nodes) {
+      nodeMap.set(rawNode.id, buildNode(rawNode));
+    }
+
+    // Build parent-child relationships
+    let root = null;
+    for (const rawNode of raw.nodes) {
+      const node = nodeMap.get(rawNode.id);
+      if (rawNode.parentId === -1 || rawNode.parentId === 0 && rawNode.id === 0) {
+        // Root node (id 0 with parentId -1 or 0)
+        root = node;
+      } else {
+        const parent = nodeMap.get(rawNode.parentId);
+        if (parent) {
+          parent.children.push(node);
+        }
+      }
+    }
+
+    return {
+      nodeCount: raw.nodeCount,
+      version: raw.version,
+      droppedCount: raw.droppedCount,
+      root: root || { id: 0, type: 'group', defName: '', children: [] }
+    };
   }
 
   // ============================================================================
@@ -1058,6 +1213,10 @@ export class SuperSonic {
     await this.#eventEmitter.emitAsync('setup');
     this.#eventEmitter.emit('ready', { capabilities: this.#capabilities, bootStats: this.bootStats });
 
+    // TODO(v1): Consider whether to keep this dev console helper.
+    // It auto-registers instances to window.__supersonic__ for quick debugging (ss.metrics(), ss.tree(), etc.)
+    // Unusual pattern - most libs expect devs to do `window.sonic = sonic` themselves.
+    // Useful but the `instances` array for multiple engines is over-engineered.
     if (__DEV__ && typeof window !== 'undefined') {
       if (!window.__supersonic__) {
         const ss = window.__supersonic__ = { instances: [] };
@@ -1067,6 +1226,7 @@ export class SuperSonic {
         });
         ss.metrics = () => ss.primary?.getMetrics();
         ss.tree = () => ss.primary?.getTree();
+        ss.rawTree = () => ss.primary?.getRawTree();
         ss.inspect = () => ss.primary ? SuperSonic.inspect(ss.primary) : null;
       }
       window.__supersonic__.instances.push(this);

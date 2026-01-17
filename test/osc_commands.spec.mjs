@@ -287,14 +287,14 @@ test.describe("Node Commands", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const hasSynthBefore = treeBefore.nodes.some((n) => n.id === 1000);
 
       // Free synth
       await sonic.send("/n_free", 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const hasSynthAfter = treeAfter.nodes.some((n) => n.id === 1000);
 
       return {
@@ -677,7 +677,7 @@ test.describe("Synth Commands", () => {
       );
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth = tree.nodes.find((n) => n.id === 1000);
 
       // Cleanup
@@ -753,7 +753,7 @@ test.describe("Synth Commands", () => {
       );
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthsInGroup = tree.nodes.filter(
         (n) => n.parentId === 100 && !n.isGroup
       );
@@ -875,7 +875,7 @@ test.describe("Group Commands", () => {
       await sonic.send("/g_new", 100, 0, 0);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const group = tree.nodes.find((n) => n.id === 100);
 
       // Cleanup
@@ -908,7 +908,7 @@ test.describe("Group Commands", () => {
       await sonic.send("/p_new", 100, 0, 0);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const group = tree.nodes.find((n) => n.id === 100);
 
       // Cleanup
@@ -1040,7 +1040,7 @@ test.describe("Group Commands", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 1, 100, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const countBefore = treeBefore.nodes.filter(
         (n) => n.parentId === 100
       ).length;
@@ -1049,7 +1049,7 @@ test.describe("Group Commands", () => {
       await sonic.send("/g_freeAll", 100);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const countAfter = treeAfter.nodes.filter(
         (n) => n.parentId === 100
       ).length;
@@ -1088,14 +1088,14 @@ test.describe("Group Commands", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 1, 101, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const synthsBefore = treeBefore.nodes.filter((n) => !n.isGroup).length;
 
       // Deep free from group 100
       await sonic.send("/g_deepFree", 100);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const synthsAfter = treeAfter.nodes.filter((n) => !n.isGroup).length;
       const groupsRemain =
         treeAfter.nodes.some((n) => n.id === 100) &&

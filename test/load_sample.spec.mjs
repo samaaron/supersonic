@@ -332,7 +332,7 @@ test.describe("SuperSonic loadSample()", () => {
         let tree;
         const start = Date.now();
         while (Date.now() - start < 2000) {
-          tree = sonic.getTree();
+          tree = sonic.getRawTree();
           if (tree.nodes.some((n) => n.id === 1000)) break;
           await new Promise(r => setTimeout(r, 20));
         }
@@ -639,7 +639,7 @@ test.describe("SuperSonic loadSample()", () => {
         let tree;
         const start = Date.now();
         while (Date.now() - start < 2000) {
-          tree = sonic.getTree();
+          tree = sonic.getRawTree();
           if (tree.nodes.some((n) => n.id === 1000)) break;
           await new Promise(r => setTimeout(r, 20));
         }
@@ -961,7 +961,7 @@ test.describe("SuperSonic loadSample()", () => {
         let tree;
         const start = Date.now();
         while (Date.now() - start < 2000) {
-          tree = sonic.getTree();
+          tree = sonic.getRawTree();
           if (tree.nodes.some((n) => n.id === 1000)) break;
           await new Promise(r => setTimeout(r, 20));
         }

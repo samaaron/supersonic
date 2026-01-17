@@ -676,17 +676,23 @@ function updateMetrics(m) {
     if (el) el.textContent = val;
   }
 
-  // Buffer bars
+  // Buffer bars (SAB mode only)
+  const isSABMode = m.mode === 'sab';
   for (const [name, color] of [
     ["in", "#1e90ff"],
     ["out", "#4a4"],
     ["debug", "#a4a"],
   ]) {
-    const usage = mapped[`${name}_buffer_usage`] ?? 0;
+    const usage = mapped[`${name}_buffer_usage`];
     const bar = $(`metric-${name}-bar`),
       label = $(`metric-${name}-usage`);
-    if (bar) bar.style.width = usage + "%";
-    if (label) label.textContent = usage.toFixed(2) + "%";
+    if (isSABMode && usage !== undefined) {
+      if (bar) bar.style.width = usage + "%";
+      if (label) label.textContent = usage.toFixed(2) + "%";
+    } else {
+      if (bar) bar.style.width = "0%";
+      if (label) label.textContent = "N/A";
+    }
   }
 }
 

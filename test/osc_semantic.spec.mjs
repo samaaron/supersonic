@@ -30,14 +30,14 @@ test.describe("/n_free semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const nodeBefore = treeBefore.nodes.find((n) => n.id === 1000);
 
       // Free synth
       await sonic.send("/n_free", 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const nodeAfter = treeAfter.nodes.find((n) => n.id === 1000);
 
       return {
@@ -67,7 +67,7 @@ test.describe("/n_free semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const countBefore = treeBefore.nodes.filter((n) =>
         [1000, 1001, 1002].includes(n.id)
       ).length;
@@ -76,7 +76,7 @@ test.describe("/n_free semantic tests", () => {
       await sonic.send("/n_free", 1000, 1001, 1002);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const countAfter = treeAfter.nodes.filter((n) =>
         [1000, 1001, 1002].includes(n.id)
       ).length;
@@ -106,13 +106,13 @@ test.describe("/n_free semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try to free non-existent node 9999
       await sonic.send("/n_free", 9999);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Original synth should still exist
       const synthStillExists = treeAfter.nodes.some((n) => n.id === 1000);
@@ -149,7 +149,7 @@ test.describe("/n_free semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const groupExists = treeBefore.nodes.some((n) => n.id === 100);
       const synthsInGroup = treeBefore.nodes.filter(
         (n) => n.parentId === 100
@@ -159,7 +159,7 @@ test.describe("/n_free semantic tests", () => {
       await sonic.send("/n_free", 100);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const groupExistsAfter = treeAfter.nodes.some((n) => n.id === 100);
       const synth1000Exists = treeAfter.nodes.some((n) => n.id === 1000);
       const synth1001Exists = treeAfter.nodes.some((n) => n.id === 1001);
@@ -241,13 +241,13 @@ test.describe("/n_free semantic tests", () => {
       await sonic.send("/n_free", 1000);
       await sonic.sync(2);
 
-      const treeAfterFirstFree = sonic.getTree();
+      const treeAfterFirstFree = sonic.getRawTree();
 
       // Free again - should not error
       await sonic.send("/n_free", 1000);
       await sonic.sync(3);
 
-      const treeAfterSecondFree = sonic.getTree();
+      const treeAfterSecondFree = sonic.getRawTree();
 
       return {
         noError: true,
@@ -276,13 +276,13 @@ test.describe("/n_free semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Free top-level group
       await sonic.send("/n_free", 100);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       return {
         group100ExistsBefore: treeBefore.nodes.some((n) => n.id === 100),
@@ -546,7 +546,7 @@ test.describe("/n_set semantic tests", () => {
       await sonic.sync(2);
 
       // Synth should still be running
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 1000);
 
       // Cleanup
@@ -726,7 +726,7 @@ test.describe("/n_map semantic tests", () => {
       await sonic.send("/n_map", 1000, "note", 0);
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 1000);
 
       // Cleanup
@@ -812,7 +812,7 @@ test.describe("/n_map semantic tests", () => {
       await sonic.send("/n_map", 1000, "note", 0, "amp", 1);
       await sonic.sync(3);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 1000);
 
       // Cleanup
@@ -841,7 +841,7 @@ test.describe("/s_new semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1234, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth = tree.nodes.find((n) => n.id === 1234);
 
       // Cleanup
@@ -871,13 +871,13 @@ test.describe("/s_new semantic tests", () => {
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
 
-      const nodeCountBefore = sonic.getTree().nodeCount;
+      const nodeCountBefore = sonic.getRawTree().nodeCount;
 
       // Create synth with auto ID
       await sonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const autoSynth = treeAfter.nodes.find(
         (n) => n.id < 0 && n.defName === "sonic-pi-beep"
       );
@@ -915,7 +915,7 @@ test.describe("/s_new semantic tests", () => {
 
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth1000 = tree.nodes.find((n) => n.id === 1000);
       const synth1001 = tree.nodes.find((n) => n.id === 1001);
 
@@ -956,7 +956,7 @@ test.describe("/s_new semantic tests", () => {
 
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth1000 = tree.nodes.find((n) => n.id === 1000);
       const synth1001 = tree.nodes.find((n) => n.id === 1001);
       const synth1002 = tree.nodes.find((n) => n.id === 1002);
@@ -1002,7 +1002,7 @@ test.describe("/s_new semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 2, 1000, "release", 60);
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth1000 = tree.nodes.find((n) => n.id === 1000);
       const synth1001 = tree.nodes.find((n) => n.id === 1001);
 
@@ -1042,7 +1042,7 @@ test.describe("/s_new semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 3, 1000, "release", 60);
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth1000 = tree.nodes.find((n) => n.id === 1000);
       const synth1001 = tree.nodes.find((n) => n.id === 1001);
 
@@ -1072,14 +1072,14 @@ test.describe("/s_new semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const synth1000Before = treeBefore.nodes.find((n) => n.id === 1000);
 
       // Replace 1000 with new synth 1001 (action 4)
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 4, 1000, "release", 60);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const synth1000After = treeAfter.nodes.find((n) => n.id === 1000);
       const synth1001After = treeAfter.nodes.find((n) => n.id === 1001);
 
@@ -1227,7 +1227,7 @@ test.describe("/s_new semantic tests", () => {
       await sonic.send("/s_new", "nonexistent_synthdef_xyz", 1000, 0, 0);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 1000);
 
       // Check for /fail message
@@ -1259,7 +1259,7 @@ test.describe("/g_new semantic tests", () => {
       await sonic.send("/g_new", 100, 0, 0);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const group = tree.nodes.find((n) => n.id === 100);
 
       // Cleanup
@@ -1290,13 +1290,13 @@ test.describe("/g_new semantic tests", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      const nodeCountBefore = sonic.getTree().nodeCount;
+      const nodeCountBefore = sonic.getRawTree().nodeCount;
 
       // Create group with auto ID
       await sonic.send("/g_new", -1, 0, 0);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const autoGroup = treeAfter.nodes.find(
         (n) => n.id < 0 && n.isGroup && n.defName === "group"
       );
@@ -1326,7 +1326,7 @@ test.describe("/g_new semantic tests", () => {
       await sonic.send("/g_new", 100, 0, 0, 101, 0, 100, 102, 1, 100);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const group100 = tree.nodes.find((n) => n.id === 100);
       const group101 = tree.nodes.find((n) => n.id === 101);
       const group102 = tree.nodes.find((n) => n.id === 102);
@@ -1371,7 +1371,7 @@ test.describe("/g_new semantic tests", () => {
       await sonic.send("/g_new", 103, 0, 102);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       const result = {
         group100Parent: tree.nodes.find((n) => n.id === 100)?.parentId,
@@ -1418,7 +1418,7 @@ test.describe("/g_new semantic tests", () => {
 
       // Order should be: 101 -> 104 -> 103 -> 102
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const g101 = tree.nodes.find((n) => n.id === 101);
       const g102 = tree.nodes.find((n) => n.id === 102);
       const g103 = tree.nodes.find((n) => n.id === 103);
@@ -1762,7 +1762,7 @@ test.describe("/n_run semantic tests", () => {
       );
 
       // Synth should still exist in tree
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 1000);
 
       // Cleanup
@@ -1918,14 +1918,14 @@ test.describe("/n_order semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 1, 100, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const group100Before = treeBefore.nodes.find((n) => n.id === 100);
 
       // Move 1002 to head of group (addAction 0)
       await sonic.send("/n_order", 0, 100, 1002);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const synth1002 = treeAfter.nodes.find((n) => n.id === 1002);
       const synth1000 = treeAfter.nodes.find((n) => n.id === 1000);
       const group100After = treeAfter.nodes.find((n) => n.id === 100);
@@ -1969,7 +1969,7 @@ test.describe("/n_order semantic tests", () => {
       await sonic.send("/n_order", 0, 100, 1003, 1002);
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth1003 = tree.nodes.find((n) => n.id === 1003);
       const synth1002 = tree.nodes.find((n) => n.id === 1002);
       const synth1000 = tree.nodes.find((n) => n.id === 1000);
@@ -2014,7 +2014,7 @@ test.describe("/n_order semantic tests", () => {
       await sonic.send("/n_order", 1, 100, 1000);
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth1000 = tree.nodes.find((n) => n.id === 1000);
       const synth1002 = tree.nodes.find((n) => n.id === 1002);
       const group100 = tree.nodes.find((n) => n.id === 100);
@@ -2303,7 +2303,7 @@ test.describe("/g_queryTree semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const sabTree = sonic.getTree();
+      const sabTree = sonic.getRawTree();
 
       messages.length = 0;
       await sonic.send("/g_queryTree", 0, 0);
@@ -3064,14 +3064,14 @@ test.describe("Error handling tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const countBefore = treeBefore.nodeCount;
 
       // Try to create another synth with same ID
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const countAfter = treeAfter.nodeCount;
 
       // Cleanup
@@ -3095,13 +3095,13 @@ test.describe("Error handling tests", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try to free root group (ID 0)
       await sonic.send("/n_free", 0);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       return {
         rootExistsBefore: treeBefore.nodes.some((n) => n.id === 0),
@@ -3130,7 +3130,7 @@ test.describe("Error handling tests", () => {
       await sonic.sync(2);
 
       // Original synth should still work
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 1000);
 
       // Cleanup
@@ -3485,14 +3485,14 @@ test.describe("Malformed input robustness tests", () => {
 
       await sonic.init();
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const countBefore = treeBefore.nodeCount;
 
       // Try to create synth with non-existent synthdef
       await sonic.send("/s_new", "this-synthdef-does-not-exist", 5000, 0, 0);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const countAfter = treeAfter.nodeCount;
 
       // Verify server still works
@@ -3526,14 +3526,14 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const countBefore = treeBefore.nodeCount;
 
       // Try with invalid add action (999)
       await sonic.send("/s_new", "sonic-pi-beep", 5001, 999, 0);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Verify server still works
       messages.length = 0;
@@ -3563,14 +3563,14 @@ test.describe("Malformed input robustness tests", () => {
 
       await sonic.init();
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const countBefore = treeBefore.nodeCount;
 
       // Try to create group with non-existent target
       await sonic.send("/g_new", 6000, 0, 99999);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const countAfter = treeAfter.nodeCount;
 
       // Verify server still works
@@ -3613,7 +3613,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.sync(2);
 
       // Verify synth still exists and server works
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 7000);
 
       messages.length = 0;
@@ -3821,7 +3821,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 8000, 0, 0);
       await sonic.sync(3);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 8000);
 
       // Cleanup
@@ -3910,7 +3910,7 @@ test.describe("/n_mapn semantic tests", () => {
       await sonic.sync(2);
 
       // Synth should still exist
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 1000);
 
       // Cleanup
@@ -3940,14 +3940,14 @@ test.describe("/s_noid semantic tests", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const synthExistsBefore = treeBefore.nodes.some((n) => n.id === 1000);
 
       // Remove the node ID - synth gets hidden negative ID
       await sonic.send("/s_noid", 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const synthExistsAfter = treeAfter.nodes.some((n) => n.id === 1000);
 
       return {
@@ -3989,7 +3989,7 @@ test.describe("/n_mapa semantic tests", () => {
       await sonic.sync(2);
 
       // Synth should still exist
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 1000);
 
       // Cleanup
@@ -4024,7 +4024,7 @@ test.describe("/n_mapan semantic tests", () => {
       await sonic.sync(2);
 
       // Synth should still exist
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some((n) => n.id === 1000);
 
       // Cleanup

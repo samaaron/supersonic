@@ -157,7 +157,7 @@ test.describe("SuperSonic reset()", () => {
         let treeBeforeReset;
         const start = Date.now();
         while (Date.now() - start < 2000) {
-          treeBeforeReset = sonic.getTree();
+          treeBeforeReset = sonic.getRawTree();
           if (treeBeforeReset.nodeCount >= 3) break;
           await new Promise((r) => setTimeout(r, 20));
         }
@@ -171,7 +171,7 @@ test.describe("SuperSonic reset()", () => {
         let treeAfterReset;
         const start2 = Date.now();
         while (Date.now() - start2 < 2000) {
-          treeAfterReset = sonic.getTree();
+          treeAfterReset = sonic.getRawTree();
           // After reset, should have only root group (node id 0)
           // Check for exactly 1 node with id 0
           if (treeAfterReset.nodeCount === 1 &&
@@ -226,7 +226,7 @@ test.describe("SuperSonic reset()", () => {
         let tree;
         const start = Date.now();
         while (Date.now() - start < 2000) {
-          tree = sonic.getTree();
+          tree = sonic.getRawTree();
           if (tree.nodes.some((n) => n.id === 2000)) break;
           await new Promise((r) => setTimeout(r, 20));
         }

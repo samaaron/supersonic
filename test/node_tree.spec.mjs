@@ -79,7 +79,7 @@ test.describe("getTree() basic functionality", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       // Don't call init()
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       return tree;
     }, sonicConfig);
 
@@ -95,7 +95,7 @@ test.describe("getTree() basic functionality", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       return tree;
     }, sonicConfig);
 
@@ -120,7 +120,7 @@ test.describe("getTree() basic functionality", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Check field types
       const synth = tree.nodes.find((n) => n.id === 1000);
@@ -171,17 +171,17 @@ test.describe("getTree() version counter", () => {
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
 
-      const v1 = sonic.getTree().version;
+      const v1 = sonic.getRawTree().version;
 
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const v2 = sonic.getTree().version;
+      const v2 = sonic.getRawTree().version;
 
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 0, 0, "release", 60);
       await sonic.sync(2);
 
-      const v3 = sonic.getTree().version;
+      const v3 = sonic.getRawTree().version;
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001);
@@ -204,12 +204,12 @@ test.describe("getTree() version counter", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const vBefore = sonic.getTree().version;
+      const vBefore = sonic.getRawTree().version;
 
       await sonic.send("/n_free", 1000);
       await sonic.sync(2);
 
-      const vAfter = sonic.getTree().version;
+      const vAfter = sonic.getRawTree().version;
 
       return { vBefore, vAfter };
     }, sonicConfig);
@@ -229,13 +229,13 @@ test.describe("getTree() version counter", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const vBefore = sonic.getTree().version;
+      const vBefore = sonic.getRawTree().version;
 
       // Move 1001 before 1000
       await sonic.send("/n_before", 1001, 1000);
       await sonic.sync(2);
 
-      const vAfter = sonic.getTree().version;
+      const vAfter = sonic.getRawTree().version;
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001);
@@ -257,13 +257,13 @@ test.describe("getTree() version counter", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const v1 = sonic.getTree().version;
+      const v1 = sonic.getRawTree().version;
 
       // Just query - no changes
       await sonic.send("/status");
       await sonic.sync(2);
 
-      const v2 = sonic.getTree().version;
+      const v2 = sonic.getRawTree().version;
 
       // Cleanup
       await sonic.send("/n_free", 1000);
@@ -299,7 +299,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const sabTree = sonic.getTree();
+      const sabTree = sonic.getRawTree();
 
       messages.length = 0;
       await sonic.send("/g_queryTree", 0, 0);
@@ -368,7 +368,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 2000, 0, 200, "release", 60);
       await sonic.sync(1);
 
-      const sabTree = sonic.getTree();
+      const sabTree = sonic.getRawTree();
 
       messages.length = 0;
       await sonic.send("/g_queryTree", 0, 0);
@@ -426,7 +426,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
       await sonic.send("/s_new", "sonic-pi-saw", 1001, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const sabTree = sonic.getTree();
+      const sabTree = sonic.getRawTree();
 
       messages.length = 0;
       await sonic.send("/g_queryTree", 0, 0);
@@ -481,7 +481,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const sabTree = sonic.getTree();
+      const sabTree = sonic.getRawTree();
 
       messages.length = 0;
       await sonic.send("/g_queryTree", 0, 0);
@@ -545,7 +545,7 @@ test.describe("getTree() vs /n_query comparison", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const sabTree = sonic.getTree();
+      const sabTree = sonic.getRawTree();
 
       // Query individual nodes
       messages.length = 0;
@@ -600,7 +600,7 @@ test.describe("getTree() vs /n_query comparison", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 3, 1001, "release", 60); // after 1001
       await sonic.sync(1);
 
-      const sabTree = sonic.getTree();
+      const sabTree = sonic.getRawTree();
 
       messages.length = 0;
       await sonic.send("/n_query", 1000, 1001, 1002);
@@ -669,7 +669,7 @@ test.describe("getTree() vs /n_query comparison", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 1, 100, "release", 60); // tail of 100
       await sonic.sync(1);
 
-      const sabTree = sonic.getTree();
+      const sabTree = sonic.getRawTree();
 
       messages.length = 0;
       await sonic.send("/n_query", 100);
@@ -713,12 +713,12 @@ test.describe("getTree() node lifecycle", () => {
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000);
@@ -750,12 +750,12 @@ test.describe("getTree() node lifecycle", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       await sonic.send("/g_new", 100, 0, 0);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -791,12 +791,12 @@ test.describe("getTree() node lifecycle", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       await sonic.send("/n_free", 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       return {
         before: {
@@ -828,12 +828,12 @@ test.describe("getTree() node lifecycle", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       await sonic.send("/g_freeAll", 100);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -883,13 +883,13 @@ test.describe("getTree() node movement", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 3, 1001, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Move 1002 before 1000: new order should be 1002, 1000, 1001
       await sonic.send("/n_before", 1002, 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002);
@@ -943,7 +943,7 @@ test.describe("getTree() node movement", () => {
       await sonic.send("/n_after", 1000, 1002);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002);
@@ -979,13 +979,13 @@ test.describe("getTree() node movement", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 1, 100, "release", 60); // tail
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Move 1001 to head
       await sonic.send("/g_head", 100, 1001);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -1019,7 +1019,7 @@ test.describe("getTree() node movement", () => {
       await sonic.send("/g_tail", 100, 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -1049,13 +1049,13 @@ test.describe("getTree() node movement", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Move synth 1000 to group 200
       await sonic.send("/g_head", 200, 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100, 200);
@@ -1095,7 +1095,7 @@ test.describe("getTree() complex hierarchies", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 102, "release", 60);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -1143,7 +1143,7 @@ test.describe("getTree() complex hierarchies", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 2001, 1, 200, "release", 60);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100, 200);
@@ -1188,7 +1188,7 @@ test.describe("getTree() complex hierarchies", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1004, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Walk the chain from head
       const root = tree.nodes.find((n) => n.id === 0);
@@ -1226,13 +1226,13 @@ test.describe("getTree() with auto-assigned IDs", () => {
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Create synth with auto-assigned ID (will get negative ID)
       await sonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Find the new synth with negative ID
       const newSynth = treeAfter.nodes.find(
@@ -1262,13 +1262,13 @@ test.describe("getTree() with auto-assigned IDs", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Create group with auto-assigned ID (will get negative ID)
       await sonic.send("/g_new", -1, 0, 0);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Find the new group with negative ID
       const newGroup = treeAfter.nodes.find(
@@ -1297,13 +1297,13 @@ test.describe("getTree() with auto-assigned IDs", () => {
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Create synth with explicit positive ID
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
       const synth = treeAfter.nodes.find((n) => n.id === 1000);
 
       // Cleanup
@@ -1345,7 +1345,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
       await sonic.sync(1);
 
       // Check SAB tree has the synth
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const autoSynth = tree.nodes.find(
         (n) => n.id < 0 && n.defName === "sonic-pi-beep"
       );
@@ -1387,7 +1387,7 @@ test.describe("getTree() edge cases", () => {
       await sonic.send("/g_new", 100, 0, 0);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const group100 = tree.nodes.find((n) => n.id === 100);
 
       // Cleanup
@@ -1410,7 +1410,7 @@ test.describe("getTree() edge cases", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth = tree.nodes.find((n) => n.id === 1000);
 
       // Cleanup
@@ -1434,7 +1434,7 @@ test.describe("getTree() edge cases", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth = tree.nodes.find((n) => n.id === 1000);
 
       // Cleanup
@@ -1459,7 +1459,7 @@ test.describe("getTree() edge cases", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 1, 100, "release", 60); // tail
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const lastSynth = tree.nodes.find((n) => n.id === 1001);
 
       // Cleanup
@@ -1478,7 +1478,7 @@ test.describe("getTree() edge cases", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const root = tree.nodes.find((n) => n.id === 0);
 
       return { parentId: root?.parentId };
@@ -1504,7 +1504,7 @@ test.describe("getTree() edge cases", () => {
       await sonic.sync(1);
       await new Promise((r) => setTimeout(r, 100));
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       return {
         nodeCount: tree.nodeCount,
@@ -1534,7 +1534,7 @@ test.describe("getTree() edge cases", () => {
 
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthCount = tree.nodes.filter((n) => !n.isGroup).length;
 
       // Cleanup
@@ -1543,7 +1543,7 @@ test.describe("getTree() edge cases", () => {
       }
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       return {
         nodeCount: tree.nodeCount,
@@ -1574,7 +1574,7 @@ test.describe("getTree() defName handling", () => {
       await sonic.send("/g_new", 101, 0, 100);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -1604,7 +1604,7 @@ test.describe("getTree() defName handling", () => {
       await sonic.send("/s_new", "sonic-pi-prophet", 1002, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002);
@@ -1633,7 +1633,7 @@ test.describe("getTree() defName handling", () => {
       await sonic.send("/s_new", "sonic-pi-piano", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synth = tree.nodes.find((n) => n.id === 1000);
 
       // Cleanup
@@ -1667,13 +1667,13 @@ test.describe("getTree() error scenarios", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try to free a node that doesn't exist
       await sonic.send("/n_free", 9999);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000);
@@ -1704,7 +1704,7 @@ test.describe("getTree() error scenarios", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Free 1000 twice
       await sonic.send("/n_free", 1000);
@@ -1712,7 +1712,7 @@ test.describe("getTree() error scenarios", () => {
       await sonic.send("/n_free", 1000);
       await sonic.sync(3);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1001);
@@ -1743,13 +1743,13 @@ test.describe("getTree() error scenarios", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try to move a non-existent node
       await sonic.send("/n_before", 9999, 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000);
@@ -1779,13 +1779,13 @@ test.describe("getTree() error scenarios", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try to move to a non-existent target
       await sonic.send("/n_after", 1000, 9999);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000);
@@ -1811,13 +1811,13 @@ test.describe("getTree() error scenarios", () => {
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try to create synth in non-existent group
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 9999, "release", 60);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       return {
         beforeCount: treeBefore.nodeCount,
@@ -1838,13 +1838,13 @@ test.describe("getTree() error scenarios", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try to create group in non-existent parent
       await sonic.send("/g_new", 100, 0, 9999);
       await sonic.sync(1);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       return {
         beforeCount: treeBefore.nodeCount,
@@ -1870,13 +1870,13 @@ test.describe("getTree() error scenarios", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try g_freeAll on non-existent group
       await sonic.send("/g_freeAll", 9999);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -1909,13 +1909,13 @@ test.describe("getTree() error scenarios", () => {
       await sonic.send("/n_free", 1000);
       await sonic.sync(2);
 
-      const treeAfterFree = sonic.getTree();
+      const treeAfterFree = sonic.getRawTree();
 
       // Reuse the same ID
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(3);
 
-      const treeAfterReuse = sonic.getTree();
+      const treeAfterReuse = sonic.getRawTree();
       const node1000 = treeAfterReuse.nodes.find((n) => n.id === 1000);
 
       // Cleanup
@@ -1951,13 +1951,13 @@ test.describe("getTree() error scenarios", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try to create another synth with same ID
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000);
@@ -1984,13 +1984,13 @@ test.describe("getTree() error scenarios", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try to move to head of non-existent group
       await sonic.send("/g_head", 9999, 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -2032,13 +2032,13 @@ test.describe("getTree() complex movement patterns", () => {
       await sonic.send("/n_before", 1003, 1000);
       await sonic.sync(2);
 
-      const tree1 = sonic.getTree();
+      const tree1 = sonic.getRawTree();
 
       // Another rotation: 1003 -> 1000 -> 1001 -> 1002  =>  1002 -> 1003 -> 1000 -> 1001
       await sonic.send("/n_before", 1002, 1003);
       await sonic.sync(3);
 
-      const tree2 = sonic.getTree();
+      const tree2 = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002, 1003);
@@ -2084,7 +2084,7 @@ test.describe("getTree() complex movement patterns", () => {
       await sonic.send("/n_before", 1001, 1000);
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002);
@@ -2133,7 +2133,7 @@ test.describe("getTree() complex movement patterns", () => {
       await sonic.send("/n_after", 1000, 1002);
       await sonic.sync(3);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002, 1003);
@@ -2172,25 +2172,25 @@ test.describe("getTree() complex movement patterns", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const tree1 = sonic.getTree();
+      const tree1 = sonic.getRawTree();
 
       // Move to group 200
       await sonic.send("/g_head", 200, 1000);
       await sonic.sync(2);
 
-      const tree2 = sonic.getTree();
+      const tree2 = sonic.getRawTree();
 
       // Move to group 300
       await sonic.send("/g_head", 300, 1000);
       await sonic.sync(3);
 
-      const tree3 = sonic.getTree();
+      const tree3 = sonic.getRawTree();
 
       // Move back to group 100
       await sonic.send("/g_head", 100, 1000);
       await sonic.sync(4);
 
-      const tree4 = sonic.getTree();
+      const tree4 = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100, 200, 300);
@@ -2248,7 +2248,7 @@ test.describe("getTree() complex movement patterns", () => {
       await sonic.send("/g_head", 0, 1003);
       await sonic.sync(4);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002, 1003);
@@ -2306,7 +2306,7 @@ test.describe("getTree() complex movement patterns", () => {
       await sonic.send("/n_after", 2003, 1003);
       await sonic.sync(4);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100, 200);
@@ -2353,13 +2353,13 @@ test.describe("getTree() complex movement patterns", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 101, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Move group 100 (with all its children) into group 200
       await sonic.send("/g_head", 200, 100);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 200);
@@ -2411,7 +2411,7 @@ test.describe("getTree() complex movement patterns", () => {
 
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002, 1003, 1004);
@@ -2465,14 +2465,14 @@ test.describe("getTree() complex movement patterns", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 3, 1001, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
       const versionBefore = treeBefore.version;
 
       // Move 1001 after 1000 (where it already is)
       await sonic.send("/n_after", 1001, 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002);
@@ -2526,13 +2526,13 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 2000, 1, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // g_deepFree on group 100 - should free synths but keep groups
       await sonic.send("/g_deepFree", 100);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100, 2000);
@@ -2573,12 +2573,12 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/g_new", 102, 0, 101);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       await sonic.send("/g_deepFree", 100);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -2615,13 +2615,13 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 2000, 0, 200, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // g_deepFree on 100 only
       await sonic.send("/g_deepFree", 100);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100, 200);
@@ -2664,13 +2664,13 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 0, 101, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // g_deepFree on root (0)
       await sonic.send("/g_deepFree", 0);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       const synthsAfter = treeAfter.nodes.filter((n) => !n.isGroup);
       const groupsAfter = treeAfter.nodes.filter((n) => n.isGroup);
@@ -2707,7 +2707,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/g_deepFree", 100);
       await sonic.sync(2);
 
-      const afterDeepFree = sonic.getTree();
+      const afterDeepFree = sonic.getRawTree();
 
       // Clean up and test g_freeAll
       await sonic.send("/n_free", 100);
@@ -2721,7 +2721,7 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/g_freeAll", 200);
       await sonic.sync(5);
 
-      const afterFreeAll = sonic.getTree();
+      const afterFreeAll = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 200);
@@ -2763,12 +2763,12 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const versionBefore = sonic.getTree().version;
+      const versionBefore = sonic.getRawTree().version;
 
       await sonic.send("/g_deepFree", 100);
       await sonic.sync(2);
 
-      const versionAfter = sonic.getTree().version;
+      const versionAfter = sonic.getRawTree().version;
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -2802,12 +2802,12 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1004, 0, 104, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       await sonic.send("/g_deepFree", 100);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -2853,13 +2853,13 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 100, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try g_deepFree on non-existent group
       await sonic.send("/g_deepFree", 9999);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -2889,13 +2889,13 @@ test.describe("getTree() /g_deepFree behavior", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1001, 0, 0, "release", 60);
       await sonic.sync(1);
 
-      const treeBefore = sonic.getTree();
+      const treeBefore = sonic.getRawTree();
 
       // Try g_deepFree on a synth (not a group)
       await sonic.send("/g_deepFree", 1000);
       await sonic.sync(2);
 
-      const treeAfter = sonic.getTree();
+      const treeAfter = sonic.getRawTree();
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001);
@@ -2926,7 +2926,7 @@ test.describe("getTree() overflow and droppedCount", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       return {
         droppedCount: tree.droppedCount,
         nodeCount: tree.nodeCount,
@@ -2950,7 +2950,7 @@ test.describe("getTree() overflow and droppedCount", () => {
       }
       await sonic.sync(1);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup
       for (let i = 0; i < 100; i++) {
@@ -2992,7 +2992,7 @@ test.describe("getTree() overflow and droppedCount", () => {
         await sonic.sync(batch + 1);
       }
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Cleanup - free all created groups
       for (let batch = 0; batch < Math.ceil(nodesToCreate / batchSize); batch++) {
@@ -3039,7 +3039,7 @@ test.describe("getTree() overflow and droppedCount", () => {
         await sonic.sync(batch + 1);
       }
 
-      const treeAtOverflow = sonic.getTree();
+      const treeAtOverflow = sonic.getRawTree();
       const droppedAtOverflow = treeAtOverflow.droppedCount;
 
       // Now free 5 nodes - these will be nodes that were dropped (not in mirror)
@@ -3050,7 +3050,7 @@ test.describe("getTree() overflow and droppedCount", () => {
       }
       await sonic.sync(99);
 
-      const treeAfterPartialFree = sonic.getTree();
+      const treeAfterPartialFree = sonic.getRawTree();
 
       // Cleanup remaining
       for (let i = 0; i < nodesToCreate - 5; i++) {
@@ -3094,7 +3094,7 @@ test.describe("getTree() overflow and droppedCount", () => {
         await sonic.sync(batch + 1);
       }
 
-      const treeOverflowed = sonic.getTree();
+      const treeOverflowed = sonic.getRawTree();
 
       // Free ALL created nodes
       for (let batch = 0; batch < Math.ceil(nodesToCreate / 100); batch++) {
@@ -3106,7 +3106,7 @@ test.describe("getTree() overflow and droppedCount", () => {
         await sonic.sync(100 + batch + 1);
       }
 
-      const treeAfterCleanup = sonic.getTree();
+      const treeAfterCleanup = sonic.getRawTree();
 
       return {
         droppedWhileOverflowed: treeOverflowed.droppedCount,
@@ -3142,7 +3142,7 @@ test.describe("getTree() overflow and droppedCount", () => {
         await sonic.sync(batch + 1);
       }
 
-      const treeBeforeSynths = sonic.getTree();
+      const treeBeforeSynths = sonic.getRawTree();
 
       // Now add synths that will overflow the mirror
       // These synths WILL produce audio even though they're not in the mirror
@@ -3154,7 +3154,7 @@ test.describe("getTree() overflow and droppedCount", () => {
       }
       await sonic.sync(50);
 
-      const treeWithOverflow = sonic.getTree();
+      const treeWithOverflow = sonic.getRawTree();
 
       // Query the actual scsynth tree to verify synths exist there
       // even if not in mirror
@@ -3206,7 +3206,7 @@ test.describe("getTree() overflow and droppedCount", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       return {
         hasDroppedCount: "droppedCount" in tree,

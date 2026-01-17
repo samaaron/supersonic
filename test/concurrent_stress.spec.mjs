@@ -139,7 +139,7 @@ test.describe("Parallel Sample Loading", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0);
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthExists = tree.nodes.some(n => n.id === 1000);
 
       await sonic.send("/n_free", 1000);
@@ -181,7 +181,7 @@ test.describe("Synth Create/Destroy Races", () => {
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 100));
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // All synths should be freed - only root group remains
       return {
@@ -211,7 +211,7 @@ test.describe("Synth Create/Destroy Races", () => {
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 50));
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       // The synth should exist because create came after free
       const synthExists = tree.nodes.some(n => n.id === 5000);
 
@@ -252,7 +252,7 @@ test.describe("Synth Create/Destroy Races", () => {
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 50));
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const existingIds = tree.nodes.filter(n => !n.isGroup).map(n => n.id).sort();
 
       // Clean up
@@ -287,7 +287,7 @@ test.describe("Synth Create/Destroy Races", () => {
       }
 
       await sonic.sync(1);
-      const treeAfterCreate = sonic.getTree();
+      const treeAfterCreate = sonic.getRawTree();
 
       // Free all 200 as fast as possible
       for (let i = 0; i < COUNT; i++) {
@@ -296,7 +296,7 @@ test.describe("Synth Create/Destroy Races", () => {
 
       await sonic.sync(2);
       await new Promise(r => setTimeout(r, 100));
-      const treeAfterFree = sonic.getTree();
+      const treeAfterFree = sonic.getRawTree();
 
       return {
         success: true,
@@ -350,7 +350,7 @@ test.describe("Operations During State Transitions", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 3000, 0, 0);
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       return {
         success: true,
@@ -396,7 +396,7 @@ test.describe("Operations During State Transitions", () => {
       await sonic.send("/s_new", "sonic-pi-saw", 1001, 0, 0);
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Clean up
       await sonic.send("/n_free", 1000, 1001);
@@ -439,7 +439,7 @@ test.describe("Operations During State Transitions", () => {
       await sonic.sync(2);
 
       // Verify synths still exist and samples loaded
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const synthCount = tree.nodes.filter(n => !n.isGroup).length;
 
       const messages = [];
@@ -571,7 +571,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
       }
 
       try {
-        sonic.getTree();
+        sonic.getRawTree();
       } catch (e) {
         errors.push({ op: "getTree", error: e.message });
       }
@@ -621,7 +621,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
       }
 
       await sonic.sync(99);
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       return {
         success: true,
@@ -687,7 +687,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
         error = e.message;
       }
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Clean up if it succeeded
       if (tree.nodes.some(n => n.id === 1000)) {
@@ -832,7 +832,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
         }
       }
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Clean up any groups that were created
       for (let i = 0; i < 3; i++) {
@@ -871,7 +871,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
       sonic.send("/g_head", 101, 100);
       await sonic.sync(2);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Clean up
       sonic.send("/n_free", 100);
@@ -928,7 +928,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
         error = e.message;
       }
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       return {
         success: true,
@@ -965,7 +965,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 100));
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       return {
         success: true,
@@ -1008,7 +1008,7 @@ test.describe("Truly Nefarious Edge Cases", () => {
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 100));
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       return {
         success: true,
@@ -1045,7 +1045,7 @@ test.describe("Timing Window Exploits", () => {
       });
 
       await sonic.sync(2);
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       // Clean up
       sonic.send("/n_free", 1000, 1001);
@@ -1106,7 +1106,7 @@ test.describe("Timing Window Exploits", () => {
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 100));
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       return {
         success: true,
@@ -1147,7 +1147,7 @@ test.describe("Timing Window Exploits", () => {
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 200));
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       return {
         success: true,
@@ -1246,7 +1246,7 @@ test.describe("Memory Stability", () => {
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0);
       await sonic.sync(100);
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
 
       return {
         success: true,
@@ -1446,7 +1446,7 @@ test.describe("Memory Stability", () => {
       const messageMagic = bc?.MESSAGE_MAGIC;
 
       // Check node tree is still readable
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       const treeValid = tree.nodeCount === 1 && tree.nodes[0].id === 0;
 
       return {
@@ -1874,7 +1874,7 @@ test.describe("Evil Float Values", () => {
       await sonic.sync();
 
       // System should still respond
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       await sonic.destroy();
 
       return { success: true, nodeCount: tree.nodeCount };
@@ -2092,7 +2092,7 @@ test.describe("Promise Flooding", () => {
       await Promise.all(promises);
       await sonic.sync();
 
-      const tree = sonic.getTree();
+      const tree = sonic.getRawTree();
       await sonic.destroy();
 
       return { success: true, nodeCount: tree.nodeCount };
