@@ -17,9 +17,18 @@ bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket);
 
 namespace scsynth {
 
-// UnrollOSCPacket - recursively unpack OSC bundles into individual messages
-// From SC_ComPort.cpp:58-143
-bool UnrollOSCPacket(World* inWorld, int inSize, char* inData, OSC_Packet* inPacket) {
+// Maximum bundle nesting depth - prevents stack overflow from deeply nested bundles
+static constexpr int MAX_BUNDLE_DEPTH = 8;
+
+// Internal helper with depth tracking
+static bool UnrollOSCPacketWithDepth(World* inWorld, int inSize, char* inData, OSC_Packet* inPacket, int depth) {
+    // Depth limit check - prevents stack overflow from deeply nested bundles
+    if (depth > MAX_BUNDLE_DEPTH) {
+        worklet_debug("ERROR: UnrollOSCPacket nesting too deep (%d > %d), skipping",
+                     depth, MAX_BUNDLE_DEPTH);
+        return false;
+    }
+
     if (!strcmp(inData, "#bundle")) { // is a bundle
         char* data;
         char* dataEnd = inData + inSize;
@@ -73,7 +82,7 @@ bool UnrollOSCPacket(World* inWorld, int inSize, char* inData, OSC_Packet* inPac
                     OSC_Packet* packet = (OSC_Packet*)malloc(sizeof(OSC_Packet));
                     memcpy(packet, inPacket, sizeof(OSC_Packet)); // clone inPacket
 
-                    if (!UnrollOSCPacket(inWorld, msgSize, data, packet)) {
+                    if (!UnrollOSCPacketWithDepth(inWorld, msgSize, data, packet, depth + 1)) {
                         free(packet);
                         return false;
                     }
@@ -104,6 +113,11 @@ bool UnrollOSCPacket(World* inWorld, int inSize, char* inData, OSC_Packet* inPac
     }
 
     return true;
+}
+
+// UnrollOSCPacket - public entry point with depth=0
+bool UnrollOSCPacket(World* inWorld, int inSize, char* inData, OSC_Packet* inPacket) {
+    return UnrollOSCPacketWithDepth(inWorld, inSize, inData, inPacket, 0);
 }
 
 } // namespace scsynth

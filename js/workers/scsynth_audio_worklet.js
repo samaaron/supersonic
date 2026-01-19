@@ -33,7 +33,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.lastTreeVersion = -1;
         this.treeSnapshotsSent = 0;
         this.lastTreeSendTime = -1; // AudioContext time of last send (-1 = never)
-        this.treeSnapshotMinInterval = 0.025; // Max 40 snapshots/sec (25ms in seconds)
+        this.treeSnapshotMinInterval = 0.050; // Max 20 snapshots/sec (50ms in seconds)
 
         // Views into SharedArrayBuffer (or WASM memory in postMessage mode)
         this.atomicView = null;
@@ -985,6 +985,14 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             if (this.atomicView && this.mode === 'sab') {
                 Atomics.or(this.atomicView, this.CONTROL_INDICES.STATUS_FLAGS, this.STATUS_FLAGS.WASM_ERROR);
             }
+            // Count WASM errors
+            if (this.metricsView) {
+                if (this.mode === 'sab') {
+                    Atomics.add(this.metricsView, MetricsOffsets.SCSYNTH_WASM_ERRORS, 1);
+                } else {
+                    this.metricsView[MetricsOffsets.SCSYNTH_WASM_ERRORS]++;
+                }
+            }
         }
 
         return true;
@@ -1005,12 +1013,12 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
             // Get current metrics (use regular array access - metricsView is Uint32Array)
             const metrics = {
-                processCount: this.metricsView[MetricsOffsets.PROCESS_COUNT],
-                messagesProcessed: this.metricsView[MetricsOffsets.MESSAGES_PROCESSED],
-                messagesDropped: this.metricsView[MetricsOffsets.MESSAGES_DROPPED],
-                schedulerQueueDepth: this.metricsView[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
-                schedulerQueueMax: this.metricsView[MetricsOffsets.SCHEDULER_QUEUE_MAX],
-                schedulerQueueDropped: this.metricsView[MetricsOffsets.SCHEDULER_QUEUE_DROPPED]
+                processCount: this.metricsView[MetricsOffsets.SCSYNTH_PROCESS_COUNT],
+                messagesProcessed: this.metricsView[MetricsOffsets.SCSYNTH_MESSAGES_PROCESSED],
+                messagesDropped: this.metricsView[MetricsOffsets.SCSYNTH_MESSAGES_DROPPED],
+                schedulerQueueDepth: this.metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_DEPTH],
+                schedulerQueueMax: this.metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_PEAK_DEPTH],
+                schedulerQueueDropped: this.metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_DROPPED]
             };
 
             this.port.postMessage({

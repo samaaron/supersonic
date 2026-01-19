@@ -91,9 +91,9 @@ export class MetricsReader {
     }
 
     const offsets = {
-      mainMessagesSent: MetricsOffsets.MESSAGES_SENT,
-      mainBytesSent: MetricsOffsets.BYTES_SENT,
-      preschedulerBypassed: MetricsOffsets.DIRECT_WRITES,
+      oscOutMessagesSent: MetricsOffsets.OSC_OUT_MESSAGES_SENT,
+      oscOutBytesSent: MetricsOffsets.OSC_OUT_BYTES_SENT,
+      preschedulerBypassed: MetricsOffsets.PRESCHEDULER_BYPASSED,
     };
 
     const offset = offsets[metric];
@@ -110,28 +110,30 @@ export class MetricsReader {
    */
   parseMetricsBuffer(m) {
     return {
-      // Worklet metrics (written by WASM)
-      workletProcessCount: m[MetricsOffsets.PROCESS_COUNT],
-      workletMessagesProcessed: m[MetricsOffsets.MESSAGES_PROCESSED],
-      workletMessagesDropped: m[MetricsOffsets.MESSAGES_DROPPED],
-      workletSchedulerDepth: m[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
-      workletSchedulerMax: m[MetricsOffsets.SCHEDULER_QUEUE_MAX],
-      workletSchedulerDropped: m[MetricsOffsets.SCHEDULER_QUEUE_DROPPED],
-      workletSequenceGaps: m[MetricsOffsets.SEQUENCE_GAPS],
+      // scsynth metrics (written by WASM)
+      scsynthProcessCount: m[MetricsOffsets.SCSYNTH_PROCESS_COUNT],
+      scsynthMessagesProcessed: m[MetricsOffsets.SCSYNTH_MESSAGES_PROCESSED],
+      scsynthMessagesDropped: m[MetricsOffsets.SCSYNTH_MESSAGES_DROPPED],
+      scsynthSchedulerDepth: m[MetricsOffsets.SCSYNTH_SCHEDULER_DEPTH],
+      scsynthSchedulerPeakDepth: m[MetricsOffsets.SCSYNTH_SCHEDULER_PEAK_DEPTH],
+      scsynthSchedulerDropped: m[MetricsOffsets.SCSYNTH_SCHEDULER_DROPPED],
+      scsynthSequenceGaps: m[MetricsOffsets.SCSYNTH_SEQUENCE_GAPS],
+      scsynthSchedulerLates: m[MetricsOffsets.SCSYNTH_SCHEDULER_LATES],
+      // scsynthSchedulerCapacity is added in gatherMetrics() from bufferConstants
 
-      // PreScheduler metrics (written by osc_out_prescheduler_worker.js)
+      // Prescheduler metrics (written by osc_out_prescheduler_worker.js)
       preschedulerPending: m[MetricsOffsets.PRESCHEDULER_PENDING],
-      preschedulerPeak: m[MetricsOffsets.PRESCHEDULER_PEAK],
-      preschedulerSent: m[MetricsOffsets.PRESCHEDULER_SENT],
-      preschedulerRetriesSucceeded: m[MetricsOffsets.RETRIES_SUCCEEDED],
-      preschedulerRetriesFailed: m[MetricsOffsets.RETRIES_FAILED],
-      preschedulerBundlesScheduled: m[MetricsOffsets.BUNDLES_SCHEDULED],
-      preschedulerEventsCancelled: m[MetricsOffsets.EVENTS_CANCELLED],
-      preschedulerTotalDispatches: m[MetricsOffsets.TOTAL_DISPATCHES],
-      preschedulerMessagesRetried: m[MetricsOffsets.MESSAGES_RETRIED],
-      preschedulerRetryQueueSize: m[MetricsOffsets.RETRY_QUEUE_SIZE],
-      preschedulerRetryQueueMax: m[MetricsOffsets.RETRY_QUEUE_MAX],
-      preschedulerBypassed: m[MetricsOffsets.DIRECT_WRITES],
+      preschedulerPendingPeak: m[MetricsOffsets.PRESCHEDULER_PENDING_PEAK],
+      preschedulerDispatched: m[MetricsOffsets.PRESCHEDULER_DISPATCHED],
+      preschedulerRetriesSucceeded: m[MetricsOffsets.PRESCHEDULER_RETRIES_SUCCEEDED],
+      preschedulerRetriesFailed: m[MetricsOffsets.PRESCHEDULER_RETRIES_FAILED],
+      preschedulerBundlesScheduled: m[MetricsOffsets.PRESCHEDULER_BUNDLES_SCHEDULED],
+      preschedulerEventsCancelled: m[MetricsOffsets.PRESCHEDULER_EVENTS_CANCELLED],
+      preschedulerTotalDispatches: m[MetricsOffsets.PRESCHEDULER_TOTAL_DISPATCHES],
+      preschedulerMessagesRetried: m[MetricsOffsets.PRESCHEDULER_MESSAGES_RETRIED],
+      preschedulerRetryQueueSize: m[MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE],
+      preschedulerRetryQueuePeak: m[MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_PEAK],
+      preschedulerBypassed: m[MetricsOffsets.PRESCHEDULER_BYPASSED],
 
       // OSC In metrics (written by osc_in_worker.js)
       oscInMessagesReceived: m[MetricsOffsets.OSC_IN_MESSAGES_RECEIVED],
@@ -142,9 +144,22 @@ export class MetricsReader {
       debugMessagesReceived: m[MetricsOffsets.DEBUG_MESSAGES_RECEIVED],
       debugBytesReceived: m[MetricsOffsets.DEBUG_BYTES_RECEIVED],
 
-      // Main thread metrics (written by supersonic.js)
-      mainMessagesSent: m[MetricsOffsets.MESSAGES_SENT],
-      mainBytesSent: m[MetricsOffsets.BYTES_SENT],
+      // OSC Out metrics (written by supersonic.js main thread)
+      oscOutMessagesSent: m[MetricsOffsets.OSC_OUT_MESSAGES_SENT],
+      oscOutBytesSent: m[MetricsOffsets.OSC_OUT_BYTES_SENT],
+
+      // Preschedule timing metrics (written by osc_out_prescheduler_worker.js)
+      preschedulerMinHeadroomMs: m[MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS],
+      preschedulerLates: m[MetricsOffsets.PRESCHEDULER_LATES],
+
+      // Error metrics
+      scsynthWasmErrors: m[MetricsOffsets.SCSYNTH_WASM_ERRORS],
+      oscInCorrupted: m[MetricsOffsets.OSC_IN_CORRUPTED],
+
+      // Ring buffer usage (written by WASM during process())
+      inBufferUsedBytes: m[MetricsOffsets.IN_BUFFER_USED_BYTES],
+      outBufferUsedBytes: m[MetricsOffsets.OUT_BUFFER_USED_BYTES],
+      debugBufferUsedBytes: m[MetricsOffsets.DEBUG_BUFFER_USED_BYTES],
     };
   }
 
@@ -189,14 +204,17 @@ export class MetricsReader {
       inBufferUsed: {
         bytes: inUsed,
         percentage: (inUsed / bc.IN_BUFFER_SIZE) * 100,
+        capacity: bc.IN_BUFFER_SIZE,
       },
       outBufferUsed: {
         bytes: outUsed,
         percentage: (outUsed / bc.OUT_BUFFER_SIZE) * 100,
+        capacity: bc.OUT_BUFFER_SIZE,
       },
       debugBufferUsed: {
         bytes: debugUsed,
         percentage: (debugUsed / bc.DEBUG_BUFFER_SIZE) * 100,
+        capacity: bc.DEBUG_BUFFER_SIZE,
       },
     };
   }
@@ -211,9 +229,9 @@ export class MetricsReader {
     // Get a view into the metrics portion of the snapshot buffer
     const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 32);
 
-    // Single memcpy of contiguous prescheduler metrics (offsets 6-16)
-    const start = MetricsOffsets.PRESCHEDULER_PENDING;  // 6
-    const count = MetricsOffsets.RETRY_QUEUE_MAX - start + 1;  // 11
+    // Single memcpy of ALL contiguous prescheduler metrics (offsets 8-21)
+    const start = MetricsOffsets.PRESCHEDULER_START;
+    const count = MetricsOffsets.PRESCHEDULER_COUNT;
     metricsView.set(preschedulerMetrics.subarray(start, start + count), start);
   }
 
@@ -234,7 +252,7 @@ export class MetricsReader {
 
       // Read metrics from snapshot buffer
       if (this.#cachedSnapshotBuffer) {
-        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 32);
+        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 36);
         metrics = this.parseMetricsBuffer(metricsView);
       } else {
         metrics = {};
@@ -242,16 +260,37 @@ export class MetricsReader {
     } else {
       // SAB mode: read directly from SharedArrayBuffer
       metrics = this.getSABMetrics() || {};
+    }
 
-      // Buffer usage (calculated from SAB head/tail pointers)
-      const bufferUsage = this.getBufferUsage();
-      if (bufferUsage) {
-        Object.assign(metrics, bufferUsage);
-      }
+    // Build buffer usage objects from raw metrics (works in both modes)
+    // WASM calculates and writes these during process()
+    if (metrics.inBufferUsedBytes !== undefined && this.#bufferConstants) {
+      const bc = this.#bufferConstants;
+      metrics.inBufferUsed = {
+        bytes: metrics.inBufferUsedBytes,
+        percentage: (metrics.inBufferUsedBytes / bc.IN_BUFFER_SIZE) * 100,
+        capacity: bc.IN_BUFFER_SIZE,
+      };
+      metrics.outBufferUsed = {
+        bytes: metrics.outBufferUsedBytes,
+        percentage: (metrics.outBufferUsedBytes / bc.OUT_BUFFER_SIZE) * 100,
+        capacity: bc.OUT_BUFFER_SIZE,
+      };
+      metrics.debugBufferUsed = {
+        bytes: metrics.debugBufferUsedBytes,
+        percentage: (metrics.debugBufferUsedBytes / bc.DEBUG_BUFFER_SIZE) * 100,
+        capacity: bc.DEBUG_BUFFER_SIZE,
+      };
     }
 
     // Add mode so clients know what metrics are available
     metrics.mode = this.#mode;
+
+    // Add scheduler capacity from buffer constants (compile-time value)
+    // Note: worklet exports as lowercase 'scheduler_slot_count'
+    if (this.#bufferConstants?.scheduler_slot_count !== undefined) {
+      metrics.scsynthSchedulerCapacity = this.#bufferConstants.scheduler_slot_count;
+    }
 
     // Add context-provided metrics
     if (context.driftOffsetMs !== undefined) {
@@ -267,6 +306,21 @@ export class MetricsReader {
     }
     if (context.loadedSynthDefsCount !== undefined) {
       metrics.loadedSynthDefs = context.loadedSynthDefsCount;
+    }
+    if (context.preschedulerCapacity !== undefined) {
+      metrics.preschedulerCapacity = context.preschedulerCapacity;
+    }
+
+    // In postMessage mode, merge transport metrics (sent/received counters)
+    // These aren't in the snapshot buffer since they're tracked on the main thread
+    if (this.#mode === 'postMessage' && context.transportMetrics) {
+      const tm = context.transportMetrics;
+      metrics.oscOutMessagesSent = tm.messagesSent ?? 0;
+      metrics.oscOutBytesSent = tm.bytesSent ?? 0;
+      metrics.oscInMessagesReceived = tm.messagesReceived ?? 0;
+      metrics.oscInBytesReceived = tm.bytesReceived ?? 0;
+      metrics.oscInMessagesDropped = tm.messagesDropped ?? 0;
+      metrics.preschedulerBypassed = tm.directSends ?? 0;
     }
 
     const totalDuration = performance.now() - startTime;

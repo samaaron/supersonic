@@ -31,7 +31,7 @@ constexpr uint32_t IN_BUFFER_SIZE     = 786432; // 768KB - OSC messages from JS 
 constexpr uint32_t OUT_BUFFER_SIZE    = 131072; // 128KB - OSC replies from scsynth to JS (prevent drops)
 constexpr uint32_t DEBUG_BUFFER_SIZE  = 65536;  // 64KB - Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 48;    // Atomic control pointers & flags (11 fields × 4 bytes + 4 padding for 8-byte alignment)
-constexpr uint32_t METRICS_SIZE       = 128;   // Performance metrics: 22 fields + 10 padding = 32 * 4 bytes = 128 bytes
+constexpr uint32_t METRICS_SIZE       = 144;   // Performance metrics: 31 fields + 5 padding = 36 * 4 bytes = 144 bytes
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in milliseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
@@ -99,50 +99,63 @@ struct alignas(4) ControlPointers {
 };
 
 // Performance metrics structure
-// Layout: [0-5] Worklet, [6-16] OSC Out, [17-19] OSC In, [20-21] Debug, [22-23] Main thread, [24] Gap detection, [25] Direct writes, [26-31] padding
+// Layout designed for contiguous memcpy operations:
+// - [0-8]   scsynth (WASM + JS worklet writes)
+// - [9-22]  Prescheduler (JS prescheduler worker - all contiguous)
+// - [23-24] OSC Out (JS main thread)
+// - [25-28] OSC In (JS osc_in_worker)
+// - [29-30] Debug (JS debug_worker)
+// - [31-33] Ring buffer usage (WASM writes)
+// - [34-35] padding
 struct alignas(4) PerformanceMetrics {
-    // Worklet metrics (offsets 0-5, written by WASM)
-    std::atomic<uint32_t> process_count;
-    std::atomic<uint32_t> messages_processed;
-    std::atomic<uint32_t> messages_dropped;
-    std::atomic<uint32_t> scheduler_queue_depth;
-    std::atomic<uint32_t> scheduler_queue_max;
-    std::atomic<uint32_t> scheduler_queue_dropped;
+    // scsynth metrics [0-8] (offsets 0-6,8 written by WASM, 7 by JS worklet)
+    std::atomic<uint32_t> process_count;           // 0: Audio process() callbacks
+    std::atomic<uint32_t> messages_processed;      // 1: OSC messages processed
+    std::atomic<uint32_t> messages_dropped;        // 2: Messages dropped
+    std::atomic<uint32_t> scheduler_queue_depth;   // 3: Current scheduler depth
+    std::atomic<uint32_t> scheduler_queue_max;     // 4: Peak scheduler depth
+    std::atomic<uint32_t> scheduler_queue_dropped; // 5: Scheduler overflow drops
+    std::atomic<uint32_t> messages_sequence_gaps;  // 6: Sequence gaps detected (WASM)
+    std::atomic<uint32_t> wasm_errors;             // 7: WASM execution errors (JS worklet)
+    std::atomic<uint32_t> scheduler_lates;         // 8: Bundles executed after scheduled time (WASM)
 
-    // OSC Out (prescheduler) metrics (offsets 6-16, written by osc_out_prescheduler_worker.js)
-    std::atomic<uint32_t> osc_out_events_pending;
-    std::atomic<uint32_t> osc_out_max_events_pending;
-    std::atomic<uint32_t> osc_out_bundles_written;
-    std::atomic<uint32_t> osc_out_retries_succeeded;
-    std::atomic<uint32_t> osc_out_retries_failed;
-    std::atomic<uint32_t> osc_out_bundles_scheduled;
-    std::atomic<uint32_t> osc_out_events_cancelled;
-    std::atomic<uint32_t> osc_out_total_dispatches;
-    std::atomic<uint32_t> osc_out_messages_retried;
-    std::atomic<uint32_t> osc_out_retry_queue_size;
-    std::atomic<uint32_t> osc_out_retry_queue_max;
+    // Prescheduler metrics [9-22] (written by JS prescheduler worker)
+    std::atomic<uint32_t> prescheduler_pending;           // 9
+    std::atomic<uint32_t> prescheduler_pending_peak;      // 10
+    std::atomic<uint32_t> prescheduler_bundles_scheduled; // 11
+    std::atomic<uint32_t> prescheduler_dispatched;        // 12
+    std::atomic<uint32_t> prescheduler_events_cancelled;  // 13
+    std::atomic<uint32_t> prescheduler_min_headroom_ms;   // 14: All-time min headroom before execution
+    std::atomic<uint32_t> prescheduler_lates;             // 15: Bundles dispatched after execution time
+    std::atomic<uint32_t> prescheduler_retries_succeeded; // 16
+    std::atomic<uint32_t> prescheduler_retries_failed;    // 17
+    std::atomic<uint32_t> prescheduler_retry_queue_size;  // 18
+    std::atomic<uint32_t> prescheduler_retry_queue_peak;  // 19
+    std::atomic<uint32_t> prescheduler_messages_retried;  // 20
+    std::atomic<uint32_t> prescheduler_total_dispatches;  // 21
+    std::atomic<uint32_t> prescheduler_bypassed;          // 22
 
-    // OSC In metrics (offsets 17-19, written by osc_in_worker.js)
-    std::atomic<uint32_t> osc_in_messages_received;
-    std::atomic<uint32_t> osc_in_dropped_messages;
-    std::atomic<uint32_t> osc_in_bytes_received;  // Total bytes read from OUT buffer
+    // OSC Out metrics [23-24] (written by JS main thread)
+    std::atomic<uint32_t> osc_out_messages_sent;   // 23
+    std::atomic<uint32_t> osc_out_bytes_sent;      // 24
 
-    // Debug metrics (offsets 20-21, written by debug_worker.js)
-    std::atomic<uint32_t> debug_messages_received;
-    std::atomic<uint32_t> debug_bytes_received;   // Total bytes read from DEBUG buffer
+    // OSC In metrics [25-28] (written by JS osc_in_worker)
+    std::atomic<uint32_t> osc_in_messages_received; // 25
+    std::atomic<uint32_t> osc_in_bytes_received;    // 26
+    std::atomic<uint32_t> osc_in_dropped_messages;  // 27
+    std::atomic<uint32_t> osc_in_corrupted;         // 28: Ring buffer message corruption detected
 
-    // Main thread metrics (offsets 22-23, written by supersonic.js via Atomics)
-    std::atomic<uint32_t> messages_sent;      // OSC messages sent to scsynth
-    std::atomic<uint32_t> bytes_sent;         // Total bytes written to IN buffer
+    // Debug metrics [29-30] (written by JS debug_worker)
+    std::atomic<uint32_t> debug_messages_received;  // 29
+    std::atomic<uint32_t> debug_bytes_received;     // 30
 
-    // Sequence gap detection (offset 24, written by WASM)
-    std::atomic<uint32_t> messages_sequence_gaps;  // Count of detected sequence gaps (missing messages)
+    // Ring buffer usage [31-33] (written by WASM during process())
+    std::atomic<uint32_t> in_buffer_used_bytes;     // 31: Bytes used in IN buffer
+    std::atomic<uint32_t> out_buffer_used_bytes;    // 32: Bytes used in OUT buffer
+    std::atomic<uint32_t> debug_buffer_used_bytes;  // 33: Bytes used in DEBUG buffer
 
-    // Direct write metrics (offset 25, written by supersonic.js main thread)
-    std::atomic<uint32_t> direct_writes;  // Messages that bypassed prescheduler worker
-
-    // Padding to ensure 8-byte alignment for subsequent Float64Array fields (offsets 26-31)
-    uint32_t _padding[6];
+    // Padding [34-35]
+    uint32_t _padding[2];
 };
 
 // Status flags

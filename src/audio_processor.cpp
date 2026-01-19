@@ -101,6 +101,11 @@ extern "C" {
     // Pre-allocated to avoid malloc in critical audio path
     alignas(16) float static_audio_bus[128 * 128];
 
+    // Static OSC message buffer - MUST NOT be on stack!
+    // MAX_MESSAGE_SIZE is ~768KB which would overflow the WASM stack.
+    // This buffer is used to copy OSC messages from ring buffer before processing.
+    alignas(8) char static_osc_buffer[MAX_MESSAGE_SIZE];
+
     uint8_t* shared_memory = nullptr;
     ControlPointers* control = nullptr;
     PerformanceMetrics* metrics = nullptr;
@@ -256,6 +261,7 @@ extern "C" {
         metrics->scheduler_queue_max.store(0, std::memory_order_relaxed);
         metrics->scheduler_queue_dropped.store(0, std::memory_order_relaxed);
         metrics->messages_sequence_gaps.store(0, std::memory_order_relaxed);
+        metrics->scheduler_lates.store(0, std::memory_order_relaxed);
 
         // Initialize node tree memory
         // All entries start with id = -1 (empty slot)
@@ -504,7 +510,8 @@ extern "C" {
                 }
                 last_in_sequence = (int32_t)header.sequence;
 
-                char osc_buffer[MAX_MESSAGE_SIZE];
+                // Use static buffer - local 768KB buffer would overflow WASM stack!
+                char* osc_buffer = static_osc_buffer;
 
                 // Copy OSC payload from ring buffer (may be split across wrap boundary)
                 uint32_t payload_start = (in_tail + sizeof(Message)) % IN_BUFFER_SIZE;
@@ -627,15 +634,16 @@ extern "C" {
                     break;  // Should not happen, but be safe
                 }
 
-                // Late bundle detection - warn when timing is broken
+                // Late bundle detection - track in metrics and warn when timing is broken
                 int64_t time_diff_osc = schedTime - currentOscTime;
                 double time_diff_ms = ((double)time_diff_osc / 4294967296.0) * 1000.0;
 
-                // Warn if bundle is significantly late (>3ms past due)
-                // Rate-limit: only log first late bundle, then every 100th
+                // Track late bundles (>3ms past due) in metrics
+                // Rate-limit logging: only log first late bundle, then every 100th
                 static int late_count = 0;
                 if (time_diff_ms < -3.0) {
                     late_count++;
+                    metrics->scheduler_lates.fetch_add(1, std::memory_order_relaxed);
                     if (late_count == 1 || late_count % 100 == 0) {
                         // Extract OSC address from first message in bundle
                         // Bundle format: #bundle\0 (8) + timetag (8) + msg_size (4) + msg_data...
@@ -730,6 +738,25 @@ extern "C" {
                         logged_buffer_full = true;
                     }
                 }
+            }
+
+            // Calculate and write ring buffer usage to metrics
+            // This makes buffer usage available in postMessage mode via the snapshot
+            {
+                int32_t in_head = control->in_head.load(std::memory_order_relaxed);
+                int32_t in_tail = control->in_tail.load(std::memory_order_relaxed);
+                uint32_t in_used = (in_head - in_tail + IN_BUFFER_SIZE) % IN_BUFFER_SIZE;
+                metrics->in_buffer_used_bytes.store(in_used, std::memory_order_relaxed);
+
+                int32_t out_head = control->out_head.load(std::memory_order_relaxed);
+                int32_t out_tail = control->out_tail.load(std::memory_order_relaxed);
+                uint32_t out_used = (out_head - out_tail + OUT_BUFFER_SIZE) % OUT_BUFFER_SIZE;
+                metrics->out_buffer_used_bytes.store(out_used, std::memory_order_relaxed);
+
+                int32_t debug_head = control->debug_head.load(std::memory_order_relaxed);
+                int32_t debug_tail = control->debug_tail.load(std::memory_order_relaxed);
+                uint32_t debug_used = (debug_head - debug_tail + DEBUG_BUFFER_SIZE) % DEBUG_BUFFER_SIZE;
+                metrics->debug_buffer_used_bytes.store(debug_used, std::memory_order_relaxed);
             }
         }
 

@@ -565,122 +565,138 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                 >
                   <div class="metrics-grid metrics-grid--4col">
                     <div class="metrics-panel">
-                      <div class="metrics-panel__title">Messages</div>
+                      <div class="metrics-panel__title">OSC In/Out</div>
                       <div class="metrics-row">
                         <span>sent</span
                         ><span
-                          ><span id="metric-sent" class="metrics-val">0</span><span class="metrics-sep"> / </span
-                          ><span id="metric-bytes-sent" class="metrics-val--muted">0 B</span></span
+                          ><span id="metric-sent" data-metric="oscOutMessagesSent" class="metrics-val">0</span>
+                           (<span id="metric-bytes-sent" data-metric="oscOutBytesSent" class="metrics-val--muted">0 B</span>)</span
                         >
+                      </div>
+                      <div class="metrics-row">
+                        <span>- direct</span><span id="metric-direct-writes" data-metric="preschedulerBypassed" class="metrics-val--green">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>- lost</span><span id="metric-sequence-gaps" data-metric="scsynthSequenceGaps" class="metrics-val--red">0</span>
                       </div>
                       <div class="metrics-row">
                         <span>received</span
                         ><span
-                          ><span id="metric-received" class="metrics-val">0</span><span class="metrics-sep"> / </span
-                          ><span id="metric-bytes-received" class="metrics-val--muted">0 B</span></span
+                          ><span id="metric-received" data-metric="oscInMessagesReceived" class="metrics-val">0</span>
+                           (<span id="metric-bytes-received" data-metric="oscInBytesReceived" class="metrics-val--muted">0 B</span>)</span
                         >
                       </div>
                       <div class="metrics-row">
-                        <span>direct</span><span id="metric-direct-writes" class="metrics-val--green">0</span>
+                        <span>- dropped</span><span id="metric-osc-in-dropped" data-metric="oscInMessagesDropped" class="metrics-val--red">0</span>
                       </div>
                       <div class="metrics-row">
-                        <span>dropped</span><span id="metric-osc-in-dropped" class="metrics-val--red">0</span>
+                        <span>- corrupted</span><span id="metric-osc-in-corrupted" data-metric="oscInCorrupted" class="metrics-val--red">0</span>
                       </div>
                     </div>
                     <div class="metrics-panel">
-                      <div class="metrics-panel__title">PreScheduler</div>
+                      <div class="metrics-panel__title">Prescheduler</div>
                       <div class="metrics-row">
                         <span>pending</span
                         ><span
-                          ><span id="metric-prescheduler-pending" class="metrics-val">0</span
+                          ><span id="metric-prescheduler-pending" data-metric="preschedulerPending" class="metrics-val">0</span
                           ><span class="metrics-sep"> / </span
-                          ><span id="metric-prescheduler-peak" class="metrics-val--muted">0</span></span
+                          ><span id="metric-prescheduler-peak" data-metric="preschedulerPendingPeak" class="metrics-val--muted">0</span></span
                         >
                       </div>
                       <div class="metrics-row">
-                        <span>sent</span><span id="metric-prescheduler-sent" class="metrics-val">0</span>
+                        <span>scheduled</span><span id="metric-bundles-scheduled" data-metric="preschedulerBundlesScheduled" class="metrics-val">0</span>
                       </div>
                       <div class="metrics-row">
-                        <span>scheduled</span><span id="metric-bundles-scheduled" class="metrics-val--dim">0</span>
+                        <span>dispatched</span><span id="metric-prescheduler-sent" data-metric="preschedulerDispatched" class="metrics-val--dim">0</span>
                       </div>
                       <div class="metrics-row">
-                        <span>cancelled</span><span id="metric-events-cancelled" class="metrics-val--red">0</span>
+                        <span>cancelled</span><span id="metric-events-cancelled" data-metric="preschedulerEventsCancelled" class="metrics-val--red">0</span>
                       </div>
-                    </div>
-                    <div class="metrics-panel">
-                      <div class="metrics-panel__title">Scheduler</div>
                       <div class="metrics-row">
-                        <span>queue</span
+                        <span>min slack</span
                         ><span
-                          ><span id="metric-scheduler-depth" class="metrics-val">0</span
-                          ><span class="metrics-sep"> / </span
-                          ><span id="metric-scheduler-peak" class="metrics-val--muted">0</span></span
+                          ><span id="metric-min-headroom" data-metric="preschedulerMinHeadroomMs" class="metrics-val--dim">-</span
+                          ><span class="metrics-val--muted"> ms</span></span
                         >
                       </div>
                       <div class="metrics-row">
-                        <span>dropped</span><span id="metric-scheduler-dropped" class="metrics-val--red">0</span>
-                      </div>
-                      <div class="metrics-row">
-                        <span>clock drift</span><span id="metric-drift" class="metrics-val">0ms</span>
+                        <span>lates</span><span id="metric-lates" data-metric="preschedulerLates" class="metrics-val--red">0</span>
                       </div>
                     </div>
                     <div class="metrics-panel">
-                      <div class="metrics-panel__title">Processing</div>
-                      <div class="metrics-row">
-                        <span>processed</span><span id="metric-messages-processed" class="metrics-val">0</span>
-                      </div>
-                      <div class="metrics-row">
-                        <span>dropped</span><span id="metric-messages-dropped" class="metrics-val--red">0</span>
-                      </div>
-                      <div class="metrics-row">
-                        <span>seq gaps</span><span id="metric-sequence-gaps" class="metrics-val--red">0</span>
-                      </div>
-                      <div class="metrics-row">
-                        <span>ticks</span><span id="metric-process-count" class="metrics-val--dim">0</span>
-                      </div>
-                    </div>
-                    <div class="metrics-panel">
-                      <div class="metrics-panel__title">Retries</div>
+                      <div class="metrics-panel__title">Prescheduler Retries</div>
                       <div class="metrics-row">
                         <span>ok / fail</span
                         ><span
-                          ><span id="metric-prescheduler-retries-succeeded" class="metrics-val--green">0</span
+                          ><span id="metric-prescheduler-retries-succeeded" data-metric="preschedulerRetriesSucceeded" class="metrics-val--green">0</span
                           ><span class="metrics-sep"> / </span
-                          ><span id="metric-prescheduler-retries-failed" class="metrics-val--red">0</span></span
+                          ><span id="metric-prescheduler-retries-failed" data-metric="preschedulerRetriesFailed" class="metrics-val--red">0</span></span
                         >
                       </div>
                       <div class="metrics-row">
                         <span>queue</span
                         ><span
-                          ><span id="metric-prescheduler-retry-queue-size" class="metrics-val">0</span
+                          ><span id="metric-prescheduler-retry-queue-size" data-metric="preschedulerRetryQueueSize" class="metrics-val">0</span
                           ><span class="metrics-sep"> / </span
-                          ><span id="metric-prescheduler-retry-queue-max" class="metrics-val--muted">0</span></span
+                          ><span id="metric-prescheduler-retry-queue-max" data-metric="preschedulerRetryQueuePeak" class="metrics-val--muted">0</span></span
                         >
                       </div>
                       <div class="metrics-row">
-                        <span>retried</span><span id="metric-messages-retried" class="metrics-val--dim">0</span>
+                        <span>retried</span><span id="metric-messages-retried" data-metric="preschedulerMessagesRetried" class="metrics-val--dim">0</span>
                       </div>
                       <div class="metrics-row">
-                        <span>dispatches</span><span id="metric-total-dispatches" class="metrics-val--dim">0</span>
+                        <span>dispatches</span><span id="metric-total-dispatches" data-metric="preschedulerTotalDispatches" class="metrics-val--dim">0</span>
+                      </div>
+                    </div>
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">scsynth Scheduler</div>
+                      <div class="metrics-row">
+                        <span>queue</span
+                        ><span
+                          ><span id="metric-scheduler-depth" data-metric="scsynthSchedulerDepth" class="metrics-val">0</span
+                          ><span class="metrics-sep"> / </span
+                          ><span id="metric-scheduler-peak" data-metric="scsynthSchedulerPeakDepth" class="metrics-val--muted">0</span></span
+                        >
+                      </div>
+                      <div class="metrics-row">
+                        <span>dropped</span><span id="metric-scheduler-dropped" data-metric="scsynthSchedulerDropped" class="metrics-val--red">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>lates</span><span id="metric-scheduler-lates" data-metric="scsynthSchedulerLates" class="metrics-val--red">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>clock drift</span><span id="metric-drift" data-metric="driftOffsetMs" class="metrics-val">0ms</span>
+                      </div>
+                    </div>
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">scsynth</div>
+                      <div class="metrics-row">
+                        <span>processed</span><span id="metric-messages-processed" data-metric="scsynthMessagesProcessed" class="metrics-val">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>dropped</span><span id="metric-messages-dropped" data-metric="scsynthMessagesDropped" class="metrics-val--red">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>synthdefs</span><span id="metric-synthdefs" data-metric="loadedSynthDefs" class="metrics-val">0</span>
                       </div>
                     </div>
                     <div class="metrics-panel metrics-panel--wide">
-                      <div class="metrics-panel__title">Ring Buffers</div>
-                      <div class="metrics-bar-row">
+                      <div class="metrics-panel__title">Ring Buffer Level</div>
+                      <div class="metrics-bar-row" data-metric="inBufferUsed">
                         <span class="metrics-bar-label">in</span>
                         <div class="metrics-bar-track">
                           <div id="metric-in-bar" class="metrics-bar-fill metrics-bar-fill--blue"></div>
                         </div>
                         <span id="metric-in-usage" class="metrics-bar-value metrics-val">0%</span>
                       </div>
-                      <div class="metrics-bar-row">
+                      <div class="metrics-bar-row" data-metric="outBufferUsed">
                         <span class="metrics-bar-label">out</span>
                         <div class="metrics-bar-track">
                           <div id="metric-out-bar" class="metrics-bar-fill metrics-bar-fill--green"></div>
                         </div>
                         <span id="metric-out-usage" class="metrics-bar-value metrics-val--green">0%</span>
                       </div>
-                      <div class="metrics-bar-row">
+                      <div class="metrics-bar-row" data-metric="debugBufferUsed">
                         <span class="metrics-bar-label">dbg</span>
                         <div class="metrics-bar-track">
                           <div id="metric-debug-bar" class="metrics-bar-fill metrics-bar-fill--purple"></div>
@@ -689,32 +705,34 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                       </div>
                     </div>
                     <div class="metrics-panel">
-                      <div class="metrics-panel__title">Engine</div>
+                      <div class="metrics-panel__title">AudioWorklet</div>
                       <div class="metrics-row">
-                        <span>audio</span><span id="metric-audio-state" class="metrics-val--green">-</span>
+                        <span>audio</span><span id="metric-audio-state" data-metric="audioContextState" class="metrics-val--green">-</span>
                       </div>
                       <div class="metrics-row">
-                        <span>synthdefs</span><span id="metric-synthdefs" class="metrics-val">0</span>
+                        <span>ticks</span><span id="metric-process-count" data-metric="scsynthProcessCount" class="metrics-val--dim">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>WASM errors</span><span id="metric-wasm-errors" data-metric="scsynthWasmErrors" class="metrics-val--red">0</span>
                       </div>
                       <div class="metrics-row">
                         <span>debug</span
                         ><span
-                          ><span id="metric-debug-received" class="metrics-val--muted">0</span
-                          ><span class="metrics-sep"> / </span
-                          ><span id="metric-debug-bytes-received" class="metrics-val--muted">0 B</span></span
+                          ><span id="metric-debug-received" data-metric="debugMessagesReceived" class="metrics-val--muted">0</span>
+                           (<span id="metric-debug-bytes-received" data-metric="debugBytesReceived" class="metrics-val--muted">0 B</span>)</span
                         >
                       </div>
                     </div>
                     <div class="metrics-panel">
-                      <div class="metrics-panel__title">Buffers</div>
+                      <div class="metrics-panel__title">Audio Buffers</div>
                       <div class="metrics-row">
-                        <span>used</span><span id="metric-buffer-used" class="metrics-val">0 B</span>
+                        <span>used</span><span id="metric-buffer-used" data-metric="bufferPoolUsedBytes" class="metrics-val">0 B</span>
                       </div>
                       <div class="metrics-row">
-                        <span>free</span><span id="metric-buffer-free" class="metrics-val--green">0 B</span>
+                        <span>free</span><span id="metric-buffer-free" data-metric="bufferPoolAvailableBytes" class="metrics-val--green">0 B</span>
                       </div>
                       <div class="metrics-row">
-                        <span>allocs</span><span id="metric-buffer-allocs" class="metrics-val--dim">0</span>
+                        <span>allocs</span><span id="metric-buffer-allocs" data-metric="bufferPoolAllocations" class="metrics-val--dim">0</span>
                       </div>
                     </div>
                   </div>

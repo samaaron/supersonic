@@ -104,8 +104,8 @@ test.describe("Scheduler Queue Overflow", () => {
 
         // Get metrics before - dump everything for debugging
         const metricsBefore = sonic.getMetrics();
-        const droppedBefore = metricsBefore.workletSchedulerDropped || 0;
-        const processCountBefore = metricsBefore.workletProcessCount || 0;
+        const droppedBefore = metricsBefore.scsynthSchedulerDropped || 0;
+        const processCountBefore = metricsBefore.scsynthProcessCount || 0;
 
         // Create timed bundle with future timestamp
         const createTimedBundle = (ntpTime, nodeId, note) => {
@@ -191,14 +191,14 @@ test.describe("Scheduler Queue Overflow", () => {
         for (let poll = 0; poll < 10; poll++) {
           await new Promise(r => setTimeout(r, 20));
           const m = sonic.getMetrics();
-          if (m.workletSchedulerDepth > peakDepth) peakDepth = m.workletSchedulerDepth;
-          if (m.workletSchedulerMax > peakMax) peakMax = m.workletSchedulerMax;
+          if (m.scsynthSchedulerDepth > peakDepth) peakDepth = m.scsynthSchedulerDepth;
+          if (m.scsynthSchedulerPeakDepth > peakMax) peakMax = m.scsynthSchedulerPeakDepth;
         }
 
         // Get metrics after sending
         const metricsAfter = sonic.getMetrics();
-        const droppedAfter = metricsAfter.workletSchedulerDropped || 0;
-        const schedulerMax = metricsAfter.workletSchedulerMax || 0;
+        const droppedAfter = metricsAfter.scsynthSchedulerDropped || 0;
+        const schedulerMax = metricsAfter.scsynthSchedulerPeakDepth || 0;
 
         // Check for scheduler overflow errors in debug
         const overflowErrors = debugMessages.filter(msg =>
@@ -211,7 +211,7 @@ test.describe("Scheduler Queue Overflow", () => {
 
         // Check if scheduler depth dropped to 0 (events executed)
         const metricsAfterWait = sonic.getMetrics();
-        const schedulerDepthAfterWait = metricsAfterWait.workletSchedulerDepth || 0;
+        const schedulerDepthAfterWait = metricsAfterWait.scsynthSchedulerDepth || 0;
 
         // Stop capture to see if the scheduled synths produced audio
         const overflowCapture = sonic.stopCapture();
@@ -258,7 +258,7 @@ test.describe("Scheduler Queue Overflow", () => {
         const metricsFinal = sonic.getMetrics();
 
         // Get final process count to verify WASM is running
-        const processCountAfter = metricsFinal.workletProcessCount || 0;
+        const processCountAfter = metricsFinal.scsynthProcessCount || 0;
 
         return {
           success: true,
@@ -276,15 +276,15 @@ test.describe("Scheduler Queue Overflow", () => {
           processCountAfter,
           processCountDelta: processCountAfter - processCountBefore,
           preschedulerBundlesScheduled: metricsFinal.preschedulerBundlesScheduled,
-          preschedulerSent: metricsFinal.preschedulerSent,
-          mainMessagesSent: metricsFinal.mainMessagesSent,
-          workletMessagesProcessed: metricsFinal.workletMessagesProcessed,
+          preschedulerDispatched: metricsFinal.preschedulerDispatched,
+          oscOutMessagesSent: metricsFinal.oscOutMessagesSent,
+          scsynthMessagesProcessed: metricsFinal.scsynthMessagesProcessed,
           // Buffer usage
           inBufferUsed: metricsFinal.inBufferUsed,
           inBufferCapacity: metricsFinal.inBufferCapacity,
           finalMetrics: {
-            schedulerDepth: metricsFinal.workletSchedulerDepth,
-            schedulerDropped: metricsFinal.workletSchedulerDropped,
+            schedulerDepth: metricsFinal.scsynthSchedulerDepth,
+            schedulerDropped: metricsFinal.scsynthSchedulerDropped,
           },
           debugCount: debugMessages.length,
           recentDebug: debugMessages.slice(-20),
@@ -315,9 +315,9 @@ test.describe("Scheduler Queue Overflow", () => {
     console.log(`\nSAB Metrics:`);
     console.log(`  WASM process count: ${result.processCountBefore} -> ${result.processCountAfter} (delta: ${result.processCountDelta})`);
     console.log(`  Prescheduler bundles scheduled: ${result.preschedulerBundlesScheduled}`);
-    console.log(`  Prescheduler sent: ${result.preschedulerSent}`);
-    console.log(`  Main messages sent: ${result.mainMessagesSent}`);
-    console.log(`  Worklet messages processed: ${result.workletMessagesProcessed}`);
+    console.log(`  Prescheduler sent: ${result.preschedulerDispatched}`);
+    console.log(`  Main messages sent: ${result.oscOutMessagesSent}`);
+    console.log(`  Worklet messages processed: ${result.scsynthMessagesProcessed}`);
     console.log(`  In buffer: ${result.inBufferUsed} / ${result.inBufferCapacity}`);
     console.log(`  Debug messages: ${result.debugCount}`);
     if (result.timingDebug) {
@@ -396,7 +396,7 @@ test.describe("Scheduler Queue Overflow", () => {
       await sonic.sync(1);
 
       const metricsBefore = sonic.getMetrics();
-      const droppedBefore = metricsBefore.workletSchedulerDropped || 0;
+      const droppedBefore = metricsBefore.scsynthSchedulerDropped || 0;
 
       // NTP helper
       const NTP_EPOCH_OFFSET = 2208988800;
@@ -454,9 +454,9 @@ test.describe("Scheduler Queue Overflow", () => {
       return {
         sent: EXACT_CAPACITY,
         droppedBefore,
-        droppedAfter: metricsAfter.workletSchedulerDropped || 0,
-        droppedCount: (metricsAfter.workletSchedulerDropped || 0) - droppedBefore,
-        schedulerMax: metricsAfter.workletSchedulerMax,
+        droppedAfter: metricsAfter.scsynthSchedulerDropped || 0,
+        droppedCount: (metricsAfter.scsynthSchedulerDropped || 0) - droppedBefore,
+        schedulerMax: metricsAfter.scsynthSchedulerPeakDepth,
         overflowErrors: debugMessages.filter(m => m.text?.includes("queue full")).length
       };
     }, sonicConfig);

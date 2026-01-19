@@ -112,7 +112,10 @@ const readMessages = () => {
         },
         onCorruption: (position) => {
             console.error('[OSCInWorker] Corrupted message at position', position);
-            if (metricsView) Atomics.add(metricsView, MetricsOffsets.OSC_IN_DROPPED_MESSAGES, 1);
+            if (metricsView) {
+                Atomics.add(metricsView, MetricsOffsets.OSC_IN_DROPPED_MESSAGES, 1);
+                Atomics.add(metricsView, MetricsOffsets.OSC_IN_CORRUPTED, 1);
+            }
         }
     });
 

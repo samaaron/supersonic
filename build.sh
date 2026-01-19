@@ -65,6 +65,11 @@ echo "SCHEDULER: $SCHEDULER_SLOT_COUNT slots × $SCHEDULER_SLOT_SIZE bytes = $((
 NODE_TREE_MIRROR_MAX_NODES=${NODE_TREE_MIRROR_MAX_NODES:-1024}
 echo "NODE_TREE_MIRROR: $NODE_TREE_MIRROR_MAX_NODES max nodes"
 
+# Stack size - explicit 1MB to prevent overflow from deep call stacks
+# Note: Large buffers (like osc_buffer) MUST be static, not stack-allocated
+WASM_STACK_SIZE=1048576
+echo "STACK_SIZE: $((WASM_STACK_SIZE / 1024))KB"
+
 # Collect all scsynth source files
 # Note: Platform-specific and unused files have been removed from the repo entirely
 # (SC_ComPort.cpp, XenomaiLock.cpp, SC_PaUtils.cpp, sc_popen.cpp, strtod.c)
@@ -110,6 +115,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -pthread \
     -sALLOW_MEMORY_GROWTH=0 \
     -sINITIAL_MEMORY=$FIXED_MEMORY \
+    -sSTACK_SIZE=$WASM_STACK_SIZE \
     -sEXPORTED_FUNCTIONS="['___wasm_call_ctors','_get_ring_buffer_base','_get_buffer_layout','_init_memory','_process_audio','_get_audio_output_bus','_get_audio_buffer_samples','_get_supersonic_version_string','_set_time_offset','_get_time_offset','_worklet_debug','_worklet_debug_va','_get_process_count','_get_messages_processed','_get_messages_dropped','_get_status_flags']" \
     --no-entry \
     -Wl,--import-memory,--shared-memory,--allow-multiple-definition \

@@ -578,21 +578,26 @@ function addSentMessage(oscData, comment = null) {
 }
 
 // ===== METRICS =====
+// Sentinel value for "unset" min headroom metric (must match prescheduler worker)
+const HEADROOM_UNSET_SENTINEL = 0xFFFFFFFF;
+
 const METRICS_MAP = {
-  workletProcessCount: "worklet_process_count",
-  workletMessagesProcessed: "worklet_messages_processed",
-  workletMessagesDropped: "worklet_messages_dropped",
-  workletSchedulerDepth: "worklet_scheduler_depth",
-  workletSchedulerMax: "worklet_scheduler_max",
-  workletSchedulerDropped: "worklet_scheduler_dropped",
-  workletSequenceGaps: "worklet_sequence_gaps",
+  scsynthProcessCount: "scsynth_process_count",
+  scsynthMessagesProcessed: "scsynth_messages_processed",
+  scsynthMessagesDropped: "scsynth_messages_dropped",
+  scsynthSchedulerDepth: "scsynth_scheduler_depth",
+  scsynthSchedulerPeakDepth: "scsynth_scheduler_peak_depth",
+  scsynthSchedulerCapacity: "scsynth_scheduler_capacity",
+  scsynthSchedulerDropped: "scsynth_scheduler_dropped",
+  scsynthSequenceGaps: "scsynth_sequence_gaps",
+  scsynthSchedulerLates: "scsynth_scheduler_lates",
   preschedulerPending: "prescheduler_pending",
-  preschedulerPeak: "prescheduler_peak",
-  preschedulerSent: "prescheduler_sent",
+  preschedulerPendingPeak: "prescheduler_pending_peak",
+  preschedulerDispatched: "prescheduler_dispatched",
   preschedulerRetriesSucceeded: "prescheduler_retries_succeeded",
   preschedulerRetriesFailed: "prescheduler_retries_failed",
   preschedulerRetryQueueSize: "prescheduler_retry_queue_size",
-  preschedulerRetryQueueMax: "prescheduler_retry_queue_max",
+  preschedulerRetryQueuePeak: "prescheduler_retry_queue_peak",
   preschedulerBundlesScheduled: "prescheduler_bundles_scheduled",
   preschedulerEventsCancelled: "prescheduler_events_cancelled",
   preschedulerTotalDispatches: "prescheduler_total_dispatches",
@@ -603,10 +608,32 @@ const METRICS_MAP = {
   oscInBytesReceived: "osc_in_bytes_received",
   debugMessagesReceived: "debug_messages_received",
   debugBytesReceived: "debug_bytes_received",
-  mainMessagesSent: "main_messages_sent",
-  mainBytesSent: "main_bytes_sent",
+  oscOutMessagesSent: "osc_out_messages_sent",
+  oscOutBytesSent: "osc_out_bytes_sent",
   driftOffsetMs: "drift_offset_ms",
+  preschedulerMinHeadroomMs: "prescheduler_min_headroom_ms",
+  preschedulerLates: "prescheduler_lates",
+  scsynthWasmErrors: "scsynth_wasm_errors",
+  oscInCorrupted: "osc_in_corrupted",
 };
+
+// Apply tooltips from schema to metric elements using data-metric attributes
+function applySchemaTooltips() {
+  const schema = SuperSonic.getMetricsSchema();
+  if (!schema) return;
+
+  document.querySelectorAll("[data-metric]").forEach((el) => {
+    const schemaKey = el.dataset.metric;
+    const metricDef = schema[schemaKey];
+    if (!metricDef?.description) return;
+
+    // Apply title to parent row element (.metrics-row or .metrics-bar-row)
+    const row = el.closest(".metrics-row, .metrics-bar-row");
+    if (row) {
+      row.title = metricDef.description;
+    }
+  });
+}
 
 function updateMetrics(m) {
   const mapped = {};
@@ -629,27 +656,36 @@ function updateMetrics(m) {
   mapped.synthdef_count = m.loadedSynthDefs;
   mapped.audio_context_state = m.audioContextState;
 
+  // Format headroom (HEADROOM_UNSET_SENTINEL means "not yet set")
+  const formatHeadroom = (val) => {
+    if (val === undefined || val === HEADROOM_UNSET_SENTINEL) return "-";
+    return val;
+  };
+
   // Update DOM
   const updates = {
-    "metric-sent": mapped.main_messages_sent ?? 0,
-    "metric-bytes-sent": formatBytes(mapped.main_bytes_sent ?? 0),
+    "metric-sent": mapped.osc_out_messages_sent ?? 0,
+    "metric-bytes-sent": formatBytes(mapped.osc_out_bytes_sent ?? 0),
     "metric-direct-writes": mapped.prescheduler_bypassed ?? 0,
     "metric-received": mapped.osc_in_messages_received ?? 0,
     "metric-bytes-received": formatBytes(mapped.osc_in_bytes_received ?? 0),
     "metric-osc-in-dropped": mapped.osc_in_messages_dropped ?? 0,
-    "metric-messages-processed": mapped.worklet_messages_processed ?? 0,
-    "metric-messages-dropped": mapped.worklet_messages_dropped ?? 0,
-    "metric-sequence-gaps": mapped.worklet_sequence_gaps ?? 0,
-    "metric-process-count": mapped.worklet_process_count ?? 0,
-    "metric-scheduler-depth": mapped.worklet_scheduler_depth ?? 0,
-    "metric-scheduler-peak": mapped.worklet_scheduler_max ?? 0,
-    "metric-scheduler-dropped": mapped.worklet_scheduler_dropped ?? 0,
+    "metric-messages-processed": mapped.scsynth_messages_processed ?? 0,
+    "metric-messages-dropped": mapped.scsynth_messages_dropped ?? 0,
+    "metric-sequence-gaps": mapped.scsynth_sequence_gaps ?? 0,
+    "metric-process-count": mapped.scsynth_process_count ?? 0,
+    "metric-scheduler-depth": mapped.scsynth_scheduler_depth ?? 0,
+    "metric-scheduler-peak": mapped.scsynth_scheduler_peak_depth ?? 0,
+    "metric-scheduler-dropped": mapped.scsynth_scheduler_dropped ?? 0,
+    "metric-scheduler-lates": mapped.scsynth_scheduler_lates ?? 0,
     "metric-drift": (mapped.drift_offset_ms ?? 0) + "ms",
     "metric-prescheduler-pending": mapped.prescheduler_pending ?? 0,
-    "metric-prescheduler-peak": mapped.prescheduler_peak ?? 0,
-    "metric-prescheduler-sent": mapped.prescheduler_sent ?? 0,
+    "metric-prescheduler-peak": mapped.prescheduler_pending_peak ?? 0,
+    "metric-prescheduler-sent": mapped.prescheduler_dispatched ?? 0,
     "metric-bundles-scheduled": mapped.prescheduler_bundles_scheduled ?? 0,
     "metric-events-cancelled": mapped.prescheduler_events_cancelled ?? 0,
+    "metric-min-headroom": formatHeadroom(mapped.prescheduler_min_headroom_ms),
+    "metric-lates": mapped.prescheduler_lates ?? 0,
     "metric-prescheduler-retries-succeeded":
       mapped.prescheduler_retries_succeeded ?? 0,
     "metric-prescheduler-retries-failed":
@@ -657,7 +693,7 @@ function updateMetrics(m) {
     "metric-prescheduler-retry-queue-size":
       mapped.prescheduler_retry_queue_size ?? 0,
     "metric-prescheduler-retry-queue-max":
-      mapped.prescheduler_retry_queue_max ?? 0,
+      mapped.prescheduler_retry_queue_peak ?? 0,
     "metric-messages-retried": mapped.prescheduler_messages_retried ?? 0,
     "metric-total-dispatches": mapped.prescheduler_total_dispatches ?? 0,
     "metric-debug-received": mapped.debug_messages_received ?? 0,
@@ -669,6 +705,8 @@ function updateMetrics(m) {
     "metric-buffer-used": formatBytes(mapped.buffer_pool_used ?? 0),
     "metric-buffer-free": formatBytes(mapped.buffer_pool_available ?? 0),
     "metric-buffer-allocs": mapped.buffer_pool_allocations ?? 0,
+    "metric-wasm-errors": mapped.scsynth_wasm_errors ?? 0,
+    "metric-osc-in-corrupted": mapped.osc_in_corrupted ?? 0,
   };
 
   for (const [id, val] of Object.entries(updates)) {
@@ -676,8 +714,7 @@ function updateMetrics(m) {
     if (el) el.textContent = val;
   }
 
-  // Buffer bars (SAB mode only)
-  const isSABMode = m.mode === 'sab';
+  // Buffer bars (works in both SAB and postMessage modes)
   for (const [name, color] of [
     ["in", "#1e90ff"],
     ["out", "#4a4"],
@@ -686,7 +723,7 @@ function updateMetrics(m) {
     const usage = mapped[`${name}_buffer_usage`];
     const bar = $(`metric-${name}-bar`),
       label = $(`metric-${name}-usage`);
-    if (isSABMode && usage !== undefined) {
+    if (usage !== undefined) {
       if (bar) bar.style.width = usage + "%";
       if (label) label.textContent = usage.toFixed(2) + "%";
     } else {
@@ -1603,3 +1640,6 @@ $("load-example-button")?.addEventListener("click", async () => {
 12.0  /s_new sonic-pi-dsaw -1 0 0 note 52 amp 0.45 attack 0.4 release 4 detune 0.18 cutoff 95 pan 0.1
 12.0  /s_new sonic-pi-dsaw -1 0 0 note 28 amp 0.45 attack 0.4 release 5 detune 0.18 cutoff 85 pan 0.1`;
 });
+
+// Apply schema tooltips to metric elements
+applySchemaTooltips();

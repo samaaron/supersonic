@@ -84,12 +84,12 @@ export function inspect(target) {
   // Read metrics
   const metricsView = new Uint32Array(sab, ringBufferBase + layout.METRICS_START, layout.METRICS_SIZE / 4);
   const metrics = {
-    processCount: metricsView[MetricsOffsets.PROCESS_COUNT],
-    messagesProcessed: metricsView[MetricsOffsets.MESSAGES_PROCESSED],
-    messagesDropped: metricsView[MetricsOffsets.MESSAGES_DROPPED],
-    schedulerQueueDepth: metricsView[MetricsOffsets.SCHEDULER_QUEUE_DEPTH],
-    schedulerQueueMax: metricsView[MetricsOffsets.SCHEDULER_QUEUE_MAX],
-    schedulerQueueDropped: metricsView[MetricsOffsets.SCHEDULER_QUEUE_DROPPED],
+    processCount: metricsView[MetricsOffsets.SCSYNTH_PROCESS_COUNT],
+    messagesProcessed: metricsView[MetricsOffsets.SCSYNTH_MESSAGES_PROCESSED],
+    messagesDropped: metricsView[MetricsOffsets.SCSYNTH_MESSAGES_DROPPED],
+    schedulerQueueDepth: metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_DEPTH],
+    schedulerQueueMax: metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_PEAK_DEPTH],
+    schedulerQueueDropped: metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_DROPPED],
   };
 
   return {

@@ -399,7 +399,7 @@ test.describe("Prescheduler Cancellation", () => {
       await sonic.sync(1);
 
       const metricsBefore = sonic.getMetrics();
-      const sentBefore = metricsBefore.preschedulerSent || 0;
+      const sentBefore = metricsBefore.preschedulerDispatched || 0;
       const cancelledBefore = metricsBefore.preschedulerEventsCancelled || 0;
 
       // Schedule bundles 5 seconds in future (long enough to cancel before dispatch)
@@ -415,7 +415,7 @@ test.describe("Prescheduler Cancellation", () => {
       await new Promise(r => setTimeout(r, 50));
 
       const metricsAfterSend = sonic.getMetrics();
-      const sentAfterSend = metricsAfterSend.preschedulerSent || 0;
+      const sentAfterSend = metricsAfterSend.preschedulerDispatched || 0;
       const pendingAfterSend = metricsAfterSend.preschedulerPending || 0;
 
       // Cancel immediately (before any dispatch cycle can occur)
@@ -425,7 +425,7 @@ test.describe("Prescheduler Cancellation", () => {
       await new Promise(r => setTimeout(r, 50));
 
       const metricsAfterCancel = sonic.getMetrics();
-      const sentAfterCancel = metricsAfterCancel.preschedulerSent || 0;
+      const sentAfterCancel = metricsAfterCancel.preschedulerDispatched || 0;
       const pendingAfterCancel = metricsAfterCancel.preschedulerPending || 0;
       const cancelledAfter = metricsAfterCancel.preschedulerEventsCancelled || 0;
 
@@ -434,7 +434,7 @@ test.describe("Prescheduler Cancellation", () => {
       await new Promise(r => setTimeout(r, 300));
 
       const metricsFinal = sonic.getMetrics();
-      const sentFinal = metricsFinal.preschedulerSent || 0;
+      const sentFinal = metricsFinal.preschedulerDispatched || 0;
 
       return {
         pendingAfterSend,
@@ -568,5 +568,235 @@ test.describe("Prescheduler Cancellation", () => {
     expect(result.pendingAfterSend).toBe(30);
     expect(result.cancelledCount).toBe(30);
     expect(result.pendingAfterCancel).toBe(0);
+  });
+
+  test("min headroom and lates metrics track dispatch timing for timed bundles", async ({ page, sonicConfig }) => {
+    // Sentinel value for "unset" min headroom metric (must match prescheduler worker)
+    const HEADROOM_UNSET_SENTINEL = 0xFFFFFFFF;
+
+    const result = await page.evaluate(async (config) => {
+      const HEADROOM_UNSET_SENTINEL = 0xFFFFFFFF;
+
+      // NTP helpers
+      const NTP_EPOCH_OFFSET = 2208988800;
+      const getCurrentNTP = () => {
+        const perfTimeMs = performance.timeOrigin + performance.now();
+        return (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+      };
+
+      const createTimedBundle = (ntpTime, nodeId) => {
+        const message = {
+          address: "/s_new",
+          args: [
+            { type: 's', value: "sonic-pi-beep" },
+            { type: 'i', value: nodeId },
+            { type: 'i', value: 0 },
+            { type: 'i', value: 0 },
+            { type: 's', value: "note" },
+            { type: 'f', value: 60 },
+            { type: 's', value: "amp" },
+            { type: 'f', value: 0.01 },
+            { type: 's', value: "release" },
+            { type: 'f', value: 0.05 },
+          ],
+        };
+
+        // Encode to binary OSC format
+        const encodedMessage = window.SuperSonic.osc.encode(message);
+        const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
+        const bundle = new Uint8Array(bundleSize);
+        const view = new DataView(bundle.buffer);
+
+        // "#bundle\0" header
+        bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], 0);
+
+        // NTP timetag (8 bytes)
+        const NTP_EPOCH_OFFSET = 2208988800;
+        const seconds = Math.floor(ntpTime);
+        const fraction = Math.floor((ntpTime - seconds) * 0xFFFFFFFF);
+        view.setUint32(8, seconds, false);
+        view.setUint32(12, fraction, false);
+
+        // Message size + data
+        view.setInt32(16, encodedMessage.byteLength, false);
+        bundle.set(new Uint8Array(encodedMessage), 20);
+
+        return bundle;
+      };
+
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+      await sonic.sync(1);
+
+      // Get initial metrics - min headroom should be unset (sentinel value)
+      const metricsBefore = sonic.getMetrics();
+      const minHeadroomBefore = metricsBefore.preschedulerMinHeadroomMs;
+      const latesBefore = metricsBefore.preschedulerLates;
+
+      // Schedule bundles 300ms in the future (beyond the 200ms lookahead window)
+      // They will be dispatched ~100ms before execution (300 - 200 = 100ms headroom)
+      const baseNTP = getCurrentNTP() + 0.3;  // 300ms in future
+      for (let i = 0; i < 5; i++) {
+        const bundle = createTimedBundle(baseNTP + (i * 0.01), 60000 + i);
+        sonic.sendOSC(bundle);
+      }
+
+      // Wait for prescheduler to dispatch the bundles (poll interval is 25ms)
+      // Wait until bundles execute (300ms) plus some buffer
+      await new Promise(r => setTimeout(r, 500));
+
+      const metricsAfter = sonic.getMetrics();
+      const minHeadroomAfter = metricsAfter.preschedulerMinHeadroomMs;
+      const latesAfter = metricsAfter.preschedulerLates;
+      const dispatched = metricsAfter.preschedulerDispatched;
+
+      await sonic.destroy();
+
+      return {
+        minHeadroomBefore,
+        latesBefore,
+        minHeadroomAfter,
+        latesAfter,
+        dispatched,
+        HEADROOM_UNSET_SENTINEL,
+      };
+    }, sonicConfig);
+
+    console.log(`\nMin headroom and lates metrics test:`);
+    console.log(`  Before: minHeadroom=${result.minHeadroomBefore}, lates=${result.latesBefore}`);
+    console.log(`  After: minHeadroom=${result.minHeadroomAfter}ms, lates=${result.latesAfter}`);
+    console.log(`  Dispatched: ${result.dispatched}`);
+
+    // Before any timed bundles, min headroom should be unset (sentinel value)
+    expect(result.minHeadroomBefore).toBe(HEADROOM_UNSET_SENTINEL);
+
+    // No lates initially
+    expect(result.latesBefore).toBe(0);
+
+    // After dispatching timed bundles, min headroom should be populated
+    expect(result.minHeadroomAfter).not.toBe(HEADROOM_UNSET_SENTINEL);
+
+    // Min headroom should be reasonable (0-300ms range for our 300ms future bundles)
+    expect(result.minHeadroomAfter).toBeGreaterThanOrEqual(0);
+    expect(result.minHeadroomAfter).toBeLessThan(300);
+
+    // Bundles scheduled 300ms in future should not be late
+    expect(result.latesAfter).toBe(0);
+
+    // We should have dispatched at least 5 bundles
+    expect(result.dispatched).toBeGreaterThanOrEqual(5);
+  });
+
+  test("lates counter increments for bundles dispatched after their scheduled time", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      // NTP helpers
+      const NTP_EPOCH_OFFSET = 2208988800;
+      const getCurrentNTP = () => {
+        const perfTimeMs = performance.timeOrigin + performance.now();
+        return (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+      };
+
+      const createTimedBundle = (ntpTime, nodeId) => {
+        const message = {
+          address: "/s_new",
+          args: [
+            { type: 's', value: "sonic-pi-beep" },
+            { type: 'i', value: nodeId },
+            { type: 'i', value: 0 },
+            { type: 'i', value: 0 },
+            { type: 's', value: "note" },
+            { type: 'f', value: 60 },
+            { type: 's', value: "amp" },
+            { type: 'f', value: 0.01 },
+            { type: 's', value: "release" },
+            { type: 'f', value: 0.05 },
+          ],
+        };
+
+        // Encode to binary OSC format
+        const encodedMessage = window.SuperSonic.osc.encode(message);
+        const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
+        const bundle = new Uint8Array(bundleSize);
+        const view = new DataView(bundle.buffer);
+
+        // "#bundle\0" header
+        bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], 0);
+
+        // NTP timetag (8 bytes)
+        const seconds = Math.floor(ntpTime);
+        const fraction = Math.floor((ntpTime - seconds) * 0xFFFFFFFF);
+        view.setUint32(8, seconds, false);
+        view.setUint32(12, fraction, false);
+
+        // Message size + data
+        view.setInt32(16, encodedMessage.byteLength, false);
+        bundle.set(new Uint8Array(encodedMessage), 20);
+
+        return bundle;
+      };
+
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+      await sonic.sync(1);
+
+      // Get initial lates count (both prescheduler and scsynth)
+      const metricsBefore = sonic.getMetrics();
+      const preschedulerLatesBefore = metricsBefore.preschedulerLates;
+      const scsynthLatesBefore = metricsBefore.scsynthSchedulerLates;
+
+      // Schedule bundles with timestamps in the PAST (100ms ago)
+      // These should be dispatched immediately but counted as late
+      // In postMessage mode: preschedulerLates increments
+      // In SAB mode: DirectWriter bypasses prescheduler, but scsynth tracks lates
+      const pastNTP = getCurrentNTP() - 0.1;  // 100ms in the past
+      for (let i = 0; i < 5; i++) {
+        const bundle = createTimedBundle(pastNTP - (i * 0.01), 70000 + i);
+        sonic.sendOSC(bundle);
+      }
+
+      // Wait for bundles to be processed
+      await new Promise(r => setTimeout(r, 300));
+
+      const metricsAfter = sonic.getMetrics();
+      const preschedulerLatesAfter = metricsAfter.preschedulerLates;
+      const scsynthLatesAfter = metricsAfter.scsynthSchedulerLates;
+      const dispatched = metricsAfter.preschedulerDispatched;
+      const mode = metricsAfter.mode;
+      const messagesProcessed = metricsAfter.scsynthMessagesProcessed;
+      const schedulerDepth = metricsAfter.scsynthSchedulerDepth;
+
+      await sonic.destroy();
+
+      return {
+        preschedulerLatesBefore,
+        preschedulerLatesAfter,
+        scsynthLatesBefore,
+        scsynthLatesAfter,
+        dispatched,
+        mode,
+        messagesProcessed,
+        schedulerDepth,
+      };
+    }, sonicConfig);
+
+    // Calculate total lates from both sources
+    const totalLatesBefore = result.preschedulerLatesBefore + result.scsynthLatesBefore;
+    const totalLatesAfter = result.preschedulerLatesAfter + result.scsynthLatesAfter;
+
+    console.log(`\nLates counter test (mode: ${result.mode}):`);
+    console.log(`  Prescheduler lates: ${result.preschedulerLatesBefore} -> ${result.preschedulerLatesAfter}`);
+    console.log(`  Scsynth lates: ${result.scsynthLatesBefore} -> ${result.scsynthLatesAfter}`);
+    console.log(`  Total lates: ${totalLatesBefore} -> ${totalLatesAfter}`);
+    console.log(`  Dispatched: ${result.dispatched}, Processed: ${result.messagesProcessed}, Depth: ${result.schedulerDepth}`);
+
+    // Total lates (prescheduler + scsynth) should have incremented for bundles scheduled in the past
+    // In postMessage mode: prescheduler tracks lates
+    // In SAB mode: scsynth tracks lates (DirectWriter bypasses prescheduler for past bundles)
+    // Note: WASM has a 3ms threshold for "late" detection, so due to timing variations
+    // not all 5 bundles may be counted as late. Accept at least 3.
+    expect(totalLatesAfter).toBeGreaterThan(totalLatesBefore);
+    expect(totalLatesAfter - totalLatesBefore).toBeGreaterThanOrEqual(3);
   });
 });

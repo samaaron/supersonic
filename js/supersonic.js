@@ -80,19 +80,21 @@ export class SuperSonic {
       // Meta
       mode: { type: 'string', values: ['sab', 'postMessage'], description: 'Transport mode' },
 
-      // Worklet metrics
-      workletProcessCount: { type: 'counter', unit: 'count', description: 'Audio process() calls', modes: ['sab', 'postMessage'] },
-      workletMessagesProcessed: { type: 'counter', unit: 'count', description: 'OSC messages processed by scsynth', modes: ['sab', 'postMessage'] },
-      workletMessagesDropped: { type: 'counter', unit: 'count', description: 'Messages dropped (ring buffer full)', modes: ['sab', 'postMessage'] },
-      workletSchedulerDepth: { type: 'gauge', unit: 'count', description: 'Current scheduler queue depth', modes: ['sab', 'postMessage'] },
-      workletSchedulerMax: { type: 'gauge', unit: 'count', description: 'Peak scheduler queue depth', modes: ['sab', 'postMessage'] },
-      workletSchedulerDropped: { type: 'counter', unit: 'count', description: 'Scheduled events dropped', modes: ['sab', 'postMessage'] },
-      workletSequenceGaps: { type: 'counter', unit: 'count', description: 'Message sequence gaps detected', modes: ['sab', 'postMessage'] },
+      // scsynth metrics
+      scsynthProcessCount: { type: 'counter', unit: 'count', description: 'Audio process() calls', modes: ['sab', 'postMessage'] },
+      scsynthMessagesProcessed: { type: 'counter', unit: 'count', description: 'OSC messages processed by scsynth', modes: ['sab', 'postMessage'] },
+      scsynthMessagesDropped: { type: 'counter', unit: 'count', description: 'Messages dropped (ring buffer full)', modes: ['sab', 'postMessage'] },
+      scsynthSchedulerDepth: { type: 'gauge', unit: 'count', description: 'Current scheduler queue depth', modes: ['sab', 'postMessage'] },
+      scsynthSchedulerPeakDepth: { type: 'gauge', unit: 'count', description: 'Peak scheduler queue depth (high water mark)', modes: ['sab', 'postMessage'] },
+      scsynthSchedulerCapacity: { type: 'constant', unit: 'count', description: 'Maximum scheduler queue size', modes: ['sab', 'postMessage'] },
+      scsynthSchedulerDropped: { type: 'counter', unit: 'count', description: 'Scheduled events dropped', modes: ['sab', 'postMessage'] },
+      scsynthSequenceGaps: { type: 'counter', unit: 'count', description: 'Messages lost in transit from JS to scsynth', modes: ['sab', 'postMessage'] },
+      scsynthSchedulerLates: { type: 'counter', unit: 'count', description: 'Bundles executed after their scheduled time', modes: ['sab', 'postMessage'] },
 
       // Prescheduler metrics
       preschedulerPending: { type: 'gauge', unit: 'count', description: 'Events waiting to be scheduled', modes: ['sab', 'postMessage'] },
-      preschedulerPeak: { type: 'gauge', unit: 'count', description: 'Peak pending events', modes: ['sab', 'postMessage'] },
-      preschedulerSent: { type: 'counter', unit: 'count', description: 'Events sent to worklet', modes: ['sab', 'postMessage'] },
+      preschedulerPendingPeak: { type: 'gauge', unit: 'count', description: 'Peak pending events', modes: ['sab', 'postMessage'] },
+      preschedulerDispatched: { type: 'counter', unit: 'count', description: 'Events sent to worklet', modes: ['sab', 'postMessage'] },
       preschedulerRetriesSucceeded: { type: 'counter', unit: 'count', description: 'Retries that succeeded', modes: ['sab', 'postMessage'] },
       preschedulerRetriesFailed: { type: 'counter', unit: 'count', description: 'Retries that failed', modes: ['sab', 'postMessage'] },
       preschedulerBundlesScheduled: { type: 'counter', unit: 'count', description: 'Bundles scheduled', modes: ['sab', 'postMessage'] },
@@ -100,34 +102,40 @@ export class SuperSonic {
       preschedulerTotalDispatches: { type: 'counter', unit: 'count', description: 'Total dispatch attempts', modes: ['sab', 'postMessage'] },
       preschedulerMessagesRetried: { type: 'counter', unit: 'count', description: 'Messages that needed retry', modes: ['sab', 'postMessage'] },
       preschedulerRetryQueueSize: { type: 'gauge', unit: 'count', description: 'Current retry queue size', modes: ['sab', 'postMessage'] },
-      preschedulerRetryQueueMax: { type: 'gauge', unit: 'count', description: 'Peak retry queue size', modes: ['sab', 'postMessage'] },
-      preschedulerBypassed: { type: 'counter', unit: 'count', description: 'Messages that bypassed prescheduler (direct write)', modes: ['sab', 'postMessage'] },
+      preschedulerRetryQueuePeak: { type: 'gauge', unit: 'count', description: 'Peak retry queue size', modes: ['sab', 'postMessage'] },
+      preschedulerBypassed: { type: 'counter', unit: 'count', description: 'Messages sent directly from JS to scsynth, bypassing prescheduler', modes: ['sab', 'postMessage'] },
+      preschedulerCapacity: { type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler', modes: ['sab', 'postMessage'] },
+      preschedulerMinHeadroomMs: { type: 'gauge', unit: 'ms', description: 'Smallest time gap between JS prescheduler dispatch and scsynth scheduler execution', modes: ['sab', 'postMessage'] },
+      preschedulerLates: { type: 'counter', unit: 'count', description: 'Bundles dispatched after their scheduled execution time', modes: ['sab', 'postMessage'] },
 
       // OSC In metrics
-      oscInMessagesReceived: { type: 'counter', unit: 'count', description: 'OSC messages received from scsynth', modes: ['sab', 'postMessage'] },
-      oscInMessagesDropped: { type: 'counter', unit: 'count', description: 'OSC messages dropped (buffer full)', modes: ['sab', 'postMessage'] },
-      oscInBytesReceived: { type: 'counter', unit: 'bytes', description: 'Total bytes received', modes: ['sab', 'postMessage'] },
+      oscInMessagesReceived: { type: 'counter', unit: 'count', description: 'OSC replies received from scsynth to JS', modes: ['sab', 'postMessage'] },
+      oscInMessagesDropped: { type: 'counter', unit: 'count', description: 'Replies lost in transit from scsynth to JS', modes: ['sab', 'postMessage'] },
+      oscInBytesReceived: { type: 'counter', unit: 'bytes', description: 'Total bytes received from scsynth to JS', modes: ['sab', 'postMessage'] },
 
       // Debug metrics
       debugMessagesReceived: { type: 'counter', unit: 'count', description: 'Debug messages from scsynth', modes: ['sab', 'postMessage'] },
       debugBytesReceived: { type: 'counter', unit: 'bytes', description: 'Debug bytes received', modes: ['sab', 'postMessage'] },
 
       // Main thread metrics
-      mainMessagesSent: { type: 'counter', unit: 'count', description: 'Messages sent to scsynth', modes: ['sab', 'postMessage'] },
-      mainBytesSent: { type: 'counter', unit: 'bytes', description: 'Bytes sent to scsynth', modes: ['sab', 'postMessage'] },
+      oscOutMessagesSent: { type: 'counter', unit: 'count', description: 'OSC messages sent from JS to scsynth', modes: ['sab', 'postMessage'] },
+      oscOutBytesSent: { type: 'counter', unit: 'bytes', description: 'Total bytes sent from JS to scsynth', modes: ['sab', 'postMessage'] },
 
       // Buffer usage (SAB only)
       inBufferUsed: { type: 'object', description: 'Input ring buffer usage', modes: ['sab'], properties: {
         bytes: { type: 'gauge', unit: 'bytes', description: 'Bytes used' },
-        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' }
+        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' },
+        capacity: { type: 'constant', unit: 'bytes', description: 'Total buffer capacity' }
       }},
       outBufferUsed: { type: 'object', description: 'Output ring buffer usage', modes: ['sab'], properties: {
         bytes: { type: 'gauge', unit: 'bytes', description: 'Bytes used' },
-        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' }
+        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' },
+        capacity: { type: 'constant', unit: 'bytes', description: 'Total buffer capacity' }
       }},
       debugBufferUsed: { type: 'object', description: 'Debug ring buffer usage', modes: ['sab'], properties: {
         bytes: { type: 'gauge', unit: 'bytes', description: 'Bytes used' },
-        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' }
+        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' },
+        capacity: { type: 'constant', unit: 'bytes', description: 'Total buffer capacity' }
       }},
 
       // Timing
@@ -139,6 +147,10 @@ export class SuperSonic {
       bufferPoolAvailableBytes: { type: 'gauge', unit: 'bytes', description: 'Buffer pool bytes available', modes: ['sab', 'postMessage'] },
       bufferPoolAllocations: { type: 'counter', unit: 'count', description: 'Total buffer allocations', modes: ['sab', 'postMessage'] },
       loadedSynthDefs: { type: 'gauge', unit: 'count', description: 'Number of loaded synthdefs', modes: ['sab', 'postMessage'] },
+
+      // Error metrics
+      scsynthWasmErrors: { type: 'counter', unit: 'count', description: 'WASM execution errors in audio worklet', modes: ['sab', 'postMessage'] },
+      oscInCorrupted: { type: 'counter', unit: 'count', description: 'Corrupted messages detected from scsynth to JS', modes: ['sab', 'postMessage'] },
     };
   }
 
@@ -266,7 +278,7 @@ export class SuperSonic {
 
     this.#config = {
       mode: mode,
-      snapshotIntervalMs: options.snapshotIntervalMs ?? 25,
+      snapshotIntervalMs: options.snapshotIntervalMs ?? 50,
       wasmUrl: options.wasmUrl || wasmBaseURL + "scsynth-nrt.wasm",
       wasmBaseURL: wasmBaseURL,
       workletUrl: options.workletUrl || workerBaseURL + "scsynth_audio_worklet.js",
@@ -715,8 +727,8 @@ export class SuperSonic {
     const uint8Data = this.#toUint8Array(oscData);
     const preparedData = await this.#prepareOutboundPacket(uint8Data);
 
-    this.#metricsReader.addMetric("mainMessagesSent");
-    this.#metricsReader.addMetric("mainBytesSent", preparedData.length);
+    this.#metricsReader.addMetric("oscOutMessagesSent");
+    this.#metricsReader.addMetric("oscOutBytesSent", preparedData.length);
 
     this.#eventEmitter.emit('message:sent', preparedData);
 
@@ -728,9 +740,9 @@ export class SuperSonic {
 
     const timing = this.#ntpTiming?.calculateBundleWait(preparedData);
 
-    // PostMessage mode: send immediate messages directly to worklet
+    // PostMessage mode: send immediate messages directly to worklet, bypassing prescheduler
     if (this.#config.mode === 'postMessage' && !timing) {
-      this.#workletNode.port.postMessage({ type: 'osc', oscData: preparedData });
+      this.#osc.sendImmediate(preparedData);
       return;
     }
 
@@ -1351,10 +1363,12 @@ export class SuperSonic {
 
     return this.#metricsReader.gatherMetrics({
       preschedulerMetrics: preschedulerMetrics,
+      transportMetrics: this.#osc?.getMetrics(),
       driftOffsetMs: this.#ntpTiming?.getDriftOffset() ?? 0,
       audioContextState: this.#audioContext?.state || "unknown",
       bufferPoolStats: this.#bufferManager?.getStats(),
       loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,
+      preschedulerCapacity: this.#config.preschedulerCapacity,
     });
   }
 

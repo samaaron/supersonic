@@ -144,9 +144,18 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
     return err;
 }
 
-// PerformOSCBundle - execute all messages in an OSC bundle
-// Based on SC_CoreAudio.cpp:226-243
-void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket) {
+// Maximum bundle nesting depth - prevents stack overflow from malicious packets
+static constexpr int MAX_BUNDLE_DEPTH = 8;
+
+// Internal helper with depth tracking
+static void PerformOSCBundleWithDepth(World* inWorld, OSC_Packet* inPacket, int depth) {
+    // Depth limit check - prevents stack overflow from deeply nested bundles
+    if (depth > MAX_BUNDLE_DEPTH) {
+        worklet_debug("ERROR: Bundle nesting too deep (%d > %d), skipping",
+                     depth, MAX_BUNDLE_DEPTH);
+        return;
+    }
+
     // Validate inputs
     if (!inWorld) {
         worklet_debug("ERROR: PerformOSCBundle called with null World");
@@ -200,8 +209,19 @@ void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket) {
             break;
         }
 
-        // Perform the OSC message
-        PerformOSCMessage(inWorld, msgSize, data, &inPacket->mReplyAddr);
+        // Check if this is a nested bundle (starts with "#bundle")
+        if (msgSize >= 8 && strncmp(data, "#bundle", 7) == 0) {
+            // Recursively handle nested bundle with incremented depth
+            OSC_Packet nestedPacket;
+            nestedPacket.mData = data;
+            nestedPacket.mSize = msgSize;
+            nestedPacket.mIsBundle = true;
+            nestedPacket.mReplyAddr = inPacket->mReplyAddr;
+            PerformOSCBundleWithDepth(inWorld, &nestedPacket, depth + 1);
+        } else {
+            // Perform the OSC message
+            PerformOSCMessage(inWorld, msgSize, data, &inPacket->mReplyAddr);
+        }
         data += msgSize;
         msgCount++;
     }
@@ -212,6 +232,12 @@ void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket) {
 
     // Reset error notification state for next command
     inWorld->mLocalErrorNotification = 0;
+}
+
+// PerformOSCBundle - execute all messages in an OSC bundle
+// Based on SC_CoreAudio.cpp:226-243
+void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket) {
+    PerformOSCBundleWithDepth(inWorld, inPacket, 0);
 }
 
 // ProcessOSCPacket - handle OSC commands in NRT mode

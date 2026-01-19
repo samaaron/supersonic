@@ -3150,9 +3150,14 @@ test.describe("getTree() overflow and droppedCount", () => {
       for (let i = 0; i < 10; i++) {
         const synthId = 5000 + i;
         synthIds.push(synthId);
-        sonic.send("/s_new", "sonic-pi-beep", synthId, 0, 0, "note", 60 + i, "release", 0.1);
+        sonic.send("/s_new", "sonic-pi-beep", synthId, 0, 0, "note", 60 + i, "release", 5.0);
       }
       await sonic.sync(50);
+
+      // In postMessage mode, wait for snapshot to update (sent every 50ms)
+      if (config.mode === 'postMessage') {
+        await new Promise(r => setTimeout(r, 100));
+      }
 
       const treeWithOverflow = sonic.getRawTree();
 

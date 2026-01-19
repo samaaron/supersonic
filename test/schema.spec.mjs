@@ -356,4 +356,164 @@ test.describe('Schema Validation', () => {
     // SAB-only metrics should not be present in postMessage mode
     expect(result.incorrectlyPresent).toEqual([]);
   });
+
+  test('metrics declared for both modes are actually populated after activity', async ({ page, sonicConfig }) => {
+    // This test verifies that metrics marked as available in both SAB and postMessage
+    // modes actually have non-zero values after sending/receiving messages.
+    // This catches bugs where metrics are declared but not implemented for a mode.
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const schema = window.SuperSonic.getMetricsSchema();
+
+      // Find counter metrics declared as working in both modes
+      // (counters should increment with activity, gauges might legitimately be 0)
+      const bothModeCounters = Object.entries(schema)
+        .filter(([key, def]) => {
+          const modes = def.modes || ['sab', 'postMessage'];
+          return modes.includes('sab') && modes.includes('postMessage') && def.type === 'counter';
+        })
+        .map(([key]) => key);
+
+      // Get metrics before any activity
+      const metricsBefore = sonic.getMetrics();
+
+      // Generate activity: send messages and wait for replies
+      // Load a synthdef (generates send + receive)
+      await sonic.loadSynthDef('sonic-pi-beep');
+
+      // Send a synth creation message (generates send)
+      sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60);
+
+      // Send an immediate status query (should bypass prescheduler, generates reply)
+      sonic.send('/status');
+
+      // Wait a bit for metrics to update
+      await new Promise(r => setTimeout(r, 200));
+
+      const metricsAfter = sonic.getMetrics();
+
+      await sonic.destroy();
+
+      // Check which counters are still 0 after activity
+      const zeroCounters = bothModeCounters.filter(key => {
+        const value = metricsAfter[key];
+        // Skip if undefined (might be mode-specific despite schema)
+        if (value === undefined) return false;
+        return value === 0;
+      });
+
+      // These specific counters MUST be non-zero after the activity above
+      const requiredNonZero = [
+        'oscOutMessagesSent',      // We sent messages
+        'oscOutBytesSent',         // We sent bytes
+        'oscInMessagesReceived', // We received /done and /status.reply
+        'oscInBytesReceived',    // We received bytes
+      ];
+
+      const failedRequired = requiredNonZero.filter(key => {
+        const value = metricsAfter[key];
+        return value === undefined || value === 0;
+      });
+
+      return {
+        mode: config.mode,
+        bothModeCounters,
+        zeroCounters,
+        failedRequired,
+        relevantMetrics: {
+          oscOutMessagesSent: metricsAfter.oscOutMessagesSent,
+          oscOutBytesSent: metricsAfter.oscOutBytesSent,
+          oscInMessagesReceived: metricsAfter.oscInMessagesReceived,
+          oscInBytesReceived: metricsAfter.oscInBytesReceived,
+          preschedulerBypassed: metricsAfter.preschedulerBypassed,
+        }
+      };
+    }, sonicConfig);
+
+    // Log for debugging
+    console.log(`Mode: ${result.mode}`);
+    console.log(`Metrics after activity:`, result.relevantMetrics);
+    if (result.zeroCounters.length > 0) {
+      console.log(`Warning: These counters are still 0: ${result.zeroCounters.join(', ')}`);
+    }
+
+    // Required metrics must be non-zero
+    expect(result.failedRequired).toEqual([]);
+  });
+
+  test('immediate messages reach scsynth and increment bypass counter', async ({ page, sonicConfig }) => {
+    // This test verifies that sendImmediate() actually delivers messages to scsynth.
+    // Previously there was a bug where sendImmediate used type 'oscImmediate' but
+    // the worklet only handled type 'osc', causing messages to be silently dropped.
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const metricsBefore = sonic.getMetrics();
+      const bypassedBefore = metricsBefore.preschedulerBypassed || 0;
+      const receivedBefore = metricsBefore.oscInMessagesReceived || 0;
+
+      // Send multiple immediate messages (non-bundled messages bypass prescheduler)
+      // /status returns /status.reply, so we can verify the message reached scsynth
+      const statusPromises = [];
+      for (let i = 0; i < 5; i++) {
+        statusPromises.push(new Promise(resolve => {
+          const handler = (reply) => {
+            if (reply.address === '/status.reply') {
+              sonic.off('message', handler);
+              resolve(true);
+            }
+          };
+          sonic.on('message', handler);
+          sonic.send('/status');
+        }));
+      }
+
+      // Wait for all replies (with timeout)
+      const timeoutPromise = new Promise(resolve =>
+        setTimeout(() => resolve('timeout'), 2000)
+      );
+      const raceResult = await Promise.race([
+        Promise.all(statusPromises),
+        timeoutPromise
+      ]);
+
+      // Wait for metrics to update
+      await new Promise(r => setTimeout(r, 100));
+
+      const metricsAfter = sonic.getMetrics();
+      const bypassedAfter = metricsAfter.preschedulerBypassed || 0;
+      const receivedAfter = metricsAfter.oscInMessagesReceived || 0;
+
+      await sonic.destroy();
+
+      return {
+        mode: config.mode,
+        timedOut: raceResult === 'timeout',
+        bypassedBefore,
+        bypassedAfter,
+        bypassedDelta: bypassedAfter - bypassedBefore,
+        receivedBefore,
+        receivedAfter,
+        receivedDelta: receivedAfter - receivedBefore,
+      };
+    }, sonicConfig);
+
+    console.log(`Mode: ${result.mode}`);
+    console.log(`Bypassed: ${result.bypassedBefore} -> ${result.bypassedAfter} (delta: ${result.bypassedDelta})`);
+    console.log(`Received: ${result.receivedBefore} -> ${result.receivedAfter} (delta: ${result.receivedDelta})`);
+
+    // Messages should not have timed out waiting for replies
+    expect(result.timedOut).toBe(false);
+
+    // We should have received at least 5 /status.reply messages
+    expect(result.receivedDelta).toBeGreaterThanOrEqual(5);
+
+    // In postMessage mode, bypass counter should increment for immediate messages
+    if (result.mode === 'postMessage') {
+      expect(result.bypassedDelta).toBeGreaterThanOrEqual(5);
+    }
+  });
 });

@@ -39,6 +39,10 @@ export class PostMessageTransport extends Transport {
     #messagesSent = 0;
     #messagesDropped = 0;
     #bytesSent = 0;
+    #messagesReceived = 0;
+    #bytesReceived = 0;
+    #directSends = 0;
+    #lastSequenceReceived = -1;
 
     // Timing functions
     #getAudioContextTime;
@@ -50,14 +54,14 @@ export class PostMessageTransport extends Transport {
      * @param {Function} config.getAudioContextTime - Returns AudioContext.currentTime
      * @param {Function} config.getNTPStartTime - Returns NTP start time
      * @param {number} [config.preschedulerCapacity=65536] - Max pending messages
-     * @param {number} [config.snapshotIntervalMs=25] - Interval for metrics/tree snapshots
+     * @param {number} [config.snapshotIntervalMs=50] - Interval for metrics/tree snapshots
      */
     constructor(config) {
         super({ ...config, mode: 'postMessage' });
 
         this.#workerBaseURL = config.workerBaseURL;
         this.#preschedulerCapacity = config.preschedulerCapacity || 65536;
-        this.#snapshotIntervalMs = config.snapshotIntervalMs || 25;
+        this.#snapshotIntervalMs = config.snapshotIntervalMs || 50;
         this.#getAudioContextTime = config.getAudioContextTime;
         this.#getNTPStartTime = config.getNTPStartTime;
     }
@@ -159,21 +163,22 @@ export class PostMessageTransport extends Transport {
     }
 
     /**
-     * Send immediately
+     * Send immediately, bypassing prescheduler
      */
     sendImmediate(message) {
         if (!this.#initialized || this._disposed) {
             return false;
         }
 
-        // Send directly to worklet, bypassing scheduler
+        // Send directly to worklet, bypassing prescheduler
         this.#workletPort.postMessage({
-            type: 'oscImmediate',
+            type: 'osc',
             oscData: message,
         });
 
         this.#messagesSent++;
         this.#bytesSent += message.length;
+        this.#directSends++;
         return true;
     }
 
@@ -266,6 +271,9 @@ export class PostMessageTransport extends Transport {
             messagesSent: this.#messagesSent,
             messagesDropped: this.#messagesDropped,
             bytesSent: this.#bytesSent,
+            messagesReceived: this.#messagesReceived,
+            bytesReceived: this.#bytesReceived,
+            directSends: this.#directSends,
         };
     }
 
@@ -320,10 +328,28 @@ export class PostMessageTransport extends Transport {
         switch (data.type) {
             case 'oscReplies':
                 // OSC replies from scsynth (batch of messages)
-                if (this.#onReplyCallback && data.messages) {
+                if (data.messages) {
                     for (const msg of data.messages) {
                         if (msg.oscData) {
-                            this.#onReplyCallback(msg.oscData, msg.sequence);
+                            // Check for dropped messages via sequence gaps
+                            if (msg.sequence !== undefined && this.#lastSequenceReceived >= 0) {
+                                const expectedSeq = (this.#lastSequenceReceived + 1) & 0xFFFFFFFF;
+                                if (msg.sequence !== expectedSeq) {
+                                    const dropped = (msg.sequence - expectedSeq + 0x100000000) & 0xFFFFFFFF;
+                                    if (dropped < 1000) { // Sanity check
+                                        this.#messagesDropped += dropped;
+                                    }
+                                }
+                            }
+                            if (msg.sequence !== undefined) {
+                                this.#lastSequenceReceived = msg.sequence;
+                            }
+
+                            this.#messagesReceived++;
+                            this.#bytesReceived += msg.oscData.byteLength || msg.oscData.length || 0;
+                            if (this.#onReplyCallback) {
+                                this.#onReplyCallback(msg.oscData, msg.sequence);
+                            }
                         }
                     }
                 }

@@ -7,6 +7,21 @@ import { writeToRingBuffer } from '../lib/ring_buffer_writer.js';
 // Transport mode: 'sab' or 'postMessage'
 let mode = 'sab';
 
+// Limits to prevent resource exhaustion
+// Scheduler slot size - bundles larger than this can't be scheduled (WASM limitation)
+let schedulerSlotSize = 1024;  // Default, updated from bufferConstants if available
+
+// Maximum individual OSC message size (must match SC_Stubs.cpp limit)
+// This is different from schedulerSlotSize - this limits messages within bundles
+const MAX_OSC_MESSAGE_SIZE = 65536;
+
+// Maximum time in the future a bundle can be scheduled (1 hour in seconds)
+// Bundles scheduled further ahead are rejected to prevent scheduler queue buildup
+const MAX_FUTURE_SCHEDULE_SECONDS = 3600;
+
+// Sentinel value for "unset" min headroom metric (allows 0ms to be valid)
+const HEADROOM_UNSET_SENTINEL = 0xFFFFFFFF;
+
 // Shared memory for ring buffer writing (SAB mode only)
 let sharedBuffer = null;
 let ringBufferBase = null;
@@ -26,7 +41,7 @@ let localMetricsBuffer = null;  // postMessage mode only - local buffer to send
 
 // Metrics send timer (postMessage mode only)
 let metricsSendTimer = null;
-let metricsSendIntervalMs = 25;  // Default, can be overridden by snapshotIntervalMs config
+let metricsSendIntervalMs = 50;  // Default, can be overridden by snapshotIntervalMs config
 
 // ============================================================================
 // METRICS HELPERS (work in both SAB and postMessage modes)
@@ -72,6 +87,31 @@ const metricsAdd = (offset, value) => {
 };
 
 /**
+ * Set a value at a metrics offset (for gauges)
+ * Uses Atomics in SAB mode, direct access in postMessage mode
+ */
+const metricsSet = (offset, value) => {
+    if (!metricsView) return;
+    if (mode === 'sab') {
+        Atomics.store(metricsView, offset, value);
+    } else {
+        metricsView[offset] = value;
+    }
+};
+
+/**
+ * Get a value at a metrics offset
+ */
+const metricsGet = (offset) => {
+    if (!metricsView) return 0;
+    if (mode === 'sab') {
+        return Atomics.load(metricsView, offset);
+    } else {
+        return metricsView[offset];
+    }
+};
+
+/**
  * Start periodic sending of metrics buffer to main thread (postMessage mode only)
  */
 const startMetricsSending = () => {
@@ -105,7 +145,7 @@ const stopMetricsSending = () => {
 // Priority queue implemented as binary min-heap
 // Entries: { ntpTime, seq, sessionId, runTag, oscData }
 let eventHeap = [];
-let periodicTimer = null;    // Single periodic timer (25ms interval)
+let periodicTimer = null;    // Single periodic timer for dispatch polling
 let sequenceCounter = 0;
 let isDispatching = false;  // Prevent reentrancy into dispatch loop
 
@@ -122,7 +162,7 @@ let maxPendingMessages = 65536;
 
 // Timing constants
 const NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
-const POLL_INTERVAL_MS = 25;           // Check every 25ms
+const POLL_INTERVAL_MS = 25;           // Dispatch poll interval (separate from metrics snapshot)
 const LOOKAHEAD_S = 0.200;             // 200ms lookahead window
 
 const schedulerLog = (...args) => {
@@ -215,9 +255,9 @@ const updateMetrics = () => {
 
     // Update max if current exceeds it
     const currentPending = eventHeap.length;
-    const currentMax = metricsLoad(MetricsOffsets.PRESCHEDULER_PEAK);
+    const currentMax = metricsLoad(MetricsOffsets.PRESCHEDULER_PENDING_PEAK);
     if (currentPending > currentMax) {
-        metricsStore(MetricsOffsets.PRESCHEDULER_PEAK, currentPending);
+        metricsStore(MetricsOffsets.PRESCHEDULER_PENDING_PEAK, currentPending);
     }
 };
 
@@ -235,7 +275,7 @@ const dispatchOSCMessage = (oscMessage, isRetry, timestamp = null) => {
             oscData: oscMessage,
             timestamp: timestamp,
         });
-        metricsAdd(MetricsOffsets.PRESCHEDULER_SENT, 1);
+        metricsAdd(MetricsOffsets.PRESCHEDULER_DISPATCHED, 1);
         return true;  // postMessage doesn't fail
     }
 
@@ -275,7 +315,7 @@ const dispatchOSCMessage = (oscMessage, isRetry, timestamp = null) => {
     }
 
     // Update metrics
-    metricsAdd(MetricsOffsets.PRESCHEDULER_SENT, 1);
+    metricsAdd(MetricsOffsets.PRESCHEDULER_DISPATCHED, 1);
     return true;
 };
 
@@ -287,7 +327,7 @@ const queueForRetry = (oscData, context) => {
     const totalPending = eventHeap.length + retryQueue.length;
     if (totalPending >= maxPendingMessages) {
         console.error('[PreScheduler] Backpressure: dropping retry (' + totalPending + ' pending)');
-        metricsAdd(MetricsOffsets.RETRIES_FAILED, 1);
+        metricsAdd(MetricsOffsets.PRESCHEDULER_RETRIES_FAILED, 1);
         return;
     }
 
@@ -299,10 +339,10 @@ const queueForRetry = (oscData, context) => {
     });
 
     // Update metrics
-    metricsStore(MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
-    const currentMax = metricsLoad(MetricsOffsets.RETRY_QUEUE_MAX);
+    metricsStore(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE, retryQueue.length);
+    const currentMax = metricsLoad(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_PEAK);
     if (retryQueue.length > currentMax) {
-        metricsStore(MetricsOffsets.RETRY_QUEUE_MAX, retryQueue.length);
+        metricsStore(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_PEAK, retryQueue.length);
     }
 
     schedulerLog('[PreScheduler] Queued message for retry:', context, 'queue size:', retryQueue.length);
@@ -327,24 +367,24 @@ const processRetryQueue = () => {
         if (success) {
             // Success - remove from queue
             retryQueue.splice(i, 1);
-            metricsAdd(MetricsOffsets.RETRIES_SUCCEEDED, 1);
-            metricsAdd(MetricsOffsets.MESSAGES_RETRIED, 1);
-            metricsStore(MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
+            metricsAdd(MetricsOffsets.PRESCHEDULER_RETRIES_SUCCEEDED, 1);
+            metricsAdd(MetricsOffsets.PRESCHEDULER_MESSAGES_RETRIED, 1);
+            metricsStore(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE, retryQueue.length);
             schedulerLog('[PreScheduler] Retry succeeded for:', item.context,
                         'after', item.retryCount + 1, 'attempts');
             // Don't increment i - we removed an item
         } else {
             // Failed - increment retry count
             item.retryCount++;
-            metricsAdd(MetricsOffsets.MESSAGES_RETRIED, 1);
+            metricsAdd(MetricsOffsets.PRESCHEDULER_MESSAGES_RETRIED, 1);
 
             if (item.retryCount >= MAX_RETRIES_PER_MESSAGE) {
                 // Give up on this message
                 const errorMsg = `Ring buffer full - dropped message after ${MAX_RETRIES_PER_MESSAGE} retries (${item.context})`;
                 console.error('[PreScheduler]', errorMsg);
                 retryQueue.splice(i, 1);
-                metricsAdd(MetricsOffsets.RETRIES_FAILED, 1);
-                metricsStore(MetricsOffsets.RETRY_QUEUE_SIZE, retryQueue.length);
+                metricsAdd(MetricsOffsets.PRESCHEDULER_RETRIES_FAILED, 1);
+                metricsStore(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE, retryQueue.length);
                 // Notify main thread so onError callback fires
                 self.postMessage({ type: 'error', error: errorMsg });
                 // Don't increment i - we removed an item
@@ -365,7 +405,9 @@ const scheduleEvent = (oscData, sessionId, runTag) => {
     // Backpressure: reject if total pending work exceeds limit
     const totalPending = eventHeap.length + retryQueue.length;
     if (totalPending >= maxPendingMessages) {
-        console.warn('[PreScheduler] Backpressure: rejecting message (' + totalPending + ' pending)');
+        const errorMsg = `Prescheduler queue full (${totalPending} >= ${maxPendingMessages} max)`;
+        console.warn('[PreScheduler]', errorMsg);
+        self.postMessage({ type: 'error', error: errorMsg, code: 'PRESCHEDULER_QUEUE_FULL' });
         return false;
     }
 
@@ -385,6 +427,22 @@ const scheduleEvent = (oscData, sessionId, runTag) => {
     const currentNTP = getCurrentNTP();
     const timeUntilExec = ntpTime - currentNTP;
 
+    // Reject bundles too large for scheduler slot (WASM has fixed slot size)
+    if (oscData.length > schedulerSlotSize) {
+        const errorMsg = `Bundle too large for scheduler (${oscData.length} > ${schedulerSlotSize} bytes)`;
+        console.warn('[PreScheduler]', errorMsg);
+        self.postMessage({ type: 'error', error: errorMsg, code: 'BUNDLE_TOO_LARGE' });
+        return false;
+    }
+
+    // Reject bundles scheduled too far in the future (prevents queue buildup)
+    if (timeUntilExec > MAX_FUTURE_SCHEDULE_SECONDS) {
+        const errorMsg = `Bundle scheduled too far in future (${timeUntilExec.toFixed(0)}s > ${MAX_FUTURE_SCHEDULE_SECONDS}s max)`;
+        console.warn('[PreScheduler]', errorMsg);
+        self.postMessage({ type: 'error', error: errorMsg, code: 'BUNDLE_TOO_FAR_FUTURE' });
+        return false;
+    }
+
     // Create event with NTP timestamp
     const event = {
         ntpTime,
@@ -396,7 +454,7 @@ const scheduleEvent = (oscData, sessionId, runTag) => {
 
     heapPush(event);
 
-    metricsAdd(MetricsOffsets.BUNDLES_SCHEDULED, 1);
+    metricsAdd(MetricsOffsets.PRESCHEDULER_BUNDLES_SCHEDULED, 1);
     updateMetrics();  // Update buffer with current queue depth and peak
 
     schedulerLog('[PreScheduler] Scheduled bundle:',
@@ -521,7 +579,20 @@ const checkAndDispatch = () => {
             updateMetrics();  // Update buffer with current queue depth
 
             const timeUntilExec = nextEvent.ntpTime - currentNTP;
-            metricsAdd(MetricsOffsets.TOTAL_DISPATCHES, 1);
+            metricsAdd(MetricsOffsets.PRESCHEDULER_TOTAL_DISPATCHES, 1);
+
+            // Track timing: headroom (ms before execution) or lates (dispatched after execution time)
+            if (timeUntilExec < 0) {
+                // Late dispatch - bundle arrived after its scheduled execution time
+                metricsAdd(MetricsOffsets.PRESCHEDULER_LATES, 1);
+            } else {
+                // On-time dispatch - track min headroom (recent window, resets periodically)
+                const headroomMs = Math.round(timeUntilExec * 1000);
+                const currentMin = metricsGet(MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS);
+                if (currentMin === HEADROOM_UNSET_SENTINEL || headroomMs < currentMin) {
+                    metricsSet(MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS, headroomMs);
+                }
+            }
 
             schedulerLog('[PreScheduler] Dispatching bundle:',
                         'NTP=' + nextEvent.ntpTime.toFixed(3),
@@ -573,7 +644,7 @@ const cancelBy = (predicate) => {
     if (removed > 0) {
         eventHeap = remaining;
         heapify();
-        metricsAdd(MetricsOffsets.EVENTS_CANCELLED, removed);
+        metricsAdd(MetricsOffsets.PRESCHEDULER_EVENTS_CANCELLED, removed);
         updateMetrics();  // Update buffer with current queue depth
         schedulerLog('[PreScheduler] Cancelled ' + removed + ' events, ' + eventHeap.length + ' remaining');
     }
@@ -602,7 +673,7 @@ const cancelAllTags = () => {
         return;
     }
     const cancelled = eventHeap.length;
-    metricsAdd(MetricsOffsets.EVENTS_CANCELLED, cancelled);
+    metricsAdd(MetricsOffsets.PRESCHEDULER_EVENTS_CANCELLED, cancelled);
     eventHeap = [];
     updateMetrics();  // Update buffer (sets eventsPending to 0)
     schedulerLog('[PreScheduler] Cancelled all ' + cancelled + ' events');
@@ -623,11 +694,12 @@ const extractMessagesFromBundle = (data) => {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
     let offset = 16; // skip "#bundle\0" + timetag
 
-    while (offset < data.length) {
+    while (offset + 4 <= data.length) {
         const messageSize = view.getInt32(offset, false);
         offset += 4;
 
-        if (messageSize <= 0 || offset + messageSize > data.length) {
+        // Validate message size (must match SC_Stubs.cpp limit)
+        if (messageSize <= 0 || messageSize > MAX_OSC_MESSAGE_SIZE || offset + messageSize > data.length) {
             break;
         }
 
@@ -684,6 +756,11 @@ self.addEventListener('message', (event) => {
                     ringBufferBase = data.ringBufferBase;
                     bufferConstants = data.bufferConstants;
                     initSharedBuffer();
+
+                    // Update scheduler slot size from buffer constants if available
+                    if (bufferConstants && bufferConstants.scheduler_slot_size) {
+                        schedulerSlotSize = bufferConstants.scheduler_slot_size;
+                    }
                 } else {
                     // postMessage mode: create local metrics buffer with same layout as SAB
                     // Size matches METRICS_SIZE (128 bytes = 32 uint32s)
@@ -694,6 +771,10 @@ self.addEventListener('message', (event) => {
                     // Start periodic sending of metrics
                     startMetricsSending();
                 }
+
+                // Initialize min headroom to sentinel value ("unset")
+                // This allows 0ms to be a valid headroom value
+                metricsSet(MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS, HEADROOM_UNSET_SENTINEL);
 
                 // Start periodic polling
                 startPeriodicPolling();

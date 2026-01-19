@@ -152,7 +152,7 @@ const supersonic = new SuperSonic({
 | `audioContextOptions`  | No       | Options passed to `new AudioContext()` (see below)                                                                                        |
 | `autoConnect`          | No       | Whether to auto-connect to `audioContext.destination` (default: true)                                                                     |
 | `scsynthOptions`       | No       | Server options (see below)                                                                                                                |
-| `snapshotIntervalMs`   | No       | Metrics snapshot interval for postMessage mode (default: 25)                                                                              |
+| `snapshotIntervalMs`   | No       | Metrics snapshot interval for postMessage mode (default: 50)                                                                              |
 | `preschedulerCapacity` | No       | Max pending events in JS prescheduler (default: 65536)                                                                                    |
 | `fetchMaxRetries`      | No       | Max retries for asset fetches (default: 3)                                                                                                |
 | `fetchRetryDelay`      | No       | Base delay in ms between fetch retries (default: 1000)                                                                                    |
@@ -906,7 +906,7 @@ Get a metrics snapshot on demand. This is a cheap local memory read in both SAB 
 
 ```javascript
 const metrics = supersonic.getMetrics();
-console.log("Messages processed:", metrics.workletMessagesProcessed);
+console.log("Messages processed:", metrics.scsynthMessagesProcessed);
 
 // Poll from requestAnimationFrame for smooth UI updates
 function updateLoop() {
