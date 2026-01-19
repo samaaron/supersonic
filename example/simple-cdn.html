@@ -18,14 +18,10 @@
         if (!sonic) {
           button.textContent = "Booting scsynth...";
 
-          // CDN-hosted synthdefs and samples
+          // Use CDN for synthdefs and samples (core auto-detected from import)
           sonic = new SuperSonic({
-            workerBaseURL: "../dist/workers/",
-            wasmBaseURL: "../dist/wasm/",
-            sampleBaseURL:
-              "https://unpkg.com/supersonic-scsynth-samples@latest/samples/",
-            synthdefBaseURL:
-              "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
+            sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/",
+            synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
           });
           await sonic.init();
           await sonic.loadSynthDefs(["sonic-pi-basic_stereo_player"]);

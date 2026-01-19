@@ -283,11 +283,7 @@
                 log('Mic access granted. Initializing SuperSonic...');
 
                 // Initialize SuperSonic
-                sonic = new SuperSonic({
-                    workerBaseURL: '/dist/workers/',
-                    wasmBaseURL: '/dist/wasm/',
-                    synthdefBaseURL: '/dist/synthdefs/',
-                });
+                sonic = new SuperSonic();
 
                 await sonic.init();
                 log('SuperSonic initialized. Connecting mic...');

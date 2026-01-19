@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>SuperSonic - Load Sample Demo</title>
+  </head>
+  <body>
+    <h1>SuperSimple SuperSonic - Load Sample</h1>
+    <div>
+      <label for="file">Select an audio file: </label>
+      <input type="file" id="file" accept="audio/*">
+    </div>
+    <br>
+    <button id="play" disabled>Play Sample</button>
+    <p id="status"></p>
+
+    <script type="module">
+      import { SuperSonic } from "../dist/supersonic.js";
+
+      const fileInput = document.getElementById("file");
+      const button = document.getElementById("play");
+      const status = document.getElementById("status");
+
+      let sonic = null;
+      let sampleLoaded = false;
+
+      fileInput.onchange = async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        status.textContent = "Loading...";
+        button.disabled = true;
+        sampleLoaded = false;
+
+        try {
+          // Initialize SuperSonic if not already done
+          if (!sonic) {
+            status.textContent = "Booting scsynth...";
+            sonic = new SuperSonic();
+            await sonic.init();
+            await sonic.loadSynthDefs(["sonic-pi-basic_stereo_player"]);
+          }
+
+          // Load the sample directly from the File object
+          status.textContent = `Loading ${file.name}...`;
+          await sonic.loadSample(0, file);
+
+          sampleLoaded = true;
+          button.disabled = false;
+          status.textContent = `Ready to play: ${file.name}`;
+        } catch (error) {
+          status.textContent = `Error: ${error.message}`;
+          console.error(error);
+        }
+      };
+
+      button.onclick = () => {
+        if (!sonic || !sampleLoaded) return;
+
+        sonic.send(
+          "/s_new",
+          "sonic-pi-basic_stereo_player",
+          -1,
+          0,
+          0,
+          "buf",
+          0
+        );
+      };
+    </script>
+  </body>
+</html>
