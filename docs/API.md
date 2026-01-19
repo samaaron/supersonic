@@ -39,7 +39,7 @@ myButton.onclick = async () => {
 | ---------------------------------------------------------------- | ----------------------------------- |
 | [`loadSynthDef(nameOrPath)`](#loadsynthdefnameorpath)            | Load a synth definition             |
 | [`loadSynthDefs(names)`](#loadsynthdefsnames)                    | Load multiple synthdefs in parallel |
-| [`loadSample(bufnum, nameOrPath)`](#loadsamplebufnum-nameorpath) | Load a sample into a buffer         |
+| [`loadSample(bufnum, source)`](#loadsamplebufnum-source)         | Load a sample into a buffer         |
 
 ### Events
 
@@ -290,14 +290,18 @@ for (const [name, result] of Object.entries(results)) {
 }
 ```
 
-### `loadSample(bufnum, nameOrPath, startFrame, numFrames)`
+### `loadSample(bufnum, source, startFrame, numFrames)`
 
-Load a sample into a buffer. Pass a filename to use `sampleBaseURL`, or provide a full path.
+Load a sample into a buffer. Accepts multiple source types:
+
+- **String** - filename (uses `sampleBaseURL`) or full path/URL
+- **File/Blob** - browser File object from `<input type="file">`
+- **ArrayBuffer/TypedArray** - raw audio data
 
 **Parameters:**
 
 - `bufnum` - Buffer number (integer)
-- `nameOrPath` - Sample filename or full path/URL (string)
+- `source` - Sample source (string, File, Blob, ArrayBuffer, or TypedArray)
 - `startFrame` - Optional starting frame offset (integer, default: 0)
 - `numFrames` - Optional number of frames to load (integer, default: 0 = all frames)
 
@@ -305,8 +309,17 @@ Load a sample into a buffer. Pass a filename to use `sampleBaseURL`, or provide 
 // By name (uses sampleBaseURL)
 await supersonic.loadSample(0, "loop_amen.flac");
 
-// By full path
+// By full path/URL
 await supersonic.loadSample(0, "./custom/my-sample.wav");
+
+// From user-selected file
+const file = document.querySelector('input[type="file"]').files[0];
+await supersonic.loadSample(0, file);
+
+// From ArrayBuffer (e.g., fetched manually)
+const response = await fetch("./audio/sample.wav");
+const arrayBuffer = await response.arrayBuffer();
+await supersonic.loadSample(0, arrayBuffer);
 
 // Load partial sample (frames 1000-2000)
 await supersonic.loadSample(0, "long-sample.flac", 1000, 1000);

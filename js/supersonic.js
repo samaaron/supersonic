@@ -827,12 +827,30 @@ export class SuperSonic {
     return results;
   }
 
-  async loadSample(bufnum, nameOrPath, startFrame = 0, numFrames = 0) {
+  async loadSample(bufnum, source, startFrame = 0, numFrames = 0) {
     this.#ensureInitialized("load samples");
 
-    const bufferInfo = await this.#bufferManager.prepareFromFile({
-      bufnum, path: nameOrPath, startFrame, numFrames,
-    });
+    let bufferInfo;
+
+    if (typeof source === 'string') {
+      // Path or URL
+      bufferInfo = await this.#bufferManager.prepareFromFile({
+        bufnum, path: source, startFrame, numFrames,
+      });
+    } else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
+      // ArrayBuffer or TypedArray
+      bufferInfo = await this.#bufferManager.prepareFromBlob({
+        bufnum, blob: source, startFrame, numFrames,
+      });
+    } else if (source instanceof Blob) {
+      // File or Blob - read into ArrayBuffer first
+      const arrayBuffer = await source.arrayBuffer();
+      bufferInfo = await this.#bufferManager.prepareFromBlob({
+        bufnum, blob: arrayBuffer, startFrame, numFrames,
+      });
+    } else {
+      throw new Error('loadSample source must be a path/URL string, ArrayBuffer, TypedArray, or File/Blob');
+    }
 
     await this.send(
       "/b_allocPtr", bufnum, bufferInfo.ptr, bufferInfo.numFrames,
