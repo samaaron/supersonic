@@ -324,56 +324,19 @@ test.describe('Schema Validation', () => {
     }
   });
 
-  test('schema modes array is accurate for SAB-only metrics', async ({ page }) => {
-    // Test in postMessage mode - SAB-only metrics should be undefined
-    const result = await page.evaluate(async () => {
-      const sonic = new window.SuperSonic({
-        mode: 'postMessage',
-        workerBaseURL: '/dist/workers/',
-        wasmBaseURL: '/dist/wasm/',
-      });
-      await sonic.init();
-
-      const metrics = sonic.getMetrics();
-      const schema = window.SuperSonic.getMetricsSchema();
-
-      await sonic.destroy();
-
-      // Find SAB-only metrics
-      const sabOnlyMetrics = Object.entries(schema)
-        .filter(([key, def]) => def.modes && def.modes.length === 1 && def.modes[0] === 'sab')
-        .map(([key]) => key);
-
-      // Check that SAB-only metrics are undefined in postMessage mode
-      const incorrectlyPresent = sabOnlyMetrics.filter(k => metrics[k] !== undefined);
-
-      return {
-        sabOnlyMetrics,
-        incorrectlyPresent
-      };
-    });
-
-    // SAB-only metrics should not be present in postMessage mode
-    expect(result.incorrectlyPresent).toEqual([]);
-  });
-
-  test('metrics declared for both modes are actually populated after activity', async ({ page, sonicConfig }) => {
-    // This test verifies that metrics marked as available in both SAB and postMessage
-    // modes actually have non-zero values after sending/receiving messages.
-    // This catches bugs where metrics are declared but not implemented for a mode.
+  test('counter metrics are populated after activity', async ({ page, sonicConfig }) => {
+    // This test verifies that counter metrics have non-zero values after
+    // sending/receiving messages. This catches bugs where metrics are declared
+    // but not implemented.
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
       const schema = window.SuperSonic.getMetricsSchema();
 
-      // Find counter metrics declared as working in both modes
-      // (counters should increment with activity, gauges might legitimately be 0)
-      const bothModeCounters = Object.entries(schema)
-        .filter(([key, def]) => {
-          const modes = def.modes || ['sab', 'postMessage'];
-          return modes.includes('sab') && modes.includes('postMessage') && def.type === 'counter';
-        })
+      // Find counter metrics (counters should increment with activity, gauges might legitimately be 0)
+      const counterMetrics = Object.entries(schema)
+        .filter(([key, def]) => def.type === 'counter')
         .map(([key]) => key);
 
       // Get metrics before any activity
@@ -397,9 +360,8 @@ test.describe('Schema Validation', () => {
       await sonic.destroy();
 
       // Check which counters are still 0 after activity
-      const zeroCounters = bothModeCounters.filter(key => {
+      const zeroCounters = counterMetrics.filter(key => {
         const value = metricsAfter[key];
-        // Skip if undefined (might be mode-specific despite schema)
         if (value === undefined) return false;
         return value === 0;
       });
@@ -419,7 +381,7 @@ test.describe('Schema Validation', () => {
 
       return {
         mode: config.mode,
-        bothModeCounters,
+        counterMetrics,
         zeroCounters,
         failedRequired,
         relevantMetrics: {

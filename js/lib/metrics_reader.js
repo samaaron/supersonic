@@ -281,6 +281,11 @@ export class MetricsReader {
         percentage: (metrics.debugBufferUsedBytes / bc.DEBUG_BUFFER_SIZE) * 100,
         capacity: bc.DEBUG_BUFFER_SIZE,
       };
+
+      // Remove raw byte values (now captured in derived objects above)
+      delete metrics.inBufferUsedBytes;
+      delete metrics.outBufferUsedBytes;
+      delete metrics.debugBufferUsedBytes;
     }
 
     // Add mode so clients know what metrics are available
