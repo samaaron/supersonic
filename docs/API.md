@@ -903,7 +903,7 @@ function getChildrenInOrder(nodes, groupId) {
 | Control values | Not included                  | Optional (flag=1)          |
 | Use case       | 60fps visualization           | One-off queries, debugging |
 
-`getTree()` returns node structure only - not control values. For control values, use `/g_queryTree` with flag=1 or `/n_get` for specific nodes. See [Server Command Reference](SERVER_COMMAND_REFERENCE.md).
+`getTree()` returns node structure only - not control values. For control values, use `/g_queryTree` with flag=1 or `/n_get` for specific nodes. See [scsynth Command Reference](SCSYNTH_COMMAND_REFERENCE.md).
 
 **Mirror capacity and overflow**
 
@@ -995,4 +995,4 @@ const msg = SuperSonic.osc.decode(oscBytes, { metadata: true });
 
 SuperSonic speaks the SuperCollider Server protocol. You control the audio engine by sending OSC messages via `send()`.
 
-For the full list of supported commands, see the [Server Command Reference](SERVER_COMMAND_REFERENCE.md).
+For the full list of supported commands, see the [scsynth Command Reference](SCSYNTH_COMMAND_REFERENCE.md).
