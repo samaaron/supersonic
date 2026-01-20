@@ -20,11 +20,14 @@
   --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, "Courier New", monospace;
 
   /* Font size scale - only 4 sizes */
-  --fs-header: 1.3rem;      /* h1, major titles */
+  --fs-header: 1.5rem;      /* h1, major titles */
   --fs-main: 1rem;          /* body text, buttons, descriptions */
   --fs-description: 0.875rem; /* secondary text, labels */
   --fs-mini: 0.75rem;       /* timestamps, metrics, small labels */
 }
+
+/* ===== UTILITY CLASSES ===== */
+.nowrap { white-space: nowrap; }
 
 /* ===== ANIMATED BORDER ===== */
 @property --border-angle {
@@ -1137,6 +1140,62 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 
 .cta-row { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
 .cta-row--sponsor { margin-top: 1.5rem; margin-bottom: 1.5rem; }
+/* ===== DOCS SECTION ===== */
+.docs-section {
+  padding: 2rem 1rem 3rem;
+  text-align: center;
+}
+
+.docs-section__inner {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.docs-section__heading {
+  font-size: var(--fs-header);
+  font-weight: bold;
+  font-style: italic;
+  color: var(--c-gray-700);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.75rem;
+}
+
+.docs-section__description {
+  color: var(--c-gray-600);
+  font-size: var(--fs-main);
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+.docs-section__buttons {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.docs-section__button {
+  display: inline-block;
+  padding: 0.75rem 2rem;
+  background: linear-gradient(101deg, var(--c-orange-dark) 0%, var(--c-orange) 100%);
+  color: white;
+  text-decoration: none;
+  font-weight: bold;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: var(--fs-main);
+  box-shadow: 0 4px 15px rgba(255, 102, 0, 0.4);
+  transition: all 0.3s ease;
+}
+
+.docs-section__button:hover {
+  background: linear-gradient(101deg, var(--c-gold) 0%, var(--c-orange) 100%);
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 0 8px 25px rgba(255, 215, 0, 0.5);
+  color: #000;
+}
 
 .cta-button--whizz { margin-top: 1.5rem; }
 
@@ -1204,6 +1263,74 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 
 .code-section__inner { max-width: 1200px; margin: 0 auto; overflow-x: hidden; }
 
+.code-section__heading {
+  font-size: var(--fs-header);
+  font-weight: bold;
+  font-style: italic;
+  color: var(--c-gold);
+  letter-spacing: 0.05em;
+  text-align: center;
+  text-transform: none;
+  margin-bottom: 0.75rem;
+}
+
+.code-section__description {
+  color: #e5e7eb;
+  font-size: var(--fs-main);
+  text-align: center;
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+.code-section__description--bottom {
+  margin-top: 3rem;
+  margin-bottom: 1.5rem;
+}
+
+.code-section__link {
+  display: block;
+  margin-top: 0.75rem;
+  color: var(--c-pink);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.3s ease;
+}
+
+.code-section__link:hover {
+  color: var(--c-gold);
+}
+
+.code-section__buttons {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 1.5rem;
+  margin-bottom: 2.5rem;
+}
+
+.code-section__button {
+  display: inline-block;
+  padding: 0.75rem 2rem;
+  background: linear-gradient(101deg, var(--c-orange-dark) 0%, var(--c-orange) 100%);
+  color: white;
+  text-decoration: none;
+  font-weight: bold;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: var(--fs-main);
+  box-shadow: 0 4px 15px rgba(255, 102, 0, 0.4);
+  transition: all 0.3s ease;
+}
+
+.code-section__button:hover {
+  background: linear-gradient(101deg, var(--c-gold) 0%, var(--c-orange) 100%);
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 0 8px 25px rgba(255, 215, 0, 0.5);
+  color: #000;
+}
+
 .code-section__intro {
   font-size: var(--fs-header);
   font-style: italic;
@@ -1258,7 +1385,51 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   }
 }
 
-/* ===== DOWNLOAD SECTION ===== */
+/* ===== DEMO LINK SECTION ===== */
+.demo-link-section {
+  text-align: center;
+  padding: 1rem 1rem 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.demo-arrow {
+  display: block;
+  width: 60px;
+  height: 60px;
+  color: var(--c-pink);
+  transition: color 0.3s ease;
+}
+
+.demo-link-section:has(.cta-button--primary:hover) .demo-arrow {
+  color: var(--c-gold);
+  animation: bounce 1s ease-in-out infinite;
+}
+
+.demo-link-section__docs {
+  margin-top: 1.5rem;
+  font-size: var(--fs-main);
+  color: #6b7280;
+}
+
+.demo-link-section__docs strong {
+  color: var(--c-gold);
+  margin-right: 0.5rem;
+}
+
+.demo-link-section__docs a {
+  color: var(--c-pink);
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.demo-link-section__docs a:hover {
+  color: var(--c-gold);
+}
+
+/* ===== DOWNLOAD SECTION (legacy) ===== */
 .download-section-container {
   padding: 0 2rem 2rem;
   margin-top: 2rem;
@@ -1365,6 +1536,16 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 }
 
 .code-note a:hover { color: var(--c-gold); }
+
+.code-note--docs {
+  margin-top: 1rem;
+  font-size: var(--fs-main);
+}
+
+.code-note--docs strong {
+  color: var(--c-gold);
+  margin-right: 0.5rem;
+}
 
 /* Syntax highlighting */
 .syn-kw { color: #bb86fc; }

@@ -63,7 +63,7 @@
             <li class="feature-box feature-box--blue">
               <div class="feature-box__accent feature-box__accent--blue-gold"></div>
               <strong class="feature-box__title feature-box__title--blue">WebAssembly</strong>
-              <span class="feature-box__text"><em>scsynth</em>'s original C++ code compiled for the web</span>
+              <span class="feature-box__text"><em>scsynth</em>'s original <span class="nowrap">C++</span> code compiled for the web</span>
             </li>
             <li class="feature-box feature-box--gold">
               <div class="feature-box__accent feature-box__accent--gold-pink"></div>
@@ -74,29 +74,19 @@
         </section>
       </div>
 
-      <!-- Download Section -->
-      <section class="download-section-container">
-        <div class="download-section">
-          <svg class="download-arrow" viewBox="0 0 24 24">
-            <path
-              d="M12 4v16M12 20l-7-7M12 20l7-7"
-              stroke="currentColor"
-              stroke-width="3"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              fill="none"
-            />
-          </svg>
-          <a
-            href="https://github.com/samaaron/supersonic/releases/latest/download/supersonic.zip"
-            class="download-button"
-            download
-          >
-            Download <span class="download-button__break">Latest<br />Release</span
-            ><span class="download-button__nobreak">Latest Release</span>
-          </a>
-          <a href="#demo" class="cta-button cta-button--primary cta-button--whizz">Whizz to Demo</a>
-        </div>
+      <!-- Demo Link -->
+      <section class="demo-link-section">
+        <svg class="demo-arrow" viewBox="0 0 24 24">
+          <path
+            d="M12 4v16M12 20l-7-7M12 20l7-7"
+            stroke="currentColor"
+            stroke-width="3"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+          />
+        </svg>
+        <a href="#demo" class="cta-button cta-button--primary">Whizz to Demo</a>
       </section>
 
       <!-- Story Section -->
@@ -134,12 +124,27 @@
         </details>
       </section>
 
-      <!-- Code Examples -->
+      <!-- Get Started & Code Examples -->
       <section class="code-section" aria-labelledby="code-heading">
         <div class="code-section__inner">
-          <h2 id="code-heading" class="visually-hidden">Code Examples</h2>
+          <h2 id="code-heading" class="code-section__heading">Get Started</h2>
+          <div class="code-section__buttons">
+            <a
+              href="https://github.com/samaaron/supersonic/blob/main/docs/WELCOME.md"
+              target="_blank"
+              rel="noopener"
+              class="code-section__button"
+              >Welcome Docs</a
+            >
+            <a
+              href="https://github.com/samaaron/supersonic/blob/main/docs/SCSYNTH_COMMAND_REFERENCE.md"
+              target="_blank"
+              rel="noopener"
+              class="code-section__button"
+              >Scsynth API</a
+            >
+          </div>
 
-          <p class="code-section__step">Drop pro-grade audio synthesis into your web page&hellip;</p>
           <div class="code-snippets-container">
             <figure class="code-snippet">
               <figcaption class="code-comment">Import from CDN (or self-host)</figcaption>
@@ -177,9 +182,8 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
             </figure>
           </div>
 
-          <p class="code-note">
-            Works directly from CDN — no server setup needed. See
-            <a href="https://github.com/samaaron/supersonic" target="_blank" rel="noopener">README</a>
+          <p class="code-section__description code-section__description--bottom">
+            SuperSonic exposes scsynth's full, powerful message-based OSC API.
           </p>
         </div>
       </section>
