@@ -411,8 +411,8 @@ export class BufferManager {
                 numFrames: framesRequested,
                 numChannels,
                 sampleRate: audioBuffer.sampleRate,
-                // postMessage mode: store source for recovery (re-load from path)
-                source: this.#mode === 'postMessage' ? { type: 'file', path, startFrame, numFrames, channels } : null
+                // Track source for recovery (postMessage) and public API (both modes)
+                source: { type: 'file', path, startFrame, numFrames, channels }
             };
         });
     }

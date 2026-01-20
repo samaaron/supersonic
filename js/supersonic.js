@@ -895,6 +895,20 @@ export class SuperSonic {
     return bufferInfo.allocationComplete;
   }
 
+  getLoadedBuffers() {
+    this.#ensureInitialized("get loaded buffers");
+
+    const buffers = this.#bufferManager?.getAllocatedBuffers() || [];
+    return buffers.map(({ bufnum, numFrames, numChannels, sampleRate, source }) => ({
+      bufnum,
+      numFrames,
+      numChannels,
+      sampleRate,
+      source: source?.path || source?.name || null,
+      duration: sampleRate > 0 ? numFrames / sampleRate : 0,
+    }));
+  }
+
   async sync(syncId = Math.floor(Math.random() * 2147483647)) {
     this.#ensureInitialized("sync");
 

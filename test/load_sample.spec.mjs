@@ -980,4 +980,86 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.success).toBe(true);
     expect(result.hasSynth).toBe(true);
   });
+
+  test("getLoadedBuffers returns info about loaded samples", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+
+      try {
+        await sonic.init();
+
+        // Initially should be empty
+        const buffersEmpty = sonic.getLoadedBuffers();
+
+        // Load some samples
+        await sonic.loadSample(0, "bd_haus.flac");
+        await sonic.loadSample(5, "loop_amen.flac");
+        await sonic.loadSample(10, "elec_ping.flac");
+        await sonic.sync(1);
+
+        const buffersLoaded = sonic.getLoadedBuffers();
+
+        // Free one buffer
+        await sonic.send("/b_free", 5);
+        await sonic.sync(2);
+
+        const buffersAfterFreeOne = sonic.getLoadedBuffers();
+
+        // Free another buffer
+        await sonic.send("/b_free", 0);
+        await sonic.sync(3);
+
+        const buffersAfterFreeTwo = sonic.getLoadedBuffers();
+
+        // Free the last buffer
+        await sonic.send("/b_free", 10);
+        await sonic.sync(4);
+
+        const buffersAfterFreeAll = sonic.getLoadedBuffers();
+
+        return {
+          success: true,
+          buffersEmpty,
+          buffersLoaded,
+          buffersAfterFreeOne,
+          buffersAfterFreeTwo,
+          buffersAfterFreeAll,
+        };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+
+    // Initially empty
+    expect(result.buffersEmpty.length).toBe(0);
+
+    // After loading 3 samples
+    expect(result.buffersLoaded.length).toBe(3);
+    expect(result.buffersLoaded.map(b => b.bufnum).sort((a,b) => a-b)).toEqual([0, 5, 10]);
+
+    const buf0 = result.buffersLoaded.find(b => b.bufnum === 0);
+    expect(buf0).toBeDefined();
+    expect(buf0.numFrames).toBeGreaterThan(0);
+    expect(buf0.numChannels).toBeGreaterThan(0);
+    expect(buf0.sampleRate).toBeGreaterThan(0);
+    expect(buf0.duration).toBeGreaterThan(0);
+    expect(buf0.source).toContain("bd_haus");
+
+    const buf5 = result.buffersLoaded.find(b => b.bufnum === 5);
+    expect(buf5).toBeDefined();
+    expect(buf5.source).toContain("loop_amen");
+
+    // After freeing buffer 5
+    expect(result.buffersAfterFreeOne.length).toBe(2);
+    expect(result.buffersAfterFreeOne.map(b => b.bufnum).sort((a,b) => a-b)).toEqual([0, 10]);
+
+    // After freeing buffer 0
+    expect(result.buffersAfterFreeTwo.length).toBe(1);
+    expect(result.buffersAfterFreeTwo[0].bufnum).toBe(10);
+
+    // After freeing all
+    expect(result.buffersAfterFreeAll.length).toBe(0);
+  });
 });
