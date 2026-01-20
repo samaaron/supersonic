@@ -175,6 +175,35 @@ test.describe("Top-level Commands", () => {
     expect(result.threw).toBe(true);
     expect(result.message).toContain("not supported");
   });
+
+  test("/rtMemoryStatus - returns realtime memory status", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+
+      await sonic.init();
+      await sonic.send("/rtMemoryStatus");
+      await sonic.sync(1);
+
+      const memReply = messages.find((m) => m.address === "/rtMemoryStatus.reply");
+      return {
+        success: !!memReply,
+        freeMemory: memReply?.args?.[0],
+        largestFreeBlock: memReply?.args?.[1],
+      };
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(typeof result.freeMemory).toBe("number");
+    expect(typeof result.largestFreeBlock).toBe("number");
+    expect(result.freeMemory).toBeGreaterThan(0);
+    expect(result.largestFreeBlock).toBeGreaterThan(0);
+    expect(result.largestFreeBlock).toBeLessThanOrEqual(result.freeMemory);
+  });
 });
 
 // =============================================================================
