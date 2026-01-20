@@ -1,7 +1,7 @@
 /**
  * OSC Command Test Suite
  *
- * Tests all supported scsynth OSC commands as documented in SERVER_COMMAND_REFERENCE.md
+ * Tests all supported scsynth OSC commands as documented in SCSYNTH_COMMAND_REFERENCE.md
  * Uses SharedArrayBuffer node tree (getTree()) for verification where possible,
  * falling back to OSC replies for commands that return specific data.
  */
