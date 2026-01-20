@@ -788,23 +788,58 @@ export class SuperSonic {
   // ASSET LOADING API
   // ============================================================================
 
-  async loadSynthDef(nameOrPath) {
+  async loadSynthDef(source) {
     this.#ensureInitialized("load synthdef");
 
-    let path;
-    if (this.#looksLikePathOrURL(nameOrPath)) {
-      path = nameOrPath;
-    } else {
-      if (!this.#synthdefBaseURL) {
-        throw new Error("synthdefBaseURL not configured.");
+    let synthdefData;
+    let synthName;
+
+    if (typeof source === 'string') {
+      // Name or path/URL string
+      let path;
+      if (this.#looksLikePathOrURL(source)) {
+        path = source;
+      } else {
+        if (!this.#synthdefBaseURL) {
+          throw new Error("synthdefBaseURL not configured.");
+        }
+        path = `${this.#synthdefBaseURL}${source}.scsyndef`;
       }
-      path = `${this.#synthdefBaseURL}${nameOrPath}.scsyndef`;
+
+      // Extract name from path for loading event
+      const pathName = extractSynthDefName(path);
+
+      const arrayBuffer = await this.#assetLoader.fetch(path, { type: 'synthdef', name: pathName });
+      synthdefData = new Uint8Array(arrayBuffer);
+
+      // Extract actual name from binary (more reliable than filename)
+      synthName = extractSynthDefName(synthdefData) || pathName;
+
+    } else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
+      // Raw bytes (ArrayBuffer or TypedArray like Uint8Array)
+      synthdefData = source instanceof ArrayBuffer
+        ? new Uint8Array(source)
+        : new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
+
+      synthName = extractSynthDefName(synthdefData);
+      if (!synthName) {
+        throw new Error('Could not extract synthdef name from binary data. Make sure it\'s a valid .scsyndef file.');
+      }
+
+    } else if (source instanceof Blob) {
+      // File or Blob
+      const arrayBuffer = await source.arrayBuffer();
+      synthdefData = new Uint8Array(arrayBuffer);
+
+      synthName = extractSynthDefName(synthdefData);
+      if (!synthName) {
+        throw new Error('Could not extract synthdef name from file. Make sure it\'s a valid .scsyndef file.');
+      }
+
+    } else {
+      throw new Error('loadSynthDef source must be a name, path/URL string, ArrayBuffer, Uint8Array, or File/Blob');
     }
 
-    const synthName = extractSynthDefName(path);
-
-    const arrayBuffer = await this.#assetLoader.fetch(path, { type: 'synthdef', name: synthName });
-    const synthdefData = new Uint8Array(arrayBuffer);
     await this.send("/d_recv", synthdefData);
 
     return { name: synthName, size: synthdefData.length };

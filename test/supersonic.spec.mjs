@@ -54,7 +54,7 @@ test.describe("SuperSonic", () => {
       expect(result.success).toBe(true);
     });
 
-    test("loads a synthdef", async ({ page, sonicConfig }) => {
+    test("loads a synthdef by name", async ({ page, sonicConfig }) => {
       const result = await page.evaluate(async (config) => {
         const sonic = new window.SuperSonic(config);
 
@@ -76,6 +76,175 @@ test.describe("SuperSonic", () => {
       expect(result.success).toBe(true);
       const doneMessages = result.messages.filter((m) => m.address === "/done");
       expect(doneMessages.length).toBeGreaterThan(0);
+    });
+
+    test("loadSynthDef returns name and size", async ({ page, sonicConfig }) => {
+      const result = await page.evaluate(async (config) => {
+        const sonic = new window.SuperSonic(config);
+
+        try {
+          await sonic.init();
+          const loadResult = await sonic.loadSynthDef("sonic-pi-beep");
+          return {
+            success: true,
+            name: loadResult.name,
+            size: loadResult.size,
+            hasName: typeof loadResult.name === 'string' && loadResult.name.length > 0,
+            hasSize: typeof loadResult.size === 'number' && loadResult.size > 0,
+          };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      }, sonicConfig);
+
+      expect(result.success).toBe(true);
+      expect(result.hasName).toBe(true);
+      expect(result.hasSize).toBe(true);
+      expect(result.name).toBe("sonic-pi-beep");
+    });
+
+    test("loadSynthDef accepts Uint8Array", async ({ page, sonicConfig }) => {
+      const result = await page.evaluate(async (config) => {
+        const sonic = new window.SuperSonic(config);
+
+        try {
+          await sonic.init();
+
+          // Fetch a known synthdef to get raw bytes
+          const response = await fetch('/dist/synthdefs/sonic-pi-beep.scsyndef');
+          const arrayBuffer = await response.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuffer);
+
+          // Load via Uint8Array
+          const loadResult = await sonic.loadSynthDef(bytes);
+
+          // Verify it's in the loaded synthdefs
+          const isLoaded = sonic.loadedSynthDefs.has(loadResult.name);
+
+          return {
+            success: true,
+            name: loadResult.name,
+            size: loadResult.size,
+            isLoaded,
+          };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      }, sonicConfig);
+
+      expect(result.success).toBe(true);
+      expect(result.name).toBe("sonic-pi-beep");
+      expect(result.size).toBeGreaterThan(0);
+      expect(result.isLoaded).toBe(true);
+    });
+
+    test("loadSynthDef accepts ArrayBuffer", async ({ page, sonicConfig }) => {
+      const result = await page.evaluate(async (config) => {
+        const sonic = new window.SuperSonic(config);
+
+        try {
+          await sonic.init();
+
+          // Fetch a known synthdef to get raw bytes
+          const response = await fetch('/dist/synthdefs/sonic-pi-beep.scsyndef');
+          const arrayBuffer = await response.arrayBuffer();
+
+          // Load via ArrayBuffer directly
+          const loadResult = await sonic.loadSynthDef(arrayBuffer);
+
+          return {
+            success: true,
+            name: loadResult.name,
+            size: loadResult.size,
+          };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      }, sonicConfig);
+
+      expect(result.success).toBe(true);
+      expect(result.name).toBe("sonic-pi-beep");
+      expect(result.size).toBeGreaterThan(0);
+    });
+
+    test("loadSynthDef accepts File/Blob", async ({ page, sonicConfig }) => {
+      const result = await page.evaluate(async (config) => {
+        const sonic = new window.SuperSonic(config);
+
+        try {
+          await sonic.init();
+
+          // Fetch a known synthdef and create a Blob
+          const response = await fetch('/dist/synthdefs/sonic-pi-beep.scsyndef');
+          const arrayBuffer = await response.arrayBuffer();
+          const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' });
+
+          // Load via Blob
+          const loadResult = await sonic.loadSynthDef(blob);
+
+          return {
+            success: true,
+            name: loadResult.name,
+            size: loadResult.size,
+          };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      }, sonicConfig);
+
+      expect(result.success).toBe(true);
+      expect(result.name).toBe("sonic-pi-beep");
+      expect(result.size).toBeGreaterThan(0);
+    });
+
+    test("loadSynthDef rejects invalid binary data", async ({ page, sonicConfig }) => {
+      const result = await page.evaluate(async (config) => {
+        const sonic = new window.SuperSonic(config);
+
+        try {
+          await sonic.init();
+
+          // Create invalid synthdef bytes (not SCgf format)
+          const invalidBytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+
+          await sonic.loadSynthDef(invalidBytes);
+          return { success: false, error: "Should have thrown" };
+        } catch (err) {
+          return {
+            success: true,
+            threw: true,
+            message: err.message,
+          };
+        }
+      }, sonicConfig);
+
+      expect(result.success).toBe(true);
+      expect(result.threw).toBe(true);
+      expect(result.message).toContain("Could not extract synthdef name");
+    });
+
+    test("loadSynthDef rejects invalid source type", async ({ page, sonicConfig }) => {
+      const result = await page.evaluate(async (config) => {
+        const sonic = new window.SuperSonic(config);
+
+        try {
+          await sonic.init();
+
+          // Pass invalid type (number)
+          await sonic.loadSynthDef(12345);
+          return { success: false, error: "Should have thrown" };
+        } catch (err) {
+          return {
+            success: true,
+            threw: true,
+            message: err.message,
+          };
+        }
+      }, sonicConfig);
+
+      expect(result.success).toBe(true);
+      expect(result.threw).toBe(true);
+      expect(result.message).toContain("must be a name, path/URL string, ArrayBuffer, Uint8Array, or File/Blob");
     });
 
     test("responds to /status command", async ({ page, sonicConfig }) => {
