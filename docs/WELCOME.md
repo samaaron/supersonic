@@ -1,10 +1,14 @@
 # Welcome to SuperSonic
 
->     Greetings friend - I hear you're interested in combining the research-level audio synthesis capabilities of the legendary SuperCollider scsynth engine with the incredible reach of the web?
+>     Greetings friend
+>
+>     I hear you're interested in combining the research-level
+>     audio synthesis capabilities of the legendary SuperCollider
+>     scsynth engine with the incredible reach of the web?
 
 >     You've come to the right place.
 
-## A Legendary Audio Synthesis in your Browser
+## Legendary Audio Synthesis in your Browser
 
 SuperCollider's scsynth is a legendary audio synthesis engine designed by James McCartney in the late 90s.
 
