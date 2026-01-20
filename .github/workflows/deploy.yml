@@ -3,8 +3,6 @@ name: Build-Test-Deploy
 on:
   push:
     branches: [main]
-    tags:
-      - 'v*'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -99,30 +97,4 @@ jobs:
         with:
           name: zip
           path: supersonic-dist.zip
-
-  # Create GitHub Release for tags
-  release:
-    needs: build-and-test
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download zip artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: zip
-
-      - name: Prepare release assets
-        run: |
-          VERSION="${{ github.ref_name }}"
-          cp supersonic-dist.zip "supersonic-${VERSION}.zip"
-          cp supersonic-dist.zip supersonic.zip
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            supersonic-${{ github.ref_name }}.zip
-            supersonic.zip
-          generate_release_notes: true
 

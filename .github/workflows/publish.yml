@@ -9,7 +9,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
 
     steps:
@@ -66,3 +66,42 @@ jobs:
       - name: Publish supersonic-scsynth-bundle
         working-directory: packages/supersonic-scsynth-bundle
         run: npm publish --provenance --access public
+
+      - name: Replace symlinks with actual files for distribution
+        run: |
+          echo "Removing symlinks and copying actual files..."
+          rm -f dist/synthdefs dist/samples
+
+          echo "Copying all synthdefs..."
+          mkdir -p dist/synthdefs
+          cp -r packages/supersonic-scsynth-synthdefs/synthdefs/* dist/synthdefs/
+          echo "Copied $(ls -1 dist/synthdefs/*.scsyndef | wc -l) synthdef files"
+
+          echo "Copying all samples..."
+          mkdir -p dist/samples
+          cp -r packages/supersonic-scsynth-samples/samples/* dist/samples/
+          echo "Copied $(ls -1 dist/samples/ | wc -l) sample files"
+
+      - name: Create zip archive
+        run: |
+          mkdir -p supersonic
+          cp -r dist/* supersonic/
+          rm -rf supersonic/.github-pages
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          sed "s/{{VERSION}}/$VERSION/" docs/README.dist.md > supersonic/README.md
+          zip -r supersonic-dist.zip supersonic
+          rm -rf supersonic
+
+      - name: Prepare release assets
+        run: |
+          VERSION="${{ github.ref_name }}"
+          cp supersonic-dist.zip "supersonic-${VERSION}.zip"
+          cp supersonic-dist.zip supersonic.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            supersonic-${{ github.ref_name }}.zip
+            supersonic.zip
+          generate_release_notes: true
