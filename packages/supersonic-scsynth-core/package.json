@@ -1,6 +1,6 @@
 {
   "name": "supersonic-scsynth-core",
-  "version": "0.28.1",
+  "version": "0.29.0",
   "description": "SuperCollider scsynth WebAssembly engine and AudioWorklet for SuperSonic",
   "type": "module",
   "main": "index.js",
