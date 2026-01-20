@@ -31,7 +31,6 @@ SuperSonic is perfect for building interactive audio experiences, music tools, l
 ## Synthesis
 
 - **[scsynth Command Reference](SCSYNTH_COMMAND_REFERENCE.md)** - The full scsynth OSC command reference for controlling synthesis
-- **[Loading SynthDefs](SYNTHDEF_LOADING.md)** - How to load and use synth definitions
 
 ## For Contributors
 
