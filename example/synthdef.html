@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>SuperSonic - Custom SynthDef</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+      .controls { margin: 20px 0; }
+      .controls label { display: inline-block; width: 80px; }
+      .controls input[type="number"] { width: 80px; }
+      button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+      button:disabled { cursor: not-allowed; opacity: 0.5; }
+      #status { color: #666; margin-top: 10px; }
+      #synthName { font-weight: bold; color: #333; }
+      .param-row { margin: 8px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>SuperSonic - Custom SynthDef</h1>
+
+    <div>
+      <label for="file">Upload a .scynthdef file: </label>
+      <input type="file" id="file" accept=".scsyndef,.scynthdef">
+    </div>
+
+    <p id="status">Select a synthdef file to begin.</p>
+    <p>Loaded: <span id="synthName">-</span></p>
+
+    <div class="controls">
+      <h3>Common Parameters</h3>
+      <div class="param-row">
+        <label for="note">note:</label>
+        <input type="number" id="note" value="60" min="0" max="127">
+      </div>
+      <div class="param-row">
+        <label for="amp">amp:</label>
+        <input type="number" id="amp" value="0.5" min="0" max="1" step="0.1">
+      </div>
+      <div class="param-row">
+        <label for="pan">pan:</label>
+        <input type="number" id="pan" value="0" min="-1" max="1" step="0.1">
+      </div>
+      <div class="param-row">
+        <label for="sustain">sustain:</label>
+        <input type="number" id="sustain" value="1" min="0" max="10" step="0.1">
+      </div>
+      <div class="param-row">
+        <label for="release">release:</label>
+        <input type="number" id="release" value="0.5" min="0" max="10" step="0.1">
+      </div>
+    </div>
+
+    <button id="trigger" disabled>Trigger Synth</button>
+    <button id="stop" disabled>Stop All</button>
+
+    <script type="module">
+      import { SuperSonic } from "../dist/supersonic.js";
+
+      const fileInput = document.getElementById("file");
+      const button = document.getElementById("trigger");
+      const stopButton = document.getElementById("stop");
+      const status = document.getElementById("status");
+      const synthNameEl = document.getElementById("synthName");
+
+      let sonic = null;
+      let synthName = null;
+
+      fileInput.onchange = async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        status.textContent = "Loading...";
+        button.disabled = true;
+        synthName = null;
+        synthNameEl.textContent = "-";
+
+        try {
+          // Initialize SuperSonic if not already done
+          if (!sonic) {
+            status.textContent = "Booting scsynth...";
+            sonic = new SuperSonic();
+            await sonic.init();
+          }
+
+          // Load the synthdef directly from the File object
+          status.textContent = `Loading synthdef...`;
+          const result = await sonic.loadSynthDef(file);
+          synthName = result.name;
+
+          synthNameEl.textContent = synthName;
+          button.disabled = false;
+          stopButton.disabled = false;
+          status.textContent = `Ready! Click "Trigger Synth" to play.`;
+        } catch (error) {
+          status.textContent = `Error: ${error.message}`;
+          console.error(error);
+        }
+      };
+
+      button.onclick = () => {
+        if (!sonic || !synthName) return;
+
+        const note = parseFloat(document.getElementById("note").value);
+        const amp = parseFloat(document.getElementById("amp").value);
+        const pan = parseFloat(document.getElementById("pan").value);
+        const sustain = parseFloat(document.getElementById("sustain").value);
+        const release = parseFloat(document.getElementById("release").value);
+
+        sonic.send(
+          "/s_new",
+          synthName,
+          -1,
+          0,
+          0,
+          "note", note,
+          "amp", amp,
+          "pan", pan,
+          "sustain", sustain,
+          "release", release
+        );
+      };
+
+      stopButton.onclick = () => {
+        if (!sonic) return;
+        // Free all nodes in root group (stops all sound)
+        sonic.send("/g_freeAll", 0);
+      };
+    </script>
+  </body>
+</html>
