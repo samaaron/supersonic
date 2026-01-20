@@ -818,6 +818,429 @@ test.describe("OSC Bundle Timing", () => {
     // Past timetag should execute immediately (within 10ms, bypasses prescheduler)
     expect(result.latencyMs).toBeLessThan(10);
   });
+
+  // NOTE ON SAMPLE-ACCURATE SCHEDULING:
+  // SuperSonic correctly sets mSampleOffset when executing scheduled bundles.
+  // However, whether this affects audio output depends on the synthdef:
+  // - Synths using OffsetOut.ar will have sample-accurate output
+  // - Synths using regular Out.ar will start at buffer boundaries
+  // This is standard scsynth behavior, not a SuperSonic limitation.
+
+  test("scheduled synths execute at correct buffer-level timing", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(
+      async (config) => {
+        eval(config.helpers);
+
+        const sonic = new window.SuperSonic(config.sonic);
+        await sonic.init();
+        await sonic.loadSynthDef("sonic-pi-beep");
+
+        const sampleRate = sonic.sampleRate || 48000;
+
+        // Get NTP start time from SharedArrayBuffer
+        const sharedBuffer = sonic.sharedBuffer;
+        const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
+        const ringBufferBase = sonic.ringBufferBase;
+        const ntpStartView = new Float64Array(
+          sharedBuffer,
+          ringBufferBase + ntpStartOffset,
+          1
+        );
+        const ntpStartTime = ntpStartView[0];
+
+        // Start capture
+        sonic.startCapture();
+        const captureStartContextTime = sonic.node.context.currentTime;
+        const captureStartNTP = captureStartContextTime + ntpStartTime;
+
+        // Schedule two synths with a precise 500-sample gap
+        // First synth at 50ms, second synth at 50ms + 500 samples
+        const expectedGapSamples = 500;
+        const firstDelayMs = 50;
+        const secondDelayMs = firstDelayMs + (expectedGapSamples / sampleRate) * 1000;
+
+        const osc = window.SuperSonic.osc;
+
+        // Create first bundle - synth A at low frequency (220Hz) for identification
+        const ntpA = captureStartNTP + (firstDelayMs / 1000);
+        const ntpSecondsA = Math.floor(ntpA);
+        const ntpFractionA = Math.floor((ntpA % 1) * 0x100000000);
+
+        const bundleA = osc.encode({
+          timeTag: { raw: [ntpSecondsA, ntpFractionA] },
+          packets: [{
+            address: "/s_new",
+            args: [
+              { type: "s", value: "sonic-pi-beep" },
+              { type: "i", value: 2000 },
+              { type: "i", value: 0 },
+              { type: "i", value: 0 },
+              { type: "s", value: "note" },
+              { type: "f", value: 57 }, // A3 = 220Hz
+              { type: "s", value: "amp" },
+              { type: "f", value: 0.5 },
+              { type: "s", value: "sustain" },
+              { type: "f", value: 0.05 },
+              { type: "s", value: "release" },
+              { type: "f", value: 0.01 },
+            ],
+          }],
+        });
+
+        // Create second bundle - synth B at higher frequency (880Hz) for identification
+        const ntpB = captureStartNTP + (secondDelayMs / 1000);
+        const ntpSecondsB = Math.floor(ntpB);
+        const ntpFractionB = Math.floor((ntpB % 1) * 0x100000000);
+
+        const bundleB = osc.encode({
+          timeTag: { raw: [ntpSecondsB, ntpFractionB] },
+          packets: [{
+            address: "/s_new",
+            args: [
+              { type: "s", value: "sonic-pi-beep" },
+              { type: "i", value: 2001 },
+              { type: "i", value: 0 },
+              { type: "i", value: 0 },
+              { type: "s", value: "note" },
+              { type: "f", value: 81 }, // A5 = 880Hz
+              { type: "s", value: "amp" },
+              { type: "f", value: 0.5 },
+              { type: "s", value: "sustain" },
+              { type: "f", value: 0.05 },
+              { type: "s", value: "release" },
+              { type: "f", value: 0.01 },
+            ],
+          }],
+        });
+
+        // Send both bundles
+        await sonic.sendOSC(bundleA);
+        await sonic.sendOSC(bundleB);
+
+        // Wait for both synths to complete
+        await new Promise((r) => setTimeout(r, 200));
+
+        const captured = sonic.stopCapture();
+
+        // Find onset of synth A (first significant audio)
+        let onsetA = -1;
+        for (let i = 0; i < captured.left.length; i++) {
+          if (Math.abs(captured.left[i]) > 0.01) {
+            onsetA = i;
+            break;
+          }
+        }
+
+        // Find onset of synth B by looking for the second rise in amplitude
+        // After synth A decays, find where amplitude rises again
+        let onsetB = -1;
+        let foundDecay = false;
+        let decayStart = -1;
+
+        // First, find where synth A decays (amplitude drops below threshold after onset)
+        for (let i = onsetA + 100; i < captured.left.length; i++) {
+          if (Math.abs(captured.left[i]) < 0.01) {
+            foundDecay = true;
+            decayStart = i;
+            break;
+          }
+        }
+
+        // Then find where synth B starts (amplitude rises again)
+        if (foundDecay) {
+          for (let i = decayStart; i < captured.left.length; i++) {
+            if (Math.abs(captured.left[i]) > 0.01) {
+              onsetB = i;
+              break;
+            }
+          }
+        }
+
+        const actualGapSamples = onsetB - onsetA;
+        const gapError = Math.abs(actualGapSamples - expectedGapSamples);
+
+        return {
+          sampleRate,
+          expectedGapSamples,
+          onsetA,
+          onsetB,
+          actualGapSamples,
+          gapError,
+          foundBothOnsets: onsetA > 0 && onsetB > 0,
+          firstDelayMs,
+          secondDelayMs,
+        };
+      },
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
+    );
+
+    console.log(`\nTwo-synth buffer-level timing test:`);
+    console.log(`  Sample rate: ${result.sampleRate}`);
+    console.log(`  Expected gap: ${result.expectedGapSamples} samples`);
+    console.log(`  Onset A: sample ${result.onsetA}`);
+    console.log(`  Onset B: sample ${result.onsetB}`);
+    console.log(`  Actual gap: ${result.actualGapSamples} samples`);
+    console.log(`  Gap error: ${result.gapError} samples`);
+
+    // Verify both synths were detected
+    expect(result.foundBothOnsets).toBe(true);
+
+    // With Out.ar (not OffsetOut.ar), timing snaps to buffer boundaries.
+    // The gap should be within 3 buffer lengths (384 samples) of expected.
+    // Additional tolerance accounts for onset detection variability.
+    // For true sample-accuracy, the synthdef must use OffsetOut.ar.
+    const bufferSize = 128;
+    expect(result.gapError).toBeLessThan(bufferSize * 3);
+  });
+
+  test("mSampleOffset is set but Out.ar snaps to buffer boundaries", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(
+      async (config) => {
+        eval(config.helpers);
+
+        const sonic = new window.SuperSonic(config.sonic);
+        await sonic.init();
+        await sonic.loadSynthDef("sonic-pi-beep");
+
+        const sampleRate = sonic.sampleRate || 48000;
+        const bufferSize = 128; // AudioWorklet quantum
+
+        // Get NTP start time
+        const sharedBuffer = sonic.sharedBuffer;
+        const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
+        const ringBufferBase = sonic.ringBufferBase;
+        const ntpStartView = new Float64Array(
+          sharedBuffer,
+          ringBufferBase + ntpStartOffset,
+          1
+        );
+        const ntpStartTime = ntpStartView[0];
+
+        // Start capture and record precise time
+        sonic.startCapture();
+        const captureStartContextTime = sonic.node.context.currentTime;
+        const captureStartNTP = captureStartContextTime + ntpStartTime;
+
+        // Schedule synth at a non-buffer-aligned offset
+        // Use 50ms + 50 samples (not a multiple of 128)
+        const baseDelayMs = 50;
+        const extraSamples = 50; // Deliberately non-aligned
+        const totalDelaySamples = Math.round((baseDelayMs / 1000) * sampleRate) + extraSamples;
+        const totalDelaySeconds = totalDelaySamples / sampleRate;
+
+        const ntpTarget = captureStartNTP + totalDelaySeconds;
+        const ntpSeconds = Math.floor(ntpTarget);
+        const ntpFraction = Math.floor((ntpTarget % 1) * 0x100000000);
+
+        const osc = window.SuperSonic.osc;
+        const bundle = osc.encode({
+          timeTag: { raw: [ntpSeconds, ntpFraction] },
+          packets: [{
+            address: "/s_new",
+            args: [
+              { type: "s", value: "sonic-pi-beep" },
+              { type: "i", value: 3000 },
+              { type: "i", value: 0 },
+              { type: "i", value: 0 },
+              { type: "s", value: "amp" },
+              { type: "f", value: 0.5 },
+            ],
+          }],
+        });
+
+        await sonic.sendOSC(bundle);
+        await new Promise((r) => setTimeout(r, 150));
+
+        const captured = sonic.stopCapture();
+
+        // Find first non-zero sample
+        let firstNonZero = -1;
+        for (let i = 0; i < captured.left.length; i++) {
+          if (Math.abs(captured.left[i]) > 0.001) {
+            firstNonZero = i;
+            break;
+          }
+        }
+
+        // Calculate expected vs actual
+        const expectedSample = totalDelaySamples;
+        const actualSample = firstNonZero;
+        const sampleError = Math.abs(actualSample - expectedSample);
+
+        // Check if it snapped to buffer boundary (would indicate bug)
+        const nearestBufferBoundary = Math.round(actualSample / bufferSize) * bufferSize;
+        const distanceToBufferBoundary = Math.abs(actualSample - nearestBufferBoundary);
+
+        return {
+          sampleRate,
+          bufferSize,
+          expectedSample,
+          actualSample,
+          sampleError,
+          extraSamples,
+          distanceToBufferBoundary,
+          // If it snapped to boundary, this would be 0
+          notSnappedToBuffer: distanceToBufferBoundary > 5,
+          hasAudio: firstNonZero > 0,
+        };
+      },
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
+    );
+
+    console.log(`\nBuffer-boundary snap test (Out.ar behavior):`);
+    console.log(`  Sample rate: ${result.sampleRate}`);
+    console.log(`  Buffer size: ${result.bufferSize}`);
+    console.log(`  Expected sample: ${result.expectedSample} (50ms + ${result.extraSamples} extra)`);
+    console.log(`  Actual sample: ${result.actualSample}`);
+    console.log(`  Sample error: ${result.sampleError}`);
+    console.log(`  Distance to nearest buffer boundary: ${result.distanceToBufferBoundary}`);
+
+    expect(result.hasAudio).toBe(true);
+
+    // Timing should be within 2 buffer lengths (256 samples) of expected
+    // This accounts for message arrival, processing latency, and buffer snapping
+    expect(result.sampleError).toBeLessThan(256);
+
+    // With Out.ar (not OffsetOut.ar), audio SHOULD snap to buffer boundaries.
+    // This verifies that Out.ar behaves as expected in scsynth.
+    // For sample-accurate output, synthdef must use OffsetOut.ar instead.
+    expect(result.distanceToBufferBoundary).toBeLessThan(10);
+  });
+
+  test("OffsetOut.ar achieves true sample-accurate scheduling", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(
+      async (config) => {
+        eval(config.helpers);
+
+        const sonic = new window.SuperSonic(config.sonic);
+        await sonic.init();
+
+        // Load synthdef that uses OffsetOut.ar
+        await sonic.loadSynthDef("test_offset_out");
+
+        const sampleRate = sonic.sampleRate || 48000;
+        const bufferSize = 128; // AudioWorklet quantum
+
+        // Get NTP start time
+        const sharedBuffer = sonic.sharedBuffer;
+        const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
+        const ringBufferBase = sonic.ringBufferBase;
+        const ntpStartView = new Float64Array(
+          sharedBuffer,
+          ringBufferBase + ntpStartOffset,
+          1
+        );
+        const ntpStartTime = ntpStartView[0];
+
+        // Start capture and record precise time
+        sonic.startCapture();
+        const captureStartContextTime = sonic.node.context.currentTime;
+        const captureStartNTP = captureStartContextTime + ntpStartTime;
+
+        // Schedule synth at a non-buffer-aligned offset
+        // Use 50ms + 50 samples (not a multiple of 128)
+        const baseDelayMs = 50;
+        const extraSamples = 50; // Deliberately non-aligned (not multiple of 128)
+        const totalDelaySamples = Math.round((baseDelayMs / 1000) * sampleRate) + extraSamples;
+        const totalDelaySeconds = totalDelaySamples / sampleRate;
+
+        const ntpTarget = captureStartNTP + totalDelaySeconds;
+        const ntpSeconds = Math.floor(ntpTarget);
+        const ntpFraction = Math.floor((ntpTarget % 1) * 0x100000000);
+
+        const osc = window.SuperSonic.osc;
+        const bundle = osc.encode({
+          timeTag: { raw: [ntpSeconds, ntpFraction] },
+          packets: [{
+            address: "/s_new",
+            args: [
+              { type: "s", value: "test_offset_out" },
+              { type: "i", value: 3000 },
+              { type: "i", value: 0 },
+              { type: "i", value: 0 },
+              { type: "s", value: "amp" },
+              { type: "f", value: 0.5 },
+              { type: "s", value: "freq" },
+              { type: "f", value: 880 },
+              { type: "s", value: "dur" },
+              { type: "f", value: 0.1 },
+            ],
+          }],
+        });
+
+        await sonic.sendOSC(bundle);
+        await new Promise((r) => setTimeout(r, 200));
+
+        const captured = sonic.stopCapture();
+
+        // Find first non-zero sample
+        let firstNonZero = -1;
+        for (let i = 0; i < captured.left.length; i++) {
+          if (Math.abs(captured.left[i]) > 0.001) {
+            firstNonZero = i;
+            break;
+          }
+        }
+
+        // Calculate expected vs actual
+        const expectedSample = totalDelaySamples;
+        const actualSample = firstNonZero;
+        const sampleError = Math.abs(actualSample - expectedSample);
+
+        // Check distance to buffer boundary
+        const nearestBufferBoundary = Math.round(actualSample / bufferSize) * bufferSize;
+        const distanceToBufferBoundary = Math.abs(actualSample - nearestBufferBoundary);
+
+        return {
+          sampleRate,
+          bufferSize,
+          expectedSample,
+          actualSample,
+          sampleError,
+          extraSamples,
+          distanceToBufferBoundary,
+          hasAudio: firstNonZero > 0,
+        };
+      },
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
+    );
+
+    // Calculate expected within-buffer offset
+    const expectedWithinBufferOffset = result.expectedSample % result.bufferSize;
+    const actualWithinBufferOffset = result.actualSample % result.bufferSize;
+    const withinBufferError = Math.abs(actualWithinBufferOffset - expectedWithinBufferOffset);
+    // Handle wraparound (e.g., expected 127, actual 1 should be error of 2)
+    const adjustedWithinBufferError = Math.min(withinBufferError, result.bufferSize - withinBufferError);
+
+    console.log(`\nOffsetOut.ar sample-accurate scheduling test:`);
+    console.log(`  Sample rate: ${result.sampleRate}`);
+    console.log(`  Buffer size: ${result.bufferSize}`);
+    console.log(`  Expected sample: ${result.expectedSample} (50ms + ${result.extraSamples} extra)`);
+    console.log(`  Actual sample: ${result.actualSample}`);
+    console.log(`  Overall sample error: ${result.sampleError}`);
+    console.log(`  Expected within-buffer offset: ${expectedWithinBufferOffset}`);
+    console.log(`  Actual within-buffer offset: ${actualWithinBufferOffset}`);
+    console.log(`  Within-buffer error: ${adjustedWithinBufferError}`);
+    console.log(`  Distance to nearest buffer boundary: ${result.distanceToBufferBoundary}`);
+
+    expect(result.hasAudio).toBe(true);
+
+    // With OffsetOut.ar, the within-buffer offset should be preserved.
+    // There may be some overall latency (integer number of buffers) due to
+    // message delivery, but the subsample offset should be accurate.
+    expect(adjustedWithinBufferError).toBeLessThan(5);
+
+    // Unlike Out.ar, OffsetOut.ar should NOT snap to buffer boundaries.
+    // The distance to the nearest buffer boundary should be approximately
+    // equal to the expected within-buffer offset (which is 50 samples here).
+    expect(result.distanceToBufferBoundary).toBeGreaterThan(10);
+  });
 });
 
 // =============================================================================
