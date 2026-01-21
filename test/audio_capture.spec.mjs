@@ -605,27 +605,33 @@ test.describe("OSC Bundle Timing", () => {
         await sonic.init();
         await sonic.loadSynthDef("sonic-pi-beep");
 
-        // Get NTP start time from SharedArrayBuffer (same reference as WASM uses)
+        // Get NTP start time and drift from SharedArrayBuffer (same reference as WASM uses)
         const sharedBuffer = sonic.sharedBuffer;
-        const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
         const ringBufferBase = sonic.ringBufferBase;
         const ntpStartView = new Float64Array(
           sharedBuffer,
-          ringBufferBase + ntpStartOffset,
+          ringBufferBase + sonic.bufferConstants.NTP_START_TIME_START,
+          1
+        );
+        const driftView = new Int32Array(
+          sharedBuffer,
+          ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
           1
         );
         const ntpStartTime = ntpStartView[0];
+        const driftMs = Atomics.load(driftView, 0);
+        const driftSeconds = driftMs / 1000;
 
         // Start capture and record AudioContext time at that moment
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
 
         // Schedule synth 100ms in the future using AudioContext-based NTP
-        // This is the same time reference the WASM scheduler uses
-        // Using 100ms to fit comfortably within the 1-second capture buffer
+        // Must include drift to match WASM's calculation:
+        // current_ntp = contextTime + ntpStart + drift
         const scheduledDelayMs = 100;
         const delaySeconds = scheduledDelayMs / 1000;
-        const captureStartNTP = captureStartContextTime + ntpStartTime;
+        const captureStartNTP = captureStartContextTime + ntpStartTime + driftSeconds;
         const scheduledNTP = captureStartNTP + delaySeconds;
 
         // Create bundle with raw NTP timetag (seconds and fraction)
