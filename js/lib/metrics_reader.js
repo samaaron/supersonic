@@ -160,6 +160,11 @@ export class MetricsReader {
       inBufferUsedBytes: m[MetricsOffsets.IN_BUFFER_USED_BYTES],
       outBufferUsedBytes: m[MetricsOffsets.OUT_BUFFER_USED_BYTES],
       debugBufferUsedBytes: m[MetricsOffsets.DEBUG_BUFFER_USED_BYTES],
+
+      // Ring buffer peak usage (written by WASM during process())
+      inBufferPeakBytes: m[MetricsOffsets.IN_BUFFER_PEAK_BYTES],
+      outBufferPeakBytes: m[MetricsOffsets.OUT_BUFFER_PEAK_BYTES],
+      debugBufferPeakBytes: m[MetricsOffsets.DEBUG_BUFFER_PEAK_BYTES],
     };
   }
 
@@ -227,7 +232,8 @@ export class MetricsReader {
     if (!this.#cachedSnapshotBuffer || !preschedulerMetrics) return;
 
     // Get a view into the metrics portion of the snapshot buffer
-    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 32);
+    // Note: must cover all metrics including peak bytes at indices 34-36
+    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 40);
 
     // Single memcpy of ALL contiguous prescheduler metrics (offsets 8-21)
     const start = MetricsOffsets.PRESCHEDULER_START;
@@ -251,7 +257,8 @@ export class MetricsReader {
 
       // Read metrics from snapshot buffer
       if (this.#cachedSnapshotBuffer) {
-        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 36);
+        // Note: must cover all metrics including peak bytes at indices 34-36
+        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 40);
         metrics = this.parseMetricsBuffer(metricsView);
       } else {
         metrics = {};
@@ -268,16 +275,22 @@ export class MetricsReader {
       metrics.inBufferUsed = {
         bytes: metrics.inBufferUsedBytes,
         percentage: (metrics.inBufferUsedBytes / bc.IN_BUFFER_SIZE) * 100,
+        peakBytes: metrics.inBufferPeakBytes,
+        peakPercentage: (metrics.inBufferPeakBytes / bc.IN_BUFFER_SIZE) * 100,
         capacity: bc.IN_BUFFER_SIZE,
       };
       metrics.outBufferUsed = {
         bytes: metrics.outBufferUsedBytes,
         percentage: (metrics.outBufferUsedBytes / bc.OUT_BUFFER_SIZE) * 100,
+        peakBytes: metrics.outBufferPeakBytes,
+        peakPercentage: (metrics.outBufferPeakBytes / bc.OUT_BUFFER_SIZE) * 100,
         capacity: bc.OUT_BUFFER_SIZE,
       };
       metrics.debugBufferUsed = {
         bytes: metrics.debugBufferUsedBytes,
         percentage: (metrics.debugBufferUsedBytes / bc.DEBUG_BUFFER_SIZE) * 100,
+        peakBytes: metrics.debugBufferPeakBytes,
+        peakPercentage: (metrics.debugBufferPeakBytes / bc.DEBUG_BUFFER_SIZE) * 100,
         capacity: bc.DEBUG_BUFFER_SIZE,
       };
 
@@ -285,6 +298,9 @@ export class MetricsReader {
       delete metrics.inBufferUsedBytes;
       delete metrics.outBufferUsedBytes;
       delete metrics.debugBufferUsedBytes;
+      delete metrics.inBufferPeakBytes;
+      delete metrics.outBufferPeakBytes;
+      delete metrics.debugBufferPeakBytes;
     }
 
     // Add mode so clients know what metrics are available

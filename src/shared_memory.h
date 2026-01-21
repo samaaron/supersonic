@@ -31,7 +31,7 @@ constexpr uint32_t IN_BUFFER_SIZE     = 786432; // 768KB - OSC messages from JS 
 constexpr uint32_t OUT_BUFFER_SIZE    = 131072; // 128KB - OSC replies from scsynth to JS (prevent drops)
 constexpr uint32_t DEBUG_BUFFER_SIZE  = 65536;  // 64KB - Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 48;    // Atomic control pointers & flags (11 fields × 4 bytes + 4 padding for 8-byte alignment)
-constexpr uint32_t METRICS_SIZE       = 144;   // Performance metrics: 31 fields + 5 padding = 36 * 4 bytes = 144 bytes
+constexpr uint32_t METRICS_SIZE       = 160;   // Performance metrics: 37 fields + 3 padding = 40 * 4 bytes = 160 bytes
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in milliseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
@@ -154,8 +154,13 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> out_buffer_used_bytes;    // 32: Bytes used in OUT buffer
     std::atomic<uint32_t> debug_buffer_used_bytes;  // 33: Bytes used in DEBUG buffer
 
-    // Padding [34-35]
-    uint32_t _padding[2];
+    // Ring buffer peak usage [34-36] (written by WASM during process())
+    std::atomic<uint32_t> in_buffer_peak_bytes;     // 34: Peak bytes used in IN buffer
+    std::atomic<uint32_t> out_buffer_peak_bytes;    // 35: Peak bytes used in OUT buffer
+    std::atomic<uint32_t> debug_buffer_peak_bytes;  // 36: Peak bytes used in DEBUG buffer
+
+    // Padding [37-39]
+    uint32_t _padding[3];
 };
 
 // Status flags

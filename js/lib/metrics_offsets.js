@@ -80,4 +80,11 @@ export const IN_BUFFER_USED_BYTES = 31;     // Bytes used in IN buffer
 export const OUT_BUFFER_USED_BYTES = 32;    // Bytes used in OUT buffer
 export const DEBUG_BUFFER_USED_BYTES = 33;  // Bytes used in DEBUG buffer
 
-// [34-35] padding
+// =============================================================================
+// Ring buffer peak usage [34-36] (written by WASM during process())
+// =============================================================================
+export const IN_BUFFER_PEAK_BYTES = 34;     // Peak bytes used in IN buffer
+export const OUT_BUFFER_PEAK_BYTES = 35;    // Peak bytes used in OUT buffer
+export const DEBUG_BUFFER_PEAK_BYTES = 36;  // Peak bytes used in DEBUG buffer
+
+// [37-39] padding

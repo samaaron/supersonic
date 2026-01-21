@@ -117,17 +117,20 @@ Ring buffer fill levels. WASM calculates buffer usage during each process() call
 
 | Property | Description |
 |----------|-------------|
-| `inBufferUsedBytes` | Raw bytes in input buffer |
-| `outBufferUsedBytes` | Raw bytes in output buffer |
-| `debugBufferUsedBytes` | Raw bytes in debug buffer |
-| `inBufferUsed.bytes` | Bytes in input buffer |
+| `inBufferUsed.bytes` | Bytes currently in input buffer |
 | `inBufferUsed.percentage` | Input buffer percentage used |
+| `inBufferUsed.peakBytes` | Peak bytes used (high water mark) |
+| `inBufferUsed.peakPercentage` | Peak percentage used |
 | `inBufferUsed.capacity` | Total input buffer capacity in bytes |
-| `outBufferUsed.bytes` | Bytes in output buffer |
+| `outBufferUsed.bytes` | Bytes currently in output buffer |
 | `outBufferUsed.percentage` | Output buffer percentage used |
+| `outBufferUsed.peakBytes` | Peak bytes used (high water mark) |
+| `outBufferUsed.peakPercentage` | Peak percentage used |
 | `outBufferUsed.capacity` | Total output buffer capacity in bytes |
-| `debugBufferUsed.bytes` | Bytes in debug buffer |
+| `debugBufferUsed.bytes` | Bytes currently in debug buffer |
 | `debugBufferUsed.percentage` | Debug buffer percentage used |
+| `debugBufferUsed.peakBytes` | Peak bytes used (high water mark) |
+| `debugBufferUsed.peakPercentage` | Peak percentage used |
 | `debugBufferUsed.capacity` | Total debug buffer capacity in bytes |
 
 ### Timing

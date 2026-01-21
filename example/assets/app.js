@@ -671,13 +671,19 @@ function updateMetrics(m) {
     if (m[src] !== undefined) mapped[dst] = m[src];
   }
 
-  // Buffer usage
-  if (m.inBufferUsed?.percentage !== undefined)
+  // Buffer usage (current and peak)
+  if (m.inBufferUsed?.percentage !== undefined) {
     mapped.in_buffer_usage = m.inBufferUsed.percentage;
-  if (m.outBufferUsed?.percentage !== undefined)
+    mapped.in_buffer_peak = m.inBufferUsed.peakPercentage;
+  }
+  if (m.outBufferUsed?.percentage !== undefined) {
     mapped.out_buffer_usage = m.outBufferUsed.percentage;
-  if (m.debugBufferUsed?.percentage !== undefined)
+    mapped.out_buffer_peak = m.outBufferUsed.peakPercentage;
+  }
+  if (m.debugBufferUsed?.percentage !== undefined) {
     mapped.debug_buffer_usage = m.debugBufferUsed.percentage;
+    mapped.debug_buffer_peak = m.debugBufferUsed.peakPercentage;
+  }
 
   // Engine state
   mapped.buffer_pool_used = m.bufferPoolUsedBytes;
@@ -751,11 +757,16 @@ function updateMetrics(m) {
     ["debug", "#a4a"],
   ]) {
     const usage = mapped[`${name}_buffer_usage`];
+    const peak = mapped[`${name}_buffer_peak`];
     const bar = $(`metric-${name}-bar`),
       label = $(`metric-${name}-usage`);
     if (usage !== undefined) {
       if (bar) bar.style.width = usage + "%";
-      if (label) label.textContent = usage.toFixed(2) + "%";
+      // Show current% (peak%)
+      if (label) {
+        const peakStr = peak !== undefined ? ` (${peak.toFixed(1)}%)` : "";
+        label.textContent = usage.toFixed(1) + "%" + peakStr;
+      }
     } else {
       if (bar) bar.style.width = "0%";
       if (label) label.textContent = "N/A";

@@ -747,16 +747,29 @@ extern "C" {
                 int32_t in_tail = control->in_tail.load(std::memory_order_relaxed);
                 uint32_t in_used = (in_head - in_tail + IN_BUFFER_SIZE) % IN_BUFFER_SIZE;
                 metrics->in_buffer_used_bytes.store(in_used, std::memory_order_relaxed);
+                // Update max if current exceeds it
+                uint32_t in_max = metrics->in_buffer_peak_bytes.load(std::memory_order_relaxed);
+                if (in_used > in_max) {
+                    metrics->in_buffer_peak_bytes.store(in_used, std::memory_order_relaxed);
+                }
 
                 int32_t out_head = control->out_head.load(std::memory_order_relaxed);
                 int32_t out_tail = control->out_tail.load(std::memory_order_relaxed);
                 uint32_t out_used = (out_head - out_tail + OUT_BUFFER_SIZE) % OUT_BUFFER_SIZE;
                 metrics->out_buffer_used_bytes.store(out_used, std::memory_order_relaxed);
+                uint32_t out_max = metrics->out_buffer_peak_bytes.load(std::memory_order_relaxed);
+                if (out_used > out_max) {
+                    metrics->out_buffer_peak_bytes.store(out_used, std::memory_order_relaxed);
+                }
 
                 int32_t debug_head = control->debug_head.load(std::memory_order_relaxed);
                 int32_t debug_tail = control->debug_tail.load(std::memory_order_relaxed);
                 uint32_t debug_used = (debug_head - debug_tail + DEBUG_BUFFER_SIZE) % DEBUG_BUFFER_SIZE;
                 metrics->debug_buffer_used_bytes.store(debug_used, std::memory_order_relaxed);
+                uint32_t debug_max = metrics->debug_buffer_peak_bytes.load(std::memory_order_relaxed);
+                if (debug_used > debug_max) {
+                    metrics->debug_buffer_peak_bytes.store(debug_used, std::memory_order_relaxed);
+                }
             }
         }
 
