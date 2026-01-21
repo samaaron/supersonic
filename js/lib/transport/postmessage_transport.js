@@ -35,13 +35,13 @@ export class PostMessageTransport extends Transport {
     #preschedulerCapacity;
     #snapshotIntervalMs;
 
-    // Metrics
-    #messagesSent = 0;
-    #messagesDropped = 0;
-    #bytesSent = 0;
-    #messagesReceived = 0;
-    #bytesReceived = 0;
-    #directSends = 0;
+    // Metrics (using canonical names matching metrics_offsets.js)
+    #oscOutMessagesSent = 0;
+    #oscInMessagesDropped = 0;
+    #oscOutBytesSent = 0;
+    #oscInMessagesReceived = 0;
+    #oscInBytesReceived = 0;
+    #preschedulerBypassed = 0;
     #lastSequenceReceived = -1;
     #debugMessagesReceived = 0;
     #debugBytesReceived = 0;
@@ -125,8 +125,8 @@ export class PostMessageTransport extends Transport {
             currentTimeS: null,
         });
 
-        this.#messagesSent++;
-        this.#bytesSent += message.length;
+        this.#oscOutMessagesSent++;
+        this.#oscOutBytesSent += message.length;
         return true;
     }
 
@@ -159,8 +159,8 @@ export class PostMessageTransport extends Transport {
             currentTimeS,
         });
 
-        this.#messagesSent++;
-        this.#bytesSent += message.length;
+        this.#oscOutMessagesSent++;
+        this.#oscOutBytesSent += message.length;
         return true;
     }
 
@@ -178,9 +178,9 @@ export class PostMessageTransport extends Transport {
             oscData: message,
         });
 
-        this.#messagesSent++;
-        this.#bytesSent += message.length;
-        this.#directSends++;
+        this.#oscOutMessagesSent++;
+        this.#oscOutBytesSent += message.length;
+        this.#preschedulerBypassed++;
         return true;
     }
 
@@ -230,14 +230,13 @@ export class PostMessageTransport extends Transport {
 
     /**
      * Handle raw debug bytes from worklet (postMessage mode)
-     * Forwards to debug worker for text decoding
+     * Decodes UTF-8 text and forwards to callback
      * @param {Object} data - { messages: Array<{bytes, sequence}> }
      */
     handleDebugRaw(data) {
-        if (this.#preschedulerWorker && data.messages) {
-            // Debug worker is not used in postMessage mode for raw bytes
-            // We need to create a debug worker or handle this differently
-            // For now, decode here using TextDecoder
+        // Decode debug messages inline using TextDecoder
+        // (TextDecoder not available in AudioWorklet, so decoding happens here)
+        if (data.messages) {
             const textDecoder = new TextDecoder('utf-8');
             for (const raw of data.messages) {
                 try {
@@ -273,12 +272,12 @@ export class PostMessageTransport extends Transport {
 
     getMetrics() {
         return {
-            messagesSent: this.#messagesSent,
-            messagesDropped: this.#messagesDropped,
-            bytesSent: this.#bytesSent,
-            messagesReceived: this.#messagesReceived,
-            bytesReceived: this.#bytesReceived,
-            directSends: this.#directSends,
+            oscOutMessagesSent: this.#oscOutMessagesSent,
+            oscOutBytesSent: this.#oscOutBytesSent,
+            oscInMessagesReceived: this.#oscInMessagesReceived,
+            oscInBytesReceived: this.#oscInBytesReceived,
+            oscInMessagesDropped: this.#oscInMessagesDropped,
+            preschedulerBypassed: this.#preschedulerBypassed,
             debugMessagesReceived: this.#debugMessagesReceived,
             debugBytesReceived: this.#debugBytesReceived,
         };
@@ -344,7 +343,7 @@ export class PostMessageTransport extends Transport {
                                 if (msg.sequence !== expectedSeq) {
                                     const dropped = (msg.sequence - expectedSeq + 0x100000000) & 0xFFFFFFFF;
                                     if (dropped < 1000) { // Sanity check
-                                        this.#messagesDropped += dropped;
+                                        this.#oscInMessagesDropped += dropped;
                                     }
                                 }
                             }
@@ -352,20 +351,13 @@ export class PostMessageTransport extends Transport {
                                 this.#lastSequenceReceived = msg.sequence;
                             }
 
-                            this.#messagesReceived++;
-                            this.#bytesReceived += msg.oscData.byteLength || msg.oscData.length || 0;
+                            this.#oscInMessagesReceived++;
+                            this.#oscInBytesReceived += msg.oscData.byteLength || msg.oscData.length || 0;
                             if (this.#onReplyCallback) {
                                 this.#onReplyCallback(msg.oscData, msg.sequence);
                             }
                         }
                     }
-                }
-                break;
-
-            case 'debug':
-                // Debug message from scsynth
-                if (this.#onDebugCallback && data.message) {
-                    this.#onDebugCallback(data.message);
                 }
                 break;
 
@@ -381,7 +373,7 @@ export class PostMessageTransport extends Transport {
 
             case 'error':
                 console.error('[PostMessageTransport] Worklet error:', data.error);
-                this.#messagesDropped++;
+                this.#oscInMessagesDropped++;
                 if (this.#onErrorCallback) {
                     this.#onErrorCallback(data.error, 'worklet');
                 }
@@ -409,7 +401,7 @@ export class PostMessageTransport extends Transport {
 
             case 'error':
                 console.error('[PostMessageTransport] Prescheduler error:', data.error);
-                this.#messagesDropped++;
+                this.#oscInMessagesDropped++;
                 if (this.#onErrorCallback) {
                     this.#onErrorCallback(data.error, 'oscOut');
                 }

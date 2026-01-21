@@ -44,10 +44,10 @@ export class SABTransport extends Transport {
     #initialized = false;
     #preschedulerCapacity;
 
-    // Metrics
-    #messagesSent = 0;
-    #messagesDropped = 0;
-    #bytesSent = 0;
+    // Metrics (using canonical names matching metrics_offsets.js)
+    #oscOutMessagesSent = 0;
+    #oscOutMessagesDropped = 0;
+    #oscOutBytesSent = 0;
 
     // Cached prescheduler metrics (worker sends via postMessage)
     #cachedPreschedulerMetrics = null;
@@ -144,8 +144,8 @@ export class SABTransport extends Transport {
             currentTimeS: null,
         });
 
-        this.#messagesSent++;
-        this.#bytesSent += message.length;
+        this.#oscOutMessagesSent++;
+        this.#oscOutBytesSent += message.length;
         return true;
     }
 
@@ -159,8 +159,8 @@ export class SABTransport extends Transport {
 
         const written = this.#directWriter.tryWrite(message);
         if (written) {
-            this.#messagesSent++;
-            this.#bytesSent += message.length;
+            this.#oscOutMessagesSent++;
+            this.#oscOutBytesSent += message.length;
         }
         return written;
     }
@@ -184,8 +184,8 @@ export class SABTransport extends Transport {
             currentTimeS,
         });
 
-        this.#messagesSent++;
-        this.#bytesSent += message.length;
+        this.#oscOutMessagesSent++;
+        this.#oscOutBytesSent += message.length;
         return true;
     }
 
@@ -202,8 +202,8 @@ export class SABTransport extends Transport {
             oscData: message,
         });
 
-        this.#messagesSent++;
-        this.#bytesSent += message.length;
+        this.#oscOutMessagesSent++;
+        this.#oscOutBytesSent += message.length;
         return true;
     }
 
@@ -253,9 +253,9 @@ export class SABTransport extends Transport {
 
     getMetrics() {
         return {
-            messagesSent: this.#messagesSent,
-            messagesDropped: this.#messagesDropped,
-            bytesSent: this.#bytesSent,
+            oscOutMessagesSent: this.#oscOutMessagesSent,
+            oscOutMessagesDropped: this.#oscOutMessagesDropped,
+            oscOutBytesSent: this.#oscOutBytesSent,
         };
     }
 
@@ -370,7 +370,7 @@ export class SABTransport extends Transport {
                 this.#cachedPreschedulerMetrics = data.metrics;
             } else if (data.type === 'error') {
                 console.error('[SABTransport] OSC OUT error:', data.error);
-                this.#messagesDropped++;
+                this.#oscOutMessagesDropped++;
                 if (this.#onErrorCallback) {
                     this.#onErrorCallback(data.error, 'oscOut');
                 }
