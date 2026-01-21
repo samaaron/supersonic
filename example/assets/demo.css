@@ -1086,6 +1086,8 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   gap: 1rem;
   font-size: var(--fs-description);
   color: #4b5563;
+  padding: 0;
+  margin: 0;
 }
 
 .feature-box {
@@ -1231,10 +1233,10 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 }
 
 .cta-button--primary:hover {
-  background: linear-gradient(101deg, var(--c-orange-dark) 0%, var(--c-orange) 100%);
+  background: linear-gradient(101deg, var(--c-gold) 0%, var(--c-orange) 100%);
   transform: translateY(-3px) scale(1.05);
-  box-shadow: 0 8px 25px rgba(255, 102, 0, 0.5);
-  color: white;
+  box-shadow: 0 8px 25px rgba(255, 215, 0, 0.5);
+  color: #000;
 }
 
 .cta-button--primary:hover::before {
