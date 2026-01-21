@@ -60,7 +60,7 @@ From the WASM scsynth engine running in the AudioWorklet.
 | `scsynthSchedulerLates` | Bundles executed after their scheduled time |
 
 ### Prescheduler Metrics
-(JavaScript, main thread) - Holds timed OSC bundles and dispatches them to the AudioWorklet just before they're needed. This keeps the ring buffer from filling up with future events.
+(JavaScript, worker thread) - Holds timed OSC bundles and dispatches them to the AudioWorklet just before they're needed. This keeps the ring buffer from filling up with future events.
 
 When you send a bundle scheduled for 2 seconds in the future, the prescheduler holds it, then dispatches it to scsynth ~50ms before execution time. Scsynth's scheduler then fires it at precisely the right sample.
 
