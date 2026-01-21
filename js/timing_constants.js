@@ -11,6 +11,10 @@ export const NTP_EPOCH_OFFSET = 2208988800;
 // Drift offset update interval in milliseconds
 export const DRIFT_UPDATE_INTERVAL_MS = 15000;
 
+// Delay before calculating initial drift at boot (ms)
+// Needs enough elapsed contextTime for accurate measurement
+export const INITIAL_DRIFT_DELAY_MS = 500;
+
 // Timeout waiting for /synced response from scsynth
 export const SYNC_TIMEOUT_MS = 10000;
 

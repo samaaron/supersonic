@@ -14,7 +14,7 @@
  * - [25-28] OSC In (osc_in_worker)
  * - [29-30] Debug (debug_worker)
  * - [31-33] Ring buffer usage (WASM writes)
- * - [34-35] padding
+ * - [34-36] Ring buffer peak usage (WASM writes)
  */
 
 // =============================================================================

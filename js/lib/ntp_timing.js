@@ -6,7 +6,7 @@ import {
   calculateNTPStartTime,
   calculateDriftMs,
 } from './timing_utils.js';
-import { DRIFT_UPDATE_INTERVAL_MS } from '../timing_constants.js';
+import { DRIFT_UPDATE_INTERVAL_MS, INITIAL_DRIFT_DELAY_MS } from '../timing_constants.js';
 
 /**
  * Manages NTP timing synchronization between AudioContext and wall clock.
@@ -91,8 +91,8 @@ export class NTPTiming {
 
   /**
    * Initialize NTP timing
-   * Sets the NTP start time when AudioContext started
-   * Blocks until audio is actually flowing (contextTime > 0)
+   * Sets the NTP start time when AudioContext started, then calculates initial drift.
+   * Blocks until audio is flowing and initial drift is measured.
    */
   async initialize() {
     if (!this.#bufferConstants || !this.#audioContext) {
@@ -135,6 +135,12 @@ export class NTPTiming {
         `(NTP=${currentNTP.toFixed(3)}s, contextTime=${timestamp.contextTime.toFixed(3)}s)`
       );
     }
+
+    // Wait for enough elapsed time to measure drift accurately
+    await new Promise((resolve) => setTimeout(resolve, INITIAL_DRIFT_DELAY_MS));
+
+    // Calculate and write initial drift before returning
+    this.updateDriftOffset();
   }
 
   /**

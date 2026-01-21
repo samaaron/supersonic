@@ -984,7 +984,8 @@ class LoopScheduler {
     this.counter += batchSize;
 
     const now = getNTP();
-    const nextDelay = Math.max(0, (this.currentTime - now) * 1000 - 500);
+    // Min 50ms delay to prevent tight loop (was causing 0ms delay at 120 BPM with batch=4)
+    const nextDelay = Math.max(50, (this.currentTime - now) * 1000 - 500);
     setTimeout(() => this.running && this.scheduleBatch(), nextDelay);
   }
 
