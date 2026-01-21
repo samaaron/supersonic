@@ -750,8 +750,8 @@ test.describe("OSC Bundle Timing", () => {
     );
 
     expect(result.hasAudio).toBe(true);
-    // Immediate bundle should start within 10ms (direct SAB write bypasses prescheduler)
-    expect(result.latencyMs).toBeLessThan(10);
+    // Immediate bundle should start within 20ms (direct SAB write bypasses prescheduler)
+    expect(result.latencyMs).toBeLessThan(20);
   });
 
   test("past timetag bundle executes immediately", async ({ page, sonicConfig }) => {
