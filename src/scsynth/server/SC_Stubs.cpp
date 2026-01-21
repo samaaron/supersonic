@@ -69,6 +69,68 @@ extern "C" {
     int worklet_debug(const char* fmt, ...);
 }
 
+// ============================================================================
+// OSC dump for /dumpOSC command - uses worklet_debug instead of scprintf
+// ============================================================================
+
+static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefix = "dumpOSC: ") {
+    if (mode & 1) {
+        // Mode 1: Parsed OSC message
+        char buf[1024];
+        int pos = 0;
+        const char* data;
+        int size;
+
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s[ ", prefix);
+        if (inData[0]) {
+            // String command
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "\"%s\"", inData);
+            data = OSCstrskip(inData);
+            size = inSize - (data - inData);
+        } else {
+            // Integer command
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "%d", OSCint(inData));
+            data = inData + 4;
+            size = inSize - 4;
+        }
+
+        sc_msg_iter msg(size, data);
+        while (msg.remain() && pos < (int)sizeof(buf) - 64) {
+            char c = msg.nextTag('i');
+            switch (c) {
+            case 'i': pos += snprintf(buf + pos, sizeof(buf) - pos, ", %d", msg.geti()); break;
+            case 'f': pos += snprintf(buf + pos, sizeof(buf) - pos, ", %g", msg.getf()); break;
+            case 'd': pos += snprintf(buf + pos, sizeof(buf) - pos, ", %g", msg.getd()); break;
+            case 's': pos += snprintf(buf + pos, sizeof(buf) - pos, ", \"%s\"", msg.gets()); break;
+            case 'b': pos += snprintf(buf + pos, sizeof(buf) - pos, ", DATA[%zu]", msg.getbsize()); msg.skipb(); break;
+            case 'T': pos += snprintf(buf + pos, sizeof(buf) - pos, ", true"); msg.count++; break;
+            case 'F': pos += snprintf(buf + pos, sizeof(buf) - pos, ", false"); msg.count++; break;
+            case 'N': pos += snprintf(buf + pos, sizeof(buf) - pos, ", nil"); msg.count++; break;
+            case '[': pos += snprintf(buf + pos, sizeof(buf) - pos, ", ["); msg.count++; break;
+            case ']': pos += snprintf(buf + pos, sizeof(buf) - pos, " ]"); msg.count++; break;
+            default: pos += snprintf(buf + pos, sizeof(buf) - pos, ", ?"); break;
+            }
+        }
+        pos += snprintf(buf + pos, sizeof(buf) - pos, " ]");
+        worklet_debug("%s", buf);
+    }
+
+    if (mode & 2) {
+        // Mode 2: Hex dump (first 64 bytes)
+        char buf[512];
+        int pos = 0;
+        int dumpSize = inSize > 64 ? 64 : inSize;
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "OSC HEX (%d bytes): ", inSize);
+        for (int i = 0; i < dumpSize && pos < (int)sizeof(buf) - 4; i++) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "%02x ", (unsigned char)inData[i]);
+        }
+        if (inSize > 64) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "...");
+        }
+        worklet_debug("%s", buf);
+    }
+}
+
 // PerformOSCMessage - dispatch OSC commands to their handlers
 // Based on SC_CoreAudio.cpp:200-224
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
@@ -90,6 +152,11 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
     if (!gCmdLib) {
         worklet_debug("ERROR: gCmdLib not initialized");
         return kSCErr_Failed;
+    }
+
+    // Dump OSC message if enabled via /dumpOSC command
+    if (inWorld->mDumpOSC) {
+        dumpOSCtoDebug(inWorld->mDumpOSC, inSize, inData);
     }
 
     SC_LibCmd* cmdObj;
@@ -118,41 +185,7 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
     }
 
     if (!cmdObj) {
-        // Format OSC message directly using sc_msg_iter (same logic as dumpOSCmsg)
-        char buf[512];
-        int pos = 0;
-        const char* data;
-        int size;
-
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "Command not found: [ ");
-        if (inData[0]) {
-            pos += snprintf(buf + pos, sizeof(buf) - pos, "\"%s\"", inData);
-            data = OSCstrskip(inData);
-            size = inSize - (data - inData);
-        } else {
-            pos += snprintf(buf + pos, sizeof(buf) - pos, "%d", OSCint(inData));
-            data = inData + 4;
-            size = inSize - 4;
-        }
-
-        sc_msg_iter msg(size, data);
-        while (msg.remain() && pos < (int)sizeof(buf) - 50) {
-            char c = msg.nextTag('i');
-            switch (c) {
-            case 'i': pos += snprintf(buf + pos, sizeof(buf) - pos, ", %d", msg.geti()); break;
-            case 'f': pos += snprintf(buf + pos, sizeof(buf) - pos, ", %g", msg.getf()); break;
-            case 'd': pos += snprintf(buf + pos, sizeof(buf) - pos, ", %g", msg.getd()); break;
-            case 's': pos += snprintf(buf + pos, sizeof(buf) - pos, ", \"%s\"", msg.gets()); break;
-            case 'b': pos += snprintf(buf + pos, sizeof(buf) - pos, ", DATA[%zu]", msg.getbsize()); msg.skipb(); break;
-            case 'T': pos += snprintf(buf + pos, sizeof(buf) - pos, ", true"); msg.count++; break;
-            case 'F': pos += snprintf(buf + pos, sizeof(buf) - pos, ", false"); msg.count++; break;
-            case 'N': pos += snprintf(buf + pos, sizeof(buf) - pos, ", nil"); msg.count++; break;
-            default: goto done;
-            }
-        }
-done:
-        snprintf(buf + pos, sizeof(buf) - pos, " ]");
-        worklet_debug("%s", buf);
+        dumpOSCtoDebug(1, inSize, inData, "Command not found: ");
         return kSCErr_NoSuchCommand;
     }
 

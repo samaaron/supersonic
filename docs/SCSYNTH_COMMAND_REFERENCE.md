@@ -243,6 +243,30 @@ supersonic.send("/cmd", "pluginName", arg1, arg2);
 
 ---
 
+### `/dumpOSC`
+
+Enable/disable OSC message dumping to the debug output.
+
+| Parameter | Type | Description                                      |
+| --------- | ---- | ------------------------------------------------ |
+| mode      | int  | 0 = off, 1 = parsed, 2 = hex, 3 = parsed and hex |
+
+When enabled, all incoming OSC messages are printed to the debug output (visible in the Debug Info panel).
+
+```javascript
+supersonic.send("/dumpOSC", 1); // Enable parsed output
+supersonic.send("/dumpOSC", 2); // Enable hex dump
+supersonic.send("/dumpOSC", 3); // Enable both
+supersonic.send("/dumpOSC", 0); // Disable
+```
+
+Example output:
+```
+dumpOSC: [ "/s_new", "default", 1000, 0, 1, "freq", 440 ]
+```
+
+---
+
 ### `/sync`
 
 Wait for all asynchronous commands to complete.
@@ -1410,7 +1434,6 @@ These commands don't work in SuperSonic - the browser environment has no filesys
 | Command       | Reason                                                                                                                |
 | ------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `/clearSched` | Use `cancelAllScheduled()` or the fine-grained `cancelTag()`, `cancelSession()`, `cancelSessionTag()` methods instead |
-| `/dumpOSC`    | Use browser dev tools and the `message` event instead                                                                 |
 | `/error`      | SuperSonic always enables error notifications so you never miss a `/fail` message                                     |
 
 ### Filesystem Commands

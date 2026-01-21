@@ -667,7 +667,6 @@ export class SuperSonic {
       "/b_write": "Writing audio files is not available in the browser.",
       "/b_close": "Writing audio files is not available in the browser.",
       "/clearSched": "Use cancelAllScheduled() or the fine-grained cancelTag(), cancelSession(), cancelSessionTag() methods instead.",
-      "/dumpOSC": "Use browser developer tools to inspect OSC messages.",
       "/error": "SuperSonic always enables error notifications so you never miss a /fail message.",
     };
 

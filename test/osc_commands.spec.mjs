@@ -157,7 +157,7 @@ test.describe("Top-level Commands", () => {
     expect(result.message).toContain("not supported");
   });
 
-  test("/dumpOSC - throws error (unsupported in SuperSonic)", async ({ page, sonicConfig }) => {
+  test("/dumpOSC - enables OSC message dumping to debug output", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -165,15 +165,17 @@ test.describe("Top-level Commands", () => {
 
       await sonic.init();
       try {
+        // Enable parsed output
         await sonic.send("/dumpOSC", 1);
-        return { threw: false };
+        // Disable
+        await sonic.send("/dumpOSC", 0);
+        return { success: true };
       } catch (e) {
-        return { threw: true, message: e.message };
+        return { success: false, message: e.message };
       }
     }, sonicConfig);
 
-    expect(result.threw).toBe(true);
-    expect(result.message).toContain("not supported");
+    expect(result.success).toBe(true);
   });
 
   test("/rtMemoryStatus - returns realtime memory status", async ({ page, sonicConfig }) => {
