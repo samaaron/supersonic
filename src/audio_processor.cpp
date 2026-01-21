@@ -814,6 +814,27 @@ extern "C" {
         return worklet_debug_impl(fmt, args);
     }
 
+    // Raw version - writes pre-formatted message directly to ring buffer
+    // Use this when you already have a formatted string (avoids double-copy)
+    extern "C" EMSCRIPTEN_KEEPALIVE
+    int worklet_debug_raw(const char* msg, uint32_t len) {
+        if (!memory_initialized || !msg || len == 0) return 0;
+
+        // Use unified ring buffer write with full protection (:: for global scope)
+        ::ring_buffer_write(
+            shared_memory,              // buffer_start
+            DEBUG_BUFFER_SIZE,          // buffer_size
+            DEBUG_BUFFER_START,         // buffer_start_offset
+            &control->debug_head,       // head
+            &control->debug_tail,       // tail
+            msg,                        // data
+            len,                        // data_size
+            nullptr                     // metrics (not tracked for debug currently)
+        );
+
+        return (int)len;
+    }
+
     // Get current metrics
     EMSCRIPTEN_KEEPALIVE
     uint32_t get_process_count() {

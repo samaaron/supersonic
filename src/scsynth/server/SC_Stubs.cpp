@@ -67,6 +67,7 @@ extern "C" {
 // From audio_processor.cpp
 extern "C" {
     int worklet_debug(const char* fmt, ...);
+    int worklet_debug_raw(const char* msg, uint32_t len);
 }
 
 // ============================================================================
@@ -111,8 +112,8 @@ static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefi
             default: pos += snprintf(buf + pos, sizeof(buf) - pos, ", ?"); break;
             }
         }
-        pos += snprintf(buf + pos, sizeof(buf) - pos, " ]");
-        worklet_debug("%s", buf);
+        pos += snprintf(buf + pos, sizeof(buf) - pos, " ]\n");
+        worklet_debug_raw(buf, pos);
     }
 
     if (mode & 2) {
@@ -127,7 +128,8 @@ static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefi
         if (inSize > 64) {
             pos += snprintf(buf + pos, sizeof(buf) - pos, "...");
         }
-        worklet_debug("%s", buf);
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "\n");
+        worklet_debug_raw(buf, pos);
     }
 }
 
