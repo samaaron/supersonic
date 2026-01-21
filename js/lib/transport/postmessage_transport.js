@@ -43,6 +43,8 @@ export class PostMessageTransport extends Transport {
     #bytesReceived = 0;
     #directSends = 0;
     #lastSequenceReceived = -1;
+    #debugMessagesReceived = 0;
+    #debugBytesReceived = 0;
 
     // Timing functions
     #getAudioContextTime;
@@ -244,6 +246,9 @@ export class PostMessageTransport extends Transport {
                     if (text.endsWith('\n')) {
                         text = text.slice(0, -1);
                     }
+                    // Track debug metrics
+                    this.#debugMessagesReceived++;
+                    this.#debugBytesReceived += bytes.length;
                     if (this.#onDebugCallback) {
                         this.#onDebugCallback({
                             text: text,
@@ -274,6 +279,8 @@ export class PostMessageTransport extends Transport {
             messagesReceived: this.#messagesReceived,
             bytesReceived: this.#bytesReceived,
             directSends: this.#directSends,
+            debugMessagesReceived: this.#debugMessagesReceived,
+            debugBytesReceived: this.#debugBytesReceived,
         };
     }
 

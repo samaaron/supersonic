@@ -247,6 +247,30 @@ test.describe("SuperSonic", () => {
       expect(result.message).toContain("must be a name, path/URL string, ArrayBuffer, Uint8Array, or File/Blob");
     });
 
+    test("debug metrics increment when scsynth outputs", async ({ page, sonicConfig }) => {
+      const result = await page.evaluate(async (config) => {
+        const sonic = new window.SuperSonic(config);
+
+        try {
+          await sonic.init();
+          // Wait for scsynth startup banner to be processed
+          await new Promise(r => setTimeout(r, 500));
+          const metrics = sonic.getMetrics();
+          return {
+            success: true,
+            debugMessagesReceived: metrics.debugMessagesReceived,
+            debugBytesReceived: metrics.debugBytesReceived,
+          };
+        } catch (err) {
+          return { success: false, error: err.message };
+        }
+      }, sonicConfig);
+
+      expect(result.success).toBe(true);
+      expect(result.debugMessagesReceived).toBeGreaterThan(0);
+      expect(result.debugBytesReceived).toBeGreaterThan(0);
+    });
+
     test("responds to /status command", async ({ page, sonicConfig }) => {
       const result = await page.evaluate(async (config) => {
         const sonic = new window.SuperSonic(config);

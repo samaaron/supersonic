@@ -326,6 +326,8 @@ export class MetricsReader {
       metrics.oscInBytesReceived = tm.bytesReceived ?? 0;
       metrics.oscInMessagesDropped = tm.messagesDropped ?? 0;
       metrics.preschedulerBypassed = tm.directSends ?? 0;
+      metrics.debugMessagesReceived = tm.debugMessagesReceived ?? 0;
+      metrics.debugBytesReceived = tm.debugBytesReceived ?? 0;
     }
 
     const totalDuration = performance.now() - startTime;
