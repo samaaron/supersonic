@@ -1,9 +1,9 @@
 # Metrics
 
-Performance metrics for monitoring SuperSonic's internal state.
+Real-time performance metrics for monitoring what's happening inside SuperSonic.
 
-- **SAB mode**: Reads directly from SharedArrayBuffer with zero overhead
-- **PostMessage mode**: Reads from a cached snapshot (worklet sends updates every 50ms by default)
+- **SAB mode** - reads directly from SharedArrayBuffer with zero overhead
+- **PostMessage mode** - reads from a cached snapshot (worklet sends updates every 50ms by default)
 
 ## Quick Start
 
@@ -38,13 +38,20 @@ const metrics = supersonic.getMetrics();
 
 ### scsynth Metrics
 
-These come from the WASM scsynth engine running in the audio worklet.
+From the WASM scsynth engine running in the AudioWorklet.
 
 | Property | Description |
 |----------|-------------|
 | `scsynthProcessCount` | Audio process() calls (cumulative) |
 | `scsynthMessagesProcessed` | OSC messages processed by scsynth |
 | `scsynthMessagesDropped` | Messages dropped (scheduler queue full) |
+
+### scsynth Scheduler Metrics
+
+(WASM, AudioWorklet) - Receives bundles from the prescheduler and executes them at the exact sample. This is where sample-accurate timing happens.
+
+| Property | Description |
+|----------|-------------|
 | `scsynthSchedulerDepth` | Current scheduler queue depth |
 | `scsynthSchedulerPeakDepth` | Peak scheduler queue depth (high water mark) |
 | `scsynthSchedulerCapacity` | Maximum scheduler queue size (compile-time constant) |
@@ -53,8 +60,10 @@ These come from the WASM scsynth engine running in the audio worklet.
 | `scsynthSchedulerLates` | Bundles executed after their scheduled time |
 
 ### Prescheduler Metrics
+(JavaScript, main thread) - Holds timed OSC bundles and dispatches them to the AudioWorklet just before they're needed. This keeps the ring buffer from filling up with future events.
 
-The prescheduler handles timed OSC bundles before they reach the audio worklet.
+When you send a bundle scheduled for 2 seconds in the future, the prescheduler holds it, then dispatches it to scsynth ~50ms before execution time. Scsynth's scheduler then fires it at precisely the right sample.
+
 
 | Property | Description |
 |----------|-------------|
@@ -76,7 +85,7 @@ The prescheduler handles timed OSC bundles before they reach the audio worklet.
 
 ### OSC Input Metrics
 
-Messages coming back from the engine.
+Messages coming back from scsynth.
 
 | Property | Description |
 |----------|-------------|
@@ -86,7 +95,7 @@ Messages coming back from the engine.
 
 ### Debug Metrics
 
-Debug output from the engine.
+Debug output from scsynth.
 
 | Property | Description |
 |----------|-------------|
@@ -148,6 +157,24 @@ Error counters for diagnosing issues.
 | `scsynthWasmErrors` | WASM execution errors in audio worklet |
 | `oscInCorrupted` | Ring buffer message corruption detected |
 
+## Node Tree Mirror
+
+Beyond numeric metrics, SuperSonic mirrors the entire scsynth node tree to JavaScript via the same shared memory mechanism. This gives you a live view of every synth and group currently running - updated in real-time with zero OSC round-trip latency.
+
+```javascript
+const tree = supersonic.getTree();
+// {
+//   version: 42,        // Increments on every change
+//   nodeCount: 5,       // Total nodes
+//   droppedCount: 0,    // Overflow (capacity exceeded)
+//   nodes: [...]        // All synths and groups
+// }
+```
+
+Use `version` to skip re-renders when nothing changed - perfect for 60fps visualizations.
+
+For the full API including node structure, tree traversal examples, and comparison with `/g_queryTree`, see [Node Tree API](API.md#node-tree-api).
+
 ## Example: Simple Monitor
 
 ```javascript
@@ -168,9 +195,3 @@ setInterval(() => {
   console.log(`Processed: ${metrics.scsynthMessagesProcessed}, Sent: ${metrics.oscOutMessagesSent}`);
 }, 100);
 ```
-
-## Performance
-
-**SAB mode**: `getMetrics()` takes less than 0.1ms - it's just reading from shared memory.
-
-**PostMessage mode**: `getMetrics()` reads from a cached snapshot that the worklet sends every 50ms (configurable via `snapshotIntervalMs`). The snapshot includes both metrics and node tree data in a single transfer.
