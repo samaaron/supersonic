@@ -1,14 +1,18 @@
-# Welcome to SuperSonic
 
->     Greetings friend
+```
+░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀
+░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░
+░▀▀▀░▀▀▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀
+```
+>     Greetings friend,
 >
 >     I hear you're interested in combining the research-level
 >     audio synthesis capabilities of the legendary SuperCollider
 >     scsynth engine with the incredible reach of the web?
 
->     You've come to the right place.
+>     Welcome, you've come to the right place.
 
-## A Legendary Audio Synth in your Browser
+# A Legendary Audio Synth in your Browser
 
 SuperCollider's scsynth is a legendary audio synthesis engine designed by James McCartney in the late 90s.
 
