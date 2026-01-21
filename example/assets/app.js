@@ -758,17 +758,19 @@ function updateMetrics(m) {
   ]) {
     const usage = mapped[`${name}_buffer_usage`];
     const peak = mapped[`${name}_buffer_peak`];
-    const bar = $(`metric-${name}-bar`),
-      label = $(`metric-${name}-usage`);
+    const bar = $(`metric-${name}-bar`);
+    const peakMarker = $(`metric-${name}-peak`);
+    const label = $(`metric-${name}-usage`);
     if (usage !== undefined) {
       if (bar) bar.style.width = usage + "%";
-      // Show current% (peak%)
-      if (label) {
-        const peakStr = peak !== undefined ? ` (${peak.toFixed(1)}%)` : "";
-        label.textContent = usage.toFixed(1) + "%" + peakStr;
+      // Position peak marker (hi-fi style peak hold)
+      if (peakMarker && peak !== undefined) {
+        peakMarker.style.left = `calc(${peak}% - 1px)`;
       }
+      if (label) label.textContent = usage.toFixed(1) + "%";
     } else {
       if (bar) bar.style.width = "0%";
+      if (peakMarker) peakMarker.style.left = "0";
       if (label) label.textContent = "N/A";
     }
   }
