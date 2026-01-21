@@ -84,13 +84,13 @@ Now for the fun part - making sound! The `send()` method sends OSC (Open Sound C
 
 The arguments are:
 
-
-|----------|-------|---------|
-| synthdef name | `"sonic-pi-prophet"` | Which synth to create |
-| node ID | `-1` | Let scsynth assign an ID automatically |
-| add action | `0` | Add to the head of the target group |
-| target | `0` | The root group |
-| params... | `"note", 28, ...` | Name/value pairs for synth parameters |
+|               |                      |                                        |
+|---------------|----------------------|----------------------------------------|
+| synthdef name | `"sonic-pi-prophet"` | Which synth to create                  |
+| node ID       | `-1`                 | Let scsynth assign an ID automatically |
+| add action    | `0`                  | Add to the head of the target group    |
+| target        | `0`                  | The root group                         |
+| params...     | `"note", 28, ...`    | Name/value pairs for synth parameters  |
 
 The synth parameters control the sound. Here we set `note` to 28 (a low E), `release` to 8 seconds, and `cutoff` to 70 (filter brightness). Each synthdef has its own parameters - see the synthdef documentation for available options.
 
