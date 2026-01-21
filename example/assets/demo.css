@@ -1214,9 +1214,9 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 }
 
 .cta-button--primary {
-  background: linear-gradient(101deg, var(--c-pink) 0%, var(--c-blue) 100%);
+  background: var(--c-blue);
   color: white;
-  box-shadow: 0 4px 6px rgba(255, 20, 147, 0.3);
+  box-shadow: 0 4px 15px rgba(30, 144, 255, 0.4);
 }
 
 .cta-button--primary::before {
@@ -1231,10 +1231,10 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 }
 
 .cta-button--primary:hover {
-  background: linear-gradient(101deg, var(--c-gold) 0%, var(--c-orange) 100%);
+  background: linear-gradient(101deg, var(--c-orange-dark) 0%, var(--c-orange) 100%);
   transform: translateY(-3px) scale(1.05);
-  box-shadow: 0 8px 25px rgba(255, 215, 0, 0.5);
-  color: #000;
+  box-shadow: 0 8px 25px rgba(255, 102, 0, 0.5);
+  color: white;
 }
 
 .cta-button--primary:hover::before {
@@ -1399,12 +1399,12 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   display: block;
   width: 60px;
   height: 60px;
-  color: var(--c-pink);
+  color: var(--c-blue);
   transition: color 0.3s ease;
 }
 
 .demo-link-section:has(.cta-button--primary:hover) .demo-arrow {
-  color: var(--c-gold);
+  color: var(--c-orange);
   animation: bounce 1s ease-in-out infinite;
 }
 
