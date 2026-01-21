@@ -512,6 +512,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             messageMagic: this.bufferConstants.MESSAGE_MAGIC,
             paddingMagic: this.bufferConstants.PADDING_MAGIC,
             headerSize: this.bufferConstants.MESSAGE_HEADER_SIZE,
+            maxMessages: 10,  // Limit per callback to avoid blocking audio thread
             onMessage: (payload, sequence) => {
                 // Send raw bytes to debug_worker for decoding
                 // (TextDecoder not available in AudioWorklet)
