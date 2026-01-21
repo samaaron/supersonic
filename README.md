@@ -36,143 +36,23 @@ Highlights:
 Try the live demo: [**sonic-pi.net/supersonic/demo.html**](https://sonic-pi.net/supersonic/demo.html)
 
 
-## Documentation
-
-- [API Reference](docs/API.md) - Methods, callbacks, and configuration
-- [scsynth Command Reference](docs/SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling scsynth
-- [Deployment](docs/DEPLOYMENT.md) - CDN, self-hosting, browser requirements
-- [Metrics](docs/METRICS.md) - Performance monitoring and debugging
-- [Building from Source](docs/BUILDING.md) - Compiling the WASM yourself
-
-
 ## Getting Started
-
-In order to use SuperSonic, you need to first install it, configure it, boot it _then play_. Luckily these are all really easy. We'll go through each in turn:
-
-1. Install
-2. Configure
-3. Boot & Play
-
-### 1. Install [Easy - CDN]
-
-Import SuperSonic directly from a CDN such as unpkg for the simplest way to get started:
 
 ```javascript
 import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
 ```
 
-### 1. Install [Advanced - Self-Hosted]
+For installation options see the [Installation Guide](docs/INSTALLATION.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
 
-You can also host the source yourself:
 
-Download the pre-built distribution from [GitHub Releases](https://github.com/samaaron/supersonic/releases):
+## Documentation
 
-```bash
-curl -LO https://github.com/samaaron/supersonic/releases/latest/download/supersonic.zip
-unzip supersonic.zip
-```
-
-This gives you:
-
-```
-supersonic/
-├── supersonic.js      # Main library
-├── wasm/              # WebAssembly binaries
-├── workers/           # Web Workers
-├── synthdefs/         # 127 (optional) synth definitions
-└── samples/           # 206 (optional) audio samples
-```
-
-Then import from this directory:
-
-```javascript
-import { SuperSonic } from "./supersonic/supersonic.js";
-```
-
-### 2. Configure [Easy - Use Defaults]
-
-If you're using SuperSonic's bundled samples and synthdefs, then no config is necessary:
-
-```javascript
-const supersonic = new SuperSonic();
-```
-
-### 2. Configure [Advanced - In Constructor]
-
-If you want to point to your own assets, you can configure this when you create your SuperSonic instance:
-
-A. Set a base URL (derives subdirectories automatically)
-```javascript
-const supersonic = new SuperSonic({
-  baseURL: "/audio/supersonic/"
-  // Derives: /audio/supersonic/workers/, /audio/supersonic/wasm/, etc.
-});
-```
-
-B. Override individual paths
-```javascript
-const supersonic = new SuperSonic({
-  workerBaseURL: "/my-workers/",
-  wasmBaseURL: "/my-wasm/",
-  synthdefBaseURL: "/my-synthdefs/",
-  sampleBaseURL: "/my-samples/"
-});
-```
-
-C. Enable SAB mode for lower latency (requires COOP/COEP headers)
-```javascript
-const supersonic = new SuperSonic({
-  mode: "sab"  // default is "postMessage"
-});
-```
-
-D. Enable debug logging
-```javascript
-const supersonic = new SuperSonic({
-  debug: true  // logs scsynth output, OSC in/out to console
-});
-```
-
-E. Configure scsynth server options
-```javascript
-const supersonic = new SuperSonic({
-  scsynthOptions: {
-    numBuffers: 4096,           // max audio buffers (default: 1024)
-    numAudioBusChannels: 256,   // audio buses (default: 128)
-    realTimeMemorySize: 16384   // RT memory in KB (default: 8192)
-  }
-});
-```
-See [API Reference](docs/API.md) for all available options.
-
-### 3. Boot & Play
-
-**Web browsers require you to press a button or make an explicit action before audio can start.**
-
-The easiest way to boot SuperSonic is from a boot button handler. Consider we have the following HTML buttons:
-
-```html
-<button id="boot-btn">boot</button>
-<button id="trig-btn">trigger</button>
-```
-
-We can then use the boot button for booting SuperSonic and the trigger button to trigger a synth:
-
-```javascript
-const bootBtn = document.getElementById("boot-btn");
-const trigBtn = document.getElementById("trig-btn");
-
-bootBtn.onclick = async () => {
-  await supersonic.init();
-  await supersonic.loadSynthDefs(["sonic-pi-prophet"]);
-};
-
-trigBtn.onclick = async () => {
-  supersonic.send("/s_new", "sonic-pi-prophet", -1, 0, 0, "note", 28, "release", 8, "cutoff", 70);
-};
-```
-
-See `example/simple.html` for a minimal working example.
+- [Installation](docs/INSTALLATION.md) - CDN, npm, self-hosting, browser requirements
+- [Quick Start](docs/QUICKSTART.md) - Boot and play your first synth
+- [API Reference](docs/API.md) - Methods, callbacks, and configuration
+- [scsynth Command Reference](docs/SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling scsynth
+- [Metrics](docs/METRICS.md) - Performance monitoring and debugging
+- [Building from Source](docs/BUILDING.md) - Compiling the WASM yourself
 
 
 ## Support

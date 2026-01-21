@@ -8,11 +8,11 @@
 
 >     You've come to the right place.
 
-## Legendary Audio Synthesis in your Browser
+## A Legendary Audio Synth in your Browser
 
 SuperCollider's scsynth is a legendary audio synthesis engine designed by James McCartney in the late 90s.
 
-Scsynth has been widely used for decades for audio research, algorithmic composition, live performance systems and instrument augmentation.
+__Scsynth has been widely used for decades for audio research, algorithmic composition, live performance systems and instrument augmentation.__
 
 SuperSonic brings scsynth into the browser as an AudioWorklet. This enables scsynth to maintain its incredible performance and sub-sample timing accuracy even within the constraints of a web browser.
 
@@ -28,39 +28,25 @@ SuperSonic is perfect for building interactive audio experiences, music tools, l
 
 Happy Coding!
 
-## Quick Start
-
-**Import from CDN** (or self-host)
+## Hello World
 
 ```javascript
 import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth';
-```
 
-**Initialise** — zero config needed
-
-```javascript
 const supersonic = new SuperSonic();
 await supersonic.init();
-```
 
-**Load and play a synth**
-
-```javascript
 await supersonic.loadSynthDef('sonic-pi-prophet');
 supersonic.send('/s_new', 'sonic-pi-prophet', -1, 0, 0, 'note', 60);
 ```
 
-**Load and play a sample**
-
-```javascript
-await supersonic.loadSynthDef('sonic-pi-basic_stereo_player');
-await supersonic.loadSample(0, 'bd_haus.flac');
-supersonic.send('/s_new', 'sonic-pi-basic_stereo_player', -1, 0, 0, 'buf', 0);
-```
+For other installation options including npm and self-hosting, see the [Installation Guide](INSTALLATION.md).
 
 ## Documentation
 
-- **[API Reference](API.md)** - The SuperSonic JavaScript API for initialising, controlling, and communicating with the scsynth Audioworklet.
+- **[Installation](INSTALLATION.md)** - CDN, npm, self-hosting options
+- **[Quick Start](QUICKSTART.md)** - Boot and play your first synth
+- **[API Reference](API.md)** - The SuperSonic JavaScript API for initialising, controlling, and communicating with the scsynth Audioworklet
 
 ## Synthesis
 
@@ -69,5 +55,4 @@ supersonic.send('/s_new', 'sonic-pi-basic_stereo_player', -1, 0, 0, 'buf', 0);
 ## For Contributors
 
 - **[Building](BUILDING.md)** - Building SuperSonic from source
-- **[Deployment](DEPLOYMENT.md)** - Deployment guide
 - **[Metrics](METRICS.md)** - Performance metrics and monitoring

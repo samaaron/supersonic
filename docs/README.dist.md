@@ -46,7 +46,7 @@ Cross-Origin-Embedder-Policy: require-corp
 
 ## More Info
 
-- Full documentation: https://github.com/samaaron/supersonic
+- Welcome & documentation: https://github.com/samaaron/supersonic/blob/main/docs/WELCOME.md
 - Live demo: https://sonic-pi.net/supersonic/demo.html
 
 ## Support
