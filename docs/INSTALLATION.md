@@ -4,10 +4,11 @@ Welcome to the SuperSonic installation guide.
 
 There are a few ways to add SuperSonic to your website:
 
-|--------|----------|
-| [CDN](#cdn) | Quick experiments, prototypes, getting started |
-| [npm](#npm) | JavaScript projects using bundlers |
-| [Self-Hosted](#self-hosted) | Full control, offline use, production deployments |
+|                              |                                                  |
+|------------------------------|--------------------------------------------------|
+| [CDN](#cdn)                  | Quick experiments, prototypes, getting started   |
+| [npm](#npm)                  | JavaScript projects using bundlers               |
+| [Self-Hosted](#self-hosted)  | Full control, offline use, production deployments|
 
 ## CDN
 
