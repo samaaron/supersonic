@@ -86,6 +86,26 @@ let orchestrator = null;
 let nodeTreeViz = null;
 let messages = [],
   sentMessages = [];
+
+// Batched log updates - collect messages and update DOM once per frame
+const logBatch = {
+  debug: { pending: [], scheduled: false },
+  oscIn: { pending: [], scheduled: false },
+  oscOut: { pending: [], scheduled: false },
+};
+
+// Helper to batch updates using requestAnimationFrame
+function batchedUpdate(batch, callback) {
+  if (!batch.scheduled) {
+    batch.scheduled = true;
+    requestAnimationFrame(() => {
+      callback(batch.pending);
+      batch.pending = [];
+      batch.scheduled = false;
+    });
+  }
+}
+
 let analyser = null,
   scopeAnimationId = null;
 let trailParticles = [],
@@ -526,55 +546,65 @@ function renderOSCMessage(oscData, showSequence = null) {
 }
 
 function addMessage(msg) {
-  messages.push(msg);
-  if (messages.length > 50) messages = messages.slice(-50);
+  logBatch.oscIn.pending.push(msg);
+  batchedUpdate(logBatch.oscIn, (pending) => {
+    for (const m of pending) {
+      messages.push(m);
+    }
+    if (messages.length > 50) messages = messages.slice(-50);
 
-  const history = $("message-history");
-  if (!messages.length) {
-    history.innerHTML = '<p class="message-empty">No messages received yet</p>';
-  } else {
-    history.innerHTML = messages
-      .map(
-        (m) => `
-      <div class="message-item">
-        <span class="message-header">[${m.sequence}]</span>
-        <span class="message-content">${m.oscData ? renderOSCMessage(m.oscData) : m.text || "Unknown"}</span>
-      </div>
-    `,
-      )
-      .join("");
-  }
-  history.scrollTop = history.scrollHeight;
-  flashTab("osc-in");
+    const history = $("message-history");
+    if (!messages.length) {
+      history.innerHTML = '<p class="message-empty">No messages received yet</p>';
+    } else {
+      history.innerHTML = messages
+        .map(
+          (m) => `
+        <div class="message-item">
+          <span class="message-header">[${m.sequence}]</span>
+          <span class="message-content">${m.oscData ? renderOSCMessage(m.oscData) : m.text || "Unknown"}</span>
+        </div>
+      `,
+        )
+        .join("");
+    }
+    history.scrollTop = history.scrollHeight;
+    flashTab("osc-in");
+  });
 }
 
 function addSentMessage(oscData, comment = null) {
-  const history = $("sent-message-history");
-  if (!history) return;
-
   const msg = { oscData, timestamp: Date.now(), comment };
-  sentMessages.push(msg);
-  if (sentMessages.length > 50) sentMessages.shift();
+  logBatch.oscOut.pending.push(msg);
+  batchedUpdate(logBatch.oscOut, (pending) => {
+    const history = $("sent-message-history");
+    if (!history) return;
 
-  const time = new Date(msg.timestamp).toISOString().slice(11, 23);
-  const content = comment
-    ? `<span class="osc-color-comment">${comment}</span>`
-    : renderOSCMessage(oscData);
+    const empty = history.querySelector(".message-empty");
+    if (empty) empty.remove();
 
-  const empty = history.querySelector(".message-empty");
-  if (empty) empty.remove();
+    let html = "";
+    for (const m of pending) {
+      sentMessages.push(m);
+      if (sentMessages.length > 50) sentMessages.shift();
 
-  history.insertAdjacentHTML(
-    "beforeend",
-    `
-    <div class="message-item">
-      <span class="message-header">[${time}]</span>
-      <span class="message-content">${content}</span>
-    </div>
-  `,
-  );
-  history.scrollTop = history.scrollHeight;
-  flashTab("osc-out");
+      const time = new Date(m.timestamp).toISOString().slice(11, 23);
+      const content = m.comment
+        ? `<span class="osc-color-comment">${m.comment}</span>`
+        : renderOSCMessage(m.oscData);
+
+      html += `
+        <div class="message-item">
+          <span class="message-header">[${time}]</span>
+          <span class="message-content">${content}</span>
+        </div>
+      `;
+    }
+
+    history.insertAdjacentHTML("beforeend", html);
+    history.scrollTop = history.scrollHeight;
+    flashTab("osc-out");
+  });
 }
 
 // ===== METRICS =====
@@ -1488,10 +1518,19 @@ $("init-button").addEventListener("click", async () => {
     });
 
     orchestrator.on("debug", (msg) => {
-      $("debug-log").textContent += msg.text + "\n";
-      const scroll = $("debug-log").parentElement;
-      if (scroll) scroll.scrollTop = scroll.scrollHeight;
-      flashTab("debug");
+      logBatch.debug.pending.push(msg.text);
+      batchedUpdate(logBatch.debug, (pending) => {
+        const log = $("debug-log");
+        const newText = pending.join("\n") + "\n";
+        log.textContent += newText;
+        // Trim if too long (keep last 50KB)
+        if (log.textContent.length > 50000) {
+          log.textContent = log.textContent.slice(-40000);
+        }
+        const scroll = log.parentElement;
+        if (scroll) scroll.scrollTop = scroll.scrollHeight;
+        flashTab("debug");
+      });
     });
 
     // Rebuild group structure on setup (fires on both init and recover)
