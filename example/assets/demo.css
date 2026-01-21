@@ -1020,13 +1020,14 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   .logs-grid .tab-content.active { display: block; }
 }
 
-/* Feature boxes - narrow/medium screens (2 on top, 1 centered below) */
-@media (max-width: 900px) {
-  .feature-boxes { display: flex !important; flex-wrap: wrap; justify-content: center; gap: 0.5rem !important; padding: 0 0.5rem !important; max-width: 340px; margin: 0 auto; }
-  .feature-boxes .feature-box:nth-child(1) { order: 1; flex: 0 0 calc(50% - 0.25rem); }  /* AudioWorklet - top left */
-  .feature-boxes .feature-box:nth-child(2) { order: 3; flex: 0 0 calc(50% - 0.25rem); }  /* WebAssembly - bottom center */
-  .feature-boxes .feature-box:nth-child(3) { order: 2; flex: 0 0 calc(50% - 0.25rem); }  /* OSC API - top right */
-  .feature-boxes .feature-box { max-width: none; padding: 0.75rem; }
+/* Feature boxes - narrow screens only (2 on top, 1 centered below) */
+/* Reorder only when boxes actually wrap to 2 rows (~520px and below) */
+@media (max-width: 520px) {
+  .feature-boxes { display: flex !important; flex-wrap: wrap; justify-content: center; gap: 0.75rem !important; padding: 0 !important; }
+  .feature-boxes .feature-box:nth-child(1) { order: 1; flex: 0 0 160px; }  /* AudioWorklet - top left */
+  .feature-boxes .feature-box:nth-child(2) { order: 3; flex: 0 0 160px; }  /* WebAssembly - bottom center */
+  .feature-boxes .feature-box:nth-child(3) { order: 2; flex: 0 0 160px; }  /* OSC API - top right */
+  .feature-boxes .feature-box { max-width: none; }
 }
 
 /* ===== HERO SECTION ===== */
