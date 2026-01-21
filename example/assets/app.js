@@ -548,26 +548,32 @@ function renderOSCMessage(oscData, showSequence = null) {
 function addMessage(msg) {
   logBatch.oscIn.pending.push(msg);
   batchedUpdate(logBatch.oscIn, (pending) => {
+    const history = $("message-history");
+    if (!history) return;
+
+    const empty = history.querySelector(".message-empty");
+    if (empty) empty.remove();
+
+    let html = "";
     for (const m of pending) {
       messages.push(m);
-    }
-    if (messages.length > 50) messages = messages.slice(-50);
+      if (messages.length > 50) messages.shift();
 
-    const history = $("message-history");
-    if (!messages.length) {
-      history.innerHTML = '<p class="message-empty">No messages received yet</p>';
-    } else {
-      history.innerHTML = messages
-        .map(
-          (m) => `
+      html += `
         <div class="message-item">
           <span class="message-header">[${m.sequence}]</span>
           <span class="message-content">${m.oscData ? renderOSCMessage(m.oscData) : m.text || "Unknown"}</span>
         </div>
-      `,
-        )
-        .join("");
+      `;
     }
+
+    history.insertAdjacentHTML("beforeend", html);
+
+    // Trim excess DOM nodes if over limit
+    while (history.children.length > 50) {
+      history.removeChild(history.firstChild);
+    }
+
     history.scrollTop = history.scrollHeight;
     flashTab("osc-in");
   });
@@ -779,6 +785,7 @@ function updateMetrics(m) {
 // ===== SCOPE VISUALISER =====
 const scopeCanvas = $("scope-canvas");
 const scopeCtx = scopeCanvas?.getContext("2d");
+let scopeDataBuffer = null; // Reused buffer for scope data
 
 function resizeScope() {
   if (!scopeCanvas || !scopeCtx) return;
@@ -795,6 +802,7 @@ function setupScope() {
   analyser = orchestrator.node.context.createAnalyser();
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0.8;
+  scopeDataBuffer = new Uint8Array(analyser.fftSize); // Allocate once
 
   orchestrator.node.disconnect();
   orchestrator.node.connect(analyser);
@@ -807,10 +815,9 @@ function setupScope() {
 
 function drawScope() {
   scopeAnimationId = requestAnimationFrame(drawScope);
-  if (!analyser) return;
+  if (!analyser || !scopeDataBuffer) return;
 
-  const data = new Uint8Array(analyser.fftSize);
-  analyser.getByteTimeDomainData(data);
+  analyser.getByteTimeDomainData(scopeDataBuffer);
 
   const w = scopeCanvas.offsetWidth,
     h = scopeCanvas.offsetHeight;
@@ -820,9 +827,9 @@ function drawScope() {
   scopeCtx.strokeStyle = "#ff6600";
   scopeCtx.beginPath();
 
-  const slice = w / data.length;
-  for (let i = 0; i < data.length; i++) {
-    const y = ((data[i] / 128.0) * h) / 2;
+  const slice = w / scopeDataBuffer.length;
+  for (let i = 0; i < scopeDataBuffer.length; i++) {
+    const y = ((scopeDataBuffer[i] / 128.0) * h) / 2;
     i === 0 ? scopeCtx.moveTo(0, y) : scopeCtx.lineTo(i * slice, y);
   }
   scopeCtx.lineTo(w, h / 2);
@@ -892,9 +899,12 @@ function updateTrail() {
   trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
   trailCtx.globalCompositeOperation = "lighter";
 
-  trailParticles = trailParticles.filter((p) => {
+  // In-place compaction to avoid array allocation every frame
+  let writeIdx = 0;
+  for (let i = 0; i < trailParticles.length; i++) {
+    const p = trailParticles[i];
     p.life -= 16.67 / (p.maxLife * 1000);
-    if (p.life <= 0) return false;
+    if (p.life <= 0) continue;
 
     p.x += p.vx;
     p.y += p.vy;
@@ -911,8 +921,10 @@ function updateTrail() {
     trailCtx.beginPath();
     trailCtx.arc(p.x, p.y, size, 0, Math.PI * 2);
     trailCtx.fill();
-    return true;
-  });
+
+    trailParticles[writeIdx++] = p;
+  }
+  trailParticles.length = writeIdx;
 
   trailCtx.globalCompositeOperation = "source-over";
   trailAnimationId = requestAnimationFrame(updateTrail);
