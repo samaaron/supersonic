@@ -241,7 +241,6 @@ export class MetricsReader {
    * @returns {Object} Combined metrics
    */
   gatherMetrics(context = {}) {
-    const startTime = performance.now();
     let metrics;
 
     if (this.#mode === 'postMessage') {
@@ -318,21 +317,9 @@ export class MetricsReader {
 
     // In postMessage mode, merge transport metrics (sent/received counters)
     // These aren't in the snapshot buffer since they're tracked on the main thread
+    // Transport now uses canonical metric names, so we can merge directly
     if (this.#mode === 'postMessage' && context.transportMetrics) {
-      const tm = context.transportMetrics;
-      metrics.oscOutMessagesSent = tm.messagesSent ?? 0;
-      metrics.oscOutBytesSent = tm.bytesSent ?? 0;
-      metrics.oscInMessagesReceived = tm.messagesReceived ?? 0;
-      metrics.oscInBytesReceived = tm.bytesReceived ?? 0;
-      metrics.oscInMessagesDropped = tm.messagesDropped ?? 0;
-      metrics.preschedulerBypassed = tm.directSends ?? 0;
-      metrics.debugMessagesReceived = tm.debugMessagesReceived ?? 0;
-      metrics.debugBytesReceived = tm.debugBytesReceived ?? 0;
-    }
-
-    const totalDuration = performance.now() - startTime;
-    if (totalDuration > 1) {
-      console.warn(`[MetricsReader] Slow metrics gathering: ${totalDuration.toFixed(2)}ms`);
+      Object.assign(metrics, context.transportMetrics);
     }
 
     return metrics;
