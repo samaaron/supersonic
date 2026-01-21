@@ -118,15 +118,41 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
     }
 
     if (!cmdObj) {
-        // Sanitize command name for logging (may contain binary garbage)
-        char safeName[64];
-        int copyLen = (inSize < 63) ? inSize : 63;
-        for (int i = 0; i < copyLen; i++) {
-            char c = inData[i];
-            safeName[i] = (c >= 32 && c < 127) ? c : '?';
+        // Format OSC message directly using sc_msg_iter (same logic as dumpOSCmsg)
+        char buf[512];
+        int pos = 0;
+        const char* data;
+        int size;
+
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "Command not found: [ ");
+        if (inData[0]) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "\"%s\"", inData);
+            data = OSCstrskip(inData);
+            size = inSize - (data - inData);
+        } else {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "%d", OSCint(inData));
+            data = inData + 4;
+            size = inSize - 4;
         }
-        safeName[copyLen] = '\0';
-        worklet_debug("Command not found: %s (size=%d)", safeName, inSize);
+
+        sc_msg_iter msg(size, data);
+        while (msg.remain() && pos < (int)sizeof(buf) - 50) {
+            char c = msg.nextTag('i');
+            switch (c) {
+            case 'i': pos += snprintf(buf + pos, sizeof(buf) - pos, ", %d", msg.geti()); break;
+            case 'f': pos += snprintf(buf + pos, sizeof(buf) - pos, ", %g", msg.getf()); break;
+            case 'd': pos += snprintf(buf + pos, sizeof(buf) - pos, ", %g", msg.getd()); break;
+            case 's': pos += snprintf(buf + pos, sizeof(buf) - pos, ", \"%s\"", msg.gets()); break;
+            case 'b': pos += snprintf(buf + pos, sizeof(buf) - pos, ", DATA[%zu]", msg.getbsize()); msg.skipb(); break;
+            case 'T': pos += snprintf(buf + pos, sizeof(buf) - pos, ", true"); msg.count++; break;
+            case 'F': pos += snprintf(buf + pos, sizeof(buf) - pos, ", false"); msg.count++; break;
+            case 'N': pos += snprintf(buf + pos, sizeof(buf) - pos, ", nil"); msg.count++; break;
+            default: goto done;
+            }
+        }
+done:
+        snprintf(buf + pos, sizeof(buf) - pos, " ]");
+        worklet_debug("%s", buf);
         return kSCErr_NoSuchCommand;
     }
 
