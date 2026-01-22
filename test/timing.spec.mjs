@@ -26,8 +26,9 @@ test.describe('Timing and Drift', () => {
 
       await sonic.init();
 
-      // Drift is 0 immediately after boot (timer hasn't fired yet)
-      const driftBeforeTimer = sonic.getMetrics().driftOffsetMs;
+      // Drift is calculated during init() so it may be non-zero immediately after boot.
+      // It should be within acceptable bounds (< 500ms).
+      const driftAfterInit = sonic.getMetrics().driftOffsetMs;
 
       // Wait for the drift timer to fire (it fires every 15 seconds)
       // Wait 16 seconds to ensure at least one timer fire
@@ -43,7 +44,7 @@ test.describe('Timing and Drift', () => {
       await sonic.destroy();
 
       return {
-        driftBeforeTimer,
+        driftAfterInit,
         driftAfterTimer,
         driftLater,
         // Drift growth rate: if drift is growing, this indicates a problem
@@ -51,8 +52,8 @@ test.describe('Timing and Drift', () => {
       };
     }, sonicConfig);
 
-    // Before the timer fires, drift should be 0 (initial value)
-    expect(result.driftBeforeTimer).toBe(0);
+    // After init, drift should be within acceptable bounds (< 500ms)
+    expect(Math.abs(result.driftAfterInit)).toBeLessThan(500);
 
     // After the timer fires, drift should be close to 0
     // Allow up to 500ms of drift due to normal clock variance

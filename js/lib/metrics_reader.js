@@ -316,6 +316,12 @@ export class MetricsReader {
     if (context.driftOffsetMs !== undefined) {
       metrics.driftOffsetMs = context.driftOffsetMs;
     }
+    if (context.ntpStartTime !== undefined) {
+      metrics.ntpStartTime = context.ntpStartTime;
+    }
+    if (context.globalOffsetMs !== undefined) {
+      metrics.globalOffsetMs = context.globalOffsetMs;
+    }
     if (context.audioContextState) {
       metrics.audioContextState = context.audioContextState;
     }

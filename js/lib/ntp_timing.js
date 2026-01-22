@@ -100,6 +100,7 @@ export class NTPTiming {
     }
 
     // Wait for audio to actually be flowing (contextTime > 0)
+    // Use getOutputTimestamp to check for audio flow, but use performance.now() for NTP calculation
     let timestamp;
     while (true) {
       timestamp = this.#audioContext.getOutputTimestamp();
@@ -109,12 +110,14 @@ export class NTPTiming {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
-    // Get synchronized snapshot of both time domains
-    const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
+    // Get current time from both domains
+    // Use performance.now() for wall clock (not getOutputTimestamp which returns past render time)
+    const perfTimeMs = performance.timeOrigin + performance.now();
     const currentNTP = calculateCurrentNTP(perfTimeMs);
+    const contextTime = this.#audioContext.currentTime;
 
     // NTP time at AudioContext start = current NTP - current AudioContext time
-    const ntpStartTime = calculateNTPStartTime(currentNTP, timestamp.contextTime);
+    const ntpStartTime = calculateNTPStartTime(currentNTP, contextTime);
 
     // Write to memory (SAB directly, or via postMessage)
     if (this.#mode === 'sab' && this.#ntpStartView) {
@@ -278,6 +281,27 @@ export class NTPTiming {
       return Atomics.load(this.#globalOffsetView, 0);
     }
     return this.#localGlobalOffsetMs;
+  }
+
+  /**
+   * Set global timing offset (for multi-system sync)
+   * @param {number} offsetMs - Offset in milliseconds
+   */
+  setGlobalOffset(offsetMs) {
+    this.#localGlobalOffsetMs = offsetMs;
+
+    if (this.#mode === 'sab' && this.#globalOffsetView) {
+      Atomics.store(this.#globalOffsetView, 0, offsetMs);
+    } else if (this.#workletPort) {
+      this.#workletPort.postMessage({
+        type: 'setGlobalOffset',
+        globalOffsetMs: offsetMs
+      });
+    }
+
+    if (__DEV__) {
+      console.log(`[Dbg-NTPTiming] Global offset set: ${offsetMs}ms`);
+    }
   }
 
   /**

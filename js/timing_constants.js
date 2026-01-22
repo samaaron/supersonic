@@ -8,11 +8,12 @@
 // NTP epoch offset: seconds between 1900-01-01 (NTP epoch) and 1970-01-01 (Unix epoch)
 export const NTP_EPOCH_OFFSET = 2208988800;
 
-// Drift offset update interval in milliseconds
+// Drift offset update interval in milliseconds.
+// At 100 ppm crystal drift, this keeps error within ~1.5ms.
 export const DRIFT_UPDATE_INTERVAL_MS = 15000;
 
-// Delay before calculating initial drift at boot (ms)
-// Needs enough elapsed contextTime for accurate measurement
+// Delay before calculating initial drift at boot (ms).
+// Allows enough contextTime to elapse for accurate measurement.
 export const INITIAL_DRIFT_DELAY_MS = 500;
 
 // Timeout waiting for /synced response from scsynth

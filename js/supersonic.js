@@ -140,6 +140,8 @@ export class SuperSonic {
 
       // Timing
       driftOffsetMs: { type: 'gauge', unit: 'ms', description: 'Clock drift between AudioContext and wall clock' },
+      ntpStartTime: { type: 'gauge', unit: 'seconds', description: 'NTP time when AudioContext started' },
+      globalOffsetMs: { type: 'gauge', unit: 'ms', description: 'Global timing offset for multi-system sync' },
 
       // Engine state
       audioContextState: { type: 'string', values: ['running', 'suspended', 'closed', 'interrupted'], description: 'AudioContext state' },
@@ -393,6 +395,21 @@ export class SuperSonic {
 
   getMetrics() {
     return this.#gatherMetrics();
+  }
+
+  // ============================================================================
+  // TIMING API
+  // ============================================================================
+
+  /**
+   * Set global timing offset for multi-system sync (e.g., Ableton Link, NTP server).
+   * This shifts all scheduled bundle execution times by the specified offset.
+   * Positive values delay execution, negative values advance it.
+   * @param {number} offsetMs - Offset in milliseconds
+   */
+  setGlobalOffset(offsetMs) {
+    this.#ensureInitialized('set global offset');
+    this.#ntpTiming?.setGlobalOffset(offsetMs);
   }
 
   // ============================================================================
@@ -1431,6 +1448,8 @@ export class SuperSonic {
       preschedulerMetrics: preschedulerMetrics,
       transportMetrics: this.#osc?.getMetrics(),
       driftOffsetMs: this.#ntpTiming?.getDriftOffset() ?? 0,
+      ntpStartTime: this.#ntpTiming?.getNTPStartTime() ?? 0,
+      globalOffsetMs: this.#ntpTiming?.getGlobalOffset() ?? 0,
       audioContextState: this.#audioContext?.state || "unknown",
       bufferPoolStats: this.#bufferManager?.getStats(),
       loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,

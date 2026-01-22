@@ -1,6 +1,25 @@
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 // Copyright (c) 2025 Sam Aaron
 
+/**
+ * SuperSonic Timing Model
+ * =======================
+ *
+ * SuperSonic synchronizes OSC bundles between JavaScript (wall clock) and
+ * the AudioWorklet (AudioContext.currentTime). The formula is:
+ *
+ *   currentNTP = contextTime + ntpStartTime + drift + globalOffset
+ *
+ * Where:
+ * - contextTime: AudioContext.currentTime (seconds since context created)
+ * - ntpStartTime: NTP time when AudioContext started (calculated at init)
+ * - drift: Clock skew correction (measured periodically, in milliseconds)
+ * - globalOffset: User-supplied offset for multi-system sync (milliseconds)
+ *
+ * Drift is positive when AudioContext runs slow (behind wall clock),
+ * negative when AudioContext runs fast (ahead of wall clock).
+ */
+
 import { NTP_EPOCH_OFFSET } from "../timing_constants.js";
 
 /**

@@ -856,10 +856,19 @@ test.describe("OSC Bundle Timing", () => {
         );
         const ntpStartTime = ntpStartView[0];
 
+        // Read drift from SAB
+        const driftView = new Int32Array(
+          sharedBuffer,
+          ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
+          1
+        );
+        const driftMs = Atomics.load(driftView, 0);
+        const driftSeconds = driftMs / 1000;
+
         // Start capture
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
-        const captureStartNTP = captureStartContextTime + ntpStartTime;
+        const captureStartNTP = captureStartContextTime + ntpStartTime + driftSeconds;
 
         // Schedule two synths with a precise 500-sample gap
         // First synth at 50ms, second synth at 50ms + 500 samples
@@ -1026,10 +1035,19 @@ test.describe("OSC Bundle Timing", () => {
         );
         const ntpStartTime = ntpStartView[0];
 
+        // Read drift from SAB
+        const driftView = new Int32Array(
+          sharedBuffer,
+          ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
+          1
+        );
+        const driftMs = Atomics.load(driftView, 0);
+        const driftSeconds = driftMs / 1000;
+
         // Start capture and record precise time
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
-        const captureStartNTP = captureStartContextTime + ntpStartTime;
+        const captureStartNTP = captureStartContextTime + ntpStartTime + driftSeconds;
 
         // Schedule synth at a non-buffer-aligned offset
         // Use 50ms + 50 samples (not a multiple of 128)
@@ -1144,10 +1162,19 @@ test.describe("OSC Bundle Timing", () => {
         );
         const ntpStartTime = ntpStartView[0];
 
+        // Read drift from SAB
+        const driftView = new Int32Array(
+          sharedBuffer,
+          ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
+          1
+        );
+        const driftMs = Atomics.load(driftView, 0);
+        const driftSeconds = driftMs / 1000;
+
         // Start capture and record precise time
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
-        const captureStartNTP = captureStartContextTime + ntpStartTime;
+        const captureStartNTP = captureStartContextTime + ntpStartTime + driftSeconds;
 
         // Schedule synth at a non-buffer-aligned offset
         // Use 50ms + 50 samples (not a multiple of 128)
