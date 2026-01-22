@@ -233,17 +233,22 @@ test.describe("Buffer Peak Metrics", () => {
       const before = sonic.getMetrics();
 
       // Generate significant buffer activity
-      // Send a burst of messages quickly
+      // Send a burst of messages WITHOUT awaiting each one to allow accumulation
       const nodeIds = [];
+      const sendPromises = [];
       for (let i = 0; i < 50; i++) {
         const nodeId = 20000 + i;
         nodeIds.push(nodeId);
-        await sonic.send("/s_new", "sonic-pi-beep", nodeId, 0, 0,
-          "amp", 0.01, "release", 0.05, "note", 48 + (i % 24));
+        // Don't await - fire all messages as fast as possible
+        sendPromises.push(sonic.send("/s_new", "sonic-pi-beep", nodeId, 0, 0,
+          "amp", 0.01, "release", 0.05, "note", 48 + (i % 24)));
       }
 
-      // Brief wait
-      await new Promise(r => setTimeout(r, 50));
+      // Now wait for all to complete
+      await Promise.all(sendPromises);
+
+      // Brief additional wait for metrics to update (peaks written every ~43ms)
+      await new Promise(r => setTimeout(r, 100));
 
       // Get metrics after burst
       const after = sonic.getMetrics();
