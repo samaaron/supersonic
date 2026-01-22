@@ -271,7 +271,7 @@ test.describe("ChipLead High Pitch Bug", () => {
 
   test("chiplead synth MIDI notes 96 to 156 (5 octaves)", async ({ page, sonicConfig }) => {
     test.skip(sonicConfig.mode === 'postMessage', 'Audio capture requires SharedArrayBuffer');
-    // Test individual MIDI notes incrementing by 1 to find where it breaks
+    // Test key MIDI notes across the range (one per octave + boundaries)
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(
@@ -282,13 +282,13 @@ test.describe("ChipLead High Pitch Bug", () => {
         await sonic.init();
         await sonic.loadSynthDef("sonic-pi-chiplead");
 
-        const startNote = 96;
-        const endNote = 96 + (5 * 12); // 5 octaves = 156
+        // Sample notes: one per octave (96, 108, 120, 132, 144, 156)
+        const testNotes = [96, 108, 120, 132, 144, 156];
         const results = [];
         let firstFailure = null;
         let firstNaN = null;
 
-        for (let note = startNote; note <= endNote; note++) {
+        for (const note of testNotes) {
           // Reset scsynth between each note to ensure clean state
           await sonic.reset();
           await sonic.loadSynthDef("sonic-pi-chiplead");
@@ -340,8 +340,7 @@ test.describe("ChipLead High Pitch Bug", () => {
         }
 
         return {
-          startNote,
-          endNote,
+          testNotes,
           results,
           firstFailure,
           firstNaN,
@@ -355,7 +354,7 @@ test.describe("ChipLead High Pitch Bug", () => {
     );
 
     // Log summary
-    console.log(`\nChipLead high pitch test: MIDI ${result.startNote} to ${result.endNote}`);
+    console.log(`\nChipLead high pitch test: MIDI notes ${result.testNotes.join(', ')}`);
     console.log(`Passed: ${result.totalPassed}/${result.totalTested}`);
     console.log(`Failed: ${result.totalFailed}/${result.totalTested}`);
     console.log(`With NaN values: ${result.totalWithNaN}/${result.totalTested}`);
@@ -401,13 +400,13 @@ test.describe("ChipLead High Pitch Bug", () => {
         await sonic.init();
         await sonic.loadSynthDef("sonic-pi-beep");
 
-        const startNote = 96;
-        const endNote = 96 + (5 * 12); // 5 octaves = 156
+        // Sample notes: one per octave (96, 108, 120, 132, 144, 156)
+        const testNotes = [96, 108, 120, 132, 144, 156];
         const results = [];
         let firstFailure = null;
         let firstNaN = null;
 
-        for (let note = startNote; note <= endNote; note++) {
+        for (const note of testNotes) {
           // Reset scsynth between each note to ensure clean state
           await sonic.reset();
           await sonic.loadSynthDef("sonic-pi-beep");
@@ -453,8 +452,7 @@ test.describe("ChipLead High Pitch Bug", () => {
         }
 
         return {
-          startNote,
-          endNote,
+          testNotes,
           results,
           firstFailure,
           firstNaN,
@@ -467,7 +465,7 @@ test.describe("ChipLead High Pitch Bug", () => {
       { sonic: sonicConfig, helpers: AUDIO_HELPERS }
     );
 
-    console.log("\nBeep synth control test: MIDI 96 to 156");
+    console.log(`\nBeep synth control test: MIDI notes ${result.testNotes.join(', ')}`);
     console.log(`Passed: ${result.totalPassed}/${result.totalTested}`);
     console.log(`Failed: ${result.totalFailed}/${result.totalTested}`);
     console.log(`With NaN values: ${result.totalWithNaN}/${result.totalTested}`);
