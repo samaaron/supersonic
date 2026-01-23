@@ -207,6 +207,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         uint32View[13] = this.worldOptions.loadGraphDefs || 0;
         uint32View[14] = this.worldOptions.preferredSampleRate || 0;
         uint32View[15] = this.worldOptions.verbosity || 0;
+        uint32View[16] = this.mode === 'postMessage' ? 1 : 0;  // 0 = SAB, 1 = PM
     }
 
     // Write debug message to DEBUG ring buffer

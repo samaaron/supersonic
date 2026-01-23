@@ -392,15 +392,20 @@ extern "C" {
         }
 
 
+        // Transport mode: 0 = SAB, 1 = postMessage
+        const char* transport_mode = worldOptionsPtr[16] ? "PM" : "SAB";
+
         worklet_debug(R"(
 ░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀
 ░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░
 ░▀▀▀░▀▀▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀)");
-        worklet_debug("v%d.%d.%d (scsynth %d.%d.%d) %.0fkHz %dch",
+        worklet_debug("v%d.%d.%d (scsynth %d.%d.%d)",
                      SUPERSONIC_VERSION_MAJOR, SUPERSONIC_VERSION_MINOR, SUPERSONIC_VERSION_PATCH,
-                     SC_VersionMajor, SC_VersionMinor, SC_VersionPatch,
-                     sample_rate / 1000, options.mNumOutputBusChannels);
-        worklet_debug("scsynth ready...");
+                     SC_VersionMajor, SC_VersionMinor, SC_VersionPatch);
+        worklet_debug("%.0fkHz %dch [%s]",
+                     sample_rate / 1000, options.mNumOutputBusChannels, transport_mode);
+        worklet_debug("");
+        worklet_debug("> scsynth ready...");
     }
 
     // Main audio processing function - called every audio frame (128 samples)
