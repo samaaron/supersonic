@@ -43,10 +43,8 @@ If you're new to audio synthesis and SuperCollider in particular, here are some 
 | Command                                      | Description                                        |
 | -------------------------------------------- | -------------------------------------------------- |
 | **Top-Level**                                |                                                    |
-| [`/quit`](#quit)                             | Terminate the server                               |
 | [`/notify`](#notify)                         | Register for node event notifications              |
 | [`/status`](#status)                         | Query server status (UGens, synths, CPU)           |
-| [`/cmd`](#cmd)                               | Execute a plugin command                           |
 | [`/sync`](#sync)                             | Wait for async commands to complete                |
 | [`/version`](#version)                       | Query server version info                          |
 | [`/rtMemoryStatus`](#rtmemorystatus)         | Query realtime memory usage                        |
@@ -82,17 +80,12 @@ If you're new to audio synthesis and SuperCollider in particular, here are some 
 | [`/g_deepFree`](#g_deepfree)                 | Recursively free all synths in group               |
 | [`/g_dumpTree`](#g_dumptree)                 | Print group tree (debug)                           |
 | [`/g_queryTree`](#g_querytree)               | Query group tree structure                         |
-| **Unit Generators**                          |                                                    |
-| [`/u_cmd`](#u_cmd)                           | Send command to a UGen                             |
 | **Buffers**                                  |                                                    |
 | [`/b_alloc`](#b_alloc)                       | Allocate an empty buffer                           |
-| [`/b_allocRead`](#b_allocread)               | Allocate and load audio file                       |
-| [`/b_allocReadChannel`](#b_allocreadchannel) | Load specific channels from file                   |
 | [`/b_free`](#b_free)                         | Free a buffer                                      |
 | [`/b_zero`](#b_zero)                         | Zero buffer contents                               |
 | [`/b_set`](#b_set)                           | Set individual samples                             |
 | [`/b_setn`](#b_setn)                         | Set sequential samples                             |
-| [`/b_setSampleRate`](#b_setsamplerate)       | Set buffer sample rate                             |
 | [`/b_fill`](#b_fill)                         | Fill samples with a value                          |
 | [`/b_gen`](#b_gen)                           | Generate buffer contents (sine, cheby, etc.)       |
 | [`/b_query`](#b_query)                       | Query buffer info                                  |
@@ -164,22 +157,6 @@ Commands marked **Async** execute on a background thread. They reply with `/done
 
 ## Top-Level Commands
 
-### `/quit`
-
-Terminate the synthesis server.
-
-| Parameter | Type | Description |
-| --------- | ---- | ----------- |
-
-**Async:** Yes
-**Reply:** `/done /quit`
-
-```javascript
-supersonic.send("/quit");
-```
-
----
-
 ### `/notify`
 
 Register/unregister for server notifications.
@@ -225,21 +202,6 @@ supersonic.send("/status");
 | 6        | float  | Peak CPU usage (%)                 |
 | 7        | double | Nominal sample rate                |
 | 8        | double | Actual sample rate                 |
-
----
-
-### `/cmd`
-
-Execute a plugin command.
-
-| Parameter | Type   | Description                |
-| --------- | ------ | -------------------------- |
-| name      | string | Command name               |
-| args      | ...    | Command-specific arguments |
-
-```javascript
-supersonic.send("/cmd", "pluginName", arg1, arg2);
-```
 
 ---
 
@@ -855,25 +817,6 @@ supersonic.send("/g_queryTree", 0, 0); // Query root group structure
 
 ---
 
-## Unit Generator Commands
-
-### `/u_cmd`
-
-Send a command to a unit generator.
-
-| Parameter | Type   | Description                 |
-| --------- | ------ | --------------------------- |
-| nodeID    | int    | Node ID containing the UGen |
-| ugenIndex | int    | UGen index within the synth |
-| command   | string | Command name                |
-| args      | ...    | Command-specific arguments  |
-
-```javascript
-supersonic.send("/u_cmd", 1000, 0, "commandName", arg1, arg2);
-```
-
----
-
 ## Buffer Commands
 
 Buffers store audio data for playback, recording, and wavetables.
@@ -899,56 +842,6 @@ supersonic.send("/b_alloc", 0, 44100, 1);
 
 // Allocate stereo buffer
 supersonic.send("/b_alloc", 1, 44100, 2);
-```
-
----
-
-### `/b_allocRead`
-
-Allocate and read a sound file into a buffer.
-
-| Parameter  | Type   | Description                               |
-| ---------- | ------ | ----------------------------------------- |
-| bufnum     | int    | Buffer number                             |
-| path       | string | Sound file path                           |
-| startFrame | int    | Starting frame in file (default: 0)       |
-| numFrames  | int    | Frames to read (default: 0 = entire file) |
-| completion | bytes  | Completion message (optional)             |
-
-**Async:** Yes
-**Reply:** `/done /b_allocRead bufnum`
-
-```javascript
-// Load entire file
-supersonic.send("/b_allocRead", 0, "samples/kick.wav");
-
-// Load frames 1000-2000
-supersonic.send("/b_allocRead", 0, "samples/loop.wav", 1000, 1000);
-```
-
-**Note:** In SuperSonic, use `loadSample()` for easier sample loading.
-
----
-
-### `/b_allocReadChannel`
-
-Allocate and read specific channels from a sound file.
-
-| Parameter  | Type    | Description                   |
-| ---------- | ------- | ----------------------------- |
-| bufnum     | int     | Buffer number                 |
-| path       | string  | Sound file path               |
-| startFrame | int     | Starting frame in file        |
-| numFrames  | int     | Frames to read                |
-| channels   | N × int | Source channel indices        |
-| completion | bytes   | Completion message (optional) |
-
-**Async:** Yes
-**Reply:** `/done /b_allocReadChannel bufnum`
-
-```javascript
-// Load only left channel (channel 0) from stereo file
-supersonic.send("/b_allocReadChannel", 0, "samples/stereo.wav", 0, 0, 0);
 ```
 
 ---
@@ -1021,21 +914,6 @@ Set sequential samples in a buffer.
 ```javascript
 // Set samples 0-2 to [1.0, 0.5, 0.0]
 supersonic.send("/b_setn", 0, 0, 3, 1.0, 0.5, 0.0);
-```
-
----
-
-### `/b_setSampleRate`
-
-Set a buffer's sample rate.
-
-| Parameter  | Type  | Description                          |
-| ---------- | ----- | ------------------------------------ |
-| bufnum     | int   | Buffer number                        |
-| sampleRate | float | Sample rate (0 or nil = server rate) |
-
-```javascript
-supersonic.send("/b_setSampleRate", 0, 44100);
 ```
 
 ---
@@ -1427,7 +1305,7 @@ This is useful when you want to send sample data directly via OSC without needin
 
 ## Unsupported Commands
 
-These commands don't work in SuperSonic - the browser environment has no filesystem and some scsynth features don't map to the AudioWorklet architecture.
+These commands don't work in SuperSonic - the browser environment has no filesystem, libsndfile is not available, and some scsynth features don't map to the AudioWorklet architecture.
 
 ### Scheduling and Debug Commands
 
@@ -1435,19 +1313,37 @@ These commands don't work in SuperSonic - the browser environment has no filesys
 | ------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `/clearSched` | Use `cancelAllScheduled()` or the fine-grained `cancelTag()`, `cancelSession()`, `cancelSessionTag()` methods instead |
 | `/error`      | SuperSonic always enables error notifications so you never miss a `/fail` message                                     |
+| `/quit`       | Use `destroy()` to shut down the SuperSonic instance                                                                  |
+
+### Plugin Commands
+
+| Command  | Status                                                               |
+| -------- | -------------------------------------------------------------------- |
+| `/cmd`   | No commands currently registered                                     |
+| `/u_cmd` | No UGens currently define commands                                   |
+
+These commands allow plugins to register custom functionality beyond the standard OSC API. None of the built-in UGens use them, but the mechanism exists if compelling use cases emerge. If you have a need for custom plugin commands, [open an issue](https://github.com/samaaron/supersonic/issues) describing your use case.
 
 ### Filesystem Commands
 
 No filesystem in browser/WASM, so file-based commands aren't available:
 
-| Command          | Alternative                              |
-| ---------------- | ---------------------------------------- |
-| `/d_load`        | `loadSynthDef()` or `/d_recv` with bytes |
-| `/d_loadDir`     | `loadSynthDefs()`                        |
-| `/b_read`        | `loadSample()`                           |
-| `/b_readChannel` | `loadSample()`                           |
-| `/b_write`       | Not available                            |
-| `/b_close`       | Not available                            |
+| Command              | Alternative                                                               |
+| -------------------- | ------------------------------------------------------------------------- |
+| `/d_load`            | `loadSynthDef()` or `/d_recv` with bytes                                  |
+| `/d_loadDir`         | `loadSynthDefs()`                                                         |
+| `/b_read`            | `loadSample()`                                                            |
+| `/b_readChannel`     | `loadSample()`                                                            |
+| `/b_allocRead`       | `loadSample()` or `/b_allocFile` with inline bytes                        |
+| `/b_allocReadChannel`| `loadSample()` (channel selection not supported)                          |
+| `/b_write`           | Not available                                                             |
+| `/b_close`           | Not available                                                             |
+
+### Buffer Commands
+
+| Command           | Reason                                                                           |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `/b_setSampleRate`| Not implemented - WebAudio automatically resamples buffers to context sample rate |
 
 Use the JavaScript API to load assets - it fetches via HTTP and sends the data to scsynth:
 
