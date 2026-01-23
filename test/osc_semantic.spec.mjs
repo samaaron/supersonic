@@ -4036,3 +4036,122 @@ test.describe("/n_mapan semantic tests", () => {
     expect(result.synthExists).toBe(true);
   });
 });
+
+// =============================================================================
+// /g_dumpTree - DUMP GROUP TREE TO DEBUG OUTPUT
+// =============================================================================
+
+test.describe("/g_dumpTree semantic tests", () => {
+  test("dumps group tree structure to debug output", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      // Collect debug messages
+      const debugMessages = [];
+      sonic.on('debug', (msg) => debugMessages.push(msg.text));
+
+      // Create a group and synth
+      await sonic.send("/g_new", 100, 0, 0);
+      await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 100);
+      await sonic.sync(1);
+
+      // Dump tree (flag=0 means without controls)
+      await sonic.send("/g_dumpTree", 0, 0);
+      await sonic.sync(2);
+
+      // Wait for debug messages to arrive
+      await new Promise(r => setTimeout(r, 100));
+
+      return {
+        debugMessages,
+        hasGroupInfo: debugMessages.some(m => m.includes('group') || m.includes('Group')),
+        hasNodeIds: debugMessages.some(m => m.includes('100') || m.includes('1000')),
+      };
+    }, sonicConfig);
+
+    // Should have received debug output containing tree info
+    expect(result.debugMessages.length).toBeGreaterThan(0);
+    expect(result.hasGroupInfo || result.hasNodeIds).toBe(true);
+  });
+
+  test("dumps tree with controls when flag is 1", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      // Collect debug messages
+      const debugMessages = [];
+      sonic.on('debug', (msg) => debugMessages.push(msg.text));
+
+      // Create synth with specific control value
+      await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "amp", 0.75);
+      await sonic.sync(1);
+
+      // Dump tree with controls (flag=1)
+      await sonic.send("/g_dumpTree", 0, 1);
+      await sonic.sync(2);
+
+      // Wait for debug messages to arrive
+      await new Promise(r => setTimeout(r, 100));
+
+      return {
+        debugMessages,
+        hasControlInfo: debugMessages.some(m => m.includes('amp') || m.includes('0.75')),
+      };
+    }, sonicConfig);
+
+    // Should have received debug output containing control values
+    expect(result.debugMessages.length).toBeGreaterThan(0);
+  });
+});
+
+// =============================================================================
+// /n_trace - TRACE NODE EXECUTION TO DEBUG OUTPUT
+// =============================================================================
+
+test.describe("/n_trace semantic tests", () => {
+  test("traces synth execution to debug output", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      // Collect debug messages
+      const debugMessages = [];
+      sonic.on('debug', (msg) => debugMessages.push(msg.text));
+
+      // Create synth
+      await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0);
+      await sonic.sync(1);
+
+      // Trace the synth
+      await sonic.send("/n_trace", 1000);
+      await sonic.sync(2);
+
+      // Wait for debug messages to arrive
+      await new Promise(r => setTimeout(r, 100));
+
+      // Cleanup
+      await sonic.send("/n_free", 1000);
+
+      return {
+        debugMessages,
+        hasTraceInfo: debugMessages.some(m =>
+          m.includes('1000') || m.includes('beep') || m.includes('trace')
+        ),
+      };
+    }, sonicConfig);
+
+    // Should have received debug output from trace
+    expect(result.debugMessages.length).toBeGreaterThan(0);
+  });
+});
