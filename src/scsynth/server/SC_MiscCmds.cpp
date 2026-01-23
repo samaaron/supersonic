@@ -1385,8 +1385,14 @@ SCErr meth_rtMemoryStatus(World* inWorld, int inSize, char* inData, ReplyAddress
 
 SCErr meth_quit(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_quit(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
+#ifdef __EMSCRIPTEN__
+    // /quit is not supported in SuperSonic - use destroy() instead
+    SendFailure(inReply, "/quit", "not supported in SuperSonic - use destroy() instead");
+    return kSCErr_Failed;
+#else
     CallSequencedCommand(AudioQuitCmd, inWorld, inSize, inData, inReply);
     return kSCErr_None;
+#endif
 }
 
 SCErr meth_clearSched(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
