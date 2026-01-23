@@ -9,8 +9,8 @@
 export const NTP_EPOCH_OFFSET = 2208988800;
 
 // Drift offset update interval in milliseconds.
-// At 100 ppm crystal drift, this keeps error within ~1.5ms.
-export const DRIFT_UPDATE_INTERVAL_MS = 15000;
+// At 100 ppm crystal drift, this keeps error within ~0.1ms.
+export const DRIFT_UPDATE_INTERVAL_MS = 1000;
 
 // Delay before calculating initial drift at boot (ms).
 // Allows enough contextTime to elapse for accurate measurement.

@@ -1,8 +1,8 @@
 import { test, expect } from './fixtures.mjs';
 
-// These tests require waiting for drift timer (15s interval) so need extended timeout
+// These tests require waiting for drift timer (1s interval)
 test.describe('Timing and Drift', () => {
-  test.setTimeout(45000); // 45s for drift timer tests
+  test.setTimeout(30000); // 30s for drift timer tests
   test.beforeEach(async ({ page, sonicConfig }) => {
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
@@ -30,9 +30,9 @@ test.describe('Timing and Drift', () => {
       // It should be within acceptable bounds (< 500ms).
       const driftAfterInit = sonic.getMetrics().driftOffsetMs;
 
-      // Wait for the drift timer to fire (it fires every 15 seconds)
-      // Wait 16 seconds to ensure at least one timer fire
-      await new Promise(r => setTimeout(r, 16000));
+      // Wait for the drift timer to fire (it fires every 1 second)
+      // Wait 2 seconds to ensure at least one timer fire
+      await new Promise(r => setTimeout(r, 2000));
 
       // Get drift after timer has fired
       const driftAfterTimer = sonic.getMetrics().driftOffsetMs;
@@ -74,7 +74,7 @@ test.describe('Timing and Drift', () => {
       await sonic.init();
 
       // Wait for initial drift timer to fire
-      await new Promise(r => setTimeout(r, 16000));
+      await new Promise(r => setTimeout(r, 2000));
       const driftBeforeSuspend = sonic.getMetrics().driftOffsetMs;
 
       // Suspend the AudioContext
