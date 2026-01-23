@@ -1610,7 +1610,14 @@ $("reset-button")?.addEventListener("click", async () => {
   stopAmenLoop();
   setSynthPadState("disabled");
 
-  await orchestrator.reset();
+  try {
+    await orchestrator.reset();
+  } catch (e) {
+    showError(`Reset failed: ${e.message}`);
+  } finally {
+    btn.textContent = "Restart";
+    btn.disabled = false;
+  }
 });
 
 // Resume button
