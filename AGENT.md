@@ -1,25 +1,37 @@
-@@ -0,0 +1,43 @@
 # SuperSonic
 
-SuperSonic is a port of SuperCollider's scsynth audio engine to work within the strict constraints of a web audioworklet.
+SuperSonic is a port of SuperCollider's scsynth audio engine to work within the strict constraints of a web audioworklet. The goal is low latency and high reliability for long running sessions.
 
-This means that:
+## AudioWorklet Constraints
 
-1. It is compiled from c++ to WASM
-2. It has to comply with the strict requirements of Audioworklets:
-   * No thread spawning
-   * No malloc
-   * No IO
-   * No main() entry point
-   * No automatic C++ intialiser calls
-3. It has to be a static library that gets called via process() from the audioworklet's high priority thread.
+The WASM scsynth runs inside an AudioWorklet which has strict requirements:
 
-The original scsynth was multi-threaded. It had a separate thread for IO vs the audio graph calculations. This was all well coordinated with queue between the threads for passing OSC messages, etc.
+* No thread spawning
+* No malloc (memory must be pre-allocated)
+* No IO
+* No main() entry point
+* No automatic C++ initialiser calls
 
-We have had to bypass all of this. Instead we have SharedBuffer memory that can be accessed by both the WASM audioworklet code and JS. We use this to ship OSC in and out of our wasm scsynth in addition to shipping debug IO messages for development and info.
+It's a static library that gets called via process() from the audioworklet's high priority thread.
 
-We have successfully managed to make sounds using some of the sonic pi synths such as sonic-pi_prophet and sonic-pi_beep. We're currently working on the audio buffer integration.
+The original scsynth was multi-threaded - separate threads for IO vs audio graph calculations, coordinated via queues for passing OSC messages. We've had to bypass all of this. Instead we use SharedArrayBuffer memory that can be accessed by both the WASM audioworklet code and JS to ship OSC in and out.
 
+## Components
+
+There isn't just the scsynth C++ compiled to wasm - it's actually a number of components:
+
+* The WASM audioworklet code (scsynth + scheduler + ringbuffer read/write code)
+* The JS prescheduler worker (for storing timestamped OSC bundles scheduled for more than 200ms from now)
+* The SuperSonic JS code
+
+## Communication Modes
+
+There are two distinct modes with which these components communicate:
+
+1. SAB - via SharedArrayBuffer
+2. postMessage - via postMessage calls and the periodic transfer of sections of memory (i.e. containing metrics and mirror-node-tree)
+
+Both modes are first class citizens and are fully supported and tested. SAB mode needs extra headers from the server and requires the browser to have stricter security (so no CDN) however postMessage mode is possible to deploy via CDN.
 
 ## Building
 
@@ -35,8 +47,6 @@ Start the test server from the example directory:
 
 cd example && npx serve
 
-
 ## Example
 
 We have a nice demo example in example/demo.html which has a BOOT button to initialise scsynth, a text area for writing ascii OSC (with initial timestamps) and three other boxes - Debug Info (showing debug output from scsynth), OSC In and OSC Out showing OSC in and out of scsynth.
-
