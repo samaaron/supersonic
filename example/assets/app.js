@@ -130,6 +130,7 @@ let synthdefsLoaded = { fx: false, instruments: false };
 let samplesLoaded = { kick: false, loops: false };
 let playbackStartNTP = null;
 let beatPulseInterval = null;
+let beatPulseTimeout = null;
 
 const uiState = {
   padX: 0.5,
@@ -999,6 +1000,10 @@ function initSchedulerWorker() {
       );
     } else if (type === "channelReady") {
       console.log("Scheduler worker has direct worklet connection");
+    } else if (type === "started" && e.data.scheduler === "arp") {
+      // Sync main thread timing with worker for beat pulse
+      playbackStartNTP = e.data.playbackStartNTP;
+      startBeatPulse();
     }
   };
 
@@ -1140,20 +1145,38 @@ function updateFXParameters(x, y) {
 
 // Beat pulse
 function startBeatPulse() {
+  // Don't start if already running
+  if (beatPulseInterval || beatPulseTimeout) return;
+
   const interval = 0.125 / getBpmScale();
   const touch = $("synth-pad-touch");
-  if (!touch) return;
+  if (!touch || !playbackStartNTP) return;
 
-  const timeSince = getNTP() - playbackStartNTP;
-  const nextIn = interval - (timeSince % interval);
+  const now = getNTP();
+  const timeSince = now - playbackStartNTP;
 
-  setTimeout(() => {
+  // Calculate time until next beat (handles both before and after playbackStartNTP)
+  let nextIn;
+  if (timeSince < 0) {
+    // We're before the first beat - wait for it
+    nextIn = -timeSince;
+  } else {
+    // We're after the start - sync to next beat boundary
+    nextIn = interval - (timeSince % interval);
+  }
+
+  beatPulseTimeout = setTimeout(() => {
+    beatPulseTimeout = null;
     triggerBeatPulse();
     beatPulseInterval = setInterval(triggerBeatPulse, interval * 1000);
   }, nextIn * 1000);
 }
 
 function stopBeatPulse() {
+  if (beatPulseTimeout) {
+    clearTimeout(beatPulseTimeout);
+    beatPulseTimeout = null;
+  }
   if (beatPulseInterval) {
     clearInterval(beatPulseInterval);
     beatPulseInterval = null;
@@ -1177,7 +1200,7 @@ async function startArpeggiator() {
   if (!schedulerWorker) initSchedulerWorker();
   schedulerWorker.postMessage({ type: "start", scheduler: "arp" });
   schedulerRunning.arp = true;
-  startBeatPulse();
+  // Beat pulse is started via worker's "started" message for proper sync
 }
 
 function stopArpeggiator() {
@@ -1318,6 +1341,7 @@ if (synthPad) {
   document.addEventListener("mouseup", () => isPadActive && deactivatePad());
 
   synthPad.addEventListener("touchstart", (e) => {
+    if (e.target.closest("#play-toggle")) return;
     e.preventDefault();
     activatePad(e.touches[0].clientX, e.touches[0].clientY);
   });
@@ -1328,10 +1352,12 @@ if (synthPad) {
       updatePadPosition(e.touches[0].clientX, e.touches[0].clientY);
   });
   synthPad.addEventListener("touchend", (e) => {
+    if (e.target.closest("#play-toggle")) return;
     e.preventDefault();
     deactivatePad();
   });
   synthPad.addEventListener("touchcancel", (e) => {
+    if (e.target.closest("#play-toggle")) return;
     e.preventDefault();
     deactivatePad();
   });

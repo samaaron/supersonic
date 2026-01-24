@@ -202,18 +202,20 @@ class Scheduler {
     this.running = true;
 
     const interval = this.getInterval();
-    const barDuration = 2 / getBpmScale(); // Align to bar boundaries
     const now = getNTP();
-    const nextBar = Math.ceil(now / barDuration) * barDuration;
 
     if (playbackStartNTP === null) {
-      playbackStartNTP = nextBar;
+      // Nothing playing - start immediately
+      playbackStartNTP = now;
       this.counter = 0;
       this.currentTime = playbackStartNTP;
     } else {
+      // Sync to existing playback - align to next bar
+      const barDuration = 2 / getBpmScale();
       const elapsed = now - playbackStartNTP;
-      this.counter = Math.ceil(elapsed / interval);
-      this.currentTime = playbackStartNTP + this.counter * interval;
+      const nextBar = Math.ceil(elapsed / barDuration) * barDuration;
+      this.counter = Math.round(nextBar / interval);
+      this.currentTime = playbackStartNTP + nextBar;
     }
 
     const delay = Math.max(0, (this.currentTime - now) * 1000);
@@ -408,6 +410,11 @@ self.onmessage = (e) => {
         arpScheduler.start();
         kickScheduler.start();
         amenScheduler.start();
+      }
+      // Notify main thread of playback timing for visual sync (only for arp)
+      // Offset by LOOKAHEAD so beat pulse syncs with when audio actually plays
+      if (data.scheduler === "arp" || data.scheduler === "all") {
+        self.postMessage({ type: "started", scheduler: "arp", playbackStartNTP: playbackStartNTP + LOOKAHEAD });
       }
       break;
 
