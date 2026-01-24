@@ -95,7 +95,7 @@ export class NTPTiming {
    * Blocks until audio is flowing and initial drift is measured.
    */
   async initialize() {
-    if (!this.#bufferConstants || !this.#audioContext) {
+    if (!this.#audioContext) {
       return;
     }
 
@@ -151,7 +151,7 @@ export class NTPTiming {
    * CRITICAL: This REPLACES the drift value, does not accumulate
    */
   updateDriftOffset() {
-    if (!this.#bufferConstants || !this.#audioContext || this.#initialNTPStartTime === undefined) {
+    if (!this.#audioContext || this.#initialNTPStartTime === undefined) {
       return;
     }
 
