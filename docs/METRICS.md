@@ -78,7 +78,11 @@ When you send a bundle scheduled for 2 seconds in the future, the prescheduler h
 | `preschedulerMessagesRetried` | Total retry attempts |
 | `preschedulerRetryQueueSize` | Current retry queue size |
 | `preschedulerRetryQueuePeak` | Peak retry queue size |
-| `preschedulerBypassed` | Messages that bypassed prescheduler (direct writes) |
+| `preschedulerBypassed` | Messages that bypassed prescheduler (aggregate total) |
+| `bypassNonBundle` | Plain OSC messages (not bundles) that bypassed prescheduler |
+| `bypassImmediate` | Bundles with timetag 0 or 1 that bypassed prescheduler |
+| `bypassNearFuture` | Bundles within 200ms that bypassed prescheduler |
+| `bypassLate` | Bundles past their scheduled time that bypassed prescheduler |
 | `preschedulerCapacity` | Maximum pending events allowed |
 | `preschedulerMinHeadroomMs` | Smallest time gap between JS prescheduler dispatch and scsynth scheduler execution |
 | `preschedulerLates` | Bundles dispatched after their scheduled execution time |

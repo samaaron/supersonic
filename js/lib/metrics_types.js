@@ -42,7 +42,11 @@
  * @property {number} preschedulerMessagesRetried - Total retry attempts (includes multiple per message)
  * @property {number} preschedulerRetryQueueSize - Current retry queue size
  * @property {number} preschedulerRetryQueuePeak - Peak retry queue size
- * @property {number} preschedulerBypassed - Messages that bypassed prescheduler (direct ring buffer writes)
+ * @property {number} preschedulerBypassed - Messages that bypassed prescheduler (direct ring buffer writes, aggregate)
+ * @property {number} bypassNonBundle - Plain OSC messages (not bundles) that bypassed prescheduler
+ * @property {number} bypassImmediate - Bundles with timetag 0 or 1 that bypassed prescheduler
+ * @property {number} bypassNearFuture - Bundles within 200ms that bypassed prescheduler
+ * @property {number} bypassLate - Bundles past their scheduled time that bypassed prescheduler
  * @property {number} preschedulerCapacity - Maximum pending events allowed in prescheduler
  * @property {number} preschedulerMinHeadroomMs - All-time minimum headroom before execution
  * @property {number} preschedulerLates - Bundles dispatched after their scheduled execution time

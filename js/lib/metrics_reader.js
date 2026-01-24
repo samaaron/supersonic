@@ -94,6 +94,10 @@ export class MetricsReader {
       oscOutMessagesSent: MetricsOffsets.OSC_OUT_MESSAGES_SENT,
       oscOutBytesSent: MetricsOffsets.OSC_OUT_BYTES_SENT,
       preschedulerBypassed: MetricsOffsets.PRESCHEDULER_BYPASSED,
+      bypassNonBundle: MetricsOffsets.BYPASS_NON_BUNDLE,
+      bypassImmediate: MetricsOffsets.BYPASS_IMMEDIATE,
+      bypassNearFuture: MetricsOffsets.BYPASS_NEAR_FUTURE,
+      bypassLate: MetricsOffsets.BYPASS_LATE,
     };
 
     const offset = offsets[metric];
@@ -165,6 +169,12 @@ export class MetricsReader {
       inBufferPeakBytes: m[MetricsOffsets.IN_BUFFER_PEAK_BYTES],
       outBufferPeakBytes: m[MetricsOffsets.OUT_BUFFER_PEAK_BYTES],
       debugBufferPeakBytes: m[MetricsOffsets.DEBUG_BUFFER_PEAK_BYTES],
+
+      // Bypass category metrics (written by JS main thread / PM transport)
+      bypassNonBundle: m[MetricsOffsets.BYPASS_NON_BUNDLE],
+      bypassImmediate: m[MetricsOffsets.BYPASS_IMMEDIATE],
+      bypassNearFuture: m[MetricsOffsets.BYPASS_NEAR_FUTURE],
+      bypassLate: m[MetricsOffsets.BYPASS_LATE],
     };
   }
 
@@ -232,8 +242,8 @@ export class MetricsReader {
     if (!this.#cachedSnapshotBuffer || !preschedulerMetrics) return;
 
     // Get a view into the metrics portion of the snapshot buffer
-    // Note: must cover all metrics including peak bytes at indices 34-36
-    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 40);
+    // Note: must cover all metrics including bypass categories at indices 37-40
+    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 42);
 
     // Single memcpy of ALL contiguous prescheduler metrics (offsets 8-21)
     const start = MetricsOffsets.PRESCHEDULER_START;
@@ -257,8 +267,8 @@ export class MetricsReader {
 
       // Read metrics from snapshot buffer
       if (this.#cachedSnapshotBuffer) {
-        // Note: must cover all metrics including peak bytes at indices 34-36
-        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 40);
+        // Note: must cover all metrics including bypass categories at indices 37-40
+        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 42);
         metrics = this.parseMetricsBuffer(metricsView);
       } else {
         metrics = {};

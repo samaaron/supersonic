@@ -87,4 +87,12 @@ export const IN_BUFFER_PEAK_BYTES = 34;     // Peak bytes used in IN buffer
 export const OUT_BUFFER_PEAK_BYTES = 35;    // Peak bytes used in OUT buffer
 export const DEBUG_BUFFER_PEAK_BYTES = 36;  // Peak bytes used in DEBUG buffer
 
-// [37-39] padding
+// =============================================================================
+// Bypass category metrics [37-40] (written by supersonic.js main thread / PM transport)
+// =============================================================================
+export const BYPASS_NON_BUNDLE = 37;    // Plain OSC messages (not bundles)
+export const BYPASS_IMMEDIATE = 38;     // Bundles with timetag 0 or 1
+export const BYPASS_NEAR_FUTURE = 39;   // Within 200ms but not late (diffSeconds >= 0 and < 0.2)
+export const BYPASS_LATE = 40;          // Past their scheduled time (diffSeconds < 0)
+
+// [41] padding
