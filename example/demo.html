@@ -328,98 +328,181 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                           <div>Y: <span id="pad-y-value">0.00</span></div>
                           <div>Cutoff: <span id="fx-cutoff-value">130</span></div>
                         </div>
+                        <button id="play-toggle" class="play-toggle" aria-pressed="false">Autoplay</button>
                       </div>
                     </div>
                   </div>
 
                   <!-- Controls -->
-                  <div class="slider-controls-section">
-                    <div class="slider-controls">
-                      <div class="slider-control">
-                        <label for="synth-select">Synth</label>
-                        <select id="synth-select">
-                          <option value="bass_foundation">Bass Foundation</option>
-                          <option value="beep" selected>Beep</option>
-                          <option value="blade">Blade</option>
-                          <option value="bnoise">BNoise</option>
-                          <option value="chipbass">Chipbass</option>
-                          <option value="chiplead">ChipLead</option>
-                          <option value="dark_ambience">Dark Ambience</option>
-                          <option value="dpulse">DPulse</option>
-                          <option value="dsaw">DSaw</option>
-                          <option value="dtri">DTri</option>
-                          <option value="fm">FM</option>
-                          <option value="gabberkick">Gabberkick</option>
-                          <option value="hollow">Hollow</option>
-                          <option value="mod_dsaw">Mod DSaw</option>
-                          <option value="mod_fm">Mod FM</option>
-                          <option value="mod_pulse">Mod Pulse</option>
-                          <option value="mod_saw">Mod Saw</option>
-                          <option value="mod_sine">Mod Sine</option>
-                          <option value="mod_tri">Mod Tri</option>
-                          <option value="noise">Noise</option>
-                          <option value="organ_tonewheel">Organ Tonewheel</option>
-                          <option value="pluck">Pluck</option>
-                          <option value="pretty_bell">Pretty Bell</option>
-                          <option value="prophet">Prophet</option>
-                          <option value="pulse">Pulse</option>
-                          <option value="rhodey">Rhodey</option>
-                          <option value="rodeo">Rodeo</option>
-                          <option value="saw">Saw</option>
-                          <option value="square">Square</option>
-                          <option value="subpulse">Subpulse</option>
-                          <option value="supersaw">Supersaw</option>
-                          <option value="tb303">TB-303</option>
-                          <option value="tech_saws">Tech Saws</option>
-                          <option value="tri">Tri</option>
-                          <option value="winwood_lead">Winwood Lead</option>
-                          <option value="zawa">Zawa</option>
-                        </select>
+                  <div class="control-groups">
+                    <!-- Synth Group -->
+                    <div class="control-group">
+                      <div class="control-group__header">Arp</div>
+                      <div class="control-group__controls">
+                        <div class="ctrl">
+                          <label for="octaves-slider">Octaves <span id="octaves-value" class="slider-value">2</span></label>
+                          <input type="range" id="octaves-slider" min="1" max="5" value="2" step="1" />
+                        </div>
+                        <div class="ctrl">
+                          <label for="attack-slider">Attack <span id="attack-value" class="slider-value">0.00</span></label>
+                          <input type="range" id="attack-slider" min="0" max="2" value="0" step="0.01" />
+                        </div>
+                        <div class="ctrl">
+                          <label for="release-slider">Release <span id="release-value" class="slider-value">0.10</span></label>
+                          <input type="range" id="release-slider" min="0" max="5" value="0.1" step="0.01" />
+                        </div>
+                        <div class="ctrl">
+                          <label for="synth-select">Synth</label>
+                          <select id="synth-select">
+                            <option value="bass_foundation">Bass Foundation</option>
+                            <option value="beep" selected>Beep</option>
+                            <option value="blade">Blade</option>
+                            <option value="bnoise">BNoise</option>
+                            <option value="chipbass">Chipbass</option>
+                            <option value="chiplead">ChipLead</option>
+                            <option value="dark_ambience">Dark Ambience</option>
+                            <option value="dpulse">DPulse</option>
+                            <option value="dsaw">DSaw</option>
+                            <option value="dtri">DTri</option>
+                            <option value="fm">FM</option>
+                            <option value="gabberkick">Gabberkick</option>
+                            <option value="hollow">Hollow</option>
+                            <option value="mod_dsaw">Mod DSaw</option>
+                            <option value="mod_fm">Mod FM</option>
+                            <option value="mod_pulse">Mod Pulse</option>
+                            <option value="mod_saw">Mod Saw</option>
+                            <option value="mod_sine">Mod Sine</option>
+                            <option value="mod_tri">Mod Tri</option>
+                            <option value="noise">Noise</option>
+                            <option value="organ_tonewheel">Organ Tonewheel</option>
+                            <option value="pluck">Pluck</option>
+                            <option value="pretty_bell">Pretty Bell</option>
+                            <option value="prophet">Prophet</option>
+                            <option value="pulse">Pulse</option>
+                            <option value="rhodey">Rhodey</option>
+                            <option value="rodeo">Rodeo</option>
+                            <option value="saw">Saw</option>
+                            <option value="square">Square</option>
+                            <option value="subpulse">Subpulse</option>
+                            <option value="supersaw">Supersaw</option>
+                            <option value="tb303">TB-303</option>
+                            <option value="tech_saws">Tech Saws</option>
+                            <option value="tri">Tri</option>
+                            <option value="winwood_lead">Winwood Lead</option>
+                            <option value="zawa">Zawa</option>
+                          </select>
+                        </div>
+                        <div class="ctrl">
+                          <label for="root-note-select">Root</label>
+                          <select id="root-note-select">
+                            <option value="84">C6</option>
+                            <option value="83">B5</option>
+                            <option value="82">A#5</option>
+                            <option value="81">A5</option>
+                            <option value="80">G#5</option>
+                            <option value="79">G5</option>
+                            <option value="78">F#5</option>
+                            <option value="77">F5</option>
+                            <option value="76">E5</option>
+                            <option value="75">D#5</option>
+                            <option value="74">D5</option>
+                            <option value="73">C#5</option>
+                            <option value="72">C5</option>
+                            <option value="71">B4</option>
+                            <option value="70">A#4</option>
+                            <option value="69">A4</option>
+                            <option value="68">G#4</option>
+                            <option value="67">G4</option>
+                            <option value="66">F#4</option>
+                            <option value="65">F4</option>
+                            <option value="64">E4</option>
+                            <option value="63">D#4</option>
+                            <option value="62">D4</option>
+                            <option value="61">C#4</option>
+                            <option value="60" selected>C4</option>
+                            <option value="59">B3</option>
+                            <option value="58">A#3</option>
+                            <option value="57">A3</option>
+                            <option value="56">G#3</option>
+                            <option value="55">G3</option>
+                            <option value="54">F#3</option>
+                            <option value="53">F3</option>
+                            <option value="52">E3</option>
+                            <option value="51">D#3</option>
+                            <option value="50">D3</option>
+                            <option value="49">C#3</option>
+                            <option value="48">C3</option>
+                            <option value="47">B2</option>
+                            <option value="46">A#2</option>
+                            <option value="45">A2</option>
+                            <option value="44">G#2</option>
+                            <option value="43">G2</option>
+                            <option value="42">F#2</option>
+                            <option value="41">F2</option>
+                            <option value="40">E2</option>
+                            <option value="39">D#2</option>
+                            <option value="38">D2</option>
+                            <option value="37">C#2</option>
+                            <option value="36">C2</option>
+                          </select>
+                        </div>
+                        <div class="ctrl">
+                          <label for="arp-mode-select">Mode</label>
+                          <select id="arp-mode-select">
+                            <option value="random" selected>Random</option>
+                            <option value="up">Up</option>
+                            <option value="down">Down</option>
+                            <option value="updown">Up/Down</option>
+                            <option value="downup">Down/Up</option>
+                          </select>
+                        </div>
                       </div>
-                      <div class="slider-control">
-                        <label for="loop-select">Loop Sample</label>
-                        <select id="loop-select">
-                          <option value="loop_amen" selected>Amen</option>
-                          <option value="loop_breakbeat">Breakbeat</option>
-                          <option value="loop_compus">Compus</option>
-                          <option value="loop_garzul">Garzul</option>
-                          <option value="loop_industrial">Industrial</option>
-                          <option value="loop_tabla">Tabla</option>
-                        </select>
-                      </div>
-                      <div class="slider-control">
-                        <label for="random-arp-toggle">Random Arp</label>
-                        <button id="random-arp-toggle" class="toggle-button" aria-pressed="true" data-active="true">
-                          On
-                        </button>
-                      </div>
-                      <div class="slider-control">
-                        <label for="bpm-slider">BPM <span id="bpm-value" class="slider-value">120</span></label>
-                        <input type="range" id="bpm-slider" min="20" max="500" value="120" step="1" />
-                      </div>
-                      <div class="slider-control">
-                        <label for="root-note-slider"
-                          >Root Note <span id="root-note-value" class="slider-value">60</span></label
-                        >
-                        <input type="range" id="root-note-slider" min="24" max="96" value="60" step="1" />
-                      </div>
-                      <div class="slider-control">
-                        <label for="octaves-slider"
-                          >Octaves <span id="octaves-value" class="slider-value">2</span></label
-                        >
-                        <input type="range" id="octaves-slider" min="1" max="5" value="2" step="1" />
-                      </div>
-                      <div class="slider-control">
-                        <label for="attack-slider"
-                          >Attack <span id="attack-value" class="slider-value">0.00</span></label
-                        >
-                        <input type="range" id="attack-slider" min="0" max="2" value="0" step="0.01" />
-                      </div>
-                      <div class="slider-control">
-                        <label for="release-slider"
-                          >Release <span id="release-value" class="slider-value">0.10</span></label
-                        >
-                        <input type="range" id="release-slider" min="0" max="5" value="0.1" step="0.01" />
+                    </div>
+                    <!-- Mix (center) -->
+                    <div class="control-mix">
+                      <span class="mix-label">Beat</span>
+                      <input type="range" id="mix-slider" min="0" max="100" value="50" step="1" orient="vertical" />
+                      <span class="mix-label">Arp</span>
+                    </div>
+                    <!-- Beat Group -->
+                    <div class="control-group">
+                      <div class="control-group__header">Beat</div>
+                      <div class="control-group__controls">
+                        <div class="ctrl ctrl--full">
+                          <label for="bpm-slider">BPM <span id="bpm-value" class="slider-value">120</span></label>
+                          <input type="range" id="bpm-slider" min="20" max="500" value="120" step="1" />
+                        </div>
+                        <div class="ctrl">
+                          <label for="loop-select">Loop</label>
+                          <select id="loop-select">
+                            <option value="loop_amen" selected>Amen</option>
+                            <option value="loop_breakbeat">Breakbeat</option>
+                            <option value="loop_compus">Compus</option>
+                            <option value="loop_garzul">Garzul</option>
+                            <option value="loop_industrial">Industrial</option>
+                            <option value="loop_tabla">Tabla</option>
+                          </select>
+                        </div>
+                        <div class="ctrl">
+                          <label for="kick-select">Kick</label>
+                          <select id="kick-select">
+                            <option value="bd_haus" selected>Haus</option>
+                            <option value="bd_boom">Boom</option>
+                            <option value="bd_tek">Tek</option>
+                            <option value="bd_zome">Zome</option>
+                          </select>
+                        </div>
+                        <div class="ctrl">
+                          <label for="kick-pattern-select">Pattern</label>
+                          <select id="kick-pattern-select">
+                            <option value="off">Off</option>
+                            <option value="four" selected>Four</option>
+                            <option value="half">Half</option>
+                            <option value="offbeat">Offbeat</option>
+                            <option value="syncopated">Syncopated</option>
+                            <option value="breakbeat">Breakbeat</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -567,34 +650,47 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                   class="metrics-section metrics-section--top"
                   aria-label="Performance metrics"
                 >
-                  <div class="metrics-grid metrics-grid--4col">
+                  <div class="metrics-grid metrics-grid--5col">
                     <div class="metrics-panel">
-                      <div class="metrics-panel__title">OSC In/Out</div>
+                      <div class="metrics-panel__title">OSC Out</div>
                       <div class="metrics-row">
-                        <span>sent</span
-                        ><span
-                          ><span id="metric-sent" data-metric="oscOutMessagesSent" class="metrics-val">0</span>
-                           (<span id="metric-bytes-sent" data-metric="oscOutBytesSent" class="metrics-val--muted">0 B</span>)</span
-                        >
+                        <span>sent</span><span id="metric-sent" data-metric="oscOutMessagesSent" class="metrics-val">0</span>
                       </div>
                       <div class="metrics-row">
-                        <span>- direct</span><span id="metric-direct-writes" data-metric="preschedulerBypassed" class="metrics-val--green">0</span>
+                        <span>bytes</span><span id="metric-bytes-sent" data-metric="oscOutBytesSent" class="metrics-val--muted">0 B</span>
                       </div>
                       <div class="metrics-row">
-                        <span>- lost</span><span id="metric-sequence-gaps" data-metric="scsynthSequenceGaps" class="metrics-val--red">0</span>
+                        <span>bypass</span><span id="metric-direct-writes" data-metric="preschedulerBypassed" class="metrics-val--green">0</span>
                       </div>
                       <div class="metrics-row">
-                        <span>received</span
-                        ><span
-                          ><span id="metric-received" data-metric="oscInMessagesReceived" class="metrics-val">0</span>
-                           (<span id="metric-bytes-received" data-metric="oscInBytesReceived" class="metrics-val--muted">0 B</span>)</span
-                        >
+                        <span>  msg</span><span id="metric-bypass-non-bundle" data-metric="bypassNonBundle" class="metrics-val--muted">0</span>
                       </div>
                       <div class="metrics-row">
-                        <span>- dropped</span><span id="metric-osc-in-dropped" data-metric="oscInMessagesDropped" class="metrics-val--red">0</span>
+                        <span>  imm</span><span id="metric-bypass-immediate" data-metric="bypassImmediate" class="metrics-val--muted">0</span>
                       </div>
                       <div class="metrics-row">
-                        <span>- corrupted</span><span id="metric-osc-in-corrupted" data-metric="oscInCorrupted" class="metrics-val--red">0</span>
+                        <span>  near</span><span id="metric-bypass-near-future" data-metric="bypassNearFuture" class="metrics-val--muted">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>  late</span><span id="metric-bypass-late" data-metric="bypassLate" class="metrics-val--muted">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>lost</span><span id="metric-sequence-gaps" data-metric="scsynthSequenceGaps" class="metrics-val--red">0</span>
+                      </div>
+                    </div>
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">OSC In</div>
+                      <div class="metrics-row">
+                        <span>received</span><span id="metric-received" data-metric="oscInMessagesReceived" class="metrics-val">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>bytes</span><span id="metric-bytes-received" data-metric="oscInBytesReceived" class="metrics-val--muted">0 B</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>dropped</span><span id="metric-osc-in-dropped" data-metric="oscInMessagesDropped" class="metrics-val--red">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>corrupted</span><span id="metric-osc-in-corrupted" data-metric="oscInCorrupted" class="metrics-val--red">0</span>
                       </div>
                     </div>
                     <div class="metrics-panel">
@@ -614,7 +710,16 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         <span>dispatched</span><span id="metric-prescheduler-sent" data-metric="preschedulerDispatched" class="metrics-val--dim">0</span>
                       </div>
                       <div class="metrics-row">
+                        <span>dispatches</span><span id="metric-total-dispatches" data-metric="preschedulerTotalDispatches" class="metrics-val--dim">0</span>
+                      </div>
+                    </div>
+                    <div class="metrics-panel">
+                      <div class="metrics-panel__title">Presched Stats</div>
+                      <div class="metrics-row">
                         <span>cancelled</span><span id="metric-events-cancelled" data-metric="preschedulerEventsCancelled" class="metrics-val--red">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>lates</span><span id="metric-lates" data-metric="preschedulerLates" class="metrics-val--red">0</span>
                       </div>
                       <div class="metrics-row">
                         <span>min slack</span
@@ -624,11 +729,11 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         >
                       </div>
                       <div class="metrics-row">
-                        <span>lates</span><span id="metric-lates" data-metric="preschedulerLates" class="metrics-val--red">0</span>
+                        <span>retried</span><span id="metric-messages-retried" data-metric="preschedulerMessagesRetried" class="metrics-val--dim">0</span>
                       </div>
                     </div>
                     <div class="metrics-panel">
-                      <div class="metrics-panel__title">Prescheduler Retries</div>
+                      <div class="metrics-panel__title">Presched Retries</div>
                       <div class="metrics-row">
                         <span>ok / fail</span
                         ><span
@@ -644,12 +749,6 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                           ><span class="metrics-sep"> / </span
                           ><span id="metric-prescheduler-retry-queue-max" data-metric="preschedulerRetryQueuePeak" class="metrics-val--muted">0</span></span
                         >
-                      </div>
-                      <div class="metrics-row">
-                        <span>retried</span><span id="metric-messages-retried" data-metric="preschedulerMessagesRetried" class="metrics-val--dim">0</span>
-                      </div>
-                      <div class="metrics-row">
-                        <span>dispatches</span><span id="metric-total-dispatches" data-metric="preschedulerTotalDispatches" class="metrics-val--dim">0</span>
                       </div>
                     </div>
                     <div class="metrics-panel">

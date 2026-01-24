@@ -4,7 +4,7 @@ import { NodeTreeViz } from "./node_tree_viz.js";
 // ===== CONFIGURATION =====
 const DEV_MODE = false;
 const NTP_EPOCH_OFFSET = 2208988800; // Seconds between Unix epoch (1970) and NTP epoch (1900)
-const LOOKAHEAD = 0.2; // Seconds to schedule ahead for timing accuracy
+const LOOKAHEAD = 0.5; // Seconds to schedule ahead for timing accuracy
 
 // OSC bundle header: ASCII "#bundle\0"
 const OSC_BUNDLE_HEADER = new Uint8Array([
@@ -18,18 +18,23 @@ const GROUP_LOOPS = 102;
 const GROUP_KICK = 103;
 
 // Audio buses for FX chain routing
-const FX_BUS_SYNTH_TO_LPF = 20; // Synths output here
+const FX_BUS_ARP = 24; // Arp synths output here
+const FX_BUS_BEAT = 26; // Beat (kick + loop) outputs here
+const FX_BUS_SYNTH_TO_LPF = 20; // Mixed output to LPF
 const FX_BUS_LPF_TO_REVERB = 22; // LPF outputs to reverb
 const FX_BUS_OUTPUT = 0; // Final output (main out)
 
 // FX node IDs
 const FX_LPF_NODE = 2000;
 const FX_REVERB_NODE = 2001;
+const FX_ARP_LEVEL_NODE = 2002;
+const FX_BEAT_LEVEL_NODE = 2003;
 
 // Available synthdefs (Sonic Pi synths)
 const FX_SYNTHDEFS = [
   "sonic-pi-fx_lpf",
   "sonic-pi-fx_reverb",
+  "sonic-pi-fx_level",
   "sonic-pi-basic_stereo_player",
 ];
 const INSTRUMENT_SYNTHDEFS = [
@@ -70,6 +75,14 @@ const INSTRUMENT_SYNTHDEFS = [
   "sonic-pi-winwood_lead",
   "sonic-pi-zawa",
 ];
+
+// Kick sample configuration (all stereo)
+const KICK_CONFIG = {
+  bd_haus: { buffer: 0 },
+  bd_boom: { buffer: 7 },
+  bd_tek: { buffer: 8 },
+  bd_zome: { buffer: 9 },
+};
 
 // Loop sample configuration
 const LOOP_CONFIG = {
@@ -124,15 +137,20 @@ const uiState = {
   padActive: false,
   synth: "beep",
   loopSample: "loop_amen",
+  kickSample: "bd_haus",
   rootNote: 60,
   octaves: 2,
   amplitude: 0.5,
   attack: 0,
   release: 0.1,
-  randomArp: true,
+  arpMode: "random",
   bpm: 120,
+  kickPattern: "four",
+  mix: 50, // 0 = full arp, 100 = full beat
 };
 window.uiState = uiState;
+
+let isAutoPlaying = false;
 
 // ===== HELPERS =====
 const $ = (id) => document.getElementById(id);
@@ -639,6 +657,10 @@ const METRICS_MAP = {
   preschedulerTotalDispatches: "prescheduler_total_dispatches",
   preschedulerMessagesRetried: "prescheduler_messages_retried",
   preschedulerBypassed: "prescheduler_bypassed",
+  bypassNonBundle: "bypass_non_bundle",
+  bypassImmediate: "bypass_immediate",
+  bypassNearFuture: "bypass_near_future",
+  bypassLate: "bypass_late",
   oscInMessagesReceived: "osc_in_messages_received",
   oscInMessagesDropped: "osc_in_messages_dropped",
   oscInBytesReceived: "osc_in_bytes_received",
@@ -709,6 +731,10 @@ function updateMetrics(m) {
     "metric-sent": mapped.osc_out_messages_sent ?? 0,
     "metric-bytes-sent": formatBytes(mapped.osc_out_bytes_sent ?? 0),
     "metric-direct-writes": mapped.prescheduler_bypassed ?? 0,
+    "metric-bypass-non-bundle": mapped.bypass_non_bundle ?? 0,
+    "metric-bypass-immediate": mapped.bypass_immediate ?? 0,
+    "metric-bypass-near-future": mapped.bypass_near_future ?? 0,
+    "metric-bypass-late": mapped.bypass_late ?? 0,
     "metric-received": mapped.osc_in_messages_received ?? 0,
     "metric-bytes-received": formatBytes(mapped.osc_in_bytes_received ?? 0),
     "metric-osc-in-dropped": mapped.osc_in_messages_dropped ?? 0,
@@ -939,80 +965,68 @@ function stopTrailAnimation() {
   trailReleaseTime = performance.now();
 }
 
-// ===== LOOP SCHEDULER =====
-class LoopScheduler {
-  constructor(
-    name,
-    { getInterval, getBatchSize = () => 4, createMessage, group },
-  ) {
-    this.name = name;
-    this.getInterval = getInterval;
-    this.getBatchSize = getBatchSize;
-    this.createMessage = createMessage;
-    this.group = group;
-    this.running = false;
-    this.counter = 0;
-    this.currentTime = null;
+// ===== SCHEDULER WORKER =====
+let schedulerWorker = null;
+let schedulerRunning = { arp: false, kick: false, amen: false };
+
+function initSchedulerWorker() {
+  if (schedulerWorker) return;
+  if (!orchestrator) {
+    console.error("Cannot init scheduler worker before orchestrator");
+    return;
   }
 
-  start() {
-    if (this.running) return;
-    this.running = true;
+  schedulerWorker = new Worker("assets/scheduler-worker.js", { type: "module" });
 
-    const interval = this.getInterval();
-    const gridInterval = 0.5 / getBpmScale();
-    const now = getNTP();
-    const nextGrid = Math.ceil(now / gridInterval) * gridInterval;
-
-    if (playbackStartNTP === null) {
-      playbackStartNTP = nextGrid;
-      this.counter = 0;
-      this.currentTime = playbackStartNTP;
-    } else {
-      const elapsed = now - playbackStartNTP;
-      this.counter = Math.ceil(elapsed / interval);
-      this.currentTime = playbackStartNTP + this.counter * interval;
+  schedulerWorker.onmessage = (e) => {
+    const { type } = e.data;
+    if (type === "ready") {
+      console.log("Scheduler worker ready, sending OscChannel...");
+      // Create an OscChannel and transfer it to the worker for direct worklet communication
+      const channel = orchestrator.createOscChannel();
+      schedulerWorker.postMessage(
+        {
+          type: "initChannel",
+          channel: channel.transferable,
+          config: {
+            groups: { GROUP_ARP, GROUP_LOOPS, GROUP_KICK },
+            buses: { FX_BUS_ARP, FX_BUS_BEAT },
+            loopConfig: LOOP_CONFIG,
+            kickConfig: KICK_CONFIG,
+          },
+        },
+        channel.transferList
+      );
+    } else if (type === "channelReady") {
+      console.log("Scheduler worker has direct worklet connection");
     }
+  };
 
-    const delay = Math.max(0, (this.currentTime - now) * 1000);
-    setTimeout(() => this.running && this.scheduleBatch(), delay);
-  }
+  schedulerWorker.onerror = (e) => {
+    console.error("Scheduler worker error:", e.message);
+  };
 
-  scheduleBatch() {
-    if (!this.running || !orchestrator) return;
+  // Send initial state
+  sendStateToWorker();
+}
 
-    const interval = this.getInterval();
-    const batchSize = this.getBatchSize();
+function sendStateToWorker(updates = null) {
+  if (!schedulerWorker) return;
 
-    for (let i = 0; i < batchSize; i++) {
-      const targetNTP = this.currentTime + LOOKAHEAD;
-      this.currentTime += interval;
+  const stateToSend = updates || {
+    synth: uiState.synth,
+    rootNote: uiState.rootNote,
+    octaves: uiState.octaves,
+    amplitude: uiState.amplitude,
+    attack: uiState.attack,
+    release: uiState.release,
+    arpMode: uiState.arpMode,
+    bpm: uiState.bpm,
+    kickPattern: uiState.kickPattern,
+    loopSample: uiState.loopSample,
+  };
 
-      const message = this.createMessage(this.counter + i);
-      const bundle = createOSCBundle(targetNTP, [message]);
-      orchestrator.sendOSC(bundle);
-    }
-
-    this.counter += batchSize;
-
-    const now = getNTP();
-    // Min 50ms delay to prevent tight loop (was causing 0ms delay at 120 BPM with batch=4)
-    const nextDelay = Math.max(50, (this.currentTime - now) * 1000 - 500);
-    setTimeout(() => this.running && this.scheduleBatch(), nextDelay);
-  }
-
-  stop(freeGroup = false) {
-    this.running = false;
-    this.currentTime = null;
-    if (freeGroup && orchestrator) orchestrator.send("/g_freeAll", this.group);
-    if (
-      !arpScheduler?.running &&
-      !kickScheduler?.running &&
-      !amenScheduler?.running
-    ) {
-      playbackStartNTP = null;
-    }
-  }
+  schedulerWorker.postMessage({ type: "state", ...stateToSend });
 }
 
 // ===== FX CHAIN =====
@@ -1037,12 +1051,43 @@ async function initFXChain() {
     orchestrator.send("/g_new", GROUP_LOOPS, 0, 0);
     orchestrator.send("/g_new", GROUP_KICK, 0, 0);
     orchestrator.send("/g_new", GROUP_FX, 1, 0);
+
+    // Level controls for arp/beat mix - must run BEFORE LPF
+    // Action 1 = add to tail of group
+    orchestrator.send(
+      "/s_new",
+      "sonic-pi-fx_level",
+      FX_ARP_LEVEL_NODE,
+      1, // add to tail
+      GROUP_FX,
+      "in_bus",
+      FX_BUS_ARP,
+      "out_bus",
+      FX_BUS_SYNTH_TO_LPF,
+      "amp",
+      0.5, // Start at 50% (mix = 50)
+    );
+    orchestrator.send(
+      "/s_new",
+      "sonic-pi-fx_level",
+      FX_BEAT_LEVEL_NODE,
+      3, // add after previous
+      FX_ARP_LEVEL_NODE,
+      "in_bus",
+      FX_BUS_BEAT,
+      "out_bus",
+      FX_BUS_SYNTH_TO_LPF,
+      "amp",
+      0.5, // Start at 50% (mix = 50)
+    );
+
+    // LPF after level synths
     orchestrator.send(
       "/s_new",
       "sonic-pi-fx_lpf",
       FX_LPF_NODE,
-      0,
-      GROUP_FX,
+      3, // add after beat level
+      FX_BEAT_LEVEL_NODE,
       "in_bus",
       FX_BUS_SYNTH_TO_LPF,
       "out_bus",
@@ -1052,11 +1097,12 @@ async function initFXChain() {
       "res",
       0.5,
     );
+    // Reverb after LPF
     orchestrator.send(
       "/s_new",
       "sonic-pi-fx_reverb",
       FX_REVERB_NODE,
-      3,
+      3, // add after LPF
       FX_LPF_NODE,
       "in_bus",
       FX_BUS_LPF_TO_REVERB,
@@ -1091,95 +1137,6 @@ function updateFXParameters(x, y) {
   }
 }
 
-// ===== SCHEDULERS =====
-function getMinorPentatonicScale(root, octaves) {
-  const intervals = [0, 3, 5, 7, 10];
-  const scale = [];
-  for (let o = 0; o < octaves; o++) {
-    for (const i of intervals) scale.push(root + i + o * 12);
-  }
-  return scale;
-}
-
-let patternIndex = 0;
-
-const arpScheduler = new LoopScheduler("Arp", {
-  getInterval: () => 0.125 / getBpmScale(),
-  createMessage: () => {
-    const scale = getMinorPentatonicScale(uiState.rootNote, uiState.octaves);
-    const note = uiState.randomArp
-      ? scale[Math.floor(Math.random() * scale.length)]
-      : scale[patternIndex++ % scale.length];
-
-    return {
-      address: "/s_new",
-      args: oscArgs(
-        `sonic-pi-${uiState.synth}`,
-        -1,
-        0,
-        GROUP_ARP,
-        "note",
-        note,
-        "out_bus",
-        FX_BUS_SYNTH_TO_LPF,
-        "amp",
-        uiState.amplitude * 0.5,
-        "attack",
-        uiState.attack,
-        "release",
-        uiState.release,
-      ),
-    };
-  },
-  group: GROUP_ARP,
-});
-
-const kickScheduler = new LoopScheduler("Kick", {
-  getInterval: () => 0.5 / getBpmScale(),
-  createMessage: () => ({
-    address: "/s_new",
-    args: oscArgs(
-      "sonic-pi-basic_stereo_player",
-      -1,
-      0,
-      GROUP_KICK,
-      "buf",
-      0,
-      "out_bus",
-      FX_BUS_SYNTH_TO_LPF,
-      "amp",
-      0.3,
-    ),
-  }),
-  group: GROUP_KICK,
-});
-
-const amenScheduler = new LoopScheduler("Amen", {
-  getInterval: () =>
-    (LOOP_CONFIG[uiState.loopSample]?.duration ?? 2) / getBpmScale(),
-  getBatchSize: () => 1,
-  createMessage: () => {
-    const cfg = LOOP_CONFIG[uiState.loopSample] || { rate: 1, buffer: 1 };
-    return {
-      address: "/s_new",
-      args: oscArgs(
-        "sonic-pi-basic_stereo_player",
-        -1,
-        0,
-        GROUP_LOOPS,
-        "buf",
-        cfg.buffer,
-        "amp",
-        0.5,
-        "rate",
-        cfg.rate * getBpmScale(),
-        "out_bus",
-        FX_BUS_SYNTH_TO_LPF,
-      ),
-    };
-  },
-  group: GROUP_LOOPS,
-});
 
 // Beat pulse
 function startBeatPulse() {
@@ -1217,27 +1174,45 @@ async function startArpeggiator() {
   if (!orchestrator) return;
   if (!synthdefsLoaded.instruments) await loadSynthdefs("instruments");
   if (!fxChainInitialized) await initFXChain();
-  arpScheduler.start();
+  if (!schedulerWorker) initSchedulerWorker();
+  schedulerWorker.postMessage({ type: "start", scheduler: "arp" });
+  schedulerRunning.arp = true;
   startBeatPulse();
 }
 
 function stopArpeggiator() {
-  arpScheduler.stop();
+  if (schedulerWorker) {
+    schedulerWorker.postMessage({ type: "stop", scheduler: "arp" });
+  }
+  schedulerRunning.arp = false;
   stopBeatPulse();
+}
+
+async function loadAllKickSamples() {
+  await Promise.all(
+    Object.entries(KICK_CONFIG).map(([name, cfg]) =>
+      orchestrator.loadSample(cfg.buffer, `${name}.flac`),
+    ),
+  );
+  samplesLoaded.kick = true;
 }
 
 async function startKickLoop() {
   if (!orchestrator) return;
   if (!fxChainInitialized) await initFXChain();
   if (!samplesLoaded.kick) {
-    await orchestrator.send("/b_allocRead", 0, "bd_haus.flac");
-    samplesLoaded.kick = true;
+    await loadAllKickSamples();
   }
-  kickScheduler.start();
+  if (!schedulerWorker) initSchedulerWorker();
+  schedulerWorker.postMessage({ type: "start", scheduler: "kick" });
+  schedulerRunning.kick = true;
 }
 
 function stopKickLoop() {
-  kickScheduler.stop();
+  if (schedulerWorker) {
+    schedulerWorker.postMessage({ type: "stop", scheduler: "kick" });
+  }
+  schedulerRunning.kick = false;
 }
 
 async function loadAllLoopSamples() {
@@ -1254,11 +1229,16 @@ async function startAmenLoop() {
   if (!orchestrator) return;
   if (!fxChainInitialized) await initFXChain();
   if (!samplesLoaded.loops) await loadAllLoopSamples();
-  amenScheduler.start();
+  if (!schedulerWorker) initSchedulerWorker();
+  schedulerWorker.postMessage({ type: "start", scheduler: "amen" });
+  schedulerRunning.amen = true;
 }
 
 function stopAmenLoop() {
-  amenScheduler.stop(true);
+  if (schedulerWorker) {
+    schedulerWorker.postMessage({ type: "stop", scheduler: "amen" });
+  }
+  schedulerRunning.amen = false;
 }
 
 // Expose globally
@@ -1307,21 +1287,24 @@ if (synthPad) {
     $("synth-pad-crosshair").classList.add("active");
     updatePadPosition(clientX, clientY);
     startTrailAnimation();
-    if (!arpScheduler.running) startArpeggiator();
-    if (!kickScheduler.running) startKickLoop();
-    if (!amenScheduler.running) startAmenLoop();
+    if (!schedulerRunning.arp) startArpeggiator();
+    if (!schedulerRunning.kick) startKickLoop();
+    if (!schedulerRunning.amen) startAmenLoop();
   }
 
   function deactivatePad() {
     isPadActive = false;
     uiState.padActive = false;
-    synthPad.classList.remove("active");
-    $("synth-pad-touch").classList.remove("active");
-    $("synth-pad-crosshair").classList.remove("active");
-    stopTrailAnimation();
-    if (arpScheduler.running) stopArpeggiator();
-    if (kickScheduler.running) stopKickLoop();
-    if (amenScheduler.running) stopAmenLoop();
+    // Only remove visual state if not in autoplay mode
+    if (!isAutoPlaying) {
+      synthPad.classList.remove("active");
+      $("synth-pad-touch").classList.remove("active");
+      $("synth-pad-crosshair").classList.remove("active");
+      stopTrailAnimation();
+      if (schedulerRunning.arp) stopArpeggiator();
+      if (schedulerRunning.kick) stopKickLoop();
+      if (schedulerRunning.amen) stopAmenLoop();
+    }
   }
 
   synthPad.addEventListener("mousedown", (e) => {
@@ -1354,6 +1337,40 @@ if (synthPad) {
   });
 }
 
+// ===== PLAY TOGGLE =====
+$("play-toggle")?.addEventListener("click", async function () {
+  const btn = this;
+  if (btn.classList.contains("disabled")) return;
+
+  isAutoPlaying = !isAutoPlaying;
+  btn.setAttribute("aria-pressed", isAutoPlaying.toString());
+  btn.textContent = isAutoPlaying ? "Stop" : "Autoplay";
+
+  const synthPad = $("synth-pad");
+  const touch = $("synth-pad-touch");
+  const crosshair = $("synth-pad-crosshair");
+
+  if (isAutoPlaying) {
+    // Start playback with visual state
+    synthPad?.classList.add("active");
+    touch?.classList.add("active");
+    crosshair?.classList.add("active");
+    startTrailAnimation();
+    if (!schedulerRunning.arp) startArpeggiator();
+    if (!schedulerRunning.kick) startKickLoop();
+    if (!schedulerRunning.amen) startAmenLoop();
+  } else {
+    // Stop playback and remove visual state
+    synthPad?.classList.remove("active");
+    touch?.classList.remove("active");
+    crosshair?.classList.remove("active");
+    stopTrailAnimation();
+    if (schedulerRunning.arp) stopArpeggiator();
+    if (schedulerRunning.kick) stopKickLoop();
+    if (schedulerRunning.amen) stopAmenLoop();
+  }
+});
+
 // ===== SLIDERS =====
 function setupSlider(sliderId, valueId, stateKey, fmt = (v) => v) {
   const slider = $(sliderId),
@@ -1363,33 +1380,58 @@ function setupSlider(sliderId, valueId, stateKey, fmt = (v) => v) {
       const val = parseFloat(e.target.value);
       uiState[stateKey] = val;
       display.textContent = fmt(val);
+      sendStateToWorker({ [stateKey]: val });
     });
   }
 }
 
 setupSlider("bpm-slider", "bpm-value", "bpm", (v) => Math.round(v));
-setupSlider("root-note-slider", "root-note-value", "rootNote", (v) =>
-  Math.round(v),
-);
+$("root-note-select")?.addEventListener("change", (e) => {
+  uiState.rootNote = parseInt(e.target.value, 10);
+  sendStateToWorker({ rootNote: uiState.rootNote });
+});
 setupSlider("octaves-slider", "octaves-value", "octaves", (v) => Math.round(v));
 setupSlider("attack-slider", "attack-value", "attack", (v) => v.toFixed(2));
 setupSlider("release-slider", "release-value", "release", (v) => v.toFixed(2));
 
 // Synth/loop selectors
-$("synth-select")?.addEventListener(
-  "change",
-  (e) => (uiState.synth = e.target.value),
-);
+$("synth-select")?.addEventListener("change", (e) => {
+  uiState.synth = e.target.value;
+  sendStateToWorker({ synth: uiState.synth });
+});
 $("loop-select")?.addEventListener("change", (e) => {
   uiState.loopSample = e.target.value;
   samplesLoaded.loops = false;
+  sendStateToWorker({ loopSample: uiState.loopSample });
 });
 
-// Random arp toggle
-$("random-arp-toggle")?.addEventListener("click", function () {
-  uiState.randomArp = !uiState.randomArp;
-  this.setAttribute("data-active", uiState.randomArp.toString());
-  this.textContent = uiState.randomArp ? "On" : "Off";
+// Arp mode selector
+$("arp-mode-select")?.addEventListener("change", (e) => {
+  uiState.arpMode = e.target.value;
+  sendStateToWorker({ arpMode: uiState.arpMode });
+});
+
+// Kick pattern selector
+$("kick-pattern-select")?.addEventListener("change", (e) => {
+  uiState.kickPattern = e.target.value;
+  sendStateToWorker({ kickPattern: uiState.kickPattern });
+});
+
+// Kick sample selector
+$("kick-select")?.addEventListener("change", (e) => {
+  uiState.kickSample = e.target.value;
+  sendStateToWorker({ kickSample: uiState.kickSample });
+});
+
+// Mix slider (arp <-> beat crossfade) - live control via /n_set
+$("mix-slider")?.addEventListener("input", (e) => {
+  uiState.mix = parseInt(e.target.value, 10);
+  if (orchestrator && fxChainInitialized) {
+    const arpAmp = 1 - uiState.mix / 100;
+    const beatAmp = uiState.mix / 100;
+    orchestrator.send("/n_set", FX_ARP_LEVEL_NODE, "amp", arpAmp);
+    orchestrator.send("/n_set", FX_BEAT_LEVEL_NODE, "amp", beatAmp);
+  }
 });
 
 // Hue slider with rainbow mode at extremes (slow left, fast right)
