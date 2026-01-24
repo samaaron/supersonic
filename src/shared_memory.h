@@ -31,7 +31,7 @@ constexpr uint32_t IN_BUFFER_SIZE     = 786432; // 768KB - OSC messages from JS 
 constexpr uint32_t OUT_BUFFER_SIZE    = 131072; // 128KB - OSC replies from scsynth to JS (prevent drops)
 constexpr uint32_t DEBUG_BUFFER_SIZE  = 65536;  // 64KB - Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 48;    // Atomic control pointers & flags (11 fields × 4 bytes + 4 padding for 8-byte alignment)
-constexpr uint32_t METRICS_SIZE       = 160;   // Performance metrics: 37 fields + 3 padding = 40 * 4 bytes = 160 bytes
+constexpr uint32_t METRICS_SIZE       = 168;   // Performance metrics: 41 fields + 1 padding = 42 * 4 bytes = 168 bytes
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in milliseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
@@ -159,8 +159,14 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> out_buffer_peak_bytes;    // 35: Peak bytes used in OUT buffer
     std::atomic<uint32_t> debug_buffer_peak_bytes;  // 36: Peak bytes used in DEBUG buffer
 
-    // Padding [37-39]
-    uint32_t _padding[3];
+    // Bypass category metrics [37-40] (written by JS main thread / PM transport)
+    std::atomic<uint32_t> bypass_non_bundle;        // 37: Plain OSC messages (not bundles)
+    std::atomic<uint32_t> bypass_immediate;         // 38: Bundles with timetag 0 or 1
+    std::atomic<uint32_t> bypass_near_future;       // 39: Within 200ms but not late
+    std::atomic<uint32_t> bypass_late;              // 40: Past their scheduled time
+
+    // Padding [41]
+    uint32_t _padding[1];
 };
 
 // Status flags
