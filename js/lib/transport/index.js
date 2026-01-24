@@ -4,6 +4,7 @@
 export { Transport } from './transport.js';
 export { SABTransport } from './sab_transport.js';
 export { PostMessageTransport } from './postmessage_transport.js';
+export { OscChannel } from '../osc_channel.js';
 
 import { SABTransport } from './sab_transport.js';
 import { PostMessageTransport } from './postmessage_transport.js';

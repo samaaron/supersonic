@@ -3,6 +3,7 @@
 
 import { Transport } from './transport.js';
 import { createWorker } from '../worker_loader.js';
+import { OscChannel } from '../osc_channel.js';
 
 /**
  * PostMessage Transport
@@ -45,6 +46,12 @@ export class PostMessageTransport extends Transport {
     #lastSequenceReceived = -1;
     #debugMessagesReceived = 0;
     #debugBytesReceived = 0;
+
+    // Bypass category counters
+    #bypassNonBundle = 0;
+    #bypassImmediate = 0;
+    #bypassNearFuture = 0;
+    #bypassLate = 0;
 
     // Timing functions
     #getAudioContextTime;
@@ -89,8 +96,17 @@ export class PostMessageTransport extends Transport {
             this.#handleWorkletMessage(event.data);
         };
 
-        // Reuse the existing prescheduler worker with postMessage mode
-        // It will dispatch messages to us instead of writing to ring buffer
+        // Create a MessageChannel for prescheduler -> worklet direct communication
+        // This bypasses the main thread relay for scheduled OSC messages
+        const preschedulerChannel = new MessageChannel();
+
+        // Register one port with the worklet
+        this.#workletPort.postMessage(
+            { type: 'addOscPort' },
+            [preschedulerChannel.port1]
+        );
+
+        // Create the prescheduler worker
         // Uses Blob URL if cross-origin (enables CDN-only deployment)
         this.#preschedulerWorker = await createWorker(
             this.#workerBaseURL + 'osc_out_prescheduler_worker.js',
@@ -101,8 +117,8 @@ export class PostMessageTransport extends Transport {
             this.#handlePreschedulerMessage(event.data);
         };
 
-        // Initialize prescheduler worker in postMessage mode
-        await this.#initPreschedulerWorker();
+        // Initialize prescheduler worker with the other port for direct worklet communication
+        await this.#initPreschedulerWorker(preschedulerChannel.port2);
 
         this.#initialized = true;
     }
@@ -166,8 +182,10 @@ export class PostMessageTransport extends Transport {
 
     /**
      * Send immediately, bypassing prescheduler
+     * @param {Uint8Array} message - OSC message data
+     * @param {string} [category] - Bypass category: 'nonBundle', 'immediate', 'nearFuture', or 'late'
      */
-    sendImmediate(message) {
+    sendImmediate(message, category) {
         if (!this.#initialized || this._disposed) {
             return false;
         }
@@ -181,7 +199,74 @@ export class PostMessageTransport extends Transport {
         this.#oscOutMessagesSent++;
         this.#oscOutBytesSent += message.length;
         this.#preschedulerBypassed++;
+
+        // Increment category-specific counter
+        if (category) {
+            switch (category) {
+                case 'nonBundle':
+                    this.#bypassNonBundle++;
+                    break;
+                case 'immediate':
+                    this.#bypassImmediate++;
+                    break;
+                case 'nearFuture':
+                    this.#bypassNearFuture++;
+                    break;
+                case 'late':
+                    this.#bypassLate++;
+                    break;
+            }
+        }
+
         return true;
+    }
+
+    /**
+     * Create an OscChannel for direct worker-to-worklet communication
+     *
+     * Returns an OscChannel that can be transferred to a Web Worker,
+     * allowing that worker to send OSC messages directly to the AudioWorklet
+     * without going through the main thread.
+     *
+     * Usage:
+     *   const channel = transport.createOscChannel();
+     *   myWorker.postMessage({ channel: channel.transferable }, channel.transferList);
+     *
+     * In worker:
+     *   const channel = OscChannel.fromTransferable(event.data.channel);
+     *   channel.send(oscBytes);
+     *
+     * @returns {OscChannel}
+     */
+    createOscChannel() {
+        if (!this.#initialized) {
+            throw new Error('Transport not initialized');
+        }
+
+        // Create a MessageChannel for direct worklet communication
+        const directChannel = new MessageChannel();
+
+        // Register one port with the worklet
+        this.#workletPort.postMessage(
+            { type: 'addOscPort' },
+            [directChannel.port1]
+        );
+
+        // Create a MessageChannel for prescheduler communication
+        const preschedulerChannel = new MessageChannel();
+
+        // Register one port with the prescheduler worker
+        this.#preschedulerWorker.postMessage(
+            { type: 'addOscSource' },
+            [preschedulerChannel.port1]
+        );
+
+        // Return OscChannel with both direct and prescheduler paths
+        return OscChannel.createPostMessage({
+            port: directChannel.port2,
+            preschedulerPort: preschedulerChannel.port2,
+            bypassLookaheadS: this._config.bypassLookaheadS,
+        });
     }
 
     /**
@@ -271,15 +356,20 @@ export class PostMessageTransport extends Transport {
     }
 
     getMetrics() {
+        // Note: oscOutMessagesSent and oscOutBytesSent are NOT included here
+        // In PM mode, the worklet counts all received messages (from main thread + OscChannel workers)
+        // and reports them in the snapshot buffer. Including them here would overwrite the worklet's count.
         return {
-            oscOutMessagesSent: this.#oscOutMessagesSent,
-            oscOutBytesSent: this.#oscOutBytesSent,
             oscInMessagesReceived: this.#oscInMessagesReceived,
             oscInBytesReceived: this.#oscInBytesReceived,
             oscInMessagesDropped: this.#oscInMessagesDropped,
             preschedulerBypassed: this.#preschedulerBypassed,
             debugMessagesReceived: this.#debugMessagesReceived,
             debugBytesReceived: this.#debugBytesReceived,
+            bypassNonBundle: this.#bypassNonBundle,
+            bypassImmediate: this.#bypassImmediate,
+            bypassNearFuture: this.#bypassNearFuture,
+            bypassLate: this.#bypassLate,
         };
     }
 
@@ -305,7 +395,7 @@ export class PostMessageTransport extends Transport {
     // Private Methods
     // =========================================================================
 
-    #initPreschedulerWorker() {
+    #initPreschedulerWorker(workletPort) {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error('Prescheduler worker initialization timeout'));
@@ -320,13 +410,15 @@ export class PostMessageTransport extends Transport {
             };
 
             this.#preschedulerWorker.addEventListener('message', handler);
+
+            // Transfer the worklet port to prescheduler for direct communication
             this.#preschedulerWorker.postMessage({
                 type: 'init',
                 mode: 'postMessage',  // Use postMessage dispatch mode
                 maxPendingMessages: this.#preschedulerCapacity,
                 snapshotIntervalMs: this.#snapshotIntervalMs,
-                // No sharedBuffer, ringBufferBase, or bufferConstants needed
-            });
+                workletPort: workletPort,  // Direct port to worklet
+            }, [workletPort]);  // Transfer the port
         });
     }
 
@@ -383,16 +475,7 @@ export class PostMessageTransport extends Transport {
 
     #handlePreschedulerMessage(data) {
         switch (data.type) {
-            case 'dispatch':
-                // Prescheduler says it's time to send this message
-                if (this.#workletPort && data.oscData) {
-                    this.#workletPort.postMessage({
-                        type: 'osc',
-                        oscData: data.oscData,
-                        timestamp: data.timestamp,
-                    });
-                }
-                break;
+            // Note: 'dispatch' no longer comes here - prescheduler sends directly to worklet
 
             case 'preschedulerMetrics':
                 // Cache prescheduler metrics for retrieval

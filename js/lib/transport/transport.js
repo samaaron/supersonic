@@ -103,6 +103,18 @@ export class Transport {
     }
 
     /**
+     * Create an OscChannel for direct worker-to-worklet communication
+     *
+     * Returns an OscChannel that can be transferred to a Web Worker,
+     * allowing that worker to send OSC messages directly to the AudioWorklet.
+     *
+     * @returns {OscChannel}
+     */
+    createOscChannel() {
+        throw new Error('Abstract method - implement in subclass');
+    }
+
+    /**
      * Clean up resources
      */
     dispose() {

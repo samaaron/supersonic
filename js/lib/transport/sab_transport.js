@@ -5,6 +5,7 @@ import { Transport } from './transport.js';
 import { writeToRingBuffer } from '../ring_buffer_writer.js';
 import { DirectWriter } from '../direct_writer.js';
 import { createWorker } from '../worker_loader.js';
+import { OscChannel } from '../osc_channel.js';
 
 /**
  * SAB (SharedArrayBuffer) Transport
@@ -86,6 +87,7 @@ export class SABTransport extends Transport {
             bufferConstants: this.#bufferConstants,
             getAudioContextTime: config.getAudioContextTime,
             getNTPStartTime: config.getNTPStartTime,
+            bypassLookaheadS: config.bypassLookaheadS,
         });
     }
 
@@ -205,6 +207,48 @@ export class SABTransport extends Transport {
         this.#oscOutMessagesSent++;
         this.#oscOutBytesSent += message.length;
         return true;
+    }
+
+    /**
+     * Create an OscChannel for direct worker-to-worklet communication
+     *
+     * Returns an OscChannel backed by the SharedArrayBuffer that can be
+     * transferred to a Web Worker, allowing that worker to send OSC messages
+     * directly to the AudioWorklet's ring buffer.
+     *
+     * Usage:
+     *   const channel = transport.createOscChannel();
+     *   myWorker.postMessage({ channel: channel.transferable }, channel.transferList);
+     *
+     * In worker:
+     *   const channel = OscChannel.fromTransferable(event.data.channel);
+     *   channel.send(oscBytes);
+     *
+     * @returns {OscChannel}
+     */
+    createOscChannel() {
+        if (!this.#initialized) {
+            throw new Error('Transport not initialized');
+        }
+
+        // Create a MessageChannel for prescheduler communication
+        const preschedulerChannel = new MessageChannel();
+
+        // Register one port with the prescheduler worker
+        this.#oscOutWorker.postMessage(
+            { type: 'addOscSource' },
+            [preschedulerChannel.port1]
+        );
+
+        // Return OscChannel with both direct (SAB) and prescheduler paths
+        return OscChannel.createSAB({
+            sharedBuffer: this.#sharedBuffer,
+            ringBufferBase: this.#ringBufferBase,
+            bufferConstants: this.#bufferConstants,
+            controlIndices: this.#controlIndices,
+            preschedulerPort: preschedulerChannel.port2,
+            bypassLookaheadS: this._config.bypassLookaheadS,
+        });
     }
 
     /**
