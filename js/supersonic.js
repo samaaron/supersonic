@@ -6,7 +6,11 @@
  * Coordinates SharedArrayBuffer, WASM, AudioWorklet, and IO Workers
  */
 
-import { createTransport } from "./lib/transport/index.js";
+import { createTransport, OscChannel } from "./lib/transport/index.js";
+import { classifyOscMessage, shouldBypass } from "./lib/osc_classifier.js";
+
+// Re-export OscChannel for use in workers
+export { OscChannel };
 import { BufferManager } from "./lib/buffer_manager.js";
 import { AssetLoader } from "./lib/asset_loader.js";
 import { OSCRewriter } from "./lib/osc_rewriter.js";
@@ -103,7 +107,11 @@ export class SuperSonic {
       preschedulerMessagesRetried: { type: 'counter', unit: 'count', description: 'Messages that needed retry' },
       preschedulerRetryQueueSize: { type: 'gauge', unit: 'count', description: 'Current retry queue size' },
       preschedulerRetryQueuePeak: { type: 'gauge', unit: 'count', description: 'Peak retry queue size' },
-      preschedulerBypassed: { type: 'counter', unit: 'count', description: 'Messages sent directly from JS to scsynth, bypassing prescheduler' },
+      preschedulerBypassed: { type: 'counter', unit: 'count', description: 'Messages sent directly from JS to scsynth, bypassing prescheduler (aggregate)' },
+      bypassNonBundle: { type: 'counter', unit: 'count', description: 'Plain OSC messages (not bundles) that bypassed prescheduler' },
+      bypassImmediate: { type: 'counter', unit: 'count', description: 'Bundles with timetag 0 or 1 that bypassed prescheduler' },
+      bypassNearFuture: { type: 'counter', unit: 'count', description: 'Bundles within 200ms that bypassed prescheduler' },
+      bypassLate: { type: 'counter', unit: 'count', description: 'Bundles past their scheduled time that bypassed prescheduler' },
       preschedulerCapacity: { type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler' },
       preschedulerMinHeadroomMs: { type: 'gauge', unit: 'ms', description: 'Smallest time gap between JS prescheduler dispatch and scsynth scheduler execution' },
       preschedulerLates: { type: 'counter', unit: 'count', description: 'Bundles dispatched after their scheduled execution time' },
@@ -263,7 +271,7 @@ export class SuperSonic {
 
     // Configuration
     // coreBaseURL is for WASM and workers (from supersonic-scsynth-core package)
-    // baseURL is for backwards compatibility and local development
+    // baseURL is a convenience shorthand for local development
     const baseURL = options.baseURL || DEFAULT_URLS.baseURL;
     const coreBaseURL = options.coreBaseURL || DEFAULT_URLS.coreBaseURL || baseURL;
     const workerBaseURL = options.workerBaseURL || (coreBaseURL ? `${coreBaseURL}workers/` : null);
@@ -294,6 +302,7 @@ export class SuperSonic {
       memory: MemoryLayout,
       worldOptions: worldOptions,
       preschedulerCapacity: options.preschedulerCapacity || 65536,
+      bypassLookaheadMs: options.bypassLookaheadMs ?? 200,
       activityEvent: {
         maxLineLength: options.activityEvent?.maxLineLength ?? 200,
         scsynthMaxLineLength: options.activityEvent?.scsynthMaxLineLength ?? null,
@@ -748,19 +757,27 @@ export class SuperSonic {
 
     this.#eventEmitter.emit('message:sent', preparedData);
 
-    // Fast path: try direct ring buffer write
-    if (this.#directWriter?.tryWrite(preparedData)) {
-      this.#metricsReader.addMetric("preschedulerBypassed");
-      return;
+    // Classify the message using NTP-based timing (same logic as OscChannel)
+    const category = this.#classifyBypassCategory(preparedData);
+
+    // Bypass categories go direct, farFuture goes to prescheduler
+    if (shouldBypass(category)) {
+      // Fast path: try direct ring buffer write (SAB mode only)
+      if (this.#directWriter?.tryWrite(preparedData)) {
+        this.#metricsReader.addMetric("preschedulerBypassed");
+        this.#incrementBypassCategoryMetric(category);
+        return;
+      }
+
+      // PostMessage mode: send direct to worklet
+      if (this.#config.mode === 'postMessage') {
+        this.#osc.sendImmediate(preparedData, category);
+        return;
+      }
     }
 
+    // Far-future bundles: calculate timing and send to prescheduler
     const timing = this.#ntpTiming?.calculateBundleWait(preparedData);
-
-    // PostMessage mode: send immediate messages directly to worklet, bypassing prescheduler
-    if (this.#config.mode === 'postMessage' && !timing) {
-      this.#osc.sendImmediate(preparedData);
-      return;
-    }
 
     // Size guard for scheduled bundles
     const slotSize = this.#metricsReader.bufferConstants?.scheduler_slot_size;
@@ -798,6 +815,32 @@ export class SuperSonic {
   cancelAllScheduled() {
     this.#ensureInitialized("cancel all scheduled");
     this.#osc.cancelAll();
+  }
+
+  /**
+   * Create an OscChannel for direct worker-to-worklet communication
+   *
+   * Returns an OscChannel that can be transferred to a Web Worker,
+   * allowing that worker to send OSC messages directly to the AudioWorklet
+   * without going through the main thread.
+   *
+   * In SAB mode: Returns a channel backed by SharedArrayBuffer (ring buffer writes)
+   * In postMessage mode: Returns a channel backed by MessagePort
+   *
+   * Usage:
+   *   const channel = supersonic.createOscChannel();
+   *   myWorker.postMessage({ channel: channel.transferable }, channel.transferList);
+   *
+   * In worker:
+   *   import { OscChannel } from 'supersonic-scsynth/transport';
+   *   const channel = OscChannel.fromTransferable(event.data.channel);
+   *   channel.send(oscBytes);
+   *
+   * @returns {OscChannel}
+   */
+  createOscChannel() {
+    this.#ensureInitialized("create OSC channel");
+    return this.#osc.createOscChannel();
   }
 
   // ============================================================================
@@ -1213,6 +1256,7 @@ export class SuperSonic {
     const transportConfig = {
       workerBaseURL: this.#config.workerBaseURL,
       preschedulerCapacity: this.#config.preschedulerCapacity,
+      bypassLookaheadS: this.#config.bypassLookaheadMs / 1000,
       getAudioContextTime: () => this.#audioContext?.currentTime ?? 0,
       getNTPStartTime: () => this.#ntpTiming?.getNTPStartTime() ?? 0,
     };
@@ -1385,6 +1429,7 @@ export class SuperSonic {
                 bufferConstants: bufferConstants,
                 getAudioContextTime: () => this.#audioContext?.currentTime ?? null,
                 getNTPStartTime: () => this.#ntpTiming?.getNTPStartTime() ?? 0,
+                bypassLookaheadS: this.#config.bypassLookaheadMs / 1000,
               });
             }
 
@@ -1475,6 +1520,41 @@ export class SuperSonic {
     if (data instanceof Uint8Array) return data;
     if (data instanceof ArrayBuffer) return new Uint8Array(data);
     throw new Error("oscData must be ArrayBuffer or Uint8Array");
+  }
+
+  /**
+   * Increment bypass category-specific metric
+   * @param {string} category - 'nonBundle', 'immediate', 'nearFuture', or 'late'
+   */
+  #incrementBypassCategoryMetric(category) {
+    const metricMap = {
+      nonBundle: 'bypassNonBundle',
+      immediate: 'bypassImmediate',
+      nearFuture: 'bypassNearFuture',
+      late: 'bypassLate',
+    };
+    const metric = metricMap[category];
+    if (metric) {
+      this.#metricsReader.addMetric(metric);
+    }
+  }
+
+  /**
+   * Classify OSC data into bypass category
+   * Uses shared classifier with audio-context-based NTP timing
+   * @param {Uint8Array} oscData
+   * @returns {string} Category: 'nonBundle', 'immediate', 'nearFuture', 'late', or 'farFuture'
+   */
+  #classifyBypassCategory(oscData) {
+    return classifyOscMessage(oscData, {
+      getCurrentNTP: () => {
+        const currentTime = this.#audioContext?.currentTime ?? null;
+        const ntpStartTime = this.#ntpTiming?.getNTPStartTime() ?? 0;
+        if (currentTime === null || ntpStartTime === 0) return null;
+        return currentTime + ntpStartTime;
+      },
+      bypassLookaheadS: this.#config.bypassLookaheadMs / 1000,
+    });
   }
 
   async #prepareOutboundPacket(uint8Data) {
