@@ -62,6 +62,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         // PostMessage mode: queue for incoming OSC messages
         this.oscQueue = [];
 
+        // Additional OSC input ports (for prescheduler and user workers)
+        // These allow workers to send OSC directly to the worklet
+        this.oscPorts = [];
+
         // Listen for messages from main thread
         this.port.onmessage = this.handleMessage.bind(this);
     }
@@ -433,6 +437,22 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         return new Uint32Array(this.metricsView);
     }
 
+    // Record OSC message received (for postMessage mode metrics)
+    // In PM mode, we track what the worklet receives since there's no shared memory
+    recordOscReceived(byteLength) {
+        if (!this.metricsView) return;
+
+        if (this.mode === 'sab') {
+            // SAB mode: use atomic operations
+            Atomics.add(this.metricsView, MetricsOffsets.OSC_OUT_MESSAGES_SENT, 1);
+            Atomics.add(this.metricsView, MetricsOffsets.OSC_OUT_BYTES_SENT, byteLength);
+        } else {
+            // PM mode: direct increment (single-threaded context)
+            this.metricsView[MetricsOffsets.OSC_OUT_MESSAGES_SENT]++;
+            this.metricsView[MetricsOffsets.OSC_OUT_BYTES_SENT] += byteLength;
+        }
+    }
+
     // Read metrics + node tree from WASM memory and send via postMessage
     // Sends immediately on tree version change, OR on interval (for metrics updates)
     // METRICS and NODE_TREE are contiguous in memory - copy as one atomic unit
@@ -549,7 +569,24 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     // Queue OSC message for processing in next audio frame
                     if (data.oscData) {
                         this.oscQueue.push(data.oscData);
+                        this.recordOscReceived(data.oscData.byteLength);
                     }
+                }
+                return;
+            }
+
+            // Handle adding a new OSC input port (for prescheduler or user workers)
+            // This allows workers to send OSC directly to the worklet via MessageChannel
+            if (data.type === 'addOscPort') {
+                const port = event.ports[0];
+                if (port) {
+                    port.onmessage = (e) => {
+                        if (e.data.type === 'osc' && e.data.oscData) {
+                            this.oscQueue.push(e.data.oscData);
+                            this.recordOscReceived(e.data.oscData.byteLength);
+                        }
+                    };
+                    this.oscPorts.push(port);
                 }
                 return;
             }

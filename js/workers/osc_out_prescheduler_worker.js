@@ -7,6 +7,9 @@ import { writeToRingBuffer } from '../lib/ring_buffer_writer.js';
 // Transport mode: 'sab' or 'postMessage'
 let mode = 'sab';
 
+// Direct port to worklet (postMessage mode only)
+let workletPort = null;
+
 // Limits to prevent resource exhaustion
 // Scheduler slot size - bundles larger than this can't be scheduled (WASM limitation)
 let schedulerSlotSize = 1024;  // Default, updated from bufferConstants if available
@@ -204,11 +207,6 @@ const extractNTPFromBundle = (oscData) => {
     return null;
 };
 
-/**
- * Legacy wrapper for backwards compatibility
- */
-const getBundleTimestamp = (oscMessage) => extractNTPFromBundle(oscMessage);
-
 // ============================================================================
 // SHARED ARRAY BUFFER ACCESS
 // ============================================================================
@@ -264,16 +262,19 @@ const updateMetrics = () => {
 /**
  * Dispatch OSC message to WASM
  * In SAB mode: writes to ring buffer
- * In postMessage mode: sends via postMessage to main thread
+ * In postMessage mode: sends directly to worklet via MessagePort
  * Returns true if successful, false if failed (caller should queue for retry)
  */
 const dispatchOSCMessage = (oscMessage, isRetry, timestamp = null) => {
     if (mode === 'postMessage') {
-        // PostMessage mode: send to main thread for forwarding to worklet
-        self.postMessage({
-            type: 'dispatch',
+        // PostMessage mode: send to worklet via MessagePort
+        if (!workletPort) {
+            console.error('[PreScheduler] No worklet port available');
+            return false;
+        }
+        workletPort.postMessage({
+            type: 'osc',
             oscData: oscMessage,
-            timestamp: timestamp,
         });
         metricsAdd(MetricsOffsets.PRESCHEDULER_DISPATCHED, 1);
         return true;  // postMessage doesn't fail
@@ -739,7 +740,7 @@ self.addEventListener('message', (event) => {
     try {
         switch (data.type) {
             case 'init':
-                // Set transport mode (default to 'sab' for backwards compatibility)
+                // Set transport mode
                 mode = data.mode || 'sab';
 
                 // Apply config overrides
@@ -762,6 +763,9 @@ self.addEventListener('message', (event) => {
                         schedulerSlotSize = bufferConstants.scheduler_slot_size;
                     }
                 } else {
+                    // postMessage mode: store worklet port
+                    workletPort = data.workletPort;
+
                     // postMessage mode: create local metrics buffer with same layout as SAB
                     // Size matches METRICS_SIZE (128 bytes = 32 uint32s)
                     const METRICS_SIZE = 128;
@@ -781,6 +785,21 @@ self.addEventListener('message', (event) => {
 
                 schedulerLog('[OSCPreSchedulerWorker] Initialized with NTP-based scheduling, mode=' + mode + ', capacity=' + maxPendingMessages);
                 self.postMessage({ type: 'initialized' });
+                break;
+
+            case 'addOscSource':
+                // Handle OSC messages from external sources (OscChannel in workers)
+                // The source port is transferred via event.ports
+                const sourcePort = event.ports[0];
+                if (sourcePort) {
+                    sourcePort.onmessage = (e) => {
+                        if (e.data.type === 'osc' && e.data.oscData) {
+                            // Process through normal scheduling path
+                            scheduleEvent(e.data.oscData, 0, '');
+                        }
+                    };
+                    schedulerLog('[OSCPreSchedulerWorker] Added external OSC source');
+                }
                 break;
 
             case 'send':
