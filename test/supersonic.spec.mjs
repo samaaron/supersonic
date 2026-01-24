@@ -1008,6 +1008,69 @@ test.describe("Event Emitter", () => {
   });
 });
 
+// Node tree tests - getRawTree() and buffer constants work in both modes
+test.describe("Node Tree Layout", () => {
+  test.beforeEach(async ({ page }) => {
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        console.error("Browser console error:", msg.text());
+      }
+    });
+
+    page.on("pageerror", (err) => {
+      console.error("Page error:", err.message);
+    });
+
+    await page.goto("/test/harness.html");
+
+    await page.waitForFunction(() => window.supersonicReady === true, {
+      timeout: 10000,
+    });
+  });
+
+  test("getRawTree returns correct initial state with root group", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+
+      try {
+        await sonic.init();
+        await new Promise((r) => setTimeout(r, 100));
+
+        const tree = sonic.getRawTree();
+        const bc = sonic.bufferConstants;
+
+        return {
+          success: true,
+          tree,
+          bufferConstants: {
+            NODE_TREE_START: bc.NODE_TREE_START,
+            NODE_TREE_SIZE: bc.NODE_TREE_SIZE,
+            NODE_TREE_HEADER_SIZE: bc.NODE_TREE_HEADER_SIZE,
+            NODE_TREE_ENTRY_SIZE: bc.NODE_TREE_ENTRY_SIZE,
+            NODE_TREE_MIRROR_MAX_NODES: bc.NODE_TREE_MIRROR_MAX_NODES,
+          },
+        };
+      } catch (err) {
+        return { success: false, error: err.message, stack: err.stack };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+
+    // Buffer constants should be consistent
+    expect(result.bufferConstants.NODE_TREE_START).toBeGreaterThan(0);
+    expect(result.bufferConstants.NODE_TREE_SIZE).toBe(57360);
+    expect(result.bufferConstants.NODE_TREE_HEADER_SIZE).toBe(16);
+    expect(result.bufferConstants.NODE_TREE_ENTRY_SIZE).toBe(56);
+    expect(result.bufferConstants.NODE_TREE_MIRROR_MAX_NODES).toBe(1024);
+
+    // Initial tree should have just the root group
+    expect(result.tree.nodes.length).toBe(1);
+    expect(result.tree.nodes[0].id).toBe(0);
+    expect(result.tree.nodes[0].defName).toBe('group');
+  });
+});
+
 // SAB-only tests - these require direct SharedArrayBuffer access
 test.describe("SuperSonic (SAB-only)", () => {
   // Skip all tests in this describe block if running in postMessage mode
@@ -1030,23 +1093,18 @@ test.describe("SuperSonic (SAB-only)", () => {
     });
   });
 
-  // Stage 1: Verify C++ and JS read the same memory at NODE_TREE_START
-  test("node tree memory layout - Stage 1", async ({ page, sonicConfig }) => {
+  // Verify C++ and JS read the same memory at NODE_TREE_START
+  test("node tree direct memory layout matches getRawTree", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
 
-      const debugMessages = [];
-      sonic.on('debug', (msg) => {
-        debugMessages.push(msg);
-      });
-
       try {
         await sonic.init();
-
         await new Promise((r) => setTimeout(r, 100));
 
         const tree = sonic.getRawTree();
 
+        // Direct memory access (SAB-only)
         const bc = sonic.bufferConstants;
         const ringBufferBase = sonic.ringBufferBase;
         const treeBase = ringBufferBase + bc.NODE_TREE_START;
@@ -1057,14 +1115,6 @@ test.describe("SuperSonic (SAB-only)", () => {
           success: true,
           tree,
           first20,
-          bufferConstants: {
-            NODE_TREE_START: bc.NODE_TREE_START,
-            NODE_TREE_SIZE: bc.NODE_TREE_SIZE,
-            NODE_TREE_HEADER_SIZE: bc.NODE_TREE_HEADER_SIZE,
-            NODE_TREE_ENTRY_SIZE: bc.NODE_TREE_ENTRY_SIZE,
-            NODE_TREE_MIRROR_MAX_NODES: bc.NODE_TREE_MIRROR_MAX_NODES,
-          },
-          debugMessages: debugMessages.filter(m => m.text && m.text.includes('[NodeTree]')).map(m => m.text)
         };
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
@@ -1072,12 +1122,8 @@ test.describe("SuperSonic (SAB-only)", () => {
     }, sonicConfig);
 
     expect(result.success).toBe(true);
-    expect(result.bufferConstants.NODE_TREE_START).toBeGreaterThan(0);
-    expect(result.bufferConstants.NODE_TREE_SIZE).toBe(57360);
-    expect(result.bufferConstants.NODE_TREE_HEADER_SIZE).toBe(16);
-    expect(result.bufferConstants.NODE_TREE_ENTRY_SIZE).toBe(56);
-    expect(result.bufferConstants.NODE_TREE_MIRROR_MAX_NODES).toBe(1024);
 
+    // Verify direct memory layout matches expected header format
     // Header: node_count (4), version (4), dropped_count (4), padding (4)
     expect(result.first20[0]).toBe(1);  // node_count = 1 (root group)
     expect(result.first20[1]).toBe(1);  // version = 1
@@ -1086,8 +1132,8 @@ test.describe("SuperSonic (SAB-only)", () => {
     // First node entry (root group): id, parent_id, is_group, prev_id, next_id, head_id
     expect(result.first20[4]).toBe(0);  // root group id = 0
 
+    // getRawTree should match direct memory
     expect(result.tree.nodes.length).toBe(1);
     expect(result.tree.nodes[0].id).toBe(0);
-    expect(result.tree.nodes[0].defName).toBe('group');
   });
 });

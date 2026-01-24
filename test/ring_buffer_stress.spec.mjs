@@ -1,4 +1,4 @@
-import { test, expect, skipIfPostMessage } from "./fixtures.mjs";
+import { test, expect } from "./fixtures.mjs";
 
 // 15 minute timeout for stress tests - CI runners can be slow
 test.setTimeout(15 * 60 * 1000);
@@ -6,21 +6,17 @@ test.setTimeout(15 * 60 * 1000);
 /**
  * Ring Buffer Stress Test
  *
- * This test attempts to reproduce race conditions in the ring buffer
- * by rapidly sending OSC messages from multiple sources (main thread
- * direct writes and worker writes).
- *
- * NOTE: These tests require SAB mode - they test the SharedArrayBuffer
- * ring buffer directly. Automatically skipped in postMessage mode.
+ * This test attempts to reproduce race conditions by rapidly sending
+ * OSC messages from multiple sources. Tests both SAB (ring buffer)
+ * and postMessage transport paths for corruption.
  *
  * Issue: https://github.com/samaaron/supersonic/issues/2
  * Symptoms: "Command not found: @␙#", garbage node IDs, "Bundle too large"
  */
 
 test.describe("Ring Buffer Stress Test", () => {
-  // Skip all tests in this describe block if running in postMessage mode
-  test.beforeEach(async ({ sonicMode }) => {
-    skipIfPostMessage(sonicMode, 'Ring buffer stress tests require SAB mode');
+  test.beforeEach(async () => {
+    // No skip - runs in both modes
   });
   test("rapid OSC messages should not cause corruption", async ({ page, sonicConfig }) => {
     // Collect all console output for analysis

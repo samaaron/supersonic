@@ -1,26 +1,11 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures.mjs";
 
 /**
- * Latency Benchmark: SAB vs postMessage
+ * Latency Benchmark
  *
- * Measures round-trip latency by sending /status and timing /status.reply
+ * Measures round-trip latency by sending /status and timing /status.reply.
+ * Runs in both SAB and postMessage modes via the standard fixture pattern.
  */
-
-const SAB_CONFIG = {
-  mode: 'sab',
-  workerBaseURL: "/dist/workers/",
-  wasmBaseURL: "/dist/wasm/",
-  sampleBaseURL: "/dist/samples/",
-  synthdefBaseURL: "/dist/synthdefs/",
-};
-
-const POSTMESSAGE_CONFIG = {
-  mode: 'postMessage',
-  workerBaseURL: "/dist/workers/",
-  wasmBaseURL: "/dist/wasm/",
-  sampleBaseURL: "/dist/samples/",
-  synthdefBaseURL: "/dist/synthdefs/",
-};
 
 async function measureLatency(page, config, iterations = 100) {
   return await page.evaluate(async ({ config, iterations }) => {
@@ -104,17 +89,10 @@ test.describe("Latency Benchmark", () => {
     });
   });
 
-  test("SAB mode round-trip latency", async ({ page }) => {
-    // Skip if crossOriginIsolated is not available
-    const isCOI = await page.evaluate(() => crossOriginIsolated);
-    if (!isCOI) {
-      test.skip();
-      return;
-    }
+  test("round-trip latency", async ({ page, sonicConfig, sonicMode }) => {
+    const results = await measureLatency(page, sonicConfig, 100);
 
-    const results = await measureLatency(page, SAB_CONFIG, 100);
-
-    console.log("\n=== SAB Mode Latency ===");
+    console.log(`\n=== ${sonicMode.toUpperCase()} Mode Latency ===`);
     console.log(`  Min:    ${results.min} ms`);
     console.log(`  Max:    ${results.max} ms`);
     console.log(`  Mean:   ${results.mean} ms`);
@@ -125,63 +103,5 @@ test.describe("Latency Benchmark", () => {
     console.log(`  First samples: [${results.raw.join(", ")}]`);
 
     expect(parseFloat(results.mean)).toBeLessThan(50); // Sanity check
-  });
-
-  test("postMessage mode round-trip latency", async ({ page }) => {
-    const results = await measureLatency(page, POSTMESSAGE_CONFIG, 100);
-
-    console.log("\n=== postMessage Mode Latency ===");
-    console.log(`  Min:    ${results.min} ms`);
-    console.log(`  Max:    ${results.max} ms`);
-    console.log(`  Mean:   ${results.mean} ms`);
-    console.log(`  Median: ${results.median} ms`);
-    console.log(`  P95:    ${results.p95} ms`);
-    console.log(`  P99:    ${results.p99} ms`);
-    console.log(`  StdDev: ${results.stdDev} ms`);
-    console.log(`  First samples: [${results.raw.join(", ")}]`);
-
-    expect(parseFloat(results.mean)).toBeLessThan(50); // Sanity check
-  });
-
-  test("compare SAB vs postMessage latency", async ({ page }) => {
-    // Skip if crossOriginIsolated is not available
-    const isCOI = await page.evaluate(() => crossOriginIsolated);
-    if (!isCOI) {
-      console.log("Skipping comparison - crossOriginIsolated not available");
-      test.skip();
-      return;
-    }
-
-    const sabResults = await measureLatency(page, SAB_CONFIG, 50);
-
-    // Need to reload page between tests to get clean state
-    await page.goto("/test/harness.html");
-    await page.waitForFunction(() => window.supersonicReady === true, {
-      timeout: 10000,
-    });
-
-    const pmResults = await measureLatency(page, POSTMESSAGE_CONFIG, 50);
-
-    console.log("\n╔══════════════════════════════════════════════════════════╗");
-    console.log("║          SAB vs postMessage Latency Comparison           ║");
-    console.log("╠═══════════════╦═══════════════════╦══════════════════════╣");
-    console.log("║    Metric     ║    SAB Mode       ║   postMessage Mode   ║");
-    console.log("╠═══════════════╬═══════════════════╬══════════════════════╣");
-    console.log(`║ Min           ║ ${sabResults.min.padStart(10)} ms   ║ ${pmResults.min.padStart(13)} ms   ║`);
-    console.log(`║ Max           ║ ${sabResults.max.padStart(10)} ms   ║ ${pmResults.max.padStart(13)} ms   ║`);
-    console.log(`║ Mean          ║ ${sabResults.mean.padStart(10)} ms   ║ ${pmResults.mean.padStart(13)} ms   ║`);
-    console.log(`║ Median        ║ ${sabResults.median.padStart(10)} ms   ║ ${pmResults.median.padStart(13)} ms   ║`);
-    console.log(`║ P95           ║ ${sabResults.p95.padStart(10)} ms   ║ ${pmResults.p95.padStart(13)} ms   ║`);
-    console.log(`║ P99           ║ ${sabResults.p99.padStart(10)} ms   ║ ${pmResults.p99.padStart(13)} ms   ║`);
-    console.log(`║ StdDev        ║ ${sabResults.stdDev.padStart(10)} ms   ║ ${pmResults.stdDev.padStart(13)} ms   ║`);
-    console.log("╚═══════════════╩═══════════════════╩══════════════════════╝");
-
-    const diff = parseFloat(pmResults.mean) - parseFloat(sabResults.mean);
-    const ratio = parseFloat(pmResults.mean) / parseFloat(sabResults.mean);
-    console.log(`\n  Difference: postMessage is ${diff.toFixed(2)}ms slower (${ratio.toFixed(2)}x)`);
-
-    // Both should be reasonably fast
-    expect(parseFloat(sabResults.mean)).toBeLessThan(50);
-    expect(parseFloat(pmResults.mean)).toBeLessThan(50);
   });
 });
