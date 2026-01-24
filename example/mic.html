@@ -283,7 +283,7 @@
                 log('Mic access granted. Initializing SuperSonic...');
 
                 // Initialize SuperSonic
-                sonic = new SuperSonic();
+                sonic = new SuperSonic({ baseURL: "dist/" });
 
                 await sonic.init();
                 log('SuperSonic initialized. Connecting mic...');

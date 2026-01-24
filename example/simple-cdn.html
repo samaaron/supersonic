@@ -18,8 +18,9 @@
         if (!sonic) {
           button.textContent = "Booting scsynth...";
 
-          // Use CDN for synthdefs and samples (core auto-detected from import)
+          // Use local core, CDN for synthdefs and samples
           sonic = new SuperSonic({
+            baseURL: "dist/",
             sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/",
             synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
           });

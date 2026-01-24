@@ -27,36 +27,6 @@ import { MemoryLayout } from "./memory_layout.js";
 import { defaultWorldOptions } from "./scsynth_options.js";
 import { addWorkletModule } from "./lib/worker_loader.js";
 
-// Derive default base URL from module location
-const MODULE_URL = import.meta.url;
-
-/**
- * Parse the module URL to extract base paths for CDN usage
- */
-function deriveDefaultURLs() {
-  try {
-    const baseURL = MODULE_URL.substring(0, MODULE_URL.lastIndexOf('/') + 1);
-    const unpkgMatch = MODULE_URL.match(/^(https:\/\/unpkg\.com\/)supersonic-scsynth@([^/]+)\/dist\/supersonic\.js$/);
-
-    if (unpkgMatch) {
-      const cdnBase = unpkgMatch[1];
-      const version = unpkgMatch[2];
-      return {
-        baseURL,
-        coreBaseURL: `${cdnBase}supersonic-scsynth-core@${version}/`,
-        sampleBaseURL: `${cdnBase}supersonic-scsynth-samples@${version}/samples/`,
-        synthdefBaseURL: `${cdnBase}supersonic-scsynth-synthdefs@${version}/synthdefs/`,
-      };
-    }
-
-    return { baseURL, coreBaseURL: null, sampleBaseURL: null, synthdefBaseURL: null };
-  } catch {
-    return { baseURL: null, coreBaseURL: null, sampleBaseURL: null, synthdefBaseURL: null };
-  }
-}
-
-const DEFAULT_URLS = deriveDefaultURLs();
-
 /**
  * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
  */
@@ -271,15 +241,21 @@ export class SuperSonic {
 
     // Configuration
     // coreBaseURL is for WASM and workers (from supersonic-scsynth-core package)
-    // baseURL is a convenience shorthand for local development
-    const baseURL = options.baseURL || DEFAULT_URLS.baseURL;
-    const coreBaseURL = options.coreBaseURL || DEFAULT_URLS.coreBaseURL || baseURL;
+    // baseURL is a convenience shorthand when all assets are co-located
+    const baseURL = options.baseURL || null;
+    const coreBaseURL = options.coreBaseURL || baseURL;
     const workerBaseURL = options.workerBaseURL || (coreBaseURL ? `${coreBaseURL}workers/` : null);
     const wasmBaseURL = options.wasmBaseURL || (coreBaseURL ? `${coreBaseURL}wasm/` : null);
 
     if (!workerBaseURL || !wasmBaseURL) {
       throw new Error(
-        "SuperSonic requires coreBaseURL, baseURL, or explicit workerBaseURL and wasmBaseURL options."
+        `SuperSonic requires explicit URL configuration.\n\n` +
+        `For CDN usage:\n` +
+        `  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@VERSION/dist/supersonic.js';\n` +
+        `  new SuperSonic({ baseURL: 'https://unpkg.com/supersonic-scsynth@VERSION/dist/' })\n\n` +
+        `For local usage:\n` +
+        `  new SuperSonic({ baseURL: '/path/to/supersonic/dist/' })\n\n` +
+        `See: https://github.com/samaaron/supersonic#configuration`
       );
     }
 
@@ -321,8 +297,8 @@ export class SuperSonic {
       },
     };
 
-    this.#sampleBaseURL = options.sampleBaseURL || DEFAULT_URLS.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null);
-    this.#synthdefBaseURL = options.synthdefBaseURL || DEFAULT_URLS.synthdefBaseURL || (baseURL ? `${baseURL}synthdefs/` : null);
+    this.#sampleBaseURL = options.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null);
+    this.#synthdefBaseURL = options.synthdefBaseURL || (baseURL ? `${baseURL}synthdefs/` : null);
 
     this.#fetchRetryConfig = {
       maxRetries: options.fetchMaxRetries ?? 3,

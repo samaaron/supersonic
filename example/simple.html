@@ -17,7 +17,7 @@
         if (!sonic) {
           button.textContent = "Booting scsynth...";
 
-          sonic = new SuperSonic();
+          sonic = new SuperSonic({ baseURL: "dist/" });
           await sonic.init();
           await sonic.loadSynthDefs(["sonic-pi-basic_stereo_player"]);
           await sonic.loadSample(0, "loop_amen.flac");

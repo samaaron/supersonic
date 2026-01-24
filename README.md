@@ -38,11 +38,43 @@ Try the live demo: [**sonic-pi.net/supersonic/demo.html**](https://sonic-pi.net/
 
 ## Getting Started
 
-```javascript
-import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
+### CDN Usage
+
+```html
+<script type="module">
+  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
+
+  const sonic = new SuperSonic({
+    baseURL: 'https://unpkg.com/supersonic-scsynth@latest/dist/',
+    sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/',
+    synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/',
+  });
+  await sonic.init();
+</script>
 ```
 
-For installation options see the [Installation Guide](docs/INSTALLATION.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
+### npm / Bundler Usage
+
+```javascript
+import { SuperSonic } from 'supersonic-scsynth';
+
+const sonic = new SuperSonic({
+  baseURL: '/assets/supersonic/'  // Where you serve the WASM/workers
+});
+```
+
+### Configuration Options
+
+| Option | Description |
+|--------|-------------|
+| `baseURL` | Base path for all assets (convenience shorthand) |
+| `coreBaseURL` | Path to WASM and workers (overrides baseURL) |
+| `wasmUrl` | Direct URL to scsynth-nrt.wasm |
+| `workletUrl` | Direct URL to audio worklet JS |
+| `sampleBaseURL` | Path to sample files |
+| `synthdefBaseURL` | Path to synthdef files |
+
+For more installation options see the [Installation Guide](docs/INSTALLATION.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
 
 
 ## Documentation

@@ -8,14 +8,18 @@
     <p>Everything loaded from CDN - no server setup required!</p>
     <button id="play">Play Amen Break</button>
     <script type="module">
-      // Everything from CDN - all URLs auto-detected from import path
+      // Everything from CDN - explicit URL configuration required
       import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
       const button = document.getElementById("play");
       let sonic = null;
       button.onclick = async () => {
         if (!sonic) {
           button.textContent = "Booting scsynth...";
-          sonic = new SuperSonic();
+          sonic = new SuperSonic({
+            baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
+            sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/",
+            synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
+          });
           await sonic.init();
           await sonic.loadSynthDefs(["sonic-pi-basic_stereo_player"]);
           await sonic.loadSample(0, "loop_amen.flac");

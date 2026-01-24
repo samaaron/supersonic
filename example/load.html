@@ -35,7 +35,7 @@
           // Initialize SuperSonic if not already done
           if (!sonic) {
             status.textContent = "Booting scsynth...";
-            sonic = new SuperSonic();
+            sonic = new SuperSonic({ baseURL: "dist/" });
             await sonic.init();
             await sonic.loadSynthDefs(["sonic-pi-basic_stereo_player"]);
           }
