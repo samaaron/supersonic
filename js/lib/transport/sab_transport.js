@@ -38,6 +38,10 @@ export class SABTransport extends Transport {
     #onReplyCallback;
     #onDebugCallback;
     #onErrorCallback;
+    #onOscLogCallback;
+
+    // Source ID tracking (0 = main thread, 1+ = workers)
+    #nextSourceId = 1;
 
     // State
     #initialized = false;
@@ -203,6 +207,9 @@ export class SABTransport extends Transport {
             throw new Error('Transport not initialized');
         }
 
+        // Assign a unique sourceId for this channel
+        const sourceId = this.#nextSourceId++;
+
         // Create a MessageChannel for prescheduler communication
         const preschedulerChannel = new MessageChannel();
 
@@ -220,6 +227,7 @@ export class SABTransport extends Transport {
             controlIndices: this.#controlIndices,
             preschedulerPort: preschedulerChannel.port2,
             bypassLookaheadS: this._config.bypassLookaheadS,
+            sourceId,
         });
     }
 
@@ -265,6 +273,21 @@ export class SABTransport extends Transport {
 
     onError(callback) {
         this.#onErrorCallback = callback;
+    }
+
+    onOscLog(callback) {
+        this.#onOscLogCallback = callback;
+    }
+
+    /**
+     * Handle OSC log entries from worklet
+     * In SAB mode, SuperSonic forwards these from the worklet port
+     * @param {Array} entries - Array of {sourceId, oscData, timestamp}
+     */
+    handleOscLog(entries) {
+        if (this.#onOscLogCallback) {
+            this.#onOscLogCallback(entries);
+        }
     }
 
     getMetrics() {

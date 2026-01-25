@@ -27,6 +27,10 @@ export class PostMessageTransport extends Transport {
     #onReplyCallback;
     #onDebugCallback;
     #onErrorCallback;
+    #onOscLogCallback;
+
+    // Source ID tracking (0 = main thread, 1+ = workers)
+    #nextSourceId = 1;
 
     // Cached prescheduler metrics (prescheduler sends via postMessage)
     #cachedPreschedulerMetrics = null;
@@ -209,12 +213,15 @@ export class PostMessageTransport extends Transport {
             throw new Error('Transport not initialized');
         }
 
+        // Assign a unique sourceId for this channel
+        const sourceId = this.#nextSourceId++;
+
         // Create a MessageChannel for direct worklet communication
         const directChannel = new MessageChannel();
 
-        // Register one port with the worklet
+        // Register one port with the worklet, including sourceId for logging
         this.#workletPort.postMessage(
-            { type: 'addOscPort' },
+            { type: 'addOscPort', sourceId },
             [directChannel.port1]
         );
 
@@ -232,6 +239,7 @@ export class PostMessageTransport extends Transport {
             port: directChannel.port2,
             preschedulerPort: preschedulerChannel.port2,
             bypassLookaheadS: this._config.bypassLookaheadS,
+            sourceId,
         });
     }
 
@@ -277,6 +285,10 @@ export class PostMessageTransport extends Transport {
 
     onError(callback) {
         this.#onErrorCallback = callback;
+    }
+
+    onOscLog(callback) {
+        this.#onOscLogCallback = callback;
     }
 
     /**
@@ -422,6 +434,13 @@ export class PostMessageTransport extends Transport {
             case 'bufferLoaded':
                 // Buffer load acknowledgment
                 // Handled by buffer manager
+                break;
+
+            case 'oscLog':
+                // OSC log from worklet (centralized logging)
+                if (data.entries && this.#onOscLogCallback) {
+                    this.#onOscLogCallback(data.entries);
+                }
                 break;
 
             case 'error':

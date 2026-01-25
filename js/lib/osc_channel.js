@@ -29,6 +29,7 @@ export class OscChannel {
     #preschedulerPort;   // MessagePort to prescheduler (both modes)
     #metricsView;        // SAB mode: Int32Array view into metrics region
     #bypassLookaheadS;   // Threshold for bypass vs prescheduler routing
+    #sourceId;           // Numeric source ID (0 = main thread, 1+ = workers)
 
     // Local metrics counters
     // SAB mode: used for tracking, then written atomically to shared memory
@@ -50,6 +51,7 @@ export class OscChannel {
         this.#mode = mode;
         this.#preschedulerPort = config.preschedulerPort || null;
         this.#bypassLookaheadS = config.bypassLookaheadS ?? DEFAULT_BYPASS_LOOKAHEAD_S;
+        this.#sourceId = config.sourceId ?? 0;
 
         if (mode === 'postMessage') {
             this.#directPort = config.port;
@@ -180,11 +182,11 @@ export class OscChannel {
     #sendDirect(oscData, bypassCategory = null) {
         if (this.#mode === 'postMessage') {
             if (!this.#directPort) return false;
-            // Include bypass category so worklet can track metrics
-            this.#directPort.postMessage({ type: 'osc', oscData, bypassCategory });
+            // Include bypass category and sourceId so worklet can track metrics and log source
+            this.#directPort.postMessage({ type: 'osc', oscData, bypassCategory, sourceId: this.#sourceId });
             return true;
         } else {
-            // SAB mode - write to ring buffer
+            // SAB mode - write to ring buffer with sourceId in header
             return writeToRingBuffer({
                 atomicView: this.#views.atomicView,
                 dataView: this.#views.dataView,
@@ -193,6 +195,7 @@ export class OscChannel {
                 ringBufferBase: this.#sabConfig.ringBufferBase,
                 controlIndices: this.#sabConfig.controlIndices,
                 oscMessage: oscData,
+                sourceId: this.#sourceId,
                 maxSpins: 10,  // Workers can spin briefly
             });
         }
@@ -284,6 +287,7 @@ export class OscChannel {
             mode: this.#mode,
             preschedulerPort: this.#preschedulerPort,
             bypassLookaheadS: this.#bypassLookaheadS,
+            sourceId: this.#sourceId,
         };
 
         if (this.#mode === 'postMessage') {
@@ -341,6 +345,7 @@ export class OscChannel {
      * @param {MessagePort} config.port - MessagePort connected to the worklet
      * @param {MessagePort} config.preschedulerPort - MessagePort to prescheduler
      * @param {number} [config.bypassLookaheadS=0.2] - Threshold for bypass routing (seconds)
+     * @param {number} [config.sourceId=0] - Source ID (0 = main, 1+ = workers)
      * @returns {OscChannel}
      */
     static createPostMessage(config) {
@@ -360,6 +365,7 @@ export class OscChannel {
      * @param {Object} [config.controlIndices] - If not provided, will be calculated
      * @param {MessagePort} config.preschedulerPort - MessagePort to prescheduler
      * @param {number} [config.bypassLookaheadS=0.2] - Threshold for bypass routing (seconds)
+     * @param {number} [config.sourceId=0] - Source ID (0 = main, 1+ = workers)
      * @returns {OscChannel}
      */
     static createSAB(config) {
@@ -379,6 +385,7 @@ export class OscChannel {
             controlIndices,
             preschedulerPort: config.preschedulerPort,
             bypassLookaheadS: config.bypassLookaheadS,
+            sourceId: config.sourceId,
         });
     }
 
@@ -394,6 +401,7 @@ export class OscChannel {
                 port: data.port,
                 preschedulerPort: data.preschedulerPort,
                 bypassLookaheadS: data.bypassLookaheadS,
+                sourceId: data.sourceId,
             });
         } else {
             return new OscChannel('sab', {
@@ -403,6 +411,7 @@ export class OscChannel {
                 controlIndices: data.controlIndices,
                 preschedulerPort: data.preschedulerPort,
                 bypassLookaheadS: data.bypassLookaheadS,
+                sourceId: data.sourceId,
             });
         }
     }

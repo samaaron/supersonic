@@ -36,6 +36,7 @@ export function calculateAvailableSpace(head, tail, bufferSize) {
  * @param {number} params.sequence - Sequence number for this message
  * @param {number} params.messageMagic - Magic number for message header (e.g., 0xDEADBEEF)
  * @param {number} params.headerSize - Size of message header (typically 16)
+ * @param {number} [params.sourceId=0] - Source ID for logging (0 = main, 1+ = workers)
  * @returns {number} new head position (aligned), relative to buffer start
  */
 export function writeMessageToBuffer({
@@ -47,7 +48,8 @@ export function writeMessageToBuffer({
     payload,
     sequence,
     messageMagic,
-    headerSize
+    headerSize,
+    sourceId = 0
 }) {
     const payloadSize = payload.length;
     const totalSize = headerSize + payloadSize;
@@ -64,7 +66,7 @@ export function writeMessageToBuffer({
         headerView.setUint32(0, messageMagic, true);
         headerView.setUint32(4, alignedSize, true);
         headerView.setUint32(8, sequence, true);
-        headerView.setUint32(12, 0, true);  // padding
+        headerView.setUint32(12, sourceId, true);  // sourceId (was padding)
 
         const writePos1 = bufferStart + head;
         const writePos2 = bufferStart;
@@ -96,7 +98,7 @@ export function writeMessageToBuffer({
         dataView.setUint32(writePos, messageMagic, true);
         dataView.setUint32(writePos + 4, alignedSize, true);
         dataView.setUint32(writePos + 8, sequence, true);
-        dataView.setUint32(writePos + 12, 0, true);  // padding
+        dataView.setUint32(writePos + 12, sourceId, true);  // sourceId (was padding)
 
         // Write payload
         uint8View.set(payload, writePos + headerSize);
@@ -122,7 +124,7 @@ export function writeMessageToBuffer({
  * @param {number} params.paddingMagic - Magic number for padding markers (e.g., 0xDEADFEED)
  * @param {number} params.headerSize - Size of message header (typically 16)
  * @param {number} [params.maxMessages=Infinity] - Maximum messages to read per call
- * @param {Function} params.onMessage - Callback: (payload: Uint8Array, sequence: number, length: number) => void
+ * @param {Function} params.onMessage - Callback: (payload: Uint8Array, sequence: number, length: number, sourceId: number) => void
  * @param {Function} [params.onCorruption] - Optional callback for corrupted messages: (position: number) => void
  * @returns {{ newTail: number, messagesRead: number }} new tail position and count
  */
@@ -176,6 +178,7 @@ export function readMessagesFromBuffer({
         // Read header fields
         const length = dataView.getUint32(readPos + 4, true);
         const sequence = dataView.getUint32(readPos + 8, true);
+        const sourceId = dataView.getUint32(readPos + 12, true);
 
         // Validate message length
         if (length < headerSize || length > bufferSize) {
@@ -198,7 +201,7 @@ export function readMessagesFromBuffer({
         }
 
         // Call message handler
-        onMessage(payload, sequence, length);
+        onMessage(payload, sequence, length, sourceId);
 
         // Advance tail by message length (which may be aligned by writer)
         currentTail = (currentTail + length) % bufferSize;

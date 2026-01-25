@@ -44,6 +44,7 @@ function releaseLock(atomicView, lockIndex) {
  * @param {number} params.ringBufferBase - Base offset of ring buffer in SAB
  * @param {Object} params.controlIndices - Control pointer indices (IN_HEAD, IN_TAIL, IN_SEQUENCE, IN_WRITE_LOCK)
  * @param {Uint8Array} params.oscMessage - OSC message data to write
+ * @param {number} [params.sourceId=0] - Source ID for logging (0 = main, 1+ = workers)
  * @param {number} [params.maxSpins=0] - Max lock spin attempts (0 = try once, for main thread)
  * @returns {boolean} true if write succeeded, false if lock contention or buffer full
  */
@@ -55,6 +56,7 @@ export function writeToRingBuffer({
     ringBufferBase,
     controlIndices,
     oscMessage,
+    sourceId = 0,
     maxSpins = 0
 }) {
     const payloadSize = oscMessage.length;
@@ -100,7 +102,8 @@ export function writeToRingBuffer({
             payload: oscMessage,
             sequence: messageSeq,
             messageMagic: bufferConstants.MESSAGE_MAGIC,
-            headerSize: bufferConstants.MESSAGE_HEADER_SIZE
+            headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
+            sourceId
         });
 
         // CRITICAL: Ensure memory barrier before publishing head pointer

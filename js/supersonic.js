@@ -727,7 +727,8 @@ export class SuperSonic {
     const uint8Data = this.#toUint8Array(oscData);
     const preparedData = await this.#prepareOutboundPacket(uint8Data);
 
-    this.#eventEmitter.emit('message:sent', preparedData);
+    // Note: message:sent is now emitted via the centralized OSC log from the worklet
+    // This ensures all messages (from main thread and workers) are captured
 
     // Classify the message to determine routing
     const category = this.#oscChannel.classify(preparedData);
@@ -1287,6 +1288,14 @@ export class SuperSonic {
       this.#eventEmitter.emit('error', new Error(`${workerName}: ${error}`));
     });
 
+    // Handle centralized OSC out logging (from worklet)
+    this.#osc.onOscLog((entries) => {
+      for (const entry of entries) {
+        // Emit message:sent for each logged message, including sourceId
+        this.#eventEmitter.emit('message:sent', entry.oscData, entry.sourceId);
+      }
+    });
+
     // Initialize transport
     if (mode === 'sab') {
       await this.#osc.initialize();
@@ -1429,6 +1438,14 @@ export class SuperSonic {
             this.#debugRawHandler(data);
           } else {
             this.#earlyDebugMessages.push(data);
+          }
+          break;
+
+        case "oscLog":
+          // Centralized OSC out logging from worklet (SAB mode)
+          // Forward to transport's handleOscLog which triggers the onOscLog callback
+          if (data.entries && this.#osc?.handleOscLog) {
+            this.#osc.handleOscLog(data.entries);
           }
           break;
       }

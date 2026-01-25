@@ -67,6 +67,17 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         // These allow workers to send OSC directly to the worklet
         this.oscPorts = [];
 
+        // OSC log for centralized logging (both modes)
+        // Collected during snapshot interval and sent to main thread
+        this.oscLog = [];
+
+        // Map of port -> sourceId for worker ports (postMessage mode)
+        this.portSourceIds = new Map();
+
+        // SAB mode: track position for OSC logging from IN buffer
+        // We read ahead of the tail pointer to log messages before C++ processes them
+        this.lastOscLogHead = 0;
+
         // Listen for messages from main thread
         this.port.onmessage = this.handleMessage.bind(this);
     }
@@ -319,6 +330,45 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         }
     }
 
+    // Collect OSC messages from IN buffer for logging (SAB mode)
+    // Reads new messages written since last check without advancing tail
+    // This allows us to log messages before C++ processes them
+    collectOscLogFromInBuffer(audioTime) {
+        if (this.mode !== 'sab' || !this.bufferConstants) return;
+
+        const head = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
+        const lastHead = this.lastOscLogHead;
+
+        // Nothing new to log
+        if (head === lastHead) return;
+
+        const IN_BUFFER_SIZE = this.bufferConstants.IN_BUFFER_SIZE;
+        const bufferStart = this.ringBufferBase + this.bufferConstants.IN_BUFFER_START;
+
+        // Read messages from lastHead to head (for logging only, don't touch tail)
+        readMessagesFromBuffer({
+            uint8View: this.uint8View,
+            dataView: this.dataView,
+            bufferStart,
+            bufferSize: IN_BUFFER_SIZE,
+            head,
+            tail: lastHead,  // Read from where we last logged
+            messageMagic: this.bufferConstants.MESSAGE_MAGIC,
+            paddingMagic: this.bufferConstants.PADDING_MAGIC,
+            headerSize: this.bufferConstants.MESSAGE_HEADER_SIZE,
+            onMessage: (payload, sequence, length, sourceId) => {
+                this.oscLog.push({
+                    sourceId,
+                    oscData: new Uint8Array(payload),
+                    timestamp: audioTime
+                });
+            }
+        });
+
+        // Update our logging position
+        this.lastOscLogHead = head;
+    }
+
     // Read OSC replies from OUT ring buffer and send via postMessage
     // Uses shared ring_buffer_core for read logic
     readOscReplies() {
@@ -492,6 +542,18 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             buffer,
             snapshotsSent: this.treeSnapshotsSent
         }, [buffer]);
+
+        // Send OSC log if there are entries
+        if (this.oscLog.length > 0) {
+            // Transfer the oscData ArrayBuffers for efficiency
+            const entries = this.oscLog;
+            const transferList = entries.map(e => e.oscData.buffer);
+            this.port.postMessage({
+                type: 'oscLog',
+                entries: entries
+            }, transferList);
+            this.oscLog = [];
+        }
     }
 
     // Read metrics + node tree as one contiguous memory copy
@@ -573,6 +635,13 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     if (data.oscData) {
                         this.oscQueue.push(data.oscData);
                         this.recordOscReceived(data.oscData.byteLength, data.bypassCategory);
+                        // Log for centralized OSC out logging (sourceId 0 = main thread)
+                        const sourceId = data.sourceId ?? 0;
+                        this.oscLog.push({
+                            sourceId,
+                            oscData: new Uint8Array(data.oscData),
+                            timestamp: currentTime
+                        });
                     }
                 }
                 return;
@@ -583,6 +652,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             if (data.type === 'addOscPort') {
                 const port = event.ports[0];
                 if (port) {
+                    // Extract sourceId from message (assigned by transport when creating OscChannel)
+                    const portSourceId = data.sourceId ?? 0;
+                    this.portSourceIds.set(port, portSourceId);
+
                     port.onmessage = (e) => {
                         if (e.data.type === 'osc' && e.data.oscData) {
                             this.oscQueue.push(e.data.oscData);
@@ -591,6 +664,14 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                                 console.log('[Worklet] OSC via addOscPort, bypassCategory:', e.data.bypassCategory);
                             }
                             this.recordOscReceived(e.data.oscData.byteLength, e.data.bypassCategory);
+                            // Log for centralized OSC out logging
+                            // Use sourceId from message if provided, otherwise from port registration
+                            const sourceId = e.data.sourceId ?? portSourceId;
+                            this.oscLog.push({
+                                sourceId,
+                                oscData: new Uint8Array(e.data.oscData),
+                                timestamp: currentTime
+                            });
                         }
                     };
                     this.oscPorts.push(port);
@@ -1014,6 +1095,22 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         const tail = this.atomicLoad(this.CONTROL_INDICES.OUT_TAIL);
                         if (head !== tail) {
                             Atomics.notify(this.atomicView, this.CONTROL_INDICES.OUT_HEAD, 1);
+                        }
+                    }
+
+                    // SAB mode: Collect OSC log from IN buffer and send periodically
+                    this.collectOscLogFromInBuffer(audioContextTime);
+                    if (this.oscLog.length > 0) {
+                        // Check if interval has elapsed for sending OSC log
+                        if (this.lastTreeSendTime < 0 || audioContextTime - this.lastTreeSendTime >= this.treeSnapshotMinInterval) {
+                            this.lastTreeSendTime = audioContextTime;
+                            const entries = this.oscLog;
+                            const transferList = entries.map(e => e.oscData.buffer);
+                            this.port.postMessage({
+                                type: 'oscLog',
+                                entries: entries
+                            }, transferList);
+                            this.oscLog = [];
                         }
                     }
                 }
