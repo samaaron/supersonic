@@ -147,16 +147,6 @@ export class PostMessageTransport extends Transport {
     }
 
     /**
-     * Try direct send - in postMessage mode, always returns false
-     * (no direct write possible without SAB)
-     */
-    trySendDirect(message) {
-        // PostMessage mode doesn't have a direct write path
-        // All messages go through the prescheduler
-        return false;
-    }
-
-    /**
      * Send with full options
      */
     sendWithOptions(message, options = {}) {

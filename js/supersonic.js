@@ -7,14 +7,12 @@
  */
 
 import { createTransport, OscChannel } from "./lib/transport/index.js";
-import { classifyOscMessage, shouldBypass } from "./lib/osc_classifier.js";
 
 // Re-export OscChannel for use in workers
 export { OscChannel };
 import { BufferManager } from "./lib/buffer_manager.js";
 import { AssetLoader } from "./lib/asset_loader.js";
 import { OSCRewriter } from "./lib/osc_rewriter.js";
-import { DirectWriter } from "./lib/direct_writer.js";
 import { extractSynthDefName } from "./lib/synthdef_parser.js";
 import { EventEmitter } from "./lib/event_emitter.js";
 import { MetricsReader } from "./lib/metrics_reader.js";
@@ -204,8 +202,8 @@ export class SuperSonic {
   #ntpTiming;
   #audioCapture;
 
-  // Direct ring buffer write (bypasses worker for low-latency non-bundle messages)
-  #directWriter;
+  // Main thread OscChannel for sending OSC
+  #oscChannel;
 
   // Track AudioContext state for recovery detection
   #previousAudioContextState = null;
@@ -526,7 +524,7 @@ export class SuperSonic {
     this.#initialized = false;
     this.loadedSynthDefs.clear();
     this.#initPromise = null;
-    this.#directWriter = null;
+    this.#oscChannel = null;
     this.#ntpTiming?.reset();
   }
 
@@ -728,49 +726,10 @@ export class SuperSonic {
     const uint8Data = this.#toUint8Array(oscData);
     const preparedData = await this.#prepareOutboundPacket(uint8Data);
 
-    this.#metricsReader.addMetric("oscOutMessagesSent");
-    this.#metricsReader.addMetric("oscOutBytesSent", preparedData.length);
-
     this.#eventEmitter.emit('message:sent', preparedData);
 
-    // Classify the message using NTP-based timing (same logic as OscChannel)
-    const category = this.#classifyBypassCategory(preparedData);
-
-    // Bypass categories go direct, farFuture goes to prescheduler
-    if (shouldBypass(category)) {
-      // Fast path: try direct ring buffer write (SAB mode only)
-      if (this.#directWriter?.tryWrite(preparedData)) {
-        this.#metricsReader.addMetric("preschedulerBypassed");
-        this.#incrementBypassCategoryMetric(category);
-        return;
-      }
-
-      // PostMessage mode: send direct to worklet
-      if (this.#config.mode === 'postMessage') {
-        this.#osc.sendImmediate(preparedData, category);
-        return;
-      }
-    }
-
-    // Far-future bundles: calculate timing and send to prescheduler
-    const timing = this.#ntpTiming?.calculateBundleWait(preparedData);
-
-    // Size guard for scheduled bundles
-    const slotSize = this.#metricsReader.bufferConstants?.scheduler_slot_size;
-    if (timing && slotSize && preparedData.length > slotSize) {
-      throw new Error(
-        `OSC bundle too large to schedule (${preparedData.length} > ${slotSize} bytes). ` +
-        `Use immediate timestamp (0 or 1) for large messages, or reduce bundle size.`
-      );
-    }
-
-    const sendOptions = { ...options };
-    if (timing) {
-      sendOptions.audioTimeS = timing.audioTimeS;
-      sendOptions.currentTimeS = timing.currentTimeS;
-    }
-
-    this.#osc.sendWithOptions(preparedData, sendOptions);
+    // OscChannel handles classification, routing, and metrics
+    this.#oscChannel.send(preparedData);
   }
 
   cancelTag(runTag) {
@@ -1024,7 +983,7 @@ export class SuperSonic {
     }
 
     this.#oscRewriter = null;
-    this.#directWriter = null;
+    this.#oscChannel = null;
     this.#initialized = false;
     this.loadedSynthDefs.clear();
     this.#initPromise = null;
@@ -1318,6 +1277,9 @@ export class SuperSonic {
       this.#debugRawHandler = (data) => this.#osc.handleDebugRaw(data);
       this.#earlyDebugMessages = [];
     }
+
+    // Create main-thread OscChannel for sendOSC()
+    this.#oscChannel = this.#osc.createOscChannel();
   }
 
   async #finishInitialization() {
@@ -1397,16 +1359,6 @@ export class SuperSonic {
             // Initialize audio capture (SAB mode only)
             if (this.#config.mode === 'sab') {
               this.#audioCapture.update(sharedBuffer, ringBufferBase, bufferConstants);
-
-              // Initialize direct writer
-              this.#directWriter = new DirectWriter({
-                sharedBuffer: sharedBuffer,
-                ringBufferBase: ringBufferBase,
-                bufferConstants: bufferConstants,
-                getAudioContextTime: () => this.#audioContext?.currentTime ?? null,
-                getNTPStartTime: () => this.#ntpTiming?.getNTPStartTime() ?? 0,
-                bypassLookaheadS: this.#config.bypassLookaheadMs / 1000,
-              });
             }
 
             // PostMessage mode: set initial snapshot
@@ -1496,41 +1448,6 @@ export class SuperSonic {
     if (data instanceof Uint8Array) return data;
     if (data instanceof ArrayBuffer) return new Uint8Array(data);
     throw new Error("oscData must be ArrayBuffer or Uint8Array");
-  }
-
-  /**
-   * Increment bypass category-specific metric
-   * @param {string} category - 'nonBundle', 'immediate', 'nearFuture', or 'late'
-   */
-  #incrementBypassCategoryMetric(category) {
-    const metricMap = {
-      nonBundle: 'bypassNonBundle',
-      immediate: 'bypassImmediate',
-      nearFuture: 'bypassNearFuture',
-      late: 'bypassLate',
-    };
-    const metric = metricMap[category];
-    if (metric) {
-      this.#metricsReader.addMetric(metric);
-    }
-  }
-
-  /**
-   * Classify OSC data into bypass category
-   * Uses shared classifier with audio-context-based NTP timing
-   * @param {Uint8Array} oscData
-   * @returns {string} Category: 'nonBundle', 'immediate', 'nearFuture', 'late', or 'farFuture'
-   */
-  #classifyBypassCategory(oscData) {
-    return classifyOscMessage(oscData, {
-      getCurrentNTP: () => {
-        const currentTime = this.#audioContext?.currentTime ?? null;
-        const ntpStartTime = this.#ntpTiming?.getNTPStartTime() ?? 0;
-        if (currentTime === null || ntpStartTime === 0) return null;
-        return currentTime + ntpStartTime;
-      },
-      bypassLookaheadS: this.#config.bypassLookaheadMs / 1000,
-    });
   }
 
   async #prepareOutboundPacket(uint8Data) {

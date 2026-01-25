@@ -2,8 +2,6 @@
 // Copyright (c) 2025 Sam Aaron
 
 import { Transport } from './transport.js';
-import { writeToRingBuffer } from '../ring_buffer_writer.js';
-import { DirectWriter } from '../direct_writer.js';
 import { createWorker } from '../worker_loader.js';
 import { OscChannel } from '../osc_channel.js';
 
@@ -22,7 +20,6 @@ export class SABTransport extends Transport {
     #sharedBuffer;
     #ringBufferBase;
     #bufferConstants;
-    #directWriter;
 
     // Cached views for ring buffer access
     #atomicView;
@@ -79,16 +76,6 @@ export class SABTransport extends Transport {
 
         // Initialize typed array views
         this.#initializeViews();
-
-        // Initialize direct writer for low-latency path
-        this.#directWriter = new DirectWriter({
-            sharedBuffer: this.#sharedBuffer,
-            ringBufferBase: this.#ringBufferBase,
-            bufferConstants: this.#bufferConstants,
-            getAudioContextTime: config.getAudioContextTime,
-            getNTPStartTime: config.getNTPStartTime,
-            bypassLookaheadS: config.bypassLookaheadS,
-        });
     }
 
     /**
@@ -149,22 +136,6 @@ export class SABTransport extends Transport {
         this.#oscOutMessagesSent++;
         this.#oscOutBytesSent += message.length;
         return true;
-    }
-
-    /**
-     * Try direct write for low-latency messages
-     */
-    trySendDirect(message) {
-        if (!this.#initialized || this._disposed) {
-            return false;
-        }
-
-        const written = this.#directWriter.tryWrite(message);
-        if (written) {
-            this.#oscOutMessagesSent++;
-            this.#oscOutBytesSent += message.length;
-        }
-        return written;
     }
 
     /**

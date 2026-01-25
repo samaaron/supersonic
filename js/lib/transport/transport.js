@@ -54,15 +54,6 @@ export class Transport {
     }
 
     /**
-     * Try to send directly (low-latency path for immediate messages)
-     * @param {Uint8Array} message - OSC message bytes
-     * @returns {boolean} True if sent directly, false if should use normal send
-     */
-    trySendDirect(message) {
-        throw new Error('Abstract method - implement in subclass');
-    }
-
-    /**
      * Register callback for OSC replies from engine
      * @param {function(Uint8Array): void} callback
      */
