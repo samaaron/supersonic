@@ -146,7 +146,9 @@ SuperSonic supports two transport modes for communication between JavaScript and
 This is the default mode and works everywhere with no special configuration:
 
 ```javascript
-const supersonic = new SuperSonic();  // postMessage is default
+const supersonic = new SuperSonic({
+  baseURL: "/supersonic/"  // postMessage is default
+});
 ```
 
 ### SAB Mode (SharedArrayBuffer)
@@ -154,7 +156,10 @@ const supersonic = new SuperSonic();  // postMessage is default
 For lower internal jitter (due to post message delays between threads), you can use SAB mode which uses SharedArrayBuffer for direct communication between threads:
 
 ```javascript
-const supersonic = new SuperSonic({ mode: "sab" });
+const supersonic = new SuperSonic({
+  baseURL: "/supersonic/",
+  mode: "sab"
+});
 ```
 
 However, for this to work your server must send the following headers:

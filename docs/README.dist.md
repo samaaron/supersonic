@@ -7,7 +7,9 @@ SuperCollider's powerful **scsynth** audio synthesis engine running in the brows
 ```javascript
 import { SuperSonic } from './supersonic/supersonic.js';
 
-const supersonic = new SuperSonic();
+const supersonic = new SuperSonic({
+  baseURL: './supersonic/'
+});
 await supersonic.init();
 await supersonic.loadSynthDef('sonic-pi-beep');
 supersonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60);
@@ -27,7 +29,9 @@ SuperSonic supports two transport modes:
 Works everywhere with no special configuration:
 
 ```javascript
-const supersonic = new SuperSonic();  // postMessage is default
+const supersonic = new SuperSonic({
+  baseURL: './supersonic/'  // postMessage is default
+});
 ```
 
 ### SAB Mode (SharedArrayBuffer)
@@ -35,7 +39,10 @@ const supersonic = new SuperSonic();  // postMessage is default
 For lower latency, use SAB mode with required headers:
 
 ```javascript
-const supersonic = new SuperSonic({ mode: 'sab' });
+const supersonic = new SuperSonic({
+  baseURL: './supersonic/',
+  mode: 'sab'
+});
 ```
 
 Your server must send these headers:

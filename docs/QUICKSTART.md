@@ -12,7 +12,10 @@ We'll create a simple page with two buttons: one to boot the audio engine, and o
 ```javascript
 import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
 
-const supersonic = new SuperSonic();
+const supersonic = new SuperSonic({
+  baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
+  synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
+});
 
 const bootBtn = document.getElementById("boot-btn");
 const trigBtn = document.getElementById("trig-btn");
@@ -40,10 +43,13 @@ This is why we use a boot button - calling `init()` from a button handler satisf
 ## Creating a SuperSonic Instance
 
 ```javascript
-const supersonic = new SuperSonic();
+const supersonic = new SuperSonic({
+  baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
+  synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
+});
 ```
 
-This creates a new SuperSonic instance with default settings. The instance doesn't start the audio engine yet - it just sets up the configuration. You can pass options here to configure transport mode, debug output, and scsynth engine settings (see [API Reference](API.md)).
+This creates a new SuperSonic instance configured to load assets from CDN. The `baseURL` tells SuperSonic where to find the WASM engine and workers. The `synthdefBaseURL` tells it where to find synthdef files when you call `loadSynthDef()`. The instance doesn't start the audio engine yet - it just sets up the configuration. You can pass additional options to configure transport mode, debug output, and scsynth engine settings (see [API Reference](API.md)).
 
 
 ## Booting the Engine

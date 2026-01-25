@@ -35,9 +35,12 @@ Happy Coding!
 ## Hello World
 
 ```javascript
-import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth';
+import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
 
-const supersonic = new SuperSonic();
+const supersonic = new SuperSonic({
+  baseURL: 'https://unpkg.com/supersonic-scsynth@latest/dist/',
+  synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/',
+});
 await supersonic.init();
 
 await supersonic.loadSynthDef('sonic-pi-prophet');

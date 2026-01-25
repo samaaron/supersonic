@@ -5,7 +5,10 @@
 ```javascript
 import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
 
-const sonic = new SuperSonic();
+const sonic = new SuperSonic({
+  baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
+  synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
+});
 
 // call init after a user interaction
 // such as a button press
@@ -111,11 +114,7 @@ myButton.onclick = async () => {
 ```javascript
 import { SuperSonic } from "supersonic-scsynth";
 
-// Zero config - URLs auto-detected from import path
-// Works with CDN imports and local imports
-const supersonic = new SuperSonic();
-
-// Or with explicit baseURL
+// With explicit baseURL (required)
 const supersonic = new SuperSonic({
   baseURL: "/supersonic/",
 });
@@ -140,7 +139,7 @@ const supersonic = new SuperSonic({
 
 | Option                 | Required | Description                                                                                                                               |
 | ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `baseURL`              | No       | Base URL - derives `workers/`, `wasm/`, `synthdefs/`, `samples/` subdirectories. Auto-detected from import path if not provided.          |
+| `baseURL`              | Yes*     | Base URL - derives `workers/`, `wasm/`, `synthdefs/`, `samples/` subdirectories. *Required unless `workerBaseURL` and `wasmBaseURL` are both provided. |
 | `workerBaseURL`        | No       | Base URL for worker scripts (overrides baseURL)                                                                                           |
 | `wasmBaseURL`          | No       | Base URL for WASM files (overrides baseURL)                                                                                               |
 | `wasmUrl`              | No       | Full URL to the WASM file (overrides wasmBaseURL)                                                                                         |
@@ -163,7 +162,7 @@ const supersonic = new SuperSonic({
 | `debugOscOut`          | No       | Log outgoing OSC messages to console                                                                                                      |
 | `activityConsoleLog`   | No       | Console output truncation options (see below)                                                                                             |
 
-**Note:** All URL options are auto-detected from the import path when loading from CDN (unpkg). For local hosting, either provide `baseURL` or ensure the import path structure matches `supersonic.js` with sibling `workers/`, `wasm/`, etc. directories.
+**Note:** You must provide either `baseURL` or both `workerBaseURL` and `wasmBaseURL`. For CDN usage, set `baseURL` to the CDN path (e.g., `https://unpkg.com/supersonic-scsynth@latest/dist/`). For self-hosted usage, set it to your local path (e.g., `/supersonic/` or `./`).
 
 ### Activity Event Options (`activityEvent`)
 
