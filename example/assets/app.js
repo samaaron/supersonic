@@ -1004,6 +1004,7 @@ function initSchedulerWorker() {
       // Sync main thread timing with worker for beat pulse
       playbackStartNTP = e.data.playbackStartNTP;
       startBeatPulse();
+      startTrailAnimation();
     }
   };
 
@@ -1264,6 +1265,32 @@ function stopAmenLoop() {
   schedulerRunning.amen = false;
 }
 
+// Start all schedulers together (for initial start)
+async function startAll() {
+  if (!orchestrator) return;
+  // Load everything needed
+  if (!synthdefsLoaded.instruments) await loadSynthdefs("instruments");
+  if (!fxChainInitialized) await initFXChain();
+  if (!samplesLoaded.kick) await loadAllKickSamples();
+  if (!samplesLoaded.loops) await loadAllLoopSamples();
+  if (!schedulerWorker) initSchedulerWorker();
+  // Send single message to start all schedulers atomically
+  schedulerWorker.postMessage({ type: "start", scheduler: "all" });
+  schedulerRunning.arp = true;
+  schedulerRunning.kick = true;
+  schedulerRunning.amen = true;
+}
+
+function stopAll() {
+  if (schedulerWorker) {
+    schedulerWorker.postMessage({ type: "stop", scheduler: "all" });
+  }
+  schedulerRunning.arp = false;
+  schedulerRunning.kick = false;
+  schedulerRunning.amen = false;
+  stopBeatPulse();
+}
+
 // Expose globally
 window.startArpeggiator = startArpeggiator;
 window.stopArpeggiator = stopArpeggiator;
@@ -1271,6 +1298,8 @@ window.startKickLoop = startKickLoop;
 window.stopKickLoop = stopKickLoop;
 window.startAmenLoop = startAmenLoop;
 window.stopAmenLoop = stopAmenLoop;
+window.startAll = startAll;
+window.stopAll = stopAll;
 
 // ===== SYNTH PAD =====
 const synthPad = $("synth-pad");
@@ -1309,10 +1338,15 @@ if (synthPad) {
     $("synth-pad-touch").classList.add("active");
     $("synth-pad-crosshair").classList.add("active");
     updatePadPosition(clientX, clientY);
-    startTrailAnimation();
-    if (!schedulerRunning.arp) startArpeggiator();
-    if (!schedulerRunning.kick) startKickLoop();
-    if (!schedulerRunning.amen) startAmenLoop();
+    const noneRunning = !schedulerRunning.arp && !schedulerRunning.kick && !schedulerRunning.amen;
+    if (noneRunning) {
+      startAll();
+    } else {
+      // Some already running - start individually to sync to existing playback
+      if (!schedulerRunning.arp) startArpeggiator();
+      if (!schedulerRunning.kick) startKickLoop();
+      if (!schedulerRunning.amen) startAmenLoop();
+    }
   }
 
   function deactivatePad() {
@@ -1324,9 +1358,7 @@ if (synthPad) {
       $("synth-pad-touch").classList.remove("active");
       $("synth-pad-crosshair").classList.remove("active");
       stopTrailAnimation();
-      if (schedulerRunning.arp) stopArpeggiator();
-      if (schedulerRunning.kick) stopKickLoop();
-      if (schedulerRunning.amen) stopAmenLoop();
+      stopAll();
     }
   }
 
@@ -1381,19 +1413,22 @@ $("play-toggle")?.addEventListener("click", async function () {
     synthPad?.classList.add("active");
     touch?.classList.add("active");
     crosshair?.classList.add("active");
-    startTrailAnimation();
-    if (!schedulerRunning.arp) startArpeggiator();
-    if (!schedulerRunning.kick) startKickLoop();
-    if (!schedulerRunning.amen) startAmenLoop();
+    // Trail animation starts via "started" message for proper sync
+    const noneRunning = !schedulerRunning.arp && !schedulerRunning.kick && !schedulerRunning.amen;
+    if (noneRunning) {
+      startAll();
+    } else {
+      if (!schedulerRunning.arp) startArpeggiator();
+      if (!schedulerRunning.kick) startKickLoop();
+      if (!schedulerRunning.amen) startAmenLoop();
+    }
   } else {
     // Stop playback and remove visual state
     synthPad?.classList.remove("active");
     touch?.classList.remove("active");
     crosshair?.classList.remove("active");
     stopTrailAnimation();
-    if (schedulerRunning.arp) stopArpeggiator();
-    if (schedulerRunning.kick) stopKickLoop();
-    if (schedulerRunning.amen) stopAmenLoop();
+    stopAll();
   }
 });
 
@@ -1557,7 +1592,7 @@ $("init-button").addEventListener("click", async () => {
 
     orchestrator = new SuperSonic({
       baseURL: "dist/",
-      mode: "postMessage",
+      mode: "sab",
     });
 
     let bootPhase = true;
@@ -1656,6 +1691,8 @@ $("init-button").addEventListener("click", async () => {
       }
 
       await loadAllLoopSamples();
+      await loadAllKickSamples();
+      await loadSynthdefs("instruments");
       await initFXChain();
     });
 

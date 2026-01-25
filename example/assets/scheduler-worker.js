@@ -4,7 +4,7 @@
 import { OscChannel } from "../dist/supersonic.js";
 
 const NTP_EPOCH_OFFSET = 2208988800;
-const LOOKAHEAD = 0.5;
+const LOOKAHEAD = 0.15;
 
 // Direct channel to AudioWorklet (works in both SAB and PM modes)
 let oscChannel = null;
@@ -44,6 +44,7 @@ const state = {
 
 // ===== TIMING =====
 let playbackStartNTP = null;
+let isInitialStart = false;
 
 const getNTP = () =>
   (performance.timeOrigin + performance.now()) / 1000 + NTP_EPOCH_OFFSET;
@@ -205,8 +206,13 @@ class Scheduler {
     const now = getNTP();
 
     if (playbackStartNTP === null) {
-      // Nothing playing - start immediately
+      // Nothing playing - start immediately with short lookahead
       playbackStartNTP = now;
+      isInitialStart = true;
+      this.counter = 0;
+      this.currentTime = playbackStartNTP;
+    } else if (isInitialStart) {
+      // Another scheduler joining during initial start - start immediately too
       this.counter = 0;
       this.currentTime = playbackStartNTP;
     } else {
