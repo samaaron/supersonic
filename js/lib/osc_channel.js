@@ -173,11 +173,14 @@ export class OscChannel {
 
     /**
      * Send directly to worklet (bypass path)
+     * @param {Uint8Array} oscData
+     * @param {string} [bypassCategory] - Category for metrics (PM mode only)
      */
-    #sendDirect(oscData) {
+    #sendDirect(oscData, bypassCategory = null) {
         if (this.#mode === 'postMessage') {
             if (!this.#directPort) return false;
-            this.#directPort.postMessage({ type: 'osc', oscData });
+            // Include bypass category so worklet can track metrics
+            this.#directPort.postMessage({ type: 'osc', oscData, bypassCategory });
             return true;
         } else {
             // SAB mode - write to ring buffer
@@ -230,7 +233,7 @@ export class OscChannel {
             return success;
         } else {
             // Bypass: send direct to worklet
-            const success = this.#sendDirect(oscData);
+            const success = this.#sendDirect(oscData, category);
             if (success) {
                 // Record send with bypass category
                 this.#recordSend(oscData.length, category);

@@ -548,4 +548,156 @@ test.describe("Bypass Category Counters", () => {
     // This is the key assertion: all messages from all sources should be counted
     expect(result.totalActual).toBe(result.totalExpected);
   });
+
+  test("bypass category metrics aggregate from multiple concurrent OscChannel workers", async ({ page, sonicConfig }) => {
+    // This test verifies that bypass category counters (bypassNearFuture, bypassLate, etc.)
+    // are correctly aggregated when multiple workers send via their own OscChannels
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.sync();
+
+      // Get baseline metrics
+      const metricsBefore = sonic.getMetrics();
+      const baselineBypassed = metricsBefore.preschedulerBypassed ?? 0;
+      const baselineNearFuture = metricsBefore.bypassNearFuture ?? 0;
+      const baselineLate = metricsBefore.bypassLate ?? 0;
+
+      // Create worker helper
+      const createWorker = async (name) => {
+        const worker = new Worker("/test/assets/osc_channel_test_worker.js", { type: "module" });
+
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error(`${name} ready timeout`)), 5000);
+          worker.onmessage = (e) => {
+            if (e.data.type === "ready") {
+              clearTimeout(timeout);
+              resolve();
+            }
+          };
+        });
+
+        const channel = sonic.createOscChannel();
+        worker.postMessage(
+          { type: "initChannel", channel: channel.transferable },
+          channel.transferList
+        );
+
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error(`${name} channel timeout`)), 5000);
+          worker.onmessage = (e) => {
+            if (e.data.type === "channelReady") {
+              clearTimeout(timeout);
+              resolve(e.data);
+            }
+          };
+        });
+
+        return worker;
+      };
+
+      // Create two workers
+      const worker1 = await createWorker("worker1");
+      const worker2 = await createWorker("worker2");
+
+      // Helper to send messages from a worker one at a time
+      const sendFromWorker = async (worker, count, offsetMs) => {
+        let totalSent = 0;
+        let lastMetrics = null;
+        let failures = [];
+
+        for (let i = 0; i < count; i++) {
+          const result = await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("Send timeout")), 5000);
+            worker.onmessage = (e) => {
+              if (e.data.type === "sent") {
+                clearTimeout(timeout);
+                resolve(e.data);
+              }
+            };
+            worker.postMessage({ type: "sendBundle", offsetMs });
+          });
+          if (result.success) {
+            totalSent++;
+          } else {
+            failures.push({ index: i, result });
+          }
+          lastMetrics = result.metrics;
+        }
+
+        return { sent: totalSent, metrics: lastMetrics, failures };
+      };
+
+      // Send from both workers (sequentially per worker, but interleaved)
+      // Worker 1: 10 messages with 50ms offset (nearFuture - within 200ms lookahead)
+      // Worker 2: 10 messages with -50ms offset (late - in the past)
+      const [result1, result2] = await Promise.all([
+        sendFromWorker(worker1, 10, 50),   // nearFuture
+        sendFromWorker(worker2, 10, -50),  // late
+      ]);
+
+      // Wait for metrics to settle
+      await new Promise(r => setTimeout(r, 300));
+
+      // Get final metrics
+      const metricsAfter = sonic.getMetrics();
+      const finalBypassed = metricsAfter.preschedulerBypassed ?? 0;
+      const finalNearFuture = metricsAfter.bypassNearFuture ?? 0;
+      const finalLate = metricsAfter.bypassLate ?? 0;
+
+      worker1.terminate();
+      worker2.terminate();
+      await sonic.destroy();
+
+      return {
+        success: true,
+        mode: config.mode,
+        worker1: { sent: result1.sent, metrics: result1.metrics, failures: result1.failures },
+        worker2: { sent: result2.sent, metrics: result2.metrics, failures: result2.failures },
+        ringBuffer: {
+          inUsage: metricsAfter.inBufferUsagePercent,
+          inPeakUsage: metricsAfter.inBufferPeakUsagePercent,
+          writeContention: metricsAfter.ringBufferWriteContention,
+        },
+        baseline: { bypassed: baselineBypassed, nearFuture: baselineNearFuture, late: baselineLate },
+        final: { bypassed: finalBypassed, nearFuture: finalNearFuture, late: finalLate },
+        delta: {
+          bypassed: finalBypassed - baselineBypassed,
+          nearFuture: finalNearFuture - baselineNearFuture,
+          late: finalLate - baselineLate,
+        },
+        expected: {
+          bypassed: 20,      // 10 from each worker
+          nearFuture: 10,    // 10 from worker1
+          late: 10,          // 10 from worker2
+        },
+      };
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+
+    console.log(`\nBypass aggregation test (mode: ${result.mode}):`);
+    console.log(`  Worker1 sent: ${result.worker1.sent}/10, failures:`, result.worker1.failures?.length ?? 0);
+    console.log(`  Worker2 sent: ${result.worker2.sent}/10, failures:`, result.worker2.failures?.length ?? 0);
+    console.log(`  Worker1 OscChannel local metrics:`, result.worker1.metrics);
+    console.log(`  Worker2 OscChannel local metrics:`, result.worker2.metrics);
+    if (result.worker1.failures?.length) console.log(`  Worker1 failure details:`, result.worker1.failures);
+    if (result.worker2.failures?.length) console.log(`  Worker2 failure details:`, result.worker2.failures);
+    console.log(`  Baseline:`, result.baseline);
+    console.log(`  Final:`, result.final);
+    console.log(`  Delta:`, result.delta);
+    console.log(`  Expected:`, result.expected);
+    console.log(`  Ring buffer:`, result.ringBuffer);
+
+    // Both workers should have sent most of their messages (allow for contention in SAB mode)
+    expect(result.worker1.sent).toBeGreaterThanOrEqual(5);
+    expect(result.worker2.sent).toBeGreaterThanOrEqual(5);
+
+    // Key assertions: bypass categories from both workers should be aggregated
+    // The delta should match what was ACTUALLY sent, not what was attempted
+    const actualTotal = result.worker1.sent + result.worker2.sent;
+    expect(result.delta.bypassed).toBe(actualTotal);
+    expect(result.delta.nearFuture).toBe(result.worker1.sent);  // Worker1 sends nearFuture
+    expect(result.delta.late).toBe(result.worker2.sent);         // Worker2 sends late
+  });
 });

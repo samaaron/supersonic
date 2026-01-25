@@ -439,7 +439,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
     // Record OSC message received (for postMessage mode metrics)
     // In PM mode, we track what the worklet receives since there's no shared memory
-    recordOscReceived(byteLength) {
+    // bypassCategory is only provided in PM mode when sent via OscChannel
+    recordOscReceived(byteLength, bypassCategory = null) {
         if (!this.metricsView) return;
 
         if (this.mode === 'sab') {
@@ -450,6 +451,21 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             // PM mode: direct increment (single-threaded context)
             this.metricsView[MetricsOffsets.OSC_OUT_MESSAGES_SENT]++;
             this.metricsView[MetricsOffsets.OSC_OUT_BYTES_SENT] += byteLength;
+
+            // Track bypass category if provided (from OscChannel workers)
+            if (bypassCategory) {
+                this.metricsView[MetricsOffsets.PRESCHEDULER_BYPASSED]++;
+                const categoryOffsets = {
+                    nonBundle: MetricsOffsets.BYPASS_NON_BUNDLE,
+                    immediate: MetricsOffsets.BYPASS_IMMEDIATE,
+                    nearFuture: MetricsOffsets.BYPASS_NEAR_FUTURE,
+                    late: MetricsOffsets.BYPASS_LATE,
+                };
+                const offset = categoryOffsets[bypassCategory];
+                if (offset !== undefined) {
+                    this.metricsView[offset]++;
+                }
+            }
         }
     }
 
@@ -569,7 +585,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     // Queue OSC message for processing in next audio frame
                     if (data.oscData) {
                         this.oscQueue.push(data.oscData);
-                        this.recordOscReceived(data.oscData.byteLength);
+                        this.recordOscReceived(data.oscData.byteLength, data.bypassCategory);
                     }
                 }
                 return;
@@ -583,7 +599,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     port.onmessage = (e) => {
                         if (e.data.type === 'osc' && e.data.oscData) {
                             this.oscQueue.push(e.data.oscData);
-                            this.recordOscReceived(e.data.oscData.byteLength);
+                            // Debug: log bypass category receipt
+                            if (__DEV__ && e.data.bypassCategory) {
+                                console.log('[Worklet] OSC via addOscPort, bypassCategory:', e.data.bypassCategory);
+                            }
+                            this.recordOscReceived(e.data.oscData.byteLength, e.data.bypassCategory);
                         }
                     };
                     this.oscPorts.push(port);

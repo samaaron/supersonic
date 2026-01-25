@@ -42,16 +42,9 @@ export class PostMessageTransport extends Transport {
     #oscOutBytesSent = 0;
     #oscInMessagesReceived = 0;
     #oscInBytesReceived = 0;
-    #preschedulerBypassed = 0;
     #lastSequenceReceived = -1;
     #debugMessagesReceived = 0;
     #debugBytesReceived = 0;
-
-    // Bypass category counters
-    #bypassNonBundle = 0;
-    #bypassImmediate = 0;
-    #bypassNearFuture = 0;
-    #bypassLate = 0;
 
     // Timing functions
     #getAudioContextTime;
@@ -181,32 +174,15 @@ export class PostMessageTransport extends Transport {
         }
 
         // Send directly to worklet, bypassing prescheduler
+        // Include bypassCategory so worklet can track all bypass metrics (from main thread + workers)
         this.#workletPort.postMessage({
             type: 'osc',
             oscData: message,
+            bypassCategory: category,
         });
 
         this.#oscOutMessagesSent++;
         this.#oscOutBytesSent += message.length;
-        this.#preschedulerBypassed++;
-
-        // Increment category-specific counter
-        if (category) {
-            switch (category) {
-                case 'nonBundle':
-                    this.#bypassNonBundle++;
-                    break;
-                case 'immediate':
-                    this.#bypassImmediate++;
-                    break;
-                case 'nearFuture':
-                    this.#bypassNearFuture++;
-                    break;
-                case 'late':
-                    this.#bypassLate++;
-                    break;
-            }
-        }
 
         return true;
     }
@@ -346,20 +322,15 @@ export class PostMessageTransport extends Transport {
     }
 
     getMetrics() {
-        // Note: oscOutMessagesSent and oscOutBytesSent are NOT included here
+        // Note: oscOutMessagesSent, oscOutBytesSent, and bypass metrics are NOT included here.
         // In PM mode, the worklet counts all received messages (from main thread + OscChannel workers)
         // and reports them in the snapshot buffer. Including them here would overwrite the worklet's count.
         return {
             oscInMessagesReceived: this.#oscInMessagesReceived,
             oscInBytesReceived: this.#oscInBytesReceived,
             oscInMessagesDropped: this.#oscInMessagesDropped,
-            preschedulerBypassed: this.#preschedulerBypassed,
             debugMessagesReceived: this.#debugMessagesReceived,
             debugBytesReceived: this.#debugBytesReceived,
-            bypassNonBundle: this.#bypassNonBundle,
-            bypassImmediate: this.#bypassImmediate,
-            bypassNearFuture: this.#bypassNearFuture,
-            bypassLate: this.#bypassLate,
         };
     }
 

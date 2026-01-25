@@ -245,9 +245,11 @@ export class MetricsReader {
     // Note: must cover all metrics including bypass categories at indices 37-40
     const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 42);
 
-    // Single memcpy of ALL contiguous prescheduler metrics (offsets 8-21)
+    // Copy prescheduler metrics (offsets 9-21), but NOT offset 22 (PRESCHEDULER_BYPASSED)
+    // The worklet tracks PRESCHEDULER_BYPASSED as it receives all bypassed messages
+    // (from main thread + OscChannel workers), so it's the source of truth for this metric.
     const start = MetricsOffsets.PRESCHEDULER_START;
-    const count = MetricsOffsets.PRESCHEDULER_COUNT;
+    const count = MetricsOffsets.PRESCHEDULER_COUNT - 1;  // Exclude PRESCHEDULER_BYPASSED at offset 22
     metricsView.set(preschedulerMetrics.subarray(start, start + count), start);
   }
 

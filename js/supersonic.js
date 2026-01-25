@@ -7,6 +7,7 @@
  */
 
 import { createTransport, OscChannel } from "./lib/transport/index.js";
+import { shouldBypass } from "./lib/osc_classifier.js";
 
 // Re-export OscChannel for use in workers
 export { OscChannel };
@@ -728,8 +729,32 @@ export class SuperSonic {
 
     this.#eventEmitter.emit('message:sent', preparedData);
 
-    // OscChannel handles classification, routing, and metrics
-    this.#oscChannel.send(preparedData);
+    // Classify the message to determine routing
+    const category = this.#oscChannel.classify(preparedData);
+
+    if (shouldBypass(category)) {
+      // Bypass: send direct to worklet
+      if (this.#config.mode === 'sab') {
+        // SAB mode: use OscChannel for direct ring buffer write
+        this.#oscChannel.send(preparedData);
+        // OscChannel writes metrics directly to shared memory
+      } else {
+        // PM mode: use transport's sendImmediate which tracks metrics locally
+        this.#osc.sendImmediate(preparedData, category);
+      }
+    } else {
+      // Far-future: goes to prescheduler for timing
+      // Check size limit: WASM scheduler has fixed slot size
+      const slotSize = this.#metricsReader.bufferConstants?.scheduler_slot_size;
+      if (slotSize && preparedData.length > slotSize) {
+        throw new Error(
+          `OSC bundle too large to schedule (${preparedData.length} > ${slotSize} bytes). ` +
+          `Use immediate timestamp (0 or 1) for large messages, or reduce bundle size.`
+        );
+      }
+      // Send to prescheduler with session/tag options for cancellation
+      this.#osc.sendWithOptions(preparedData, options);
+    }
   }
 
   cancelTag(runTag) {
@@ -1437,6 +1462,19 @@ export class SuperSonic {
   #ensureInitialized(actionDescription = "perform this operation") {
     if (!this.#initialized) {
       throw new Error(`SuperSonic not initialized. Call init() before attempting to ${actionDescription}.`);
+    }
+  }
+
+  #incrementBypassCategoryMetric(category) {
+    const metricMap = {
+      nonBundle: 'bypassNonBundle',
+      immediate: 'bypassImmediate',
+      nearFuture: 'bypassNearFuture',
+      late: 'bypassLate',
+    };
+    const metric = metricMap[category];
+    if (metric) {
+      this.#metricsReader.addMetric(metric);
     }
   }
 
