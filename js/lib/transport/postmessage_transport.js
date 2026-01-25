@@ -60,14 +60,14 @@ export class PostMessageTransport extends Transport {
      * @param {Function} config.getAudioContextTime - Returns AudioContext.currentTime
      * @param {Function} config.getNTPStartTime - Returns NTP start time
      * @param {number} [config.preschedulerCapacity=65536] - Max pending messages
-     * @param {number} [config.snapshotIntervalMs=50] - Interval for metrics/tree snapshots
+     * @param {number} [config.snapshotIntervalMs] - Interval for metrics/tree snapshots
      */
     constructor(config) {
         super({ ...config, mode: 'postMessage' });
 
         this.#workerBaseURL = config.workerBaseURL;
         this.#preschedulerCapacity = config.preschedulerCapacity || 65536;
-        this.#snapshotIntervalMs = config.snapshotIntervalMs || 50;
+        this.#snapshotIntervalMs = config.snapshotIntervalMs;
         this.#getAudioContextTime = config.getAudioContextTime;
         this.#getNTPStartTime = config.getNTPStartTime;
     }

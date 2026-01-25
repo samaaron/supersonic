@@ -45,7 +45,7 @@ let localMetricsBuffer = null;  // postMessage mode only - local buffer to send
 
 // Metrics send timer (postMessage mode only)
 let metricsSendTimer = null;
-let metricsSendIntervalMs = 50;  // Default, can be overridden by snapshotIntervalMs config
+let metricsSendIntervalMs = 150;  // Default, can be overridden by snapshotIntervalMs config
 
 // ============================================================================
 // METRICS HELPERS (work in both SAB and postMessage modes)

@@ -151,7 +151,7 @@ const supersonic = new SuperSonic({
 | `audioContextOptions`  | No       | Options passed to `new AudioContext()` (see below)                                                                                        |
 | `autoConnect`          | No       | Whether to auto-connect to `audioContext.destination` (default: true)                                                                     |
 | `scsynthOptions`       | No       | Server options (see below)                                                                                                                |
-| `snapshotIntervalMs`   | No       | Metrics snapshot interval for postMessage mode (default: 50)                                                                              |
+| `snapshotIntervalMs`   | No       | Metrics snapshot interval for postMessage mode (default: 150)                                                                             |
 | `preschedulerCapacity` | No       | Max pending events in JS prescheduler (default: 65536)                                                                                    |
 | `fetchMaxRetries`      | No       | Max retries for asset fetches (default: 3)                                                                                                |
 | `fetchRetryDelay`      | No       | Base delay in ms between fetch retries (default: 1000)                                                                                    |

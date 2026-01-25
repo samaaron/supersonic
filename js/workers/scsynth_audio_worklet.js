@@ -34,7 +34,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.lastTreeVersion = -1;
         this.treeSnapshotsSent = 0;
         this.lastTreeSendTime = -1; // AudioContext time of last send (-1 = never)
-        this.treeSnapshotMinInterval = 0.050; // Max 20 snapshots/sec (50ms in seconds)
+        this.treeSnapshotMinInterval = 0.150; // Default, can be overridden by snapshotIntervalMs config
 
         // Views into SharedArrayBuffer (or WASM memory in postMessage mode)
         this.atomicView = null;

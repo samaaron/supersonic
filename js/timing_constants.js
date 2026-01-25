@@ -21,3 +21,6 @@ export const SYNC_TIMEOUT_MS = 10000;
 
 // Timeout waiting for AudioWorklet initialization
 export const WORKLET_INIT_TIMEOUT_MS = 5000;
+
+// Interval for metrics/tree snapshots in postMessage mode (ms)
+export const SNAPSHOT_INTERVAL_MS = 150;

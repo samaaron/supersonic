@@ -21,7 +21,7 @@ import { NTPTiming } from "./lib/ntp_timing.js";
 import { AudioCapture } from "./lib/audio_capture.js";
 import { inspect, parseNodeTree } from "./lib/inspector.js";
 import oscLib from "./vendor/osc.js/osc.js";
-import { SYNC_TIMEOUT_MS, WORKLET_INIT_TIMEOUT_MS } from "./timing_constants.js";
+import { SYNC_TIMEOUT_MS, WORKLET_INIT_TIMEOUT_MS, SNAPSHOT_INTERVAL_MS } from "./timing_constants.js";
 import { MemoryLayout } from "./memory_layout.js";
 import { defaultWorldOptions } from "./scsynth_options.js";
 import { addWorkletModule } from "./lib/worker_loader.js";
@@ -263,7 +263,7 @@ export class SuperSonic {
 
     this.#config = {
       mode: mode,
-      snapshotIntervalMs: options.snapshotIntervalMs ?? 50,
+      snapshotIntervalMs: options.snapshotIntervalMs ?? SNAPSHOT_INTERVAL_MS,
       wasmUrl: options.wasmUrl || wasmBaseURL + "scsynth-nrt.wasm",
       wasmBaseURL: wasmBaseURL,
       workletUrl: options.workletUrl || workerBaseURL + "scsynth_audio_worklet.js",
