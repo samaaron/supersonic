@@ -3,6 +3,7 @@
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { writeToRingBuffer } from '../lib/ring_buffer_writer.js';
+import { calculateInControlIndices } from '../lib/control_offsets.js';
 
 // Transport mode: 'sab' or 'postMessage'
 let mode = 'sab';
@@ -225,14 +226,7 @@ const initSharedBuffer = () => {
     uint8View = new Uint8Array(sharedBuffer);
 
     // Calculate control indices for ring buffer
-    // Offsets: in_head=0, in_tail=4, out_head=8, out_tail=12, debug_head=16, debug_tail=20,
-    //          in_sequence=24, out_sequence=28, debug_sequence=32, status_flags=36, in_write_lock=40
-    CONTROL_INDICES = {
-        IN_HEAD: (ringBufferBase + bufferConstants.CONTROL_START + 0) / 4,
-        IN_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 4) / 4,
-        IN_SEQUENCE: (ringBufferBase + bufferConstants.CONTROL_START + 24) / 4,
-        IN_WRITE_LOCK: (ringBufferBase + bufferConstants.CONTROL_START + 40) / 4
-    };
+    CONTROL_INDICES = calculateInControlIndices(ringBufferBase, bufferConstants.CONTROL_START);
 
     // Initialize metrics view
     const metricsBase = ringBufferBase + bufferConstants.METRICS_START;

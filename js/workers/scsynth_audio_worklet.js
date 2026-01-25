@@ -8,6 +8,7 @@
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { writeMessageToBuffer, calculateAvailableSpace, readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
+import { calculateAllControlIndices } from '../lib/control_offsets.js';
 
 class ScsynthProcessor extends AudioWorkletProcessor {
     constructor() {
@@ -149,21 +150,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         const METRICS_START = this.bufferConstants.METRICS_START;
 
         // Calculate Int32Array indices (divide byte offsets by 4)
-        // Offsets: in_head=0, in_tail=4, out_head=8, out_tail=12, debug_head=16, debug_tail=20,
-        //          in_sequence=24, out_sequence=28, debug_sequence=32, status_flags=36, in_write_lock=40
-        this.CONTROL_INDICES = {
-            IN_HEAD: (ringBufferBase + CONTROL_START + 0) / 4,
-            IN_TAIL: (ringBufferBase + CONTROL_START + 4) / 4,
-            OUT_HEAD: (ringBufferBase + CONTROL_START + 8) / 4,
-            OUT_TAIL: (ringBufferBase + CONTROL_START + 12) / 4,
-            DEBUG_HEAD: (ringBufferBase + CONTROL_START + 16) / 4,
-            DEBUG_TAIL: (ringBufferBase + CONTROL_START + 20) / 4,
-            IN_SEQUENCE: (ringBufferBase + CONTROL_START + 24) / 4,
-            OUT_SEQUENCE: (ringBufferBase + CONTROL_START + 28) / 4,
-            DEBUG_SEQUENCE: (ringBufferBase + CONTROL_START + 32) / 4,
-            STATUS_FLAGS: (ringBufferBase + CONTROL_START + 36) / 4,
-            IN_WRITE_LOCK: (ringBufferBase + CONTROL_START + 40) / 4
-        };
+        this.CONTROL_INDICES = calculateAllControlIndices(ringBufferBase, CONTROL_START);
 
         // Create views - source depends on mode
         if (this.mode === 'sab') {

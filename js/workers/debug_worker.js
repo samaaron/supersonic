@@ -9,6 +9,7 @@
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
+import { calculateDebugControlIndices } from '../lib/control_offsets.js';
 
 // Transport mode: 'sab' or 'postMessage'
 let mode = 'sab';
@@ -53,10 +54,7 @@ const initRingBuffer = (buffer, base, constants) => {
     uint8View = new Uint8Array(sharedBuffer);
 
     // Calculate control indices using constants from WASM
-    CONTROL_INDICES = {
-        DEBUG_HEAD: (ringBufferBase + bufferConstants.CONTROL_START + 16) / 4,
-        DEBUG_TAIL: (ringBufferBase + bufferConstants.CONTROL_START + 20) / 4
-    };
+    CONTROL_INDICES = calculateDebugControlIndices(ringBufferBase, bufferConstants.CONTROL_START);
 
     // Initialize metrics view
     const metricsBase = ringBufferBase + bufferConstants.METRICS_START;

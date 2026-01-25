@@ -3,6 +3,7 @@
 
 import { writeToRingBuffer } from './ring_buffer_writer.js';
 import * as MetricsOffsets from './metrics_offsets.js';
+import { calculateInControlIndices } from './control_offsets.js';
 import {
     classifyOscMessage,
     shouldBypass,
@@ -365,14 +366,10 @@ export class OscChannel {
         // Calculate control indices if not provided
         let controlIndices = config.controlIndices;
         if (!controlIndices) {
-            const CONTROL_START = config.bufferConstants.CONTROL_START;
-            const base = config.ringBufferBase;
-            controlIndices = {
-                IN_HEAD: (base + CONTROL_START + 0) / 4,
-                IN_TAIL: (base + CONTROL_START + 4) / 4,
-                IN_SEQUENCE: (base + CONTROL_START + 24) / 4,
-                IN_WRITE_LOCK: (base + CONTROL_START + 40) / 4,
-            };
+            controlIndices = calculateInControlIndices(
+                config.ringBufferBase,
+                config.bufferConstants.CONTROL_START
+            );
         }
 
         return new OscChannel('sab', {

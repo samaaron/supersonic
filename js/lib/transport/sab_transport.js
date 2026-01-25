@@ -4,6 +4,7 @@
 import { Transport } from './transport.js';
 import { createWorker } from '../worker_loader.js';
 import { OscChannel } from '../osc_channel.js';
+import { calculateInControlIndices } from '../control_offsets.js';
 
 /**
  * SAB (SharedArrayBuffer) Transport
@@ -311,13 +312,10 @@ export class SABTransport extends Transport {
         this.#dataView = new DataView(this.#sharedBuffer);
         this.#uint8View = new Uint8Array(this.#sharedBuffer);
 
-        const CONTROL_START = this.#bufferConstants.CONTROL_START;
-        this.#controlIndices = {
-            IN_HEAD: (this.#ringBufferBase + CONTROL_START + 0) / 4,
-            IN_TAIL: (this.#ringBufferBase + CONTROL_START + 4) / 4,
-            IN_SEQUENCE: (this.#ringBufferBase + CONTROL_START + 24) / 4,
-            IN_WRITE_LOCK: (this.#ringBufferBase + CONTROL_START + 40) / 4,
-        };
+        this.#controlIndices = calculateInControlIndices(
+            this.#ringBufferBase,
+            this.#bufferConstants.CONTROL_START
+        );
     }
 
     #initWorker(worker, name, extraConfig = {}) {
