@@ -508,7 +508,7 @@ protected:
 ///////////////////////////////////////////////////////////////////////////
 
 
-typedef bool (*AsyncStageFn)(World* inWorld, void* cmdData);
+typedef SCBool (*AsyncStageFn)(World* inWorld, void* cmdData);
 typedef void (*AsyncFreeFn)(World* inWorld, void* cmdData);
 
 class AsyncPlugInCmd : public SC_SequencedCommand {
@@ -517,7 +517,7 @@ public:
                    AsyncStageFn stage2, // stage2 is non real time
                    AsyncStageFn stage3, // stage3 is real time - completion msg performed if stage3 returns true
                    AsyncStageFn stage4, // stage4 is non real time - sends done if stage4 returns true
-                   AsyncFreeFn cleanup, int completionMsgSize, void* completionMsgData);
+                   AsyncFreeFn cleanup, int completionMsgSize, const void* completionMsgData);
 
     virtual ~AsyncPlugInCmd();
 

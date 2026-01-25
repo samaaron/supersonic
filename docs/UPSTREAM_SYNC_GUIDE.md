@@ -1,9 +1,9 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2025-11-24
-**Last Sync Commit**: 0edfbdb8f
-**Upstream Branch**: supercollider/develop (tracked to 2025-09-25)
-**Verified Against**: SuperCollider 3.14.1 (2025-11-23) - No scsynth/plugin changes needed
+**Last Updated**: 2026-01-25
+**Last Sync Commit**: 765ac9982ebca76079f75db9555a940fa2e8f35c
+**Upstream Branch**: supercollider/develop (tracked to 2026-01-25)
+**Verified Against**: SuperCollider 3.14.1 + PR #7329 (Plugin API v4)
 
 ---
 
@@ -595,6 +595,45 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 ---
 
 ## Reference: Previous Sync Summary
+
+### Plugin API v4 Update (2026-01-25)
+
+Applied SuperCollider PR #7329 which converts the Plugin API from C++ to C:
+
+**Key Changes:**
+- API version bumped from 3 to 4
+- Replaced C++ `SCFFT_Allocator` virtual class with C struct using function pointers
+- Changed `bool` to `SCBool` typedef (uint8_t in C, bool in C++)
+- Changed `int` to `int32` for explicit sizing
+- Changed C++ references to C pointers (`FifoMsg&` → `FifoMsg*`, `ScopeBufferHnd&` → `ScopeBufferHnd*`, `SCFFT_Allocator&` → `SCFFT_Allocator*`)
+- Removed `bool mUnused0` field from InterfaceTable
+- Added `SC_INLINE` macro for C/C++ compatible inline functions
+- Added `kSCTrue`/`kSCFalse` enum constants
+
+**Files Modified:**
+- `src/scsynth/include/common/SC_Types.h`
+- `src/scsynth/include/common/SC_fftlib.h`
+- `src/scsynth/common/SC_fftlib.hpp` (new - private header)
+- `src/scsynth/common/SC_fftlib.cpp`
+- `src/scsynth/include/plugin_interface/SC_InterfaceTable.h`
+- `src/scsynth/include/plugin_interface/SC_World.h`
+- `src/scsynth/include/plugin_interface/SC_Unit.h`
+- `src/scsynth/include/plugin_interface/SC_FifoMsg.h`
+- `src/scsynth/server/SC_World.cpp`
+- `src/scsynth/server/SC_Prototypes.h`
+- `src/scsynth/server/SC_SequencedCommand.h`
+- `src/scsynth/server/SC_SequencedCommand.cpp`
+- `src/scsynth/plugins/DelayUGens.cpp`
+
+**Benefits for WASM:**
+- Eliminates C++ vtable overhead for FFT allocator
+- Simpler function pointer dispatch (better for WASM indirect calls)
+- C-compatible plugin interface enables future C plugin support
+
+**Upstream PR:** https://github.com/supercollider/supercollider/pull/7329
+**Commit:** 765ac9982ebca76079f75db9555a940fa2e8f35c
+
+---
 
 ### Verification: SuperCollider 3.14.1 (2025-11-24)
 

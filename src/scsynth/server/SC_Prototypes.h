@@ -211,15 +211,15 @@ int32 server_timeseed();
 
 ////////////////////////////////////////////////////////////////////////
 
-typedef bool (*AsyncStageFn)(World* inWorld, void* cmdData);
+typedef SCBool (*AsyncStageFn)(World* inWorld, void* cmdData);
 typedef void (*AsyncFreeFn)(World* inWorld, void* cmdData);
 
-int PerformAsynchronousCommand(
+SCErr PerformAsynchronousCommand(
     World* inWorld, void* replyAddr, const char* cmdName, void* cmdData,
     AsyncStageFn stage2, // stage2 is non real time
     AsyncStageFn stage3, // stage3 is real time - completion msg performed if stage3 returns true
     AsyncStageFn stage4, // stage4 is non real time - sends done if stage4 returns true
-    AsyncFreeFn cleanup, int completionMsgSize, void* completionMsgData);
+    AsyncFreeFn cleanup, int32 completionMsgSize, const void* completionMsgData);
 
 ////////////////////////////////////////////////////////////////////////
 
