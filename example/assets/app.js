@@ -1634,6 +1634,26 @@ $("init-button").addEventListener("click", async () => {
       fxChainInitializing = null;
       synthdefsLoaded = { fx: false, instruments: false };
       samplesLoaded = { kick: false, loops: false };
+      playbackStartNTP = null;
+
+      // Re-initialize scheduler worker with new OscChannel after reset
+      if (schedulerWorker) {
+        schedulerWorker.postMessage({ type: "reset" });
+        const channel = orchestrator.createOscChannel();
+        schedulerWorker.postMessage(
+          {
+            type: "initChannel",
+            channel: channel.transferable,
+            config: {
+              groups: { GROUP_ARP, GROUP_LOOPS, GROUP_KICK },
+              buses: { FX_BUS_ARP, FX_BUS_BEAT },
+              loopConfig: LOOP_CONFIG,
+              kickConfig: KICK_CONFIG,
+            },
+          },
+          channel.transferList
+        );
+      }
 
       await loadAllLoopSamples();
       await initFXChain();
@@ -1679,9 +1699,10 @@ $("reset-button")?.addEventListener("click", async () => {
   setSynthPadState("disabled");
 
   try {
-    await orchestrator.reset();
+    await orchestrator.recover();
+    setSynthPadState("ready");
   } catch (e) {
-    showError(`Reset failed: ${e.message}`);
+    showError(`Restart failed: ${e.message}`);
   } finally {
     btn.textContent = "Restart";
     btn.disabled = false;
