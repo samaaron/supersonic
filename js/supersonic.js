@@ -1313,7 +1313,8 @@ export class SuperSonic {
     }
 
     // Create main-thread OscChannel for sendOSC()
-    this.#oscChannel = this.#osc.createOscChannel();
+    // Main thread uses sourceId 0, workers get 1+
+    this.#oscChannel = this.#osc.createOscChannel({ sourceId: 0 });
   }
 
   async #finishInitialization() {

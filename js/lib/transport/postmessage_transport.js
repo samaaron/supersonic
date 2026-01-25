@@ -206,15 +206,18 @@ export class PostMessageTransport extends Transport {
      *   const channel = OscChannel.fromTransferable(event.data.channel);
      *   channel.send(oscBytes);
      *
+     * @param {Object} [options]
+     * @param {number} [options.sourceId] - Override sourceId (default: auto-assign)
      * @returns {OscChannel}
      */
-    createOscChannel() {
+    createOscChannel(options = {}) {
         if (!this.#initialized) {
             throw new Error('Transport not initialized');
         }
 
-        // Assign a unique sourceId for this channel
-        const sourceId = this.#nextSourceId++;
+        // Use provided sourceId or auto-assign
+        // sourceId 0 is reserved for main thread, 1+ for workers
+        const sourceId = options.sourceId ?? this.#nextSourceId++;
 
         // Create a MessageChannel for direct worklet communication
         const directChannel = new MessageChannel();
