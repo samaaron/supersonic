@@ -82,7 +82,7 @@ test.describe("Bypass Category Counters", () => {
       const immediateTimetag = new Uint8Array([0, 0, 0, 0, 0, 0, 0, 1]); // timetag = 1
 
       // Simple /status message
-      const statusMsg = window.SuperSonic.osc.encode({ address: "/status", args: [] });
+      const statusMsg = window.SuperSonic.osc.encodeMessage("/status", []);
 
       for (let i = 0; i < 3; i++) {
         const bundle = new Uint8Array(16 + 4 + statusMsg.length);
@@ -136,7 +136,7 @@ test.describe("Bypass Category Counters", () => {
       // Immediate bundles
       const bundleHeader = new Uint8Array([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00]);
       const immediateTimetag = new Uint8Array([0, 0, 0, 0, 0, 0, 0, 1]);
-      const statusMsg = window.SuperSonic.osc.encode({ address: "/status", args: [] });
+      const statusMsg = window.SuperSonic.osc.encodeMessage("/status", []);
 
       for (let i = 0; i < 2; i++) {
         const bundle = new Uint8Array(16 + 4 + statusMsg.length);
@@ -233,7 +233,7 @@ test.describe("Bypass Category Counters", () => {
       const pastNTP = nowNTP - 1.0; // 1 second in the past
 
       const bundleHeader = new Uint8Array([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00]);
-      const statusMsg = window.SuperSonic.osc.encode({ address: "/status", args: [] });
+      const statusMsg = window.SuperSonic.osc.encodeMessage("/status", []);
 
       for (let i = 0; i < 2; i++) {
         const targetNTP = pastNTP - (i * 0.5); // 1s, 1.5s in past
@@ -306,7 +306,7 @@ test.describe("Bypass Category Counters", () => {
       const getNTP = () => (performance.timeOrigin + performance.now()) / 1000 + NTP_EPOCH_OFFSET;
 
       const bundleHeader = new Uint8Array([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00]);
-      const statusMsg = window.SuperSonic.osc.encode({ address: "/status", args: [] });
+      const statusMsg = window.SuperSonic.osc.encodeMessage("/status", []);
 
       const createBundleAt = (offsetMs) => {
         const targetNTP = getNTP() + offsetMs / 1000;

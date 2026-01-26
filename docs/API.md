@@ -952,42 +952,44 @@ Returns an object containing:
 - `capabilities` - Browser capabilities object
 - `version` - Engine version string (may be null if not yet received)
 
-### `SuperSonic.osc.encode(message)`
+### `SuperSonic.osc.encodeMessage(address, args)`
 
-Encode an OSC message object into binary format. Useful for building OSC messages manually.
+Encode an OSC message into binary format. Types are inferred automatically from JavaScript values.
 
 ```javascript
-const message = {
-  address: "/s_new",
-  args: [
-    { type: "s", value: "sonic-pi-beep" },
-    { type: "i", value: -1 },
-    { type: "i", value: 0 },
-    { type: "i", value: 0 },
-  ],
-};
-
-const bytes = SuperSonic.osc.encode(message);
+const bytes = SuperSonic.osc.encodeMessage("/s_new", [
+  "sonic-pi-beep",  // string
+  -1,               // integer
+  0,                // integer
+  0,                // integer
+]);
 // bytes is a Uint8Array
 ```
 
-### `SuperSonic.osc.decode(data, options)`
+### `SuperSonic.osc.encodeBundle(timeTag, packets)`
 
-Decode binary OSC data into a message object. Useful for debugging or logging.
+Encode an OSC bundle with a timestamp and multiple messages.
+
+```javascript
+const ntpTime = /* NTP timestamp */;
+const bytes = SuperSonic.osc.encodeBundle(ntpTime, [
+  { address: "/s_new", args: ["sonic-pi-beep", 1001, 0, 0] },
+  { address: "/n_set", args: [1001, "amp", 0.5] },
+]);
+```
+
+### `SuperSonic.osc.decode(data)`
+
+Decode binary OSC data into a message or bundle object. Useful for debugging or logging.
 
 **Parameters:**
 
 - `data` - `Uint8Array` or `ArrayBuffer` containing OSC data
-- `options` - Optional. `{ metadata: true }` to include type info in args
 
 ```javascript
-// Basic decode
 const msg = SuperSonic.osc.decode(oscBytes);
 console.log(msg.address, msg.args);
-
-// With type metadata
-const msg = SuperSonic.osc.decode(oscBytes, { metadata: true });
-// msg.args will be [{ type: "s", value: "..." }, ...]
+// For bundles: msg.timeTag, msg.packets
 ```
 
 ## OSC Commands

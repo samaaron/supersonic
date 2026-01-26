@@ -1,18 +1,12 @@
 // Scheduler Worker - runs timing loops isolated from main thread jank
 // Sends OSC directly to AudioWorklet via OscChannel, bypassing main thread
 
-import { OscChannel } from "../dist/supersonic.js";
+import { OscChannel, oscFast } from "../dist/supersonic.js";
 
-const NTP_EPOCH_OFFSET = 2208988800;
 const LOOKAHEAD = 0.15;
 
 // Direct channel to AudioWorklet (works in both SAB and PM modes)
 let oscChannel = null;
-
-// OSC bundle header: ASCII "#bundle\0"
-const OSC_BUNDLE_HEADER = new Uint8Array([
-  0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00,
-]);
 
 // Config received from main thread (groups, buses, loopConfig)
 let config = null;
@@ -47,98 +41,14 @@ let playbackStartNTP = null;
 let isInitialStart = false;
 
 const getNTP = () =>
-  (performance.timeOrigin + performance.now()) / 1000 + NTP_EPOCH_OFFSET;
+  (performance.timeOrigin + performance.now()) / 1000 + oscFast.NTP_EPOCH_OFFSET;
 
 const getBpmScale = () => state.bpm / 120;
 
-// ===== OSC ENCODING =====
-// Minimal OSC encoder (subset of what we need)
-function oscEncode(msg) {
-  const address = msg.address;
-  const args = msg.args || [];
-
-  // Calculate address size (null-padded to 4-byte boundary)
-  const addressBytes = new TextEncoder().encode(address);
-  const addressPadded = Math.ceil((addressBytes.length + 1) / 4) * 4;
-
-  // Build type tag string
-  let typeTag = ",";
-  for (const arg of args) {
-    typeTag += arg.type;
-  }
-  const typeTagBytes = new TextEncoder().encode(typeTag);
-  const typeTagPadded = Math.ceil((typeTagBytes.length + 1) / 4) * 4;
-
-  // Calculate args size
-  let argsSize = 0;
-  for (const arg of args) {
-    if (arg.type === "i" || arg.type === "f") argsSize += 4;
-    else if (arg.type === "s") {
-      const strBytes = new TextEncoder().encode(arg.value);
-      argsSize += Math.ceil((strBytes.length + 1) / 4) * 4;
-    }
-  }
-
-  // Build buffer
-  const totalSize = addressPadded + typeTagPadded + argsSize;
-  const buffer = new ArrayBuffer(totalSize);
-  const view = new DataView(buffer);
-  const bytes = new Uint8Array(buffer);
-
-  let offset = 0;
-
-  // Write address
-  bytes.set(addressBytes, offset);
-  offset = addressPadded;
-
-  // Write type tag
-  bytes.set(typeTagBytes, offset);
-  offset += typeTagPadded;
-
-  // Write args
-  for (const arg of args) {
-    if (arg.type === "i") {
-      view.setInt32(offset, arg.value, false);
-      offset += 4;
-    } else if (arg.type === "f") {
-      view.setFloat32(offset, arg.value, false);
-      offset += 4;
-    } else if (arg.type === "s") {
-      const strBytes = new TextEncoder().encode(arg.value);
-      bytes.set(strBytes, offset);
-      offset += Math.ceil((strBytes.length + 1) / 4) * 4;
-    }
-  }
-
-  return new Uint8Array(buffer);
-}
-
-function createOSCBundle(ntpTime, messages) {
-  const encoded = messages.map((m) => oscEncode(m));
-  const size = 16 + encoded.reduce((sum, m) => sum + 4 + m.byteLength, 0);
-  const bundle = new Uint8Array(size);
-  const view = new DataView(bundle.buffer);
-
-  bundle.set(OSC_BUNDLE_HEADER, 0);
-  view.setUint32(8, Math.floor(ntpTime), false);
-  view.setUint32(12, Math.floor((ntpTime % 1) * 0x100000000), false);
-
-  let offset = 16;
-  for (const msg of encoded) {
-    view.setInt32(offset, msg.byteLength, false);
-    bundle.set(msg, offset + 4);
-    offset += 4 + msg.byteLength;
-  }
-  return bundle;
-}
-
-// ===== HELPERS =====
-function oscArgs(...args) {
-  return args.map((v) => {
-    if (typeof v === "string") return { type: "s", value: v };
-    if (Number.isInteger(v)) return { type: "i", value: v };
-    return { type: "f", value: v };
-  });
+// ===== OSC HELPERS =====
+// Create a single-message bundle using osc_fast (zero-allocation)
+function createOSCBundle(ntpTime, address, args) {
+  return oscFast.encodeSingleBundle(ntpTime, address, args);
 }
 
 function getMinorPentatonicScale(root, octaves) {
@@ -240,7 +150,8 @@ class Scheduler {
 
       const message = this.createMessage(this.counter + i);
       if (message) {
-        const bundle = createOSCBundle(targetNTP, [message]);
+        // Use osc_fast's zero-allocation single bundle encoder
+        const bundle = createOSCBundle(targetNTP, message.address, message.args);
         // Send directly to AudioWorklet (bypasses main thread)
         sendOSC(bundle);
       }
@@ -261,9 +172,8 @@ class Scheduler {
       this.timeoutId = null;
     }
     if (freeGroup) {
-      // Send g_freeAll command directly to worklet
-      const msg = { address: "/g_freeAll", args: oscArgs(this.getGroup()) };
-      const encoded = oscEncode(msg);
+      // Send g_freeAll command directly to worklet using osc_fast
+      const encoded = oscFast.encodeMessage("/g_freeAll", [this.getGroup()]);
       sendOSC(encoded);
     }
     // Reset playbackStartNTP if all schedulers stopped
@@ -276,6 +186,7 @@ class Scheduler {
 
 // ===== SCHEDULERS =====
 // Use getters for config values so they read from received config
+// Args are plain values - osc_fast infers types automatically
 const arpScheduler = new Scheduler("Arp", {
   getInterval: () => 0.125 / getBpmScale(),
   createMessage: () => {
@@ -285,7 +196,7 @@ const arpScheduler = new Scheduler("Arp", {
 
     return {
       address: "/s_new",
-      args: oscArgs(
+      args: [
         `sonic-pi-${state.synth}`,
         -1,
         0,
@@ -300,7 +211,7 @@ const arpScheduler = new Scheduler("Arp", {
         state.attack,
         "release",
         state.release,
-      ),
+      ],
     };
   },
   getGroup: () => config?.groups.GROUP_ARP ?? 100,
@@ -319,7 +230,7 @@ const kickScheduler = new Scheduler("Kick", {
     const kickCfg = config.kickConfig?.[state.kickSample] || { buffer: 0 };
     return {
       address: "/s_new",
-      args: oscArgs(
+      args: [
         "sonic-pi-basic_stereo_player",
         -1,
         0,
@@ -330,7 +241,7 @@ const kickScheduler = new Scheduler("Kick", {
         config.buses.FX_BUS_BEAT,
         "amp",
         0.3,
-      ),
+      ],
     };
   },
   getGroup: () => config?.groups.GROUP_KICK ?? 103,
@@ -349,7 +260,7 @@ const amenScheduler = new Scheduler("Amen", {
     const cfg = loopConfig[state.loopSample] || { rate: 1, buffer: 1 };
     return {
       address: "/s_new",
-      args: oscArgs(
+      args: [
         "sonic-pi-basic_stereo_player",
         -1,
         0,
@@ -362,7 +273,7 @@ const amenScheduler = new Scheduler("Amen", {
         cfg.rate * getBpmScale(),
         "out_bus",
         config.buses.FX_BUS_BEAT,
-      ),
+      ],
     };
   },
   getGroup: () => config?.groups.GROUP_LOOPS ?? 102,

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>OSC Fast Test Harness</title>
+  </head>
+  <body>
+    <h1>OSC Fast Test Harness</h1>
+    <p>This page is driven by Playwright tests for osc_fast.js</p>
+
+    <script type="module">
+      import * as oscFast from "../js/lib/osc_fast.js";
+
+      // Expose to window for Playwright
+      window.oscFast = oscFast;
+
+      // Signal ready
+      window.oscReady = true;
+    </script>
+  </body>
+</html>

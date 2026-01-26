@@ -11,6 +11,8 @@ import { shouldBypass } from "./lib/osc_classifier.js";
 
 // Re-export OscChannel for use in workers
 export { OscChannel };
+// Re-export oscFast for direct use in workers (zero-allocation OSC encoding)
+export { oscFast };
 import { BufferManager } from "./lib/buffer_manager.js";
 import { AssetLoader } from "./lib/asset_loader.js";
 import { OSCRewriter } from "./lib/osc_rewriter.js";
@@ -20,7 +22,7 @@ import { MetricsReader } from "./lib/metrics_reader.js";
 import { NTPTiming } from "./lib/ntp_timing.js";
 import { AudioCapture } from "./lib/audio_capture.js";
 import { inspect, parseNodeTree } from "./lib/inspector.js";
-import oscLib from "./vendor/osc.js/osc.js";
+import * as oscFast from "./lib/osc_fast.js";
 import { SYNC_TIMEOUT_MS, WORKLET_INIT_TIMEOUT_MS, SNAPSHOT_INTERVAL_MS } from "./timing_constants.js";
 import { MemoryLayout } from "./memory_layout.js";
 import { defaultWorldOptions } from "./scsynth_options.js";
@@ -31,10 +33,41 @@ import { addWorkletModule } from "./lib/worker_loader.js";
  */
 
 export class SuperSonic {
-  // Expose OSC utilities as static methods
+  // Expose OSC utilities as static methods (uses plain args, not typed {type, value} format)
   static osc = {
-    encode: (message) => oscLib.writePacket(message),
-    decode: (data, options = { metadata: false }) => oscLib.readPacket(data, options),
+    encodeMessage: (address, args) => oscFast.copyEncoded(oscFast.encodeMessage(address, args)),
+    encodeBundle: (timeTag, packets) => oscFast.copyEncoded(oscFast.encodeBundle(timeTag, packets)),
+    decode: (data) => oscFast.decodePacket(data),
+    // Backwards-compatible encode for tests - handles legacy osc.js format
+    encode: (packet) => {
+      if (packet.timeTag !== undefined) {
+        // Bundle - convert legacy format
+        let timeTag;
+        if (packet.timeTag.raw) {
+          // Convert { raw: [seconds, fraction] } to NTP float
+          const [seconds, fraction] = packet.timeTag.raw;
+          timeTag = seconds + fraction / oscFast.TWO_POW_32;
+        } else if (typeof packet.timeTag === 'number') {
+          timeTag = packet.timeTag;
+        } else {
+          timeTag = 1; // immediate
+        }
+        // Convert typed args to plain args in packets
+        const packets = packet.packets.map(p => ({
+          address: p.address,
+          args: (p.args || []).map(a =>
+            (a && typeof a === 'object' && 'value' in a) ? a.value : a
+          ),
+        }));
+        return oscFast.copyEncoded(oscFast.encodeBundle(timeTag, packets));
+      } else {
+        // Message - convert typed args to plain args
+        const args = (packet.args || []).map(a =>
+          (a && typeof a === 'object' && 'value' in a) ? a.value : a
+        );
+        return oscFast.copyEncoded(oscFast.encodeMessage(packet.address, args));
+      }
+    },
   };
 
   /**
@@ -63,6 +96,9 @@ export class SuperSonic {
       scsynthSchedulerDropped: { type: 'counter', unit: 'count', description: 'Scheduled events dropped' },
       scsynthSequenceGaps: { type: 'counter', unit: 'count', description: 'Messages lost in transit from JS to scsynth' },
       scsynthSchedulerLates: { type: 'counter', unit: 'count', description: 'Bundles executed after their scheduled time' },
+      scsynthSchedulerMaxLateMs: { type: 'gauge', unit: 'ms', description: 'Maximum lateness observed in scsynth scheduler (ms)' },
+      scsynthSchedulerLastLateMs: { type: 'gauge', unit: 'ms', description: 'Most recent late magnitude in scsynth scheduler (ms)' },
+      scsynthSchedulerLastLateTick: { type: 'gauge', unit: 'count', description: 'Process count when last scsynth late occurred' },
 
       // Prescheduler metrics
       preschedulerPending: { type: 'gauge', unit: 'count', description: 'Events waiting to be scheduled' },
@@ -84,6 +120,7 @@ export class SuperSonic {
       preschedulerCapacity: { type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler' },
       preschedulerMinHeadroomMs: { type: 'gauge', unit: 'ms', description: 'Smallest time gap between JS prescheduler dispatch and scsynth scheduler execution' },
       preschedulerLates: { type: 'counter', unit: 'count', description: 'Bundles dispatched after their scheduled execution time' },
+      preschedulerMaxLateMs: { type: 'gauge', unit: 'ms', description: 'Maximum lateness at prescheduler (ms)' },
 
       // OSC In metrics
       oscInMessagesReceived: { type: 'counter', unit: 'count', description: 'OSC replies received from scsynth to JS' },
@@ -379,6 +416,47 @@ export class SuperSonic {
 
   getMetrics() {
     return this.#gatherMetrics();
+  }
+
+  /**
+   * Get a diagnostic snapshot containing metrics, node tree, and memory info.
+   * Useful for debugging timing issues, capturing state for bug reports, etc.
+   * @returns {Object} Snapshot with timestamp, metrics (with descriptions), nodeTree, and memory info
+   */
+  getSnapshot() {
+    const rawMetrics = this.#gatherMetrics();
+    const schema = SuperSonic.getMetricsSchema() || {};
+
+    // Build metrics with descriptions
+    const metricsWithDescriptions = {};
+    for (const [key, value] of Object.entries(rawMetrics)) {
+      const def = schema[key];
+      if (def?.description) {
+        metricsWithDescriptions[key] = {
+          value,
+          description: def.description,
+        };
+      } else {
+        metricsWithDescriptions[key] = { value };
+      }
+    }
+
+    // Get JS heap memory info (Chrome only, non-standard API)
+    let memory = null;
+    if (typeof performance !== 'undefined' && performance.memory) {
+      memory = {
+        usedJSHeapSize: performance.memory.usedJSHeapSize,
+        totalJSHeapSize: performance.memory.totalJSHeapSize,
+        jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+      };
+    }
+
+    return {
+      timestamp: new Date().toISOString(),
+      metrics: metricsWithDescriptions,
+      nodeTree: this.getRawTree(),
+      memory,
+    };
   }
 
   // ============================================================================
@@ -696,17 +774,13 @@ export class SuperSonic {
       this.loadedSynthDefs.clear();
     }
 
-    const oscArgs = args.map((arg) => {
-      if (typeof arg === "string") return { type: "s", value: arg };
-      if (typeof arg === "number") return { type: Number.isInteger(arg) ? "i" : "f", value: arg };
-      if (arg instanceof Uint8Array || arg instanceof ArrayBuffer) {
-        return { type: "b", value: arg instanceof ArrayBuffer ? new Uint8Array(arg) : arg };
-      }
-      throw new Error(`Unsupported argument type: ${typeof arg}`);
+    // Normalize ArrayBuffer to Uint8Array for blob args
+    const normalizedArgs = args.map(arg => {
+      if (arg instanceof ArrayBuffer) return new Uint8Array(arg);
+      return arg;
     });
 
-    const message = { address, args: oscArgs };
-    const oscData = SuperSonic.osc.encode(message);
+    const oscData = SuperSonic.osc.encodeMessage(address, normalizedArgs);
 
     if (this.#config.debug || this.#config.debugOscOut) {
       const maxLen = this.#config.activityConsoleLog.oscOutMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
@@ -1238,8 +1312,7 @@ export class SuperSonic {
 
       // Parse OSC and emit parsed message
       try {
-        const options = { metadata: false, unpackSingleArgs: false };
-        const msg = oscLib.readPacket(oscData, options);
+        const msg = oscFast.decodePacket(oscData);
 
         // Handle special messages
         if (msg.address === "/supersonic/buffer/freed") {
@@ -1343,6 +1416,7 @@ export class SuperSonic {
         ss.metrics = () => ss.primary?.getMetrics();
         ss.tree = () => ss.primary?.getTree();
         ss.rawTree = () => ss.primary?.getRawTree();
+        ss.snapshot = () => ss.primary?.getSnapshot();
         ss.inspect = () => ss.primary ? SuperSonic.inspect(ss.primary) : null;
       }
       window.__supersonic__.instances.push(this);
@@ -1511,12 +1585,15 @@ export class SuperSonic {
   }
 
   async #prepareOutboundPacket(uint8Data) {
-    const decodeOptions = { metadata: true, unpackSingleArgs: false };
     try {
-      const decodedPacket = SuperSonic.osc.decode(uint8Data, decodeOptions);
+      const decodedPacket = SuperSonic.osc.decode(uint8Data);
       const { packet, changed } = await this.#oscRewriter.rewritePacket(decodedPacket);
       if (!changed) return uint8Data;
-      return SuperSonic.osc.encode(packet);
+      // Re-encode the rewritten packet
+      if (packet.packets !== undefined) {
+        return SuperSonic.osc.encodeBundle(packet.timeTag, packet.packets);
+      }
+      return SuperSonic.osc.encodeMessage(packet.address, packet.args);
     } catch (error) {
       console.error("[SuperSonic] Failed to prepare OSC packet:", error);
       throw error;

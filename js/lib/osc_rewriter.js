@@ -237,12 +237,12 @@ export class OSCRewriter {
     return {
       address: "/b_allocPtr",
       args: [
-        this.#intArg(bufnum),
-        this.#intArg(bufferInfo.ptr),
-        this.#intArg(bufferInfo.numFrames),
-        this.#intArg(bufferInfo.numChannels),
-        this.#floatArg(bufferInfo.sampleRate),
-        this.#stringArg(bufferInfo.uuid),
+        Math.floor(bufnum),
+        Math.floor(bufferInfo.ptr),
+        Math.floor(bufferInfo.numFrames),
+        Math.floor(bufferInfo.numChannels),
+        bufferInfo.sampleRate,
+        String(bufferInfo.uuid),
       ],
     };
   }
@@ -254,20 +254,8 @@ export class OSCRewriter {
   }
 
   // ============================================================================
-  // ARGUMENT HELPERS
+  // ARGUMENT HELPERS (plain values - osc_fast infers types)
   // ============================================================================
-
-  #intArg(value) {
-    return { type: "i", value: Math.floor(value) };
-  }
-
-  #floatArg(value) {
-    return { type: "f", value };
-  }
-
-  #stringArg(value) {
-    return { type: "s", value: String(value) };
-  }
 
   #argAt(args, index) {
     if (!Array.isArray(args)) {
@@ -280,6 +268,7 @@ export class OSCRewriter {
     if (arg === undefined || arg === null) {
       return undefined;
     }
+    // Support both plain values and legacy {type, value} format for compatibility
     return typeof arg === "object" &&
       Object.prototype.hasOwnProperty.call(arg, "value")
       ? arg.value
@@ -311,11 +300,7 @@ export class OSCRewriter {
   }
 
   #requireBlobArg(args, index, errorMessage) {
-    const arg = this.#argAt(args, index);
-    if (!arg || arg.type !== "b") {
-      throw new Error(errorMessage);
-    }
-    const value = this.#getArgValue(arg);
+    const value = this.#getArgValue(this.#argAt(args, index));
     if (!(value instanceof Uint8Array || value instanceof ArrayBuffer)) {
       throw new Error(errorMessage);
     }
