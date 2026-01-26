@@ -26,6 +26,85 @@ SharedArrayBuffer requires COOP/COEP headers, preventing CDN deployment. We crea
 
 Both modes are first-class citizens. All tests must pass in both modes.
 
+## NTP Time and Clock Synchronization
+
+### The Problem
+
+OSC bundles carry NTP timestamps indicating when they should execute. All timestamps throughout SuperSonic are NTP-based (seconds since 1900-01-01). However, the AudioWorklet has no access to `performance.now()` or the system clock - it only receives the audio clock timestamp (`currentTime`) passed into `process()`.
+
+The AudioWorklet must translate between audio clock and NTP to know when to dispatch scheduled bundles to scsynth.
+
+### OSC Bundle Timestamps
+
+- **Timetag 0 or 1**: Execute immediately
+- **Any other value**: NTP timestamp (seconds since 1900-01-01)
+
+NTP time is calculated from the system clock:
+```
+ntpTime = (performance.timeOrigin + performance.now()) / 1000 + NTP_EPOCH_OFFSET
+```
+
+where `NTP_EPOCH_OFFSET = 2208988800` (seconds between 1900 and 1970).
+
+### Clock Translation
+
+At AudioContext boot, we record the **NTP start time** - the NTP timestamp when `audioContext.currentTime` was zero:
+
+```
+ntpStartTime = currentNTP - audioContext.currentTime
+```
+
+The AudioWorklet can then convert audio time to NTP:
+
+```
+currentNTP = audioContextTime + ntpStartTime + driftOffset
+```
+
+### Drift Management
+
+The audio clock and system clock drift relative to each other (hardware crystals aren't perfect). At typical 100ppm drift, clocks can diverge ~0.1ms per second.
+
+We measure and correct for drift:
+
+1. **Main thread** periodically (every 1000ms) compares expected vs actual `contextTime`:
+   ```
+   expectedContextTime = currentNTP - ntpStartTime
+   driftMs = (expectedContextTime - actualContextTime) * 1000
+   ```
+
+2. **Drift offset** is written to shared memory (SAB mode) or sent via postMessage (PM mode)
+
+3. **AudioWorklet** applies drift correction when converting timestamps
+
+### Time Data Flow
+
+```
+Main Thread                          AudioWorklet
+    │                                     │
+    │  ntpStartTime (at boot)             │
+    ├────────────────────────────────────▶│
+    │                                     │
+    │  driftOffset (every 1s)             │
+    ├────────────────────────────────────▶│
+    │                                     │
+    │                     currentTime ────┤
+    │                           +         │
+    │                   ntpStartTime      │
+    │                           +         │
+    │                    driftOffset      │
+    │                           =         │
+    │                     currentNTP ─────┤──▶ "Is this bundle ready?"
+    │                                     │
+```
+
+### Key Files
+
+| Component | File |
+|-----------|------|
+| NTP timing | `js/lib/ntp_timing.js` |
+| Timing utilities | `js/lib/timing_utils.js` |
+| Timing constants | `js/timing_constants.js` |
+
 ## Component Overview
 
 ```
@@ -114,6 +193,7 @@ Same pattern as OSC replies but via DEBUG buffer and `onDebug` event.
 | PM transport | `js/lib/transport/postmessage_transport.js` |
 | Prescheduler | `js/workers/osc_out_prescheduler_worker.js` |
 | AudioWorklet | `js/workers/scsynth_audio_worklet.js` |
+| NTP timing | `js/lib/ntp_timing.js` |
 | WASM entry | `src/audio_processor.cpp` |
 | WASM scheduler | `src/scheduler/BundleScheduler.h` |
 | Memory layout | `src/shared_memory.h` |

@@ -2,6 +2,8 @@
 
 SuperSonic is a port of SuperCollider's scsynth audio engine to work within the strict constraints of a web audioworklet. The goal is low latency and high reliability for long running sessions.
 
+**See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full architectural documentation including message flow diagrams and component relationships.**
+
 ## AudioWorklet Constraints
 
 The WASM scsynth runs inside an AudioWorklet which has strict requirements:
