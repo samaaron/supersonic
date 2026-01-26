@@ -48,9 +48,6 @@ export const DEBUG_SEQUENCE = 32;
 export const STATUS_FLAGS = 36;
 export const IN_WRITE_LOCK = 40;
 
-// Trailing log pointer for OSC logging (repurposed padding slot)
-export const IN_LOG_TAIL = 44;
-
 // =============================================================================
 // Helper functions
 // =============================================================================
@@ -70,7 +67,6 @@ export function calculateInControlIndices(ringBufferBase, CONTROL_START) {
         IN_TAIL: (base + IN_TAIL) / 4,
         IN_SEQUENCE: (base + IN_SEQUENCE) / 4,
         IN_WRITE_LOCK: (base + IN_WRITE_LOCK) / 4,
-        IN_LOG_TAIL: (base + IN_LOG_TAIL) / 4,
     };
 }
 
@@ -128,6 +124,5 @@ export function calculateAllControlIndices(ringBufferBase, CONTROL_START) {
         DEBUG_SEQUENCE: (base + DEBUG_SEQUENCE) / 4,
         STATUS_FLAGS: (base + STATUS_FLAGS) / 4,
         IN_WRITE_LOCK: (base + IN_WRITE_LOCK) / 4,
-        IN_LOG_TAIL: (base + IN_LOG_TAIL) / 4,
     };
 }

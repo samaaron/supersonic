@@ -5,7 +5,6 @@ import { Transport } from './transport.js';
 import { createWorker } from '../worker_loader.js';
 import { OscChannel } from '../osc_channel.js';
 import { calculateInControlIndices } from '../control_offsets.js';
-import { readMessagesFromBuffer } from '../ring_buffer_core.js';
 
 /**
  * SAB (SharedArrayBuffer) Transport
@@ -55,10 +54,6 @@ export class SABTransport extends Transport {
 
     // Cached prescheduler metrics (worker sends via postMessage)
     #cachedPreschedulerMetrics = null;
-
-    // OSC log polling interval
-    #oscLogInterval = null;
-    #oscLogIntervalMs = 150;
 
     /**
      * @param {Object} config
@@ -122,11 +117,6 @@ export class SABTransport extends Transport {
         // Start polling workers
         this.#oscInWorker.postMessage({ type: 'start' });
         this.#debugWorker.postMessage({ type: 'start' });
-
-        // Start OSC log polling (main thread reads directly from SAB)
-        this.#oscLogInterval = setInterval(() => {
-            this.#readOscLog();
-        }, this.#oscLogIntervalMs);
 
         this.#initialized = true;
     }
@@ -318,12 +308,6 @@ export class SABTransport extends Transport {
     dispose() {
         if (this._disposed) return;
 
-        // Stop OSC log polling
-        if (this.#oscLogInterval) {
-            clearInterval(this.#oscLogInterval);
-            this.#oscLogInterval = null;
-        }
-
         // Stop and terminate workers
         if (this.#oscOutWorker) {
             this.#oscOutWorker.postMessage({ type: 'stop' });
@@ -439,58 +423,5 @@ export class SABTransport extends Transport {
      */
     getPreschedulerMetrics() {
         return this.#cachedPreschedulerMetrics;
-    }
-
-    /**
-     * Read OSC log from IN buffer (SAB mode)
-     * Main thread reads directly from SAB, advancing logTail atomically.
-     * This eliminates allocations in the audio worklet's RT thread.
-     */
-    #readOscLog() {
-        if (!this.#initialized || this._disposed || !this.#bufferConstants) {
-            return;
-        }
-
-        // Read head and logTail positions atomically
-        const head = Atomics.load(this.#atomicView, this.#controlIndices.IN_HEAD);
-        const logTail = Atomics.load(this.#atomicView, this.#controlIndices.IN_LOG_TAIL);
-
-        // Nothing new to log
-        if (head === logTail) {
-            return;
-        }
-
-        const entries = [];
-        const bufferStart = this.#ringBufferBase + this.#bufferConstants.IN_BUFFER_START;
-        const bufferSize = this.#bufferConstants.IN_BUFFER_SIZE;
-        const timestamp = performance.now();
-
-        // Read messages from logTail to head
-        const { newTail } = readMessagesFromBuffer({
-            uint8View: this.#uint8View,
-            dataView: this.#dataView,
-            bufferStart,
-            bufferSize,
-            head,
-            tail: logTail,
-            messageMagic: this.#bufferConstants.MESSAGE_MAGIC,
-            paddingMagic: this.#bufferConstants.PADDING_MAGIC,
-            headerSize: this.#bufferConstants.MESSAGE_HEADER_SIZE,
-            onMessage: (payload, sequence, length, sourceId) => {
-                entries.push({
-                    sourceId,
-                    oscData: payload,  // Already a Uint8Array from readMessagesFromBuffer
-                    timestamp
-                });
-            }
-        });
-
-        // Advance logTail atomically
-        Atomics.store(this.#atomicView, this.#controlIndices.IN_LOG_TAIL, newTail);
-
-        // Call callback with entries
-        if (entries.length > 0 && this.#onOscLogCallback) {
-            this.#onOscLogCallback(entries);
-        }
     }
 }

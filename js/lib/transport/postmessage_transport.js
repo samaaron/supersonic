@@ -4,7 +4,6 @@
 import { Transport } from './transport.js';
 import { createWorker } from '../worker_loader.js';
 import { OscChannel } from '../osc_channel.js';
-import { readMessagesFromBuffer } from '../ring_buffer_core.js';
 
 /**
  * PostMessage Transport
@@ -54,9 +53,6 @@ export class PostMessageTransport extends Transport {
     // Timing functions
     #getAudioContextTime;
     #getNTPStartTime;
-
-    // Buffer constants for parsing raw OSC log (set after worklet init)
-    #bufferConstants = null;
 
     /**
      * @param {Object} config
@@ -299,15 +295,6 @@ export class PostMessageTransport extends Transport {
     }
 
     /**
-     * Set buffer constants (needed for parsing raw OSC log bytes)
-     * Called by SuperSonic after worklet initialization
-     * @param {Object} bufferConstants - Constants from worklet
-     */
-    setBufferConstants(bufferConstants) {
-        this.#bufferConstants = bufferConstants;
-    }
-
-    /**
      * Handle raw debug bytes from worklet (postMessage mode)
      * Decodes UTF-8 text and forwards to callback
      * @param {Object} data - { messages: Array<{bytes, sequence}> }
@@ -453,15 +440,10 @@ export class PostMessageTransport extends Transport {
                 break;
 
             case 'oscLog':
-                // OSC log from worklet (centralized logging) - legacy format
+                // OSC log from worklet (centralized logging)
                 if (data.entries && this.#onOscLogCallback) {
                     this.#onOscLogCallback(data.entries);
                 }
-                break;
-
-            case 'oscLogRaw':
-                // Raw OSC log bytes from worklet (new zero-allocation format)
-                this.#parseOscLogRaw(data);
                 break;
 
             case 'error':
@@ -471,62 +453,6 @@ export class PostMessageTransport extends Transport {
                     this.#onErrorCallback(data.error, 'worklet');
                 }
                 break;
-        }
-    }
-
-    /**
-     * Parse raw OSC log bytes from worklet
-     * Reconstructs buffer and parses messages on main thread
-     * @param {Object} data - { bufferSize, logTail, head, data, data2? }
-     */
-    #parseOscLogRaw(data) {
-        if (!this.#onOscLogCallback || !this.#bufferConstants) {
-            return;
-        }
-
-        const { bufferSize, logTail, head, data: rawData, data2 } = data;
-
-        // Reconstruct contiguous buffer if wrapped
-        let buffer;
-        if (data2) {
-            // Wrapped: combine two segments
-            const segment1 = new Uint8Array(rawData);
-            const segment2 = new Uint8Array(data2);
-            buffer = new Uint8Array(segment1.length + segment2.length);
-            buffer.set(segment1, 0);
-            buffer.set(segment2, segment1.length);
-        } else {
-            buffer = new Uint8Array(rawData);
-        }
-
-        // Parse messages from the reconstructed buffer
-        const entries = [];
-        const timestamp = performance.now();
-
-        // Create views for parsing (buffer starts at 0, head is at buffer.length)
-        const dataView = new DataView(buffer.buffer);
-
-        readMessagesFromBuffer({
-            uint8View: buffer,
-            dataView,
-            bufferStart: 0,
-            bufferSize: buffer.length,
-            head: buffer.length,
-            tail: 0,
-            messageMagic: this.#bufferConstants.MESSAGE_MAGIC,
-            paddingMagic: this.#bufferConstants.PADDING_MAGIC,
-            headerSize: this.#bufferConstants.MESSAGE_HEADER_SIZE,
-            onMessage: (payload, sequence, length, sourceId) => {
-                entries.push({
-                    sourceId,
-                    oscData: payload,
-                    timestamp
-                });
-            }
-        });
-
-        if (entries.length > 0) {
-            this.#onOscLogCallback(entries);
         }
     }
 
