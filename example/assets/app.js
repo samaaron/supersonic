@@ -849,6 +849,34 @@ function drawScope() {
 const trailCanvas = $("trail-canvas");
 const trailCtx = trailCanvas?.getContext("2d");
 
+// Pre-rendered gradient sprites to avoid per-frame gradient/string allocations
+// Creates 10 opacity levels of the glow sprite, drawn once at startup
+const SPRITE_LEVELS = 10;
+const SPRITE_SIZE = 64; // Base size, will be scaled during draw
+const trailSprites = [];
+
+function initTrailSprites() {
+  for (let level = 0; level < SPRITE_LEVELS; level++) {
+    const alpha = (level + 1) / SPRITE_LEVELS; // 0.1 to 1.0
+    const canvas = document.createElement("canvas");
+    canvas.width = SPRITE_SIZE;
+    canvas.height = SPRITE_SIZE;
+    const ctx = canvas.getContext("2d");
+
+    const cx = SPRITE_SIZE / 2;
+    const grad = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx);
+    grad.addColorStop(0, `rgba(255, 215, 0, ${alpha * 0.9})`);
+    grad.addColorStop(0.5, `rgba(255, 160, 0, ${alpha * 0.7})`);
+    grad.addColorStop(1, "rgba(255, 102, 0, 0)");
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
+    trailSprites.push(canvas);
+  }
+}
+
+if (trailCtx) initTrailSprites();
+
 if (trailCanvas) {
   const pad = $("synth-pad");
   if (pad) {
@@ -921,15 +949,11 @@ function updateTrail() {
     p.vy *= 0.98;
 
     const size = p.size * (0.5 + p.life * 0.5);
-    const grad = trailCtx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size);
-    grad.addColorStop(0, `rgba(255, 215, 0, ${p.life * 0.9})`);
-    grad.addColorStop(0.5, `rgba(255, 160, 0, ${p.life * 0.7})`);
-    grad.addColorStop(1, "rgba(255, 102, 0, 0)");
-
-    trailCtx.fillStyle = grad;
-    trailCtx.beginPath();
-    trailCtx.arc(p.x, p.y, size, 0, Math.PI * 2);
-    trailCtx.fill();
+    // Use pre-rendered sprite instead of creating gradient per particle
+    const spriteIdx = Math.min(SPRITE_LEVELS - 1, Math.floor(p.life * SPRITE_LEVELS));
+    const sprite = trailSprites[spriteIdx];
+    const drawSize = size * 2;
+    trailCtx.drawImage(sprite, p.x - size, p.y - size, drawSize, drawSize);
 
     trailParticles[writeIdx++] = p;
   }
@@ -1285,6 +1309,13 @@ window.stopAll = stopAll;
 
 // ===== SYNTH PAD =====
 const synthPad = $("synth-pad");
+// Cache pad element references to avoid DOM lookups in hot path
+const padTouch = $("synth-pad-touch");
+const padCrosshairH = $("synth-pad-crosshair-h");
+const padCrosshairV = $("synth-pad-crosshair-v");
+const padXVal = $("pad-x-value");
+const padYVal = $("pad-y-value");
+
 if (synthPad) {
   synthPad.classList.add("disabled");
   let isPadActive = false;
@@ -1296,19 +1327,18 @@ if (synthPad) {
 
     uiState.padX = x;
     uiState.padY = y;
-    uiState.padActive = isPadActive;
+    // Preserve padActive during autoplay (don't let mouse-up override it)
+    if (!isAutoPlaying) uiState.padActive = isPadActive;
 
     const px = x * rect.width,
       py = (1 - y) * rect.height;
-    $("synth-pad-touch").style.left = px + "px";
-    $("synth-pad-touch").style.top = py + "px";
-    $("synth-pad-crosshair-h").style.top = py + "px";
-    $("synth-pad-crosshair-v").style.left = px + "px";
+    padTouch.style.left = px + "px";
+    padTouch.style.top = py + "px";
+    padCrosshairH.style.top = py + "px";
+    padCrosshairV.style.left = px + "px";
 
-    const xVal = $("pad-x-value"),
-      yVal = $("pad-y-value");
-    if (xVal) xVal.textContent = x.toFixed(2);
-    if (yVal) yVal.textContent = y.toFixed(2);
+    if (padXVal) padXVal.textContent = x.toFixed(2);
+    if (padYVal) padYVal.textContent = y.toFixed(2);
 
     updateFXParameters(x, y);
   }
@@ -1317,7 +1347,7 @@ if (synthPad) {
     if (synthPad.classList.contains("disabled")) return;
     isPadActive = true;
     synthPad.classList.add("active");
-    $("synth-pad-touch").classList.add("active");
+    padTouch.classList.add("active");
     $("synth-pad-crosshair").classList.add("active");
     updatePadPosition(clientX, clientY);
     const noneRunning = !schedulerRunning.arp && !schedulerRunning.kick && !schedulerRunning.amen;
@@ -1333,11 +1363,11 @@ if (synthPad) {
 
   function deactivatePad() {
     isPadActive = false;
-    uiState.padActive = false;
-    // Only remove visual state if not in autoplay mode
+    // Only fully deactivate if not in autoplay mode
     if (!isAutoPlaying) {
+      uiState.padActive = false;
       synthPad.classList.remove("active");
-      $("synth-pad-touch").classList.remove("active");
+      padTouch.classList.remove("active");
       $("synth-pad-crosshair").classList.remove("active");
       stopTrailAnimation();
       stopAll();
@@ -1386,26 +1416,24 @@ $("play-toggle")?.addEventListener("click", async function () {
   btn.setAttribute("aria-pressed", isAutoPlaying.toString());
   btn.textContent = isAutoPlaying ? "Stop" : "Autoplay";
 
-  const synthPad = $("synth-pad");
-  const touch = $("synth-pad-touch");
   const crosshair = $("synth-pad-crosshair");
 
   if (isAutoPlaying) {
     // Start playback with visual state
     synthPad?.classList.add("active");
-    touch?.classList.add("active");
+    padTouch?.classList.add("active");
     crosshair?.classList.add("active");
 
     // Animate pointer to top-left area
-    if (synthPad && touch) {
+    if (synthPad && padTouch) {
       const rect = synthPad.getBoundingClientRect();
       const padding = 60;
       const targetPx = padding;
       const targetPy = padding;
 
       // Get current position (default to center if not set)
-      const startPx = parseFloat(touch.style.left) || rect.width / 2;
-      const startPy = parseFloat(touch.style.top) || rect.height / 2;
+      const startPx = parseFloat(padTouch.style.left) || rect.width / 2;
+      const startPy = parseFloat(padTouch.style.top) || rect.height / 2;
 
       // Enable trail animation
       uiState.padActive = true;
@@ -1422,19 +1450,18 @@ $("play-toggle")?.addEventListener("click", async function () {
         const px = startPx + (targetPx - startPx) * eased;
         const py = startPy + (targetPy - startPy) * eased;
 
-        touch.style.left = px + "px";
-        touch.style.top = py + "px";
-        $("synth-pad-crosshair-h")?.style && ($("synth-pad-crosshair-h").style.top = py + "px");
-        $("synth-pad-crosshair-v")?.style && ($("synth-pad-crosshair-v").style.left = px + "px");
+        padTouch.style.left = px + "px";
+        padTouch.style.top = py + "px";
+        if (padCrosshairH) padCrosshairH.style.top = py + "px";
+        if (padCrosshairV) padCrosshairV.style.left = px + "px";
 
         // Update normalized coordinates (y is inverted: 0=bottom, 1=top)
         const x = px / rect.width;
         const y = 1 - py / rect.height;
         uiState.padX = x;
         uiState.padY = y;
-        const xVal = $("pad-x-value"), yVal = $("pad-y-value");
-        if (xVal) xVal.textContent = x.toFixed(2);
-        if (yVal) yVal.textContent = y.toFixed(2);
+        if (padXVal) padXVal.textContent = x.toFixed(2);
+        if (padYVal) padYVal.textContent = y.toFixed(2);
         updateFXParameters(x, y);
 
         if (progress < 1) {
@@ -1456,7 +1483,7 @@ $("play-toggle")?.addEventListener("click", async function () {
   } else {
     // Stop playback and remove visual state
     synthPad?.classList.remove("active");
-    touch?.classList.remove("active");
+    padTouch?.classList.remove("active");
     crosshair?.classList.remove("active");
     stopTrailAnimation();
     stopAll();
