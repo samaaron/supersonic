@@ -527,7 +527,6 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         <textarea
                           id="message-input"
                           class="osc-textarea"
-                          placeholder="Single: /s_new sonic-pi-beep 1001 0 0 note 72&#10;Scheduled:&#10;0 /s_new 1 0 0 note 60&#10;0.5 /s_new 2 0 0 note 64"
                           disabled
                           spellcheck="false"
                           autocomplete="off"
@@ -546,10 +545,11 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                   <!-- OSC Guide (constrained height like controls) -->
                   <div class="osc-guide">
                     <div class="osc-guide__content">
-                      <p><strong>Play a Synth:</strong> <code>/s_new sonic-pi-beep -1 0 0 note 72</code></p>
-                      <p><strong>Schedule:</strong> <code>0.0 /s_new sonic-pi-beep -1 0 0 note 60</code> <code>0.5 /s_new sonic-pi-beep -1 0 0 note 64</code></p>
-                      <p><strong>Synths:</strong> sonic-pi-beep, sonic-pi-dsaw, sonic-pi-prophet, sonic-pi-tb303, sonic-pi-fm, sonic-pi-saw...</p>
-                      <p><a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" class="welcome-link">Full scsynth OSC docs →</a></p>
+                      <h3>Direct scsynth OSC Access</h3>
+                      <p class="osc-guide__intro">Send raw OSC messages directly to scsynth. Use standard Server Command Reference syntax with optional timestamp scheduling.</p>
+                      <p><strong>Immediate:</strong> <code>/s_new sonic-pi-beep -1 0 0 note 72</code></p>
+                      <p><strong>Scheduled:</strong> <code>0.0 /s_new sonic-pi-saw -1 0 0 note 60</code><br><code>0.5 /s_new sonic-pi-saw -1 0 0 note 64</code><br><code>1.0 /s_new sonic-pi-saw -1 0 0 note 67</code></p>
+                      <p><a href="https://doc.sccode.org/Reference/Server-Command-Reference.html" target="_blank" class="welcome-link">Full scsynth Server Command Reference →</a></p>
                     </div>
                   </div>
                 </section>
@@ -689,9 +689,6 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                           ><span class="metrics-val--muted"> ms</span></span
                         >
                       </div>
-                      <div class="metrics-row">
-                        <span>clock drift</span><span id="metric-drift" data-metric="driftOffsetMs" class="metrics-val">0ms</span>
-                      </div>
                     </div>
                     <div class="metrics-panel">
                       <div class="metrics-panel__title">scsynth</div>
@@ -703,6 +700,9 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                       </div>
                       <div class="metrics-row">
                         <span>synthdefs</span><span id="metric-synthdefs" data-metric="loadedSynthDefs" class="metrics-val">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>clock drift</span><span id="metric-drift" data-metric="driftOffsetMs" class="metrics-val">0ms</span>
                       </div>
                     </div>
                     <div class="metrics-panel metrics-panel--wide">
@@ -763,7 +763,7 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         <span>allocs</span><span id="metric-buffer-allocs" data-metric="bufferPoolAllocations" class="metrics-val--dim">0</span>
                       </div>
                       <button id="copy-metrics-btn" class="metrics-copy-btn" title="Copy metrics & node tree to clipboard" aria-label="Copy metrics to clipboard">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                           <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                         </svg>

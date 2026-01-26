@@ -95,22 +95,34 @@ let nodeTreeViz = null;
 let messages = [],
   sentMessages = [];
 
-// Batched log updates - collect messages and update DOM once per frame
+// Batched log updates - collect messages and update DOM in batches
+const LOG_BATCH_INTERVAL = 100; // Minimum ms between DOM updates
+const LOG_MAX_ITEMS = 50; // Max items to keep in each log
+
 const logBatch = {
-  debug: { pending: [], scheduled: false },
-  oscIn: { pending: [], scheduled: false },
-  oscOut: { pending: [], scheduled: false },
+  debug: { pending: [], scheduled: false, lastUpdate: 0 },
+  oscIn: { pending: [], scheduled: false, lastUpdate: 0 },
+  oscOut: { pending: [], scheduled: false, lastUpdate: 0 },
 };
 
-// Helper to batch updates using requestAnimationFrame
+// Helper to batch updates with throttling
 function batchedUpdate(batch, callback) {
   if (!batch.scheduled) {
     batch.scheduled = true;
-    requestAnimationFrame(() => {
-      callback(batch.pending);
-      batch.pending = [];
-      batch.scheduled = false;
-    });
+    const now = performance.now();
+    const elapsed = now - batch.lastUpdate;
+    const delay = Math.max(0, LOG_BATCH_INTERVAL - elapsed);
+
+    setTimeout(() => {
+      requestAnimationFrame(() => {
+        if (batch.pending.length > 0) {
+          callback(batch.pending);
+          batch.pending = [];
+        }
+        batch.scheduled = false;
+        batch.lastUpdate = performance.now();
+      });
+    }, delay);
   }
 }
 
@@ -574,7 +586,7 @@ function addMessage(msg) {
     let html = "";
     for (const m of pending) {
       messages.push(m);
-      if (messages.length > 50) messages.shift();
+      if (messages.length > LOG_MAX_ITEMS) messages.shift();
 
       html += `
         <div class="message-item">
@@ -587,7 +599,7 @@ function addMessage(msg) {
     history.insertAdjacentHTML("beforeend", html);
 
     // Trim excess DOM nodes if over limit
-    while (history.children.length > 50) {
+    while (history.children.length > LOG_MAX_ITEMS) {
       history.removeChild(history.firstChild);
     }
 
@@ -609,7 +621,7 @@ function addSentMessage(oscData, comment = null) {
     let html = "";
     for (const m of pending) {
       sentMessages.push(m);
-      if (sentMessages.length > 50) sentMessages.shift();
+      if (sentMessages.length > LOG_MAX_ITEMS) sentMessages.shift();
 
       const time = new Date(m.timestamp).toISOString().slice(11, 23);
       const content = m.comment
@@ -625,6 +637,12 @@ function addSentMessage(oscData, comment = null) {
     }
 
     history.insertAdjacentHTML("beforeend", html);
+
+    // Trim excess DOM nodes if over limit
+    while (history.children.length > LOG_MAX_ITEMS) {
+      history.removeChild(history.firstChild);
+    }
+
     history.scrollTop = history.scrollHeight;
     flashTab("osc-out");
   });
