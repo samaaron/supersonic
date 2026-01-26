@@ -1592,7 +1592,7 @@ $("init-button").addEventListener("click", async () => {
 
     orchestrator = new SuperSonic({
       baseURL: "dist/",
-      mode: "sab",
+      mode: "postMessage",
     });
 
     let bootPhase = true;

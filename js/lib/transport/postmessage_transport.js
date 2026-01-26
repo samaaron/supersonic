@@ -21,6 +21,7 @@ import { OscChannel } from '../osc_channel.js';
 export class PostMessageTransport extends Transport {
     #workletPort;
     #preschedulerWorker;
+    #oscOutLogWorker;
     #workerBaseURL;
 
     // Callbacks
@@ -39,6 +40,7 @@ export class PostMessageTransport extends Transport {
     #initialized = false;
     #preschedulerCapacity;
     #snapshotIntervalMs;
+    #bufferConstants = null;
 
     // Metrics (using canonical names matching metrics_offsets.js)
     #oscOutMessagesSent = 0;
@@ -117,7 +119,55 @@ export class PostMessageTransport extends Transport {
         // Initialize prescheduler worker with the other port for direct worklet communication
         await this.#initPreschedulerWorker(preschedulerChannel.port2);
 
+        // Create the OSC out log decoder worker
+        this.#oscOutLogWorker = await createWorker(
+            this.#workerBaseURL + 'osc_out_log_pm_worker.js',
+            { type: 'module' }
+        );
+
+        this.#oscOutLogWorker.onmessage = (event) => {
+            const data = event.data;
+            if (data.type === 'oscLog' && this.#onOscLogCallback) {
+                this.#onOscLogCallback(data.entries);
+            } else if (data.type === 'error') {
+                console.error('[PostMessageTransport] OSC OUT LOG error:', data.error);
+                if (this.#onErrorCallback) {
+                    this.#onErrorCallback(data.error, 'oscOutLog');
+                }
+            }
+        };
+
+        // Create MessageChannel for worklet -> decoder communication
+        const oscLogChannel = new MessageChannel();
+
+        // Send one port to worklet for sending raw OSC log bytes
+        this.#workletPort.postMessage(
+            { type: 'setOscLogPort' },
+            [oscLogChannel.port1]
+        );
+
+        // Initialize decoder worker with the other port (bufferConstants will be set later)
+        this.#oscOutLogWorker.postMessage(
+            { type: 'init', bufferConstants: null },
+            [oscLogChannel.port2]
+        );
+
         this.#initialized = true;
+    }
+
+    /**
+     * Set buffer constants for OSC log decoder worker
+     * Called by SuperSonic after receiving bufferConstants from worklet
+     * @param {Object} bufferConstants
+     */
+    setBufferConstants(bufferConstants) {
+        this.#bufferConstants = bufferConstants;
+        if (this.#oscOutLogWorker) {
+            this.#oscOutLogWorker.postMessage({
+                type: 'init',
+                bufferConstants: bufferConstants
+            });
+        }
     }
 
     /**
@@ -362,6 +412,11 @@ export class PostMessageTransport extends Transport {
             this.#preschedulerWorker = null;
         }
 
+        if (this.#oscOutLogWorker) {
+            this.#oscOutLogWorker.terminate();
+            this.#oscOutLogWorker = null;
+        }
+
         this.#workletPort = null;
         this.#initialized = false;
         super.dispose();
@@ -439,12 +494,7 @@ export class PostMessageTransport extends Transport {
                 // Handled by buffer manager
                 break;
 
-            case 'oscLog':
-                // OSC log from worklet (centralized logging)
-                if (data.entries && this.#onOscLogCallback) {
-                    this.#onOscLogCallback(data.entries);
-                }
-                break;
+            // Note: oscLog is now handled by the decoder worker, not the worklet directly
 
             case 'error':
                 console.error('[PostMessageTransport] Worklet error:', data.error);

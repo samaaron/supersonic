@@ -19,7 +19,7 @@
  *       std::atomic<int32_t> debug_sequence; // offset 32
  *       std::atomic<uint32_t> status_flags;  // offset 36
  *       std::atomic<int32_t> in_write_lock;  // offset 40
- *       int32_t _padding;                    // offset 44
+ *       std::atomic<int32_t> in_log_tail;    // offset 44
  *   };
  */
 
@@ -47,6 +47,7 @@ export const DEBUG_SEQUENCE = 32;
 // Status and synchronization
 export const STATUS_FLAGS = 36;
 export const IN_WRITE_LOCK = 40;
+export const IN_LOG_TAIL = 44;
 
 // =============================================================================
 // Helper functions
@@ -67,6 +68,7 @@ export function calculateInControlIndices(ringBufferBase, CONTROL_START) {
         IN_TAIL: (base + IN_TAIL) / 4,
         IN_SEQUENCE: (base + IN_SEQUENCE) / 4,
         IN_WRITE_LOCK: (base + IN_WRITE_LOCK) / 4,
+        IN_LOG_TAIL: (base + IN_LOG_TAIL) / 4,
     };
 }
 
@@ -124,5 +126,6 @@ export function calculateAllControlIndices(ringBufferBase, CONTROL_START) {
         DEBUG_SEQUENCE: (base + DEBUG_SEQUENCE) / 4,
         STATUS_FLAGS: (base + STATUS_FLAGS) / 4,
         IN_WRITE_LOCK: (base + IN_WRITE_LOCK) / 4,
+        IN_LOG_TAIL: (base + IN_LOG_TAIL) / 4,
     };
 }

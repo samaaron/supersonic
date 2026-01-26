@@ -1303,6 +1303,9 @@ export class SuperSonic {
     } else {
       await this.#osc.initialize(this.#workletNode.port);
 
+      // PM mode: pass bufferConstants to transport for decoder worker
+      this.#osc.setBufferConstants(bc);
+
       // Handle early debug messages that arrived before transport was ready
       if (this.#earlyDebugMessages?.length > 0) {
         for (const data of this.#earlyDebugMessages) {

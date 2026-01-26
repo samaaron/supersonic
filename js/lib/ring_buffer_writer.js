@@ -112,6 +112,9 @@ export function writeToRingBuffer({
         // Update head pointer (publish message)
         Atomics.store(atomicView, controlIndices.IN_HEAD, newHead);
 
+        // Notify waiting log worker that new data is available
+        Atomics.notify(atomicView, controlIndices.IN_HEAD, 1);
+
         return true;
     } finally {
         // === RELEASE LOCK ===

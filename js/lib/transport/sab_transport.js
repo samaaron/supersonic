@@ -32,6 +32,7 @@ export class SABTransport extends Transport {
     #oscOutWorker;
     #oscInWorker;
     #debugWorker;
+    #oscOutLogWorker;
     #workerBaseURL;
 
     // Callbacks
@@ -93,14 +94,16 @@ export class SABTransport extends Transport {
         }
 
         // Spawn workers (uses Blob URL if cross-origin)
-        const [oscOutWorker, oscInWorker, debugWorker] = await Promise.all([
+        const [oscOutWorker, oscInWorker, debugWorker, oscOutLogWorker] = await Promise.all([
             createWorker(this.#workerBaseURL + 'osc_out_prescheduler_worker.js', { type: 'module' }),
             createWorker(this.#workerBaseURL + 'osc_in_worker.js', { type: 'module' }),
-            createWorker(this.#workerBaseURL + 'debug_worker.js', { type: 'module' })
+            createWorker(this.#workerBaseURL + 'debug_worker.js', { type: 'module' }),
+            createWorker(this.#workerBaseURL + 'osc_out_log_sab_worker.js', { type: 'module' })
         ]);
         this.#oscOutWorker = oscOutWorker;
         this.#oscInWorker = oscInWorker;
         this.#debugWorker = debugWorker;
+        this.#oscOutLogWorker = oscOutLogWorker;
 
         // Set up message handlers
         this.#setupWorkerHandlers();
@@ -112,11 +115,13 @@ export class SABTransport extends Transport {
             }),
             this.#initWorker(this.#oscInWorker, 'OSC IN'),
             this.#initWorker(this.#debugWorker, 'DEBUG'),
+            this.#initWorker(this.#oscOutLogWorker, 'OSC OUT LOG'),
         ]);
 
         // Start polling workers
         this.#oscInWorker.postMessage({ type: 'start' });
         this.#debugWorker.postMessage({ type: 'start' });
+        this.#oscOutLogWorker.postMessage({ type: 'start' });
 
         this.#initialized = true;
     }
@@ -324,6 +329,11 @@ export class SABTransport extends Transport {
             this.#debugWorker.terminate();
             this.#debugWorker = null;
         }
+        if (this.#oscOutLogWorker) {
+            this.#oscOutLogWorker.postMessage({ type: 'stop' });
+            this.#oscOutLogWorker.terminate();
+            this.#oscOutLogWorker = null;
+        }
 
         this.#initialized = false;
         super.dispose();
@@ -412,6 +422,19 @@ export class SABTransport extends Transport {
                 this.#oscOutMessagesDropped++;
                 if (this.#onErrorCallback) {
                     this.#onErrorCallback(data.error, 'oscOut');
+                }
+            }
+        };
+
+        // OSC OUT LOG worker - receives logged OSC messages
+        this.#oscOutLogWorker.onmessage = (event) => {
+            const data = event.data;
+            if (data.type === 'oscLog' && this.#onOscLogCallback) {
+                this.#onOscLogCallback(data.entries);
+            } else if (data.type === 'error') {
+                console.error('[SABTransport] OSC OUT LOG error:', data.error);
+                if (this.#onErrorCallback) {
+                    this.#onErrorCallback(data.error, 'oscOutLog');
                 }
             }
         };

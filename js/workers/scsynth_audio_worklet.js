@@ -74,9 +74,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         // Map of port -> sourceId for worker ports (postMessage mode)
         this.portSourceIds = new Map();
 
-        // SAB mode: track position for OSC logging from IN buffer
-        // We read ahead of the tail pointer to log messages before C++ processes them
-        this.lastOscLogHead = 0;
+        // PM mode: port to send raw OSC log bytes to decoder worker
+        this.oscLogPort = null;
+        // PM mode: local tail position for OSC logging (no shared memory contention)
+        this.pmLogTail = 0;
 
         // Listen for messages from main thread
         this.port.onmessage = this.handleMessage.bind(this);
@@ -330,44 +331,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         }
     }
 
-    // Collect OSC messages from IN buffer for logging (SAB mode)
-    // Reads new messages written since last check without advancing tail
-    // This allows us to log messages before C++ processes them
-    collectOscLogFromInBuffer(audioTime) {
-        if (this.mode !== 'sab' || !this.bufferConstants) return;
-
-        const head = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
-        const lastHead = this.lastOscLogHead;
-
-        // Nothing new to log
-        if (head === lastHead) return;
-
-        const IN_BUFFER_SIZE = this.bufferConstants.IN_BUFFER_SIZE;
-        const bufferStart = this.ringBufferBase + this.bufferConstants.IN_BUFFER_START;
-
-        // Read messages from lastHead to head (for logging only, don't touch tail)
-        readMessagesFromBuffer({
-            uint8View: this.uint8View,
-            dataView: this.dataView,
-            bufferStart,
-            bufferSize: IN_BUFFER_SIZE,
-            head,
-            tail: lastHead,  // Read from where we last logged
-            messageMagic: this.bufferConstants.MESSAGE_MAGIC,
-            paddingMagic: this.bufferConstants.PADDING_MAGIC,
-            headerSize: this.bufferConstants.MESSAGE_HEADER_SIZE,
-            onMessage: (payload, sequence, length, sourceId) => {
-                this.oscLog.push({
-                    sourceId,
-                    oscData: new Uint8Array(payload),
-                    timestamp: audioTime
-                });
-            }
-        });
-
-        // Update our logging position
-        this.lastOscLogHead = head;
-    }
+    // Note: SAB mode OSC logging is now handled by osc_out_log_sab_worker
+    // The worker uses Atomics.wait() on IN_HEAD for instant wake when messages arrive
 
     // Read OSC replies from OUT ring buffer and send via postMessage
     // Uses shared ring_buffer_core for read logic
@@ -543,13 +508,14 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             snapshotsSent: this.treeSnapshotsSent
         }, [buffer]);
 
-        // Send OSC log if there are entries
-        if (this.oscLog.length > 0) {
-            // Transfer the oscData ArrayBuffers for efficiency
+        // Send OSC log if there are entries (PM mode only)
+        // SAB mode: logging is handled by osc_out_log_sab_worker
+        if (this.oscLog.length > 0 && this.oscLogPort) {
+            // Send structured entries to decoder worker via dedicated port
             const entries = this.oscLog;
             const transferList = entries.map(e => e.oscData.buffer);
-            this.port.postMessage({
-                type: 'oscLog',
+            this.oscLogPort.postMessage({
+                type: 'oscLogEntries',
                 entries: entries
             }, transferList);
             this.oscLog = [];
@@ -643,6 +609,15 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                             timestamp: currentTime
                         });
                     }
+                }
+                return;
+            }
+
+            // Handle setting the OSC log port (for PM mode decoder worker)
+            if (data.type === 'setOscLogPort') {
+                const port = event.ports[0];
+                if (port) {
+                    this.oscLogPort = port;
                 }
                 return;
             }
@@ -1097,22 +1072,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                             Atomics.notify(this.atomicView, this.CONTROL_INDICES.OUT_HEAD, 1);
                         }
                     }
-
-                    // SAB mode: Collect OSC log from IN buffer and send periodically
-                    this.collectOscLogFromInBuffer(audioContextTime);
-                    if (this.oscLog.length > 0) {
-                        // Check if interval has elapsed for sending OSC log
-                        if (this.lastTreeSendTime < 0 || audioContextTime - this.lastTreeSendTime >= this.treeSnapshotMinInterval) {
-                            this.lastTreeSendTime = audioContextTime;
-                            const entries = this.oscLog;
-                            const transferList = entries.map(e => e.oscData.buffer);
-                            this.port.postMessage({
-                                type: 'oscLog',
-                                entries: entries
-                            }, transferList);
-                            this.oscLog = [];
-                        }
-                    }
+                    // SAB mode: OSC logging is handled by osc_out_log_sab_worker
                 }
 
                 // Periodic status check - reduced frequency
