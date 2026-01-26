@@ -889,8 +889,16 @@ if (trailCanvas) {
   }
 }
 
+let lastSpawnTime = 0;
+const MIN_SPAWN_INTERVAL = 50; // Max 20 spawns/sec = 60 particles/sec
+
 function spawnTrailParticle() {
   if (!trailCanvas || !uiState.padActive) return;
+
+  const now = performance.now();
+  if (now - lastSpawnTime < MIN_SPAWN_INTERVAL) return;
+  lastSpawnTime = now;
+
   const x = uiState.padX * trailCanvas.width,
     y = (1 - uiState.padY) * trailCanvas.height;
 
@@ -903,7 +911,7 @@ function spawnTrailParticle() {
       vx: Math.cos(angle) * speed * 0.2,
       vy: Math.sin(angle) * speed * 0.2,
       life: 1.0,
-      maxLife: 0.6 + Math.random() * 0.4,
+      maxLife: 1.2 + Math.random() * 0.8,
       size: 8 + Math.random() * 8,
     });
   }
