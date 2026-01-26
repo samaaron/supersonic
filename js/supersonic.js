@@ -1302,6 +1302,9 @@ export class SuperSonic {
     } else {
       await this.#osc.initialize(this.#workletNode.port);
 
+      // Set buffer constants for parsing raw OSC log bytes
+      this.#osc.setBufferConstants(bc);
+
       // Handle early debug messages that arrived before transport was ready
       if (this.#earlyDebugMessages?.length > 0) {
         for (const data of this.#earlyDebugMessages) {
