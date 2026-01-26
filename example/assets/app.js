@@ -6,11 +6,6 @@ const DEV_MODE = false;
 const NTP_EPOCH_OFFSET = 2208988800; // Seconds between Unix epoch (1970) and NTP epoch (1900)
 const LOOKAHEAD = 0.5; // Seconds to schedule ahead for timing accuracy
 
-// OSC bundle header: ASCII "#bundle\0"
-const OSC_BUNDLE_HEADER = new Uint8Array([
-  0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00,
-]);
-
 // Scsynth node groups (keep synths organized in the node tree)
 const GROUP_ARP = 100;
 const GROUP_FX = 101;
@@ -178,15 +173,6 @@ function setSynthPadState(state) {
   pad.classList.add(state);
 }
 
-// OSC typed args builder - reduces verbosity in scheduler messages
-function oscArgs(...args) {
-  return args.map((v) => {
-    if (typeof v === "string") return { type: "s", value: v };
-    if (Number.isInteger(v)) return { type: "i", value: v };
-    return { type: "f", value: v };
-  });
-}
-
 // Generic tab system handler with ARIA support
 function setupTabSystem(buttonSelector, contentSelector, tabAttr, contentAttr) {
   $$(buttonSelector).forEach((btn) => {
@@ -247,6 +233,7 @@ function parseTextToOSC(text) {
   if (!address.startsWith("/"))
     throw new Error("OSC address must start with /");
 
+  // Parse args as plain values (osc_fast infers types)
   const args = parts.slice(1).map((arg) => {
     if (
       address === "/d_recv" &&
@@ -256,33 +243,19 @@ function parseTextToOSC(text) {
       const bytes = new Uint8Array(arg.length / 2);
       for (let i = 0; i < arg.length; i += 2)
         bytes[i / 2] = parseInt(arg.substr(i, 2), 16);
-      return { type: "b", value: bytes };
+      return bytes;
     }
-    if (/^-?\d+$/.test(arg)) return { type: "i", value: parseInt(arg, 10) };
-    if (/^-?\d*\.\d+$/.test(arg)) return { type: "f", value: parseFloat(arg) };
-    return { type: "s", value: arg };
+    if (/^-?\d+$/.test(arg)) return parseInt(arg, 10);
+    if (/^-?\d*\.\d+$/.test(arg)) return parseFloat(arg);
+    return arg;
   });
   return { address, args };
 }
 
 function createOSCBundle(ntpTime, messages) {
-  const encoded = messages.map((m) => SuperSonic.osc.encode(m));
-  const size = 16 + encoded.reduce((sum, m) => sum + 4 + m.byteLength, 0);
-  const bundle = new Uint8Array(size);
-  const view = new DataView(bundle.buffer);
-
-  // Write header and NTP timestamp (8 bytes header + 8 bytes timestamp)
-  bundle.set(OSC_BUNDLE_HEADER, 0);
-  view.setUint32(8, Math.floor(ntpTime), false);
-  view.setUint32(12, Math.floor((ntpTime % 1) * 0x100000000), false);
-
-  let offset = 16;
-  for (const msg of encoded) {
-    view.setInt32(offset, msg.byteLength, false);
-    bundle.set(msg, offset + 4);
-    offset += 4 + msg.byteLength;
-  }
-  return bundle;
+  // Convert messages to format expected by encodeBundle
+  const packets = messages.map((m) => ({ address: m.address, args: m.args }));
+  return SuperSonic.osc.encodeBundle(ntpTime, packets);
 }
 
 function colorizeOSCArgs(oscMsg) {
@@ -646,6 +619,9 @@ const METRICS_MAP = {
   scsynthSchedulerDropped: "scsynth_scheduler_dropped",
   scsynthSequenceGaps: "scsynth_sequence_gaps",
   scsynthSchedulerLates: "scsynth_scheduler_lates",
+  scsynthSchedulerMaxLateMs: "scsynth_scheduler_max_late_ms",
+  scsynthSchedulerLastLateMs: "scsynth_scheduler_last_late_ms",
+  scsynthSchedulerLastLateTick: "scsynth_scheduler_last_late_tick",
   preschedulerPending: "prescheduler_pending",
   preschedulerPendingPeak: "prescheduler_pending_peak",
   preschedulerDispatched: "prescheduler_dispatched",
@@ -671,7 +647,9 @@ const METRICS_MAP = {
   oscOutBytesSent: "osc_out_bytes_sent",
   driftOffsetMs: "drift_offset_ms",
   preschedulerMinHeadroomMs: "prescheduler_min_headroom_ms",
+  preschedulerMaxHeadroomMs: "prescheduler_max_headroom_ms",
   preschedulerLates: "prescheduler_lates",
+  preschedulerMaxLateMs: "prescheduler_max_late_ms",
   scsynthWasmErrors: "scsynth_wasm_errors",
   oscInCorrupted: "osc_in_corrupted",
 };
@@ -747,6 +725,8 @@ function updateMetrics(m) {
     "metric-scheduler-peak": mapped.scsynth_scheduler_peak_depth ?? 0,
     "metric-scheduler-dropped": mapped.scsynth_scheduler_dropped ?? 0,
     "metric-scheduler-lates": mapped.scsynth_scheduler_lates ?? 0,
+    "metric-scheduler-max-late": mapped.scsynth_scheduler_max_late_ms ?? 0,
+    "metric-scheduler-last-late": mapped.scsynth_scheduler_last_late_ms ?? 0,
     "metric-drift": (mapped.drift_offset_ms ?? 0) + "ms",
     "metric-prescheduler-pending": mapped.prescheduler_pending ?? 0,
     "metric-prescheduler-peak": mapped.prescheduler_pending_peak ?? 0,
@@ -754,7 +734,9 @@ function updateMetrics(m) {
     "metric-bundles-scheduled": mapped.prescheduler_bundles_scheduled ?? 0,
     "metric-events-cancelled": mapped.prescheduler_events_cancelled ?? 0,
     "metric-min-headroom": formatHeadroom(mapped.prescheduler_min_headroom_ms),
+    "metric-max-headroom": mapped.prescheduler_max_headroom_ms ?? 0,
     "metric-lates": mapped.prescheduler_lates ?? 0,
+    "metric-presched-max-late": mapped.prescheduler_max_late_ms ?? 0,
     "metric-prescheduler-retries-succeeded":
       mapped.prescheduler_retries_succeeded ?? 0,
     "metric-prescheduler-retries-failed":
@@ -1413,6 +1395,55 @@ $("play-toggle")?.addEventListener("click", async function () {
     synthPad?.classList.add("active");
     touch?.classList.add("active");
     crosshair?.classList.add("active");
+
+    // Animate pointer to top-left area
+    if (synthPad && touch) {
+      const rect = synthPad.getBoundingClientRect();
+      const padding = 60;
+      const targetPx = padding;
+      const targetPy = padding;
+
+      // Get current position (default to center if not set)
+      const startPx = parseFloat(touch.style.left) || rect.width / 2;
+      const startPy = parseFloat(touch.style.top) || rect.height / 2;
+
+      // Enable trail animation
+      uiState.padActive = true;
+
+      const duration = 1200; // ms
+      const startTime = performance.now();
+
+      function animatePointer(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // Ease out cubic for smooth deceleration
+        const eased = 1 - Math.pow(1 - progress, 3);
+
+        const px = startPx + (targetPx - startPx) * eased;
+        const py = startPy + (targetPy - startPy) * eased;
+
+        touch.style.left = px + "px";
+        touch.style.top = py + "px";
+        $("synth-pad-crosshair-h")?.style && ($("synth-pad-crosshair-h").style.top = py + "px");
+        $("synth-pad-crosshair-v")?.style && ($("synth-pad-crosshair-v").style.left = px + "px");
+
+        // Update normalized coordinates (y is inverted: 0=bottom, 1=top)
+        const x = px / rect.width;
+        const y = 1 - py / rect.height;
+        uiState.padX = x;
+        uiState.padY = y;
+        const xVal = $("pad-x-value"), yVal = $("pad-y-value");
+        if (xVal) xVal.textContent = x.toFixed(2);
+        if (yVal) yVal.textContent = y.toFixed(2);
+        updateFXParameters(x, y);
+
+        if (progress < 1) {
+          requestAnimationFrame(animatePointer);
+        }
+      }
+      requestAnimationFrame(animatePointer);
+    }
+
     // Trail animation starts via "started" message for proper sync
     const noneRunning = !schedulerRunning.arp && !schedulerRunning.kick && !schedulerRunning.amen;
     if (noneRunning) {
@@ -1592,7 +1623,7 @@ $("init-button").addEventListener("click", async () => {
 
     orchestrator = new SuperSonic({
       baseURL: "dist/",
-      mode: "postMessage",
+      mode: "sab",
     });
 
     let bootPhase = true;
@@ -1837,6 +1868,22 @@ $("load-example-button")?.addEventListener("click", async () => {
 8.0   /s_new sonic-pi-dsaw -1 0 0 note 47 amp 0.42 attack 0.5 release 4 detune 0.22 cutoff 86 pan -0.1
 12.0  /s_new sonic-pi-dsaw -1 0 0 note 52 amp 0.45 attack 0.4 release 4 detune 0.18 cutoff 95 pan 0.1
 12.0  /s_new sonic-pi-dsaw -1 0 0 note 28 amp 0.45 attack 0.4 release 5 detune 0.18 cutoff 85 pan 0.1`;
+});
+
+// Copy metrics button
+$("copy-metrics-btn")?.addEventListener("click", async () => {
+  if (!orchestrator) return;
+
+  const snapshot = orchestrator.getSnapshot();
+
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(snapshot, null, 2));
+    const btn = $("copy-metrics-btn");
+    btn.classList.add("copied");
+    setTimeout(() => btn.classList.remove("copied"), 1500);
+  } catch (err) {
+    console.error("Failed to copy metrics:", err);
+  }
 });
 
 // Apply schema tooltips to metric elements

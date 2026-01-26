@@ -31,7 +31,7 @@ constexpr uint32_t IN_BUFFER_SIZE     = 786432; // 768KB - OSC messages from JS 
 constexpr uint32_t OUT_BUFFER_SIZE    = 131072; // 128KB - OSC replies from scsynth to JS (prevent drops)
 constexpr uint32_t DEBUG_BUFFER_SIZE  = 65536;  // 64KB - Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 48;    // Atomic control pointers & flags (11 fields × 4 bytes + 4 padding for 8-byte alignment)
-constexpr uint32_t METRICS_SIZE       = 168;   // Performance metrics: 41 fields + 1 padding = 42 * 4 bytes = 168 bytes
+constexpr uint32_t METRICS_SIZE       = 184;   // Performance metrics: 45 fields + 1 padding = 46 * 4 bytes = 184 bytes
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in milliseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
@@ -101,12 +101,15 @@ struct alignas(4) ControlPointers {
 // Performance metrics structure
 // Layout designed for contiguous memcpy operations:
 // - [0-8]   scsynth (WASM + JS worklet writes)
-// - [9-22]  Prescheduler (JS prescheduler worker - all contiguous)
-// - [23-24] OSC Out (JS main thread)
-// - [25-28] OSC In (JS osc_in_worker)
-// - [29-30] Debug (JS debug_worker)
-// - [31-33] Ring buffer usage (WASM writes)
-// - [34-35] padding
+// - [9-23]  Prescheduler (JS prescheduler worker - all contiguous for single memcpy overlay)
+// - [24-25] OSC Out (JS main thread)
+// - [26-29] OSC In (JS osc_in_worker)
+// - [30-31] Debug (JS debug_worker)
+// - [32-34] Ring buffer usage (WASM writes)
+// - [35-37] Ring buffer peak usage (WASM writes)
+// - [38-41] Bypass category metrics (JS main thread / PM transport)
+// - [42-44] scsynth late timing diagnostics (WASM writes)
+// - [45]    padding
 struct alignas(4) PerformanceMetrics {
     // scsynth metrics [0-8] (offsets 0-6,8 written by WASM, 7 by JS worklet)
     std::atomic<uint32_t> process_count;           // 0: Audio process() callbacks
@@ -119,7 +122,7 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> wasm_errors;             // 7: WASM execution errors (JS worklet)
     std::atomic<uint32_t> scheduler_lates;         // 8: Bundles executed after scheduled time (WASM)
 
-    // Prescheduler metrics [9-22] (written by JS prescheduler worker)
+    // Prescheduler metrics [9-23] (written by JS prescheduler worker - all contiguous)
     std::atomic<uint32_t> prescheduler_pending;           // 9
     std::atomic<uint32_t> prescheduler_pending_peak;      // 10
     std::atomic<uint32_t> prescheduler_bundles_scheduled; // 11
@@ -134,38 +137,44 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> prescheduler_messages_retried;  // 20
     std::atomic<uint32_t> prescheduler_total_dispatches;  // 21
     std::atomic<uint32_t> prescheduler_bypassed;          // 22
+    std::atomic<int32_t> prescheduler_max_late_ms;        // 23: Maximum lateness at prescheduler (ms)
 
-    // OSC Out metrics [23-24] (written by JS main thread)
-    std::atomic<uint32_t> osc_out_messages_sent;   // 23
-    std::atomic<uint32_t> osc_out_bytes_sent;      // 24
+    // OSC Out metrics [24-25] (written by JS main thread)
+    std::atomic<uint32_t> osc_out_messages_sent;   // 24
+    std::atomic<uint32_t> osc_out_bytes_sent;      // 25
 
-    // OSC In metrics [25-28] (written by JS osc_in_worker)
-    std::atomic<uint32_t> osc_in_messages_received; // 25
-    std::atomic<uint32_t> osc_in_bytes_received;    // 26
-    std::atomic<uint32_t> osc_in_dropped_messages;  // 27
-    std::atomic<uint32_t> osc_in_corrupted;         // 28: Ring buffer message corruption detected
+    // OSC In metrics [26-29] (written by JS osc_in_worker)
+    std::atomic<uint32_t> osc_in_messages_received; // 26
+    std::atomic<uint32_t> osc_in_bytes_received;    // 27
+    std::atomic<uint32_t> osc_in_dropped_messages;  // 28
+    std::atomic<uint32_t> osc_in_corrupted;         // 29: Ring buffer message corruption detected
 
-    // Debug metrics [29-30] (written by JS debug_worker)
-    std::atomic<uint32_t> debug_messages_received;  // 29
-    std::atomic<uint32_t> debug_bytes_received;     // 30
+    // Debug metrics [30-31] (written by JS debug_worker)
+    std::atomic<uint32_t> debug_messages_received;  // 30
+    std::atomic<uint32_t> debug_bytes_received;     // 31
 
-    // Ring buffer usage [31-33] (written by WASM during process())
-    std::atomic<uint32_t> in_buffer_used_bytes;     // 31: Bytes used in IN buffer
-    std::atomic<uint32_t> out_buffer_used_bytes;    // 32: Bytes used in OUT buffer
-    std::atomic<uint32_t> debug_buffer_used_bytes;  // 33: Bytes used in DEBUG buffer
+    // Ring buffer usage [32-34] (written by WASM during process())
+    std::atomic<uint32_t> in_buffer_used_bytes;     // 32: Bytes used in IN buffer
+    std::atomic<uint32_t> out_buffer_used_bytes;    // 33: Bytes used in OUT buffer
+    std::atomic<uint32_t> debug_buffer_used_bytes;  // 34: Bytes used in DEBUG buffer
 
-    // Ring buffer peak usage [34-36] (written by WASM during process())
-    std::atomic<uint32_t> in_buffer_peak_bytes;     // 34: Peak bytes used in IN buffer
-    std::atomic<uint32_t> out_buffer_peak_bytes;    // 35: Peak bytes used in OUT buffer
-    std::atomic<uint32_t> debug_buffer_peak_bytes;  // 36: Peak bytes used in DEBUG buffer
+    // Ring buffer peak usage [35-37] (written by WASM during process())
+    std::atomic<uint32_t> in_buffer_peak_bytes;     // 35: Peak bytes used in IN buffer
+    std::atomic<uint32_t> out_buffer_peak_bytes;    // 36: Peak bytes used in OUT buffer
+    std::atomic<uint32_t> debug_buffer_peak_bytes;  // 37: Peak bytes used in DEBUG buffer
 
-    // Bypass category metrics [37-40] (written by JS main thread / PM transport)
-    std::atomic<uint32_t> bypass_non_bundle;        // 37: Plain OSC messages (not bundles)
-    std::atomic<uint32_t> bypass_immediate;         // 38: Bundles with timetag 0 or 1
-    std::atomic<uint32_t> bypass_near_future;       // 39: Within 200ms but not late
-    std::atomic<uint32_t> bypass_late;              // 40: Past their scheduled time
+    // Bypass category metrics [38-41] (written by JS main thread / PM transport)
+    std::atomic<uint32_t> bypass_non_bundle;        // 38: Plain OSC messages (not bundles)
+    std::atomic<uint32_t> bypass_immediate;         // 39: Bundles with timetag 0 or 1
+    std::atomic<uint32_t> bypass_near_future;       // 40: Within 200ms but not late
+    std::atomic<uint32_t> bypass_late;              // 41: Past their scheduled time
 
-    // Padding [41]
+    // scsynth late timing diagnostics [42-44] (written by WASM during process())
+    std::atomic<int32_t> scheduler_max_late_ms;     // 42: Maximum lateness observed (ms)
+    std::atomic<int32_t> scheduler_last_late_ms;    // 43: Most recent late magnitude (ms)
+    std::atomic<uint32_t> scheduler_last_late_tick; // 44: Process count when last late occurred
+
+    // Padding [45]
     uint32_t _padding[1];
 };
 

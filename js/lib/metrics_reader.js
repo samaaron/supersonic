@@ -125,6 +125,11 @@ export class MetricsReader {
       scsynthSchedulerLates: m[MetricsOffsets.SCSYNTH_SCHEDULER_LATES],
       // scsynthSchedulerCapacity is added in gatherMetrics() from bufferConstants
 
+      // scsynth late timing diagnostics (written by WASM during process())
+      scsynthSchedulerMaxLateMs: m[MetricsOffsets.SCSYNTH_SCHEDULER_MAX_LATE_MS],
+      scsynthSchedulerLastLateMs: m[MetricsOffsets.SCSYNTH_SCHEDULER_LAST_LATE_MS],
+      scsynthSchedulerLastLateTick: m[MetricsOffsets.SCSYNTH_SCHEDULER_LAST_LATE_TICK],
+
       // Prescheduler metrics (written by osc_out_prescheduler_worker.js)
       preschedulerPending: m[MetricsOffsets.PRESCHEDULER_PENDING],
       preschedulerPendingPeak: m[MetricsOffsets.PRESCHEDULER_PENDING_PEAK],
@@ -152,9 +157,10 @@ export class MetricsReader {
       oscOutMessagesSent: m[MetricsOffsets.OSC_OUT_MESSAGES_SENT],
       oscOutBytesSent: m[MetricsOffsets.OSC_OUT_BYTES_SENT],
 
-      // Preschedule timing metrics (written by osc_out_prescheduler_worker.js)
+      // Prescheduler timing metrics (written by osc_out_prescheduler_worker.js)
       preschedulerMinHeadroomMs: m[MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS],
       preschedulerLates: m[MetricsOffsets.PRESCHEDULER_LATES],
+      preschedulerMaxLateMs: m[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS],
 
       // Error metrics
       scsynthWasmErrors: m[MetricsOffsets.SCSYNTH_WASM_ERRORS],
@@ -242,15 +248,20 @@ export class MetricsReader {
     if (!this.#cachedSnapshotBuffer || !preschedulerMetrics) return;
 
     // Get a view into the metrics portion of the snapshot buffer
-    // Note: must cover all metrics including bypass categories at indices 37-40
-    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 42);
+    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 46);
 
-    // Copy prescheduler metrics (offsets 9-21), but NOT offset 22 (PRESCHEDULER_BYPASSED)
+    // Copy prescheduler metrics (offsets 9-22), but NOT offset 22 (PRESCHEDULER_BYPASSED)
+    // or offset 23 (PRESCHEDULER_MAX_LATE_MS).
     // The worklet tracks PRESCHEDULER_BYPASSED as it receives all bypassed messages
     // (from main thread + OscChannel workers), so it's the source of truth for this metric.
+    // PRESCHEDULER_MAX_LATE_MS is copied separately to include it.
     const start = MetricsOffsets.PRESCHEDULER_START;
-    const count = MetricsOffsets.PRESCHEDULER_COUNT - 1;  // Exclude PRESCHEDULER_BYPASSED at offset 22
+    const count = MetricsOffsets.PRESCHEDULER_COUNT - 2;  // Exclude BYPASSED (22) and MAX_LATE_MS (23)
     metricsView.set(preschedulerMetrics.subarray(start, start + count), start);
+
+    // Copy PRESCHEDULER_MAX_LATE_MS (offset 23) - this is tracked by prescheduler worker
+    metricsView[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS] =
+      preschedulerMetrics[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS];
   }
 
   /**
@@ -269,8 +280,7 @@ export class MetricsReader {
 
       // Read metrics from snapshot buffer
       if (this.#cachedSnapshotBuffer) {
-        // Note: must cover all metrics including bypass categories at indices 37-40
-        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 42);
+        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 46);
         metrics = this.parseMetricsBuffer(metricsView);
       } else {
         metrics = {};

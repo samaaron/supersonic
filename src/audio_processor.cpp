@@ -263,6 +263,11 @@ extern "C" {
         metrics->messages_sequence_gaps.store(0, std::memory_order_relaxed);
         metrics->scheduler_lates.store(0, std::memory_order_relaxed);
 
+        // Initialize late timing diagnostics
+        metrics->scheduler_max_late_ms.store(0, std::memory_order_relaxed);
+        metrics->scheduler_last_late_ms.store(0, std::memory_order_relaxed);
+        metrics->scheduler_last_late_tick.store(0, std::memory_order_relaxed);
+
         // Initialize node tree memory
         // All entries start with id = -1 (empty slot)
         // Using memset with 0xFF sets all bytes to 0xFF, which is -1 for signed int32
@@ -647,8 +652,29 @@ extern "C" {
                 // Rate-limit logging: only log first late bundle, then every 100th
                 static int late_count = 0;
                 if (time_diff_ms < -3.0) {
+                    // Cap late_ms to prevent overflow from timing sync issues
+                    // Values over 10 seconds indicate a systemic problem, not individual lateness
+                    double raw_late_ms = -time_diff_ms;
+                    int32_t late_ms = (raw_late_ms > 10000.0) ? 10000 : (int32_t)raw_late_ms;
                     late_count++;
                     metrics->scheduler_lates.fetch_add(1, std::memory_order_relaxed);
+
+                    // Track max lateness (compare-exchange loop for atomic max)
+                    int32_t current_max = metrics->scheduler_max_late_ms.load(std::memory_order_relaxed);
+                    while (late_ms > current_max) {
+                        if (metrics->scheduler_max_late_ms.compare_exchange_weak(
+                                current_max, late_ms, std::memory_order_relaxed, std::memory_order_relaxed)) {
+                            break;
+                        }
+                        // current_max is updated by compare_exchange_weak on failure
+                    }
+
+                    // Store last late magnitude and tick for correlation
+                    metrics->scheduler_last_late_ms.store(late_ms, std::memory_order_relaxed);
+                    metrics->scheduler_last_late_tick.store(
+                        metrics->process_count.load(std::memory_order_relaxed),
+                        std::memory_order_relaxed);
+
                     if (late_count == 1 || late_count % 100 == 0) {
                         // Extract OSC address from first message in bundle
                         // Bundle format: #bundle\0 (8) + timetag (8) + msg_size (4) + msg_data...

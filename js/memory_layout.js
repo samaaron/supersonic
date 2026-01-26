@@ -45,7 +45,7 @@ export const MemoryLayout = {
     /**
      * Ring buffer reserved space (between WASM heap and buffer pool)
      * Actual ring buffer usage: IN: 768KB, OUT: 128KB, DEBUG: 64KB = 960KB
-     * Plus control structures: CONTROL_SIZE (48B) + METRICS_SIZE (160B) + timing (16B) = 224B
+     * Plus control structures: CONTROL_SIZE (48B) + METRICS_SIZE (184B) + timing (16B) = 248B
      * Plus node tree: ~57KB
      * Plus audio capture buffer (for testing): 3sec at 48kHz stereo = ~1.1MB
      * Total actual usage: ~2.2MB

@@ -341,7 +341,7 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                       <div class="control-group__controls">
                         <div class="ctrl ctrl--full">
                           <label for="bpm-slider">BPM <span id="bpm-value" class="slider-value">120</span></label>
-                          <input type="range" id="bpm-slider" min="20" max="500" value="120" step="1" />
+                          <input type="range" id="bpm-slider" min="20" max="1000" value="120" step="1" />
                         </div>
                         <div class="ctrl">
                           <label for="loop-select">Loop</label>
@@ -723,7 +723,13 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                     <div class="metrics-panel">
                       <div class="metrics-panel__title">Presched Health</div>
                       <div class="metrics-row">
-                        <span>lates</span><span id="metric-lates" data-metric="preschedulerLates" class="metrics-val--red">0</span>
+                        <span>lates</span
+                        ><span
+                          ><span id="metric-lates" data-metric="preschedulerLates" class="metrics-val--red">0</span
+                          ><span class="metrics-sep"> (</span
+                          ><span id="metric-presched-max-late" data-metric="preschedulerMaxLateMs" class="metrics-val--dim">0</span
+                          ><span class="metrics-val--muted">ms max)</span></span
+                        >
                       </div>
                       <div class="metrics-row">
                         <span>cancelled</span><span id="metric-events-cancelled" data-metric="preschedulerEventsCancelled" class="metrics-val--red">0</span>
@@ -763,6 +769,15 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                       </div>
                       <div class="metrics-row">
                         <span>lates</span><span id="metric-scheduler-lates" data-metric="scsynthSchedulerLates" class="metrics-val--red">0</span>
+                      </div>
+                      <div class="metrics-row">
+                        <span>max/last late</span
+                        ><span
+                          ><span id="metric-scheduler-max-late" data-metric="scsynthSchedulerMaxLateMs" class="metrics-val--red">0</span
+                          ><span class="metrics-sep">/</span
+                          ><span id="metric-scheduler-last-late" data-metric="scsynthSchedulerLastLateMs" class="metrics-val--dim">0</span
+                          ><span class="metrics-val--muted"> ms</span></span
+                        >
                       </div>
                       <div class="metrics-row">
                         <span>clock drift</span><span id="metric-drift" data-metric="driftOffsetMs" class="metrics-val">0ms</span>
@@ -826,7 +841,7 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         >
                       </div>
                     </div>
-                    <div class="metrics-panel">
+                    <div class="metrics-panel metrics-panel--has-copy">
                       <div class="metrics-panel__title">Audio Buffers</div>
                       <div class="metrics-row">
                         <span>used</span><span id="metric-buffer-used" data-metric="bufferPoolUsedBytes" class="metrics-val">0 B</span>
@@ -837,6 +852,12 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                       <div class="metrics-row">
                         <span>allocs</span><span id="metric-buffer-allocs" data-metric="bufferPoolAllocations" class="metrics-val--dim">0</span>
                       </div>
+                      <button id="copy-metrics-btn" class="metrics-copy-btn" title="Copy metrics & node tree to clipboard" aria-label="Copy metrics to clipboard">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                      </button>
                     </div>
                   </div>
                 </section>

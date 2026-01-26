@@ -166,7 +166,7 @@ let maxPendingMessages = 65536;
 
 // Timing constants
 const NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
-const POLL_INTERVAL_MS = 25;           // Dispatch poll interval (separate from metrics snapshot)
+const POLL_INTERVAL_MS = 50;           // Dispatch poll interval (separate from metrics snapshot)
 const LOOKAHEAD_S = 0.200;             // 200ms lookahead window
 
 const schedulerLog = (...args) => {
@@ -579,10 +579,19 @@ const checkAndDispatch = () => {
             // Track timing: headroom (ms before execution) or lates (dispatched after execution time)
             if (timeUntilExec < 0) {
                 // Late dispatch - bundle arrived after its scheduled execution time
+                const lateMs = Math.round(-timeUntilExec * 1000);
                 metricsAdd(MetricsOffsets.PRESCHEDULER_LATES, 1);
+
+                // Track max lateness
+                const currentMaxLate = metricsGet(MetricsOffsets.PRESCHEDULER_MAX_LATE_MS);
+                if (lateMs > currentMaxLate) {
+                    metricsSet(MetricsOffsets.PRESCHEDULER_MAX_LATE_MS, lateMs);
+                }
             } else {
-                // On-time dispatch - track min headroom (recent window, resets periodically)
+                // On-time dispatch - track min headroom
                 const headroomMs = Math.round(timeUntilExec * 1000);
+
+                // Track min headroom
                 const currentMin = metricsGet(MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS);
                 if (currentMin === HEADROOM_UNSET_SENTINEL || headroomMs < currentMin) {
                     metricsSet(MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS, headroomMs);
@@ -761,8 +770,8 @@ self.addEventListener('message', (event) => {
                     workletPort = data.workletPort;
 
                     // postMessage mode: create local metrics buffer with same layout as SAB
-                    // Size matches METRICS_SIZE (128 bytes = 32 uint32s)
-                    const METRICS_SIZE = 128;
+                    // Size matches METRICS_SIZE (184 bytes = 46 uint32s)
+                    const METRICS_SIZE = 184;
                     localMetricsBuffer = new ArrayBuffer(METRICS_SIZE);
                     metricsView = new Uint32Array(localMetricsBuffer);
 
@@ -773,6 +782,9 @@ self.addEventListener('message', (event) => {
                 // Initialize min headroom to sentinel value ("unset")
                 // This allows 0ms to be a valid headroom value
                 metricsSet(MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS, HEADROOM_UNSET_SENTINEL);
+
+                // Initialize max late to 0 (any late value will exceed)
+                metricsSet(MetricsOffsets.PRESCHEDULER_MAX_LATE_MS, 0);
 
                 // Start periodic polling
                 startPeriodicPolling();

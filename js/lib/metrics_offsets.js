@@ -9,12 +9,15 @@
  *
  * Layout designed for contiguous memcpy operations:
  * - [0-8]   scsynth (WASM + worklet writes)
- * - [9-22]  Prescheduler (prescheduler worker - all contiguous for single memcpy overlay)
- * - [23-24] OSC Out (main thread)
- * - [25-28] OSC In (osc_in_worker)
- * - [29-30] Debug (debug_worker)
- * - [31-33] Ring buffer usage (WASM writes)
- * - [34-36] Ring buffer peak usage (WASM writes)
+ * - [9-23]  Prescheduler (prescheduler worker - all contiguous for single memcpy overlay)
+ * - [24-25] OSC Out (main thread)
+ * - [26-29] OSC In (osc_in_worker)
+ * - [30-31] Debug (debug_worker)
+ * - [32-34] Ring buffer usage (WASM writes)
+ * - [35-37] Ring buffer peak usage (WASM writes)
+ * - [38-41] Bypass category metrics (main thread / PM transport)
+ * - [42-44] scsynth late timing diagnostics (WASM writes)
+ * - [45]    padding
  */
 
 // =============================================================================
@@ -31,7 +34,7 @@ export const SCSYNTH_WASM_ERRORS = 7;          // WASM execution errors (written
 export const SCSYNTH_SCHEDULER_LATES = 8;      // Bundles executed after their scheduled time (WASM)
 
 // =============================================================================
-// Prescheduler metrics [9-22] (written by osc_out_prescheduler_worker.js)
+// Prescheduler metrics [9-23] (written by osc_out_prescheduler_worker.js)
 // ALL CONTIGUOUS for single memcpy overlay in postMessage mode
 // =============================================================================
 export const PRESCHEDULER_PENDING = 9;           // Events waiting to be dispatched
@@ -48,51 +51,59 @@ export const PRESCHEDULER_RETRY_QUEUE_PEAK = 19; // Peak retry queue size
 export const PRESCHEDULER_MESSAGES_RETRIED = 20; // Total messages that needed retry
 export const PRESCHEDULER_TOTAL_DISPATCHES = 21; // Total dispatch attempts
 export const PRESCHEDULER_BYPASSED = 22;         // Messages that bypassed prescheduler
+export const PRESCHEDULER_MAX_LATE_MS = 23;      // Maximum lateness at prescheduler (ms)
 
 // Prescheduler range constants for overlay
 export const PRESCHEDULER_START = 9;
-export const PRESCHEDULER_COUNT = 14;  // 9-22 inclusive
+export const PRESCHEDULER_COUNT = 15;  // 9-23 inclusive
 
 // =============================================================================
-// OSC Out metrics [23-24] (written by supersonic.js main thread)
+// OSC Out metrics [24-25] (written by supersonic.js main thread)
 // =============================================================================
-export const OSC_OUT_MESSAGES_SENT = 23;  // OSC messages sent to scsynth
-export const OSC_OUT_BYTES_SENT = 24;     // Total bytes sent
+export const OSC_OUT_MESSAGES_SENT = 24;  // OSC messages sent to scsynth
+export const OSC_OUT_BYTES_SENT = 25;     // Total bytes sent
 
 // =============================================================================
-// OSC In metrics [25-28] (written by osc_in_worker.js)
+// OSC In metrics [26-29] (written by osc_in_worker.js)
 // =============================================================================
-export const OSC_IN_MESSAGES_RECEIVED = 25; // OSC messages received from scsynth
-export const OSC_IN_BYTES_RECEIVED = 26;    // Total bytes received
-export const OSC_IN_DROPPED_MESSAGES = 27;  // Messages dropped (sequence gaps/corruption)
-export const OSC_IN_CORRUPTED = 28;         // Ring buffer message corruption detected
+export const OSC_IN_MESSAGES_RECEIVED = 26; // OSC messages received from scsynth
+export const OSC_IN_BYTES_RECEIVED = 27;    // Total bytes received
+export const OSC_IN_DROPPED_MESSAGES = 28;  // Messages dropped (sequence gaps/corruption)
+export const OSC_IN_CORRUPTED = 29;         // Ring buffer message corruption detected
 
 // =============================================================================
-// Debug metrics [29-30] (written by debug_worker.js)
+// Debug metrics [30-31] (written by debug_worker.js)
 // =============================================================================
-export const DEBUG_MESSAGES_RECEIVED = 29;  // Debug messages from scsynth
-export const DEBUG_BYTES_RECEIVED = 30;     // Total debug bytes
+export const DEBUG_MESSAGES_RECEIVED = 30;  // Debug messages from scsynth
+export const DEBUG_BYTES_RECEIVED = 31;     // Total debug bytes
 
 // =============================================================================
-// Ring buffer usage [31-33] (written by WASM during process())
+// Ring buffer usage [32-34] (written by WASM during process())
 // =============================================================================
-export const IN_BUFFER_USED_BYTES = 31;     // Bytes used in IN buffer
-export const OUT_BUFFER_USED_BYTES = 32;    // Bytes used in OUT buffer
-export const DEBUG_BUFFER_USED_BYTES = 33;  // Bytes used in DEBUG buffer
+export const IN_BUFFER_USED_BYTES = 32;     // Bytes used in IN buffer
+export const OUT_BUFFER_USED_BYTES = 33;    // Bytes used in OUT buffer
+export const DEBUG_BUFFER_USED_BYTES = 34;  // Bytes used in DEBUG buffer
 
 // =============================================================================
-// Ring buffer peak usage [34-36] (written by WASM during process())
+// Ring buffer peak usage [35-37] (written by WASM during process())
 // =============================================================================
-export const IN_BUFFER_PEAK_BYTES = 34;     // Peak bytes used in IN buffer
-export const OUT_BUFFER_PEAK_BYTES = 35;    // Peak bytes used in OUT buffer
-export const DEBUG_BUFFER_PEAK_BYTES = 36;  // Peak bytes used in DEBUG buffer
+export const IN_BUFFER_PEAK_BYTES = 35;     // Peak bytes used in IN buffer
+export const OUT_BUFFER_PEAK_BYTES = 36;    // Peak bytes used in OUT buffer
+export const DEBUG_BUFFER_PEAK_BYTES = 37;  // Peak bytes used in DEBUG buffer
 
 // =============================================================================
-// Bypass category metrics [37-40] (written by supersonic.js main thread / PM transport)
+// Bypass category metrics [38-41] (written by supersonic.js main thread / PM transport)
 // =============================================================================
-export const BYPASS_NON_BUNDLE = 37;    // Plain OSC messages (not bundles)
-export const BYPASS_IMMEDIATE = 38;     // Bundles with timetag 0 or 1
-export const BYPASS_NEAR_FUTURE = 39;   // Within 200ms but not late (diffSeconds >= 0 and < 0.2)
-export const BYPASS_LATE = 40;          // Past their scheduled time (diffSeconds < 0)
+export const BYPASS_NON_BUNDLE = 38;    // Plain OSC messages (not bundles)
+export const BYPASS_IMMEDIATE = 39;     // Bundles with timetag 0 or 1
+export const BYPASS_NEAR_FUTURE = 40;   // Within 200ms but not late (diffSeconds >= 0 and < 0.2)
+export const BYPASS_LATE = 41;          // Past their scheduled time (diffSeconds < 0)
 
-// [41] padding
+// =============================================================================
+// scsynth late timing diagnostics [42-44] (written by WASM during process())
+// =============================================================================
+export const SCSYNTH_SCHEDULER_MAX_LATE_MS = 42;    // Maximum lateness observed (ms)
+export const SCSYNTH_SCHEDULER_LAST_LATE_MS = 43;   // Most recent late magnitude (ms)
+export const SCSYNTH_SCHEDULER_LAST_LATE_TICK = 44; // Process count when last late occurred
+
+// [45] padding

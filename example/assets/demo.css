@@ -747,8 +747,8 @@ textarea:disabled, select:disabled, input:disabled {
   bottom: 8px; right: 12px;
   font-size: var(--fs-mini);
   font-family: "Courier New", monospace;
-  color: var(--c-gold);
-  background: rgba(0,0,0,0.7);
+  color: var(--c-orange-dark);
+  background: transparent;
   padding: 6px 10px;
   border-radius: 4px;
   pointer-events: none;
@@ -763,7 +763,7 @@ textarea:disabled, select:disabled, input:disabled {
 
 .play-toggle {
   position: absolute;
-  top: 8px;
+  bottom: 8px;
   left: 12px;
   padding: 8px 20px;
   font-size: var(--fs-mini);
@@ -859,7 +859,7 @@ textarea:disabled, select:disabled, input:disabled {
 }
 
 .control-group__header {
-  color: var(--c-gold);
+  color: var(--c-orange-dark);
   font-size: var(--fs-mini);
   font-weight: bold;
   text-transform: uppercase;
@@ -887,7 +887,7 @@ textarea:disabled, select:disabled, input:disabled {
 }
 
 .ctrl label {
-  color: var(--c-gold);
+  color: var(--c-orange-dark);
   font-size: var(--fs-mini);
   font-weight: bold;
   text-transform: uppercase;
@@ -962,7 +962,7 @@ textarea:disabled, select:disabled, input:disabled {
 }
 
 .slider-value {
-  color: var(--c-orange-dark);
+  color: var(--c-gold);
   font-family: "Courier New", monospace;
 }
 
@@ -980,7 +980,7 @@ textarea:disabled, select:disabled, input:disabled {
 }
 
 .mix-label {
-  color: var(--c-gold);
+  color: var(--c-orange-dark);
   font-size: var(--fs-mini);
   font-weight: bold;
   text-transform: uppercase;
@@ -1039,7 +1039,7 @@ textarea:disabled, select:disabled, input:disabled {
   align-items: center;
 }
 
-.slider-value { color: var(--c-orange-dark); font-family: "Courier New", monospace; font-size: var(--fs-description); font-weight: normal; }
+.slider-value { color: var(--c-gold); font-family: "Courier New", monospace; font-size: var(--fs-description); font-weight: normal; }
 
 .slider-control input[type="range"],
 .hue-control__inner input[type="range"] {
@@ -2088,6 +2088,35 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 .metrics-bar-peak--green { background: #8f8; }
 .metrics-bar-peak--purple { background: #f8f; }
 .metrics-bar-value { width: 28px; text-align: right; }
+
+.metrics-panel--has-copy { position: relative; }
+
+.metrics-copy-btn {
+  position: absolute;
+  bottom: 0.3rem;
+  right: 0.3rem;
+  padding: 3px 5px;
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 3px;
+  color: #555;
+  cursor: pointer;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.metrics-copy-btn:hover {
+  border-color: var(--c-orange);
+  color: var(--c-orange);
+}
+
+.metrics-copy-btn.copied {
+  border-color: #4a4;
+  color: #4a4;
+}
 
 /* ===== SUSPENDED OVERLAY ===== */
 .suspended-overlay {
