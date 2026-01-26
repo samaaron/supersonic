@@ -381,15 +381,18 @@ function updateStatus(status) {
     initContainer = $("init-button-container");
   const scopeContainer = $("scope-container"),
     uiContainer = $("synth-ui-container");
-  const restartContainer = $("restart-container");
+  const restartContainer = $("restart-container"),
+    hueBar = $("hue-bar");
 
   if (status === "not_initialized" || status === "error") {
     stopBootAnimation();
     initBtn.textContent = "Boot";
     initBtn.disabled = false;
-    if (initContainer) initContainer.style.display = "block";
-    if (scopeContainer) scopeContainer.style.display = "none";
+    if (initContainer) initContainer.style.display = "flex";
+    if (scopeContainer) scopeContainer.style.display = "block";
     if (uiContainer) uiContainer.classList.remove("initialized");
+    if (hueBar) hueBar.style.display = "none";
+    if (restartContainer) restartContainer.style.display = "none";
     $("message-input").disabled = true;
     $$("#message-form button").forEach((b) => (b.disabled = true));
   } else if (status === "initializing") {
@@ -402,9 +405,12 @@ function updateStatus(status) {
     if (initContainer) initContainer.style.display = "none";
     if (scopeContainer) scopeContainer.style.display = "block";
     if (uiContainer) uiContainer.classList.add("initialized");
-    if (restartContainer) restartContainer.style.display = "block";
+    if (restartContainer) restartContainer.style.display = "flex";
+    if (hueBar) hueBar.style.display = "flex";
     $("message-input").disabled = false;
     $$("#message-form button").forEach((b) => (b.disabled = false));
+    // Enable footer controls
+    $$("#restart-container button").forEach((b) => (b.disabled = false));
   }
 }
 
@@ -484,6 +490,25 @@ function positionLoadingLog() {
     });
   }
 }
+
+function positionInitOverlay() {
+  const initOverlay = $("init-button-container");
+  const pad = $("synth-pad");
+  const panel = document.querySelector(".dark-panel");
+  if (!initOverlay || !pad || !panel) return;
+  const pr = pad.getBoundingClientRect(),
+    panelR = panel.getBoundingClientRect();
+  Object.assign(initOverlay.style, {
+    top: `${pr.top - panelR.top}px`,
+    left: `${pr.left - panelR.left}px`,
+    width: `${pr.width}px`,
+    height: `${pr.height}px`,
+  });
+}
+
+// Position init overlay on load and resize
+positionInitOverlay();
+window.addEventListener("resize", positionInitOverlay);
 
 function showLoadingLog() {
   if (loadingLog) {
@@ -805,8 +830,31 @@ function resizeScope() {
   scopeCtx.scale(dpr, dpr);
 }
 
+// Draw a silent (flat line) scope before boot
+function drawSilentScope() {
+  if (!scopeCanvas || !scopeCtx) return;
+  resizeScope();
+  const w = scopeCanvas.offsetWidth,
+    h = scopeCanvas.offsetHeight;
+  scopeCtx.fillStyle = "#000";
+  scopeCtx.fillRect(0, 0, w, h);
+  scopeCtx.lineWidth = 3;
+  scopeCtx.strokeStyle = "#666";
+  scopeCtx.beginPath();
+  scopeCtx.moveTo(0, h / 2);
+  scopeCtx.lineTo(w, h / 2);
+  scopeCtx.stroke();
+}
+
+// Draw silent scope on load
+drawSilentScope();
+window.addEventListener("resize", drawSilentScope);
+
 function setupScope() {
   if (!orchestrator?.node?.context) return;
+
+  // Remove silent scope resize listener
+  window.removeEventListener("resize", drawSilentScope);
 
   analyser = orchestrator.node.context.createAnalyser();
   analyser.fftSize = 2048;
@@ -1611,7 +1659,7 @@ $("hue-slider")?.addEventListener("input", (e) => {
 
 // ===== TABS =====
 setupTabSystem(
-  ".main-tab-button",
+  ".segmented-toggle__btn",
   ".main-tab-content",
   "mainTab",
   "data-main-tab-content",
