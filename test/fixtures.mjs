@@ -30,6 +30,7 @@ export const test = base.extend({
       wasmBaseURL: "/dist/wasm/",
       sampleBaseURL: "/dist/samples/",
       synthdefBaseURL: "/dist/synthdefs/",
+      snapshotIntervalMs: 25,  // Fast metrics updates for test reliability
       mode,
     });
   },

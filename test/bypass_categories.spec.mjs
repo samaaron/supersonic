@@ -321,7 +321,7 @@ test.describe("Bypass Category Counters", () => {
       };
 
       // Test 1: With short threshold (50ms), a 100ms bundle should NOT bypass
-      const shortConfig = { ...baseConfig, bypassLookaheadMs: 50 };
+      const shortConfig = { ...baseConfig, bypassLookaheadMs: 50, snapshotIntervalMs: 25 };
       const sonicShort = new window.SuperSonic(shortConfig);
       await sonicShort.init();
       await sonicShort.sync();
@@ -333,7 +333,7 @@ test.describe("Bypass Category Counters", () => {
       await sonicShort.destroy();
 
       // Test 2: With long threshold (500ms), a 100ms bundle SHOULD bypass as nearFuture
-      const longConfig = { ...baseConfig, bypassLookaheadMs: 500 };
+      const longConfig = { ...baseConfig, bypassLookaheadMs: 500, snapshotIntervalMs: 25 };
       const sonicLong = new window.SuperSonic(longConfig);
       await sonicLong.init();
       await sonicLong.sync();

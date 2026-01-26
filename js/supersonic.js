@@ -1217,6 +1217,7 @@ export class SuperSonic {
     const transportConfig = {
       workerBaseURL: this.#config.workerBaseURL,
       preschedulerCapacity: this.#config.preschedulerCapacity,
+      snapshotIntervalMs: this.#config.snapshotIntervalMs,
       bypassLookaheadS: this.#config.bypassLookaheadMs / 1000,
       getAudioContextTime: () => this.#audioContext?.currentTime ?? 0,
       getNTPStartTime: () => this.#ntpTiming?.getNTPStartTime() ?? 0,
