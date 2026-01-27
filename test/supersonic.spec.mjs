@@ -1006,6 +1006,25 @@ test.describe("Event Emitter", () => {
     expect(result.sameContext).toBe(true);
     expect(result.sampleRate).toBe(44100);
   });
+
+  test("merges audioContextOptions with defaults", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic({
+        ...config,
+        audioContextOptions: { sampleRate: 44100 },
+      });
+
+      await sonic.init();
+
+      return {
+        success: true,
+        sampleRate: sonic.node.context.sampleRate,
+      };
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.sampleRate).toBe(44100);
+  });
 });
 
 // Node tree tests - getRawTree() and buffer constants work in both modes

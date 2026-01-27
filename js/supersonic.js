@@ -310,6 +310,7 @@ export class SuperSonic {
       audioContextOptions: {
         latencyHint: "interactive",
         sampleRate: 48000,
+        ...options.audioContextOptions,
       },
       memory: MemoryLayout,
       worldOptions: worldOptions,
