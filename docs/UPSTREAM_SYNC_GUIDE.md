@@ -95,6 +95,7 @@ git log supercollider/develop --oneline --since="$LAST_SYNC" -- \
 - ❌ Documentation (`README`, `*.md` in upstream)
 - ❌ Thread/mutex/lock code
 - ❌ Print statements (`printf`, `scprintf` for debugging)
+- ❌ Link UGens (`server/plugins/LinkUGens.cpp`) - see [Intentionally Excluded Features](#intentionally-excluded-features)
 
 **Only INCLUDE**:
 - ✅ scsynth server core (`server/scsynth/`)
@@ -679,6 +680,17 @@ See `BACKPORT_COMPLETION_SUMMARY.md` for full details.
 5. **Keep upstream links** - Future maintainers need to trace back to original PRs
 6. **Update this guide** - Add new patterns, pitfalls, or workflow improvements
 7. **Use cherry-pick when possible** - Preserves upstream history and attribution
+
+---
+
+## Intentionally Excluded Features
+
+Some upstream features are excluded due to AudioWorklet constraints:
+
+- ❌ **Link UGens** (`server/plugins/LinkUGens.cpp`) - requires network sockets for tempo sync ([PR #6947](https://github.com/supercollider/supercollider/pull/6947))
+- ❌ **Threading UGens** - no thread spawning in AudioWorklet
+- ❌ **Disk I/O UGens** (DiskIn, DiskOut, VDiskIn) - no filesystem access
+- ❌ **OSC Network UGens** (SendReply via UDP) - no network sockets
 
 ---
 
