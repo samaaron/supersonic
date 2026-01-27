@@ -2376,7 +2376,6 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 
 .synth-ui-container:fullscreen .dark-panel {
   width: 100%;
-  max-width: 1187px;
 }
 
 /* Segmented Toggle */
