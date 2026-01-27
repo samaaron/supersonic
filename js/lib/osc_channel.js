@@ -211,7 +211,7 @@ export class OscChannel {
             console.warn('[OscChannel] No prescheduler port, sending direct');
             return this.#sendDirect(oscData);
         }
-        this.#preschedulerPort.postMessage({ type: 'osc', oscData });
+        this.#preschedulerPort.postMessage({ type: 'osc', oscData, sourceId: this.#sourceId });
         return true;
     }
 

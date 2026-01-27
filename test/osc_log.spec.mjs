@@ -423,5 +423,84 @@ test.describe("Centralized OSC Out Logging", () => {
   });
 });
 
+test("sourceId is preserved for far-future bundles through prescheduler", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.sync();
+
+      const messagesBySource = new Map();
+
+      // Listen for message:sent events
+      sonic.on("message:sent", (oscData, sourceId) => {
+        const count = messagesBySource.get(sourceId) || 0;
+        messagesBySource.set(sourceId, count + 1);
+      });
+
+      // Create a worker and send far-future bundles (>200ms = goes through prescheduler)
+      const worker = new Worker("/test/assets/osc_channel_test_worker.js", { type: "module" });
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Worker ready timeout")), 5000);
+        worker.onmessage = (e) => {
+          if (e.data.type === "ready") {
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+      });
+
+      const channel = sonic.createOscChannel();
+      worker.postMessage(
+        { type: "initChannel", channel: channel.transferable },
+        channel.transferList
+      );
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Channel init timeout")), 5000);
+        worker.onmessage = (e) => {
+          if (e.data.type === "channelReady") {
+            clearTimeout(timeout);
+            resolve(e.data);
+          }
+        };
+      });
+
+      // Send far-future bundles (500ms offset - well beyond 200ms bypass threshold)
+      const FAR_FUTURE_COUNT = 5;
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Worker send timeout")), 5000);
+        worker.onmessage = (e) => {
+          if (e.data.type === "sentMultiple") {
+            clearTimeout(timeout);
+            resolve(e.data);
+          }
+        };
+        worker.postMessage({ type: "sendMultiple", count: FAR_FUTURE_COUNT, offsetMs: 500 });
+      });
+
+      // Wait for bundles to be dispatched through prescheduler and logged
+      // Need to wait longer than the 500ms offset plus processing time
+      await new Promise(r => setTimeout(r, 800));
+
+      worker.terminate();
+      await sonic.shutdown();
+
+      return {
+        sourceIds: Array.from(messagesBySource.keys()).sort((a, b) => a - b),
+        workerCount: messagesBySource.get(1) || 0,
+        messagesBySource: Object.fromEntries(messagesBySource),
+      };
+    }, sonicConfig);
+
+    // Worker messages through prescheduler should preserve sourceId 1
+    expect(result.sourceIds).toContain(1);
+    expect(result.workerCount).toBeGreaterThanOrEqual(1);
+
+    // Log for debugging
+    console.log(`Far-future test - sourceIds: ${JSON.stringify(result.sourceIds)}, by source: ${JSON.stringify(result.messagesBySource)}`);
+  });
+});
+
 // Define MAIN_COUNT and WORKER_COUNT as constants for reference in expects
 const MAIN_COUNT = 5;

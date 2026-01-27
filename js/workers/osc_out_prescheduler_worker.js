@@ -147,7 +147,7 @@ const stopMetricsSending = () => {
 };
 
 // Priority queue implemented as binary min-heap
-// Entries: { ntpTime, seq, sessionId, runTag, oscData }
+// Entries: { ntpTime, seq, sessionId, runTag, oscData, sourceId }
 let eventHeap = [];
 let periodicTimer = null;    // Single periodic timer for dispatch polling
 let sequenceCounter = 0;
@@ -259,7 +259,7 @@ const updateMetrics = () => {
  * In postMessage mode: sends directly to worklet via MessagePort
  * Returns true if successful, false if failed (caller should queue for retry)
  */
-const dispatchOSCMessage = (oscMessage, isRetry, timestamp = null) => {
+const dispatchOSCMessage = (oscMessage, isRetry, sourceId = 0) => {
     if (mode === 'postMessage') {
         // PostMessage mode: send to worklet via MessagePort
         if (!workletPort) {
@@ -269,6 +269,7 @@ const dispatchOSCMessage = (oscMessage, isRetry, timestamp = null) => {
         workletPort.postMessage({
             type: 'osc',
             oscData: oscMessage,
+            sourceId,
         });
         metricsAdd(MetricsOffsets.PRESCHEDULER_DISPATCHED, 1);
         return true;  // postMessage doesn't fail
@@ -298,6 +299,7 @@ const dispatchOSCMessage = (oscMessage, isRetry, timestamp = null) => {
         ringBufferBase,
         controlIndices: CONTROL_INDICES,
         oscMessage,
+        sourceId,
         maxSpins: 10  // Worker can afford brief spinning
     });
 
@@ -317,7 +319,7 @@ const dispatchOSCMessage = (oscMessage, isRetry, timestamp = null) => {
 /**
  * Add a message to the retry queue
  */
-const queueForRetry = (oscData, context) => {
+const queueForRetry = (oscData, context, sourceId = 0) => {
     // Use same holistic limit as scheduleEvent
     const totalPending = eventHeap.length + retryQueue.length;
     if (totalPending >= maxPendingMessages) {
@@ -330,7 +332,8 @@ const queueForRetry = (oscData, context) => {
         oscData,
         retryCount: 0,
         context: context || 'unknown',
-        queuedAt: performance.now()
+        queuedAt: performance.now(),
+        sourceId
     });
 
     // Update metrics
@@ -357,7 +360,7 @@ const processRetryQueue = () => {
         const item = retryQueue[i];
 
         // Try to write
-        const success = dispatchOSCMessage(item.oscData, true);
+        const success = dispatchOSCMessage(item.oscData, true, item.sourceId);
 
         if (success) {
             // Success - remove from queue
@@ -396,7 +399,7 @@ const processRetryQueue = () => {
  * Non-bundles or bundles without timestamps are dispatched immediately
  * Returns false if rejected due to backpressure
  */
-const scheduleEvent = (oscData, sessionId, runTag) => {
+const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
     // Backpressure: reject if total pending work exceeds limit
     const totalPending = eventHeap.length + retryQueue.length;
     if (totalPending >= maxPendingMessages) {
@@ -411,10 +414,10 @@ const scheduleEvent = (oscData, sessionId, runTag) => {
     if (ntpTime === null) {
         // Not a bundle - dispatch immediately to ring buffer
         schedulerLog('[PreScheduler] Non-bundle message, dispatching immediately');
-        const success = dispatchOSCMessage(oscData, false);
+        const success = dispatchOSCMessage(oscData, false, sourceId);
         if (!success) {
             // Queue for retry
-            queueForRetry(oscData, 'immediate message');
+            queueForRetry(oscData, 'immediate message', sourceId);
         }
         return true;
     }
@@ -444,7 +447,8 @@ const scheduleEvent = (oscData, sessionId, runTag) => {
         seq: sequenceCounter++,
         sessionId: sessionId || 0,
         runTag: runTag || '',
-        oscData
+        oscData,
+        sourceId
     };
 
     heapPush(event);
@@ -604,10 +608,10 @@ const checkAndDispatch = () => {
                         'early=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
                         'remaining=' + eventHeap.length);
 
-            const success = dispatchOSCMessage(nextEvent.oscData, false);
+            const success = dispatchOSCMessage(nextEvent.oscData, false, nextEvent.sourceId);
             if (!success) {
                 // Queue for retry
-                queueForRetry(nextEvent.oscData, 'scheduled bundle NTP=' + nextEvent.ntpTime.toFixed(3));
+                queueForRetry(nextEvent.oscData, 'scheduled bundle NTP=' + nextEvent.ntpTime.toFixed(3), nextEvent.sourceId);
             }
             dispatchCount++;
         } else {
@@ -719,19 +723,19 @@ const extractMessagesFromBundle = (data) => {
     return messages;
 };
 
-const processImmediate = (oscData) => {
+const processImmediate = (oscData, sourceId = 0) => {
     if (isBundle(oscData)) {
         const messages = extractMessagesFromBundle(oscData);
         for (let i = 0; i < messages.length; i++) {
-            const success = dispatchOSCMessage(messages[i], false);
+            const success = dispatchOSCMessage(messages[i], false, sourceId);
             if (!success) {
-                queueForRetry(messages[i], 'immediate bundle message ' + i);
+                queueForRetry(messages[i], 'immediate bundle message ' + i, sourceId);
             }
         }
     } else {
-        const success = dispatchOSCMessage(oscData, false);
+        const success = dispatchOSCMessage(oscData, false, sourceId);
         if (!success) {
-            queueForRetry(oscData, 'immediate message');
+            queueForRetry(oscData, 'immediate message', sourceId);
         }
     }
 };
@@ -800,8 +804,8 @@ self.addEventListener('message', (event) => {
                 if (sourcePort) {
                     sourcePort.onmessage = (e) => {
                         if (e.data.type === 'osc' && e.data.oscData) {
-                            // Process through normal scheduling path
-                            scheduleEvent(e.data.oscData, 0, '');
+                            // Process through normal scheduling path, preserving sourceId
+                            scheduleEvent(e.data.oscData, 0, '', e.data.sourceId || 0);
                         }
                     };
                     schedulerLog('[OSCPreSchedulerWorker] Added external OSC source');
@@ -814,12 +818,13 @@ self.addEventListener('message', (event) => {
                 scheduleEvent(
                     data.oscData,
                     data.sessionId || 0,
-                    data.runTag || ''
+                    data.runTag || '',
+                    data.sourceId || 0
                 );
                 break;
 
             case 'sendImmediate':
-                processImmediate(data.oscData);
+                processImmediate(data.oscData, data.sourceId || 0);
                 break;
 
             case 'cancelSessionTag':
