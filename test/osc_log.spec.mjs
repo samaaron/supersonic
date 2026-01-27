@@ -421,9 +421,8 @@ test.describe("Centralized OSC Out Logging", () => {
       expect(msg.size).toBeGreaterThan(0);
     }
   });
-});
 
-test("sourceId is preserved for far-future bundles through prescheduler", async ({ page, sonicConfig }) => {
+  test("sourceId is preserved for far-future bundles through prescheduler", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
