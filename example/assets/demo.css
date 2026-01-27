@@ -2412,28 +2412,17 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   border-color: var(--c-gray-600);
 }
 
-/* Mobile: hue at top, toggle+restart at bottom */
+/* Mobile: hue inline above app, toggle+restart inline below app */
 @media (max-width: 480px) {
-  body {
-    padding-top: 36px;
-    padding-bottom: 36px;
-  }
   .hue-bar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 100;
+    /* Inline in document flow, same style as desktop */
+    position: static;
   }
   .footer-toolbar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 100;
+    /* Inline in document flow, not fixed */
+    position: static;
   }
   .segmented-toggle__btn { padding: 0.2rem 0.5rem; font-size: 0.7rem; }
-  .hue-bar__slider { width: 100px; }
   .restart-button { padding: 0.2rem 0.5rem; }
 }
 

@@ -248,6 +248,20 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
         </div>
       </aside>
 
+      <!-- Hue Bar (mobile: inline above app, desktop: in footer area) -->
+      <div id="hue-bar" class="hue-bar" hidden>
+        <label for="hue-slider" id="hue-label" class="hue-bar__label">Hue</label>
+        <input
+          type="range"
+          id="hue-slider"
+          class="hue-bar__slider"
+          min="0"
+          max="360"
+          value="180"
+          step="1"
+        />
+      </div>
+
       <!-- Demo -->
       <main id="demo">
         <div id="synth-ui-container" class="synth-ui-container">
@@ -892,20 +906,6 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
           </div>
         </div>
       </main>
-    </div>
-
-    <!-- Hue Bar (mobile: top, desktop: in footer) -->
-    <div id="hue-bar" class="hue-bar" hidden>
-      <label for="hue-slider" id="hue-label" class="hue-bar__label">Hue</label>
-      <input
-        type="range"
-        id="hue-slider"
-        class="hue-bar__slider"
-        min="0"
-        max="360"
-        value="180"
-        step="1"
-      />
     </div>
 
     <!-- Footer Toolbar -->
