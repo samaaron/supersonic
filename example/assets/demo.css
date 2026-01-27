@@ -1387,6 +1387,9 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 
   .logs-grid .tab-content { display: none; }
   .logs-grid .tab-content.active { display: block; }
+
+  .code-snippet pre,
+  .code-snippet:first-child pre { font-size: 0.55rem !important; }
 }
 
 /* Feature boxes - narrow screens only (2 on top, 1 centered below) */

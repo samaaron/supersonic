@@ -37,13 +37,57 @@ const state = {
 };
 
 // ===== TIMING =====
-let playbackStartNTP = null;
-let isInitialStart = false;
-
 const getNTP = () =>
   (performance.timeOrigin + performance.now()) / 1000 + oscFast.NTP_EPOCH_OFFSET;
 
-const getBpmScale = () => state.bpm / 120;
+// ===== TIMELINE (Ableton Link style) =====
+// Single source of truth for beat → time conversion
+// All schedulers reference this for timing, ensuring they stay in phase
+// When BPM changes, anchor adjusts to preserve current beat position
+const timeline = {
+  anchor: null,      // NTP time of beat 0 (adjusted when BPM changes)
+  bpm: 120,
+
+  // Get NTP time for a given beat number (beats are 8th notes)
+  getTimeAtBeat(beat) {
+    if (this.anchor === null) return null;
+    const interval = 0.125 / (this.bpm / 120);
+    return this.anchor + beat * interval;
+  },
+
+  // Get current beat at a given NTP time
+  getBeatAtTime(ntp) {
+    if (this.anchor === null) return 0;
+    const interval = 0.125 / (this.bpm / 120);
+    return (ntp - this.anchor) / interval;
+  },
+
+  // Start the timeline at a given NTP time
+  start(startNTP, bpm) {
+    this.anchor = startNTP;
+    this.bpm = bpm;
+  },
+
+  // Update BPM while preserving current beat position (Ableton Link style)
+  setBpm(newBpm) {
+    if (this.anchor === null || newBpm === this.bpm) return;
+
+    const now = getNTP();
+    const currentBeat = this.getBeatAtTime(now);
+
+    // Update BPM and recalculate anchor so currentBeat stays at 'now'
+    // now = newAnchor + currentBeat * newInterval
+    // newAnchor = now - currentBeat * newInterval
+    const newInterval = 0.125 / (newBpm / 120);
+    this.anchor = now - currentBeat * newInterval;
+    this.bpm = newBpm;
+  },
+
+  reset() {
+    this.anchor = null;
+    this.bpm = 120;
+  }
+};
 
 // ===== OSC HELPERS =====
 // Create a single-message bundle using osc_fast (zero-allocation)
@@ -95,100 +139,105 @@ function getArpNote(scale) {
 }
 
 // ===== SCHEDULER CLASS =====
+// Schedulers use the shared timeline for all timing, ensuring phase alignment
 class Scheduler {
-  constructor(name, { getInterval, getBatchSize = () => 4, createMessage, getGroup }) {
+  constructor(name, { getBeatsPerEvent, getBatchSize = () => 4, createMessage, getGroup }) {
     this.name = name;
-    this.getInterval = getInterval;
+    this.getBeatsPerEvent = getBeatsPerEvent;  // How many 8th-note beats per event
     this.getBatchSize = getBatchSize;
     this.createMessage = createMessage;
     this.getGroup = getGroup;
     this.running = false;
-    this.counter = 0;
-    this.currentTime = null;
+    this.nextBeat = 0;  // Next beat to schedule (in 8th notes)
     this.timeoutId = null;
   }
 
   start() {
-    if (this.running) return;
+    console.log(`[${this.name}] start() called, running=${this.running}`);
+    if (this.running) {
+      console.log(`[${this.name}] already running, returning early`);
+      return;
+    }
     this.running = true;
 
-    const interval = this.getInterval();
     const now = getNTP();
 
-    if (playbackStartNTP === null) {
-      // Nothing playing - start immediately with short lookahead
-      playbackStartNTP = now;
-      isInitialStart = true;
-      this.counter = 0;
-      this.currentTime = playbackStartNTP;
-    } else if (isInitialStart) {
-      // Another scheduler joining during initial start - start immediately too
-      this.counter = 0;
-      this.currentTime = playbackStartNTP;
+    if (timeline.anchor === null) {
+      // First scheduler to start - initialize timeline
+      const STARTUP_DELAY = 0.1;
+      timeline.start(now + STARTUP_DELAY, state.bpm);
+      this.nextBeat = 0;
     } else {
-      // Sync to existing playback - align to next bar
-      const barDuration = 2 / getBpmScale();
-      const elapsed = now - playbackStartNTP;
-      const nextBar = Math.ceil(elapsed / barDuration) * barDuration;
-      this.counter = Math.round(nextBar / interval);
-      this.currentTime = playbackStartNTP + nextBar;
+      // Join existing playback - align to next bar (16 8th notes)
+      const currentBeat = timeline.getBeatAtTime(now);
+      const beatsPerBar = 16;
+      this.nextBeat = Math.ceil(currentBeat / beatsPerBar) * beatsPerBar;
     }
 
-    const delay = Math.max(0, (this.currentTime - now) * 1000);
+    const nextTime = timeline.getTimeAtBeat(this.nextBeat);
+    const delay = Math.max(0, (nextTime - now) * 1000);
     this.timeoutId = setTimeout(() => this.running && this.scheduleBatch(), delay);
   }
 
   scheduleBatch() {
     if (!this.running) return;
 
-    const interval = this.getInterval();
+    const beatsPerEvent = this.getBeatsPerEvent();
     const batchSize = this.getBatchSize();
+    const now = getNTP();
+
+    // Debug: log first 8 events to verify timestamps
+    const shouldLog = Math.floor(this.nextBeat / beatsPerEvent) < 8 && this.name === "Arp";
 
     for (let i = 0; i < batchSize; i++) {
-      const targetNTP = this.currentTime + LOOKAHEAD;
-      this.currentTime += interval;
+      const eventBeat = this.nextBeat + i * beatsPerEvent;
+      const targetNTP = timeline.getTimeAtBeat(eventBeat) + LOOKAHEAD;
 
-      const message = this.createMessage(this.counter + i);
+      const eventIndex = Math.floor(eventBeat / beatsPerEvent);
+      const message = this.createMessage(eventIndex);
       if (message) {
-        // Use osc_fast's zero-allocation single bundle encoder
+        if (shouldLog) {
+          const playsIn = (targetNTP - now) * 1000;
+          console.log(`[${this.name} beat=${eventBeat}] target=${targetNTP.toFixed(3)}, playsIn=${playsIn.toFixed(0)}ms`);
+        }
         const bundle = createOSCBundle(targetNTP, message.address, message.args);
-        // Send directly to AudioWorklet (bypasses main thread)
         sendOSC(bundle);
       }
     }
 
-    this.counter += batchSize;
+    this.nextBeat += batchSize * beatsPerEvent;
 
-    const now = getNTP();
-    const nextDelay = Math.max(50, (this.currentTime - now) * 1000 - 500);
+    // Schedule next batch
+    const nowAfter = getNTP();
+    const nextBatchTime = timeline.getTimeAtBeat(this.nextBeat);
+    const nextDelay = Math.max(50, (nextBatchTime - nowAfter) * 1000 - 500);
     this.timeoutId = setTimeout(() => this.running && this.scheduleBatch(), nextDelay);
   }
 
   stop(freeGroup = false) {
     this.running = false;
-    this.currentTime = null;
+    this.nextBeat = 0;
     if (this.timeoutId) {
       clearTimeout(this.timeoutId);
       this.timeoutId = null;
     }
     if (freeGroup) {
-      // Send g_freeAll command directly to worklet using osc_fast
       const encoded = oscFast.encodeMessage("/g_freeAll", [this.getGroup()]);
       sendOSC(encoded);
     }
-    // Reset playbackStartNTP if all schedulers stopped
+    // Reset timeline if all schedulers stopped
     if (!arpScheduler.running && !kickScheduler.running && !amenScheduler.running) {
-      playbackStartNTP = null;
+      timeline.reset();
     }
   }
 }
 
 
 // ===== SCHEDULERS =====
-// Use getters for config values so they read from received config
-// Args are plain values - osc_fast infers types automatically
+// All schedulers use the shared timeline for timing
+// getBeatsPerEvent returns how many 8th-note beats between events
 const arpScheduler = new Scheduler("Arp", {
-  getInterval: () => 0.125 / getBpmScale(),
+  getBeatsPerEvent: () => 1,  // One 8th note per arp event
   createMessage: () => {
     if (!config) return null;
     if (state.synth === "none") return null;
@@ -219,7 +268,7 @@ const arpScheduler = new Scheduler("Arp", {
 });
 
 const kickScheduler = new Scheduler("Kick", {
-  getInterval: () => 0.125 / getBpmScale(),
+  getBeatsPerEvent: () => 1,  // One 8th note per kick step
   createMessage: (counter) => {
     if (!config) return null;
     if (state.kickSample === "none") return null;
@@ -250,10 +299,13 @@ const kickScheduler = new Scheduler("Kick", {
 });
 
 const amenScheduler = new Scheduler("Amen", {
-  getInterval: () => {
-    if (!config) return 2 / getBpmScale();
+  getBeatsPerEvent: () => {
+    // Convert loop duration (in seconds at 120 BPM) to 8th-note beats
+    // e.g., 2.0 seconds at 120 BPM = 16 8th notes
+    if (!config) return 16;
     const loopConfig = config.loopConfig;
-    return (loopConfig[state.loopSample]?.duration ?? 2) / getBpmScale();
+    const duration = loopConfig[state.loopSample]?.duration ?? 2;
+    return duration / 0.125;  // Convert seconds to 8th notes (at 120 BPM base)
   },
   getBatchSize: () => 1,
   createMessage: () => {
@@ -261,6 +313,8 @@ const amenScheduler = new Scheduler("Amen", {
     if (state.loopSample === "none") return null;
     const loopConfig = config.loopConfig;
     const cfg = loopConfig[state.loopSample] || { rate: 1, buffer: 1 };
+    // Rate scales with BPM to keep loop in sync
+    const bpmScale = timeline.bpm / 120;
     return {
       address: "/s_new",
       args: [
@@ -273,7 +327,7 @@ const amenScheduler = new Scheduler("Amen", {
         "amp",
         0.5,
         "rate",
-        cfg.rate * getBpmScale(),
+        cfg.rate * bpmScale,
         "out_bus",
         config.buses.FX_BUS_BEAT,
       ],
@@ -314,7 +368,12 @@ self.onmessage = (e) => {
       break;
 
     case "state":
-      // Update state values
+      // Update state values, but handle BPM changes specially
+      if (data.bpm !== undefined && data.bpm !== state.bpm) {
+        state.bpm = data.bpm;
+        // Update timeline - this preserves current beat position (Ableton Link style)
+        timeline.setBpm(data.bpm);
+      }
       Object.assign(state, data);
       // Reset arp direction on mode change
       if (data.arpMode !== undefined) {
@@ -334,7 +393,7 @@ self.onmessage = (e) => {
       // Notify main thread of playback timing for visual sync (only for arp)
       // Offset by LOOKAHEAD so beat pulse syncs with when audio actually plays
       if (data.scheduler === "arp" || data.scheduler === "all") {
-        self.postMessage({ type: "started", scheduler: "arp", playbackStartNTP: playbackStartNTP + LOOKAHEAD });
+        self.postMessage({ type: "started", scheduler: "arp", playbackStartNTP: timeline.anchor + LOOKAHEAD });
       }
       break;
 
@@ -354,7 +413,7 @@ self.onmessage = (e) => {
       arpScheduler.stop();
       kickScheduler.stop();
       amenScheduler.stop();
-      playbackStartNTP = null;
+      timeline.reset();
       patternIndex = 0;
       arpDirection = 1;
       break;

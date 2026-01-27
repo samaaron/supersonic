@@ -1457,6 +1457,7 @@ if (synthPad) {
   }
 
   synthPad.addEventListener("mousedown", (e) => {
+    if (e.target.closest("#play-toggle")) return;
     e.preventDefault();
     activatePad(e.clientX, e.clientY);
   });
