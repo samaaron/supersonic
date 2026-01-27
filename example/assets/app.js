@@ -1086,6 +1086,7 @@ function initSchedulerWorker() {
       );
     } else if (type === "channelReady") {
       console.log("Scheduler worker has direct worklet connection");
+      $("play-toggle")?.classList.remove("disabled");
     } else if (type === "started" && e.data.scheduler === "arp") {
       // Sync main thread timing with worker for beat pulse
       playbackStartNTP = e.data.playbackStartNTP;
@@ -1398,6 +1399,7 @@ const padYVal = $("pad-y-value");
 
 if (synthPad) {
   synthPad.classList.add("disabled");
+  $("play-toggle")?.classList.add("disabled");
   let isPadActive = false;
 
   function updatePadPosition(clientX, clientY) {
@@ -1836,6 +1838,7 @@ $("init-button").addEventListener("click", async () => {
       await loadAllKickSamples();
       await loadSynthdefs("instruments");
       await initFXChain();
+      initSchedulerWorker();
     });
 
     orchestrator.on("audiocontext:suspended", () =>
