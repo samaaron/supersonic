@@ -191,6 +191,7 @@ const arpScheduler = new Scheduler("Arp", {
   getInterval: () => 0.125 / getBpmScale(),
   createMessage: () => {
     if (!config) return null;
+    if (state.synth === "none") return null;
     const scale = getMinorPentatonicScale(state.rootNote, state.octaves);
     const note = getArpNote(scale);
 
@@ -221,6 +222,7 @@ const kickScheduler = new Scheduler("Kick", {
   getInterval: () => 0.125 / getBpmScale(),
   createMessage: (counter) => {
     if (!config) return null;
+    if (state.kickSample === "none") return null;
     const pattern = KICK_PATTERNS[state.kickPattern] || KICK_PATTERNS.four;
     const step = counter % 16;
     const shouldPlay = pattern[step];
@@ -256,6 +258,7 @@ const amenScheduler = new Scheduler("Amen", {
   getBatchSize: () => 1,
   createMessage: () => {
     if (!config) return null;
+    if (state.loopSample === "none") return null;
     const loopConfig = config.loopConfig;
     const cfg = loopConfig[state.loopSample] || { rate: 1, buffer: 1 };
     return {

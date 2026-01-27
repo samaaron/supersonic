@@ -93,7 +93,8 @@ const LOOP_CONFIG = {
 let orchestrator = null;
 let nodeTreeViz = null;
 let messages = [],
-  sentMessages = [];
+  sentMessages = [],
+  sentMessageSeq = 0;
 
 // Batched log updates - collect messages and update DOM in batches
 const LOG_BATCH_INTERVAL = 100; // Minimum ms between DOM updates
@@ -138,6 +139,7 @@ let samplesLoaded = { kick: false, loops: false };
 let playbackStartNTP = null;
 let beatPulseInterval = null;
 let beatPulseTimeout = null;
+let appStartTime = null;
 
 const uiState = {
   padX: 0.5,
@@ -296,7 +298,7 @@ function colorizeOSCArgs(oscMsg) {
       const isParam =
         isSnew && i >= 4 && (i - 4) % 2 === 0 && typeof value === "string";
 
-      if (isFloat) return `<span class="osc-color-float">${value}</span>`;
+      if (isFloat) return `<span class="osc-color-float">${parseFloat(value.toFixed(3))}</span>`;
       if (isInt) return `<span class="osc-color-int">${value}</span>`;
       if (isParam) return `<span class="osc-color-param">${value}</span>`;
       return `<span class="osc-color-string">${value}</span>`;
@@ -566,6 +568,8 @@ function renderOSCMessage(oscData, showSequence = null) {
             `<span class="osc-color-address">${p.address}</span> ${colorizeOSCArgs(p)}`,
         )
         .join("<br>");
+      // For single-packet bundles, just show the content
+      if (msg.packets.length === 1) return content;
       return `<span class="osc-color-string">Bundle (${msg.packets.length})</span><br>${content}`;
     }
     return `<span class="osc-color-address">${msg.address}</span> ${colorizeOSCArgs(msg)}`;
@@ -608,8 +612,9 @@ function addMessage(msg) {
   });
 }
 
-function addSentMessage(oscData, comment = null) {
-  const msg = { oscData, timestamp: Date.now(), comment };
+function addSentMessage(oscData, comment = null, sourceId = null) {
+  const seq = ++sentMessageSeq;
+  const msg = { oscData, timestamp: Date.now(), comment, seq, sourceId };
   logBatch.oscOut.pending.push(msg);
   batchedUpdate(logBatch.oscOut, (pending) => {
     const history = $("sent-message-history");
@@ -623,14 +628,15 @@ function addSentMessage(oscData, comment = null) {
       sentMessages.push(m);
       if (sentMessages.length > LOG_MAX_ITEMS) sentMessages.shift();
 
-      const time = new Date(m.timestamp).toISOString().slice(11, 23);
+      const relativeTime = ((m.timestamp - appStartTime) / 1000).toFixed(2);
       const content = m.comment
         ? `<span class="osc-color-comment">${m.comment}</span>`
         : renderOSCMessage(m.oscData);
 
+      const src = m.sourceId !== null && m.sourceId !== undefined ? `[${m.sourceId}]` : "";
       html += `
         <div class="message-item">
-          <span class="message-header">[${time}]</span>
+          <span class="message-header">${m.seq} +${relativeTime}s ${src}</span>
           <span class="message-content">${content}</span>
         </div>
       `;
@@ -1691,6 +1697,8 @@ const divider = $("column-divider"),
 if (divider && leftCol && rightCol) {
   let dragging = false;
   divider.addEventListener("mousedown", (e) => {
+    // Only allow dragging when initialized
+    if (!$("synth-ui-container")?.classList.contains("initialized")) return;
     e.preventDefault();
     dragging = true;
     document.body.style.cursor = "col-resize";
@@ -1699,9 +1707,10 @@ if (divider && leftCol && rightCol) {
     if (!dragging) return;
     const container = leftCol.parentElement.getBoundingClientRect();
     const pct = ((e.clientX - container.left) / container.width) * 100;
-    if (pct >= 20 && pct <= 80) {
-      leftCol.style.flex = `0 0 ${pct}%`;
-      rightCol.style.flex = `0 0 ${100 - pct}%`;
+    if (pct >= 25 && pct <= 75) {
+      // Use flex-grow ratios - flexbox handles the divider/gap automatically
+      leftCol.style.flex = `${pct} 1 0`;
+      rightCol.style.flex = `${100 - pct} 1 0`;
     }
   });
   document.addEventListener("mouseup", () => {
@@ -1715,6 +1724,7 @@ if (divider && leftCol && rightCol) {
 // ===== INIT =====
 $("init-button").addEventListener("click", async () => {
   try {
+    appStartTime = Date.now();
     updateStatus("initializing");
     hideError();
     clearLoadingLog();
@@ -1771,7 +1781,7 @@ $("init-button").addEventListener("click", async () => {
     });
 
     orchestrator.on("message:raw", addMessage);
-    orchestrator.on("message:sent", (oscData) => addSentMessage(oscData));
+    orchestrator.on("message:sent", (oscData, sourceId) => addSentMessage(oscData, null, sourceId));
     setInterval(() => updateMetrics(orchestrator.getMetrics()), 100);
     orchestrator.on("error", (e) => {
       showError(e.message);
@@ -1905,6 +1915,20 @@ $("resume-button")?.addEventListener("click", async () => {
 
   btn.textContent = "Resume Audio";
   btn.disabled = false;
+});
+
+// Fullscreen button
+$("fullscreen-button")?.addEventListener("click", () => {
+  const container = $("synth-ui-container");
+  if (!container) return;
+
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else {
+    container.requestFullscreen().catch(err => {
+      console.warn("Fullscreen request failed:", err);
+    });
+  }
 });
 
 // Visibility change

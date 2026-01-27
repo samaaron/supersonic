@@ -317,11 +317,12 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                       <div class="control-group__controls">
                         <div class="ctrl ctrl--full">
                           <label for="bpm-slider">BPM <span id="bpm-value" class="slider-value">120</span></label>
-                          <input type="range" id="bpm-slider" min="20" max="1000" value="120" step="1" />
+                          <input type="range" id="bpm-slider" min="20" max="500" value="120" step="1" />
                         </div>
                         <div class="ctrl">
                           <label for="loop-select">Loop</label>
                           <select id="loop-select">
+                            <option value="none">None</option>
                             <option value="loop_amen" selected>Amen</option>
                             <option value="loop_breakbeat">Breakbeat</option>
                             <option value="loop_compus">Compus</option>
@@ -333,6 +334,7 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         <div class="ctrl">
                           <label for="kick-select">Kick</label>
                           <select id="kick-select">
+                            <option value="none">None</option>
                             <option value="bd_haus" selected>Haus</option>
                             <option value="bd_boom">Boom</option>
                             <option value="bd_tek">Tek</option>
@@ -372,11 +374,12 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         </div>
                         <div class="ctrl">
                           <label for="release-slider">Release <span id="release-value" class="slider-value">0.10</span></label>
-                          <input type="range" id="release-slider" min="0" max="5" value="0.1" step="0.01" />
+                          <input type="range" id="release-slider" min="0" max="2" value="0.1" step="0.01" />
                         </div>
                         <div class="ctrl">
                           <label for="synth-select">Synth</label>
                           <select id="synth-select">
+                            <option value="none">None</option>
                             <option value="bass_foundation">Bass Foundation</option>
                             <option value="beep" selected>Beep</option>
                             <option value="blade">Blade</option>
@@ -612,7 +615,7 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         <span>pending</span
                         ><span
                           ><span id="metric-prescheduler-pending" data-metric="preschedulerPending" class="metrics-val">0</span
-                          ><span class="metrics-sep"> / </span
+                          ><span class="metrics-sep"> | </span
                           ><span id="metric-prescheduler-peak" data-metric="preschedulerPendingPeak" class="metrics-val--muted">0</span></span
                         >
                       </div>
@@ -648,18 +651,17 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         <span>retried</span
                         ><span
                           ><span id="metric-messages-retried" data-metric="preschedulerMessagesRetried" class="metrics-val--dim">0</span
-                          ><span class="metrics-sep"> (</span
+                          ><span class="metrics-sep"> | </span
                           ><span id="metric-prescheduler-retries-succeeded" data-metric="preschedulerRetriesSucceeded" class="metrics-val--green">0</span
-                          ><span class="metrics-sep">/</span
-                          ><span id="metric-prescheduler-retries-failed" data-metric="preschedulerRetriesFailed" class="metrics-val--red">0</span
-                          ><span class="metrics-sep">)</span></span
+                          ><span class="metrics-sep"> | </span
+                          ><span id="metric-prescheduler-retries-failed" data-metric="preschedulerRetriesFailed" class="metrics-val--red">0</span></span
                         >
                       </div>
                       <div class="metrics-row">
                         <span>retry queue</span
                         ><span
                           ><span id="metric-prescheduler-retry-queue-size" data-metric="preschedulerRetryQueueSize" class="metrics-val">0</span
-                          ><span class="metrics-sep"> / </span
+                          ><span class="metrics-sep"> | </span
                           ><span id="metric-prescheduler-retry-queue-max" data-metric="preschedulerRetryQueuePeak" class="metrics-val--muted">0</span></span
                         >
                       </div>
@@ -670,7 +672,7 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         <span>queue</span
                         ><span
                           ><span id="metric-scheduler-depth" data-metric="scsynthSchedulerDepth" class="metrics-val">0</span
-                          ><span class="metrics-sep"> / </span
+                          ><span class="metrics-sep"> | </span
                           ><span id="metric-scheduler-peak" data-metric="scsynthSchedulerPeakDepth" class="metrics-val--muted">0</span></span
                         >
                       </div>
@@ -681,10 +683,10 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                         <span>lates</span><span id="metric-scheduler-lates" data-metric="scsynthSchedulerLates" class="metrics-val--red">0</span>
                       </div>
                       <div class="metrics-row">
-                        <span><span data-metric="scsynthSchedulerMaxLateMs">max</span>/<span data-metric="scsynthSchedulerLastLateMs">last</span></span
+                        <span><span data-metric="scsynthSchedulerMaxLateMs">max</span> | <span data-metric="scsynthSchedulerLastLateMs">last</span></span
                         ><span
                           ><span id="metric-scheduler-max-late" data-metric="scsynthSchedulerMaxLateMs" class="metrics-val--red">0</span
-                          ><span class="metrics-sep">/</span
+                          ><span class="metrics-sep"> | </span
                           ><span id="metric-scheduler-last-late" data-metric="scsynthSchedulerLastLateMs" class="metrics-val--dim">0</span
                           ><span class="metrics-val--muted"> ms</span></span
                         >
@@ -927,6 +929,14 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
         >OSC API</button>
       </div>
       <button id="reset-button" class="restart-button">Restart</button>
+      <button id="fullscreen-button" class="fullscreen-button" title="Toggle fullscreen">
+        <svg class="fullscreen-icon fullscreen-icon--enter" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+        </svg>
+        <svg class="fullscreen-icon fullscreen-icon--exit" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+        </svg>
+      </button>
     </footer>
 
     <!-- Audio Suspended Dialog -->
