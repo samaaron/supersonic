@@ -4,7 +4,7 @@ You control SuperSonic by sending **OSC** (Open Sound Control) messages which ar
 
 OSC messages can also sent as a bundle along with a fine-grained timestamp for accurate scheduling.
 
-> This reference covers all the OSC messages that SuperSonic understands. It is based on the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html). However, it is not identical due to implementation differences between the original scsynth and SuperSonic's AudioWorklet. See [Unsupported Commands](#unsupported-commands) for what's not available in the browser environment.
+> This reference covers all the OSC messages that SuperSonic understands. It is based on the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html). However, it is not identical due to implementation differences between the original scsynth and SuperSonic's AudioWorklet. See [Unsupported Commands](#unsupported-commands) for what's not available, and [SCSYNTH_DIFFERENCES.md](SCSYNTH_DIFFERENCES.md) for a comprehensive guide to all differences including unsupported UGens.
 
 
 ## How to Send OSC
@@ -1305,7 +1305,9 @@ This is useful when you want to send sample data directly via OSC without needin
 
 ## Unsupported Commands
 
-These commands don't work in SuperSonic - the browser environment has no filesystem, libsndfile is not available, and some scsynth features don't map to the AudioWorklet architecture.
+These commands don't work in SuperSonic due to browser/AudioWorklet constraints.
+
+> For a complete guide to all differences between SuperSonic and scsynth—including unsupported UGens, architectural differences, and error handling—see [SCSYNTH_DIFFERENCES.md](SCSYNTH_DIFFERENCES.md).
 
 ### Scheduling and Debug Commands
 
