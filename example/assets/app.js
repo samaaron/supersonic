@@ -67,7 +67,6 @@ const INSTRUMENT_SYNTHDEFS = [
   "sonic-pi-tb303",
   "sonic-pi-tech_saws",
   "sonic-pi-tri",
-  "sonic-pi-winwood_lead",
   "sonic-pi-zawa",
 ];
 
