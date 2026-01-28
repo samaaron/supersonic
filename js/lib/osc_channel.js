@@ -164,9 +164,22 @@ export class OscChannel {
     }
 
     /**
-     * Get current local metrics without resetting (for inspection)
+     * Get current metrics snapshot.
+     * SAB mode: reads aggregated metrics from shared memory
+     * PM mode: returns local metrics (aggregated via heartbeat)
      */
     getMetrics() {
+        if (this.#mode === 'sab' && this.#metricsView) {
+            return {
+                messagesSent: Atomics.load(this.#metricsView, MetricsOffsets.OSC_OUT_MESSAGES_SENT),
+                bytesSent: Atomics.load(this.#metricsView, MetricsOffsets.OSC_OUT_BYTES_SENT),
+                nonBundle: Atomics.load(this.#metricsView, MetricsOffsets.BYPASS_NON_BUNDLE),
+                immediate: Atomics.load(this.#metricsView, MetricsOffsets.BYPASS_IMMEDIATE),
+                nearFuture: Atomics.load(this.#metricsView, MetricsOffsets.BYPASS_NEAR_FUTURE),
+                late: Atomics.load(this.#metricsView, MetricsOffsets.BYPASS_LATE),
+                bypassed: Atomics.load(this.#metricsView, MetricsOffsets.PRESCHEDULER_BYPASSED),
+            };
+        }
         return { ...this.#localMetrics };
     }
 

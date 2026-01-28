@@ -700,4 +700,110 @@ test.describe("Bypass Category Counters", () => {
     expect(result.delta.nearFuture).toBe(result.worker1.sent);  // Worker1 sends nearFuture
     expect(result.delta.late).toBe(result.worker2.sent);         // Worker2 sends late
   });
+
+  test("OscChannel.getMetrics() returns aggregated metrics from shared memory in SAB mode", async ({ page, sonicConfig }) => {
+    // Skip in PM mode - this test specifically validates SAB shared memory reads
+    if (sonicConfig.mode !== 'sab') {
+      test.skip();
+      return;
+    }
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.sync();
+
+      // Create a worker with an OscChannel
+      const worker = new Worker("/test/assets/osc_channel_test_worker.js", { type: "module" });
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Worker ready timeout")), 5000);
+        worker.onmessage = (e) => {
+          if (e.data.type === "ready") {
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+      });
+
+      const channel = sonic.createOscChannel();
+      worker.postMessage(
+        { type: "initChannel", channel: channel.transferable },
+        channel.transferList
+      );
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Channel timeout")), 5000);
+        worker.onmessage = (e) => {
+          if (e.data.type === "channelReady") {
+            clearTimeout(timeout);
+            resolve(e.data);
+          }
+        };
+      });
+
+      // Get baseline from main thread
+      const baselineMetrics = sonic.getMetrics();
+      const baselineSent = baselineMetrics.oscOutMessagesSent ?? 0;
+
+      // Send messages from the worker
+      const MESSAGE_COUNT = 5;
+      const sendResults = [];
+      for (let i = 0; i < MESSAGE_COUNT; i++) {
+        const sendResult = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error("Send timeout")), 5000);
+          worker.onmessage = (e) => {
+            if (e.data.type === "sent") {
+              clearTimeout(timeout);
+              resolve(e.data);
+            }
+          };
+          worker.postMessage({ type: "sendBundle", offsetMs: 50 });
+        });
+        sendResults.push(sendResult);
+      }
+
+      // Count successful sends
+      const successfulSends = sendResults.filter(r => r.success).length;
+
+      // Get metrics from worker's OscChannel.getMetrics()
+      const workerMetrics = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Metrics timeout")), 5000);
+        worker.onmessage = (e) => {
+          if (e.data.type === "metrics") {
+            clearTimeout(timeout);
+            resolve(e.data.metrics);
+          }
+        };
+        worker.postMessage({ type: "getMetrics" });
+      });
+
+      // Get metrics from main thread for comparison
+      const mainMetrics = sonic.getMetrics();
+
+      worker.terminate();
+      await sonic.destroy();
+
+      return {
+        success: true,
+        successfulSends,
+        workerMetrics,
+        mainMetrics: {
+          oscOutMessagesSent: mainMetrics.oscOutMessagesSent ?? 0,
+          bypassNearFuture: mainMetrics.bypassNearFuture ?? 0,
+        },
+      };
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.successfulSends).toBeGreaterThan(0);
+
+    // Key assertion: worker's getMetrics() should return non-zero aggregated values
+    // (not zeros from uninitialized local metrics)
+    expect(result.workerMetrics.messagesSent).toBeGreaterThan(0);
+
+    // Worker metrics should reflect the aggregated state (same as main thread sees)
+    expect(result.workerMetrics.messagesSent).toBe(result.mainMetrics.oscOutMessagesSent);
+    expect(result.workerMetrics.nearFuture).toBe(result.mainMetrics.bypassNearFuture);
+  });
 });
