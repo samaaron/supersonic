@@ -64,6 +64,11 @@ extern Malloc gMalloc;
 
 const size_t ERR_BUF_SIZE(256);
 
+// Static error message storage for GraphDef parsing errors
+// Used to preserve error messages across exception boundaries in Emscripten/WASM
+// where C++ exception RTTI doesn't always work correctly
+static std::string g_lastGraphDefError;
+
 int32 GetHash(ParamSpec* inParamSpec) { return inParamSpec->mHash; }
 
 int32* GetKey(ParamSpec* inParamSpec) { return inParamSpec->mName; }
@@ -141,6 +146,7 @@ void UnitSpec_Read(UnitSpec* inUnitSpec, char*& buffer) {
         char str[ERR_BUF_SIZE];
         snprintf(str, ERR_BUF_SIZE, "UGen '%s' not installed.", (char*)name);
         worklet_debug("ERROR: UGen '%s' not installed", (char*)name);
+        g_lastGraphDefError = str;
         throw std::runtime_error(str);
         return;
     }
@@ -174,6 +180,8 @@ void UnitSpec_ReadVer1(UnitSpec* inUnitSpec, char*& buffer) {
     if (!inUnitSpec->mUnitDef) {
         char str[ERR_BUF_SIZE];
         snprintf(str, ERR_BUF_SIZE, "UGen '%s' not installed.", (char*)name);
+        worklet_debug("ERROR: UGen '%s' not installed", (char*)name);
+        g_lastGraphDefError = str;
         throw std::runtime_error(str);
         return;
     }
@@ -603,13 +611,29 @@ SCErr GraphDef_DeleteMsg(World* inWorld, GraphDef* inDef) {
     return kSCErr_None;
 }
 
-GraphDef* GraphDef_Recv(World* inWorld, char* buffer, GraphDef* inList) {
+GraphDef* GraphDef_Recv(World* inWorld, char* buffer, GraphDef* inList, std::string* outErrorMsg) {
+    g_lastGraphDefError.clear();
     try {
         inList = GraphDefLib_Read(inWorld, buffer, inList);
     } catch (std::exception& exc) {
         worklet_debug("exception in GraphDef_Recv: %s\n", exc.what());
+        if (outErrorMsg) {
+            *outErrorMsg = exc.what();
+        }
     } catch (...) {
-        worklet_debug("unknown exception in GraphDef_Recv\n");
+        // Emscripten WASM exception handling may not preserve std::exception type info,
+        // so use g_lastGraphDefError which was set before throwing
+        if (!g_lastGraphDefError.empty()) {
+            worklet_debug("exception in GraphDef_Recv: %s\n", g_lastGraphDefError.c_str());
+            if (outErrorMsg) {
+                *outErrorMsg = g_lastGraphDefError;
+            }
+        } else {
+            worklet_debug("unknown exception in GraphDef_Recv\n");
+            if (outErrorMsg) {
+                *outErrorMsg = "unknown exception";
+            }
+        }
     }
 
     return inList;

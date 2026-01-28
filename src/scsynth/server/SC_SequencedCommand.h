@@ -467,6 +467,7 @@ public:
 protected:
     char* mBuffer;
     GraphDef* mDefs;
+    std::string mErrorMsg;
 
     virtual void CallDestructor();
 };

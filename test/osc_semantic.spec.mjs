@@ -4155,3 +4155,250 @@ test.describe("/n_trace semantic tests", () => {
     expect(result.debugMessages.length).toBeGreaterThan(0);
   });
 });
+
+// =============================================================================
+// /d_recv - UNKNOWN UGEN HANDLING
+// =============================================================================
+
+test.describe("/d_recv unknown UGen handling", () => {
+  /**
+   * Creates a minimal synthdef binary with a specified UGen name.
+   * This is useful for testing error handling when loading synthdefs
+   * that reference UGens not installed in SuperSonic.
+   *
+   * Format: SCgf version 1 with a single UGen
+   */
+  function createMinimalSynthdef(synthName, ugenName) {
+    const parts = [];
+
+    // Helper to write big-endian 16-bit int
+    const writeInt16BE = (val) => [(val >> 8) & 0xff, val & 0xff];
+
+    // Helper to write big-endian 32-bit int
+    const writeInt32BE = (val) => [
+      (val >> 24) & 0xff,
+      (val >> 16) & 0xff,
+      (val >> 8) & 0xff,
+      val & 0xff
+    ];
+
+    // Helper to write pstring (length byte + string)
+    const writePString = (str) => [str.length, ...str.split('').map(c => c.charCodeAt(0))];
+
+    // Magic: "SCgf"
+    parts.push([0x53, 0x43, 0x67, 0x66]);
+
+    // Version: 1 (32-bit BE)
+    parts.push(writeInt32BE(1));
+
+    // Number of synthdefs: 1 (16-bit BE)
+    parts.push(writeInt16BE(1));
+
+    // Synthdef name (pstring)
+    parts.push(writePString(synthName));
+
+    // Number of constants: 0 (16-bit BE for version 1)
+    parts.push(writeInt16BE(0));
+
+    // Number of parameters: 0 (16-bit BE)
+    parts.push(writeInt16BE(0));
+
+    // Number of parameter names: 0 (16-bit BE)
+    parts.push(writeInt16BE(0));
+
+    // Number of UGens: 1 (16-bit BE)
+    parts.push(writeInt16BE(1));
+
+    // UGen spec:
+    // - name (pstring)
+    parts.push(writePString(ugenName));
+    // - calc rate: 1 (control rate)
+    parts.push([0x01]);
+    // - num inputs: 0 (16-bit BE)
+    parts.push(writeInt16BE(0));
+    // - num outputs: 1 (16-bit BE)
+    parts.push(writeInt16BE(1));
+    // - special index: 0 (16-bit BE)
+    parts.push(writeInt16BE(0));
+    // - output spec: calc rate 1 for the single output
+    parts.push([0x01]);
+
+    // Number of variants: 0 (16-bit BE)
+    parts.push(writeInt16BE(0));
+
+    // Flatten and convert to Uint8Array
+    const flat = parts.flat();
+    return new Uint8Array(flat);
+  }
+
+  test("loading synthdef with unknown UGen fails gracefully", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      // Create minimal synthdef with unknown UGen
+      function createMinimalSynthdef(synthName, ugenName) {
+        const parts = [];
+        const writeInt16BE = (val) => [(val >> 8) & 0xff, val & 0xff];
+        const writeInt32BE = (val) => [
+          (val >> 24) & 0xff, (val >> 16) & 0xff,
+          (val >> 8) & 0xff, val & 0xff
+        ];
+        const writePString = (str) => [str.length, ...str.split('').map(c => c.charCodeAt(0))];
+
+        parts.push([0x53, 0x43, 0x67, 0x66]); // SCgf
+        parts.push(writeInt32BE(1)); // version 1
+        parts.push(writeInt16BE(1)); // 1 synthdef
+        parts.push(writePString(synthName)); // name
+        parts.push(writeInt16BE(0)); // 0 constants
+        parts.push(writeInt16BE(0)); // 0 params
+        parts.push(writeInt16BE(0)); // 0 param names
+        parts.push(writeInt16BE(1)); // 1 UGen
+        parts.push(writePString(ugenName)); // UGen name
+        parts.push([0x01]); // calc rate
+        parts.push(writeInt16BE(0)); // 0 inputs
+        parts.push(writeInt16BE(1)); // 1 output
+        parts.push(writeInt16BE(0)); // special index
+        parts.push([0x01]); // output calc rate
+        parts.push(writeInt16BE(0)); // 0 variants
+
+        return new Uint8Array(parts.flat());
+      }
+
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      const debugMessages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('debug', (msg) => debugMessages.push(msg.text));
+
+      await sonic.init();
+
+      // Create synthdef with MouseX (unknown in SuperSonic)
+      const badSynthdef = createMinimalSynthdef("test-unknown-ugen", "MouseX");
+
+      // Try to load it
+      await sonic.send("/d_recv", badSynthdef);
+      await sonic.sync(1);
+
+      // Wait for any async messages
+      await new Promise(r => setTimeout(r, 100));
+
+      // Check if /done was received (it shouldn't be for failed load)
+      const doneMsg = messages.find(m =>
+        m.address === "/done" && m.args?.[0] === "/d_recv"
+      );
+
+      // Check if /fail was received
+      const failMsg = messages.find(m => m.address === "/fail");
+
+      // Check debug output for error message
+      const hasErrorInDebug = debugMessages.some(m =>
+        m.includes("MouseX") && m.includes("not installed")
+      );
+
+      // Try to create a synth with the (presumably failed) synthdef
+      let synthCreated = false;
+      try {
+        await sonic.send("/s_new", "test-unknown-ugen", 1000, 0, 0);
+        await sonic.sync(2);
+        const tree = sonic.getRawTree();
+        synthCreated = tree.nodes.some(n => n.id === 1000);
+        if (synthCreated) {
+          await sonic.send("/n_free", 1000);
+        }
+      } catch (e) {
+        // Expected - synth creation should fail
+      }
+
+      return {
+        gotDone: !!doneMsg,
+        gotFail: !!failMsg,
+        failMessage: failMsg?.args,
+        hasErrorInDebug,
+        debugMessages,
+        synthCreated,
+      };
+    }, sonicConfig);
+
+    // The synth should NOT have been created
+    expect(result.synthCreated).toBe(false);
+
+    // No /done should be received (the load failed)
+    expect(result.gotDone).toBe(false);
+
+    // /fail should be received with the error message
+    expect(result.gotFail).toBe(true);
+
+    // The error message should mention the unknown UGen
+    expect(result.failMessage).toBeDefined();
+    expect(result.failMessage[0]).toBe("/d_recv");
+    expect(result.failMessage[1]).toContain("MouseX");
+    expect(result.failMessage[1]).toContain("not installed");
+  });
+
+  test("loading valid synthdef still works after failed load", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      function createMinimalSynthdef(synthName, ugenName) {
+        const parts = [];
+        const writeInt16BE = (val) => [(val >> 8) & 0xff, val & 0xff];
+        const writeInt32BE = (val) => [
+          (val >> 24) & 0xff, (val >> 16) & 0xff,
+          (val >> 8) & 0xff, val & 0xff
+        ];
+        const writePString = (str) => [str.length, ...str.split('').map(c => c.charCodeAt(0))];
+
+        parts.push([0x53, 0x43, 0x67, 0x66]);
+        parts.push(writeInt32BE(1));
+        parts.push(writeInt16BE(1));
+        parts.push(writePString(synthName));
+        parts.push(writeInt16BE(0));
+        parts.push(writeInt16BE(0));
+        parts.push(writeInt16BE(0));
+        parts.push(writeInt16BE(1));
+        parts.push(writePString(ugenName));
+        parts.push([0x01]);
+        parts.push(writeInt16BE(0));
+        parts.push(writeInt16BE(1));
+        parts.push(writeInt16BE(0));
+        parts.push([0x01]);
+        parts.push(writeInt16BE(0));
+
+        return new Uint8Array(parts.flat());
+      }
+
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on('message', (msg) => messages.push(msg));
+
+      await sonic.init();
+
+      // First, try to load a bad synthdef
+      const badSynthdef = createMinimalSynthdef("bad-synth", "FakeUnknownUGen");
+      await sonic.send("/d_recv", badSynthdef);
+      await sonic.sync(1);
+
+      // Now load a valid synthdef
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      // Create a synth with the valid synthdef
+      await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0);
+      await sonic.sync(2);
+
+      const tree = sonic.getRawTree();
+      const synthExists = tree.nodes.some(n => n.id === 1000);
+
+      // Cleanup
+      if (synthExists) {
+        await sonic.send("/n_free", 1000);
+      }
+
+      return {
+        synthExists,
+      };
+    }, sonicConfig);
+
+    // Valid synthdef should work even after a failed load
+    expect(result.synthExists).toBe(true);
+  });
+});

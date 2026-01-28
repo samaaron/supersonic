@@ -1384,11 +1384,17 @@ RecvSynthDefCmd::~RecvSynthDefCmd() { World_Free(mWorld, mBuffer); }
 void RecvSynthDefCmd::CallDestructor() { this->~RecvSynthDefCmd(); }
 
 bool RecvSynthDefCmd::Stage2() {
-    mDefs = GraphDef_Recv(mWorld, mBuffer, mDefs);
+    mDefs = GraphDef_Recv(mWorld, mBuffer, mDefs, &mErrorMsg);
 
     if (mDefs) {
         return true;
     } else {
+        // Send /fail with the error message so clients know what went wrong
+        if (!mErrorMsg.empty()) {
+            SendFailure(&mReplyAddress, "/d_recv", mErrorMsg.c_str());
+        } else {
+            SendFailure(&mReplyAddress, "/d_recv", "failed to load synthdef");
+        }
         return false;  // Abort command - don't proceed to Stage3 with null pointer
     }
 }
