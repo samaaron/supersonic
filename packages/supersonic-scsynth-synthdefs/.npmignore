@@ -1,0 +1,9 @@
+# Test and debug synthdefs - not for distribution
+synthdefs/fft_brickwall.scsyndef
+synthdefs/fft_magfreeze.scsyndef
+synthdefs/fft_passthrough.scsyndef
+synthdefs/fft_size_1024.scsyndef
+synthdefs/fft_size_4096.scsyndef
+synthdefs/fft_size_512.scsyndef
+synthdefs/fft_test_sine.scsyndef
+synthdefs/test_offset_out.scsyndef
