@@ -115,7 +115,7 @@ export class SuperSonic {
       preschedulerBypassed: { type: 'counter', unit: 'count', description: 'Messages sent directly from JS to scsynth, bypassing prescheduler (aggregate)' },
       bypassNonBundle: { type: 'counter', unit: 'count', description: 'Plain OSC messages (not bundles) that bypassed prescheduler' },
       bypassImmediate: { type: 'counter', unit: 'count', description: 'Bundles with timetag 0 or 1 that bypassed prescheduler' },
-      bypassNearFuture: { type: 'counter', unit: 'count', description: 'Bundles within 200ms that bypassed prescheduler' },
+      bypassNearFuture: { type: 'counter', unit: 'count', description: 'Bundles within lookahead window that bypassed prescheduler' },
       bypassLate: { type: 'counter', unit: 'count', description: 'Bundles past their scheduled time that bypassed prescheduler' },
       preschedulerCapacity: { type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler' },
       preschedulerMinHeadroomMs: { type: 'gauge', unit: 'ms', description: 'Smallest time gap between JS prescheduler dispatch and scsynth scheduler execution' },
@@ -315,7 +315,7 @@ export class SuperSonic {
       memory: MemoryLayout,
       worldOptions: worldOptions,
       preschedulerCapacity: options.preschedulerCapacity || 65536,
-      bypassLookaheadMs: options.bypassLookaheadMs ?? 200,
+      bypassLookaheadMs: options.bypassLookaheadMs ?? 500,
       activityEvent: {
         maxLineLength: options.activityEvent?.maxLineLength ?? 200,
         scsynthMaxLineLength: options.activityEvent?.scsynthMaxLineLength ?? null,

@@ -167,7 +167,7 @@ let maxPendingMessages = 65536;
 // Timing constants
 const NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
 const POLL_INTERVAL_MS = 50;           // Dispatch poll interval (separate from metrics snapshot)
-const LOOKAHEAD_S = 0.200;             // 200ms lookahead window
+let lookaheadS = 0.500;                // Lookahead window (configurable via init)
 
 const schedulerLog = (...args) => {
     if (__DEV__) {
@@ -565,7 +565,7 @@ const checkAndDispatch = () => {
     processRetryQueue();
 
     const currentNTP = getCurrentNTP();
-    const lookaheadTime = currentNTP + LOOKAHEAD_S;
+    const lookaheadTime = currentNTP + lookaheadS;
     let dispatchCount = 0;
 
     // Dispatch all bundles that are ready
@@ -756,6 +756,9 @@ self.addEventListener('message', (event) => {
                 }
                 if (data.snapshotIntervalMs) {
                     metricsSendIntervalMs = data.snapshotIntervalMs;
+                }
+                if (data.bypassLookaheadS !== undefined) {
+                    lookaheadS = data.bypassLookaheadS;
                 }
 
                 if (mode === 'sab') {

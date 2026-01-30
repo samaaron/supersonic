@@ -111,7 +111,8 @@ export class SABTransport extends Transport {
         // Initialize workers with shared buffer
         await Promise.all([
             this.#initWorker(this.#oscOutWorker, 'OSC OUT', {
-                maxPendingMessages: this.#preschedulerCapacity
+                maxPendingMessages: this.#preschedulerCapacity,
+                bypassLookaheadS: this._config.bypassLookaheadS,
             }),
             this.#initWorker(this.#oscInWorker, 'OSC IN'),
             this.#initWorker(this.#debugWorker, 'DEBUG'),

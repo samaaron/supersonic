@@ -19,7 +19,7 @@
  * Default bypass lookahead threshold in seconds.
  * Bundles within this window go direct, beyond go to prescheduler.
  */
-export const DEFAULT_BYPASS_LOOKAHEAD_S = 0.2;
+export const DEFAULT_BYPASS_LOOKAHEAD_S = 0.5;
 
 /**
  * NTP epoch offset: seconds between Unix epoch (1970) and NTP epoch (1900)

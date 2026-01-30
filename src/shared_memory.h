@@ -166,7 +166,7 @@ struct alignas(4) PerformanceMetrics {
     // Bypass category metrics [38-41] (written by JS main thread / PM transport)
     std::atomic<uint32_t> bypass_non_bundle;        // 38: Plain OSC messages (not bundles)
     std::atomic<uint32_t> bypass_immediate;         // 39: Bundles with timetag 0 or 1
-    std::atomic<uint32_t> bypass_near_future;       // 40: Within 200ms but not late
+    std::atomic<uint32_t> bypass_near_future;       // 40: Within lookahead window but not late
     std::atomic<uint32_t> bypass_late;              // 41: Past their scheduled time
 
     // scsynth late timing diagnostics [42-44] (written by WASM during process())

@@ -448,6 +448,7 @@ export class PostMessageTransport extends Transport {
                 mode: 'postMessage',  // Use postMessage dispatch mode
                 maxPendingMessages: this.#preschedulerCapacity,
                 snapshotIntervalMs: this.#snapshotIntervalMs,
+                bypassLookaheadS: this._config.bypassLookaheadS,
                 workletPort: workletPort,  // Direct port to worklet
             }, [workletPort]);  // Transfer the port
         });
