@@ -112,7 +112,7 @@ export class SABTransport extends Transport {
         await Promise.all([
             this.#initWorker(this.#oscOutWorker, 'OSC OUT', {
                 maxPendingMessages: this.#preschedulerCapacity,
-                bypassLookaheadS: this._config.bypassLookaheadS,
+                bypassLookaheadS: this._config.bypassLookaheadS
             }),
             this.#initWorker(this.#oscInWorker, 'OSC IN'),
             this.#initWorker(this.#debugWorker, 'DEBUG'),

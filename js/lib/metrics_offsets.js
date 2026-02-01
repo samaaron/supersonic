@@ -96,7 +96,7 @@ export const DEBUG_BUFFER_PEAK_BYTES = 37;  // Peak bytes used in DEBUG buffer
 // =============================================================================
 export const BYPASS_NON_BUNDLE = 38;    // Plain OSC messages (not bundles)
 export const BYPASS_IMMEDIATE = 39;     // Bundles with timetag 0 or 1
-export const BYPASS_NEAR_FUTURE = 40;   // Within lookahead window but not late (diffSeconds >= 0 and < lookahead)
+export const BYPASS_NEAR_FUTURE = 40;   // Within bypass lookahead threshold but not late
 export const BYPASS_LATE = 41;          // Past their scheduled time (diffSeconds < 0)
 
 // =============================================================================

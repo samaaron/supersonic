@@ -200,6 +200,7 @@ export class OscChannel {
             return true;
         } else {
             // SAB mode - write to ring buffer with sourceId in header
+            // Logging is handled by osc_out_log_sab_worker reading from ring buffer
             return writeToRingBuffer({
                 atomicView: this.#views.atomicView,
                 dataView: this.#views.dataView,
@@ -216,6 +217,7 @@ export class OscChannel {
 
     /**
      * Send to prescheduler (far-future path)
+     * Logging happens at dispatch time when message reaches the ring buffer.
      */
     #sendToPrescheduler(oscData) {
         if (!this.#preschedulerPort) {

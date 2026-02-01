@@ -21,7 +21,6 @@ import { OscChannel } from '../osc_channel.js';
 export class PostMessageTransport extends Transport {
     #workletPort;
     #preschedulerWorker;
-    #oscOutLogWorker;
     #workerBaseURL;
 
     // Callbacks
@@ -116,58 +115,19 @@ export class PostMessageTransport extends Transport {
             this.#handlePreschedulerMessage(event.data);
         };
 
-        // Initialize prescheduler worker with the other port for direct worklet communication
+        // Initialize prescheduler worker with the worklet port for direct communication
         await this.#initPreschedulerWorker(preschedulerChannel.port2);
-
-        // Create the OSC out log decoder worker
-        this.#oscOutLogWorker = await createWorker(
-            this.#workerBaseURL + 'osc_out_log_pm_worker.js',
-            { type: 'module' }
-        );
-
-        this.#oscOutLogWorker.onmessage = (event) => {
-            const data = event.data;
-            if (data.type === 'oscLog' && this.#onOscLogCallback) {
-                this.#onOscLogCallback(data.entries);
-            } else if (data.type === 'error') {
-                console.error('[PostMessageTransport] OSC OUT LOG error:', data.error);
-                if (this.#onErrorCallback) {
-                    this.#onErrorCallback(data.error, 'oscOutLog');
-                }
-            }
-        };
-
-        // Create MessageChannel for worklet -> decoder communication
-        const oscLogChannel = new MessageChannel();
-
-        // Send one port to worklet for sending raw OSC log bytes
-        this.#workletPort.postMessage(
-            { type: 'setOscLogPort' },
-            [oscLogChannel.port1]
-        );
-
-        // Initialize decoder worker with the other port (bufferConstants will be set later)
-        this.#oscOutLogWorker.postMessage(
-            { type: 'init', bufferConstants: null },
-            [oscLogChannel.port2]
-        );
 
         this.#initialized = true;
     }
 
     /**
-     * Set buffer constants for OSC log decoder worker
+     * Set buffer constants
      * Called by SuperSonic after receiving bufferConstants from worklet
      * @param {Object} bufferConstants
      */
     setBufferConstants(bufferConstants) {
         this.#bufferConstants = bufferConstants;
-        if (this.#oscOutLogWorker) {
-            this.#oscOutLogWorker.postMessage({
-                type: 'init',
-                bufferConstants: bufferConstants
-            });
-        }
     }
 
     /**
@@ -179,6 +139,7 @@ export class PostMessageTransport extends Transport {
         }
 
         // Send to prescheduler for timing coordination
+        // Logging happens at dispatch time when message reaches the ring buffer
         this.#preschedulerWorker.postMessage({
             type: 'send',
             oscData: message,
@@ -203,6 +164,7 @@ export class PostMessageTransport extends Transport {
 
         const { sessionId = 0, runTag = '', audioTimeS = null, currentTimeS = null } = options;
 
+        // Logging happens at dispatch time when message reaches the ring buffer
         this.#preschedulerWorker.postMessage({
             type: 'send',
             oscData: message,
@@ -229,6 +191,7 @@ export class PostMessageTransport extends Transport {
 
         // Send directly to worklet, bypassing prescheduler
         // Include bypassCategory so worklet can track all bypass metrics (from main thread + workers)
+        // Logging happens when worklet writes to ring buffer
         this.#workletPort.postMessage({
             type: 'osc',
             oscData: message,
@@ -287,7 +250,8 @@ export class PostMessageTransport extends Transport {
             [preschedulerChannel.port1]
         );
 
-        // Return OscChannel with both direct and prescheduler paths
+        // Return OscChannel with direct and prescheduler paths
+        // Logging happens via worklet reading from ring buffer
         return OscChannel.createPostMessage({
             port: directChannel.port2,
             preschedulerPort: preschedulerChannel.port2,
@@ -347,28 +311,32 @@ export class PostMessageTransport extends Transport {
     /**
      * Handle raw debug bytes from worklet (postMessage mode)
      * Decodes UTF-8 text and forwards to callback
-     * @param {Object} data - { messages: Array<{bytes, sequence}> }
+     * Supports packed buffer format: { messages: [...], count: N, buffer: ArrayBuffer }
+     * @param {Object} data - Debug message batch
      */
     handleDebugRaw(data) {
         // Decode debug messages inline using TextDecoder
         // (TextDecoder not available in AudioWorklet, so decoding happens here)
-        if (data.messages) {
+        if (data.messages && data.count > 0 && data.buffer) {
+            // New packed buffer format
             const textDecoder = new TextDecoder('utf-8');
-            for (const raw of data.messages) {
+            const debugBuffer = new Uint8Array(data.buffer);
+            for (let i = 0; i < data.count; i++) {
+                const entry = data.messages[i];
                 try {
-                    const bytes = new Uint8Array(raw.bytes);
+                    const bytes = debugBuffer.subarray(entry.offset, entry.offset + entry.length);
                     let text = textDecoder.decode(bytes);
                     if (text.endsWith('\n')) {
                         text = text.slice(0, -1);
                     }
                     // Track debug metrics
                     this.#debugMessagesReceived++;
-                    this.#debugBytesReceived += bytes.length;
+                    this.#debugBytesReceived += entry.length;
                     if (this.#onDebugCallback) {
                         this.#onDebugCallback({
                             text: text,
                             timestamp: performance.now(),
-                            sequence: raw.sequence
+                            sequence: entry.sequence
                         });
                     }
                 } catch (err) {
@@ -412,11 +380,6 @@ export class PostMessageTransport extends Transport {
             this.#preschedulerWorker = null;
         }
 
-        if (this.#oscOutLogWorker) {
-            this.#oscOutLogWorker.terminate();
-            this.#oscOutLogWorker = null;
-        }
-
         this.#workletPort = null;
         this.#initialized = false;
         super.dispose();
@@ -457,29 +420,33 @@ export class PostMessageTransport extends Transport {
     #handleWorkletMessage(data) {
         switch (data.type) {
             case 'oscReplies':
-                // OSC replies from scsynth (batch of messages)
-                if (data.messages) {
-                    for (const msg of data.messages) {
-                        if (msg.oscData) {
-                            // Check for dropped messages via sequence gaps
-                            if (msg.sequence !== undefined && this.#lastSequenceReceived >= 0) {
-                                const expectedSeq = (this.#lastSequenceReceived + 1) & 0xFFFFFFFF;
-                                if (msg.sequence !== expectedSeq) {
-                                    const dropped = (msg.sequence - expectedSeq + 0x100000000) & 0xFFFFFFFF;
-                                    if (dropped < 1000) { // Sanity check
-                                        this.#oscInMessagesDropped += dropped;
-                                    }
+                // OSC replies from scsynth (packed buffer format)
+                // Format: { messages: [...entries], count: N, buffer: ArrayBuffer }
+                if (data.messages && data.count > 0 && data.buffer) {
+                    const replyBuffer = new Uint8Array(data.buffer);
+                    for (let i = 0; i < data.count; i++) {
+                        const entry = data.messages[i];
+                        // entry has { offset, length, sequence }
+                        const oscData = replyBuffer.subarray(entry.offset, entry.offset + entry.length);
+
+                        // Check for dropped messages via sequence gaps
+                        if (entry.sequence !== undefined && this.#lastSequenceReceived >= 0) {
+                            const expectedSeq = (this.#lastSequenceReceived + 1) & 0xFFFFFFFF;
+                            if (entry.sequence !== expectedSeq) {
+                                const dropped = (entry.sequence - expectedSeq + 0x100000000) & 0xFFFFFFFF;
+                                if (dropped < 1000) { // Sanity check
+                                    this.#oscInMessagesDropped += dropped;
                                 }
                             }
-                            if (msg.sequence !== undefined) {
-                                this.#lastSequenceReceived = msg.sequence;
-                            }
+                        }
+                        if (entry.sequence !== undefined) {
+                            this.#lastSequenceReceived = entry.sequence;
+                        }
 
-                            this.#oscInMessagesReceived++;
-                            this.#oscInBytesReceived += msg.oscData.byteLength || msg.oscData.length || 0;
-                            if (this.#onReplyCallback) {
-                                this.#onReplyCallback(msg.oscData, msg.sequence);
-                            }
+                        this.#oscInMessagesReceived++;
+                        this.#oscInBytesReceived += entry.length;
+                        if (this.#onReplyCallback) {
+                            this.#onReplyCallback(oscData, entry.sequence);
                         }
                     }
                 }
@@ -495,7 +462,44 @@ export class PostMessageTransport extends Transport {
                 // Handled by buffer manager
                 break;
 
-            // Note: oscLog is now handled by the decoder worker, not the worklet directly
+            case 'debugRawBatch':
+                // Debug messages from worklet (packed buffer format)
+                this.handleDebugRaw(data);
+                break;
+
+            case 'oscLog':
+                // OSC log entries from worklet (packed buffer format)
+                // Format: { entries: [...], count: N, buffer: ArrayBuffer }
+                if (__DEV__) {
+                    console.log('[PostMessageTransport] oscLog received:', {
+                        hasCallback: !!this.#onOscLogCallback,
+                        count: data.count,
+                        hasBuffer: !!data.buffer,
+                        hasEntries: !!data.entries,
+                        entriesLength: data.entries?.length,
+                    });
+                }
+                if (this.#onOscLogCallback) {
+                    if (data.count > 0 && data.buffer && data.entries) {
+                        // New packed buffer format
+                        const logBuffer = new Uint8Array(data.buffer);
+                        const entries = [];
+                        for (let i = 0; i < data.count; i++) {
+                            const entry = data.entries[i];
+                            // entry has { offset, length, originalLength, sourceId, sequence }
+                            const oscData = logBuffer.subarray(entry.offset, entry.offset + entry.length);
+                            entries.push({
+                                oscData,
+                                sourceId: entry.sourceId,
+                                sequence: entry.sequence,
+                                truncated: entry.length < entry.originalLength,
+                                originalLength: entry.originalLength,
+                            });
+                        }
+                        this.#onOscLogCallback(entries);
+                    }
+                }
+                break;
 
             case 'error':
                 console.error('[PostMessageTransport] Worklet error:', data.error);
@@ -503,6 +507,11 @@ export class PostMessageTransport extends Transport {
                 if (this.#onErrorCallback) {
                     this.#onErrorCallback(data.error, 'worklet');
                 }
+                break;
+
+            case 'debug':
+                // Debug message from worklet
+                console.log('[PostMessageTransport] Worklet debug:', data.message);
                 break;
         }
     }

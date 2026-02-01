@@ -45,7 +45,7 @@
  * @property {number} preschedulerBypassed - Messages that bypassed prescheduler (direct ring buffer writes, aggregate)
  * @property {number} bypassNonBundle - Plain OSC messages (not bundles) that bypassed prescheduler
  * @property {number} bypassImmediate - Bundles with timetag 0 or 1 that bypassed prescheduler
- * @property {number} bypassNearFuture - Bundles within lookahead window that bypassed prescheduler
+ * @property {number} bypassNearFuture - Bundles within bypass lookahead threshold that bypassed prescheduler
  * @property {number} bypassLate - Bundles past their scheduled time that bypassed prescheduler
  * @property {number} preschedulerCapacity - Maximum pending events allowed in prescheduler
  * @property {number} preschedulerMinHeadroomMs - All-time minimum headroom before execution

@@ -10,6 +10,25 @@ import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { writeMessageToBuffer, calculateAvailableSpace, readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
 import { calculateAllControlIndices } from '../lib/control_offsets.js';
 
+// PM Mode Pool Configuration - pre-allocated buffers for allocation-free process()
+const PM_POOL_CONFIG = {
+    // Outgoing pools
+    MAX_REPLY_MESSAGES: 64,
+    MAX_DEBUG_MESSAGES: 32,
+    MAX_LOG_ENTRIES: 100,
+
+    // Shared buffer sizes (packed approach)
+    REPLY_BUFFER_SIZE: 128 * 1024,   // 128KB - matches OUT_BUFFER_SIZE
+    DEBUG_BUFFER_SIZE: 64 * 1024,    // 64KB - matches DEBUG_BUFFER_SIZE
+    LOG_BUFFER_SIZE: 256 * 1024,     // 256KB for log entries
+
+    // Message size limits
+    LOG_MAX_MESSAGE_SIZE: 16 * 1024, // 16KB - truncate larger messages
+
+    // Incoming path
+    MAX_OSC_MESSAGE_SIZE: 8192,      // For header assembly on wrap
+};
+
 class ScsynthProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
@@ -60,24 +79,21 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             FRAGMENTED_MSG: 1 << 3
         };
 
-        // PostMessage mode: queue for incoming OSC messages
-        this.oscQueue = [];
-
         // Additional OSC input ports (for prescheduler and user workers)
         // These allow workers to send OSC directly to the worklet
         this.oscPorts = [];
 
-        // OSC log for centralized logging (both modes)
-        // Collected during snapshot interval and sent to main thread
-        this.oscLog = [];
-
         // Map of port -> sourceId for worker ports (postMessage mode)
         this.portSourceIds = new Map();
 
-        // PM mode: port to send raw OSC log bytes to decoder worker
-        this.oscLogPort = null;
-        // PM mode: local tail position for OSC logging (no shared memory contention)
-        this.pmLogTail = 0;
+        // Pre-allocated channel views to avoid per-frame subarray() allocations
+        this.leftChannelView = null;
+        this.rightChannelView = null;
+        this.lastNumSamples = 0;
+
+        // PM Mode pools - pre-allocated for allocation-free process()
+        // Initialized in initPMPools() after mode is known
+        this.pmPools = null;
 
         // Listen for messages from main thread
         this.port.onmessage = this.handleMessage.bind(this);
@@ -177,6 +193,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             this.dataView = new DataView(this.wasmMemory.buffer);
             const metricsBase = ringBufferBase + METRICS_START;
             this.metricsView = new Uint32Array(this.wasmMemory.buffer, metricsBase, this.bufferConstants.METRICS_SIZE / 4);
+
+            // Initialize IN_LOG_TAIL to current IN_HEAD value for postMessage mode logging
+            // This ensures we only log messages from this point forward
+            const currentHead = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
+            this.atomicStore(this.CONTROL_INDICES.IN_LOG_TAIL, currentHead);
         }
     }
 
@@ -277,72 +298,170 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         }
     }
 
-    // Write queued OSC messages to the IN ring buffer (postMessage mode)
-    // Uses shared ring_buffer_core for wrap-around handling
-    drainOscQueue() {
-        if (this.oscQueue.length === 0) return;
+    // Initialize pre-allocated pools for allocation-free PM mode
+    // Called once after mode is set and bufferConstants are loaded
+    initPMPools() {
+        if (this.mode !== 'postMessage') return;
+
+        const C = PM_POOL_CONFIG;
+
+        this.pmPools = {
+            // === OUTGOING POOLS ===
+
+            // OSC replies from scsynth
+            replies: {
+                message: { type: 'oscReplies', messages: null, count: 0 },
+                buffer: new ArrayBuffer(C.REPLY_BUFFER_SIZE),
+                bufferView: null,
+                entries: new Array(C.MAX_REPLY_MESSAGES).fill(null).map(() => ({
+                    offset: 0,
+                    length: 0,
+                    sequence: 0
+                })),
+            },
+
+            // Debug messages
+            debug: {
+                message: { type: 'debugRawBatch', messages: null, count: 0 },
+                buffer: new ArrayBuffer(C.DEBUG_BUFFER_SIZE),
+                bufferView: null,
+                entries: new Array(C.MAX_DEBUG_MESSAGES).fill(null).map(() => ({
+                    offset: 0,
+                    length: 0,
+                    sequence: 0
+                })),
+            },
+
+            // Metrics + node tree snapshot
+            snapshot: {
+                message: { type: 'snapshot', buffer: null, snapshotsSent: 0 },
+                buffer: null,       // Sized after bufferConstants known
+                bufferView: null,
+                size: 0,
+            },
+
+            // OSC log entries
+            log: {
+                message: { type: 'oscLog', entries: null, count: 0, buffer: null },
+                buffer: new ArrayBuffer(C.LOG_BUFFER_SIZE),
+                bufferView: null,
+                entries: new Array(C.MAX_LOG_ENTRIES).fill(null).map(() => ({
+                    offset: 0,
+                    length: 0,
+                    originalLength: 0,
+                    sourceId: 0,
+                    sequence: 0
+                })),
+            },
+
+            // === INCOMING POOLS ===
+            incoming: {
+                headerBytes: new Uint8Array(16),  // MESSAGE_HEADER_SIZE
+                headerView: null,
+            },
+        };
+
+        const p = this.pmPools;
+
+        // Create views for outgoing buffers
+        p.replies.bufferView = new Uint8Array(p.replies.buffer);
+        p.debug.bufferView = new Uint8Array(p.debug.buffer);
+        p.log.bufferView = new Uint8Array(p.log.buffer);
+
+        // Wire up message.messages to entries arrays
+        p.replies.message.messages = p.replies.entries;
+        p.debug.message.messages = p.debug.entries;
+        p.log.message.entries = p.log.entries;
+
+        // Incoming header view
+        p.incoming.headerView = new DataView(p.incoming.headerBytes.buffer);
+
+        // Snapshot buffer (needs bufferConstants and wasmMemory)
+        if (this.bufferConstants && this.wasmMemory) {
+            const bc = this.bufferConstants;
+            const size = bc.METRICS_SIZE + bc.NODE_TREE_SIZE;
+            p.snapshot.buffer = new ArrayBuffer(size);
+            p.snapshot.bufferView = new Uint8Array(p.snapshot.buffer);
+            p.snapshot.size = size;
+            p.snapshot.message.buffer = p.snapshot.buffer;
+
+            // Pre-allocate source view for the METRICS+NODE_TREE region
+            // This view remains valid as long as WASM memory doesn't grow
+            // (SuperSonic uses fixed memory size, so this is safe)
+            const metricsBase = this.ringBufferBase + bc.METRICS_START;
+            p.snapshot.sourceView = new Uint8Array(this.wasmMemory.buffer, metricsBase, size);
+        }
+    }
+
+    // Write a single OSC message directly to the IN ring buffer (postMessage mode)
+    // Called from onmessage handlers - no queue, no allocation in process()
+    writeOscToRingBuffer(oscData, sourceId = 0) {
+        if (!this.bufferConstants || !this.uint8View) return false;
 
         const IN_BUFFER_SIZE = this.bufferConstants.IN_BUFFER_SIZE;
         const MESSAGE_HEADER_SIZE = this.bufferConstants.MESSAGE_HEADER_SIZE;
         const bufferStart = this.ringBufferBase + this.bufferConstants.IN_BUFFER_START;
 
-        while (this.oscQueue.length > 0) {
-            const oscData = this.oscQueue[0];
-            const messageLength = oscData.byteLength;
-            const totalLength = MESSAGE_HEADER_SIZE + messageLength;
-            const alignedLength = (totalLength + 3) & ~3;  // Align to 4 bytes
+        const messageLength = oscData.byteLength;
+        const totalLength = MESSAGE_HEADER_SIZE + messageLength;
+        const alignedLength = (totalLength + 3) & ~3;  // Align to 4 bytes
 
-            // Get current head/tail
-            const head = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
-            const tail = this.atomicLoad(this.CONTROL_INDICES.IN_TAIL);
+        // Get current head/tail
+        const head = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
+        const tail = this.atomicLoad(this.CONTROL_INDICES.IN_TAIL);
 
-            // Calculate available space using shared helper
-            const available = calculateAvailableSpace(head, tail, IN_BUFFER_SIZE);
+        // Calculate available space using shared helper
+        const available = calculateAvailableSpace(head, tail, IN_BUFFER_SIZE);
 
-            // Check if message fits
-            if (alignedLength > available) {
-                // Buffer full, leave message in queue for next frame
-                break;
-            }
-
-            // Remove from queue
-            this.oscQueue.shift();
-
-            // Get and increment sequence number
-            const sequence = this.atomicLoad(this.CONTROL_INDICES.IN_SEQUENCE);
-            this.atomicStore(this.CONTROL_INDICES.IN_SEQUENCE, sequence + 1);
-
-            // Write message using shared core logic
-            const oscBytes = new Uint8Array(oscData);
-            const newHead = writeMessageToBuffer({
-                uint8View: this.uint8View,
-                dataView: this.dataView,
-                bufferStart,
-                bufferSize: IN_BUFFER_SIZE,
-                head,
-                payload: oscBytes,
-                sequence,
-                messageMagic: this.bufferConstants.MESSAGE_MAGIC,
-                headerSize: MESSAGE_HEADER_SIZE
-            });
-
-            // Update head
-            this.atomicStore(this.CONTROL_INDICES.IN_HEAD, newHead);
+        // Check if message fits
+        if (alignedLength > available) {
+            // Buffer full - message is dropped
+            // This shouldn't happen with proper backpressure
+            console.warn('[AudioWorklet] Ring buffer full, dropping OSC message');
+            return false;
         }
+
+        // Get and increment sequence number
+        const sequence = this.atomicLoad(this.CONTROL_INDICES.IN_SEQUENCE);
+        this.atomicStore(this.CONTROL_INDICES.IN_SEQUENCE, sequence + 1);
+
+        // Write message using shared core logic
+        const oscBytes = new Uint8Array(oscData);
+        const newHead = writeMessageToBuffer({
+            uint8View: this.uint8View,
+            dataView: this.dataView,
+            bufferStart,
+            bufferSize: IN_BUFFER_SIZE,
+            head,
+            payload: oscBytes,
+            sequence,
+            messageMagic: this.bufferConstants.MESSAGE_MAGIC,
+            headerSize: MESSAGE_HEADER_SIZE,
+            sourceId
+        });
+
+        // Update head
+        this.atomicStore(this.CONTROL_INDICES.IN_HEAD, newHead);
+        return true;
     }
 
     // Note: SAB mode OSC logging is now handled by osc_out_log_sab_worker
     // The worker uses Atomics.wait() on IN_HEAD for instant wake when messages arrive
 
     // Read OSC replies from OUT ring buffer and send via postMessage
-    // Uses shared ring_buffer_core for read logic
+    // Uses pre-allocated pools for allocation-free operation
     readOscReplies() {
+        if (!this.pmPools) return;
+
         const head = this.atomicLoad(this.CONTROL_INDICES.OUT_HEAD);
         const tail = this.atomicLoad(this.CONTROL_INDICES.OUT_TAIL);
 
         if (head === tail) return;
 
-        const messages = [];
+        const pool = this.pmPools.replies;
+        const C = PM_POOL_CONFIG;
+        let count = 0;
+        let bufferOffset = 0;
 
         const { newTail, messagesRead } = readMessagesFromBuffer({
             uint8View: this.uint8View,
@@ -354,8 +473,24 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             messageMagic: this.bufferConstants.MESSAGE_MAGIC,
             paddingMagic: this.bufferConstants.PADDING_MAGIC,
             headerSize: this.bufferConstants.MESSAGE_HEADER_SIZE,
-            onMessage: (payload, sequence) => {
-                messages.push({ oscData: payload.buffer, sequence });
+            maxMessages: C.MAX_REPLY_MESSAGES,
+            onMessage: (payloadOffset, payloadLength, sequence, sourceId) => {
+                if (count >= C.MAX_REPLY_MESSAGES) return;
+                if (bufferOffset + payloadLength > C.REPLY_BUFFER_SIZE) return;
+
+                // Copy directly from source to pool - NO intermediate allocation
+                for (let i = 0; i < payloadLength; i++) {
+                    pool.bufferView[bufferOffset + i] = this.uint8View[payloadOffset + i];
+                }
+
+                // Update pre-allocated entry
+                const entry = pool.entries[count];
+                entry.offset = bufferOffset;
+                entry.length = payloadLength;
+                entry.sequence = sequence;
+
+                bufferOffset += payloadLength;
+                count++;
             }
         });
 
@@ -364,12 +499,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             this.atomicStore(this.CONTROL_INDICES.OUT_TAIL, newTail);
         }
 
-        // Send messages via postMessage
-        if (messages.length > 0) {
-            this.port.postMessage({
-                type: 'oscReplies',
-                messages: messages
-            });
+        // Send via postMessage (structured clone - pool remains valid for reuse)
+        if (count > 0) {
+            pool.message.count = count;
+            pool.message.buffer = pool.buffer;
+            this.port.postMessage(pool.message);
         }
     }
 
@@ -474,14 +608,16 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     // Read metrics + node tree from WASM memory and send via postMessage
     // Sends immediately on tree version change, OR on interval (for metrics updates)
     // METRICS and NODE_TREE are contiguous in memory - copy as one atomic unit
+    // Uses pre-allocated pool for allocation-free operation
     checkAndSendSnapshot(audioTime) {
         // Check if tree version changed (need to read header to check)
         const bc = this.bufferConstants;
-        if (!bc || !this.wasmMemory || this.ringBufferBase === null) return;
+        if (!bc || !this.wasmMemory || this.ringBufferBase === null || !this.pmPools) return;
 
         const treeBase = this.ringBufferBase + bc.NODE_TREE_START;
-        const headerView = new Uint32Array(this.wasmMemory.buffer, treeBase, 2);
-        const currentVersion = headerView[1];
+        // Reuse existing atomicView to avoid creating new typed array
+        const versionOffset = (treeBase + 4) / 4;  // version is second uint32 in header
+        const currentVersion = this.atomicView[versionOffset];
         const versionChanged = currentVersion !== this.lastTreeVersion;
 
         if (versionChanged) {
@@ -496,35 +632,21 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             this.lastTreeSendTime = audioTime;
         }
 
-        // Single memcopy of contiguous METRICS + NODE_TREE region
-        const buffer = this.readMetricsAndTreeBuffer();
-        if (!buffer) return;
+        const pool = this.pmPools.snapshot;
+        if (!pool.buffer || !pool.sourceView) return;
 
-        // Send as transferable - main thread parses
+        // Copy METRICS + NODE_TREE using pre-allocated source view - NO allocation
+        pool.bufferView.set(pool.sourceView);
+
+        // Send via postMessage (structured clone - pool remains valid for reuse)
         this.treeSnapshotsSent++;
-        this.port.postMessage({
-            type: 'snapshot',
-            buffer,
-            snapshotsSent: this.treeSnapshotsSent
-        }, [buffer]);
-
-        // Send OSC log if there are entries (PM mode only)
-        // SAB mode: logging is handled by osc_out_log_sab_worker
-        if (this.oscLog.length > 0 && this.oscLogPort) {
-            // Send structured entries to decoder worker via dedicated port
-            const entries = this.oscLog;
-            const transferList = entries.map(e => e.oscData.buffer);
-            this.oscLogPort.postMessage({
-                type: 'oscLogEntries',
-                entries: entries
-            }, transferList);
-            this.oscLog = [];
-        }
+        pool.message.snapshotsSent = this.treeSnapshotsSent;
+        this.port.postMessage(pool.message);
     }
 
     // Read metrics + node tree as one contiguous memory copy
     // Returns raw ArrayBuffer (transferable) or null if not ready
-    // Main thread parses the buffer - keeps worklet fast
+    // Used only for initial snapshot during initialization
     readMetricsAndTreeBuffer() {
         if (!this.bufferConstants || !this.wasmMemory || this.ringBufferBase === null) {
             return null;
@@ -544,15 +666,87 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         return buffer;
     }
 
+    // Read and send OSC log entries from IN ring buffer (postMessage mode)
+    // Uses IN_LOG_TAIL to track what's been logged vs IN_HEAD for new messages
+    // Uses pre-allocated pools for allocation-free operation, with truncation for large messages
+    sendLogEntries() {
+        if (!this.CONTROL_INDICES || !this.bufferConstants || !this.pmPools) return;
+
+        const head = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
+        const logTail = this.atomicLoad(this.CONTROL_INDICES.IN_LOG_TAIL);
+
+        if (head === logTail) return; // No new messages to log
+
+        const pool = this.pmPools.log;
+        const C = PM_POOL_CONFIG;
+        let count = 0;
+        let bufferOffset = 0;
+
+        const { newTail, messagesRead } = readMessagesFromBuffer({
+            uint8View: this.uint8View,
+            dataView: this.dataView,
+            bufferStart: this.ringBufferBase + this.bufferConstants.IN_BUFFER_START,
+            bufferSize: this.bufferConstants.IN_BUFFER_SIZE,
+            head,
+            tail: logTail,
+            messageMagic: this.bufferConstants.MESSAGE_MAGIC,
+            paddingMagic: this.bufferConstants.PADDING_MAGIC,
+            headerSize: this.bufferConstants.MESSAGE_HEADER_SIZE,
+            maxMessages: C.MAX_LOG_ENTRIES,
+            onMessage: (payloadOffset, payloadLength, sequence, sourceId) => {
+                if (count >= C.MAX_LOG_ENTRIES) return;
+
+                // Truncate large messages (e.g., buffer dumps) to LOG_MAX_MESSAGE_SIZE
+                const actualLength = Math.min(payloadLength, C.LOG_MAX_MESSAGE_SIZE);
+
+                // Check if pool buffer has space
+                if (bufferOffset + actualLength > C.LOG_BUFFER_SIZE) return;
+
+                // Copy (possibly truncated) directly from source - NO intermediate allocation
+                for (let i = 0; i < actualLength; i++) {
+                    pool.bufferView[bufferOffset + i] = this.uint8View[payloadOffset + i];
+                }
+
+                // Update pre-allocated entry with truncation info
+                const entry = pool.entries[count];
+                entry.offset = bufferOffset;
+                entry.length = actualLength;
+                entry.originalLength = payloadLength;  // Receiver can detect truncation
+                entry.sourceId = sourceId ?? 0;
+                entry.sequence = sequence;
+
+                bufferOffset += actualLength;
+                count++;
+            }
+        });
+
+        // Update log tail pointer (mark messages as logged)
+        if (messagesRead > 0) {
+            this.atomicStore(this.CONTROL_INDICES.IN_LOG_TAIL, newTail);
+        }
+
+        // Send via postMessage (structured clone - pool remains valid for reuse)
+        if (count > 0) {
+            pool.message.count = count;
+            pool.message.buffer = pool.buffer;
+            this.port.postMessage(pool.message);
+        }
+    }
+
     // Read debug messages from DEBUG ring buffer and send via postMessage
-    // Uses shared ring_buffer_core for read logic
+    // Uses pre-allocated pools for allocation-free operation
     readDebugMessages() {
+        if (!this.pmPools) return;
+
         const head = this.atomicLoad(this.CONTROL_INDICES.DEBUG_HEAD);
         const tail = this.atomicLoad(this.CONTROL_INDICES.DEBUG_TAIL);
 
         if (head === tail) return;
 
-        const messages = [];
+        const pool = this.pmPools.debug;
+        const C = PM_POOL_CONFIG;
+        let count = 0;
+        let bufferOffset = 0;
 
         const { newTail, messagesRead } = readMessagesFromBuffer({
             uint8View: this.uint8View,
@@ -564,14 +758,24 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             messageMagic: this.bufferConstants.MESSAGE_MAGIC,
             paddingMagic: this.bufferConstants.PADDING_MAGIC,
             headerSize: this.bufferConstants.MESSAGE_HEADER_SIZE,
-            maxMessages: 10,  // Limit per callback to avoid blocking audio thread
-            onMessage: (payload, sequence) => {
-                // Send raw bytes to debug_worker for decoding
-                // (TextDecoder not available in AudioWorklet)
-                messages.push({
-                    bytes: payload.buffer,
-                    sequence
-                });
+            maxMessages: C.MAX_DEBUG_MESSAGES,
+            onMessage: (payloadOffset, payloadLength, sequence, sourceId) => {
+                if (count >= C.MAX_DEBUG_MESSAGES) return;
+                if (bufferOffset + payloadLength > C.DEBUG_BUFFER_SIZE) return;
+
+                // Copy directly from source to pool - NO intermediate allocation
+                for (let i = 0; i < payloadLength; i++) {
+                    pool.bufferView[bufferOffset + i] = this.uint8View[payloadOffset + i];
+                }
+
+                // Update pre-allocated entry
+                const entry = pool.entries[count];
+                entry.offset = bufferOffset;
+                entry.length = payloadLength;
+                entry.sequence = sequence;
+
+                bufferOffset += payloadLength;
+                count++;
             }
         });
 
@@ -580,12 +784,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             this.atomicStore(this.CONTROL_INDICES.DEBUG_TAIL, newTail);
         }
 
-        // Send raw bytes to be decoded by debug_worker
-        if (messages.length > 0) {
-            this.port.postMessage({
-                type: 'debugRawBatch',
-                messages: messages
-            }, messages.map(m => m.bytes));  // Transfer ArrayBuffers for efficiency
+        // Send via postMessage (structured clone - pool remains valid for reuse)
+        if (count > 0) {
+            pool.message.count = count;
+            pool.message.buffer = pool.buffer;
+            this.port.postMessage(pool.message);
         }
     }
 
@@ -597,27 +800,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             // Handle OSC messages (postMessage mode)
             if (data.type === 'osc') {
                 if (this.mode === 'postMessage') {
-                    // Queue OSC message for processing in next audio frame
+                    // Write OSC message directly to ring buffer (no allocation in process())
                     if (data.oscData) {
-                        this.oscQueue.push(data.oscData);
+                        this.writeOscToRingBuffer(data.oscData, data.sourceId ?? 0);
                         this.recordOscReceived(data.oscData.byteLength, data.bypassCategory);
-                        // Log for centralized OSC out logging (sourceId 0 = main thread)
-                        const sourceId = data.sourceId ?? 0;
-                        this.oscLog.push({
-                            sourceId,
-                            oscData: new Uint8Array(data.oscData),
-                            timestamp: currentTime
-                        });
                     }
-                }
-                return;
-            }
-
-            // Handle setting the OSC log port (for PM mode decoder worker)
-            if (data.type === 'setOscLogPort') {
-                const port = event.ports[0];
-                if (port) {
-                    this.oscLogPort = port;
                 }
                 return;
             }
@@ -633,20 +820,15 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                     port.onmessage = (e) => {
                         if (e.data.type === 'osc' && e.data.oscData) {
-                            this.oscQueue.push(e.data.oscData);
+                            // Write OSC message directly to ring buffer (no allocation in process())
+                            // Use sourceId from message or port's assigned sourceId
+                            const msgSourceId = e.data.sourceId ?? this.portSourceIds.get(port) ?? 0;
+                            this.writeOscToRingBuffer(e.data.oscData, msgSourceId);
                             // Debug: log bypass category receipt
                             if (__DEV__ && e.data.bypassCategory) {
                                 console.log('[Worklet] OSC via addOscPort, bypassCategory:', e.data.bypassCategory);
                             }
                             this.recordOscReceived(e.data.oscData.byteLength, e.data.bypassCategory);
-                            // Log for centralized OSC out logging
-                            // Use sourceId from message if provided, otherwise from port registration
-                            const sourceId = e.data.sourceId ?? portSourceId;
-                            this.oscLog.push({
-                                sourceId,
-                                oscData: new Uint8Array(e.data.oscData),
-                                timestamp: currentTime
-                            });
                         }
                     };
                     this.oscPorts.push(port);
@@ -761,6 +943,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                         this.calculateBufferIndices(this.ringBufferBase);
 
+                        // Initialize PM mode pools after bufferConstants are known
+                        this.initPMPools();
+
                         // Write worldOptions to SharedArrayBuffer for C++ to read
                         this.writeWorldOptionsToMemory();
 
@@ -798,6 +983,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         this.loadBufferConstants();
 
                         this.calculateBufferIndices(this.ringBufferBase);
+
+                        // Initialize PM mode pools after bufferConstants are known
+                        this.initPMPools();
 
                         // Write worldOptions to SharedArrayBuffer for C++ to read
                         this.writeWorldOptionsToMemory();
@@ -958,10 +1146,6 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
         try {
             if (this.wasmInstance && this.wasmInstance.exports.process_audio) {
-                // PostMessage mode: drain queued OSC messages to ring buffer before processing
-                if (this.mode === 'postMessage') {
-                    this.drainOscQueue();
-                }
 
                 // CRITICAL: Access AudioContext currentTime correctly
                 // In AudioWorkletGlobalScope, currentTime is a bare global variable (not on globalThis)
@@ -1048,9 +1232,19 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                                 this.lastWasmBufferSize = bufferSize;
                             }
 
-                            // Direct copy using pre-allocated view
-                            outputs[0][0].set(this.audioView.subarray(0, numSamples));
-                            outputs[0][1].set(this.audioView.subarray(numSamples, numSamples * 2));
+                            // Recreate channel views only when audioView or numSamples changes
+                            // (avoids per-frame subarray() allocation)
+                            if (!this.leftChannelView ||
+                                this.lastNumSamples !== numSamples ||
+                                this.leftChannelView.buffer !== this.audioView.buffer) {
+                                this.leftChannelView = this.audioView.subarray(0, numSamples);
+                                this.rightChannelView = this.audioView.subarray(numSamples, numSamples * 2);
+                                this.lastNumSamples = numSamples;
+                            }
+
+                            // Direct copy using pre-allocated views
+                            outputs[0][0].set(this.leftChannelView);
+                            outputs[0][1].set(this.rightChannelView);
                         }
                     } catch (err) {
                         // Silently fail in real-time audio context
@@ -1062,6 +1256,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     this.readOscReplies();
                     this.readDebugMessages();
                     this.checkAndSendSnapshot(audioContextTime);
+                    this.sendLogEntries();
                 } else {
                     // SAB mode: Notify waiting worker when there's data to read
                     // Atomics.notify() is cheap when no one is waiting, so notify every frame

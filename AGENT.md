@@ -23,7 +23,7 @@ The original scsynth was multi-threaded - separate threads for IO vs audio graph
 There isn't just the scsynth C++ compiled to wasm - it's actually a number of components:
 
 * The WASM audioworklet code (scsynth + scheduler + ringbuffer read/write code)
-* The JS prescheduler worker (for storing timestamped OSC bundles scheduled for more than 200ms from now)
+* The JS prescheduler worker (for storing timestamped OSC bundles scheduled beyond the lookahead threshold)
 * The SuperSonic JS code
 
 ## Communication Modes

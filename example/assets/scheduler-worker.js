@@ -3,7 +3,8 @@
 
 import { OscChannel, oscFast } from "../dist/supersonic.js";
 
-const LOOKAHEAD = 0.15;
+// ===== TIMING =====
+const SCHEDULE_AHEAD_MS = 350;  // How early to wake and prepare next batch
 
 // Direct channel to AudioWorklet (works in both SAB and PM modes)
 let oscChannel = null;
@@ -191,7 +192,7 @@ class Scheduler {
 
     for (let i = 0; i < batchSize; i++) {
       const eventBeat = this.nextBeat + i * beatsPerEvent;
-      const targetNTP = timeline.getTimeAtBeat(eventBeat) + LOOKAHEAD;
+      const targetNTP = timeline.getTimeAtBeat(eventBeat);
 
       const eventIndex = Math.floor(eventBeat / beatsPerEvent);
       const message = this.createMessage(eventIndex);
@@ -210,7 +211,14 @@ class Scheduler {
     // Schedule next batch
     const nowAfter = getNTP();
     const nextBatchTime = timeline.getTimeAtBeat(this.nextBeat);
-    const nextDelay = Math.max(50, (nextBatchTime - nowAfter) * 1000 - 500);
+    const nextDelay = (nextBatchTime - nowAfter) * 1000 - SCHEDULE_AHEAD_MS;
+
+    if (nextDelay < 0) {
+      console.error(`[${this.name}] Scheduler fell behind, stopping`);
+      this.stop();
+      return;
+    }
+
     this.timeoutId = setTimeout(() => this.running && this.scheduleBatch(), nextDelay);
   }
 
@@ -391,9 +399,8 @@ self.onmessage = (e) => {
         amenScheduler.start();
       }
       // Notify main thread of playback timing for visual sync (only for arp)
-      // Offset by LOOKAHEAD so beat pulse syncs with when audio actually plays
       if (data.scheduler === "arp" || data.scheduler === "all") {
-        self.postMessage({ type: "started", scheduler: "arp", playbackStartNTP: timeline.anchor + LOOKAHEAD });
+        self.postMessage({ type: "started", scheduler: "arp", playbackStartNTP: timeline.anchor });
       }
       break;
 

@@ -1375,42 +1375,55 @@ test.describe("Memory Stability", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      // Track how many times our listener fires
-      let callCount = 0;
-      const listener = () => callCount++;
+      // Track how many times listeners fire
+      let singleListenerCalls = 0;
+      let tripleListenerCalls = 0;
+      const singleListener = () => singleListenerCalls++;
+      const tripleListener = () => tripleListenerCalls++;
 
-      // Add the same listener multiple times - should only fire once per event
-      // unless there's a bug that duplicates listeners
-      sonic.on('message', listener);
-      sonic.on('message', listener);
-      sonic.on('message', listener);
+      // Add single listener once
+      sonic.on('message', singleListener);
 
-      // Trigger one message
+      // Add triple listener three times - should deduplicate (Set-based)
+      sonic.on('message', tripleListener);
+      sonic.on('message', tripleListener);
+      sonic.on('message', tripleListener);
+
+      // Trigger message(s)
       sonic.send("/status");
       await sonic.sync(1);
 
-      const callsForOneMessage = callCount;
+      // Both should have fired the same number of times
+      // (proves triple registration didn't cause triple firing)
+      const singleCalls = singleListenerCalls;
+      const tripleCalls = tripleListenerCalls;
 
-      // Now test that off() works
-      callCount = 0;
-      sonic.off('message', listener);
+      // Now test that off() works for the triple listener
+      tripleListenerCalls = 0;
+      sonic.off('message', tripleListener);
       sonic.send("/status");
       await sonic.sync(2);
 
-      const callsAfterOff = callCount;
+      const callsAfterOff = tripleListenerCalls;
+
+      await sonic.destroy();
 
       return {
         success: true,
-        callsForOneMessage,
+        singleCalls,
+        tripleCalls,
         callsAfterOff,
-        listenerFiredCorrectly: callsForOneMessage >= 1,
-        offWorked: callsAfterOff < callsForOneMessage,
       };
     }, sonicConfig);
 
     expect(result.success).toBe(true);
-    expect(result.listenerFiredCorrectly).toBe(true);
-    expect(result.offWorked).toBe(true);
+    // Both listeners should fire the same number of times
+    // This proves adding same listener 3x doesn't cause 3x firing
+    expect(result.tripleCalls).toBe(result.singleCalls);
+    // There should have been at least one message event
+    expect(result.singleCalls).toBeGreaterThanOrEqual(1);
+    // After off(), the triple listener should not fire
+    expect(result.callsAfterOff).toBe(0);
   });
 
   test("SharedArrayBuffer not corrupted after heavy use", async ({ page, sonicConfig }) => {

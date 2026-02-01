@@ -71,7 +71,6 @@ const readMessages = () => {
     }
 
     const entries = [];
-    const timestamp = performance.now();
 
     const { newTail, messagesRead } = readMessagesFromBuffer({
         uint8View,
@@ -84,11 +83,17 @@ const readMessages = () => {
         paddingMagic: bufferConstants.PADDING_MAGIC,
         headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
         maxMessages: 100,
-        onMessage: (payload, sequence, length, sourceId) => {
+        onMessage: (payloadOffset, payloadLength, sequence, sourceId) => {
+            // SAB worker can allocate - it's not in the audio thread
+            // Copy the data since ring buffer may be overwritten
+            const oscData = new Uint8Array(payloadLength);
+            for (let i = 0; i < payloadLength; i++) {
+                oscData[i] = uint8View[payloadOffset + i];
+            }
             entries.push({
                 sourceId,
-                oscData: new Uint8Array(payload),
-                timestamp
+                oscData,
+                sequence
             });
         },
         onCorruption: (position) => {

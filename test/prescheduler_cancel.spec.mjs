@@ -574,6 +574,9 @@ test.describe("Prescheduler Cancellation", () => {
     // Sentinel value for "unset" min headroom metric (must match prescheduler worker)
     const HEADROOM_UNSET_SENTINEL = 0xFFFFFFFF;
 
+    // Use shorter lookahead for faster test (bundles 300ms out go through prescheduler)
+    const config = { ...sonicConfig, bypassLookaheadMs: 200 };
+
     const result = await page.evaluate(async (config) => {
       const HEADROOM_UNSET_SENTINEL = 0xFFFFFFFF;
 
@@ -661,7 +664,7 @@ test.describe("Prescheduler Cancellation", () => {
         dispatched,
         HEADROOM_UNSET_SENTINEL,
       };
-    }, sonicConfig);
+    }, config);
 
     console.log(`\nMin headroom and lates metrics test:`);
     console.log(`  Before: minHeadroom=${result.minHeadroomBefore}, lates=${result.latesBefore}`);

@@ -115,7 +115,7 @@ export class SuperSonic {
       preschedulerBypassed: { type: 'counter', unit: 'count', description: 'Messages sent directly from JS to scsynth, bypassing prescheduler (aggregate)' },
       bypassNonBundle: { type: 'counter', unit: 'count', description: 'Plain OSC messages (not bundles) that bypassed prescheduler' },
       bypassImmediate: { type: 'counter', unit: 'count', description: 'Bundles with timetag 0 or 1 that bypassed prescheduler' },
-      bypassNearFuture: { type: 'counter', unit: 'count', description: 'Bundles within lookahead window that bypassed prescheduler' },
+      bypassNearFuture: { type: 'counter', unit: 'count', description: 'Bundles within bypass lookahead threshold that bypassed prescheduler' },
       bypassLate: { type: 'counter', unit: 'count', description: 'Bundles past their scheduled time that bypassed prescheduler' },
       preschedulerCapacity: { type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler' },
       preschedulerMinHeadroomMs: { type: 'gauge', unit: 'ms', description: 'Smallest time gap between JS prescheduler dispatch and scsynth scheduler execution' },
@@ -1366,8 +1366,8 @@ export class SuperSonic {
     // Handle centralized OSC out logging (from worklet)
     this.#osc.onOscLog((entries) => {
       for (const entry of entries) {
-        // Emit message:sent for each logged message, including sourceId
-        this.#eventEmitter.emit('message:sent', entry.oscData, entry.sourceId);
+        // Emit message:sent for each logged message, including sourceId and sequence
+        this.#eventEmitter.emit('message:sent', entry.oscData, entry.sourceId, entry.sequence);
       }
     });
 
@@ -1522,7 +1522,7 @@ export class SuperSonic {
           break;
 
         case "oscLog":
-          // Centralized OSC out logging from worklet (SAB mode)
+          // Centralized OSC out logging from worklet (postMessage mode)
           // Forward to transport's handleOscLog which triggers the onOscLog callback
           if (data.entries && this.#osc?.handleOscLog) {
             this.#osc.handleOscLog(data.entries);

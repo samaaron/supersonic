@@ -6,7 +6,7 @@ import { test, expect } from "./fixtures.mjs";
  * Bypass categories track why a message bypassed the prescheduler:
  * - nonBundle: Plain OSC messages (not bundles)
  * - immediate: Bundles with timetag 0 or 1
- * - nearFuture: Bundles within 200ms but not late
+ * - nearFuture: Bundles within lookahead threshold (default 500ms) but not late
  * - late: Bundles past their scheduled time
  */
 
@@ -629,7 +629,7 @@ test.describe("Bypass Category Counters", () => {
       };
 
       // Send from both workers (sequentially per worker, but interleaved)
-      // Worker 1: 10 messages with 50ms offset (nearFuture - within 200ms lookahead)
+      // Worker 1: 10 messages with 50ms offset (nearFuture - within lookahead threshold)
       // Worker 2: 10 messages with -50ms offset (late - in the past)
       const [result1, result2] = await Promise.all([
         sendFromWorker(worker1, 10, 50),   // nearFuture

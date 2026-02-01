@@ -475,6 +475,9 @@ test.describe("Scheduler Queue Overflow", () => {
       timeout: 10000,
     });
 
+    // Use shorter lookahead for faster test
+    const config = { ...sonicConfig, bypassLookaheadMs: 200 };
+
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
 
@@ -483,7 +486,7 @@ test.describe("Scheduler Queue Overflow", () => {
       // Get the scheduler slot size from buffer constants
       const slotSize = sonic.bufferConstants.scheduler_slot_size;
 
-      // NTP helper - create a bundle scheduled > 200ms in future (won't bypass)
+      // NTP helper - create a bundle scheduled beyond lookahead threshold (won't bypass)
       const NTP_EPOCH_OFFSET = 2208988800;
       const getCurrentNTP = () => {
         const perfTimeMs = performance.timeOrigin + performance.now();
@@ -535,8 +538,8 @@ test.describe("Scheduler Queue Overflow", () => {
         return bundle;
       };
 
-      // Schedule 500ms in future (definitely won't bypass prescheduler)
-      const futureNTP = getCurrentNTP() + 0.5;
+      // Schedule 300ms in future (beyond 200ms lookahead, won't bypass)
+      const futureNTP = getCurrentNTP() + 0.3;
 
       // Create a bundle that exceeds slot size
       const oversizedBundle = createOversizedBundle(futureNTP, slotSize);
@@ -555,7 +558,7 @@ test.describe("Scheduler Queue Overflow", () => {
         errorContainsSize: errorThrown?.includes('too large'),
         errorContainsLimit: errorThrown?.includes(String(slotSize)),
       };
-    }, sonicConfig);
+    }, config);
 
     console.log(`\nSize limit test: slot=${result.slotSize}, bundle=${result.bundleSize}`);
     console.log(`Error: ${result.errorThrown}`);
@@ -571,6 +574,9 @@ test.describe("Scheduler Queue Overflow", () => {
     await page.waitForFunction(() => window.supersonicReady === true, {
       timeout: 10000,
     });
+
+    // Use shorter lookahead for faster test
+    const config = { ...sonicConfig, bypassLookaheadMs: 200 };
 
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
@@ -606,7 +612,8 @@ test.describe("Scheduler Queue Overflow", () => {
       const view = new DataView(bundle.buffer);
 
       bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], 0);
-      const futureNTP = getCurrentNTP() + 0.5;
+      // 300ms in future (beyond 200ms lookahead, goes to prescheduler)
+      const futureNTP = getCurrentNTP() + 0.3;
       const ntpSeconds = Math.floor(futureNTP);
       const ntpFraction = Math.floor((futureNTP % 1) * 0x100000000);
       view.setUint32(8, ntpSeconds, false);
@@ -627,7 +634,7 @@ test.describe("Scheduler Queue Overflow", () => {
         errorThrown,
         withinLimit: bundle.length <= slotSize,
       };
-    }, sonicConfig);
+    }, config);
 
     console.log(`\nNormal bundle test: slot=${result.slotSize}, bundle=${result.bundleSize}, within limit=${result.withinLimit}`);
 

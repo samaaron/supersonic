@@ -86,7 +86,14 @@ const readDebugMessages = () => {
         paddingMagic: bufferConstants.PADDING_MAGIC,
         headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
         maxMessages: 1000,
-        onMessage: (payload, sequence, length) => {
+        onMessage: (payloadOffset, payloadLength, sequence, sourceId) => {
+            // Worker can allocate - it's not in the audio thread
+            // Must copy to a regular buffer since TextDecoder cannot decode SharedArrayBuffer views
+            const payload = new Uint8Array(payloadLength);
+            for (let i = 0; i < payloadLength; i++) {
+                payload[i] = uint8View[payloadOffset + i];
+            }
+
             // Convert bytes to string using TextDecoder for proper UTF-8 handling
             let messageText = textDecoder.decode(payload);
 
@@ -104,7 +111,7 @@ const readDebugMessages = () => {
             // Update metrics
             if (metricsView) {
                 Atomics.add(metricsView, MetricsOffsets.DEBUG_MESSAGES_RECEIVED, 1);
-                Atomics.add(metricsView, MetricsOffsets.DEBUG_BYTES_RECEIVED, payload.length);
+                Atomics.add(metricsView, MetricsOffsets.DEBUG_BYTES_RECEIVED, payloadLength);
             }
         },
         onCorruption: (position) => {

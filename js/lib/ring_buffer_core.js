@@ -113,6 +113,10 @@ export function writeMessageToBuffer({
  * Pure data operation - no atomics, no locking.
  * Calls onMessage callback for each valid message found.
  *
+ * IMPORTANT: Callback receives offset/length, NOT a Uint8Array payload.
+ * This design enables allocation-free reading in the AudioWorklet.
+ * Caller must read directly from uint8View using the provided offset.
+ *
  * @param {Object} params - Read parameters
  * @param {Uint8Array} params.uint8View - Uint8Array view of memory
  * @param {DataView} params.dataView - DataView of memory
@@ -124,7 +128,9 @@ export function writeMessageToBuffer({
  * @param {number} params.paddingMagic - Magic number for padding markers (e.g., 0xDEADFEED)
  * @param {number} params.headerSize - Size of message header (typically 16)
  * @param {number} [params.maxMessages=Infinity] - Maximum messages to read per call
- * @param {Function} params.onMessage - Callback: (payload: Uint8Array, sequence: number, length: number, sourceId: number) => void
+ * @param {Function} params.onMessage - Callback: (payloadOffset: number, payloadLength: number, sequence: number, sourceId: number) => void
+ *   payloadOffset is absolute byte offset into uint8View where payload starts
+ *   Caller reads directly: uint8View[payloadOffset + i] for i in 0..payloadLength-1
  * @param {Function} [params.onCorruption] - Optional callback for corrupted messages: (position: number) => void
  * @returns {{ newTail: number, messagesRead: number }} new tail position and count
  */
@@ -190,18 +196,12 @@ export function readMessagesFromBuffer({
             continue;
         }
 
-        // Read payload
+        // Calculate payload location (no allocation - just arithmetic)
         const payloadLength = length - headerSize;
-        const payloadStart = readPos + headerSize;
+        const payloadOffset = readPos + headerSize;
 
-        // Copy payload bytes (messages are contiguous due to padding markers)
-        const payload = new Uint8Array(payloadLength);
-        for (let i = 0; i < payloadLength; i++) {
-            payload[i] = uint8View[payloadStart + i];
-        }
-
-        // Call message handler
-        onMessage(payload, sequence, length, sourceId);
+        // Call message handler with offset/length (caller reads directly from uint8View)
+        onMessage(payloadOffset, payloadLength, sequence, sourceId);
 
         // Advance tail by message length (which may be aligned by writer)
         currentTail = (currentTail + length) % bufferSize;

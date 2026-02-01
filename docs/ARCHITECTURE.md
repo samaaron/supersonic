@@ -116,7 +116,7 @@ Main Thread                          AudioWorklet
 │  └──────────────┘    └─────────────┘  │                             │   │
 │                                       │                             │   │
 │         Immediate/near-future OSC     │    Far-future bundles       │   │
-│                   │                   │         (>200ms)            │   │
+│                   │                   │         (>500ms)            │   │
 └───────────────────┼───────────────────┼─────────────────────────────┘   │
                     │                   │                                 │
                     ▼                   ▼                                 │
@@ -158,13 +158,13 @@ Main Thread                          AudioWorklet
 1. **SuperSonic** receives OSC via `send()` or `sendBundle()`
 2. **OSCChannel** classifies the message:
    - **Immediate/non-bundle**: bypass direct to AudioWorklet
-   - **Near-future bundle** (<=200ms): bypass direct to AudioWorklet
+   - **Near-future bundle** (<=500ms): bypass direct to AudioWorklet
    - **Late bundle** (past timestamp): bypass direct (already late)
-   - **Far-future bundle** (>200ms): route to Prescheduler
+   - **Far-future bundle** (>500ms): route to Prescheduler
 3. **Direct route** (bypass):
    - SAB mode: write to IN ring buffer
    - PM mode: postMessage to AudioWorklet
-4. **Prescheduler route**: stores bundle until ~200ms before timestamp, then dispatches via its own direct connection
+4. **Prescheduler route**: stores bundle until ~500ms before timestamp, then dispatches via its own direct connection
 5. **AudioWorklet** receives message:
    - SAB mode: reads from ring buffer
    - PM mode: receives via postMessage, queues internally
