@@ -1783,9 +1783,22 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   transition: color 0.3s ease;
 }
 
-.demo-link-section:has(.cta-button--primary:hover) .demo-arrow {
+.demo-link-section:has(.cta-button--primary:hover) .demo-arrow,
+.demo-arrow-link:hover .demo-arrow {
   color: var(--c-orange);
   animation: bounce 1s ease-in-out infinite;
+}
+
+.demo-arrow-link {
+  cursor: pointer;
+}
+
+/* When arrow is hovered, also trigger button hover styles */
+.demo-link-section:has(.demo-arrow-link:hover) .cta-button--primary {
+  background: linear-gradient(101deg, var(--c-gold) 0%, var(--c-orange) 100%);
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 0 8px 25px rgba(255, 215, 0, 0.5);
+  color: #000;
 }
 
 .demo-link-section__docs {
