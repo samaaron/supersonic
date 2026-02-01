@@ -609,10 +609,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     // Sends immediately on tree version change, OR on interval (for metrics updates)
     // METRICS and NODE_TREE are contiguous in memory - copy as one atomic unit
     // Uses pre-allocated pool for allocation-free operation
+    // Returns true if snapshot was sent (used to batch log entries on same interval)
     checkAndSendSnapshot(audioTime) {
         // Check if tree version changed (need to read header to check)
         const bc = this.bufferConstants;
-        if (!bc || !this.wasmMemory || this.ringBufferBase === null || !this.pmPools) return;
+        if (!bc || !this.wasmMemory || this.ringBufferBase === null || !this.pmPools) return false;
 
         const treeBase = this.ringBufferBase + bc.NODE_TREE_START;
         // Reuse existing atomicView to avoid creating new typed array
@@ -627,13 +628,13 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         } else {
             // No tree change - check if interval has elapsed (for metrics updates)
             if (this.lastTreeSendTime >= 0 && audioTime - this.lastTreeSendTime < this.treeSnapshotMinInterval) {
-                return; // Skip this frame, will send on next interval
+                return false; // Skip this frame, will send on next interval
             }
             this.lastTreeSendTime = audioTime;
         }
 
         const pool = this.pmPools.snapshot;
-        if (!pool.buffer || !pool.sourceView) return;
+        if (!pool.buffer || !pool.sourceView) return false;
 
         // Copy METRICS + NODE_TREE using pre-allocated source view - NO allocation
         pool.bufferView.set(pool.sourceView);
@@ -642,6 +643,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.treeSnapshotsSent++;
         pool.message.snapshotsSent = this.treeSnapshotsSent;
         this.port.postMessage(pool.message);
+        return true;
     }
 
     // Read metrics + node tree as one contiguous memory copy
@@ -667,6 +669,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     }
 
     // Read and send OSC log entries from IN ring buffer (postMessage mode)
+    // Called on snapshot heartbeat (~150ms) to batch entries and reduce postMessage frequency
     // Uses IN_LOG_TAIL to track what's been logged vs IN_HEAD for new messages
     // Uses pre-allocated pools for allocation-free operation, with truncation for large messages
     sendLogEntries() {
@@ -1255,8 +1258,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 if (this.mode === 'postMessage') {
                     this.readOscReplies();
                     this.readDebugMessages();
-                    this.checkAndSendSnapshot(audioContextTime);
-                    this.sendLogEntries();
+                    // Batch log entries with snapshot heartbeat (~150ms) to reduce postMessage frequency
+                    if (this.checkAndSendSnapshot(audioContextTime)) {
+                        this.sendLogEntries();
+                    }
                 } else {
                     // SAB mode: Notify waiting worker when there's data to read
                     // Atomics.notify() is cheap when no one is waiting, so notify every frame
