@@ -73,8 +73,21 @@ const sonic = new SuperSonic({
 | `workletUrl` | Direct URL to audio worklet JS |
 | `sampleBaseURL` | Path to sample files |
 | `synthdefBaseURL` | Path to synthdef files |
+| `mode` | `'sab'` or `'postMessage'` - transport mode (auto-detected by default) - see below |
 
 For the full list of configuration options, see the [API Reference](docs/API.md#constructor-options). For installation options see the [Installation Guide](docs/INSTALLATION.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
+
+
+### Communication Modes
+
+SuperSonic has two communication modes:
+
+- **SAB mode** (SharedArrayBuffer) - the main thread, each worker and audio worklet (i.e. isolated thread) has access to the same memory section for reading and writing. This lowers communication latency and jitter but requires your server to send [COOP/COEP headers](https://web.dev/articles/coop-coep).
+- **PM mode** (postMessage) - the main thread, each worker and audio worklet communicate via explicit messages using `postMessage`. This mode does not require special HTTP headers and works anywhere including CDNs. Due to the extra work of sending explicit messages between workers and the audio worklet, this mode has slightly higher internal latency and jitter.
+
+SuperSonic auto-detects which mode is available. If you want to use a CDN and can't control your server's HTTP headers, PM mode works great. However, if you're self-hosting, running something in production and want the lowest latency and highest robustness be sure to use `'sab'`.
+
+Set the mode explicitly in the SuperSonic constructor with `mode: 'postMessage'` or `mode: 'sab'` (See above).
 
 
 ## Documentation
