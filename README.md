@@ -74,7 +74,7 @@ const sonic = new SuperSonic({
 | `sampleBaseURL` | Path to sample files |
 | `synthdefBaseURL` | Path to synthdef files |
 
-For more installation options see the [Installation Guide](docs/INSTALLATION.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
+For the full list of configuration options, see the [API Reference](docs/API.md#constructor-options). For installation options see the [Installation Guide](docs/INSTALLATION.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
 
 
 ## Documentation
@@ -83,6 +83,7 @@ For more installation options see the [Installation Guide](docs/INSTALLATION.md)
 - [Quick Start](docs/QUICKSTART.md) - Boot and play your first synth
 - [API Reference](docs/API.md) - Methods, callbacks, and configuration
 - [scsynth Command Reference](docs/SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling scsynth
+- [Workers Guide](docs/WORKERS.md) - Sending OSC from Web Workers
 - [Metrics](docs/METRICS.md) - Performance monitoring and debugging
 - [Building from Source](docs/BUILDING.md) - Compiling the WASM yourself
 

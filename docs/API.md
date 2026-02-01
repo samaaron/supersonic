@@ -992,6 +992,24 @@ console.log(msg.address, msg.args);
 // For bundles: msg.timeTag, msg.packets
 ```
 
+### `createOscChannel()`
+
+Create an `OscChannel` for sending OSC from a Web Worker directly to the AudioWorklet, bypassing the main thread. Useful for high-frequency control or offloading work.
+
+```javascript
+const channel = supersonic.createOscChannel();
+myWorker.postMessage({ channel: channel.transferable }, channel.transferList);
+```
+
+In worker:
+```javascript
+import { OscChannel } from 'supersonic-scsynth';
+const channel = OscChannel.fromTransferable(event.data.channel);
+channel.send(oscBytes);  // Send directly to AudioWorklet
+```
+
+For detailed usage including multiple workers, see [Workers Guide](WORKERS.md).
+
 ## OSC Commands
 
 SuperSonic speaks the SuperCollider Server protocol. You control the audio engine by sending OSC messages via `send()`.
