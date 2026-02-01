@@ -1270,6 +1270,13 @@ function stopBeatPulse() {
   }
 }
 
+function restartBeatPulse() {
+  // Only restart if currently running
+  if (!beatPulseInterval && !beatPulseTimeout) return;
+  stopBeatPulse();
+  startBeatPulse();
+}
+
 function triggerBeatPulse() {
   const touch = $("synth-pad-touch");
   if (!touch) return;
@@ -1351,6 +1358,32 @@ function stopAmenLoop() {
   schedulerRunning.amen = false;
 }
 
+// Mute/unmute the final mixer for clean stop/start
+function muteOutput() {
+  if (!orchestrator || !fxChainInitialized) return;
+  const steps = 10;
+  const duration = 500; // ms
+  const interval = duration / steps;
+
+  for (let i = 0; i <= steps; i++) {
+    setTimeout(() => {
+      const amp = 1 - (i / steps);
+      const arpAmp = amp * (1 - uiState.mix / 100);
+      const beatAmp = amp * (uiState.mix / 100);
+      orchestrator.send("/n_set", FX_ARP_LEVEL_NODE, "amp", arpAmp);
+      orchestrator.send("/n_set", FX_BEAT_LEVEL_NODE, "amp", beatAmp);
+    }, i * interval);
+  }
+}
+
+function unmuteOutput() {
+  if (!orchestrator || !fxChainInitialized) return;
+  const arpAmp = 1 - uiState.mix / 100;
+  const beatAmp = uiState.mix / 100;
+  orchestrator.send("/n_set", FX_ARP_LEVEL_NODE, "amp", arpAmp);
+  orchestrator.send("/n_set", FX_BEAT_LEVEL_NODE, "amp", beatAmp);
+}
+
 // Start all schedulers together (for initial start)
 async function startAll() {
   if (!orchestrator) return;
@@ -1360,6 +1393,9 @@ async function startAll() {
   if (!samplesLoaded.kick) await loadAllKickSamples();
   if (!samplesLoaded.loops) await loadAllLoopSamples();
   if (!schedulerWorker) initSchedulerWorker();
+  // Unmute and reset scheduler state before starting
+  unmuteOutput();
+  schedulerWorker.postMessage({ type: "reset" });
   // Send single message to start all schedulers atomically
   schedulerWorker.postMessage({ type: "start", scheduler: "all" });
   schedulerRunning.arp = true;
@@ -1368,6 +1404,8 @@ async function startAll() {
 }
 
 function stopAll() {
+  // Mute immediately for clean cutoff
+  muteOutput();
   if (schedulerWorker) {
     schedulerWorker.postMessage({ type: "stop", scheduler: "all" });
   }
@@ -1587,6 +1625,8 @@ function setupSlider(sliderId, valueId, stateKey, fmt = (v) => v) {
 }
 
 setupSlider("bpm-slider", "bpm-value", "bpm", (v) => Math.round(v));
+// Also restart beat pulse animation when BPM changes
+$("bpm-slider")?.addEventListener("input", () => restartBeatPulse());
 $("root-note-select")?.addEventListener("change", (e) => {
   uiState.rootNote = parseInt(e.target.value, 10);
   sendStateToWorker({ rootNote: uiState.rootNote });

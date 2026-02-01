@@ -142,7 +142,7 @@ function getArpNote(scale) {
 // ===== SCHEDULER CLASS =====
 // Schedulers use the shared timeline for all timing, ensuring phase alignment
 class Scheduler {
-  constructor(name, { getBeatsPerEvent, getBatchSize = () => 4, createMessage, getGroup }) {
+  constructor(name, { getBeatsPerEvent, getBatchSize = () => 16, createMessage, getGroup }) {
     this.name = name;
     this.getBeatsPerEvent = getBeatsPerEvent;  // How many 8th-note beats per event
     this.getBatchSize = getBatchSize;
@@ -213,13 +213,9 @@ class Scheduler {
     const nextBatchTime = timeline.getTimeAtBeat(this.nextBeat);
     const nextDelay = (nextBatchTime - nowAfter) * 1000 - SCHEDULE_AHEAD_MS;
 
-    if (nextDelay < 0) {
-      console.error(`[${this.name}] Scheduler fell behind, stopping`);
-      this.stop();
-      return;
-    }
-
-    this.timeoutId = setTimeout(() => this.running && this.scheduleBatch(), nextDelay);
+    // At high BPMs, batch duration < SCHEDULE_AHEAD_MS, so nextDelay can be negative
+    // This just means we should schedule the next batch immediately, not that we fell behind
+    this.timeoutId = setTimeout(() => this.running && this.scheduleBatch(), Math.max(1, nextDelay));
   }
 
   stop(freeGroup = false) {
@@ -237,6 +233,24 @@ class Scheduler {
     if (!arpScheduler.running && !kickScheduler.running && !amenScheduler.running) {
       timeline.reset();
     }
+  }
+
+  // Called when BPM changes - reschedule based on new timing
+  reschedule() {
+    if (!this.running || timeline.anchor === null) return;
+
+    // Cancel current timeout
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
+    }
+
+    // Recalculate next wake time based on new BPM
+    const now = getNTP();
+    const nextBatchTime = timeline.getTimeAtBeat(this.nextBeat);
+    const nextDelay = (nextBatchTime - now) * 1000 - SCHEDULE_AHEAD_MS;
+
+    this.timeoutId = setTimeout(() => this.running && this.scheduleBatch(), Math.max(1, nextDelay));
   }
 }
 
@@ -381,6 +395,10 @@ self.onmessage = (e) => {
         state.bpm = data.bpm;
         // Update timeline - this preserves current beat position (Ableton Link style)
         timeline.setBpm(data.bpm);
+        // Reschedule all running schedulers to use new timing
+        arpScheduler.reschedule();
+        kickScheduler.reschedule();
+        amenScheduler.reschedule();
       }
       Object.assign(state, data);
       // Reset arp direction on mode change
