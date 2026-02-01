@@ -37,6 +37,8 @@ export function calculateAvailableSpace(head, tail, bufferSize) {
  * @param {number} params.messageMagic - Magic number for message header (e.g., 0xDEADBEEF)
  * @param {number} params.headerSize - Size of message header (typically 16)
  * @param {number} [params.sourceId=0] - Source ID for logging (0 = main, 1+ = workers)
+ * @param {Uint8Array} [params.headerScratch] - Pre-allocated buffer for header (avoids allocation on wrap)
+ * @param {DataView} [params.headerScratchView] - Pre-allocated DataView for header
  * @returns {number} new head position (aligned), relative to buffer start
  */
 export function writeMessageToBuffer({
@@ -49,7 +51,9 @@ export function writeMessageToBuffer({
     sequence,
     messageMagic,
     headerSize,
-    sourceId = 0
+    sourceId = 0,
+    headerScratch = null,
+    headerScratchView = null
 }) {
     const payloadSize = payload.length;
     const totalSize = headerSize + payloadSize;
@@ -61,8 +65,9 @@ export function writeMessageToBuffer({
 
     if (alignedSize > spaceToEnd) {
         // Message will wrap - write in two parts
-        const headerBytes = new Uint8Array(headerSize);
-        const headerView = new DataView(headerBytes.buffer);
+        // Use pre-allocated scratch buffers if provided, otherwise allocate
+        const headerBytes = headerScratch || new Uint8Array(headerSize);
+        const headerView = headerScratchView || new DataView(headerBytes.buffer);
         headerView.setUint32(0, messageMagic, true);
         headerView.setUint32(4, alignedSize, true);
         headerView.setUint32(8, sequence, true);

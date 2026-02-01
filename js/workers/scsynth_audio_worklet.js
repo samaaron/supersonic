@@ -95,6 +95,28 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         // Initialized in initPMPools() after mode is known
         this.pmPools = null;
 
+        // Pre-allocated objects for checkStatus() to avoid allocation on audio thread
+        this._statusObj = {
+            bufferFull: false,
+            overrun: false,
+            wasmError: false,
+            fragmented: false
+        };
+        this._metricsObj = {
+            processCount: 0,
+            messagesProcessed: 0,
+            messagesDropped: 0,
+            schedulerQueueDepth: 0,
+            schedulerQueueMax: 0,
+            schedulerQueueDropped: 0
+        };
+        this._statusMessage = {
+            type: 'status',
+            flags: 0,
+            status: this._statusObj,
+            metrics: this._metricsObj
+        };
+
         // Listen for messages from main thread
         this.port.onmessage = this.handleMessage.bind(this);
     }
@@ -394,9 +416,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     }
 
     // Write a single OSC message directly to the IN ring buffer (postMessage mode)
-    // Called from onmessage handlers - no queue, no allocation in process()
+    // Called from onmessage handlers - uses pre-allocated header scratch for wrap-around case
+    // Note: new Uint8Array(oscData) creates a view (no copy), which is required to access ArrayBuffer bytes
     writeOscToRingBuffer(oscData, sourceId = 0) {
-        if (!this.bufferConstants || !this.uint8View) return false;
+        if (!this.bufferConstants || !this.uint8View || !this.pmPools) return false;
 
         const IN_BUFFER_SIZE = this.bufferConstants.IN_BUFFER_SIZE;
         const MESSAGE_HEADER_SIZE = this.bufferConstants.MESSAGE_HEADER_SIZE;
@@ -425,8 +448,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         const sequence = this.atomicLoad(this.CONTROL_INDICES.IN_SEQUENCE);
         this.atomicStore(this.CONTROL_INDICES.IN_SEQUENCE, sequence + 1);
 
-        // Write message using shared core logic
+        // Create view over incoming ArrayBuffer (view only, no data copy)
+        // This allocation is unavoidable - JS requires TypedArray to access ArrayBuffer bytes
         const oscBytes = new Uint8Array(oscData);
+
+        // Write message using shared core logic with pre-allocated header scratch
         const newHead = writeMessageToBuffer({
             uint8View: this.uint8View,
             dataView: this.dataView,
@@ -437,7 +463,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             sequence,
             messageMagic: this.bufferConstants.MESSAGE_MAGIC,
             headerSize: MESSAGE_HEADER_SIZE,
-            sourceId
+            sourceId,
+            headerScratch: this.pmPools.incoming.headerBytes,
+            headerScratchView: this.pmPools.incoming.headerView
         });
 
         // Update head
@@ -1307,29 +1335,24 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         const statusFlags = this.atomicLoad(this.CONTROL_INDICES.STATUS_FLAGS);
 
         if (statusFlags !== this.STATUS_FLAGS.OK) {
-            const status = {
-                bufferFull: !!(statusFlags & this.STATUS_FLAGS.BUFFER_FULL),
-                overrun: !!(statusFlags & this.STATUS_FLAGS.OVERRUN),
-                wasmError: !!(statusFlags & this.STATUS_FLAGS.WASM_ERROR),
-                fragmented: !!(statusFlags & this.STATUS_FLAGS.FRAGMENTED_MSG)
-            };
+            // Update pre-allocated status object (avoids allocation on audio thread)
+            this._statusObj.bufferFull = !!(statusFlags & this.STATUS_FLAGS.BUFFER_FULL);
+            this._statusObj.overrun = !!(statusFlags & this.STATUS_FLAGS.OVERRUN);
+            this._statusObj.wasmError = !!(statusFlags & this.STATUS_FLAGS.WASM_ERROR);
+            this._statusObj.fragmented = !!(statusFlags & this.STATUS_FLAGS.FRAGMENTED_MSG);
 
-            // Get current metrics (use regular array access - metricsView is Uint32Array)
-            const metrics = {
-                processCount: this.metricsView[MetricsOffsets.SCSYNTH_PROCESS_COUNT],
-                messagesProcessed: this.metricsView[MetricsOffsets.SCSYNTH_MESSAGES_PROCESSED],
-                messagesDropped: this.metricsView[MetricsOffsets.SCSYNTH_MESSAGES_DROPPED],
-                schedulerQueueDepth: this.metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_DEPTH],
-                schedulerQueueMax: this.metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_PEAK_DEPTH],
-                schedulerQueueDropped: this.metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_DROPPED]
-            };
+            // Update pre-allocated metrics object (avoids allocation on audio thread)
+            this._metricsObj.processCount = this.metricsView[MetricsOffsets.SCSYNTH_PROCESS_COUNT];
+            this._metricsObj.messagesProcessed = this.metricsView[MetricsOffsets.SCSYNTH_MESSAGES_PROCESSED];
+            this._metricsObj.messagesDropped = this.metricsView[MetricsOffsets.SCSYNTH_MESSAGES_DROPPED];
+            this._metricsObj.schedulerQueueDepth = this.metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_DEPTH];
+            this._metricsObj.schedulerQueueMax = this.metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_PEAK_DEPTH];
+            this._metricsObj.schedulerQueueDropped = this.metricsView[MetricsOffsets.SCSYNTH_SCHEDULER_DROPPED];
 
-            this.port.postMessage({
-                type: 'status',
-                flags: statusFlags,
-                status: status,
-                metrics: metrics
-            });
+            // Update pre-allocated message object and send
+            // Note: postMessage does structured clone, so reusing the object is safe
+            this._statusMessage.flags = statusFlags;
+            this.port.postMessage(this._statusMessage);
 
             // Clear non-persistent flags
             const persistentFlags = statusFlags & (this.STATUS_FLAGS.BUFFER_FULL);
