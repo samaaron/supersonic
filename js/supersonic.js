@@ -116,7 +116,7 @@ export class SuperSonic {
       bypassNonBundle: { type: 'counter', unit: 'count', description: 'Plain OSC messages (not bundles) that bypassed prescheduler' },
       bypassImmediate: { type: 'counter', unit: 'count', description: 'Bundles with timetag 0 or 1 that bypassed prescheduler' },
       bypassNearFuture: { type: 'counter', unit: 'count', description: 'Bundles within bypass lookahead threshold that bypassed prescheduler' },
-      bypassLate: { type: 'counter', unit: 'count', description: 'Bundles past their scheduled time that bypassed prescheduler' },
+      bypassLate: { type: 'counter', unit: 'count', description: 'Timestamped OSC bundles arriving late into SuperSonic bypassing prescheduler' },
       preschedulerCapacity: { type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler' },
       preschedulerMinHeadroomMs: { type: 'gauge', unit: 'ms', description: 'Smallest time gap between JS prescheduler dispatch and scsynth scheduler execution' },
       preschedulerLates: { type: 'counter', unit: 'count', description: 'Bundles dispatched after their scheduled execution time' },
