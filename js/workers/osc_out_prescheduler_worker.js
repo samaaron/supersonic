@@ -257,9 +257,13 @@ const updateMetrics = () => {
  * Dispatch OSC message to WASM
  * In SAB mode: writes to ring buffer
  * In postMessage mode: sends directly to worklet via MessagePort
- * Returns true if successful, false if failed (caller should queue for retry)
+ * @param {Uint8Array} oscMessage - OSC message data
+ * @param {boolean} isRetry - Whether this is a retry attempt (for logging)
+ * @param {number} sourceId - Source ID for logging
+ * @param {boolean} useWait - If true, use Atomics.wait() for guaranteed delivery (SAB mode only)
+ * @returns {boolean} true if successful, false if failed (caller should queue for retry)
  */
-const dispatchOSCMessage = (oscMessage, isRetry, sourceId = 0) => {
+const dispatchOSCMessage = (oscMessage, isRetry, sourceId = 0, useWait = false) => {
     if (mode === 'postMessage') {
         // PostMessage mode: send to worklet via MessagePort
         if (!workletPort) {
@@ -290,7 +294,8 @@ const dispatchOSCMessage = (oscMessage, isRetry, sourceId = 0) => {
         return false;
     }
 
-    // Use shared ring buffer writer (worker can spin briefly for lock)
+    // Use shared ring buffer writer
+    // useWait: true means use Atomics.wait() for guaranteed delivery (blocks until lock available)
     const success = writeToRingBuffer({
         atomicView,
         dataView,
@@ -300,7 +305,8 @@ const dispatchOSCMessage = (oscMessage, isRetry, sourceId = 0) => {
         controlIndices: CONTROL_INDICES,
         oscMessage,
         sourceId,
-        maxSpins: 10  // Worker can afford brief spinning
+        maxSpins: 10,  // Spin briefly first
+        useWait,       // If true, block until lock available (guaranteed delivery)
     });
 
     if (!success) {
@@ -359,8 +365,10 @@ const processRetryQueue = () => {
     while (i < retryQueue.length) {
         const item = retryQueue[i];
 
-        // Try to write
-        const success = dispatchOSCMessage(item.oscData, true, item.sourceId);
+        // Try to write with guaranteed delivery (useWait: true)
+        // In SAB mode this uses Atomics.wait() so lock contention won't cause failures
+        // Only buffer-full can fail here
+        const success = dispatchOSCMessage(item.oscData, true, item.sourceId, true);
 
         if (success) {
             // Success - remove from queue
@@ -413,10 +421,11 @@ const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
 
     if (ntpTime === null) {
         // Not a bundle - dispatch immediately to ring buffer
+        // Use useWait: true for guaranteed delivery (no lock contention drops)
         schedulerLog('[PreScheduler] Non-bundle message, dispatching immediately');
-        const success = dispatchOSCMessage(oscData, false, sourceId);
+        const success = dispatchOSCMessage(oscData, false, sourceId, true);
         if (!success) {
-            // Queue for retry
+            // Queue for retry (only fails if buffer genuinely full)
             queueForRetry(oscData, 'immediate message', sourceId);
         }
         return true;
@@ -608,9 +617,10 @@ const checkAndDispatch = () => {
                         'early=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
                         'remaining=' + eventHeap.length);
 
-            const success = dispatchOSCMessage(nextEvent.oscData, false, nextEvent.sourceId);
+            // Use useWait: true for guaranteed delivery (no lock contention drops)
+            const success = dispatchOSCMessage(nextEvent.oscData, false, nextEvent.sourceId, true);
             if (!success) {
-                // Queue for retry
+                // Queue for retry (only fails if buffer genuinely full)
                 queueForRetry(nextEvent.oscData, 'scheduled bundle NTP=' + nextEvent.ntpTime.toFixed(3), nextEvent.sourceId);
             }
             dispatchCount++;
@@ -724,16 +734,17 @@ const extractMessagesFromBundle = (data) => {
 };
 
 const processImmediate = (oscData, sourceId = 0) => {
+    // Use useWait: true for guaranteed delivery (no lock contention drops)
     if (isBundle(oscData)) {
         const messages = extractMessagesFromBundle(oscData);
         for (let i = 0; i < messages.length; i++) {
-            const success = dispatchOSCMessage(messages[i], false, sourceId);
+            const success = dispatchOSCMessage(messages[i], false, sourceId, true);
             if (!success) {
                 queueForRetry(messages[i], 'immediate bundle message ' + i, sourceId);
             }
         }
     } else {
-        const success = dispatchOSCMessage(oscData, false, sourceId);
+        const success = dispatchOSCMessage(oscData, false, sourceId, true);
         if (!success) {
             queueForRetry(oscData, 'immediate message', sourceId);
         }
@@ -828,6 +839,18 @@ self.addEventListener('message', (event) => {
 
             case 'sendImmediate':
                 processImmediate(data.oscData, data.sourceId || 0);
+                break;
+
+            case 'directDispatch':
+                // Direct dispatch with guaranteed delivery (fallback from main thread SAB contention)
+                // Uses Atomics.wait() to block until lock is available - NEVER drops
+                {
+                    const success = dispatchOSCMessage(data.oscData, false, data.sourceId || 0, true);
+                    if (!success) {
+                        // Only fails if buffer is genuinely full (not lock contention)
+                        queueForRetry(data.oscData, 'directDispatch fallback', data.sourceId || 0);
+                    }
+                }
                 break;
 
             case 'cancelSessionTag':

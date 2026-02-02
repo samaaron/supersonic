@@ -700,6 +700,7 @@ const METRICS_MAP = {
   preschedulerMaxLateMs: "prescheduler_max_late_ms",
   scsynthWasmErrors: "scsynth_wasm_errors",
   oscInCorrupted: "osc_in_corrupted",
+  ringBufferDirectWriteFails: "ring_buffer_direct_write_fails",
 };
 
 // Apply tooltips from schema to metric elements using data-metric attributes
@@ -806,6 +807,7 @@ function updateMetrics(m) {
     "metric-buffer-allocs": mapped.buffer_pool_allocations ?? 0,
     "metric-wasm-errors": mapped.scsynth_wasm_errors ?? 0,
     "metric-osc-in-corrupted": mapped.osc_in_corrupted ?? 0,
+    "metric-direct-write-fails": mapped.ring_buffer_direct_write_fails ?? 0,
   };
 
   for (const [id, val] of Object.entries(updates)) {

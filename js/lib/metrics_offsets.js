@@ -17,7 +17,7 @@
  * - [35-37] Ring buffer peak usage (WASM writes)
  * - [38-41] Bypass category metrics (main thread / PM transport)
  * - [42-44] scsynth late timing diagnostics (WASM writes)
- * - [45]    padding
+ * - [45]    Ring buffer direct write failures (OscChannel SAB mode)
  */
 
 // =============================================================================
@@ -106,4 +106,7 @@ export const SCSYNTH_SCHEDULER_MAX_LATE_MS = 42;    // Maximum lateness observed
 export const SCSYNTH_SCHEDULER_LAST_LATE_MS = 43;   // Most recent late magnitude (ms)
 export const SCSYNTH_SCHEDULER_LAST_LATE_TICK = 44; // Process count when last late occurred
 
-// [45] padding
+// =============================================================================
+// Ring buffer direct write failures [45] (written by OscChannel in SAB mode)
+// =============================================================================
+export const RING_BUFFER_DIRECT_WRITE_FAILS = 45;   // SAB mode only: optimistic direct writes that failed (delivered via prescheduler)

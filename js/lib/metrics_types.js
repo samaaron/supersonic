@@ -87,6 +87,7 @@
  * --- Error Metrics ---
  * @property {number} scsynthWasmErrors - Count of WASM execution errors in audio worklet
  * @property {number} oscInCorrupted - Ring buffer message corruption detected (invalid framing)
+ * @property {number} ringBufferDirectWriteFails - SAB mode only: optimistic direct writes attempted but failed due to ring buffer lock not being available (delivered via prescheduler instead)
  */
 
 export {};

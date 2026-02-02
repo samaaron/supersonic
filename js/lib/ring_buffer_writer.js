@@ -8,9 +8,10 @@ import { writeMessageToBuffer, calculateAvailableSpace } from './ring_buffer_cor
  * @param {Int32Array} atomicView - Int32Array view of SharedArrayBuffer
  * @param {number} lockIndex - Index of the lock in atomicView
  * @param {number} maxSpins - Maximum spin attempts (0 = try once)
+ * @param {boolean} useWait - If true, use Atomics.wait() for guaranteed acquisition (workers only)
  * @returns {boolean} true if lock acquired, false if failed
  */
-function tryAcquireLock(atomicView, lockIndex, maxSpins = 0) {
+function tryAcquireLock(atomicView, lockIndex, maxSpins = 0, useWait = false) {
     // Try to CAS 0 (unlocked) → 1 (locked)
     for (let i = 0; i <= maxSpins; i++) {
         const oldValue = Atomics.compareExchange(atomicView, lockIndex, 0, 1);
@@ -19,7 +20,28 @@ function tryAcquireLock(atomicView, lockIndex, maxSpins = 0) {
         }
         // If spinning, brief pause (only matters for worker, main thread uses maxSpins=0)
     }
-    return false; // Failed to acquire
+
+    // If useWait is enabled (workers only), block until lock becomes available
+    // Main thread CANNOT use Atomics.wait() - browser will throw
+    if (useWait) {
+        const MAX_WAIT_ATTEMPTS = 100; // 100 * 100ms = 10 seconds max
+        for (let attempt = 0; attempt < MAX_WAIT_ATTEMPTS; attempt++) {
+            // Wait for lock to become 0 (unlocked)
+            // Timeout after 100ms to avoid deadlock, then retry
+            Atomics.wait(atomicView, lockIndex, 1, 100);
+
+            // Try to acquire after waking
+            const oldValue = Atomics.compareExchange(atomicView, lockIndex, 0, 1);
+            if (oldValue === 0) {
+                return true; // Lock acquired
+            }
+            // Lock was taken by someone else, wait again
+        }
+        console.error('[RingBuffer] Lock acquisition timeout after 10s - possible deadlock');
+        return false;
+    }
+
+    return false; // Failed to acquire (non-blocking mode)
 }
 
 /**
@@ -29,6 +51,8 @@ function tryAcquireLock(atomicView, lockIndex, maxSpins = 0) {
  */
 function releaseLock(atomicView, lockIndex) {
     Atomics.store(atomicView, lockIndex, 0);
+    // Wake one waiting thread (if any are blocked on Atomics.wait)
+    Atomics.notify(atomicView, lockIndex, 1);
 }
 
 /**
@@ -46,6 +70,7 @@ function releaseLock(atomicView, lockIndex) {
  * @param {Uint8Array} params.oscMessage - OSC message data to write
  * @param {number} [params.sourceId=0] - Source ID for logging (0 = main, 1+ = workers)
  * @param {number} [params.maxSpins=0] - Max lock spin attempts (0 = try once, for main thread)
+ * @param {boolean} [params.useWait=false] - Use Atomics.wait() for guaranteed lock acquisition (workers only)
  * @returns {boolean} true if write succeeded, false if lock contention or buffer full
  */
 export function writeToRingBuffer({
@@ -57,7 +82,8 @@ export function writeToRingBuffer({
     controlIndices,
     oscMessage,
     sourceId = 0,
-    maxSpins = 0
+    maxSpins = 0,
+    useWait = false
 }) {
     const payloadSize = oscMessage.length;
     const totalSize = bufferConstants.MESSAGE_HEADER_SIZE + payloadSize;
@@ -68,7 +94,7 @@ export function writeToRingBuffer({
     }
 
     // Try to acquire write lock
-    if (!tryAcquireLock(atomicView, controlIndices.IN_WRITE_LOCK, maxSpins)) {
+    if (!tryAcquireLock(atomicView, controlIndices.IN_WRITE_LOCK, maxSpins, useWait)) {
         return false; // Lock contention - caller should fall back to worker
     }
 

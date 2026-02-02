@@ -191,8 +191,9 @@ export class OscChannel {
      * Send directly to worklet (bypass path)
      * @param {Uint8Array} oscData
      * @param {string} [bypassCategory] - Category for metrics (PM mode only)
+     * @param {boolean} [allowFallback=true] - Allow fallback to prescheduler on SAB contention (main thread only)
      */
-    #sendDirect(oscData, bypassCategory = null) {
+    #sendDirect(oscData, bypassCategory = null, allowFallback = true) {
         if (this.#mode === 'postMessage') {
             if (!this.#directPort) return false;
             // Include bypass category and sourceId so worklet can track metrics and log source
@@ -201,7 +202,9 @@ export class OscChannel {
         } else {
             // SAB mode - write to ring buffer with sourceId in header
             // Logging is handled by osc_out_log_sab_worker reading from ring buffer
-            return writeToRingBuffer({
+            const isMainThread = this.#sourceId === 0;
+
+            const success = writeToRingBuffer({
                 atomicView: this.#views.atomicView,
                 dataView: this.#views.dataView,
                 uint8View: this.#views.uint8View,
@@ -210,8 +213,29 @@ export class OscChannel {
                 controlIndices: this.#sabConfig.controlIndices,
                 oscMessage: oscData,
                 sourceId: this.#sourceId,
-                maxSpins: 10,  // Workers can spin briefly
+                // Main thread: try once (can't block), will fall back to prescheduler
+                // Workers: use Atomics.wait() for guaranteed delivery (can block)
+                maxSpins: isMainThread ? 0 : 10,
+                useWait: !isMainThread,  // Workers block until lock available
             });
+
+            if (!success) {
+                // Main thread: fall back to prescheduler for guaranteed delivery
+                // The prescheduler is a worker and can use Atomics.wait()
+                if (isMainThread && allowFallback && this.#preschedulerPort) {
+                    if (this.#metricsView) {
+                        // Track when optimistic direct write falls back to prescheduler (not an error - message still delivered)
+                        Atomics.add(this.#metricsView, MetricsOffsets.RING_BUFFER_DIRECT_WRITE_FAILS, 1);
+                    }
+                    this.#preschedulerPort.postMessage({
+                        type: 'directDispatch',
+                        oscData,
+                        sourceId: this.#sourceId,
+                    });
+                    return true;  // Message will be delivered via prescheduler
+                }
+            }
+            return success;
         }
     }
 
@@ -235,6 +259,12 @@ export class OscChannel {
      *
      * - nonBundle/immediate/nearFuture/late → direct to worklet
      * - farFuture → prescheduler for proper scheduling
+     *
+     * In SAB mode, the main thread uses an optimistic direct write path. If the
+     * ring buffer lock is held by another writer, the message is routed through
+     * the prescheduler instead. This is not an error - the message is still
+     * delivered. Workers don't need this fallback as they use Atomics.wait()
+     * for guaranteed lock acquisition.
      *
      * @param {Uint8Array} oscData - OSC message bytes
      * @returns {boolean} true if sent successfully

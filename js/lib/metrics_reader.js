@@ -165,6 +165,7 @@ export class MetricsReader {
       // Error metrics
       scsynthWasmErrors: m[MetricsOffsets.SCSYNTH_WASM_ERRORS],
       oscInCorrupted: m[MetricsOffsets.OSC_IN_CORRUPTED],
+      ringBufferDirectWriteFails: m[MetricsOffsets.RING_BUFFER_DIRECT_WRITE_FAILS],
 
       // Ring buffer usage (written by WASM during process())
       inBufferUsedBytes: m[MetricsOffsets.IN_BUFFER_USED_BYTES],

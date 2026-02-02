@@ -167,6 +167,7 @@ export class SuperSonic {
       // Error metrics
       scsynthWasmErrors: { type: 'counter', unit: 'count', description: 'WASM execution errors in audio worklet' },
       oscInCorrupted: { type: 'counter', unit: 'count', description: 'Corrupted messages detected from scsynth to JS' },
+      ringBufferDirectWriteFails: { type: 'counter', unit: 'count', description: 'SAB mode only: optimistic direct writes attempted but failed due to ring buffer lock not being available (delivered via prescheduler instead)' },
     };
   }
 

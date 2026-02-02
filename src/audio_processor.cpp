@@ -648,10 +648,11 @@ extern "C" {
                 int64_t time_diff_osc = schedTime - currentOscTime;
                 double time_diff_ms = ((double)time_diff_osc / 4294967296.0) * 1000.0;
 
-                // Track late bundles (>3ms past due) in metrics
+                // Track late bundles (any amount past due) in metrics
+                // This matches JS classification which also uses 0ms threshold
                 // Rate-limit logging: only log first late bundle, then every 100th
                 static int late_count = 0;
-                if (time_diff_ms < -3.0) {
+                if (time_diff_ms < 0) {
                     // Cap late_ms to prevent overflow from timing sync issues
                     // Values over 10 seconds indicate a systemic problem, not individual lateness
                     double raw_late_ms = -time_diff_ms;

@@ -562,6 +562,7 @@ test.describe("Bypass Category Counters", () => {
       const baselineBypassed = metricsBefore.preschedulerBypassed ?? 0;
       const baselineNearFuture = metricsBefore.bypassNearFuture ?? 0;
       const baselineLate = metricsBefore.bypassLate ?? 0;
+      const baselineDirectWriteFails = metricsBefore.ringBufferDirectWriteFails ?? 0;
 
       // Create worker helper
       const createWorker = async (name) => {
@@ -628,12 +629,45 @@ test.describe("Bypass Category Counters", () => {
         return { sent: totalSent, metrics: lastMetrics, failures };
       };
 
-      // Send from both workers (sequentially per worker, but interleaved)
-      // Worker 1: 10 messages with 50ms offset (nearFuture - within lookahead threshold)
-      // Worker 2: 10 messages with -50ms offset (late - in the past)
-      const [result1, result2] = await Promise.all([
-        sendFromWorker(worker1, 10, 50),   // nearFuture
-        sendFromWorker(worker2, 10, -50),  // late
+      // Helper to send messages from main thread
+      const sendFromMainThread = async (count, offsetMs) => {
+        const NTP_EPOCH_OFFSET = 2208988800;
+        const bundleHeader = new Uint8Array([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00]);
+        const statusMsg = window.SuperSonic.osc.encodeMessage("/status", []);
+
+        let totalSent = 0;
+        for (let i = 0; i < count; i++) {
+          const ntpNow = (performance.timeOrigin + performance.now()) / 1000 + NTP_EPOCH_OFFSET;
+          const targetNtp = ntpNow + (offsetMs / 1000);
+
+          const bundle = new Uint8Array(16 + 4 + statusMsg.length);
+          bundle.set(bundleHeader, 0);
+          const view = new DataView(bundle.buffer);
+          const seconds = Math.floor(targetNtp);
+          const fraction = Math.floor((targetNtp % 1) * 0x100000000);
+          view.setUint32(8, seconds, false);
+          view.setUint32(12, fraction, false);
+          view.setInt32(16, statusMsg.length, false);
+          bundle.set(statusMsg, 20);
+
+          // sendOSC doesn't return a value (throws on failure)
+          await sonic.sendOSC(bundle);
+          totalSent++;
+        }
+        return { sent: totalSent };
+      };
+
+      // Send from main thread AND both workers concurrently
+      // This stress-tests concurrent lock acquisition:
+      // - Main thread: uses non-blocking write, falls back to prescheduler on contention
+      // - Workers: use Atomics.wait() for guaranteed delivery
+      // Worker 1: 100 messages with 50ms offset (nearFuture)
+      // Worker 2: 100 messages with -50ms offset (late)
+      // Main thread: 100 messages with 25ms offset (nearFuture, interleaved timing)
+      const [result1, result2, mainResult] = await Promise.all([
+        sendFromWorker(worker1, 100, 50),   // nearFuture
+        sendFromWorker(worker2, 100, -50),  // late
+        sendFromMainThread(100, 25),        // nearFuture (main thread)
       ]);
 
       // Wait for metrics to settle
@@ -644,6 +678,7 @@ test.describe("Bypass Category Counters", () => {
       const finalBypassed = metricsAfter.preschedulerBypassed ?? 0;
       const finalNearFuture = metricsAfter.bypassNearFuture ?? 0;
       const finalLate = metricsAfter.bypassLate ?? 0;
+      const finalDirectWriteFails = metricsAfter.ringBufferDirectWriteFails ?? 0;
 
       worker1.terminate();
       worker2.terminate();
@@ -654,10 +689,12 @@ test.describe("Bypass Category Counters", () => {
         mode: config.mode,
         worker1: { sent: result1.sent, metrics: result1.metrics, failures: result1.failures },
         worker2: { sent: result2.sent, metrics: result2.metrics, failures: result2.failures },
+        mainThread: { sent: mainResult.sent },
         ringBuffer: {
           inUsage: metricsAfter.inBufferUsagePercent,
           inPeakUsage: metricsAfter.inBufferPeakUsagePercent,
           writeContention: metricsAfter.ringBufferWriteContention,
+          directWriteFails: finalDirectWriteFails - baselineDirectWriteFails,
         },
         baseline: { bypassed: baselineBypassed, nearFuture: baselineNearFuture, late: baselineLate },
         final: { bypassed: finalBypassed, nearFuture: finalNearFuture, late: finalLate },
@@ -667,9 +704,9 @@ test.describe("Bypass Category Counters", () => {
           late: finalLate - baselineLate,
         },
         expected: {
-          bypassed: 20,      // 10 from each worker
-          nearFuture: 10,    // 10 from worker1
-          late: 10,          // 10 from worker2
+          bypassed: 300,     // 100 from each: worker1, worker2, main thread
+          nearFuture: 200,   // 100 from worker1 + 100 from main thread
+          late: 100,         // 100 from worker2
         },
       };
     }, sonicConfig);
@@ -677,8 +714,9 @@ test.describe("Bypass Category Counters", () => {
     expect(result.success).toBe(true);
 
     console.log(`\nBypass aggregation test (mode: ${result.mode}):`);
-    console.log(`  Worker1 sent: ${result.worker1.sent}/10, failures:`, result.worker1.failures?.length ?? 0);
-    console.log(`  Worker2 sent: ${result.worker2.sent}/10, failures:`, result.worker2.failures?.length ?? 0);
+    console.log(`  Worker1 sent: ${result.worker1.sent}/100, failures:`, result.worker1.failures?.length ?? 0);
+    console.log(`  Worker2 sent: ${result.worker2.sent}/100, failures:`, result.worker2.failures?.length ?? 0);
+    console.log(`  Main thread sent: ${result.mainThread.sent}/100`);
     console.log(`  Worker1 OscChannel local metrics:`, result.worker1.metrics);
     console.log(`  Worker2 OscChannel local metrics:`, result.worker2.metrics);
     if (result.worker1.failures?.length) console.log(`  Worker1 failure details:`, result.worker1.failures);
@@ -688,17 +726,113 @@ test.describe("Bypass Category Counters", () => {
     console.log(`  Delta:`, result.delta);
     console.log(`  Expected:`, result.expected);
     console.log(`  Ring buffer:`, result.ringBuffer);
+    if (result.mode === 'sab') {
+      console.log(`  Direct write fails (main thread fallbacks): ${result.ringBuffer.directWriteFails}`);
+    }
 
-    // Both workers should have sent most of their messages (allow for contention in SAB mode)
-    expect(result.worker1.sent).toBeGreaterThanOrEqual(5);
-    expect(result.worker2.sent).toBeGreaterThanOrEqual(5);
+    // Workers use Atomics.wait() for guaranteed lock acquisition (useWait: true)
+    // Main thread uses non-blocking write with fallback to prescheduler on contention
+    // All messages should be delivered - no drops
+    expect(result.worker1.sent).toBe(100);
+    expect(result.worker2.sent).toBe(100);
+    expect(result.mainThread.sent).toBe(100);
 
-    // Key assertions: bypass categories from both workers should be aggregated
-    // The delta should match what was ACTUALLY sent, not what was attempted
-    const actualTotal = result.worker1.sent + result.worker2.sent;
+    // Key assertions: bypass categories from all sources should be aggregated
+    const actualTotal = result.worker1.sent + result.worker2.sent + result.mainThread.sent;
     expect(result.delta.bypassed).toBe(actualTotal);
-    expect(result.delta.nearFuture).toBe(result.worker1.sent);  // Worker1 sends nearFuture
-    expect(result.delta.late).toBe(result.worker2.sent);         // Worker2 sends late
+    expect(result.delta.nearFuture).toBe(result.worker1.sent + result.mainThread.sent);  // Worker1 + main thread send nearFuture
+    expect(result.delta.late).toBe(result.worker2.sent);  // Worker2 sends late
+  });
+
+  test("bypassLate and scsynthSchedulerLates use consistent thresholds", async ({ page, sonicConfig }) => {
+    // Both JS and scsynth use the same threshold for "late": any amount past scheduled time.
+    // This ensures metrics are holistically consistent - bypassLate should equal scsynthSchedulerLates
+    // for the same set of late bundles.
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.loadSynthDef("sonic-pi-beep");
+      await sonic.sync();
+
+      // Wait for drift to stabilize
+      await new Promise(r => setTimeout(r, 1000));
+
+      const metricsBefore = sonic.getMetrics();
+
+      // Helper to create a bundle with a specific NTP timetag
+      const NTP_EPOCH_OFFSET = 2208988800;
+      const bundleHeader = new Uint8Array([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00]);
+      const statusMsg = window.SuperSonic.osc.encodeMessage("/status", []);
+
+      const createBundleAtNTP = (ntpTime) => {
+        const bundle = new Uint8Array(16 + 4 + statusMsg.length);
+        bundle.set(bundleHeader, 0);
+        const view = new DataView(bundle.buffer);
+        const seconds = Math.floor(ntpTime);
+        const fraction = Math.floor((ntpTime % 1) * 0x100000000);
+        view.setUint32(8, seconds, false);
+        view.setUint32(12, fraction, false);
+        view.setInt32(16, statusMsg.length, false);
+        bundle.set(statusMsg, 20);
+        return bundle;
+      };
+
+      // JS classifier uses performance-based NTP time
+      const getJSNTP = () => (performance.timeOrigin + performance.now()) / 1000 + NTP_EPOCH_OFFSET;
+
+      const driftMs = metricsBefore.driftOffsetMs ?? 0;
+
+      // Send bundles that are late (50ms past) - should trigger both counters equally
+      const LATE_COUNT = 5;
+      for (let i = 0; i < LATE_COUNT; i++) {
+        const jsNow = getJSNTP();
+        const bundle = createBundleAtNTP(jsNow - 0.050); // 50ms in past
+        await sonic.sendOSC(bundle);
+        await new Promise(r => setTimeout(r, 10));
+      }
+
+      // Wait for all bundles to be processed
+      await new Promise(r => setTimeout(r, 500));
+
+      const metricsAfter = sonic.getMetrics();
+      await sonic.destroy();
+
+      return {
+        success: true,
+        drift: driftMs,
+        before: {
+          bypassLate: metricsBefore.bypassLate ?? 0,
+          scsynthSchedulerLates: metricsBefore.scsynthSchedulerLates ?? 0,
+        },
+        after: {
+          bypassLate: metricsAfter.bypassLate ?? 0,
+          scsynthSchedulerLates: metricsAfter.scsynthSchedulerLates ?? 0,
+          scsynthSchedulerMaxLateMs: metricsAfter.scsynthSchedulerMaxLateMs ?? 0,
+        },
+        delta: {
+          bypassLate: (metricsAfter.bypassLate ?? 0) - (metricsBefore.bypassLate ?? 0),
+          scsynthSchedulerLates: (metricsAfter.scsynthSchedulerLates ?? 0) - (metricsBefore.scsynthSchedulerLates ?? 0),
+        },
+        lateBundlesSent: LATE_COUNT,
+      };
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+
+    console.log(`\nLate threshold test (drift: ${result.drift}ms):`);
+    console.log(`  Sent: ${result.lateBundlesSent} late bundles (50ms past)`);
+    console.log(`  bypassLate delta: ${result.delta.bypassLate}`);
+    console.log(`  scsynthSchedulerLates delta: ${result.delta.scsynthSchedulerLates}`);
+    console.log(`  Max late observed: ${result.after.scsynthSchedulerMaxLateMs}ms`);
+
+    // Key assertion 1: All late bundles should be counted by JS bypass layer
+    expect(result.delta.bypassLate).toBe(result.lateBundlesSent);
+
+    // Key assertion 2: All late bundles should be counted by scsynth scheduler
+    expect(result.delta.scsynthSchedulerLates).toBe(result.lateBundlesSent);
+
+    // Key assertion 3: Both metrics should match (consistent thresholds)
+    expect(result.delta.scsynthSchedulerLates).toBe(result.delta.bypassLate);
   });
 
   test("OscChannel.getMetrics() returns aggregated metrics from shared memory in SAB mode", async ({ page, sonicConfig }) => {
