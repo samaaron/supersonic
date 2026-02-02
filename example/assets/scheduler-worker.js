@@ -175,9 +175,7 @@ class Scheduler {
       this.nextBeat = Math.ceil(currentBeat / beatsPerBar) * beatsPerBar;
     }
 
-    const nextTime = timeline.getTimeAtBeat(this.nextBeat);
-    const delay = Math.max(0, (nextTime - now) * 1000);
-    this.timeoutId = setTimeout(() => this.running && this.scheduleBatch(), delay);
+    this.scheduleBatch();
   }
 
   scheduleBatch() {
