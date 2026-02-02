@@ -82,7 +82,7 @@ extern "C" {
 
 // Supersonic version - appended to SC version
 static const int SUPERSONIC_VERSION_MAJOR = 0;
-static const int SUPERSONIC_VERSION_MINOR = 37;
+static const int SUPERSONIC_VERSION_MINOR = 38;
 static const int SUPERSONIC_VERSION_PATCH = 0;
 
 // Global pointers
