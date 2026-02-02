@@ -1,14 +1,16 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>SuperSonic Simple Demo (CDN)</title>
+    <title>SuperSonic Hybrid Demo</title>
   </head>
   <body>
-    <h1>SuperSimple SuperSonic (CDN)</h1>
+    <h1>SuperSonic Hybrid Demo</h1>
+    <p>Local core (WASM + workers) with CDN-hosted samples and synthdefs.</p>
+    <p>Use this approach when you need SAB mode (requires same-origin) but want CDN assets.</p>
     <button id="play">Play Amen Break</button>
 
     <script type="module">
-      // Self-hosted core library
+      // Local core library (enables SAB mode with proper headers)
       import { SuperSonic } from "../dist/supersonic.js";
 
       const button = document.getElementById("play");
@@ -18,7 +20,7 @@
         if (!sonic) {
           button.textContent = "Booting scsynth...";
 
-          // Use local core, CDN for synthdefs and samples
+          // Local WASM/workers (baseURL), CDN for samples and synthdefs
           sonic = new SuperSonic({
             baseURL: "dist/",
             sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/",

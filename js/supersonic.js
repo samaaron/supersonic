@@ -257,6 +257,88 @@ export class SuperSonic {
   #earlyDebugMessages = [];
   #debugRawHandler = null;
 
+  /**
+   * Validate scsynthOptions (worldOptions) at construction time.
+   * Throws descriptive errors for invalid configurations.
+   * @param {Object} opts - The merged world options
+   */
+  #validateWorldOptions(opts) {
+    // Helper to validate numeric option
+    const validateNumber = (name, value, { min, max, allowZero = true } = {}) => {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new Error(`scsynthOptions.${name} must be a finite number, got: ${value}`);
+      }
+      if (!allowZero && value === 0) {
+        throw new Error(`scsynthOptions.${name} must be non-zero, got: ${value}`);
+      }
+      if (min !== undefined && value < min) {
+        throw new Error(`scsynthOptions.${name} must be >= ${min}, got: ${value}`);
+      }
+      if (max !== undefined && value > max) {
+        throw new Error(`scsynthOptions.${name} must be <= ${max}, got: ${value}`);
+      }
+    };
+
+    // numBuffers: 1-65535
+    validateNumber('numBuffers', opts.numBuffers, { min: 1, max: 65535 });
+
+    // maxNodes: must be positive
+    validateNumber('maxNodes', opts.maxNodes, { min: 1 });
+
+    // maxGraphDefs: must be positive
+    validateNumber('maxGraphDefs', opts.maxGraphDefs, { min: 1 });
+
+    // maxWireBufs: must be positive
+    validateNumber('maxWireBufs', opts.maxWireBufs, { min: 1 });
+
+    // numAudioBusChannels: must be positive
+    validateNumber('numAudioBusChannels', opts.numAudioBusChannels, { min: 1 });
+
+    // numInputBusChannels: must be non-negative
+    validateNumber('numInputBusChannels', opts.numInputBusChannels, { min: 0 });
+
+    // numOutputBusChannels: must be positive (need at least 1 output)
+    validateNumber('numOutputBusChannels', opts.numOutputBusChannels, { min: 1 });
+
+    // numControlBusChannels: must be positive
+    validateNumber('numControlBusChannels', opts.numControlBusChannels, { min: 1 });
+
+    // bufLength: must be exactly 128 (WebAudio API constraint)
+    if (opts.bufLength !== 128) {
+      throw new Error(`scsynthOptions.bufLength must be 128 (WebAudio API constraint), got: ${opts.bufLength}`);
+    }
+
+    // realTimeMemorySize: must be positive
+    validateNumber('realTimeMemorySize', opts.realTimeMemorySize, { min: 1 });
+
+    // numRGens: must be positive
+    validateNumber('numRGens', opts.numRGens, { min: 1 });
+
+    // realTime: must be boolean
+    if (typeof opts.realTime !== 'boolean') {
+      throw new Error(`scsynthOptions.realTime must be a boolean, got: ${typeof opts.realTime}`);
+    }
+
+    // memoryLocking: must be boolean
+    if (typeof opts.memoryLocking !== 'boolean') {
+      throw new Error(`scsynthOptions.memoryLocking must be a boolean, got: ${typeof opts.memoryLocking}`);
+    }
+
+    // loadGraphDefs: 0 or 1
+    if (opts.loadGraphDefs !== 0 && opts.loadGraphDefs !== 1) {
+      throw new Error(`scsynthOptions.loadGraphDefs must be 0 or 1, got: ${opts.loadGraphDefs}`);
+    }
+
+    // preferredSampleRate: 0 (auto) or valid range (8000-384000)
+    validateNumber('preferredSampleRate', opts.preferredSampleRate, { min: 0, max: 384000 });
+    if (opts.preferredSampleRate !== 0 && opts.preferredSampleRate < 8000) {
+      throw new Error(`scsynthOptions.preferredSampleRate must be 0 (auto) or >= 8000, got: ${opts.preferredSampleRate}`);
+    }
+
+    // verbosity: 0-4
+    validateNumber('verbosity', opts.verbosity, { min: 0, max: 4 });
+  }
+
   constructor(options = {}) {
     this.#initialized = false;
     this.#initializing = false;
@@ -297,6 +379,7 @@ export class SuperSonic {
     }
 
     const worldOptions = { ...defaultWorldOptions, ...options.scsynthOptions };
+    this.#validateWorldOptions(worldOptions);
     const mode = options.mode || 'postMessage';
 
     this.#config = {
