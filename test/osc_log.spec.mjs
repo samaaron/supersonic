@@ -753,12 +753,11 @@ test.describe("Centralized OSC Out Logging", () => {
 
     console.log(`Burst test: received ${result.messageCount} messages, sequences ${result.firstSequence}-${result.lastSequence}`);
 
-    // Should have received at least BURST_SIZE messages
+    // Should have received exactly BURST_SIZE messages - no loss tolerance
     expect(result.messageCount).toBeGreaterThanOrEqual(100);
 
     // The number of messages should match the sequence range (no gaps in our burst)
-    // Allow for some tolerance due to system messages interleaved
-    expect(result.messageCount).toBeGreaterThanOrEqual(result.expectedRange * 0.9);
+    expect(result.messageCount).toBe(result.expectedRange);
   });
 
   test("first message after init is logged - no off-by-one error", async ({ page, sonicConfig }) => {

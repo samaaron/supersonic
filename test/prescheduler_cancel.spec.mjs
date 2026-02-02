@@ -797,9 +797,7 @@ test.describe("Prescheduler Cancellation", () => {
     // Total lates (prescheduler + scsynth) should have incremented for bundles scheduled in the past
     // In postMessage mode: prescheduler tracks lates
     // In SAB mode: scsynth tracks lates (DirectWriter bypasses prescheduler for past bundles)
-    // Note: WASM has a 3ms threshold for "late" detection, so due to timing variations
-    // not all 5 bundles may be counted as late. Accept at least 3.
-    expect(totalLatesAfter).toBeGreaterThan(totalLatesBefore);
-    expect(totalLatesAfter - totalLatesBefore).toBeGreaterThanOrEqual(3);
+    // All 5 bundles should be counted as late (JS and WASM both use 0ms threshold)
+    expect(totalLatesAfter - totalLatesBefore).toBe(5);
   });
 });
