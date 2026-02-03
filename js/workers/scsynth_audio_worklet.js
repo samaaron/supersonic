@@ -43,6 +43,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.processCallCount = 0;
         this.lastStatusCheck = 0;
         this.ringBufferBase = null;
+        this.pendingClearSched = false;
 
         // Pre-allocated audio view to avoid per-frame allocations
         this.audioView = null;
@@ -871,6 +872,19 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 return;
             }
 
+            if (data.type === 'clearSched') {
+                // Set flag to clear the WASM scheduler on next process() call
+                // This avoids the race condition of sending /clearSched via the ring buffer
+                // where stale scheduled bundles would fire before the clear command is read
+                this.pendingClearSched = true;
+                // Ack immediately — the flag guarantees process() will clear
+                // before executing any bundles, even if AudioContext is suspended
+                if (data.ack) {
+                    this.port.postMessage({ type: 'clearSchedAck' });
+                }
+                return;
+            }
+
             if (data.type === 'init') {
                 // Set mode from init message
                 this.mode = data.mode || 'sab';
@@ -1181,6 +1195,14 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
         try {
             if (this.wasmInstance && this.wasmInstance.exports.process_audio) {
+
+                // Clear WASM scheduler if flagged (before process_audio runs scheduled bundles)
+                if (this.pendingClearSched) {
+                    this.pendingClearSched = false;
+                    if (this.wasmInstance.exports.clear_scheduler) {
+                        this.wasmInstance.exports.clear_scheduler();
+                    }
+                }
 
                 // CRITICAL: Access AudioContext currentTime correctly
                 // In AudioWorkletGlobalScope, currentTime is a bare global variable (not on globalThis)

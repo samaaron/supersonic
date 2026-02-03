@@ -272,6 +272,25 @@ export class SABTransport extends Transport {
         this.#oscOutWorker.postMessage({ type: 'cancelAll' });
     }
 
+    /**
+     * Cancel all scheduled messages and return a promise that resolves
+     * when the prescheduler has confirmed the cancel is complete.
+     * @returns {Promise<void>}
+     */
+    cancelAllWithAck() {
+        if (!this.#initialized) return Promise.resolve();
+        return new Promise(resolve => {
+            const handler = (event) => {
+                if (event.data.type === 'cancelAllAck') {
+                    this.#oscOutWorker.removeEventListener('message', handler);
+                    resolve();
+                }
+            };
+            this.#oscOutWorker.addEventListener('message', handler);
+            this.#oscOutWorker.postMessage({ type: 'cancelAll', ack: true });
+        });
+    }
+
     onReply(callback) {
         this.#onReplyCallback = callback;
     }

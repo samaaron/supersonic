@@ -191,6 +191,15 @@ extern "C" {
         metrics->scheduler_queue_dropped.fetch_add(1, std::memory_order_relaxed);
     }
 
+    // Clear the WASM-side bundle scheduler
+    // Called from the worklet JS layer (via postMessage flag) to flush
+    // all pending scheduled bundles without going through the ring buffer
+    EMSCRIPTEN_KEEPALIVE
+    void clear_scheduler() {
+        g_scheduler.Clear();
+        update_scheduler_depth_metric(0);
+    }
+
     // Convert AudioContext time (double) to OSC/NTP time (int64)
     int64_t audio_to_osc_time(double audio_time) {
         double osc_seconds = audio_time + g_time_zero_osc;

@@ -44,6 +44,9 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE uint32_t get_messages_dropped();
     EMSCRIPTEN_KEEPALIVE uint32_t get_status_flags();
 
+    // Scheduler control
+    EMSCRIPTEN_KEEPALIVE void clear_scheduler();
+
     // scsynth audio bus functions
     EMSCRIPTEN_KEEPALIVE uintptr_t get_audio_output_bus();
     EMSCRIPTEN_KEEPALIVE uintptr_t get_audio_input_bus();

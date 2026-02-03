@@ -589,10 +589,11 @@ export class SuperSonic {
    * @returns {Promise<boolean>} true if worklet is running after resume
    */
   async resume() {
-    if (!this.#initialized) return false;
-    if (!this.#audioContext || !this.#metricsReader.getMetricsView()) {
-      return false;
-    }
+    if (!this.#initialized || !this.#audioContext) return false;
+
+    // Clear stale messages before resuming so scheduled events from
+    // before the suspend (e.g. fade-outs) don't interfere with new work
+    await this.flushAll();
 
     try {
       await this.#audioContext.resume();
@@ -600,18 +601,44 @@ export class SuperSonic {
       // Resume may fail
     }
 
-    const metricsView = this.#metricsReader.getMetricsView();
-    const count1 = metricsView[0]; // PROCESS_COUNT
-    await new Promise(resolve => setTimeout(resolve, 200));
-    const count2 = metricsView[0];
+    this.#ntpTiming?.startDriftTimer();
 
-    const isRunning = count2 > count1;
+    const count1 = this.#readProcessCount();
+    if (count1 === null) {
+      // No metrics available yet — check AudioContext state instead
+      const isRunning = this.#audioContext.state === 'running';
+      if (isRunning) {
+        this.#ntpTiming?.resync();
+        this.#eventEmitter.emit('resumed');
+      }
+      return isRunning;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const count2 = this.#readProcessCount();
+
+    const isRunning = count2 !== null && count2 > count1;
     if (isRunning) {
-      this.#ntpTiming.resync();
+      this.#ntpTiming?.resync();
       this.#eventEmitter.emit('resumed');
     }
 
     return isRunning;
+  }
+
+  /**
+   * Suspend the AudioContext and stop the drift timer.
+   * The worklet remains loaded but processing stops.
+   * The audiocontext statechange listener handles emitting events.
+   */
+  async suspend() {
+    if (!this.#initialized) return;
+    this.#ntpTiming?.stopDriftTimer();
+    try {
+      await this.#audioContext?.suspend();
+    } catch (e) {
+      // Suspend may fail
+    }
   }
 
   /**
@@ -830,7 +857,7 @@ export class SuperSonic {
       "/b_readChannel": "Use loadSample() to load audio into a buffer.",
       "/b_write": "Writing audio files is not available in the browser.",
       "/b_close": "Writing audio files is not available in the browser.",
-      "/clearSched": "Use cancelAllScheduled() or the fine-grained cancelTag(), cancelSession(), cancelSessionTag() methods instead.",
+      "/clearSched": "Use flushAll() to clear both the JS prescheduler and WASM scheduler.",
       "/error": "SuperSonic always enables error notifications so you never miss a /fail message.",
     };
 
@@ -935,6 +962,42 @@ export class SuperSonic {
   cancelAllScheduled() {
     this.#ensureInitialized("cancel all scheduled");
     this.#osc.cancelAll();
+  }
+
+  /**
+   * Flush all pending OSC messages from both the JS prescheduler
+   * and the WASM BundleScheduler.
+   *
+   * Unlike cancelAllScheduled() which only clears the JS prescheduler,
+   * this also clears bundles that have already been consumed from the
+   * ring buffer and are sitting in the WASM scheduler's priority queue.
+   *
+   * Uses a postMessage flag (not the ring buffer) to avoid the race
+   * condition where stale scheduled bundles would fire before a
+   * /clearSched command could be read from the ring buffer.
+   *
+   * Returns a promise that resolves when both the prescheduler and
+   * WASM scheduler have confirmed they are cleared.
+   *
+   * @returns {Promise<void>}
+   */
+  async flushAll() {
+    this.#ensureInitialized("flush all");
+
+    const preschedulerDone = this.#osc.cancelAllWithAck();
+
+    const workletDone = new Promise(resolve => {
+      const handler = (event) => {
+        if (event.data.type === 'clearSchedAck') {
+          this.#workletNode.port.removeEventListener('message', handler);
+          resolve();
+        }
+      };
+      this.#workletNode.port.addEventListener('message', handler);
+      this.#workletNode.port.postMessage({ type: 'clearSched', ack: true });
+    });
+
+    await Promise.all([preschedulerDone, workletDone]);
   }
 
   /**
@@ -1639,6 +1702,16 @@ export class SuperSonic {
   // ============================================================================
   // PRIVATE: UTILITIES
   // ============================================================================
+
+  #readProcessCount() {
+    if (this.#config.mode === 'sab') {
+      const view = this.#metricsReader.getMetricsView();
+      return view ? view[0] : null;
+    }
+    const buffer = this.#metricsReader.getSnapshotBuffer();
+    if (!buffer) return null;
+    return new Uint32Array(buffer, 0, 1)[0];
+  }
 
   #ensureInitialized(actionDescription = "perform this operation") {
     if (!this.#initialized) {

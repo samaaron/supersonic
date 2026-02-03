@@ -871,6 +871,9 @@ self.addEventListener('message', (event) => {
 
             case 'cancelAll':
                 cancelAllTags();
+                if (data.ack) {
+                    self.postMessage({ type: 'cancelAllAck' });
+                }
                 break;
 
             default:
