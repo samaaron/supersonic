@@ -70,11 +70,9 @@ midiWorker.postMessage({ channel: midiChannel.transferable }, midiChannel.transf
 
 ## SAB vs PM Mode
 
-TLDR; `OscChannel` works identically in both SAB and PM modes.
+`OscChannel` works identically in both modes - it detects the active mode and uses the appropriate communication method automatically. Your worker code doesn't need to know or care which mode is active.
 
-SuperSonic can run in one of two modes which affects how inter-worker communication happens. SAB mode uses a SharedArrayBuffer that all workers can access, and PM mode uses explicit message sending with `postMessage`.
-
-The `OscChannel` is aware of its mode and uses the appropriate method for direct communication to the scsynth engine running in WASM. This is completely handled for you so the behaviour is identical regardless of the mode.
+See [Communication Modes](MODES.md) for details on choosing between SAB and postMessage modes.
 
 ## Message Routing
 

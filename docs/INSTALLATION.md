@@ -134,42 +134,11 @@ const supersonic = new SuperSonic({
 
 ## Transport Modes
 
-SuperSonic supports two transport modes for communication between JavaScript and the AudioWorklet. The choice (slightly) affects internal jitter and which HTTP headers your server needs to send.
+SuperSonic supports two transport modes: **postMessage** (default, works everywhere) and **SAB** (SharedArrayBuffer, lower latency but requires server headers).
 
-| Mode | Headers Required | Jitter | Use Case |
-|------|------------------|---------|----------|
-| `postMessage` | None | Higher | General purpose use |
-| `sab` | COOP/COEP | Lower | Production apps needing minimal jitter |
+The default `postMessage` mode needs no configuration. For SAB mode, set `mode: "sab"` and configure your server to send COOP/COEP headers.
 
-### PostMessage Mode (Default)
-
-This is the default mode and works everywhere with no special configuration:
-
-```javascript
-const supersonic = new SuperSonic({
-  baseURL: "/supersonic/"  // postMessage is default
-});
-```
-
-### SAB Mode (SharedArrayBuffer)
-
-For lower internal jitter (due to post message delays between threads), you can use SAB mode which uses SharedArrayBuffer for direct communication between threads:
-
-```javascript
-const supersonic = new SuperSonic({
-  baseURL: "/supersonic/",
-  mode: "sab"
-});
-```
-
-However, for this to work your server must send the following headers:
-
-```
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: require-corp
-```
-
-See [Server Configuration](#server-configuration-sab-mode) below for examples of how to configure these for different hosting environments.
+See [Communication Modes](MODES.md) for a detailed comparison, server configuration examples, and technical details.
 
 
 ## Configuration Options
@@ -209,68 +178,14 @@ SuperSonic requires a modern browser with the following features:
 
 ## Server Configuration (SAB Mode)
 
-If you're using `mode: 'sab'` for lower latency, your server needs to send the COOP/COEP headers. Here are examples for common setups:
-
-### serve (npx)
-
-Create a `serve.json` file:
-
-```json
-{
-  "headers": [
-    {
-      "source": "**/*",
-      "headers": [
-        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
-        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
-      ]
-    }
-  ]
-}
-```
-
-Then run: `npx serve`
-
-### Nginx
-
-```nginx
-server {
-    add_header Cross-Origin-Opener-Policy same-origin;
-    add_header Cross-Origin-Embedder-Policy require-corp;
-
-    location ~ \.wasm$ {
-        types { application/wasm wasm; }
-    }
-}
-```
-
-### Apache
-
-```apache
-<IfModule mod_headers.c>
-    Header set Cross-Origin-Opener-Policy "same-origin"
-    Header set Cross-Origin-Embedder-Policy "require-corp"
-</IfModule>
-AddType application/wasm .wasm
-```
-
-### Express (Node.js)
-
-```javascript
-app.use((req, res, next) => {
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-  next();
-});
-app.use(express.static('public'));
-```
+If you're using `mode: 'sab'` for lower latency, your server needs to send COOP/COEP headers. See [Communication Modes](MODES.md#server-headers-for-sab-mode) for configuration examples for serve, Nginx, Apache, Express, and Vite.
 
 
 ## Troubleshooting
 
 ### "SharedArrayBuffer is not defined"
 
-You're using SAB mode without COOP/COEP headers. Either configure your server to send the headers (see above) or use the default `postMessage` mode.
+You're using SAB mode without COOP/COEP headers. Either configure your server to send the headers (see [Communication Modes](MODES.md#server-headers-for-sab-mode)) or use the default `postMessage` mode.
 
 ### Audio doesn't play
 

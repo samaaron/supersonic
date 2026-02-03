@@ -195,12 +195,7 @@ SuperSonic provides a high-level JavaScript API that wraps the OSC protocol:
 
 ### Dual Communication Modes
 
-SuperSonic supports two communication modes between JavaScript and the AudioWorklet:
-
-1. **SharedArrayBuffer (SAB)** - Lower latency, requires specific server headers
-2. **postMessage** - Works everywhere, slightly higher latency
-
-Both modes are fully supported and tested.
+SuperSonic supports two communication modes: **postMessage** (default, works everywhere) and **SAB** (lower latency, requires server headers). Both are fully supported and tested. See [Communication Modes](MODES.md) for details.
 
 ---
 

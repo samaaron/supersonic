@@ -2,8 +2,7 @@
 
 Real-time performance metrics for monitoring what's happening inside SuperSonic.
 
-- **SAB mode** - reads directly from SharedArrayBuffer with zero overhead
-- **PostMessage mode** - reads from a cached snapshot (worklet sends updates every 50ms by default)
+In both [communication modes](MODES.md), calling `getMetrics()` is a cheap local memory read with no IPC overhead.
 
 ## Quick Start
 

@@ -73,21 +73,16 @@ const sonic = new SuperSonic({
 | `workletUrl` | Direct URL to audio worklet JS |
 | `sampleBaseURL` | Path to sample files |
 | `synthdefBaseURL` | Path to synthdef files |
-| `mode` | `'sab'` or `'postMessage'` - transport mode (defaults to `'postMessage'`) - see below |
+| `mode` | `'sab'` or `'postMessage'` - transport mode (defaults to `'postMessage'`) - see [Modes](docs/MODES.md) |
 
 For the full list of configuration options, see the [API Reference](docs/API.md#constructor-options). For installation options see the [Installation Guide](docs/INSTALLATION.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
 
 
 ### Communication Modes
 
-SuperSonic has two communication modes:
+SuperSonic supports two communication modes: **postMessage** (default, works everywhere including CDNs) and **SAB** (SharedArrayBuffer, lower latency but requires server headers).
 
-- **SAB mode** (SharedArrayBuffer) - the main thread, each worker and audio worklet (i.e. isolated thread) has access to the same memory section for reading and writing. This lowers communication latency and jitter but requires your server to send [COOP/COEP headers](https://web.dev/articles/coop-coep).
-- **PM mode** (postMessage) - the main thread, each worker and audio worklet communicate via explicit messages using `postMessage`. This mode does not require special HTTP headers and works anywhere including CDNs. Due to the extra work of sending explicit messages between workers and the audio worklet, this mode has slightly higher internal latency and jitter.
-
-SuperSonic defaults to `'postMessage'` mode which works everywhere including CDNs. If you're self-hosting, running something in production and want the lowest latency and highest robustness, set `mode: 'sab'` - but note that if the required COOP/COEP headers are not present, `init()` will throw an error.
-
-Set the mode in the SuperSonic constructor with `mode: 'postMessage'` or `mode: 'sab'` (See above).
+See [Communication Modes](docs/MODES.md) for details on choosing a mode, server configuration, and technical implementation.
 
 
 ## Documentation
@@ -95,6 +90,7 @@ Set the mode in the SuperSonic constructor with `mode: 'postMessage'` or `mode: 
 - [Installation](docs/INSTALLATION.md) - CDN, npm, self-hosting, browser requirements
 - [Quick Start](docs/QUICKSTART.md) - Boot and play your first synth
 - [API Reference](docs/API.md) - Methods, callbacks, and configuration
+- [Communication Modes](docs/MODES.md) - SAB vs postMessage, server configuration
 - [scsynth Command Reference](docs/SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling scsynth
 - [Workers Guide](docs/WORKERS.md) - Sending OSC from Web Workers
 - [Metrics](docs/METRICS.md) - Performance monitoring and debugging

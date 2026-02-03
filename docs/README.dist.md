@@ -17,39 +17,9 @@ supersonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60);
 
 ## Transport Modes
 
-SuperSonic supports two transport modes:
+SuperSonic supports two transport modes: **postMessage** (default, works everywhere) and **SAB** (SharedArrayBuffer, lower latency but requires COOP/COEP server headers).
 
-| Mode | Headers Required | Latency | Use Case |
-|------|------------------|---------|----------|
-| `postMessage` (default) | None | Higher | Simple hosting, getting started |
-| `sab` | COOP/COEP | Lower | Production apps needing minimal latency |
-
-### PostMessage Mode (Default)
-
-Works everywhere with no special configuration:
-
-```javascript
-const supersonic = new SuperSonic({
-  baseURL: './supersonic/'  // postMessage is default
-});
-```
-
-### SAB Mode (SharedArrayBuffer)
-
-For lower latency, use SAB mode with required headers:
-
-```javascript
-const supersonic = new SuperSonic({
-  baseURL: './supersonic/',
-  mode: 'sab'
-});
-```
-
-Your server must send these headers:
-```
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: require-corp
-```
+For SAB mode, set `mode: 'sab'` and configure your server headers. See the full documentation for details.
 
 ## More Info
 

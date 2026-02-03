@@ -146,7 +146,7 @@ const supersonic = new SuperSonic({
 | `workletUrl`           | No       | Full URL to the worklet script (overrides workerBaseURL)                                                                                  |
 | `synthdefBaseURL`      | No       | Base URL for synthdef files (used by `loadSynthDef`)                                                                                      |
 | `sampleBaseURL`        | No       | Base URL for sample files (used by `loadSample`)                                                                                          |
-| `mode`                 | No       | Transport mode: `'postMessage'` (default) or `'sab'`. PostMessage works everywhere; SAB requires COOP/COEP headers but has lower latency. |
+| `mode`                 | No       | Transport mode: `'postMessage'` (default) or `'sab'`. See [Communication Modes](MODES.md). |
 | `audioContext`         | No       | Use an existing AudioContext instead of creating one                                                                                      |
 | `audioContextOptions`  | No       | Options passed to `new AudioContext()` (see below)                                                                                        |
 | `autoConnect`          | No       | Whether to auto-connect to `audioContext.destination` (default: true)                                                                     |

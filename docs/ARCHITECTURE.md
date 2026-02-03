@@ -24,7 +24,7 @@ SharedArrayBuffer requires COOP/COEP headers, preventing CDN deployment. We crea
 | **SAB** | SharedArrayBuffer + ring buffers | Self-hosted (COOP/COEP headers) | Lower |
 | **PM** | postMessage | CDN-compatible | Higher |
 
-Both modes are first-class citizens. All tests must pass in both modes.
+Both modes are first-class citizens. All tests must pass in both modes. See [Communication Modes](MODES.md) for configuration details and server setup.
 
 ## NTP Time and Clock Synchronization
 
