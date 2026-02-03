@@ -214,24 +214,29 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-purple:hover:not(:disabled) { background: #d4117a; }
 
 .btn-init {
+  position: relative;
   background: var(--c-orange-dark);
   color: white;
   padding: 0.75rem 2rem;
   font-size: var(--fs-main);
-  animation: pulsate 2.5s ease-in-out infinite;
+  box-shadow: 0 0 0 0 rgba(255,102,0,1), 0 0 30px rgba(255,102,0,0.6), 0 0 60px rgba(255,102,0,0.3);
+}
+.btn-init::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 30px 15px rgba(255,102,0,0.8), 0 0 60px rgba(255,102,0,0.6), 0 0 90px rgba(255,102,0,0.4);
+  animation: pulsate-glow 2.5s ease-in-out infinite;
 }
 .btn-init:hover:not(:disabled) { background: var(--c-gold); color: #000; }
-.btn-init:disabled { animation: none; cursor: wait; opacity: 1; }
+.btn-init:disabled { cursor: wait; opacity: 1; }
+.btn-init:disabled::after { animation: none; }
 
-@keyframes pulsate {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(255,102,0,1), 0 0 30px rgba(255,102,0,0.6), 0 0 60px rgba(255,102,0,0.3);
-    filter: brightness(1);
-  }
-  50% {
-    box-shadow: 0 0 30px 15px rgba(255,102,0,0.8), 0 0 60px rgba(255,102,0,0.6), 0 0 90px rgba(255,102,0,0.4);
-    filter: brightness(1.3);
-  }
+@keyframes pulsate-glow {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 
 .btn-red { background: var(--c-royal-blue); color: white; }
@@ -763,13 +768,31 @@ textarea:disabled, select:disabled, input:disabled {
   50% { transform: translate(-50%, -50%) scale(1.1); }
 }
 
-@keyframes beat-pulse {
-  0% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 30px var(--c-gold), 0 0 60px var(--c-orange-dark); }
-  50% { transform: translate(-50%, -50%) scale(1.3); box-shadow: 0 0 50px var(--c-gold), 0 0 100px var(--c-orange-dark), 0 0 150px rgba(255,215,0,0.5); }
-  100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 30px var(--c-gold), 0 0 60px var(--c-orange-dark); }
+.synth-pad-touch::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow: 0 0 50px var(--c-gold), 0 0 100px var(--c-orange-dark), 0 0 150px rgba(255,215,0,0.5);
+  opacity: 0;
 }
 
-.synth-pad-touch.beat-pulse { animation: beat-pulse 0.125s ease-out; }
+@keyframes beat-pulse-scale {
+  0% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.3); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes beat-pulse-glow {
+  0% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.synth-pad-touch.beat-pulse { animation: beat-pulse-scale 0.125s ease-out; }
+.synth-pad-touch.beat-pulse::before { animation: beat-pulse-glow 0.125s ease-out; }
+.synth-pad-touch.beat-pulse-hold::before { opacity: 1; animation: none; }
 .synth-pad-touch.active { opacity: 1; }
 
 .trail-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
@@ -2131,6 +2154,7 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
 }
 
 .sponsor-item {
+  position: relative;
   text-align: center;
   display: flex;
   flex-direction: column;
@@ -2142,23 +2166,29 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   transition: transform 0.3s ease, box-shadow 0.3s ease;
   cursor: pointer;
   width: 240px;
+  box-shadow: 0 0 10px rgba(255, 20, 147, 0.3), 0 0 20px rgba(255, 20, 147, 0.1);
+}
+
+.sponsor-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 20px rgba(255, 20, 147, 0.5), 0 0 40px rgba(255, 20, 147, 0.2);
   animation: sponsor-glow 3s ease-in-out infinite;
 }
 
 @keyframes sponsor-glow {
-  0%, 100% {
-    box-shadow: 0 0 10px rgba(255, 20, 147, 0.3), 0 0 20px rgba(255, 20, 147, 0.1);
-  }
-  50% {
-    box-shadow: 0 0 20px rgba(255, 20, 147, 0.5), 0 0 40px rgba(255, 20, 147, 0.2);
-  }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 
 .sponsor-item:hover {
   transform: translateY(-4px);
   box-shadow: 0 0 30px rgba(255, 20, 147, 0.6), 0 0 60px rgba(255, 20, 147, 0.3), 0 0 90px rgba(255, 20, 147, 0.15);
-  animation: none;
 }
+.sponsor-item:hover::after { animation: none; opacity: 0; }
 
 .sponsor-image { width: 200px; height: 133px; object-fit: contain; display: block; }
 
