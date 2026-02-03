@@ -1237,7 +1237,7 @@ function startBeatPulse() {
   // Don't start if already running
   if (beatPulseInterval || beatPulseTimeout) return;
 
-  const interval = 0.125 / getBpmScale();
+  const interval = Math.max(0.15, 0.125 / getBpmScale());
   const touch = $("synth-pad-touch");
   if (!touch || !playbackStartNTP) return;
 
