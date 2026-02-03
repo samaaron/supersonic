@@ -297,6 +297,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             // Update head pointer (publish message)
             const newHead = writePos + bytes.length;
             this.atomicStore(debugHeadIndex, newHead);
+            // Notify waiting debug worker that new data is available
+            if (this.mode === 'sab') {
+                Atomics.notify(this.atomicView, debugHeadIndex, 1);
+            }
         } catch (err) {
             // Silently fail in real-time audio context
         }
@@ -1291,13 +1295,19 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         this.sendLogEntries();
                     }
                 } else {
-                    // SAB mode: Notify waiting worker when there's data to read
+                    // SAB mode: Notify waiting workers when there's data to read
                     // Atomics.notify() is cheap when no one is waiting, so notify every frame
                     if (this.atomicView) {
-                        const head = this.atomicLoad(this.CONTROL_INDICES.OUT_HEAD);
-                        const tail = this.atomicLoad(this.CONTROL_INDICES.OUT_TAIL);
-                        if (head !== tail) {
+                        const outHead = this.atomicLoad(this.CONTROL_INDICES.OUT_HEAD);
+                        const outTail = this.atomicLoad(this.CONTROL_INDICES.OUT_TAIL);
+                        if (outHead !== outTail) {
                             Atomics.notify(this.atomicView, this.CONTROL_INDICES.OUT_HEAD, 1);
+                        }
+                        // Notify debug worker for C++ debug messages (written directly by WASM)
+                        const debugHead = this.atomicLoad(this.CONTROL_INDICES.DEBUG_HEAD);
+                        const debugTail = this.atomicLoad(this.CONTROL_INDICES.DEBUG_TAIL);
+                        if (debugHead !== debugTail) {
+                            Atomics.notify(this.atomicView, this.CONTROL_INDICES.DEBUG_HEAD, 1);
                         }
                     }
                     // SAB mode: OSC logging is handled by osc_out_log_sab_worker

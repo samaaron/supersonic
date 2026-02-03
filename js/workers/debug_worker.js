@@ -139,14 +139,7 @@ const waitLoop = () => {
 
             // If buffer is empty, wait for AudioWorklet to notify us
             if (currentHead === currentTail) {
-                // Wait for up to 100ms (allows checking stop signal)
-                const result = Atomics.wait(atomicView, CONTROL_INDICES.DEBUG_HEAD, currentHead, 100);
-
-                if (result === 'ok' || result === 'not-equal') {
-                    // We were notified or value changed!
-                } else if (result === 'timed-out') {
-                    continue; // Check running flag
-                }
+                Atomics.wait(atomicView, CONTROL_INDICES.DEBUG_HEAD, currentHead);
             }
 
             // Read all available debug messages

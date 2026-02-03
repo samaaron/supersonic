@@ -121,14 +121,7 @@ const waitLoop = () => {
 
             // If no new messages, wait for ring_buffer_writer to notify us
             if (currentHead === currentLogTail) {
-                // Wait for up to 100ms (allows checking stop signal)
-                const result = Atomics.wait(atomicView, CONTROL_INDICES.IN_HEAD, currentHead, 100);
-
-                if (result === 'ok' || result === 'not-equal') {
-                    // We were notified or value changed!
-                } else if (result === 'timed-out') {
-                    continue; // Check running flag
-                }
+                Atomics.wait(atomicView, CONTROL_INDICES.IN_HEAD, currentHead);
             }
 
             // Read all available messages
