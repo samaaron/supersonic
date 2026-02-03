@@ -1473,14 +1473,22 @@ function stopAmenLoop() {
 
 // Mute the final mixer with a ramp to avoid pops/clicks
 // Returns a promise that resolves when the ramp is complete
+let muteTimeoutIds = [];
+
+function cancelPendingMute() {
+  for (const id of muteTimeoutIds) clearTimeout(id);
+  muteTimeoutIds = [];
+}
+
 function muteOutput(durationMs = 500) {
   if (!orchestrator || !fxChainInitialized) return Promise.resolve();
+  cancelPendingMute();
   const steps = 10;
   const interval = durationMs / steps;
 
   return new Promise(resolve => {
     for (let i = 0; i <= steps; i++) {
-      setTimeout(() => {
+      const id = setTimeout(() => {
         const amp = 1 - (i / steps);
         const arpAmp = amp * (1 - uiState.mix / 100);
         const beatAmp = amp * (uiState.mix / 100);
@@ -1488,11 +1496,13 @@ function muteOutput(durationMs = 500) {
         orchestrator.send("/n_set", FX_BEAT_LEVEL_NODE, "amp", beatAmp);
         if (i === steps) resolve();
       }, i * interval);
+      muteTimeoutIds.push(id);
     }
   });
 }
 
 function unmuteOutput() {
+  cancelPendingMute();
   if (!orchestrator || !fxChainInitialized) return;
   const arpAmp = 1 - uiState.mix / 100;
   const beatAmp = uiState.mix / 100;
@@ -1513,10 +1523,29 @@ async function startAll() {
       clearTimeout(idleTimeoutId);
       idleTimeoutId = null;
     }
-    // Fast ramp down to avoid pops
-    await muteOutput(50);
-    // Clear all pending scheduled messages (await confirmation)
+    // Cancel any in-flight JS-level mute ramp from the previous stopAll()
+    cancelPendingMute();
+    // Clear all pending scheduled messages (both prescheduler and WASM scheduler)
     await orchestrator.flushAll();
+    // Send a fast 50ms ramp-down as timestamped OSC bundles — all at once,
+    // with incrementing timestamps so the WASM scheduler spreads them over
+    // real audio frames. This avoids setTimeout races entirely.
+    const rampMs = 50;
+    const rampSteps = 10;
+    const stepMs = rampMs / rampSteps;
+    const baseNTP = getNTP();
+    const arpRatio = 1 - uiState.mix / 100;
+    const beatRatio = uiState.mix / 100;
+    for (let i = 0; i <= rampSteps; i++) {
+      const amp = 1 - (i / rampSteps);
+      const bundle = createOSCBundle(baseNTP + (i * stepMs) / 1000, [
+        { address: "/n_set", args: [FX_ARP_LEVEL_NODE, "amp", amp * arpRatio] },
+        { address: "/n_set", args: [FX_BEAT_LEVEL_NODE, "amp", amp * beatRatio] },
+      ]);
+      orchestrator.sendOSC(bundle);
+    }
+    // Wait for the ramp to complete at the audio level
+    await new Promise(r => setTimeout(r, rampMs + 10));
     // Free source groups to kill any still-sounding synths (preserves FX chain)
     orchestrator.send("/g_freeAll", GROUP_ARP);
     orchestrator.send("/g_freeAll", GROUP_LOOPS);
