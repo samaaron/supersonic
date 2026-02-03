@@ -91,6 +91,7 @@ const LOOP_CONFIG = {
 // ===== STATE =====
 let orchestrator = null;
 let nodeTreeViz = null;
+let nodeTreeVizActive = false;
 let messages = [],
   sentMessages = [],
   sentMessageSeq = 0;
@@ -129,7 +130,7 @@ function batchedUpdate(batch, callback) {
 let analyser = null,
   scopeAnimationId = null;
 let trailParticles = [],
-  trailAnimationId = null,
+  trailActive = false,
   trailReleaseTime = null;
 let fxChainInitialized = false,
   fxChainInitializing = null;
@@ -160,6 +161,9 @@ const uiState = {
 window.uiState = uiState;
 
 let isAutoPlaying = false;
+let metricsIntervalId = null;
+let isIdle = false, idleTimeoutId = null;
+const IDLE_DELAY_MS = 2000;
 
 // ===== HELPERS =====
 const $ = (id) => document.getElementById(id);
@@ -845,12 +849,15 @@ function updateMetrics(m) {
 const scopeCanvas = $("scope-canvas");
 const scopeCtx = scopeCanvas?.getContext("2d");
 let scopeDataBuffer = null; // Reused buffer for scope data
+let scopeW = 0, scopeH = 0;
 
 function resizeScope() {
   if (!scopeCanvas || !scopeCtx) return;
   const dpr = window.devicePixelRatio || 1;
-  scopeCanvas.width = scopeCanvas.offsetWidth * dpr;
-  scopeCanvas.height = scopeCanvas.offsetHeight * dpr;
+  scopeW = scopeCanvas.offsetWidth;
+  scopeH = scopeCanvas.offsetHeight;
+  scopeCanvas.width = scopeW * dpr;
+  scopeCanvas.height = scopeH * dpr;
   scopeCtx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform before scaling
   scopeCtx.scale(dpr, dpr);
 }
@@ -859,15 +866,13 @@ function resizeScope() {
 function drawSilentScope() {
   if (!scopeCanvas || !scopeCtx) return;
   resizeScope();
-  const w = scopeCanvas.offsetWidth,
-    h = scopeCanvas.offsetHeight;
   scopeCtx.fillStyle = "#000";
-  scopeCtx.fillRect(0, 0, w, h);
+  scopeCtx.fillRect(0, 0, scopeW, scopeH);
   scopeCtx.lineWidth = 3;
   scopeCtx.strokeStyle = "#666";
   scopeCtx.beginPath();
-  scopeCtx.moveTo(0, h / 2);
-  scopeCtx.lineTo(w, h / 2);
+  scopeCtx.moveTo(0, scopeH / 2);
+  scopeCtx.lineTo(scopeW, scopeH / 2);
   scopeCtx.stroke();
 }
 
@@ -901,21 +906,22 @@ function drawScope() {
 
   analyser.getByteTimeDomainData(scopeDataBuffer);
 
-  const w = scopeCanvas.offsetWidth,
-    h = scopeCanvas.offsetHeight;
   scopeCtx.fillStyle = "#000";
-  scopeCtx.fillRect(0, 0, w, h);
+  scopeCtx.fillRect(0, 0, scopeW, scopeH);
   scopeCtx.lineWidth = 3;
   scopeCtx.strokeStyle = "#ff6600";
   scopeCtx.beginPath();
 
-  const slice = w / scopeDataBuffer.length;
+  const slice = scopeW / scopeDataBuffer.length;
   for (let i = 0; i < scopeDataBuffer.length; i++) {
-    const y = ((scopeDataBuffer[i] / 128.0) * h) / 2;
+    const y = ((scopeDataBuffer[i] / 128.0) * scopeH) / 2;
     i === 0 ? scopeCtx.moveTo(0, y) : scopeCtx.lineTo(i * slice, y);
   }
-  scopeCtx.lineTo(w, h / 2);
+  scopeCtx.lineTo(scopeW, scopeH / 2);
   scopeCtx.stroke();
+
+  if (trailActive) updateTrail();
+  if (nodeTreeVizActive) nodeTreeViz.update();
 }
 
 // ===== TRAIL EFFECT =====
@@ -1008,7 +1014,7 @@ function updateTrail() {
 
   if (!trailParticles.length && !shouldSpawn) {
     trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
-    trailAnimationId = null;
+    trailActive = false;
     trailReleaseTime = null;
     return;
   }
@@ -1041,17 +1047,122 @@ function updateTrail() {
   trailParticles.length = writeIdx;
 
   trailCtx.globalCompositeOperation = "source-over";
-  trailAnimationId = requestAnimationFrame(updateTrail);
 }
 
 function startTrailAnimation() {
   trailReleaseTime = null;
-  if (!trailAnimationId) trailAnimationId = requestAnimationFrame(updateTrail);
+  trailActive = true;
 }
 
 function stopTrailAnimation() {
   trailReleaseTime = performance.now();
 }
+
+// ===== VISIBILITY OBSERVER (CSS animation gating) =====
+let visibilityObserver = null;
+
+function createVisibilityObserver() {
+  visibilityObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      entry.target.classList.toggle("in-view", entry.isIntersecting);
+    }
+  });
+  observeGlowElements();
+}
+
+function observeGlowElements() {
+  if (!visibilityObserver) return;
+  const btnInit = $("boot-button");
+  if (btnInit) visibilityObserver.observe(btnInit);
+  for (const el of $$(".sponsor-item")) {
+    visibilityObserver.observe(el);
+  }
+}
+
+function disconnectVisibilityObserver() {
+  if (!visibilityObserver) return;
+  visibilityObserver.disconnect();
+  $("boot-button")?.classList.remove("in-view");
+  for (const el of $$(".sponsor-item")) {
+    el.classList.remove("in-view");
+  }
+}
+
+// ===== IDLE SUSPEND =====
+function checkIdle() {
+  const anyActive = schedulerRunning.arp || schedulerRunning.kick || schedulerRunning.amen || isAutoPlaying;
+  if (anyActive) {
+    if (idleTimeoutId !== null) {
+      clearTimeout(idleTimeoutId);
+      idleTimeoutId = null;
+    }
+    if (isIdle) wakeUp();
+    return;
+  }
+  if (idleTimeoutId === null && !isIdle) {
+    idleTimeoutId = setTimeout(goIdle, IDLE_DELAY_MS);
+  }
+}
+
+async function goIdle() {
+  if (isIdle) return;
+  isIdle = true;
+  idleTimeoutId = null;
+
+  if (scopeAnimationId) {
+    cancelAnimationFrame(scopeAnimationId);
+    scopeAnimationId = null;
+  }
+  trailActive = false;
+
+  if (rainbowAnimationId) {
+    cancelAnimationFrame(rainbowAnimationId);
+    rainbowAnimationId = null;
+  }
+
+  nodeTreeVizActive = false;
+
+  if (metricsIntervalId) {
+    clearInterval(metricsIntervalId);
+    metricsIntervalId = null;
+  }
+
+  disconnectVisibilityObserver();
+  drawSilentScope();
+  await orchestrator?.flushAll();
+  orchestrator?.suspend();
+}
+
+async function wakeUp() {
+  if (!isIdle) return;
+  isIdle = false;
+
+  await orchestrator?.resume();
+
+  if (analyser && !scopeAnimationId) {
+    drawScope();
+  }
+
+  if (rainbowMode && !rainbowAnimationId) {
+    animateRainbow();
+  }
+
+  if (uiState.padActive || isAutoPlaying) {
+    trailActive = true;
+  }
+
+  if (nodeTreeViz) {
+    nodeTreeVizActive = true;
+  }
+
+  if (orchestrator && !metricsIntervalId) {
+    metricsIntervalId = setInterval(() => updateMetrics(orchestrator.getMetrics()), 100);
+  }
+
+  observeGlowElements();
+}
+
+createVisibilityObserver();
 
 // ===== SCHEDULER WORKER =====
 let schedulerWorker = null;
@@ -1360,22 +1471,25 @@ function stopAmenLoop() {
   schedulerRunning.amen = false;
 }
 
-// Mute/unmute the final mixer for clean stop/start
-function muteOutput() {
-  if (!orchestrator || !fxChainInitialized) return;
+// Mute the final mixer with a ramp to avoid pops/clicks
+// Returns a promise that resolves when the ramp is complete
+function muteOutput(durationMs = 500) {
+  if (!orchestrator || !fxChainInitialized) return Promise.resolve();
   const steps = 10;
-  const duration = 500; // ms
-  const interval = duration / steps;
+  const interval = durationMs / steps;
 
-  for (let i = 0; i <= steps; i++) {
-    setTimeout(() => {
-      const amp = 1 - (i / steps);
-      const arpAmp = amp * (1 - uiState.mix / 100);
-      const beatAmp = amp * (uiState.mix / 100);
-      orchestrator.send("/n_set", FX_ARP_LEVEL_NODE, "amp", arpAmp);
-      orchestrator.send("/n_set", FX_BEAT_LEVEL_NODE, "amp", beatAmp);
-    }, i * interval);
-  }
+  return new Promise(resolve => {
+    for (let i = 0; i <= steps; i++) {
+      setTimeout(() => {
+        const amp = 1 - (i / steps);
+        const arpAmp = amp * (1 - uiState.mix / 100);
+        const beatAmp = amp * (uiState.mix / 100);
+        orchestrator.send("/n_set", FX_ARP_LEVEL_NODE, "amp", arpAmp);
+        orchestrator.send("/n_set", FX_BEAT_LEVEL_NODE, "amp", beatAmp);
+        if (i === steps) resolve();
+      }, i * interval);
+    }
+  });
 }
 
 function unmuteOutput() {
@@ -1386,9 +1500,29 @@ function unmuteOutput() {
   orchestrator.send("/n_set", FX_BEAT_LEVEL_NODE, "amp", beatAmp);
 }
 
-// Start all schedulers together (for initial start)
+// Start all schedulers together (for initial start or restart)
 async function startAll() {
   if (!orchestrator) return;
+
+  if (isIdle) {
+    // Waking from idle — resume handles flushAll
+    await wakeUp();
+  } else {
+    // Quick restart — cancel pending idle timer, clean up stale state
+    if (idleTimeoutId !== null) {
+      clearTimeout(idleTimeoutId);
+      idleTimeoutId = null;
+    }
+    // Fast ramp down to avoid pops
+    await muteOutput(50);
+    // Clear all pending scheduled messages (await confirmation)
+    await orchestrator.flushAll();
+    // Free source groups to kill any still-sounding synths (preserves FX chain)
+    orchestrator.send("/g_freeAll", GROUP_ARP);
+    orchestrator.send("/g_freeAll", GROUP_LOOPS);
+    orchestrator.send("/g_freeAll", GROUP_KICK);
+  }
+
   // Load everything needed
   if (!synthdefsLoaded.instruments) await loadSynthdefs("instruments");
   if (!fxChainInitialized) await initFXChain();
@@ -1406,8 +1540,6 @@ async function startAll() {
 }
 
 function stopAll() {
-  // Mute immediately for clean cutoff
-  muteOutput();
   if (schedulerWorker) {
     schedulerWorker.postMessage({ type: "stop", scheduler: "all" });
   }
@@ -1415,6 +1547,9 @@ function stopAll() {
   schedulerRunning.kick = false;
   schedulerRunning.amen = false;
   stopBeatPulse();
+  // Graceful 500ms ramp down, then wait for idle timeout
+  muteOutput();
+  checkIdle();
 }
 
 // Expose globally
@@ -1464,8 +1599,9 @@ if (synthPad) {
     updateFXParameters(x, y);
   }
 
-  function activatePad(clientX, clientY) {
+  async function activatePad(clientX, clientY) {
     if (synthPad.classList.contains("disabled")) return;
+    await wakeUp();
     isPadActive = true;
     synthPad.classList.add("active");
     padTouch.classList.add("active");
@@ -1822,11 +1958,15 @@ $("init-button").addEventListener("click", async () => {
       if (mix) mix.textContent = "0.30";
 
       setupScope();
+
+      // Start idle detection — nothing is playing after boot,
+      // so this will trigger the idle timeout and suspend the engine
+      checkIdle();
     });
 
     orchestrator.on("message:raw", addMessage);
     orchestrator.on("message:sent", (oscData, sourceId) => addSentMessage(oscData, null, sourceId));
-    setInterval(() => updateMetrics(orchestrator.getMetrics()), 100);
+    metricsIntervalId = setInterval(() => updateMetrics(orchestrator.getMetrics()), 100);
     orchestrator.on("error", (e) => {
       showError(e.message);
       updateStatus("error");
@@ -1883,12 +2023,12 @@ $("init-button").addEventListener("click", async () => {
       initSchedulerWorker();
     });
 
-    orchestrator.on("audiocontext:suspended", () =>
-      showOverlay("suspended-overlay"),
-    );
-    orchestrator.on("audiocontext:interrupted", () =>
-      showOverlay("suspended-overlay"),
-    );
+    orchestrator.on("audiocontext:suspended", () => {
+      if (!isIdle) showOverlay("suspended-overlay");
+    });
+    orchestrator.on("audiocontext:interrupted", () => {
+      if (!isIdle) showOverlay("suspended-overlay");
+    });
     orchestrator.on("audiocontext:resumed", () =>
       hideOverlay("suspended-overlay"),
     );
@@ -1900,6 +2040,9 @@ $("init-button").addEventListener("click", async () => {
     if (c2d && c3d) {
       nodeTreeViz = new NodeTreeViz(c2d, c3d, orchestrator);
       await nodeTreeViz.init();
+      // Stop self-polling — the unified drawScope loop drives updates
+      nodeTreeViz.stopPolling();
+      nodeTreeVizActive = true;
       $("dim-btn")?.addEventListener("click", function () {
         this.textContent = nodeTreeViz.toggleDimensions();
       });
@@ -1978,6 +2121,7 @@ $("fullscreen-button")?.addEventListener("click", () => {
 
 // Visibility change
 document.addEventListener("visibilitychange", () => {
+  if (isIdle) return;
   if (
     document.visibilityState === "visible" &&
     orchestrator?.audioContext?.state === "suspended"
