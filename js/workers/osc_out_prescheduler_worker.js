@@ -149,7 +149,8 @@ const stopMetricsSending = () => {
 // Priority queue implemented as binary min-heap
 // Entries: { ntpTime, seq, sessionId, runTag, oscData, sourceId }
 let eventHeap = [];
-let periodicTimer = null;    // Single periodic timer for dispatch polling
+let dispatchTimer = null;      // Demand-driven dispatch timer
+let nextDispatchAt = Infinity; // NTP time the current timer targets
 let sequenceCounter = 0;
 let isDispatching = false;  // Prevent reentrancy into dispatch loop
 
@@ -166,7 +167,7 @@ let maxPendingMessages = 65536;
 
 // Timing constants
 const NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
-const POLL_INTERVAL_MS = 50;           // Dispatch poll interval (separate from metrics snapshot)
+const RETRY_INTERVAL_MS = 50;          // Retry queue poll interval
 let lookaheadS = 0.500;                // Lookahead window (configurable via init)
 
 const schedulerLog = (...args) => {
@@ -427,6 +428,7 @@ const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
         if (!success) {
             // Queue for retry (only fails if buffer genuinely full)
             queueForRetry(oscData, 'immediate message', sourceId);
+            rescheduleDispatch();
         }
         return true;
     }
@@ -471,6 +473,7 @@ const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
                  'wait=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
                  'pending=' + eventHeap.length);
 
+    rescheduleDispatch();
     return true;
 };
 
@@ -540,26 +543,72 @@ const swap = (i, j) => {
 };
 
 /**
- * Start periodic polling (called once on init)
+ * Reschedule the dispatch timer to target the next needed dispatch time.
+ * Called after any state change (heap push/pop, retry queue change, cancel).
+ * When idle (nothing pending), no timer runs.
  */
-const startPeriodicPolling = () => {
-    if (periodicTimer !== null) {
-        console.warn('[PreScheduler] Polling already started');
+const rescheduleDispatch = () => {
+    if (eventHeap.length === 0 && retryQueue.length === 0) {
+        // Nothing to do — go idle
+        if (dispatchTimer !== null) {
+            clearTimeout(dispatchTimer);
+            dispatchTimer = null;
+            nextDispatchAt = Infinity;
+        }
         return;
     }
 
-    schedulerLog('[PreScheduler] Starting periodic polling (every ' + POLL_INTERVAL_MS + 'ms)');
-    checkAndDispatch();  // Start immediately
+    // Determine target time (in NTP seconds)
+    let targetNTP;
+    const nowNTP = getCurrentNTP();
+
+    if (retryQueue.length > 0) {
+        // Retry queue needs polling — target now + retry interval
+        const retryTarget = nowNTP + RETRY_INTERVAL_MS / 1000;
+        if (eventHeap.length > 0) {
+            const heapTarget = heapPeek().ntpTime - lookaheadS;
+            targetNTP = Math.min(retryTarget, heapTarget);
+        } else {
+            targetNTP = retryTarget;
+        }
+    } else {
+        // Only heap events — target next event's dispatch time
+        targetNTP = heapPeek().ntpTime - lookaheadS;
+    }
+
+    // Only reset timer if new target is sooner than existing
+    if (targetNTP < nextDispatchAt) {
+        if (dispatchTimer !== null) {
+            clearTimeout(dispatchTimer);
+        }
+        const delayMs = Math.max(0, (targetNTP - nowNTP) * 1000);
+        nextDispatchAt = targetNTP;
+        dispatchTimer = setTimeout(checkAndDispatch, delayMs);
+    }
 };
 
 /**
- * Stop periodic polling
+ * Start dispatching (called once on init)
  */
-const stopPeriodicPolling = () => {
-    if (periodicTimer !== null) {
-        clearTimeout(periodicTimer);
-        periodicTimer = null;
-        schedulerLog('[PreScheduler] Stopped periodic polling');
+const startDispatching = () => {
+    if (dispatchTimer !== null) {
+        console.warn('[PreScheduler] Dispatching already started');
+        return;
+    }
+
+    schedulerLog('[PreScheduler] Starting demand-driven dispatching');
+    rescheduleDispatch();  // Sets timer if heap/retry queue non-empty, otherwise idle
+};
+
+/**
+ * Stop dispatching
+ */
+const stopDispatching = () => {
+    if (dispatchTimer !== null) {
+        clearTimeout(dispatchTimer);
+        dispatchTimer = null;
+        nextDispatchAt = Infinity;
+        schedulerLog('[PreScheduler] Stopped dispatching');
     }
 };
 
@@ -639,8 +688,10 @@ const checkAndDispatch = () => {
 
     isDispatching = false;
 
-    // Reschedule for next check (fixed interval)
-    periodicTimer = setTimeout(checkAndDispatch, POLL_INTERVAL_MS);
+    // Reschedule based on next needed dispatch time
+    dispatchTimer = null;
+    nextDispatchAt = Infinity;
+    rescheduleDispatch();
 };
 
 const cancelBy = (predicate) => {
@@ -665,6 +716,7 @@ const cancelBy = (predicate) => {
         metricsAdd(MetricsOffsets.PRESCHEDULER_EVENTS_CANCELLED, removed);
         updateMetrics();  // Update buffer with current queue depth
         schedulerLog('[PreScheduler] Cancelled ' + removed + ' events, ' + eventHeap.length + ' remaining');
+        rescheduleDispatch();
     }
 };
 
@@ -695,7 +747,7 @@ const cancelAllTags = () => {
     eventHeap = [];
     updateMetrics();  // Update buffer (sets eventsPending to 0)
     schedulerLog('[PreScheduler] Cancelled all ' + cancelled + ' events');
-    // Note: Periodic timer continues running (it will just find empty queue)
+    rescheduleDispatch();
 };
 
 // Helpers reused from legacy worker for immediate send
@@ -748,6 +800,9 @@ const processImmediate = (oscData, sourceId = 0) => {
         if (!success) {
             queueForRetry(oscData, 'immediate message', sourceId);
         }
+    }
+    if (retryQueue.length > 0) {
+        rescheduleDispatch();
     }
 };
 
@@ -804,8 +859,8 @@ self.addEventListener('message', (event) => {
                 // Initialize max late to 0 (any late value will exceed)
                 metricsSet(MetricsOffsets.PRESCHEDULER_MAX_LATE_MS, 0);
 
-                // Start periodic polling
-                startPeriodicPolling();
+                // Start demand-driven dispatching
+                startDispatching();
 
                 schedulerLog('[OSCPreSchedulerWorker] Initialized with NTP-based scheduling, mode=' + mode + ', capacity=' + maxPendingMessages);
                 self.postMessage({ type: 'initialized' });
@@ -849,6 +904,7 @@ self.addEventListener('message', (event) => {
                     if (!success) {
                         // Only fails if buffer is genuinely full (not lock contention)
                         queueForRetry(data.oscData, 'directDispatch fallback', data.sourceId || 0);
+                        rescheduleDispatch();
                     }
                 }
                 break;
