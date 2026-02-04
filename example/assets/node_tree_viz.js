@@ -9,6 +9,8 @@
  * - 3D: Radial force graph with bloom effects (lazy-loaded)
  */
 
+const DEV_MODE = false;
+
 // Color palette - distinct colors for each node type
 const COLORS = {
   group: '#ff8c00',      // Orange for groups
@@ -465,7 +467,7 @@ export class NodeTreeViz {
 
     const tree = this.supersonic.getRawTree();
     if (tree.version === this.lastVersion) return;
-    console.log(`[NodeTreeViz] Updating: version ${this.lastVersion} -> ${tree.version}, nodes: ${tree.nodeCount}`);
+    if (DEV_MODE) console.log(`[NodeTreeViz] Updating: version ${this.lastVersion} -> ${tree.version}, nodes: ${tree.nodeCount}`);
     this.lastVersion = tree.version;
 
     // Build node map

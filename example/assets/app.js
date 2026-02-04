@@ -1180,7 +1180,7 @@ function initSchedulerWorker() {
   schedulerWorker.onmessage = (e) => {
     const { type } = e.data;
     if (type === "ready") {
-      console.log("Scheduler worker ready, sending OscChannel...");
+      if (DEV_MODE) console.log("Scheduler worker ready, sending OscChannel...");
       // Create an OscChannel and transfer it to the worker for direct worklet communication
       const channel = orchestrator.createOscChannel();
       schedulerWorker.postMessage(
@@ -1197,7 +1197,7 @@ function initSchedulerWorker() {
         channel.transferList
       );
     } else if (type === "channelReady") {
-      console.log("Scheduler worker has direct worklet connection");
+      if (DEV_MODE) console.log("Scheduler worker has direct worklet connection");
       $("play-toggle")?.classList.remove("disabled");
     } else if (type === "started" && e.data.scheduler === "arp") {
       // Sync main thread timing with worker for beat pulse

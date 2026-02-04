@@ -3,6 +3,8 @@
 
 import { OscChannel, oscFast } from "../dist/supersonic.js";
 
+const DEV_MODE = false;
+
 // ===== TIMING =====
 const SCHEDULE_AHEAD_MS = 350;  // How early to wake and prepare next batch
 
@@ -154,9 +156,9 @@ class Scheduler {
   }
 
   start() {
-    console.log(`[${this.name}] start() called, running=${this.running}`);
+    if (DEV_MODE) console.log(`[${this.name}] start() called, running=${this.running}`);
     if (this.running) {
-      console.log(`[${this.name}] already running, returning early`);
+      if (DEV_MODE) console.log(`[${this.name}] already running, returning early`);
       return;
     }
     this.running = true;
@@ -185,9 +187,6 @@ class Scheduler {
     const batchSize = this.getBatchSize();
     const now = getNTP();
 
-    // Debug: log first 8 events to verify timestamps
-    const shouldLog = Math.floor(this.nextBeat / beatsPerEvent) < 8 && this.name === "Arp";
-
     for (let i = 0; i < batchSize; i++) {
       const eventBeat = this.nextBeat + i * beatsPerEvent;
       const targetNTP = timeline.getTimeAtBeat(eventBeat);
@@ -195,10 +194,6 @@ class Scheduler {
       const eventIndex = Math.floor(eventBeat / beatsPerEvent);
       const message = this.createMessage(eventIndex);
       if (message) {
-        if (shouldLog) {
-          const playsIn = (targetNTP - now) * 1000;
-          console.log(`[${this.name} beat=${eventBeat}] target=${targetNTP.toFixed(3)}, playsIn=${playsIn.toFixed(0)}ms`);
-        }
         const bundle = createOSCBundle(targetNTP, message.address, message.args);
         sendOSC(bundle);
       }
@@ -384,7 +379,7 @@ self.onmessage = (e) => {
         config = data.config;
       }
       self.postMessage({ type: "channelReady" });
-      console.log(`[Scheduler Worker] Direct worklet channel established (${oscChannel?.mode ?? 'unknown'} mode)`);
+      if (DEV_MODE) console.log(`[Scheduler Worker] Direct worklet channel established (${oscChannel?.mode ?? 'unknown'} mode)`);
       break;
 
     case "state":
