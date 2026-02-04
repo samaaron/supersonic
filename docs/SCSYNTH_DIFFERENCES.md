@@ -142,7 +142,7 @@ No filesystem in browser, so file-based commands aren't available:
 
 | Command | Reason / Alternative |
 |---------|---------------------|
-| `/clearSched` | Use `cancelAllScheduled()` or fine-grained `cancelTag()`, `cancelSession()`, `cancelSessionTag()` |
+| `/clearSched` | Use `cancelAll()` or fine-grained `cancelTag()`, `cancelSession()`, `cancelSessionTag()` |
 | `/error` | SuperSonic always enables error notifications |
 | `/quit` | Use `destroy()` to shut down SuperSonic |
 
@@ -188,7 +188,7 @@ SuperSonic provides a high-level JavaScript API that wraps the OSC protocol:
 | `loadSynthDef(name)` | Fetch and load a synthdef by name |
 | `loadSynthDefs(names)` | Load multiple synthdefs |
 | `loadSample(bufnum, url)` | Fetch and load audio into a buffer |
-| `cancelAllScheduled()` | Cancel all scheduled OSC bundles |
+| `cancelAll()` | Cancel all scheduled OSC bundles |
 | `cancelTag(tag)` | Cancel bundles with specific tag |
 | `cancelSession(session)` | Cancel bundles from specific session |
 | `destroy()` | Clean shutdown |

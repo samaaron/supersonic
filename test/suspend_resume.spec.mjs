@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures.mjs";
 /**
  * Suspend / Resume Tests
  *
- * Tests the suspend() and resume() lifecycle independent of flushAll.
+ * Tests the suspend() and resume() lifecycle independent of purge.
  *
  * 1. suspend() transitions AudioContext to 'suspended'
  * 2. resume() transitions AudioContext back to 'running'

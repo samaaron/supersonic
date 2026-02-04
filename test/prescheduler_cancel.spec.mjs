@@ -468,7 +468,7 @@ test.describe("Prescheduler Cancellation", () => {
     expect(result.sentDuringTest).toBe(0);
   });
 
-  test("cancelAllScheduled clears entire prescheduler queue", async ({ page, sonicConfig }) => {
+  test("cancelAll clears entire prescheduler queue", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       // NTP helpers
       const NTP_EPOCH_OFFSET = 2208988800;
@@ -543,7 +543,7 @@ test.describe("Prescheduler Cancellation", () => {
       const pendingAfterSend = metricsAfterSend.preschedulerPending || 0;
 
       // Cancel ALL scheduled bundles
-      sonic.cancelAllScheduled();
+      sonic.cancelAll();
 
       // Wait for cancel to process
       await new Promise(r => setTimeout(r, 100));
@@ -560,7 +560,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
     }, sonicConfig);
 
-    console.log(`\ncancelAllScheduled test:`);
+    console.log(`\ncancelAll test:`);
     console.log(`  Pending after send: ${result.pendingAfterSend}`);
     console.log(`  Pending after cancel: ${result.pendingAfterCancel}`);
     console.log(`  Cancelled: ${result.cancelledCount}`);

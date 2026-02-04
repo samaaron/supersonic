@@ -29,12 +29,15 @@ myButton.onclick = async () => {
 | [`shutdown()`](#shutdown)                            | Shut down, preserving listeners (can call `init()` again) |
 | [`destroy()`](#destroy)                              | Permanently destroy instance, clearing all listeners      |
 | [`recover()`](#recover)                              | Smart recovery - tries resume, falls back to reload       |
-| [`resume()`](#resume)                                | Quick resume - just AudioContext, preserves memory        |
+| [`suspend()`](#suspend)                              | Suspend the AudioContext (worklet stays loaded)            |
+| [`resume()`](#resume)                                | Resume after suspend, flushes stale messages               |
 | [`reload()`](#reload)                                | Full reload - destroys memory, emits `setup` event        |
 | [`reset(config?)`](#resetconfig)                     | Full teardown and re-initialize (loses all state)         |
 | [`send(address, ...args)`](#sendaddress-args)        | Send an OSC message                                       |
 | [`sendOSC(data, options)`](#sendoscoscbytes-options) | Send pre-encoded OSC bytes                                |
 | [`sync(syncId)`](#syncsyncid)                        | Wait for server to process all commands                   |
+| [`purge()`](#flushall)                            | Flush all pending OSC from prescheduler and WASM scheduler |
+| [`cancelAll()`](#cancelallscheduled)        | Cancel all pending events in the JS prescheduler          |
 
 ### Asset Loading
 
@@ -362,6 +365,32 @@ await supersonic.sync(); // Now safe to use the synthdefs
 await supersonic.sync(42);
 ```
 
+### `purge()`
+
+Flush all pending OSC messages from both the JS prescheduler and the WASM BundleScheduler. Returns a promise that resolves when both sides have confirmed the flush is complete.
+
+Unlike `cancelAll()` which only clears the JS prescheduler, this also clears bundles that have already been consumed from the ring buffer and are sitting in the WASM scheduler's priority queue. Uses a postMessage flag (not the ring buffer) to avoid the race condition where stale scheduled bundles would fire before a clear command could be read.
+
+Called internally by `resume()` to prevent stale messages from a previous session interfering with new work.
+
+**Returns:** `Promise<void>`
+
+```javascript
+// Clear everything before starting a new run
+await supersonic.purge();
+
+// Safe to send new events — pipeline is confirmed empty
+supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60);
+```
+
+### `cancelAll()`
+
+Cancel all pending events in the JS prescheduler. This clears future-timestamped bundles that haven't yet been sent to the worklet. Does **not** clear bundles already in the WASM scheduler — use [`purge()`](#flushall) for that.
+
+```javascript
+supersonic.cancelAll();
+```
+
 ### `shutdown()`
 
 Shut down the engine, releasing all resources but preserving event listeners. After shutdown, you can call `init()` again to restart. Emits the `shutdown` event before teardown begins.
@@ -402,11 +431,28 @@ document.addEventListener("visibilitychange", async () => {
 });
 ```
 
+### `suspend()`
+
+Suspend the AudioContext. The worklet remains loaded but audio processing stops. Use this to reduce CPU usage when audio is not needed (e.g., nothing is playing).
+
+The `audiocontext:suspended` event is emitted automatically by the AudioContext state change listener.
+
+**Returns:** `Promise<void>`
+
+```javascript
+// Suspend when idle
+await supersonic.suspend();
+// CPU drops to near-zero, worklet and memory preserved
+
+// Later, resume
+await supersonic.resume();
+```
+
 ### `resume()`
 
-Quick resume - just resumes the AudioContext and resyncs timing. Memory and node tree are preserved. Does **not** emit `setup` event.
+Resume after a suspend. Calls [`purge()`](#flushall) internally to clear any stale scheduled messages from before the suspend, then resumes the AudioContext and resyncs timing. Memory and node tree are preserved. Does **not** emit `setup` event.
 
-Use when you know the worklet is still running (e.g., tab was briefly backgrounded).
+Use when you know the worklet is still running (e.g., tab was briefly backgrounded, or after a manual `suspend()`).
 
 **Returns:** `Promise<boolean>` - true if worklet is running after resume
 

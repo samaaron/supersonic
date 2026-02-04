@@ -3,12 +3,12 @@ import { test, expect } from "./fixtures.mjs";
 /**
  * Flush Scheduler Tests
  *
- * Tests that flushAll() clears pending OSC messages from:
+ * Tests that purge() clears pending OSC messages from:
  * 1. The JS prescheduler heap (future-timestamped bundles)
  * 2. The WASM BundleScheduler (bundles already consumed from the ring buffer)
  *
  * Also tests:
- * 3. The async ack guarantee (flushAll resolves only when both sides confirm)
+ * 3. The async ack guarantee (purge resolves only when both sides confirm)
  * 4. New OSC sent after flush is not lost
  * 5. Quick restart: stale messages don't contaminate new run
  * 6. Flush while suspended takes effect after resume
@@ -73,7 +73,7 @@ test.describe("Flush Scheduler", () => {
     });
   });
 
-  test("flushAll clears prescheduler pending bundles", async ({ page, sonicConfig }) => {
+  test("purge clears prescheduler pending bundles", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       eval(config._helpers);
 
@@ -96,7 +96,7 @@ test.describe("Flush Scheduler", () => {
       const pendingBefore = metricsBefore.preschedulerPending || 0;
 
       // Flush everything (awaits confirmation from both sides)
-      await sonic.flushAll();
+      await sonic.purge();
 
       // Wait for metrics to propagate (PM mode sends snapshots periodically)
       await new Promise(r => setTimeout(r, 200));
@@ -108,7 +108,7 @@ test.describe("Flush Scheduler", () => {
       return { pendingBefore, pendingAfter };
     }, { ...sonicConfig, _helpers: HELPERS });
 
-    console.log(`\nflushAll prescheduler test (${sonicConfig.mode}):`);
+    console.log(`\npurge prescheduler test (${sonicConfig.mode}):`);
     console.log(`  Pending before flush: ${result.pendingBefore}`);
     console.log(`  Pending after flush: ${result.pendingAfter}`);
 
@@ -116,7 +116,7 @@ test.describe("Flush Scheduler", () => {
     expect(result.pendingAfter).toBe(0);
   });
 
-  test("flushAll clears WASM scheduler pending bundles", async ({ page, sonicConfig }) => {
+  test("purge clears WASM scheduler pending bundles", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       eval(config._helpers);
 
@@ -142,7 +142,7 @@ test.describe("Flush Scheduler", () => {
       const wasmDepthBefore = metricsBefore.scsynthSchedulerDepth || 0;
 
       // Flush everything (awaits confirmation from both sides)
-      await sonic.flushAll();
+      await sonic.purge();
 
       // Wait for process() to run and clear the scheduler, then metrics to propagate
       await new Promise(r => setTimeout(r, 200));
@@ -154,7 +154,7 @@ test.describe("Flush Scheduler", () => {
       return { wasmDepthBefore, wasmDepthAfter };
     }, { ...sonicConfig, _helpers: HELPERS });
 
-    console.log(`\nflushAll WASM scheduler test (${sonicConfig.mode}):`);
+    console.log(`\npurge WASM scheduler test (${sonicConfig.mode}):`);
     console.log(`  WASM scheduler depth before flush: ${result.wasmDepthBefore}`);
     console.log(`  WASM scheduler depth after flush: ${result.wasmDepthAfter}`);
 
@@ -162,7 +162,7 @@ test.describe("Flush Scheduler", () => {
     expect(result.wasmDepthAfter).toBe(0);
   });
 
-  test("flushAll after suspend prevents stale messages on resume", async ({ page, sonicConfig }) => {
+  test("purge after suspend prevents stale messages on resume", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       eval(config._helpers);
 
@@ -194,7 +194,7 @@ test.describe("Flush Scheduler", () => {
 
       // Suspend then flush
       await sonic.suspend();
-      await sonic.flushAll();
+      await sonic.purge();
 
       // Resume (also flushes internally)
       await sonic.resume();
@@ -219,7 +219,7 @@ test.describe("Flush Scheduler", () => {
       };
     }, { ...sonicConfig, _helpers: HELPERS });
 
-    console.log(`\nflushAll suspend/resume test (${sonicConfig.mode}):`);
+    console.log(`\npurge suspend/resume test (${sonicConfig.mode}):`);
     console.log(`  Prescheduler: ${result.preschedulerBefore} -> ${result.preschedulerAfter}`);
     console.log(`  WASM scheduler: ${result.wasmDepthBefore} -> ${result.wasmDepthAfter}`);
     console.log(`  New lates after resume: ${result.newLates}`);
@@ -229,7 +229,7 @@ test.describe("Flush Scheduler", () => {
     expect(result.newLates).toBe(0);
   });
 
-  test("new OSC sent after flushAll is not lost", async ({ page, sonicConfig }) => {
+  test("new OSC sent after purge is not lost", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       eval(config._helpers);
 
@@ -257,7 +257,7 @@ test.describe("Flush Scheduler", () => {
       await new Promise(r => setTimeout(r, 500));
 
       // Flush everything
-      await sonic.flushAll();
+      await sonic.purge();
 
       // Now send "new run" bundles — these must NOT be lost
       const newNTP = getCurrentNTP();
@@ -325,7 +325,7 @@ test.describe("Flush Scheduler", () => {
       const metricsRun1 = sonic.getMetrics();
 
       // Quick restart: flush then immediately send run 2
-      await sonic.flushAll();
+      await sonic.purge();
 
       // "Run 2": send new bundles immediately after flush
       const run2NTP = getCurrentNTP();
@@ -367,7 +367,7 @@ test.describe("Flush Scheduler", () => {
     expect(result.run2Prescheduler).toBe(8);
   });
 
-  test("flushAll resolves within a bounded time", async ({ page, sonicConfig }) => {
+  test("purge resolves within a bounded time", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       eval(config._helpers);
 
@@ -392,23 +392,23 @@ test.describe("Flush Scheduler", () => {
       // Wait for WASM scheduler to consume bundles
       await new Promise(r => setTimeout(r, 500));
 
-      // Time the flushAll call — it should resolve promptly (< 2s)
+      // Time the purge call — it should resolve promptly (< 2s)
       const start = performance.now();
-      await sonic.flushAll();
+      await sonic.purge();
       const elapsed = performance.now() - start;
 
       await sonic.shutdown();
       return { elapsed };
     }, { ...sonicConfig, _helpers: HELPERS });
 
-    console.log(`\nflushAll timing test (${sonicConfig.mode}):`);
+    console.log(`\npurge timing test (${sonicConfig.mode}):`);
     console.log(`  Resolved in: ${result.elapsed.toFixed(1)}ms`);
 
     // Should resolve well within 2 seconds — typically < 50ms
     expect(result.elapsed).toBeLessThan(2000);
   });
 
-  test("rapid sequential flushAll calls do not hang", async ({ page, sonicConfig }) => {
+  test("rapid sequential purge calls do not hang", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       eval(config._helpers);
 
@@ -436,7 +436,7 @@ test.describe("Flush Scheduler", () => {
         await new Promise(r => setTimeout(r, 100));
 
         const start = performance.now();
-        await sonic.flushAll();
+        await sonic.purge();
         timings.push(performance.now() - start);
       }
 
@@ -468,7 +468,7 @@ test.describe("Flush Scheduler", () => {
     expect(result.finalPrescheduler).toBe(0);
   });
 
-  test("flushAll resolves only after both sides confirm", async ({ page, sonicConfig }) => {
+  test("purge resolves only after both sides confirm", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       eval(config._helpers);
 
@@ -489,11 +489,11 @@ test.describe("Flush Scheduler", () => {
 
       const pendingBefore = (sonic.getMetrics().preschedulerPending) || 0;
 
-      // flushAll returns a promise — if the ack mechanism works,
-      // a non-awaited flushAll followed by immediate metric read
-      // might still show pending bundles (race). But awaited flushAll
+      // purge returns a promise — if the ack mechanism works,
+      // a non-awaited purge followed by immediate metric read
+      // might still show pending bundles (race). But awaited purge
       // guarantees the prescheduler has processed the cancel.
-      const flushPromise = sonic.flushAll();
+      const flushPromise = sonic.purge();
 
       // Read metrics BEFORE the promise resolves (fire-and-forget check)
       // In SAB mode, the cancel may already be processed since postMessage
@@ -515,7 +515,7 @@ test.describe("Flush Scheduler", () => {
       return { pendingBefore, pendingDuringFlush, pendingAfter, mode: config.mode };
     }, { ...sonicConfig, _helpers: HELPERS });
 
-    console.log(`\nflushAll ack guarantee test (${sonicConfig.mode}):`);
+    console.log(`\npurge ack guarantee test (${sonicConfig.mode}):`);
     console.log(`  Pending before: ${result.pendingBefore}`);
     console.log(`  Pending during (pre-await): ${result.pendingDuringFlush}`);
     console.log(`  Pending after await: ${result.pendingAfter}`);

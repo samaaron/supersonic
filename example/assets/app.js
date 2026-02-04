@@ -1129,7 +1129,7 @@ async function goIdle() {
 
   disconnectVisibilityObserver();
   drawSilentScope();
-  await orchestrator?.flushAll();
+  await orchestrator?.purge();
   orchestrator?.suspend();
 }
 
@@ -1515,7 +1515,7 @@ async function startAll() {
   if (!orchestrator) return;
 
   if (isIdle) {
-    // Waking from idle — resume handles flushAll
+    // Waking from idle — resume handles purge
     await wakeUp();
   } else {
     // Quick restart — cancel pending idle timer, clean up stale state
@@ -1526,7 +1526,7 @@ async function startAll() {
     // Cancel any in-flight JS-level mute ramp from the previous stopAll()
     cancelPendingMute();
     // Clear all pending scheduled messages (both prescheduler and WASM scheduler)
-    await orchestrator.flushAll();
+    await orchestrator.purge();
     // Send a fast 50ms ramp-down as timestamped OSC bundles — all at once,
     // with incrementing timestamps so the WASM scheduler spreads them over
     // real audio frames. This avoids setTimeout races entirely.
@@ -2166,6 +2166,9 @@ $("message-form").addEventListener("submit", async (e) => {
   if (!msg || !orchestrator) return;
 
   hideError();
+
+  // Wake engine if idle so OSC messages are actually processed
+  await wakeUp();
 
   try {
     const parsed = parseOscTextInput(msg);

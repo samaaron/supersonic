@@ -1313,7 +1313,7 @@ These commands don't work in SuperSonic due to browser/AudioWorklet constraints.
 
 | Command       | Reason                                                                                                                |
 | ------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `/clearSched` | Use `cancelAllScheduled()` or the fine-grained `cancelTag()`, `cancelSession()`, `cancelSessionTag()` methods instead |
+| `/clearSched` | Use `cancelAll()` or the fine-grained `cancelTag()`, `cancelSession()`, `cancelSessionTag()` methods instead |
 | `/error`      | SuperSonic always enables error notifications so you never miss a `/fail` message                                     |
 | `/quit`       | Use `destroy()` to shut down the SuperSonic instance                                                                  |
 

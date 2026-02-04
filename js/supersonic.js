@@ -593,7 +593,7 @@ export class SuperSonic {
 
     // Clear stale messages before resuming so scheduled events from
     // before the suspend (e.g. fade-outs) don't interfere with new work
-    await this.flushAll();
+    await this.purge();
 
     try {
       await this.#audioContext.resume();
@@ -857,7 +857,7 @@ export class SuperSonic {
       "/b_readChannel": "Use loadSample() to load audio into a buffer.",
       "/b_write": "Writing audio files is not available in the browser.",
       "/b_close": "Writing audio files is not available in the browser.",
-      "/clearSched": "Use flushAll() to clear both the JS prescheduler and WASM scheduler.",
+      "/clearSched": "Use purge() to clear both the JS prescheduler and WASM scheduler.",
       "/error": "SuperSonic always enables error notifications so you never miss a /fail message.",
     };
 
@@ -959,7 +959,7 @@ export class SuperSonic {
     this.#osc.cancelSessionTag(sessionId, runTag);
   }
 
-  cancelAllScheduled() {
+  cancelAll() {
     this.#ensureInitialized("cancel all scheduled");
     this.#osc.cancelAll();
   }
@@ -968,7 +968,7 @@ export class SuperSonic {
    * Flush all pending OSC messages from both the JS prescheduler
    * and the WASM BundleScheduler.
    *
-   * Unlike cancelAllScheduled() which only clears the JS prescheduler,
+   * Unlike cancelAll() which only clears the JS prescheduler,
    * this also clears bundles that have already been consumed from the
    * ring buffer and are sitting in the WASM scheduler's priority queue.
    *
@@ -981,8 +981,8 @@ export class SuperSonic {
    *
    * @returns {Promise<void>}
    */
-  async flushAll() {
-    this.#ensureInitialized("flush all");
+  async purge() {
+    this.#ensureInitialized("purge");
 
     const preschedulerDone = this.#osc.cancelAllWithAck();
 
