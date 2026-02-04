@@ -1331,6 +1331,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         if (debugHead !== debugTail) {
                             Atomics.notify(this.atomicView, this.CONTROL_INDICES.DEBUG_HEAD, 1);
                         }
+                        // Notify prescheduler if waiting for buffer space
+                        Atomics.notify(this.atomicView, this.CONTROL_INDICES.IN_TAIL, 1);
                     }
                     // SAB mode: OSC logging is handled by osc_out_log_sab_worker
                 }

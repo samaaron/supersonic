@@ -159,7 +159,7 @@ let isDispatching = false;  // Prevent reentrancy into dispatch loop
 
 // Retry queue for failed writes
 let retryQueue = [];
-const MAX_RETRIES_PER_MESSAGE = 5;
+let waitingForBufferSpace = false;
 
 // Backpressure: max total pending messages (heap + retry queue combined)
 // Default 65536, can be overridden via init config
@@ -167,7 +167,6 @@ let maxPendingMessages = 65536;
 
 // Timing constants
 const NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
-const RETRY_INTERVAL_MS = 50;          // Retry queue poll interval
 let lookaheadS = 0.500;                // Lookahead window (configurable via init)
 
 const schedulerLog = (...args) => {
@@ -337,7 +336,6 @@ const queueForRetry = (oscData, context, sourceId = 0) => {
 
     retryQueue.push({
         oscData,
-        retryCount: 0,
         context: context || 'unknown',
         queuedAt: performance.now(),
         sourceId
@@ -351,54 +349,56 @@ const queueForRetry = (oscData, context, sourceId = 0) => {
     }
 
     schedulerLog('[PreScheduler] Queued message for retry:', context, 'queue size:', retryQueue.length);
+    awaitBufferSpace();
+};
+
+/**
+ * Wait for the worklet to consume from the IN buffer, then process retries.
+ * Uses Atomics.waitAsync() for non-blocking, notification-driven waiting.
+ */
+const awaitBufferSpace = () => {
+    if (waitingForBufferSpace || retryQueue.length === 0 || mode !== 'sab') return;
+
+    waitingForBufferSpace = true;
+    const currentTail = Atomics.load(atomicView, CONTROL_INDICES.IN_TAIL);
+    const result = Atomics.waitAsync(atomicView, CONTROL_INDICES.IN_TAIL, currentTail);
+
+    const onSpaceAvailable = () => {
+        waitingForBufferSpace = false;
+        processRetryQueue();
+        if (retryQueue.length > 0) {
+            awaitBufferSpace();
+        }
+    };
+
+    if (result.async) {
+        result.value.then(onSpaceAvailable);
+    } else {
+        // Value already changed — process on next microtask to avoid recursion
+        queueMicrotask(onSpaceAvailable);
+    }
 };
 
 /**
  * Attempt to retry queued messages
- * Called periodically from checkAndDispatch
+ * Called when buffer space becomes available (via Atomics.waitAsync notification)
  */
 const processRetryQueue = () => {
-    if (retryQueue.length === 0) {
-        return;
-    }
+    if (retryQueue.length === 0) return;
 
     let i = 0;
     while (i < retryQueue.length) {
         const item = retryQueue[i];
-
-        // Try to write with guaranteed delivery (useWait: true)
-        // In SAB mode this uses Atomics.wait() so lock contention won't cause failures
-        // Only buffer-full can fail here
         const success = dispatchOSCMessage(item.oscData, true, item.sourceId, true);
 
         if (success) {
-            // Success - remove from queue
             retryQueue.splice(i, 1);
             metricsAdd(MetricsOffsets.PRESCHEDULER_RETRIES_SUCCEEDED, 1);
-            metricsAdd(MetricsOffsets.PRESCHEDULER_MESSAGES_RETRIED, 1);
             metricsStore(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE, retryQueue.length);
-            schedulerLog('[PreScheduler] Retry succeeded for:', item.context,
-                        'after', item.retryCount + 1, 'attempts');
-            // Don't increment i - we removed an item
+            // Don't increment i — we removed an item
         } else {
-            // Failed - increment retry count
-            item.retryCount++;
-            metricsAdd(MetricsOffsets.PRESCHEDULER_MESSAGES_RETRIED, 1);
-
-            if (item.retryCount >= MAX_RETRIES_PER_MESSAGE) {
-                // Give up on this message
-                const errorMsg = `Ring buffer full - dropped message after ${MAX_RETRIES_PER_MESSAGE} retries (${item.context})`;
-                console.error('[PreScheduler]', errorMsg);
-                retryQueue.splice(i, 1);
-                metricsAdd(MetricsOffsets.PRESCHEDULER_RETRIES_FAILED, 1);
-                metricsStore(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE, retryQueue.length);
-                // Notify main thread so onError callback fires
-                self.postMessage({ type: 'error', error: errorMsg });
-                // Don't increment i - we removed an item
-            } else {
-                // Keep in queue, try again next cycle
-                i++;
-            }
+            // Buffer still full — stop processing, wait for more space
+            break;
         }
     }
 };
@@ -428,7 +428,6 @@ const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
         if (!success) {
             // Queue for retry (only fails if buffer genuinely full)
             queueForRetry(oscData, 'immediate message', sourceId);
-            rescheduleDispatch();
         }
         return true;
     }
@@ -544,12 +543,12 @@ const swap = (i, j) => {
 
 /**
  * Reschedule the dispatch timer to target the next needed dispatch time.
- * Called after any state change (heap push/pop, retry queue change, cancel).
+ * Called after any state change (heap push/pop, cancel).
+ * Retry queue is handled separately via Atomics.waitAsync notifications.
  * When idle (nothing pending), no timer runs.
  */
 const rescheduleDispatch = () => {
-    if (eventHeap.length === 0 && retryQueue.length === 0) {
-        // Nothing to do — go idle
+    if (eventHeap.length === 0) {
         if (dispatchTimer !== null) {
             clearTimeout(dispatchTimer);
             dispatchTimer = null;
@@ -558,25 +557,9 @@ const rescheduleDispatch = () => {
         return;
     }
 
-    // Determine target time (in NTP seconds)
-    let targetNTP;
+    const targetNTP = heapPeek().ntpTime - lookaheadS;
     const nowNTP = getCurrentNTP();
 
-    if (retryQueue.length > 0) {
-        // Retry queue needs polling — target now + retry interval
-        const retryTarget = nowNTP + RETRY_INTERVAL_MS / 1000;
-        if (eventHeap.length > 0) {
-            const heapTarget = heapPeek().ntpTime - lookaheadS;
-            targetNTP = Math.min(retryTarget, heapTarget);
-        } else {
-            targetNTP = retryTarget;
-        }
-    } else {
-        // Only heap events — target next event's dispatch time
-        targetNTP = heapPeek().ntpTime - lookaheadS;
-    }
-
-    // Only reset timer if new target is sooner than existing
     if (targetNTP < nextDispatchAt) {
         if (dispatchTimer !== null) {
             clearTimeout(dispatchTimer);
@@ -610,6 +593,7 @@ const stopDispatching = () => {
         nextDispatchAt = Infinity;
         schedulerLog('[PreScheduler] Stopped dispatching');
     }
+    waitingForBufferSpace = false;
 };
 
 /**
@@ -618,9 +602,6 @@ const stopDispatching = () => {
  */
 const checkAndDispatch = () => {
     isDispatching = true;
-
-    // First, try to process any queued retries
-    processRetryQueue();
 
     const currentNTP = getCurrentNTP();
     const lookaheadTime = currentNTP + lookaheadS;
@@ -801,9 +782,6 @@ const processImmediate = (oscData, sourceId = 0) => {
             queueForRetry(oscData, 'immediate message', sourceId);
         }
     }
-    if (retryQueue.length > 0) {
-        rescheduleDispatch();
-    }
 };
 
 // Message handling
@@ -904,7 +882,6 @@ self.addEventListener('message', (event) => {
                     if (!success) {
                         // Only fails if buffer is genuinely full (not lock contention)
                         queueForRetry(data.oscData, 'directDispatch fallback', data.sourceId || 0);
-                        rescheduleDispatch();
                     }
                 }
                 break;
