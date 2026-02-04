@@ -247,7 +247,7 @@ export class OscChannel {
         if (!this.#preschedulerPort) {
             // Fallback: send direct if no prescheduler port
             // This shouldn't happen in normal usage
-            console.warn('[OscChannel] No prescheduler port, sending direct');
+            console.error('[OscChannel] No prescheduler port, sending direct');
             return this.#sendDirect(oscData);
         }
         this.#preschedulerPort.postMessage({ type: 'osc', oscData, sourceId: this.#sourceId });

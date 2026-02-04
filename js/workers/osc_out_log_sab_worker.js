@@ -158,7 +158,7 @@ const start = () => {
     }
 
     if (running) {
-        console.warn('[OSCOutLogWorker] Already running');
+        if (__DEV__) console.warn('[OSCOutLogWorker] Already running');
         return;
     }
 
@@ -195,7 +195,7 @@ self.addEventListener('message', (event) => {
                 break;
 
             default:
-                console.warn('[OSCOutLogWorker] Unknown message type:', data.type);
+                if (__DEV__) console.warn('[OSCOutLogWorker] Unknown message type:', data.type);
         }
     } catch (error) {
         console.error('[OSCOutLogWorker] Error:', error);

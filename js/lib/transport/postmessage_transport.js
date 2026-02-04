@@ -79,7 +79,7 @@ export class PostMessageTransport extends Transport {
      */
     async initialize(workletPort) {
         if (this.#initialized) {
-            console.warn('[PostMessageTransport] Already initialized');
+            if (__DEV__) console.warn('[PostMessageTransport] Already initialized');
             return;
         }
 
@@ -530,7 +530,7 @@ export class PostMessageTransport extends Transport {
 
             case 'debug':
                 // Debug message from worklet
-                console.log('[PostMessageTransport] Worklet debug:', data.message);
+                if (__DEV__) console.log('[PostMessageTransport] Worklet debug:', data.message);
                 break;
         }
     }

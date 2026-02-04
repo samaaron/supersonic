@@ -312,7 +312,7 @@ const dispatchOSCMessage = (oscMessage, isRetry, sourceId = 0, useWait = false) 
     if (!success) {
         // Buffer full - return false so caller can queue for retry
         if (!isRetry) {
-            console.warn('[PreScheduler] Ring buffer full, message will be queued for retry');
+            if (__DEV__) console.warn('[PreScheduler] Ring buffer full, message will be queued for retry');
         }
         return false;
     }
@@ -413,7 +413,7 @@ const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
     const totalPending = eventHeap.length + retryQueue.length;
     if (totalPending >= maxPendingMessages) {
         const errorMsg = `Prescheduler queue full (${totalPending} >= ${maxPendingMessages} max)`;
-        console.warn('[PreScheduler]', errorMsg);
+        console.error('[PreScheduler]', errorMsg);
         self.postMessage({ type: 'error', error: errorMsg, code: 'PRESCHEDULER_QUEUE_FULL' });
         return false;
     }
@@ -438,7 +438,7 @@ const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
     // Reject bundles too large for scheduler slot (WASM has fixed slot size)
     if (oscData.length > schedulerSlotSize) {
         const errorMsg = `Bundle too large for scheduler (${oscData.length} > ${schedulerSlotSize} bytes)`;
-        console.warn('[PreScheduler]', errorMsg);
+        console.error('[PreScheduler]', errorMsg);
         self.postMessage({ type: 'error', error: errorMsg, code: 'BUNDLE_TOO_LARGE' });
         return false;
     }
@@ -446,7 +446,7 @@ const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
     // Reject bundles scheduled too far in the future (prevents queue buildup)
     if (timeUntilExec > MAX_FUTURE_SCHEDULE_SECONDS) {
         const errorMsg = `Bundle scheduled too far in future (${timeUntilExec.toFixed(0)}s > ${MAX_FUTURE_SCHEDULE_SECONDS}s max)`;
-        console.warn('[PreScheduler]', errorMsg);
+        console.error('[PreScheduler]', errorMsg);
         self.postMessage({ type: 'error', error: errorMsg, code: 'BUNDLE_TOO_FAR_FUTURE' });
         return false;
     }
@@ -575,7 +575,7 @@ const rescheduleDispatch = () => {
  */
 const startDispatching = () => {
     if (dispatchTimer !== null) {
-        console.warn('[PreScheduler] Dispatching already started');
+        if (__DEV__) console.warn('[PreScheduler] Dispatching already started');
         return;
     }
 
@@ -910,7 +910,7 @@ self.addEventListener('message', (event) => {
                 break;
 
             default:
-                console.warn('[OSCPreSchedulerWorker] Unknown message type:', data.type);
+                if (__DEV__) console.warn('[OSCPreSchedulerWorker] Unknown message type:', data.type);
         }
     } catch (error) {
         console.error('[OSCPreSchedulerWorker] Error:', error);

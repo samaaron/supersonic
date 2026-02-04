@@ -445,7 +445,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         if (alignedLength > available) {
             // Buffer full - message is dropped
             // This shouldn't happen with proper backpressure
-            console.warn('[AudioWorklet] Ring buffer full, dropping OSC message');
+            console.error('[AudioWorklet] Ring buffer full, dropping OSC message');
             return false;
         }
 

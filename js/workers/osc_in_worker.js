@@ -90,7 +90,7 @@ const readMessages = () => {
                 if (sequence !== expectedSeq) {
                     const dropped = (sequence - expectedSeq + 0x100000000) & 0xFFFFFFFF;
                     if (dropped < 1000) { // Sanity check
-                        console.warn('[OSCInWorker] Detected', dropped, 'dropped messages (expected seq', expectedSeq, 'got', sequence, ')');
+                        console.error('[OSCInWorker] Detected', dropped, 'dropped messages (expected seq', expectedSeq, 'got', sequence, ')');
                         if (metricsView) Atomics.add(metricsView, MetricsOffsets.OSC_IN_DROPPED_MESSAGES, dropped);
                     }
                 }
@@ -182,7 +182,7 @@ const start = () => {
     }
 
     if (running) {
-        console.warn('[OSCInWorker] Already running');
+        if (__DEV__) console.warn('[OSCInWorker] Already running');
         return;
     }
 
@@ -219,7 +219,7 @@ self.addEventListener('message', (event) => {
                 break;
 
             default:
-                console.warn('[OSCInWorker] Unknown message type:', data.type);
+                if (__DEV__) console.warn('[OSCInWorker] Unknown message type:', data.type);
         }
     } catch (error) {
         console.error('[OSCInWorker] Error:', error);

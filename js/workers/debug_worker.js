@@ -177,7 +177,7 @@ const start = () => {
     }
 
     if (running) {
-        console.warn('[DebugWorker] Already running');
+        if (__DEV__) console.warn('[DebugWorker] Already running');
         return;
     }
 
@@ -279,7 +279,7 @@ self.addEventListener('message', (event) => {
                 break;
 
             default:
-                console.warn('[DebugWorker] Unknown message type:', data.type);
+                if (__DEV__) console.warn('[DebugWorker] Unknown message type:', data.type);
         }
     } catch (error) {
         console.error('[DebugWorker] Error:', error);

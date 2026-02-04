@@ -89,7 +89,7 @@ export class SABTransport extends Transport {
      */
     async initialize() {
         if (this.#initialized) {
-            console.warn('[SABTransport] Already initialized');
+            if (__DEV__) console.warn('[SABTransport] Already initialized');
             return;
         }
 
