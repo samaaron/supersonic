@@ -100,7 +100,6 @@ export class NTPTiming {
     }
 
     // Wait for audio to actually be flowing (contextTime > 0)
-    // Use getOutputTimestamp to check for audio flow, but use performance.now() for NTP calculation
     let timestamp;
     while (true) {
       timestamp = this.#audioContext.getOutputTimestamp();
@@ -110,11 +109,16 @@ export class NTPTiming {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
-    // Get current time from both domains
-    // Use performance.now() for wall clock (not getOutputTimestamp which returns past render time)
-    const perfTimeMs = performance.timeOrigin + performance.now();
+    // Get current time from both domains using a synchronized pair.
+    // getOutputTimestamp() returns performanceTime and contextTime from the same
+    // audio render instant, ensuring consistency with updateDriftOffset() which
+    // also uses getOutputTimestamp(). Using unsynchronized performance.now() +
+    // audioContext.currentTime can produce a different time mapping on platforms
+    // with WASAPI buffering (Windows/Edge), causing false drift on first measurement.
+    timestamp = this.#audioContext.getOutputTimestamp();
+    const perfTimeMs = performance.timeOrigin + timestamp.performanceTime;
     const currentNTP = calculateCurrentNTP(perfTimeMs);
-    const contextTime = this.#audioContext.currentTime;
+    const contextTime = timestamp.contextTime;
 
     // NTP time at AudioContext start = current NTP - current AudioContext time
     const ntpStartTime = calculateNTPStartTime(currentNTP, contextTime);
