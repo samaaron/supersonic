@@ -1527,13 +1527,14 @@ async function startAll() {
     cancelPendingMute();
     // Clear all pending scheduled messages (both prescheduler and WASM scheduler)
     await orchestrator.purge();
-    // Send a fast 50ms ramp-down as timestamped OSC bundles — all at once,
+    // Send a fast ramp-down as timestamped OSC bundles — all at once,
     // with incrementing timestamps so the WASM scheduler spreads them over
     // real audio frames. This avoids setTimeout races entirely.
+    const STARTUP_DELAY_MS = 100;  // Headroom for ring buffer transit (matches scheduler concept)
     const rampMs = 50;
     const rampSteps = 10;
     const stepMs = rampMs / rampSteps;
-    const baseNTP = getNTP();
+    const baseNTP = getNTP() + STARTUP_DELAY_MS / 1000;
     const arpRatio = 1 - uiState.mix / 100;
     const beatRatio = uiState.mix / 100;
     for (let i = 0; i <= rampSteps; i++) {
@@ -1545,7 +1546,7 @@ async function startAll() {
       orchestrator.sendOSC(bundle);
     }
     // Wait for the ramp to complete at the audio level
-    await new Promise(r => setTimeout(r, rampMs + 10));
+    await new Promise(r => setTimeout(r, STARTUP_DELAY_MS + rampMs + 10));
     // Free source groups to kill any still-sounding synths (preserves FX chain)
     orchestrator.send("/g_freeAll", GROUP_ARP);
     orchestrator.send("/g_freeAll", GROUP_LOOPS);
