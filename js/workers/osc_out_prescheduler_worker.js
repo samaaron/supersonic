@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 // Copyright (c) 2025 Sam Aaron
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';

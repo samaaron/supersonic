@@ -12,15 +12,19 @@ GPL-3.0-or-later:
 
   js/supersonic.js
   js/lib/
+  js/workers/debug_worker.js
+  js/workers/osc_in_worker.js
+  js/workers/osc_out_log_sab_worker.js
+  js/workers/osc_out_prescheduler_worker.js
 
 ================================================================================
-Audio Engine and Workers (GPL-3.0-or-later)
+Audio Engine and AudioWorklet (GPL-3.0-or-later)
 ================================================================================
 
 The following components are licensed under GPL-3.0-or-later only:
 
-  src/                    (C++/WASM audio engine)
-  js/workers/             (AudioWorklet and workers that execute WASM)
+  src/                                  (C++/WASM audio engine)
+  js/workers/scsynth_audio_worklet.js   (AudioWorklet that executes WASM)
 
 Based on SuperCollider's scsynth
 Copyright (c) 2002-2023 James McCartney and SuperCollider contributors
@@ -62,3 +66,50 @@ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
 this program. If not, see <https://www.gnu.org/licenses/>.
+
+================================================================================
+Downstream Usage — Architectural Intent
+================================================================================
+
+The following is a statement of architectural intent from the project author.
+It is provided for clarification and guidance only and does not modify,
+supersede, or reinterpret the terms of the GPL.
+
+SuperSonic is deliberately designed with a strict execution boundary between
+the GPL-licensed audio engine and application-level code:
+
+  - The GPL-licensed engine runs inside an AudioWorklet, providing strong
+    execution isolation within the browser. Code outside the AudioWorklet
+    cannot directly access engine internals, shared closures, object
+    references, or function calls.
+
+  - The MIT-licensed JavaScript client library and supporting workers
+    communicate with the engine exclusively using serialized Open Sound
+    Control (OSC) messages. These messages are transported using explicit
+    inter-context communication mechanisms such as postMessage or
+    shared-memory transport used only for serialized message exchange.
+
+OSC is a language-neutral, protocol-level messaging system comparable to
+network or IPC-based communication between independent software components.
+
+It is the project author's good-faith interpretation that application code
+which uses the MIT-licensed client library solely to send and receive OSC
+messages with the engine would generally not constitute a derivative work of
+the GPL-licensed audio engine, provided that:
+
+  1. The GPL-licensed components (src/ and
+     js/workers/scsynth_audio_worklet.js) are not modified. Any
+     modifications to these components remain subject to the GPL.
+
+  2. Application code interacts with the engine exclusively through the
+     documented OSC message interface via the MIT-licensed client library.
+
+  3. Distribution of the GPL-licensed engine components remains compliant
+     with the GPL, including providing access to corresponding source code
+     when required.
+
+This interpretation is consistent with long-established architectural
+separation patterns in audio software ecosystems. For example, in the
+SuperCollider ecosystem, client environments such as sclang and third-party
+applications communicate with the scsynth synthesis engine over OSC without
+generally being considered derivative works of the engine itself.
