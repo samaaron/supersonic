@@ -121,6 +121,9 @@ extern "C" {
     // Events stored in pool (never copied), queue only stores small indices
     BundleScheduler g_scheduler;
 
+    // Ring buffer sequence tracking — reset on drain to suppress spurious gap warnings
+    int32_t last_in_sequence = -1;
+
     // Time conversion constants - Based on SC_CoreAudio.cpp
     const uint64_t SECONDS_1900_TO_1970 = 2208988800ULL;
     double g_osc_increment_numerator = 0.0;  // Buffer length in NTP units
@@ -203,6 +206,9 @@ extern "C" {
     void clear_scheduler() {
         g_scheduler.Clear();
         update_scheduler_depth_metric(0);
+        // Reset sequence tracking so the next message after the ring buffer
+        // drain doesn't trigger a spurious gap warning.
+        last_in_sequence = -1;
     }
 
     // Convert AudioContext time (double) to OSC/NTP time (int64)
@@ -514,8 +520,7 @@ extern "C" {
                 }
 
                 // Gap detection: check for missing messages
-                // Uses static to persist across process() calls
-                static int32_t last_in_sequence = -1;
+                // last_in_sequence is file-scope (reset by clear_scheduler on drain)
                 if (last_in_sequence >= 0) {
                     int32_t expected = (last_in_sequence + 1) & 0x7FFFFFFF;  // Handle wrap at INT32_MAX
                     if ((int32_t)header.sequence != expected) {
