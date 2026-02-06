@@ -161,6 +161,8 @@ const uiState = {
 window.uiState = uiState;
 
 let isAutoPlaying = false;
+let runState = 'idle'; // 'idle' | 'running' | 'finishing'
+let runGeneration = 0;
 let metricsIntervalId = null;
 let isIdle = false, idleTimeoutId = null;
 const IDLE_DELAY_MS = 2000;
@@ -1108,6 +1110,7 @@ async function goIdle() {
   if (isIdle) return;
   isIdle = true;
   idleTimeoutId = null;
+  runState = 'idle';
 
   if (scopeAnimationId) {
     cancelAnimationFrame(scopeAnimationId);
@@ -1511,12 +1514,20 @@ function unmuteOutput() {
 }
 
 // Start all schedulers together (for initial start or restart)
+// Uses a generation counter so that if stopAll() or another startAll()
+// fires while we're mid-async, the stale invocation bails out.
 async function startAll() {
   if (!orchestrator) return;
+  if (runState === 'running') return;
+
+  const gen = ++runGeneration;
+  runState = 'running';
+  const stale = () => gen !== runGeneration;
 
   if (isIdle) {
     // Waking from idle — resume handles purge
     await wakeUp();
+    if (stale()) return;
   } else {
     // Quick restart — cancel pending idle timer, clean up stale state
     if (idleTimeoutId !== null) {
@@ -1527,6 +1538,7 @@ async function startAll() {
     cancelPendingMute();
     // Clear all pending scheduled messages (both prescheduler and WASM scheduler)
     await orchestrator.purge();
+    if (stale()) return;
     // Send a fast ramp-down as timestamped OSC bundles — all at once,
     // with incrementing timestamps so the WASM scheduler spreads them over
     // real audio frames. This avoids setTimeout races entirely.
@@ -1547,17 +1559,18 @@ async function startAll() {
     }
     // Wait for the ramp to complete at the audio level
     await new Promise(r => setTimeout(r, STARTUP_DELAY_MS + rampMs + 10));
+    if (stale()) return;
     // Free source groups to kill any still-sounding synths (preserves FX chain)
     orchestrator.send("/g_freeAll", GROUP_ARP);
     orchestrator.send("/g_freeAll", GROUP_LOOPS);
     orchestrator.send("/g_freeAll", GROUP_KICK);
   }
 
-  // Load everything needed
-  if (!synthdefsLoaded.instruments) await loadSynthdefs("instruments");
-  if (!fxChainInitialized) await initFXChain();
-  if (!samplesLoaded.kick) await loadAllKickSamples();
-  if (!samplesLoaded.loops) await loadAllLoopSamples();
+  // Load everything needed (bail after each await if superseded)
+  if (!synthdefsLoaded.instruments) { await loadSynthdefs("instruments"); if (stale()) return; }
+  if (!fxChainInitialized) { await initFXChain(); if (stale()) return; }
+  if (!samplesLoaded.kick) { await loadAllKickSamples(); if (stale()) return; }
+  if (!samplesLoaded.loops) { await loadAllLoopSamples(); if (stale()) return; }
   if (!schedulerWorker) initSchedulerWorker();
   // Unmute and reset scheduler state before starting
   unmuteOutput();
@@ -1570,6 +1583,7 @@ async function startAll() {
 }
 
 function stopAll() {
+  ++runGeneration; // Invalidate any in-flight startAll
   if (schedulerWorker) {
     schedulerWorker.postMessage({ type: "stop", scheduler: "all" });
   }
@@ -1577,8 +1591,16 @@ function stopAll() {
   schedulerRunning.kick = false;
   schedulerRunning.amen = false;
   stopBeatPulse();
-  // Graceful 500ms ramp down, then wait for idle timeout
-  muteOutput();
+  if (runState === 'running') {
+    // Graceful finish: ramp down over 500ms, then transition to idle
+    runState = 'finishing';
+    muteOutput().then(() => {
+      if (runState === 'finishing') runState = 'idle';
+    });
+  } else {
+    cancelPendingMute();
+    runState = 'idle';
+  }
   checkIdle();
 }
 
@@ -1638,23 +1660,14 @@ if (synthPad) {
     updateFXParameters(x, y);
   }
 
-  async function activatePad(clientX, clientY) {
+  function activatePad(clientX, clientY) {
     if (synthPad.classList.contains("disabled")) return;
-    await wakeUp();
     isPadActive = true;
     synthPad.classList.add("active");
     padTouch.classList.add("active");
     $("synth-pad-crosshair").classList.add("active");
     updatePadPosition(clientX, clientY);
-    const noneRunning = !schedulerRunning.arp && !schedulerRunning.kick && !schedulerRunning.amen;
-    if (noneRunning) {
-      startAll();
-    } else {
-      // Some already running - start individually to sync to existing playback
-      if (!schedulerRunning.arp) startArpeggiator();
-      if (!schedulerRunning.kick) startKickLoop();
-      if (!schedulerRunning.amen) startAmenLoop();
-    }
+    startAll(); // Handles wakeUp, re-entrance, and finishing abort
   }
 
   function deactivatePad() {
@@ -1769,14 +1782,7 @@ $("play-toggle")?.addEventListener("click", async function () {
     }
 
     // Trail animation starts via "started" message for proper sync
-    const noneRunning = !schedulerRunning.arp && !schedulerRunning.kick && !schedulerRunning.amen;
-    if (noneRunning) {
-      startAll();
-    } else {
-      if (!schedulerRunning.arp) startArpeggiator();
-      if (!schedulerRunning.kick) startKickLoop();
-      if (!schedulerRunning.amen) startAmenLoop();
-    }
+    startAll();
   } else {
     // Stop playback and remove visual state
     synthPad?.classList.remove("active");
@@ -2109,9 +2115,8 @@ $("reset-button")?.addEventListener("click", async () => {
   btn.textContent = "Restarting...";
   btn.disabled = true;
 
-  stopArpeggiator();
-  stopKickLoop();
-  stopAmenLoop();
+  stopAll();
+  resetAutoPlay();
   setSynthPadState("disabled");
 
   try {
