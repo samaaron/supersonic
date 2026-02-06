@@ -720,14 +720,17 @@ const cancelTag = (runTag) => {
 };
 
 const cancelAllTags = () => {
-    if (eventHeap.length === 0) {
+    const cancelled = eventHeap.length;
+    const retried = retryQueue.length;
+    if (cancelled === 0 && retried === 0) {
         return;
     }
-    const cancelled = eventHeap.length;
-    metricsAdd(MetricsOffsets.PRESCHEDULER_EVENTS_CANCELLED, cancelled);
+    metricsAdd(MetricsOffsets.PRESCHEDULER_EVENTS_CANCELLED, cancelled + retried);
     eventHeap = [];
+    retryQueue = [];
+    metricsStore(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE, 0);
     updateMetrics();  // Update buffer (sets eventsPending to 0)
-    schedulerLog('[PreScheduler] Cancelled all ' + cancelled + ' events');
+    schedulerLog('[PreScheduler] Cancelled all ' + cancelled + ' events, ' + retried + ' retries');
     rescheduleDispatch();
 };
 

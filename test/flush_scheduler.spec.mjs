@@ -468,6 +468,131 @@ test.describe("Flush Scheduler", () => {
     expect(result.finalPrescheduler).toBe(0);
   });
 
+  test("purge drains stale messages from IN ring buffer", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      eval(config._helpers);
+
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.loadSynthDefs(["sonic-pi-beep"]);
+      await sonic.sync(1);
+
+      const channel = sonic.createOscChannel();
+
+      // Record baseline metrics while engine is running
+      const metricsBaseline = sonic.getMetrics();
+      const latesBaseline = metricsBaseline.scsynthSchedulerLates || 0;
+
+      // Suspend AudioContext — process() stops, ring buffer won't be consumed
+      await sonic.suspend();
+
+      // Write 20 bundles directly to ring buffer with timestamps already in the past.
+      // Since process() isn't running, these sit in the ring buffer unconsumed.
+      const pastNTP = getCurrentNTP() - 5.0;
+      let writeCount = 0;
+      for (let i = 0; i < 20; i++) {
+        const ok = channel.sendDirect(createTimedBundle(pastNTP + (i * 0.01), 95000 + i));
+        if (ok) writeCount++;
+      }
+
+      // Purge — should clear ring buffer contents alongside prescheduler and WASM scheduler
+      await sonic.purge();
+
+      // Resume — process() starts running again
+      await sonic.resume();
+
+      // Wait for several process() cycles
+      await new Promise(r => setTimeout(r, 500));
+
+      const metricsAfter = sonic.getMetrics();
+      const latesAfter = metricsAfter.scsynthSchedulerLates || 0;
+
+      await sonic.shutdown();
+      return {
+        writeCount,
+        latesBaseline,
+        latesAfter,
+        newLates: latesAfter - latesBaseline,
+      };
+    }, { ...sonicConfig, _helpers: HELPERS });
+
+    console.log(`\npurge ring buffer drain test (${sonicConfig.mode}):`);
+    console.log(`  Bundles written to ring buffer: ${result.writeCount}`);
+    console.log(`  Lates baseline: ${result.latesBaseline}`);
+    console.log(`  Lates after resume: ${result.latesAfter}`);
+    console.log(`  New lates: ${result.newLates}`);
+
+    // Bundles should have been written successfully
+    expect(result.writeCount).toBeGreaterThan(0);
+    // After purge, no stale bundles should fire when resuming — lates must not increase
+    expect(result.newLates).toBe(0);
+  });
+
+  test("purge drains ring buffer messages written by prescheduler during suspension", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      eval(config._helpers);
+
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.loadSynthDefs(["sonic-pi-beep"]);
+      await sonic.sync(1);
+
+      // Record baseline
+      const metricsBaseline = sonic.getMetrics();
+      const latesBaseline = metricsBaseline.scsynthSchedulerLates || 0;
+      const processedBaseline = metricsBaseline.scsynthMessagesProcessed || 0;
+
+      // Suspend AudioContext — process() stops
+      await sonic.suspend();
+
+      // Schedule bundles just past the lookahead threshold (500ms) so they
+      // route through the prescheduler, which will dispatch them to the
+      // ring buffer when their time approaches. Since process() is suspended,
+      // dispatched messages accumulate in the ring buffer.
+      const now = getCurrentNTP();
+      for (let i = 0; i < 20; i++) {
+        const bundle = createTimedBundle(now + 0.6 + (i * 0.01), 96000 + i);
+        sonic.sendOSC(bundle, { sessionId: 0, runTag: 'rb_drain_test' });
+      }
+
+      // Wait for the prescheduler to dispatch these bundles (lookahead fires at
+      // ~now + 0.1s) AND for their timestamps to become past-due
+      await new Promise(r => setTimeout(r, 1500));
+
+      // Purge — should clear prescheduler heap, WASM scheduler, AND ring buffer
+      await sonic.purge();
+
+      // Resume
+      await sonic.resume();
+
+      // Wait for process() to run
+      await new Promise(r => setTimeout(r, 500));
+
+      const metricsAfter = sonic.getMetrics();
+      const latesAfter = metricsAfter.scsynthSchedulerLates || 0;
+      const processedAfter = metricsAfter.scsynthMessagesProcessed || 0;
+
+      await sonic.shutdown();
+      return {
+        latesBaseline,
+        latesAfter,
+        newLates: latesAfter - latesBaseline,
+        processedBaseline,
+        processedAfter,
+        newProcessed: processedAfter - processedBaseline,
+      };
+    }, { ...sonicConfig, _helpers: HELPERS });
+
+    console.log(`\npurge prescheduler ring buffer drain test (${sonicConfig.mode}):`);
+    console.log(`  Lates: ${result.latesBaseline} -> ${result.latesAfter} (new: ${result.newLates})`);
+    console.log(`  Processed: ${result.processedBaseline} -> ${result.processedAfter} (new: ${result.newProcessed})`);
+
+    // After purge, no stale bundles should fire — lates must not increase
+    expect(result.newLates).toBe(0);
+    // No stale messages should have been processed from the ring buffer
+    expect(result.newProcessed).toBe(0);
+  });
+
   test("purge resolves only after both sides confirm", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       eval(config._helpers);

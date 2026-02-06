@@ -873,12 +873,22 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             }
 
             if (data.type === 'clearSched') {
-                // Set flag to clear the WASM scheduler on next process() call
-                // This avoids the race condition of sending /clearSched via the ring buffer
-                // where stale scheduled bundles would fire before the clear command is read
+                // Drain the IN ring buffer immediately — discard all stale messages
+                // that accumulated while the AudioContext was suspended (e.g. mobile
+                // tab switch). This must happen eagerly (not deferred to process())
+                // so that new messages sent after purge() resolves are not affected.
+                // handleMessage and process() both run on the audio thread, so there
+                // is no race with the C++ ring buffer consumer.
+                if (this.CONTROL_INDICES) {
+                    const head = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
+                    this.atomicStore(this.CONTROL_INDICES.IN_TAIL, head);
+                }
+
+                // Set flag to clear the WASM scheduler on next process() call.
+                // The scheduler may contain bundles already dequeued from the ring
+                // buffer before the drain — these must also be discarded.
                 this.pendingClearSched = true;
-                // Ack immediately — the flag guarantees process() will clear
-                // before executing any bundles, even if AudioContext is suspended
+
                 if (data.ack) {
                     this.port.postMessage({ type: 'clearSchedAck' });
                 }

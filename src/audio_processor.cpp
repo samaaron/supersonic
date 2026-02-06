@@ -191,9 +191,14 @@ extern "C" {
         metrics->scheduler_queue_dropped.fetch_add(1, std::memory_order_relaxed);
     }
 
-    // Clear the WASM-side bundle scheduler
+    // Clear the WASM-side bundle scheduler.
     // Called from the worklet JS layer (via postMessage flag) to flush
-    // all pending scheduled bundles without going through the ring buffer
+    // all pending scheduled bundles without going through the ring buffer.
+    //
+    // Note: the IN ring buffer is drained separately by the JS worklet in its
+    // message handler (immediately on receiving clearSched), not here. Draining
+    // eagerly in JS ensures stale messages are discarded before the ack is sent,
+    // so new messages written after purge() resolves are not affected.
     EMSCRIPTEN_KEEPALIVE
     void clear_scheduler() {
         g_scheduler.Clear();
