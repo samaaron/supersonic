@@ -202,6 +202,7 @@ function setupTabSystem(buttonSelector, contentSelector, tabAttr, contentAttr) {
         b.setAttribute("aria-selected", "false");
       });
       btn.classList.add("active");
+      btn.classList.remove("tab-ping");
       btn.setAttribute("aria-selected", "true");
 
       // Update content panels
@@ -380,10 +381,9 @@ function parseOscTextInput(rawText) {
 function flashTab(tabName) {
   const btn = document.querySelector(`[data-tab="${tabName}"]`);
   if (!btn || btn.classList.contains("active")) return;
-  btn.classList.remove("flash");
+  btn.classList.remove("tab-ping");
   void btn.offsetWidth;
-  btn.classList.add("flash");
-  setTimeout(() => btn.classList.remove("flash"), 1500);
+  btn.classList.add("tab-ping");
 }
 
 function showError(msg) {

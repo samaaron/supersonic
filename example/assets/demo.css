@@ -581,34 +581,44 @@ textarea:disabled, select:disabled, input:disabled {
 .osc-color-string { color: var(--c-orange); }
 .osc-color-comment { color: #999; }
 
-/* ===== TABS ===== */
-.tab-buttons { display: flex; gap: 0.25rem; margin-bottom: 1rem; border-bottom: none; }
+/* ===== TABS (connected to log panel) ===== */
+.tab-buttons {
+  display: flex;
+  margin-bottom: -1px;          /* overlap the logs-grid border-top */
+  position: relative;
+  z-index: 1;
+}
 
 .tab-button {
-  padding: 0.5rem 1rem;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  cursor: pointer;
+  background: var(--c-bg-dark-mid);
+  border: 1px solid #333;
+  border-bottom: 1px solid #333;
+  color: #999;
+  padding: 0.4rem 0.75rem;
   font-size: var(--fs-description);
   font-weight: 500;
-  color: #999;
-  transition: all 0.2s;
+  font-family: inherit;
+  cursor: pointer;
   position: relative;
+  margin-right: -1px;           /* collapse shared borders */
 }
 
-.tab-button.active { color: var(--c-pink); border-bottom-color: var(--c-pink); }
-.tab-button:hover { color: var(--c-pink); }
+.tab-button::before { display: none; }
 
-@keyframes tabFlash {
-  0% { background-color: transparent; color: #999; }
-  8% { background-color: rgba(255,102,0,0.5); color: var(--c-gold); }
-  100% { background-color: transparent; color: #999; }
+.tab-button.active {
+  background: #000;
+  color: #fff;
+  border-bottom-color: #000;    /* merge into panel below */
 }
 
-.tab-button.flash { animation: tabFlash 1.5s ease-in-out; }
-.tab-button.active.flash { animation: none; }
+/* Activity: top-line ping that fades on each message */
+@keyframes tabPing {
+  0% { box-shadow: inset 0 2px 0 0 transparent; }
+  10% { box-shadow: inset 0 2px 0 0 rgba(255,255,255,0.7); }
+  100% { box-shadow: inset 0 2px 0 0 transparent; }
+}
+
+.tab-button.tab-ping { animation: tabPing 2s ease-out forwards; }
 
 .tab-content { display: none; }
 .tab-content.active { display: block; }
@@ -616,6 +626,10 @@ textarea:disabled, select:disabled, input:disabled {
 @media (min-width: 1024px) {
   .tab-buttons { display: none !important; }
   .tab-content { display: block !important; }
+}
+
+@media (max-width: 1023px) {
+  .logs-section .log-container-header { display: none; }
 }
 
 /* ===== MAIN TAB CONTENT ===== */
