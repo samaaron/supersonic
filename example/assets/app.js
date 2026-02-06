@@ -1582,6 +1582,15 @@ function stopAll() {
   checkIdle();
 }
 
+function resetAutoPlay() {
+  isAutoPlaying = false;
+  const btn = $("play-toggle");
+  if (btn) {
+    btn.setAttribute("aria-pressed", "false");
+    btn.textContent = "Autoplay";
+  }
+}
+
 // Expose globally
 window.startArpeggiator = startArpeggiator;
 window.stopArpeggiator = stopArpeggiator;
@@ -2054,10 +2063,20 @@ $("init-button").addEventListener("click", async () => {
     });
 
     orchestrator.on("audiocontext:suspended", () => {
-      if (!isIdle) showOverlay("suspended-overlay");
+      if (!isIdle) {
+        // Kill schedulers immediately so they don't catch up and flood
+        // the engine with hundreds of past-due events while suspended.
+        stopAll();
+        resetAutoPlay();
+        showOverlay("suspended-overlay");
+      }
     });
     orchestrator.on("audiocontext:interrupted", () => {
-      if (!isIdle) showOverlay("suspended-overlay");
+      if (!isIdle) {
+        stopAll();
+        resetAutoPlay();
+        showOverlay("suspended-overlay");
+      }
     });
     orchestrator.on("audiocontext:resumed", () =>
       hideOverlay("suspended-overlay"),
@@ -2115,9 +2134,8 @@ $("resume-button")?.addEventListener("click", async () => {
 
   beginLoadingSequence("Recovering");
 
-  stopArpeggiator();
-  stopKickLoop();
-  stopAmenLoop();
+  stopAll();
+  resetAutoPlay();
   setSynthPadState("disabled");
   hideOverlay("suspended-overlay");
 
