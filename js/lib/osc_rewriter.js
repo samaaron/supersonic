@@ -33,7 +33,7 @@ export class OSCRewriter {
    * @returns {Promise<{packet: Object, changed: boolean}>}
    */
   async rewritePacket(packet) {
-    if (packet && packet.address) {
+    if (Array.isArray(packet)) {
       const { message, changed } = await this.#rewriteMessage(packet);
       return { packet: message, changed };
     }
@@ -68,25 +68,27 @@ export class OSCRewriter {
   // ============================================================================
 
   async #rewriteMessage(message) {
-    switch (message.address) {
+    const address = message[0];
+    const args = message.slice(1);
+    switch (address) {
       case "/b_alloc":
         return {
-          message: await this.#rewriteAlloc(message),
+          message: await this.#rewriteAlloc(args),
           changed: true,
         };
       case "/b_allocRead":
         return {
-          message: await this.#rewriteAllocRead(message),
+          message: await this.#rewriteAllocRead(args),
           changed: true,
         };
       case "/b_allocReadChannel":
         return {
-          message: await this.#rewriteAllocReadChannel(message),
+          message: await this.#rewriteAllocReadChannel(args),
           changed: true,
         };
       case "/b_allocFile":
         return {
-          message: await this.#rewriteAllocFile(message),
+          message: await this.#rewriteAllocFile(args),
           changed: true,
         };
       default:
@@ -94,14 +96,14 @@ export class OSCRewriter {
     }
   }
 
-  async #rewriteAlloc(message) {
+  async #rewriteAlloc(args) {
     const bufnum = this.#requireIntArg(
-      message.args,
+      args,
       0,
       "/b_alloc requires a buffer number"
     );
     const numFrames = this.#requireIntArg(
-      message.args,
+      args,
       1,
       "/b_alloc requires a frame count"
     );
@@ -110,20 +112,20 @@ export class OSCRewriter {
     let numChannels = 1;
     let sampleRate = this.#getDefaultSampleRate();
 
-    if (this.#isNumericArg(this.#argAt(message.args, argIndex))) {
+    if (this.#isNumericArg(this.#argAt(args, argIndex))) {
       numChannels = Math.max(
         1,
-        this.#optionalIntArg(message.args, argIndex, 1)
+        this.#optionalIntArg(args, argIndex, 1)
       );
       argIndex++;
     }
 
-    if (this.#argAt(message.args, argIndex)?.type === "b") {
+    if (this.#argAt(args, argIndex)?.type === "b") {
       argIndex++;
     }
 
-    if (this.#isNumericArg(this.#argAt(message.args, argIndex))) {
-      sampleRate = this.#getArgValue(this.#argAt(message.args, argIndex));
+    if (this.#isNumericArg(this.#argAt(args, argIndex))) {
+      sampleRate = this.#getArgValue(this.#argAt(args, argIndex));
     }
 
     const bufferInfo = await this.#bufferManager.prepareEmpty({
@@ -140,19 +142,19 @@ export class OSCRewriter {
     return this.#buildAllocPtrMessage(bufnum, bufferInfo);
   }
 
-  async #rewriteAllocRead(message) {
+  async #rewriteAllocRead(args) {
     const bufnum = this.#requireIntArg(
-      message.args,
+      args,
       0,
       "/b_allocRead requires a buffer number"
     );
     const path = this.#requireStringArg(
-      message.args,
+      args,
       1,
       "/b_allocRead requires a file path"
     );
-    const startFrame = this.#optionalIntArg(message.args, 2, 0);
-    const numFrames = this.#optionalIntArg(message.args, 3, 0);
+    const startFrame = this.#optionalIntArg(args, 2, 0);
+    const numFrames = this.#optionalIntArg(args, 3, 0);
 
     const bufferInfo = await this.#bufferManager.prepareFromFile({
       bufnum,
@@ -168,26 +170,26 @@ export class OSCRewriter {
     return this.#buildAllocPtrMessage(bufnum, bufferInfo);
   }
 
-  async #rewriteAllocReadChannel(message) {
+  async #rewriteAllocReadChannel(args) {
     const bufnum = this.#requireIntArg(
-      message.args,
+      args,
       0,
       "/b_allocReadChannel requires a buffer number"
     );
     const path = this.#requireStringArg(
-      message.args,
+      args,
       1,
       "/b_allocReadChannel requires a file path"
     );
-    const startFrame = this.#optionalIntArg(message.args, 2, 0);
-    const numFrames = this.#optionalIntArg(message.args, 3, 0);
+    const startFrame = this.#optionalIntArg(args, 2, 0);
+    const numFrames = this.#optionalIntArg(args, 3, 0);
 
     const channels = [];
-    for (let i = 4; i < (message.args?.length || 0); i++) {
-      if (!this.#isNumericArg(message.args[i])) {
+    for (let i = 4; i < (args?.length || 0); i++) {
+      if (!this.#isNumericArg(args[i])) {
         break;
       }
-      channels.push(Math.floor(this.#getArgValue(message.args[i])));
+      channels.push(Math.floor(this.#getArgValue(args[i])));
     }
 
     const bufferInfo = await this.#bufferManager.prepareFromFile({
@@ -209,14 +211,14 @@ export class OSCRewriter {
    * Handle /b_allocFile - SuperSonic extension (not standard scsynth OSC)
    * Loads audio from inline file data (FLAC, WAV, OGG, etc.) without URL fetch.
    */
-  async #rewriteAllocFile(message) {
+  async #rewriteAllocFile(args) {
     const bufnum = this.#requireIntArg(
-      message.args,
+      args,
       0,
       "/b_allocFile requires a buffer number"
     );
     const blob = this.#requireBlobArg(
-      message.args,
+      args,
       1,
       "/b_allocFile requires audio file data as blob"
     );
@@ -234,17 +236,15 @@ export class OSCRewriter {
   }
 
   #buildAllocPtrMessage(bufnum, bufferInfo) {
-    return {
-      address: "/b_allocPtr",
-      args: [
-        Math.floor(bufnum),
-        Math.floor(bufferInfo.ptr),
-        Math.floor(bufferInfo.numFrames),
-        Math.floor(bufferInfo.numChannels),
-        bufferInfo.sampleRate,
-        String(bufferInfo.uuid),
-      ],
-    };
+    return [
+      "/b_allocPtr",
+      Math.floor(bufnum),
+      Math.floor(bufferInfo.ptr),
+      Math.floor(bufferInfo.numFrames),
+      Math.floor(bufferInfo.numChannels),
+      bufferInfo.sampleRate,
+      String(bufferInfo.uuid),
+    ];
   }
 
   #isBundle(packet) {

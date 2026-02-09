@@ -24,7 +24,7 @@ test.describe("Parallel Sample Loading", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -51,13 +51,13 @@ test.describe("Parallel Sample Loading", () => {
       }
       await sonic.sync(2);
 
-      const bufferInfos = messages.filter(m => m.address === "/b_info");
+      const bufferInfos = messages.filter(m => m[0] === "/b_info");
 
       return {
         success: true,
         loadedCount: bufferInfos.length,
-        allHaveFrames: bufferInfos.every(info => info.args[1] > 0),
-        bufferNumbers: bufferInfos.map(info => info.args[0]).sort((a, b) => a - b),
+        allHaveFrames: bufferInfos.every(info => info[2] > 0),
+        bufferNumbers: bufferInfos.map(info => info[1]).sort((a, b) => a - b),
       };
     }, sonicConfig);
 
@@ -74,7 +74,7 @@ test.describe("Parallel Sample Loading", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -95,14 +95,14 @@ test.describe("Parallel Sample Loading", () => {
       await sonic.send("/b_query", 0);
       await sonic.sync(2);
 
-      const bufferInfo = messages.find(m => m.address === "/b_info");
+      const bufferInfo = messages.find(m => m[0] === "/b_info");
 
       return {
         success: true,
         hasBuffer: !!bufferInfo,
-        bufferNum: bufferInfo?.args[0],
-        frames: bufferInfo?.args[1],
-        channels: bufferInfo?.args[2],
+        bufferNum: bufferInfo?.[1],
+        frames: bufferInfo?.[2],
+        channels: bufferInfo?.[3],
       };
     }, sonicConfig);
 
@@ -447,7 +447,7 @@ test.describe("Operations During State Transitions", () => {
       await sonic.send("/b_query", 0, 1, 2);
       await sonic.sync(3);
 
-      const bufferInfo = messages.find(m => m.address === "/b_info");
+      const bufferInfo = messages.find(m => m[0] === "/b_info");
 
       // Clean up
       for (let i = 0; i < 20; i++) {
@@ -457,7 +457,7 @@ test.describe("Operations During State Transitions", () => {
       return {
         success: true,
         synthCount,
-        buffersLoaded: !!bufferInfo && bufferInfo.args[1] > 0,
+        buffersLoaded: !!bufferInfo && bufferInfo[2] > 0,
       };
     }, sonicConfig);
 
@@ -1128,7 +1128,7 @@ test.describe("Timing Window Exploits", () => {
 
       // Set up listener that does operations
       sonic.on('message', (msg) => {
-        if (msg.address === "/status.reply") {
+        if (msg[0] === "/status.reply") {
           // Do operations inside callback
           sonic.send("/s_new", "sonic-pi-beep", 50000 + operationsInCallback, 0, 0, "release", 0.001);
           sonic.send("/n_free", 50000 + operationsInCallback);

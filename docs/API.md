@@ -106,11 +106,15 @@ myButton.onclick = async () => {
 
 ### Advanced
 
-| Method                                                        | Description                     |
-| ------------------------------------------------------------- | ------------------------------- |
-| [`getInfo()`](#getinfo)                                       | Get static engine configuration |
-| [`SuperSonic.osc.encode()`](#supersonicoscencodemessage)      | Encode an OSC message to bytes  |
-| [`SuperSonic.osc.decode()`](#supersonicoscdecodedata-options) | Decode OSC bytes to a message   |
+| Method                                                                    | Description                                    |
+| ------------------------------------------------------------------------- | ---------------------------------------------- |
+| [`getInfo()`](#getinfo)                                                   | Get static engine configuration                |
+| [`SuperSonic.osc.encode()`](#supersonicoscencodemessage)                  | Encode an OSC message to bytes                 |
+| [`SuperSonic.osc.decode()`](#supersonicoscdecodedata-options)             | Decode OSC bytes to a message                  |
+| [`SuperSonic.osc.encodeSingleBundle()`](#supersonicoscencodesinglebundle) | Encode a bundle containing a single message    |
+| [`SuperSonic.osc.readTimetag()`](#supersonicoscreadtimetag)               | Read NTP timetag from raw bundle bytes         |
+| [`SuperSonic.osc.ntpNow()`](#supersonicoscntpnow)                        | Get current time as NTP seconds                |
+| [`SuperSonic.osc.NTP_EPOCH_OFFSET`](#supersonicoscntp_epoch_offset)      | Seconds between Unix epoch (1970) and NTP (1900) |
 
 ## Creating an Instance
 
@@ -510,7 +514,7 @@ Subscribe to events with `on()`, which returns an unsubscribe function for easy 
 ```javascript
 // Subscribe
 const unsubscribe = supersonic.on("message", (msg) => {
-  console.log("Received:", msg.address);
+  console.log("Received:", msg[0]);  // address
 });
 
 // Later, unsubscribe
@@ -521,8 +525,8 @@ Multiple listeners can subscribe to the same event - each receives all events in
 
 ```javascript
 // Both listeners receive all messages
-supersonic.on("message", (msg) => console.log("Listener A:", msg.address));
-supersonic.on("message", (msg) => console.log("Listener B:", msg.address));
+supersonic.on("message", (msg) => console.log("Listener A:", msg[0]));
+supersonic.on("message", (msg) => console.log("Listener B:", msg[0]));
 ```
 
 ### `off(event, callback)`
@@ -600,8 +604,9 @@ Emitted when a parsed OSC message is received from scsynth.
 
 ```javascript
 supersonic.on("message", (msg) => {
-  console.log("Address:", msg.address);
-  console.log("Args:", msg.args);
+  // msg is [address, ...args]
+  console.log("Address:", msg[0]);
+  console.log("Args:", msg.slice(1));
 });
 ```
 
@@ -612,7 +617,8 @@ Emitted with raw OSC data including the original bytes. Useful for logging.
 ```javascript
 supersonic.on("message:raw", (data) => {
   console.log("OSC bytes:", data.oscData);
-  console.log("Parsed:", data.address, data.args);
+  const parsed = SuperSonic.osc.decode(data.oscData);
+  console.log("Parsed:", parsed[0], parsed.slice(1));
 });
 ```
 
@@ -623,7 +629,7 @@ Emitted when an OSC message is sent to scsynth.
 ```javascript
 supersonic.on("message:sent", (oscBytes) => {
   const decoded = SuperSonic.osc.decode(oscBytes);
-  console.log("Sent:", decoded.address);
+  console.log("Sent:", decoded[0]);
 });
 ```
 
@@ -1016,26 +1022,101 @@ const bytes = SuperSonic.osc.encodeMessage("/s_new", [
 
 Encode an OSC bundle with a timestamp and multiple messages.
 
+**TimeTag formats:**
+
+| Value | Meaning |
+|---|---|
+| `1`, `null`, `undefined` | Execute immediately |
+| `[seconds, fraction]` | NTP uint32 pair — preserves full 64-bit precision |
+| Number (e.g. `3913056000.5`) | NTP float — seconds since 1900 (fractional part encoded) |
+
+A `[seconds, fraction]` array must have exactly 2 elements (throws `Error` otherwise). Non-number / non-array values throw `TypeError`. Numbers between 1 and `NTP_EPOCH_OFFSET` trigger a `console.warn` because they look like Unix timestamps.
+
+Each packet is an array: `[address, ...args]`.
+
 ```javascript
-const ntpTime = /* NTP timestamp */;
-const bytes = SuperSonic.osc.encodeBundle(ntpTime, [
-  { address: "/s_new", args: ["sonic-pi-beep", 1001, 0, 0] },
-  { address: "/n_set", args: [1001, "amp", 0.5] },
+// Immediate
+SuperSonic.osc.encodeBundle(1, [["/notify", 1]]);
+
+// NTP float
+const ntpTime = SuperSonic.osc.ntpNow();
+SuperSonic.osc.encodeBundle(ntpTime, [
+  ["/s_new", "sonic-pi-beep", 1001, 0, 0],
+]);
+
+// NTP uint32 pair (full precision, no float loss)
+SuperSonic.osc.encodeBundle([3913056000, 2147483648], [
+  ["/s_new", "sonic-pi-beep", 1001, 0, 0],
+  ["/n_set", 1001, "amp", 0.5],
 ]);
 ```
 
 ### `SuperSonic.osc.decode(data)`
 
-Decode binary OSC data into a message or bundle object. Useful for debugging or logging.
+Decode binary OSC data. Messages decode to `[address, ...args]` arrays. Bundles decode to `{ timeTag, packets }` objects where each packet is itself decoded.
 
 **Parameters:**
 
 - `data` - `Uint8Array` or `ArrayBuffer` containing OSC data
 
 ```javascript
+// Messages
 const msg = SuperSonic.osc.decode(oscBytes);
-console.log(msg.address, msg.args);
-// For bundles: msg.timeTag, msg.packets
+// msg = ["/s_new", "sonic-pi-beep", 1001, 0, 0]
+console.log(msg[0], msg.slice(1));  // address, args
+
+// Bundles
+const bundle = SuperSonic.osc.decode(bundleBytes);
+// bundle = { timeTag: 3913056000.5, packets: [["/s_new", ...], ["/n_set", ...]] }
+```
+
+### `SuperSonic.osc.encodeSingleBundle(timeTag, address, args)`
+
+Encode a bundle containing a single message. This is an optimised path that avoids wrapping the message in an array.
+
+**Parameters:**
+
+- `timeTag` - TimeTag in any accepted format (see [`encodeBundle`](#supersonicoscencodebundletimetag-packets))
+- `address` - OSC address string (e.g. `"/s_new"`)
+- `args` - Array of arguments
+
+```javascript
+const bytes = SuperSonic.osc.encodeSingleBundle(
+  [sec, frac],
+  "/s_new",
+  ["sonic-pi-beep", 1001, 0, 0]
+);
+```
+
+### `SuperSonic.osc.readTimetag(bundleData)`
+
+Read the NTP timetag from raw bundle bytes without decoding the entire packet. Returns `{ ntpSeconds, ntpFraction }` or `null` if data is too short.
+
+**Parameters:**
+
+- `bundleData` - `Uint8Array` of at least 16 bytes (the `#bundle\0` header + 8-byte timetag)
+
+```javascript
+const bytes = SuperSonic.osc.encodeBundle([sec, frac], packets);
+const { ntpSeconds, ntpFraction } = SuperSonic.osc.readTimetag(bytes);
+```
+
+### `SuperSonic.osc.ntpNow()`
+
+Get the current time as NTP seconds (seconds since 1900-01-01). Derived from `performance.timeOrigin + performance.now()`.
+
+```javascript
+const ntpTime = SuperSonic.osc.ntpNow();
+SuperSonic.osc.encodeBundle(ntpTime + 0.5, [/* ... */]);
+```
+
+### `SuperSonic.osc.NTP_EPOCH_OFFSET`
+
+Constant: seconds between the Unix epoch (1970) and the NTP epoch (1900). Value: `2208988800`.
+
+```javascript
+const unixSeconds = Date.now() / 1000;
+const ntpSeconds = unixSeconds + SuperSonic.osc.NTP_EPOCH_OFFSET;
 ```
 
 ### `createOscChannel()`

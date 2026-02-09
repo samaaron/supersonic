@@ -247,7 +247,7 @@ test.describe('Recovery and Caching', () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -258,9 +258,9 @@ test.describe('Recovery and Caching', () => {
       messages.length = 0;
       await sonic.send('/b_query', 5);
       await sonic.sync(2);
-      const beforeReload = messages.find((m) => m.address === '/b_info');
-      const framesBefore = beforeReload?.args[1];
-      const channelsBefore = beforeReload?.args[2];
+      const beforeReload = messages.find((m) => m[0] === '/b_info');
+      const framesBefore = beforeReload?.[2];
+      const channelsBefore = beforeReload?.[3];
 
       // Force full reload by calling internal #reload via recover
       // First, simulate worklet death by checking process count doesn't advance
@@ -276,9 +276,9 @@ test.describe('Recovery and Caching', () => {
       messages.length = 0;
       await sonic.send('/b_query', 5);
       await sonic.sync(3);
-      const afterRecover = messages.find((m) => m.address === '/b_info');
-      const framesAfter = afterRecover?.args[1];
-      const channelsAfter = afterRecover?.args[2];
+      const afterRecover = messages.find((m) => m[0] === '/b_info');
+      const framesAfter = afterRecover?.[2];
+      const channelsAfter = afterRecover?.[3];
 
       await sonic.destroy();
 
@@ -303,7 +303,7 @@ test.describe('Recovery and Caching', () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -317,8 +317,8 @@ test.describe('Recovery and Caching', () => {
       messages.length = 0;
       await sonic.send('/b_query', 7);
       await sonic.sync(2);
-      const beforeRecover = messages.find((m) => m.address === '/b_info');
-      const framesBefore = beforeRecover?.args[1];
+      const beforeRecover = messages.find((m) => m[0] === '/b_info');
+      const framesBefore = beforeRecover?.[2];
 
       // Recover
       await sonic.recover();
@@ -327,8 +327,8 @@ test.describe('Recovery and Caching', () => {
       messages.length = 0;
       await sonic.send('/b_query', 7);
       await sonic.sync(3);
-      const afterRecover = messages.find((m) => m.address === '/b_info');
-      const framesAfter = afterRecover?.args[1];
+      const afterRecover = messages.find((m) => m[0] === '/b_info');
+      const framesAfter = afterRecover?.[2];
 
       await sonic.destroy();
 
@@ -349,7 +349,7 @@ test.describe('Recovery and Caching', () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -366,11 +366,11 @@ test.describe('Recovery and Caching', () => {
       await sonic.send('/b_query', 30);
       await sonic.sync(2);
 
-      const beforeInfos = messages.filter((m) => m.address === '/b_info');
+      const beforeInfos = messages.filter((m) => m[0] === '/b_info');
       const before = {
-        buf10: beforeInfos.find(m => m.args[0] === 10)?.args[1],
-        buf20: beforeInfos.find(m => m.args[0] === 20)?.args[1],
-        buf30: beforeInfos.find(m => m.args[0] === 30)?.args[1],
+        buf10: beforeInfos.find(m => m[1] === 10)?.[2],
+        buf20: beforeInfos.find(m => m[1] === 20)?.[2],
+        buf30: beforeInfos.find(m => m[1] === 30)?.[2],
       };
 
       // Recover
@@ -383,11 +383,11 @@ test.describe('Recovery and Caching', () => {
       await sonic.send('/b_query', 30);
       await sonic.sync(3);
 
-      const afterInfos = messages.filter((m) => m.address === '/b_info');
+      const afterInfos = messages.filter((m) => m[0] === '/b_info');
       const after = {
-        buf10: afterInfos.find(m => m.args[0] === 10)?.args[1],
-        buf20: afterInfos.find(m => m.args[0] === 20)?.args[1],
-        buf30: afterInfos.find(m => m.args[0] === 30)?.args[1],
+        buf10: afterInfos.find(m => m[1] === 10)?.[2],
+        buf20: afterInfos.find(m => m[1] === 20)?.[2],
+        buf30: afterInfos.find(m => m[1] === 30)?.[2],
       };
 
       await sonic.destroy();
@@ -419,7 +419,7 @@ test.describe('Recovery and Caching', () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -432,9 +432,9 @@ test.describe('Recovery and Caching', () => {
       await sonic.send('/b_getn', 5, 0, 10);
       await sonic.sync(2);
 
-      const beforeReply = messages.find((m) => m.address === '/b_setn');
-      // /b_setn args: [bufnum, startIndex, numSamples, ...samples]
-      const samplesBefore = beforeReply?.args.slice(3) || [];
+      const beforeReply = messages.find((m) => m[0] === '/b_setn');
+      // /b_setn array: [address, bufnum, startIndex, numSamples, ...samples]
+      const samplesBefore = beforeReply?.slice(4) || [];
 
       // Recover
       await sonic.recover();
@@ -444,8 +444,8 @@ test.describe('Recovery and Caching', () => {
       await sonic.send('/b_getn', 5, 0, 10);
       await sonic.sync(3);
 
-      const afterReply = messages.find((m) => m.address === '/b_setn');
-      const samplesAfter = afterReply?.args.slice(3) || [];
+      const afterReply = messages.find((m) => m[0] === '/b_setn');
+      const samplesAfter = afterReply?.slice(4) || [];
 
       await sonic.destroy();
 

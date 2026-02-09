@@ -151,7 +151,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -165,15 +165,15 @@ test.describe("SuperSonic loadSample()", () => {
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
 
-        const queryReply = messages.find((m) => m.address === "/b_info");
+        const queryReply = messages.find((m) => m[0] === "/b_info");
 
         return {
           success: true,
           queryReply,
-          bufnum: queryReply?.args[0],
-          numFrames: queryReply?.args[1],
-          numChannels: queryReply?.args[2],
-          sampleRate: queryReply?.args[3],
+          bufnum: queryReply?.[1],
+          numFrames: queryReply?.[2],
+          numChannels: queryReply?.[3],
+          sampleRate: queryReply?.[4],
         };
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
@@ -193,7 +193,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -207,13 +207,13 @@ test.describe("SuperSonic loadSample()", () => {
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
 
-        const queryReply = messages.find((m) => m.address === "/b_info");
+        const queryReply = messages.find((m) => m[0] === "/b_info");
 
         return {
           success: true,
           queryReply,
-          bufnum: queryReply?.args[0],
-          numFrames: queryReply?.args[1],
+          bufnum: queryReply?.[1],
+          numFrames: queryReply?.[2],
         };
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
@@ -260,7 +260,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -278,14 +278,14 @@ test.describe("SuperSonic loadSample()", () => {
         await sonic.send("/b_query", 2);
         await sonic.sync(2);
 
-        const queryReplies = messages.filter((m) => m.address === "/b_info");
+        const queryReplies = messages.filter((m) => m[0] === "/b_info");
 
         return {
           success: true,
           numBuffersLoaded: queryReplies.length,
           buffers: queryReplies.map((r) => ({
-            bufnum: r.args[0],
-            numFrames: r.args[1],
+            bufnum: r[1],
+            numFrames: r[2],
           })),
         };
       } catch (err) {
@@ -429,7 +429,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -441,8 +441,8 @@ test.describe("SuperSonic loadSample()", () => {
         messages.length = 0;
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
-        const fullInfo = messages.find((m) => m.address === "/b_info");
-        const fullFrames = fullInfo.args[1];
+        const fullInfo = messages.find((m) => m[0] === "/b_info");
+        const fullFrames = fullInfo[2];
 
         // Load same sample with startFrame offset
         const startFrame = Math.floor(fullFrames / 2);
@@ -452,8 +452,8 @@ test.describe("SuperSonic loadSample()", () => {
         messages.length = 0;
         await sonic.send("/b_query", 1);
         await sonic.sync(4);
-        const partialInfo = messages.find((m) => m.address === "/b_info");
-        const partialFrames = partialInfo.args[1];
+        const partialInfo = messages.find((m) => m[0] === "/b_info");
+        const partialFrames = partialInfo[2];
 
         return {
           success: true,
@@ -479,7 +479,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -492,12 +492,12 @@ test.describe("SuperSonic loadSample()", () => {
         messages.length = 0;
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
-        const info = messages.find((m) => m.address === "/b_info");
+        const info = messages.find((m) => m[0] === "/b_info");
 
         return {
           success: true,
           requestedFrames,
-          actualFrames: info.args[1],
+          actualFrames: info[2],
         };
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
@@ -514,7 +514,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -526,8 +526,8 @@ test.describe("SuperSonic loadSample()", () => {
         messages.length = 0;
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
-        const firstInfo = messages.find((m) => m.address === "/b_info");
-        const firstFrames = firstInfo.args[1];
+        const firstInfo = messages.find((m) => m[0] === "/b_info");
+        const firstFrames = firstInfo[2];
 
         // Replace with a different sample
         await sonic.loadSample(0, "sn_dub.flac");
@@ -536,8 +536,8 @@ test.describe("SuperSonic loadSample()", () => {
         messages.length = 0;
         await sonic.send("/b_query", 0);
         await sonic.sync(4);
-        const secondInfo = messages.find((m) => m.address === "/b_info");
-        const secondFrames = secondInfo.args[1];
+        const secondInfo = messages.find((m) => m[0] === "/b_info");
+        const secondFrames = secondInfo[2];
 
         return {
           success: true,
@@ -563,7 +563,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -582,15 +582,15 @@ test.describe("SuperSonic loadSample()", () => {
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
 
-        const queryReply = messages.find((m) => m.address === "/b_info");
+        const queryReply = messages.find((m) => m[0] === "/b_info");
 
         return {
           success: true,
           queryReply,
-          bufnum: queryReply?.args[0],
-          numFrames: queryReply?.args[1],
-          numChannels: queryReply?.args[2],
-          sampleRate: queryReply?.args[3],
+          bufnum: queryReply?.[1],
+          numFrames: queryReply?.[2],
+          numChannels: queryReply?.[3],
+          sampleRate: queryReply?.[4],
           blobSize: fileBytes.length,
         };
       } catch (err) {
@@ -688,7 +688,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -703,8 +703,8 @@ test.describe("SuperSonic loadSample()", () => {
         messages.length = 0;
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
-        const beforeRecover = messages.find((m) => m.address === "/b_info");
-        const framesBefore = beforeRecover?.args[1];
+        const beforeRecover = messages.find((m) => m[0] === "/b_info");
+        const framesBefore = beforeRecover?.[2];
 
         // Recover
         await sonic.recover();
@@ -713,8 +713,8 @@ test.describe("SuperSonic loadSample()", () => {
         messages.length = 0;
         await sonic.send("/b_query", 0);
         await sonic.sync(3);
-        const afterRecover = messages.find((m) => m.address === "/b_info");
-        const framesAfter = afterRecover?.args[1];
+        const afterRecover = messages.find((m) => m[0] === "/b_info");
+        const framesAfter = afterRecover?.[2];
 
         return {
           success: true,
@@ -740,7 +740,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -754,14 +754,14 @@ test.describe("SuperSonic loadSample()", () => {
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
 
-        const queryReply = messages.find((m) => m.address === "/b_info");
+        const queryReply = messages.find((m) => m[0] === "/b_info");
 
         return {
           success: true,
-          bufnum: queryReply?.args[0],
-          numFrames: queryReply?.args[1],
-          numChannels: queryReply?.args[2],
-          sampleRate: queryReply?.args[3],
+          bufnum: queryReply?.[1],
+          numFrames: queryReply?.[2],
+          numChannels: queryReply?.[3],
+          sampleRate: queryReply?.[4],
         };
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
@@ -790,7 +790,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -805,14 +805,14 @@ test.describe("SuperSonic loadSample()", () => {
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
 
-        const queryReply = messages.find((m) => m.address === "/b_info");
+        const queryReply = messages.find((m) => m[0] === "/b_info");
 
         return {
           success: true,
-          bufnum: queryReply?.args[0],
-          numFrames: queryReply?.args[1],
-          numChannels: queryReply?.args[2],
-          sampleRate: queryReply?.args[3],
+          bufnum: queryReply?.[1],
+          numFrames: queryReply?.[2],
+          numChannels: queryReply?.[3],
+          sampleRate: queryReply?.[4],
         };
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
@@ -839,7 +839,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -852,14 +852,14 @@ test.describe("SuperSonic loadSample()", () => {
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
 
-        const queryReply = messages.find((m) => m.address === "/b_info");
+        const queryReply = messages.find((m) => m[0] === "/b_info");
 
         return {
           success: true,
-          bufnum: queryReply?.args[0],
-          numFrames: queryReply?.args[1],
-          numChannels: queryReply?.args[2],
-          sampleRate: queryReply?.args[3],
+          bufnum: queryReply?.[1],
+          numFrames: queryReply?.[2],
+          numChannels: queryReply?.[3],
+          sampleRate: queryReply?.[4],
         };
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };
@@ -887,7 +887,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(JSON.parse(JSON.stringify(msg))));
+      sonic.on('message', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -900,14 +900,14 @@ test.describe("SuperSonic loadSample()", () => {
         await sonic.send("/b_query", 0);
         await sonic.sync(2);
 
-        const queryReply = messages.find((m) => m.address === "/b_info");
+        const queryReply = messages.find((m) => m[0] === "/b_info");
 
         return {
           success: true,
-          bufnum: queryReply?.args[0],
-          numFrames: queryReply?.args[1],
-          numChannels: queryReply?.args[2],
-          sampleRate: queryReply?.args[3],
+          bufnum: queryReply?.[1],
+          numFrames: queryReply?.[2],
+          numChannels: queryReply?.[3],
+          sampleRate: queryReply?.[4],
         };
       } catch (err) {
         return { success: false, error: err.message, stack: err.stack };

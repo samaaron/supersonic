@@ -305,14 +305,14 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
       await sonic.send("/g_queryTree", 0, 0);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/g_queryTree.reply");
+      const reply = messages.find((m) => m[0] === "/g_queryTree.reply");
 
       // Parse /g_queryTree response to count nodes
       // Format: [flag, nodeID, numChildren, ...children]
       // Groups: nodeID, numChildren >= 0, then children recursively
       // Synths: nodeID, -1, defName
       let oscNodeCount = 0;
-      const args = reply?.args || [];
+      const args = reply?.slice(1) || [];
       let i = 1; // Skip flag
 
       function countNodes() {
@@ -374,11 +374,11 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
       await sonic.send("/g_queryTree", 0, 0);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/g_queryTree.reply");
+      const reply = messages.find((m) => m[0] === "/g_queryTree.reply");
 
       // Parse /g_queryTree to extract all node IDs
       const oscNodeIds = [];
-      const args = reply?.args || [];
+      const args = reply?.slice(1) || [];
       let i = 1; // Skip flag
 
       function extractIds() {
@@ -432,12 +432,12 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
       await sonic.send("/g_queryTree", 0, 0);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/g_queryTree.reply");
+      const reply = messages.find((m) => m[0] === "/g_queryTree.reply");
 
       // Extract synth names from OSC response
       // Synths have format: [nodeID, -1, defName]
       const oscSynthNames = {};
-      const args = reply?.args || [];
+      const args = reply?.slice(1) || [];
       for (let i = 1; i < args.length - 2; i++) {
         if (
           typeof args[i] === "number" &&
@@ -487,11 +487,11 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
       await sonic.send("/g_queryTree", 0, 0);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/g_queryTree.reply");
+      const reply = messages.find((m) => m[0] === "/g_queryTree.reply");
 
       // Parse OSC to determine isGroup (numChildren >= 0 = group, -1 = synth)
       const oscIsGroup = {};
-      const args = reply?.args || [];
+      const args = reply?.slice(1) || [];
       for (let i = 1; i < args.length - 1; i++) {
         if (typeof args[i] === "number" && args[i] >= 0) {
           const numChildren = args[i + 1];
@@ -554,10 +554,10 @@ test.describe("getTree() vs /n_query comparison", () => {
 
       // /n_info format: [nodeID, parentID, prevID, nextID, isGroup, ...]
       const info100 = messages.find(
-        (m) => m.address === "/n_info" && m.args[0] === 100
+        (m) => m[0] === "/n_info" && m[1] === 100
       );
       const info1000 = messages.find(
-        (m) => m.address === "/n_info" && m.args[0] === 1000
+        (m) => m[0] === "/n_info" && m[1] === 1000
       );
 
       // Cleanup
@@ -566,8 +566,8 @@ test.describe("getTree() vs /n_query comparison", () => {
       return {
         sabGroup100Parent: sabTree.nodes.find((n) => n.id === 100)?.parentId,
         sabSynth1000Parent: sabTree.nodes.find((n) => n.id === 1000)?.parentId,
-        oscGroup100Parent: info100?.args[1],
-        oscSynth1000Parent: info1000?.args[1],
+        oscGroup100Parent: info100?.[2],
+        oscSynth1000Parent: info1000?.[2],
         hasInfo100: !!info100,
         hasInfo1000: !!info1000,
       };
@@ -607,13 +607,13 @@ test.describe("getTree() vs /n_query comparison", () => {
       await sonic.sync(2);
 
       const info1000 = messages.find(
-        (m) => m.address === "/n_info" && m.args[0] === 1000
+        (m) => m[0] === "/n_info" && m[1] === 1000
       );
       const info1001 = messages.find(
-        (m) => m.address === "/n_info" && m.args[0] === 1001
+        (m) => m[0] === "/n_info" && m[1] === 1001
       );
       const info1002 = messages.find(
-        (m) => m.address === "/n_info" && m.args[0] === 1002
+        (m) => m[0] === "/n_info" && m[1] === 1002
       );
 
       const sab1000 = sabTree.nodes.find((n) => n.id === 1000);
@@ -628,9 +628,9 @@ test.describe("getTree() vs /n_query comparison", () => {
         sab1000: { prev: sab1000?.prevId, next: sab1000?.nextId },
         sab1001: { prev: sab1001?.prevId, next: sab1001?.nextId },
         sab1002: { prev: sab1002?.prevId, next: sab1002?.nextId },
-        osc1000: { prev: info1000?.args[2], next: info1000?.args[3] },
-        osc1001: { prev: info1001?.args[2], next: info1001?.args[3] },
-        osc1002: { prev: info1002?.args[2], next: info1002?.args[3] },
+        osc1000: { prev: info1000?.[3], next: info1000?.[4] },
+        osc1001: { prev: info1001?.[3], next: info1001?.[4] },
+        osc1002: { prev: info1002?.[3], next: info1002?.[4] },
       };
     }, sonicConfig);
 
@@ -677,7 +677,7 @@ test.describe("getTree() vs /n_query comparison", () => {
 
       // /n_info for groups: [nodeID, parentID, prevID, nextID, isGroup(1), headID, tailID]
       const info100 = messages.find(
-        (m) => m.address === "/n_info" && m.args[0] === 100
+        (m) => m[0] === "/n_info" && m[1] === 100
       );
 
       const sabGroup100 = sabTree.nodes.find((n) => n.id === 100);
@@ -687,8 +687,8 @@ test.describe("getTree() vs /n_query comparison", () => {
 
       return {
         sabHeadId: sabGroup100?.headId,
-        oscHeadId: info100?.args[5],
-        oscTailId: info100?.args[6],
+        oscHeadId: info100?.[6],
+        oscTailId: info100?.[7],
         hasInfo100: !!info100,
       };
     }, sonicConfig);
@@ -1351,13 +1351,13 @@ test.describe("getTree() with auto-assigned IDs", () => {
       );
 
       // Check for /n_go notification
-      const nGoMessages = messages.filter((m) => m.address === "/n_go");
+      const nGoMessages = messages.filter((m) => m[0] === "/n_go");
 
       return {
         synthInSabTree: !!autoSynth,
         synthIdInSab: autoSynth?.id,
         nGoCount: nGoMessages.length,
-        nGoNodeIds: nGoMessages.map((m) => m.args[0]),
+        nGoNodeIds: nGoMessages.map((m) => m[1]),
       };
     }, sonicConfig);
 
@@ -3166,11 +3166,11 @@ test.describe("getTree() overflow and droppedCount", () => {
       let oscTreeNodeCount = 0;
       const oscPromise = new Promise((resolve) => {
         sonic.on("message", (msg) => {
-          if (msg.address === "/g_queryTree.reply") {
+          if (msg[0] === "/g_queryTree.reply") {
             // Count nodes in OSC reply
             // Format: [flag, nodeID, numChildren, ...]
             // We just need to verify it has more nodes than the mirror
-            oscTreeNodeCount = msg.args.length;
+            oscTreeNodeCount = msg.length - 1;
             resolve();
           }
         });

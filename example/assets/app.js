@@ -273,14 +273,14 @@ function parseTextToOSC(text) {
 }
 
 function createOSCBundle(ntpTime, messages) {
-  // Convert messages to format expected by encodeBundle
-  const packets = messages.map((m) => ({ address: m.address, args: m.args }));
+  const packets = messages.map((m) => [m.address, ...m.args]);
   return SuperSonic.osc.encodeBundle(ntpTime, packets);
 }
 
 function colorizeOSCArgs(oscMsg) {
-  const { address, args } = oscMsg;
-  if (!Array.isArray(args)) return args || "";
+  const address = oscMsg[0];
+  const args = oscMsg.slice(1);
+  if (args.length === 0) return "";
 
   const isSnew = address === "/s_new";
   return args
@@ -570,14 +570,14 @@ function renderOSCMessage(oscData, showSequence = null) {
       const content = msg.packets
         .map(
           (p) =>
-            `<span class="osc-color-address">${p.address}</span> ${colorizeOSCArgs(p)}`,
+            `<span class="osc-color-address">${p[0]}</span> ${colorizeOSCArgs(p)}`,
         )
         .join("<br>");
       // For single-packet bundles, just show the content
       if (msg.packets.length === 1) return content;
       return `<span class="osc-color-string">Bundle (${msg.packets.length})</span><br>${content}`;
     }
-    return `<span class="osc-color-address">${msg.address}</span> ${colorizeOSCArgs(msg)}`;
+    return `<span class="osc-color-address">${msg[0]}</span> ${colorizeOSCArgs(msg)}`;
   } catch (e) {
     return `<span class="osc-color-error">Decode error: ${e.message}</span>`;
   }

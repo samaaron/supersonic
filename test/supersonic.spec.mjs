@@ -60,7 +60,7 @@ test.describe("SuperSonic", () => {
 
         const messages = [];
         sonic.on('message', (msg) => {
-          messages.push(JSON.parse(JSON.stringify(msg)));
+          messages.push(msg);
         });
 
         try {
@@ -74,7 +74,7 @@ test.describe("SuperSonic", () => {
       }, sonicConfig);
 
       expect(result.success).toBe(true);
-      const doneMessages = result.messages.filter((m) => m.address === "/done");
+      const doneMessages = result.messages.filter((m) => m[0] === "/done");
       expect(doneMessages.length).toBeGreaterThan(0);
     });
 
@@ -277,7 +277,7 @@ test.describe("SuperSonic", () => {
 
         const messages = [];
         sonic.on('message', (msg) => {
-          messages.push(JSON.parse(JSON.stringify(msg)));
+          messages.push(msg);
         });
 
         try {
@@ -292,7 +292,7 @@ test.describe("SuperSonic", () => {
 
       expect(result.success).toBe(true);
       const statusMessages = result.messages.filter(
-        (m) => m.address === "/status.reply"
+        (m) => m[0] === "/status.reply"
       );
       expect(statusMessages.length).toBe(1);
     });
@@ -398,7 +398,7 @@ test.describe("SuperSonic", () => {
 
         const messages = [];
         sonic.on('message', (msg) => {
-          messages.push(JSON.parse(JSON.stringify(msg)));
+          messages.push(msg);
         });
 
         try {
@@ -420,7 +420,7 @@ test.describe("SuperSonic", () => {
           await sonic.sync(2);
           await new Promise(r => setTimeout(r, 100));
 
-          const queryTreeMsg = messages.find(m => m.address === '/g_queryTree.reply');
+          const queryTreeMsg = messages.find(m => m[0] === '/g_queryTree.reply');
 
           return {
             success: true,
@@ -438,8 +438,7 @@ test.describe("SuperSonic", () => {
       // Tree should have: root (0), group (100), synths (1000, 1001, 1002)
       expect(result.tree.nodeCount).toBe(5);
 
-      const args = result.queryTreeMsg.args;
-      expect(args[1]).toBe(0); // Root node ID
+      expect(result.queryTreeMsg[2]).toBe(0); // Root node ID (args[1])
 
       // Verify all expected node IDs exist in tree
       const nodeIds = result.tree.nodes.map(n => n.id);
@@ -573,7 +572,7 @@ test.describe("Event Emitter", () => {
 
       const messages = [];
       const unsubscribe = sonic.on('message', (msg) => {
-        messages.push(msg.address);
+        messages.push(msg[0]);
       });
 
       const isFunction = typeof unsubscribe === 'function';
@@ -615,15 +614,15 @@ test.describe("Event Emitter", () => {
       const listener3Messages = [];
 
       sonic.on('message', (msg) => {
-        listener1Messages.push({ listener: 1, address: msg.address });
+        listener1Messages.push({ listener: 1, address: msg[0] });
       });
 
       sonic.on('message', (msg) => {
-        listener2Messages.push({ listener: 2, address: msg.address });
+        listener2Messages.push({ listener: 2, address: msg[0] });
       });
 
       sonic.on('message', (msg) => {
-        listener3Messages.push({ listener: 3, address: msg.address });
+        listener3Messages.push({ listener: 3, address: msg[0] });
       });
 
       await sonic.init();
@@ -654,15 +653,15 @@ test.describe("Event Emitter", () => {
       const listenerC = [];
 
       sonic.on('message', (msg) => {
-        listenerA.push(msg.address);
+        listenerA.push(msg[0]);
       });
 
       const unsubB = sonic.on('message', (msg) => {
-        listenerB.push(msg.address);
+        listenerB.push(msg[0]);
       });
 
       sonic.on('message', (msg) => {
-        listenerC.push(msg.address);
+        listenerC.push(msg[0]);
       });
 
       await sonic.init();
@@ -707,11 +706,11 @@ test.describe("Event Emitter", () => {
       const regularMessages = [];
 
       sonic.once('message', (msg) => {
-        onceMessages.push(msg.address);
+        onceMessages.push(msg[0]);
       });
 
       sonic.on('message', (msg) => {
-        regularMessages.push(msg.address);
+        regularMessages.push(msg[0]);
       });
 
       await sonic.init();
@@ -742,7 +741,7 @@ test.describe("Event Emitter", () => {
       const messages = [];
 
       const callback = (msg) => {
-        messages.push(msg.address);
+        messages.push(msg[0]);
       };
 
       sonic.on('message', callback);
@@ -779,7 +778,7 @@ test.describe("Event Emitter", () => {
       const goodListener2 = [];
 
       sonic.on('message', (msg) => {
-        goodListener1.push(msg.address);
+        goodListener1.push(msg[0]);
       });
 
       sonic.on('message', () => {
@@ -787,7 +786,7 @@ test.describe("Event Emitter", () => {
       });
 
       sonic.on('message', (msg) => {
-        goodListener2.push(msg.address);
+        goodListener2.push(msg[0]);
       });
 
       await sonic.init();

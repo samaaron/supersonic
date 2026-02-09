@@ -50,14 +50,10 @@ test.describe('OSC Fast Encoder/Decoder', () => {
       const result = await page.evaluate(() => {
         const encoded = window.oscFast.encodeMessage('/test', [42]);
         const decoded = window.oscFast.decodeMessage(encoded);
-        return {
-          address: decoded.address,
-          args: decoded.args,
-        };
+        return decoded;
       });
 
-      expect(result.address).toBe('/test');
-      expect(result.args).toEqual([42]);
+      expect(result).toEqual(['/test', 42]);
     });
 
     test('encodes message with negative integer', async ({ page }) => {
@@ -67,21 +63,18 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         return decoded;
       });
 
-      expect(result.args).toEqual([-12345]);
+      expect(result).toEqual(['/test', -12345]);
     });
 
     test('encodes message with float arg', async ({ page }) => {
       const result = await page.evaluate(() => {
         const encoded = window.oscFast.encodeMessage('/test', [3.14159]);
         const decoded = window.oscFast.decodeMessage(encoded);
-        return {
-          address: decoded.address,
-          arg: decoded.args[0],
-        };
+        return decoded;
       });
 
-      expect(result.address).toBe('/test');
-      expect(result.arg).toBeCloseTo(3.14159, 4);
+      expect(result[0]).toBe('/test');
+      expect(result[1]).toBeCloseTo(3.14159, 4);
     });
 
     test('encodes message with string arg', async ({ page }) => {
@@ -91,8 +84,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         return decoded;
       });
 
-      expect(result.address).toBe('/test');
-      expect(result.args).toEqual(['hello']);
+      expect(result).toEqual(['/test', 'hello']);
     });
 
     test('encodes message with boolean args', async ({ page }) => {
@@ -102,7 +94,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         return decoded;
       });
 
-      expect(result.args).toEqual([true, false]);
+      expect(result).toEqual(['/test', true, false]);
     });
 
     test('encodes message with blob arg', async ({ page }) => {
@@ -111,9 +103,9 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         const encoded = window.oscFast.encodeMessage('/test', [blob]);
         const decoded = window.oscFast.decodeMessage(encoded);
         return {
-          address: decoded.address,
-          blobLength: decoded.args[0].length,
-          blobData: Array.from(decoded.args[0]),
+          address: decoded[0],
+          blobLength: decoded[1].length,
+          blobData: Array.from(decoded[1]),
         };
       });
 
@@ -137,15 +129,15 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         return decoded;
       });
 
-      expect(result.address).toBe('/s_new');
-      expect(result.args[0]).toBe('sonic-pi-beep');
-      expect(result.args[1]).toBe(1001);
-      expect(result.args[2]).toBe(0);
-      expect(result.args[3]).toBe(0);
-      expect(result.args[4]).toBe('note');
-      expect(result.args[5]).toBe(60);
-      expect(result.args[6]).toBe('amp');
-      expect(result.args[7]).toBeCloseTo(0.5, 5);
+      expect(result[0]).toBe('/s_new');
+      expect(result[1]).toBe('sonic-pi-beep');
+      expect(result[2]).toBe(1001);
+      expect(result[3]).toBe(0);
+      expect(result[4]).toBe(0);
+      expect(result[5]).toBe('note');
+      expect(result[6]).toBe(60);
+      expect(result[7]).toBe('amp');
+      expect(result[8]).toBeCloseTo(0.5, 5);
     });
 
     test('encodes message with int64 arg', async ({ page }) => {
@@ -154,14 +146,12 @@ test.describe('OSC Fast Encoder/Decoder', () => {
           { type: 'int64', value: 9007199254740993n },
         ]);
         const decoded = window.oscFast.decodeMessage(encoded);
-        return {
-          args: decoded.args.map((a) =>
-            typeof a === 'bigint' ? a.toString() : a
-          ),
-        };
+        return decoded.map((a) =>
+          typeof a === 'bigint' ? a.toString() : a
+        );
       });
 
-      expect(result.args[0]).toBe('9007199254740993');
+      expect(result[1]).toBe('9007199254740993');
     });
 
     test('encodes message with double arg', async ({ page }) => {
@@ -173,7 +163,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         return decoded;
       });
 
-      expect(result.args[0]).toBeCloseTo(3.141592653589793, 10);
+      expect(result[1]).toBeCloseTo(3.141592653589793, 10);
     });
   });
 
@@ -185,7 +175,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
     test('encodes bundle with immediate timetag', async ({ page }) => {
       const result = await page.evaluate(() => {
         const encoded = window.oscFast.encodeBundle(1, [
-          { address: '/test', args: [42] },
+          ['/test', 42],
         ]);
         const decoded = window.oscFast.decodeBundle(encoded);
         return {
@@ -198,8 +188,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
       // Immediate timetag is 1 (very small NTP time)
       expect(result.timeTag).toBeLessThan(10);
       expect(result.packetCount).toBe(1);
-      expect(result.firstPacket.address).toBe('/test');
-      expect(result.firstPacket.args).toEqual([42]);
+      expect(result.firstPacket).toEqual(['/test', 42]);
     });
 
     test('encodes bundle with NTP timetag', async ({ page }) => {
@@ -207,7 +196,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         // NTP timestamp for some time in 2024
         const ntpTime = 3913056000 + 0.5; // seconds + fraction
         const encoded = window.oscFast.encodeBundle(ntpTime, [
-          { address: '/test', args: [] },
+          ['/test'],
         ]);
         const decoded = window.oscFast.decodeBundle(encoded);
         return {
@@ -224,21 +213,19 @@ test.describe('OSC Fast Encoder/Decoder', () => {
     test('encodes bundle with multiple messages', async ({ page }) => {
       const result = await page.evaluate(() => {
         const encoded = window.oscFast.encodeBundle(1, [
-          { address: '/one', args: [1] },
-          { address: '/two', args: [2] },
-          { address: '/three', args: [3] },
+          ['/one', 1],
+          ['/two', 2],
+          ['/three', 3],
         ]);
         const decoded = window.oscFast.decodeBundle(encoded);
         return {
           packetCount: decoded.packets.length,
-          addresses: decoded.packets.map((p) => p.address),
-          args: decoded.packets.map((p) => p.args),
+          packets: decoded.packets,
         };
       });
 
       expect(result.packetCount).toBe(3);
-      expect(result.addresses).toEqual(['/one', '/two', '/three']);
-      expect(result.args).toEqual([[1], [2], [3]]);
+      expect(result.packets).toEqual([['/one', 1], ['/two', 2], ['/three', 3]]);
     });
 
     test('encodes single-message bundle (optimized path)', async ({ page }) => {
@@ -252,42 +239,279 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         const decoded = window.oscFast.decodeBundle(encoded);
         return {
           packetCount: decoded.packets.length,
-          address: decoded.packets[0].address,
-          args: decoded.packets[0].args,
+          firstPacket: decoded.packets[0],
         };
       });
 
       expect(result.packetCount).toBe(1);
-      expect(result.address).toBe('/s_new');
-      expect(result.args).toEqual(['beep', 1001, 0, 0]);
+      expect(result.firstPacket).toEqual(['/s_new', 'beep', 1001, 0, 0]);
     });
 
     test('encodes nested bundles', async ({ page }) => {
       const result = await page.evaluate(() => {
         const encoded = window.oscFast.encodeBundle(1, [
-          { address: '/outer', args: [] },
+          ['/outer'],
           {
             timeTag: 2,
             packets: [
-              { address: '/inner1', args: [1] },
-              { address: '/inner2', args: [2] },
+              ['/inner1', 1],
+              ['/inner2', 2],
             ],
           },
         ]);
         const decoded = window.oscFast.decodeBundle(encoded);
         return {
           outerPacketCount: decoded.packets.length,
-          firstAddress: decoded.packets[0].address,
+          firstPacket: decoded.packets[0],
           nestedTimeTag: decoded.packets[1].timeTag,
           nestedPacketCount: decoded.packets[1].packets?.length,
-          nestedAddresses: decoded.packets[1].packets?.map((p) => p.address),
+          nestedPackets: decoded.packets[1].packets,
         };
       });
 
       expect(result.outerPacketCount).toBe(2);
-      expect(result.firstAddress).toBe('/outer');
+      expect(result.firstPacket).toEqual(['/outer']);
       expect(result.nestedPacketCount).toBe(2);
-      expect(result.nestedAddresses).toEqual(['/inner1', '/inner2']);
+      expect(result.nestedPackets).toEqual([['/inner1', 1], ['/inner2', 2]]);
+    });
+  });
+
+  // ===========================================================================
+  // TIMETAG INPUT FORMATS
+  // ===========================================================================
+
+  test.describe('TimeTag Input Formats', () => {
+    test('null produces immediate timetag', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeBundle(null, [
+          ['/test', 1],
+        ]);
+        const decoded = window.oscFast.decodeBundle(encoded);
+        return { timeTag: decoded.timeTag };
+      });
+
+      expect(result.timeTag).toBeLessThan(10);
+    });
+
+    test('undefined produces immediate timetag', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeBundle(undefined, [
+          ['/test', 1],
+        ]);
+        const decoded = window.oscFast.decodeBundle(encoded);
+        return { timeTag: decoded.timeTag };
+      });
+
+      expect(result.timeTag).toBeLessThan(10);
+    });
+
+    test('[sec, frac] array produces correct encoding', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const sec = 3913056000;
+        const frac = 2147483648; // 0.5 in NTP fractional
+        const encoded = window.oscFast.encodeBundle([sec, frac], [
+          ['/test'],
+        ]);
+        const timetag = window.readTimetag(encoded);
+        return timetag;
+      });
+
+      expect(result.ntpSeconds).toBe(3913056000);
+      expect(result.ntpFraction).toBe(2147483648);
+    });
+
+    test('[sec, frac] round-trips with readTimetag', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const sec = 3913056000;
+        const frac = 123456789;
+        const encoded = window.oscFast.encodeBundle([sec, frac], [
+          ['/test'],
+        ]);
+        const timetag = window.readTimetag(encoded);
+        return { sec: timetag.ntpSeconds, frac: timetag.ntpFraction };
+      });
+
+      expect(result.sec).toBe(3913056000);
+      expect(result.frac).toBe(123456789);
+    });
+
+    test('[sec, frac] preserves full uint32 precision', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        // Use values near uint32 max to test precision
+        const sec = 4294967295; // 0xFFFFFFFF
+        const frac = 4294967295;
+        const encoded = window.oscFast.encodeBundle([sec, frac], [
+          ['/test'],
+        ]);
+        const timetag = window.readTimetag(encoded);
+        return { sec: timetag.ntpSeconds, frac: timetag.ntpFraction };
+      });
+
+      expect(result.sec).toBe(4294967295);
+      expect(result.frac).toBe(4294967295);
+    });
+
+    test('array with wrong length throws Error', async ({ page }) => {
+      const results = await page.evaluate(() => {
+        const errors = [];
+        for (const arr of [[], [1], [1, 2, 3]]) {
+          try {
+            window.oscFast.encodeBundle(arr, [['/test']]);
+            errors.push({ length: arr.length, threw: false });
+          } catch (e) {
+            errors.push({ length: arr.length, threw: true, name: e.constructor.name });
+          }
+        }
+        return errors;
+      });
+
+      for (const r of results) {
+        expect(r.threw).toBe(true);
+        expect(r.name).toBe('Error');
+      }
+    });
+
+    test('string timetag throws TypeError', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        try {
+          window.oscFast.encodeBundle('now', [['/test']]);
+          return { threw: false };
+        } catch (e) {
+          return { threw: true, name: e.constructor.name };
+        }
+      });
+
+      expect(result.threw).toBe(true);
+      expect(result.name).toBe('TypeError');
+    });
+
+    test('boolean timetag throws TypeError', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        try {
+          window.oscFast.encodeBundle(true, [['/test']]);
+          return { threw: false };
+        } catch (e) {
+          return { threw: true, name: e.constructor.name };
+        }
+      });
+
+      expect(result.threw).toBe(true);
+      expect(result.name).toBe('TypeError');
+    });
+
+    test('object timetag throws TypeError', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        try {
+          window.oscFast.encodeBundle({sec: 1}, [['/test']]);
+          return { threw: false };
+        } catch (e) {
+          return { threw: true, name: e.constructor.name };
+        }
+      });
+
+      expect(result.threw).toBe(true);
+      expect(result.name).toBe('TypeError');
+    });
+
+    test('Unix-range number triggers console.warn', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const warnings = [];
+        const origWarn = console.warn;
+        console.warn = (...args) => warnings.push(args.join(' '));
+        try {
+          window.oscFast.encodeBundle(1700000000, [
+            ['/test'],
+          ]);
+        } finally {
+          console.warn = origWarn;
+        }
+        return { warningCount: warnings.length, hasWarning: warnings.length > 0 };
+      });
+
+      expect(result.hasWarning).toBe(true);
+    });
+
+    test('valid NTP number does not warn', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const warnings = [];
+        const origWarn = console.warn;
+        console.warn = (...args) => warnings.push(args.join(' '));
+        try {
+          // NTP time well above epoch offset
+          window.oscFast.encodeBundle(3913056000, [
+            ['/test'],
+          ]);
+        } finally {
+          console.warn = origWarn;
+        }
+        return { warningCount: warnings.length };
+      });
+
+      expect(result.warningCount).toBe(0);
+    });
+
+    test('timetag 1 does not warn', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const warnings = [];
+        const origWarn = console.warn;
+        console.warn = (...args) => warnings.push(args.join(' '));
+        try {
+          window.oscFast.encodeBundle(1, [['/test']]);
+        } finally {
+          console.warn = origWarn;
+        }
+        return { warningCount: warnings.length };
+      });
+
+      expect(result.warningCount).toBe(0);
+    });
+
+    test('encodeSingleBundle with array timetag', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const sec = 3913056000;
+        const frac = 500000000;
+        const encoded = window.oscFast.encodeSingleBundle(
+          [sec, frac],
+          '/s_new',
+          ['beep', 1001, 0, 0]
+        );
+        const timetag = window.readTimetag(encoded);
+        const decoded = window.oscFast.decodeBundle(encoded);
+        return {
+          sec: timetag.ntpSeconds,
+          frac: timetag.ntpFraction,
+          firstPacket: decoded.packets[0],
+        };
+      });
+
+      expect(result.sec).toBe(3913056000);
+      expect(result.frac).toBe(500000000);
+      expect(result.firstPacket).toEqual(['/s_new', 'beep', 1001, 0, 0]);
+    });
+
+    test('nested bundle with array timetag', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeBundle([3913056000, 0], [
+          ['/outer'],
+          {
+            timeTag: [3913056001, 0],
+            packets: [['/inner', 42]],
+          },
+        ]);
+        const decoded = window.oscFast.decodeBundle(encoded);
+        const outerTimetag = window.readTimetag(encoded);
+        return {
+          outerSec: outerTimetag.ntpSeconds,
+          outerPacketCount: decoded.packets.length,
+          firstPacket: decoded.packets[0],
+          nestedPacket: decoded.packets[1].packets?.[0],
+        };
+      });
+
+      expect(result.outerSec).toBe(3913056000);
+      expect(result.outerPacketCount).toBe(2);
+      expect(result.firstPacket).toEqual(['/outer']);
+      expect(result.nestedPacket).toEqual(['/inner', 42]);
     });
   });
 
@@ -303,24 +527,24 @@ test.describe('OSC Fast Encoder/Decoder', () => {
           window.oscFast.encodeMessage('/test', [42])
         );
         const bundle = window.oscFast.copyEncoded(
-          window.oscFast.encodeBundle(1, [{ address: '/test', args: [] }])
+          window.oscFast.encodeBundle(1, [['/test']])
         );
 
         const decodedMsg = window.oscFast.decodePacket(message);
         const decodedBundle = window.oscFast.decodePacket(bundle);
 
         return {
-          messageHasAddress: 'address' in decodedMsg,
-          messageHasTimeTag: 'timeTag' in decodedMsg,
-          bundleHasAddress: 'address' in decodedBundle,
+          messageIsArray: Array.isArray(decodedMsg),
+          messageStartsWithAddress: typeof decodedMsg[0] === 'string' && decodedMsg[0].startsWith('/'),
           bundleHasTimeTag: 'timeTag' in decodedBundle,
+          bundleHasPackets: 'packets' in decodedBundle,
         };
       });
 
-      expect(result.messageHasAddress).toBe(true);
-      expect(result.messageHasTimeTag).toBe(false);
-      expect(result.bundleHasAddress).toBe(false);
+      expect(result.messageIsArray).toBe(true);
+      expect(result.messageStartsWithAddress).toBe(true);
       expect(result.bundleHasTimeTag).toBe(true);
+      expect(result.bundleHasPackets).toBe(true);
     });
 
     test('isBundle correctly identifies bundles', async ({ page }) => {
@@ -349,7 +573,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
       const result = await page.evaluate(() => {
         const ntpTime = 3913056000.123;
         const bundle = window.oscFast.encodeBundle(ntpTime, [
-          { address: '/test', args: [1, 2, 3, 4, 5] },
+          ['/test', 1, 2, 3, 4, 5],
         ]);
 
         const quickTimeTag = window.oscFast.getBundleTimeTag(bundle);
@@ -372,54 +596,52 @@ test.describe('OSC Fast Encoder/Decoder', () => {
   test.describe('Round-trip Encoding/Decoding', () => {
     test('round-trips complex message', async ({ page }) => {
       const result = await page.evaluate(() => {
-        const original = {
-          address: '/s_new',
-          args: [
-            'sonic-pi-beep',
-            -1,
-            0,
-            0,
-            'note',
-            60,
-            'amp',
-            0.8,
-            'pan',
-            -0.5,
-            'attack',
-            0.01,
-            'release',
-            1.5,
-          ],
-        };
+        const original = [
+          '/s_new',
+          'sonic-pi-beep',
+          -1,
+          0,
+          0,
+          'note',
+          60,
+          'amp',
+          0.8,
+          'pan',
+          -0.5,
+          'attack',
+          0.01,
+          'release',
+          1.5,
+        ];
 
         const encoded = window.oscFast.encodeMessage(
-          original.address,
-          original.args
+          original[0],
+          original.slice(1)
         );
         const decoded = window.oscFast.decodeMessage(encoded);
 
         return {
           original,
           decoded,
-          addressMatch: original.address === decoded.address,
-          argsMatch: original.args.length === decoded.args.length,
+          addressMatch: original[0] === decoded[0],
+          lengthMatch: original.length === decoded.length,
         };
       });
 
       expect(result.addressMatch).toBe(true);
-      expect(result.argsMatch).toBe(true);
-      expect(result.decoded.args[0]).toBe('sonic-pi-beep');
-      expect(result.decoded.args[1]).toBe(-1);
-      expect(result.decoded.args[7]).toBeCloseTo(0.8, 5);
+      expect(result.lengthMatch).toBe(true);
+      expect(result.decoded[1]).toBe('sonic-pi-beep');
+      expect(result.decoded[2]).toBe(-1);
+      expect(result.decoded[8]).toBeCloseTo(0.8, 5);
     });
 
     test('round-trips bundle with complex messages', async ({ page }) => {
       const result = await page.evaluate(() => {
         const ntpTime = 3913056000.5;
         const packets = [
-          { address: '/s_new', args: ['beep', 1001, 0, 0, 'note', 60] },
-          { address: '/n_set', args: [1001, 'amp', 0.5] },
-          { address: '/n_free', args: [1001] },
+          ['/s_new', 'beep', 1001, 0, 0, 'note', 60],
+          ['/n_set', 1001, 'amp', 0.5],
+          ['/n_free', 1001],
         ];
 
         const encoded = window.oscFast.encodeBundle(ntpTime, packets);
@@ -428,7 +650,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         return {
           timeTagMatch: Math.abs(decoded.timeTag - ntpTime) < 0.0001,
           packetCount: decoded.packets.length,
-          addresses: decoded.packets.map((p) => p.address),
+          addresses: decoded.packets.map((p) => p[0]),
         };
       });
 
@@ -520,7 +742,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         try {
           const encoded = window.oscFast.encodeMessage('', []);
           const decoded = window.oscFast.decodeMessage(encoded);
-          return { success: true, address: decoded.address };
+          return { success: true, address: decoded[0] };
         } catch (e) {
           return { success: false, error: e.message };
         }
@@ -536,9 +758,9 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         const encoded = window.oscFast.encodeMessage(longAddress, [42]);
         const decoded = window.oscFast.decodeMessage(encoded);
         return {
-          addressLength: decoded.address.length,
-          addressMatch: decoded.address === longAddress,
-          arg: decoded.args[0],
+          addressLength: decoded[0].length,
+          addressMatch: decoded[0] === longAddress,
+          arg: decoded[1],
         };
       });
 
@@ -558,7 +780,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         const encoded = window.oscFast.encodeMessage('/blob', [blob]);
         const decoded = window.oscFast.decodeMessage(encoded);
 
-        const decodedBlob = decoded.args[0];
+        const decodedBlob = decoded[1];
 
         // Check first and last bytes
         return {
@@ -588,7 +810,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         const encoded = window.oscFast.encodeMessage('/huge', [blob]);
         const decoded = window.oscFast.decodeMessage(encoded);
 
-        const decodedBlob = decoded.args[0];
+        const decodedBlob = decoded[1];
 
         // Verify integrity
         let mismatch = -1;
@@ -623,11 +845,11 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         const encoded = window.oscFast.encodeMessage('/test', [maxInt, minInt]);
         const decoded = window.oscFast.decodeMessage(encoded);
 
-        return decoded.args;
+        return decoded;
       });
 
-      expect(result[0]).toBe(2147483647);
-      expect(result[1]).toBe(-2147483648);
+      expect(result[1]).toBe(2147483647);
+      expect(result[2]).toBe(-2147483648);
     });
 
     test('handles special float values', async ({ page }) => {
@@ -641,10 +863,10 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         const decoded = window.oscFast.decodeMessage(encoded);
 
         return {
-          zero: decoded.args[0],
-          negZero: Object.is(decoded.args[1], -0),
-          posInf: decoded.args[2],
-          negInf: decoded.args[3],
+          zero: decoded[1],
+          negZero: Object.is(decoded[2], -0),
+          posInf: decoded[3],
+          negInf: decoded[4],
         };
       });
 
@@ -677,12 +899,12 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         ]);
         const decoded = window.oscFast.decodeMessage(encoded);
 
-        return decoded.args;
+        return decoded;
       });
 
       // Basic ASCII should work
-      expect(result[0]).toBe('Hello');
-      expect(result[1]).toBe('World');
+      expect(result[1]).toBe('Hello');
+      expect(result[2]).toBe('World');
     });
 
     test('copyEncoded creates independent copy', async ({ page }) => {
@@ -698,10 +920,10 @@ test.describe('OSC Fast Encoder/Decoder', () => {
         const decoded2 = window.oscFast.decodeMessage(encoded2);
 
         return {
-          copyAddress: decoded1.address,
-          newAddress: decoded2.address,
-          copyArg: decoded1.args[0],
-          newArg: decoded2.args[0],
+          copyAddress: decoded1[0],
+          newAddress: decoded2[0],
+          copyArg: decoded1[1],
+          newArg: decoded2[1],
         };
       });
 

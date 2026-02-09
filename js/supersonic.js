@@ -7,7 +7,7 @@
  */
 
 import { createTransport, OscChannel } from "./lib/transport/index.js";
-import { shouldBypass } from "./lib/osc_classifier.js";
+import { shouldBypass, readTimetag, getCurrentNTPFromPerformance } from "./lib/osc_classifier.js";
 
 // Re-export OscChannel for use in workers
 export { OscChannel };
@@ -38,6 +38,11 @@ export class SuperSonic {
     encodeMessage: (address, args) => oscFast.copyEncoded(oscFast.encodeMessage(address, args)),
     encodeBundle: (timeTag, packets) => oscFast.copyEncoded(oscFast.encodeBundle(timeTag, packets)),
     decode: (data) => oscFast.decodePacket(data),
+    encodeSingleBundle: (timeTag, address, args) =>
+      oscFast.copyEncoded(oscFast.encodeSingleBundle(timeTag, address, args)),
+    readTimetag: (bundleData) => readTimetag(bundleData),
+    ntpNow: () => getCurrentNTPFromPerformance(),
+    NTP_EPOCH_OFFSET: oscFast.NTP_EPOCH_OFFSET,
     // Backwards-compatible encode for tests - handles legacy osc.js format
     encode: (packet) => {
       if (packet.timeTag !== undefined) {
@@ -52,13 +57,13 @@ export class SuperSonic {
         } else {
           timeTag = 1; // immediate
         }
-        // Convert typed args to plain args in packets
-        const packets = packet.packets.map(p => ({
-          address: p.address,
-          args: (p.args || []).map(a =>
+        // Convert typed args to plain args as arrays
+        const packets = packet.packets.map(p => {
+          const args = (p.args || []).map(a =>
             (a && typeof a === 'object' && 'value' in a) ? a.value : a
-          ),
-        }));
+          );
+          return [p.address, ...args];
+        });
         return oscFast.copyEncoded(oscFast.encodeBundle(timeTag, packets));
       } else {
         // Message - convert typed args to plain args
@@ -1462,13 +1467,15 @@ export class SuperSonic {
       try {
         const msg = oscFast.decodePacket(oscData);
 
-        // Handle special messages
-        if (msg.address === "/supersonic/buffer/freed") {
-          this.#bufferManager?.handleBufferFreed(msg.args);
-        } else if (msg.address === "/supersonic/buffer/allocated") {
-          this.#bufferManager?.handleBufferAllocated(msg.args);
-        } else if (msg.address === "/synced" && msg.args.length > 0) {
-          const syncId = msg.args[0];
+        // Handle special messages (msg is [address, ...args])
+        const address = msg[0];
+        const args = msg.slice(1);
+        if (address === "/supersonic/buffer/freed") {
+          this.#bufferManager?.handleBufferFreed(args);
+        } else if (address === "/supersonic/buffer/allocated") {
+          this.#bufferManager?.handleBufferAllocated(args);
+        } else if (address === "/synced" && args.length > 0) {
+          const syncId = args[0];
           if (this.#syncListeners?.has(syncId)) {
             this.#syncListeners.get(syncId)(msg);
           }
@@ -1478,11 +1485,11 @@ export class SuperSonic {
 
         if (this.#config.debug || this.#config.debugOscIn) {
           const maxLen = this.#config.activityConsoleLog.oscInMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
-          const argsStr = msg.args?.map(a => {
+          const argsStr = args.map(a => {
             const str = JSON.stringify(a);
             return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
           }).join(', ') || '';
-          console.log(`[← OSC] ${msg.address}${argsStr ? ' ' + argsStr : ''}`);
+          console.log(`[← OSC] ${address}${argsStr ? ' ' + argsStr : ''}`);
         }
       } catch (e) {
         console.error('[SuperSonic] Failed to decode OSC message:', e);
@@ -1748,10 +1755,10 @@ export class SuperSonic {
       const { packet, changed } = await this.#oscRewriter.rewritePacket(decodedPacket);
       if (!changed) return uint8Data;
       // Re-encode the rewritten packet
-      if (packet.packets !== undefined) {
+      if (packet.timeTag !== undefined) {
         return SuperSonic.osc.encodeBundle(packet.timeTag, packet.packets);
       }
-      return SuperSonic.osc.encodeMessage(packet.address, packet.args);
+      return SuperSonic.osc.encodeMessage(packet[0], packet.slice(1));
     } catch (error) {
       console.error("[SuperSonic] Failed to prepare OSC packet:", error);
       throw error;

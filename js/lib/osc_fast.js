@@ -78,7 +78,9 @@ function estimateBundleSize(packets) {
   let size = 16;
   for (const packet of packets) {
     size += 4; // size prefix
-    if (packet.packets !== undefined) {
+    if (Array.isArray(packet)) {
+      size += estimateMessageSize(packet[0], packet.slice(1));
+    } else if (packet.packets !== undefined) {
       size += estimateBundleSize(packet.packets);
     } else {
       size += estimateMessageSize(packet.address, packet.args || []);
@@ -165,11 +167,14 @@ export function encodeBundle(timeTag, packets) {
 
     const packetStart = pos;
 
-    if (packet.packets !== undefined) {
+    if (Array.isArray(packet)) {
+      // Message as [address, ...args]
+      pos = encodeMessageInto(packet[0], packet.slice(1), pos);
+    } else if (packet.packets !== undefined) {
       // Nested bundle
       pos = encodeBundleInto(packet.timeTag, packet.packets, pos);
     } else {
-      // Message
+      // Legacy object format { address, args }
       pos = encodeMessageInto(packet.address, packet.args || [], pos);
     }
 
@@ -249,7 +254,9 @@ function encodeBundleInto(timeTag, packets, pos) {
     pos += 4;
     const packetStart = pos;
 
-    if (packet.packets !== undefined) {
+    if (Array.isArray(packet)) {
+      pos = encodeMessageInto(packet[0], packet.slice(1), pos);
+    } else if (packet.packets !== undefined) {
       pos = encodeBundleInto(packet.timeTag, packet.packets, pos);
     } else {
       pos = encodeMessageInto(packet.address, packet.args || [], pos);
@@ -415,14 +422,37 @@ function writeArg(arg, pos) {
 
 /**
  * Write NTP timetag (8 bytes).
+ *
+ * Accepted formats:
+ * - `1`, `null`, `undefined` → immediate (0x0000000000000001)
+ * - `[uint32, uint32]` → write seconds/fraction pair directly
+ * - Number → existing NTP float path
+ *
  * @private
  */
 function writeTimeTag(time, pos) {
-  if (time === 1) {
+  if (time === 1 || time === null || time === undefined) {
     // Immediate: timetag = 0x0000000000000001
     encodeView.setUint32(pos, 0, false);
     encodeView.setUint32(pos + 4, 1, false);
     return pos + 8;
+  }
+
+  if (Array.isArray(time)) {
+    if (time.length !== 2) {
+      throw new Error(`TimeTag array must have exactly 2 elements [seconds, fraction], got ${time.length}`);
+    }
+    encodeView.setUint32(pos, time[0] >>> 0, false);
+    encodeView.setUint32(pos + 4, time[1] >>> 0, false);
+    return pos + 8;
+  }
+
+  if (typeof time !== 'number') {
+    throw new TypeError(`TimeTag must be a number, array, null, or undefined, got ${typeof time}`);
+  }
+
+  if (time > 1 && time < NTP_EPOCH_OFFSET) {
+    console.warn(`TimeTag ${time} looks like a Unix timestamp (< NTP_EPOCH_OFFSET). Did you mean to add NTP_EPOCH_OFFSET (2208988800)?`);
   }
 
   // time is already in NTP seconds (seconds since 1900)
@@ -462,7 +492,7 @@ export function decodePacket(data) {
  * Decode an OSC message.
  *
  * @param {Uint8Array} data - Raw OSC message data
- * @returns {Object} - {address, args}
+ * @returns {Array} - [address, ...args]
  */
 export function decodeMessage(data) {
   if (!(data instanceof Uint8Array)) {
@@ -478,7 +508,7 @@ export function decodeMessage(data) {
 
   // Check for type tags
   if (pos >= data.length || data[pos] !== TAG_COMMA) {
-    return { address, args: [] };
+    return [address];
   }
 
   // Read type tags
@@ -486,63 +516,63 @@ export function decodeMessage(data) {
   pos = tagsEnd;
 
   // Parse args based on tags (skip the leading ',')
-  const args = [];
+  const result = [address];
   for (let i = 1; i < tags.length; i++) {
     const tag = tags.charCodeAt(i);
 
     switch (tag) {
       case TAG_INT: // 'i' - int32
-        args.push(view.getInt32(pos, false));
+        result.push(view.getInt32(pos, false));
         pos += 4;
         break;
 
       case TAG_FLOAT: // 'f' - float32
-        args.push(view.getFloat32(pos, false));
+        result.push(view.getFloat32(pos, false));
         pos += 4;
         break;
 
       case TAG_STRING: // 's' - string
         const [str, strEnd] = readString(data, pos);
-        args.push(str);
+        result.push(str);
         pos = strEnd;
         break;
 
       case TAG_BLOB: // 'b' - blob
         const blobSize = view.getUint32(pos, false);
         pos += 4;
-        args.push(data.slice(pos, pos + blobSize));
+        result.push(data.slice(pos, pos + blobSize));
         pos += blobSize;
         pos = (pos + 3) & ~3; // Pad to 4
         break;
 
       case TAG_INT64: // 'h' - int64
-        args.push(view.getBigInt64(pos, false));
+        result.push(view.getBigInt64(pos, false));
         pos += 8;
         break;
 
       case TAG_DOUBLE: // 'd' - double
-        args.push(view.getFloat64(pos, false));
+        result.push(view.getFloat64(pos, false));
         pos += 8;
         break;
 
       case TAG_TRUE: // 'T' - true
-        args.push(true);
+        result.push(true);
         break;
 
       case TAG_FALSE: // 'F' - false
-        args.push(false);
+        result.push(false);
         break;
 
       case TAG_TIMETAG: // 't' - timetag
         const seconds = view.getUint32(pos, false);
         const fraction = view.getUint32(pos + 4, false);
-        args.push(seconds + fraction / TWO_POW_32);
+        result.push(seconds + fraction / TWO_POW_32);
         pos += 8;
         break;
     }
   }
 
-  return { address, args };
+  return result;
 }
 
 /**

@@ -26,14 +26,14 @@ test.describe("Top-level Commands", () => {
       await sonic.send("/status");
       await sonic.sync(1);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
       return {
         success: !!statusReply,
-        args: statusReply?.args,
-        numUgens: statusReply?.args?.[1],
-        numSynths: statusReply?.args?.[2],
-        numGroups: statusReply?.args?.[3],
-        numSynthDefs: statusReply?.args?.[4],
+        args: statusReply?.slice(1),
+        numUgens: statusReply?.[2],
+        numSynths: statusReply?.[3],
+        numGroups: statusReply?.[4],
+        numSynthDefs: statusReply?.[5],
       };
     }, sonicConfig);
 
@@ -58,9 +58,9 @@ test.describe("Top-level Commands", () => {
       await new Promise((r) => setTimeout(r, 100));
 
       const syncedMsg = messages.find(
-        (m) => m.address === "/synced" && m.args[0] === 42
+        (m) => m[0] === "/synced" && m[1] === 42
       );
-      return { success: !!syncedMsg, id: syncedMsg?.args?.[0] };
+      return { success: !!syncedMsg, id: syncedMsg?.[1] };
     }, sonicConfig);
 
     expect(result.success).toBe(true);
@@ -81,13 +81,13 @@ test.describe("Top-level Commands", () => {
       await sonic.sync(1);
 
       const versionReply = messages.find(
-        (m) => m.address === "/version.reply"
+        (m) => m[0] === "/version.reply"
       );
       return {
         success: !!versionReply,
-        programName: versionReply?.args?.[0],
-        majorVersion: versionReply?.args?.[1],
-        minorVersion: versionReply?.args?.[2],
+        programName: versionReply?.[1],
+        majorVersion: versionReply?.[2],
+        minorVersion: versionReply?.[3],
       };
     }, sonicConfig);
 
@@ -111,7 +111,7 @@ test.describe("Top-level Commands", () => {
       await sonic.sync(1);
 
       const doneMsg = messages.find(
-        (m) => m.address === "/done" && m.args[0] === "/notify"
+        (m) => m[0] === "/done" && m[1] === "/notify"
       );
       return { success: !!doneMsg };
     }, sonicConfig);
@@ -191,11 +191,11 @@ test.describe("Top-level Commands", () => {
       await sonic.send("/rtMemoryStatus");
       await sonic.sync(1);
 
-      const memReply = messages.find((m) => m.address === "/rtMemoryStatus.reply");
+      const memReply = messages.find((m) => m[0] === "/rtMemoryStatus.reply");
       return {
         success: !!memReply,
-        freeMemory: memReply?.args?.[0],
-        largestFreeBlock: memReply?.args?.[1],
+        freeMemory: memReply?.[1],
+        largestFreeBlock: memReply?.[2],
       };
     }, sonicConfig);
 
@@ -227,8 +227,8 @@ test.describe("Synthdef Commands", () => {
       // Get synthdef count before loading
       await sonic.send("/status");
       await sonic.sync(1);
-      const statusBefore = messages.find((m) => m.address === "/status.reply");
-      const defsBefore = statusBefore?.args?.[4];
+      const statusBefore = messages.find((m) => m[0] === "/status.reply");
+      const defsBefore = statusBefore?.[5];
 
       // Load synthdef (uses /d_recv internally)
       messages.length = 0;
@@ -236,15 +236,15 @@ test.describe("Synthdef Commands", () => {
       await sonic.sync(2);
 
       const doneMsg = messages.find(
-        (m) => m.address === "/done" && m.args[0] === "/d_recv"
+        (m) => m[0] === "/done" && m[1] === "/d_recv"
       );
 
       // Get synthdef count after loading
       messages.length = 0;
       await sonic.send("/status");
       await sonic.sync(3);
-      const statusAfter = messages.find((m) => m.address === "/status.reply");
-      const defsAfter = statusAfter?.args?.[4];
+      const statusAfter = messages.find((m) => m[0] === "/status.reply");
+      const defsAfter = statusAfter?.[5];
 
       return {
         success: !!doneMsg,
@@ -273,8 +273,8 @@ test.describe("Synthdef Commands", () => {
       // Get status before free
       await sonic.send("/status");
       await sonic.sync(1);
-      const statusBefore = messages.find((m) => m.address === "/status.reply");
-      const defsBefore = statusBefore?.args?.[4];
+      const statusBefore = messages.find((m) => m[0] === "/status.reply");
+      const defsBefore = statusBefore?.[5];
 
       // Free the synthdef
       await sonic.send("/d_free", "sonic-pi-beep");
@@ -284,8 +284,8 @@ test.describe("Synthdef Commands", () => {
       messages.length = 0;
       await sonic.send("/status");
       await sonic.sync(3);
-      const statusAfter = messages.find((m) => m.address === "/status.reply");
-      const defsAfter = statusAfter?.args?.[4];
+      const statusAfter = messages.find((m) => m[0] === "/status.reply");
+      const defsAfter = statusAfter?.[5];
 
       return {
         success: true,
@@ -364,13 +364,13 @@ test.describe("Node Commands", () => {
       messages.length = 0;
       await sonic.send("/n_run", 1000, 0);
       await sonic.sync(2);
-      const offMsg = messages.find((m) => m.address === "/n_off");
+      const offMsg = messages.find((m) => m[0] === "/n_off");
 
       // Turn on
       messages.length = 0;
       await sonic.send("/n_run", 1000, 1);
       await sonic.sync(3);
-      const onMsg = messages.find((m) => m.address === "/n_on");
+      const onMsg = messages.find((m) => m[0] === "/n_on");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
@@ -421,16 +421,16 @@ test.describe("Node Commands", () => {
       await sonic.send("/s_get", 1000, "note");
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/n_set");
+      const reply = messages.find((m) => m[0] === "/n_set");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
         success: !!reply,
-        nodeId: reply?.args?.[0],
-        controlName: reply?.args?.[1],
-        value: reply?.args?.[2],
+        nodeId: reply?.[1],
+        controlName: reply?.[2],
+        value: reply?.[3],
       };
     }, sonicConfig);
 
@@ -488,16 +488,16 @@ test.describe("Node Commands", () => {
       await sonic.send("/n_query", 1000);
       await sonic.sync(2);
 
-      const infoMsg = messages.find((m) => m.address === "/n_info");
+      const infoMsg = messages.find((m) => m[0] === "/n_info");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
         success: !!infoMsg,
-        nodeId: infoMsg?.args?.[0],
-        parentId: infoMsg?.args?.[1],
-        isGroup: infoMsg?.args?.[4],
+        nodeId: infoMsg?.[1],
+        parentId: infoMsg?.[2],
+        isGroup: infoMsg?.[5],
       };
     }, sonicConfig);
 
@@ -533,17 +533,17 @@ test.describe("Node Commands", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // /n_move args: nodeID, parentID, prevID, nextID, isGroup
-      const moveMsg = messages.find((m) => m.address === "/n_move");
+      const moveMsg = messages.find((m) => m[0] === "/n_move");
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001);
 
       return {
         success: !!moveMsg,
-        movedNodeId: moveMsg?.args?.[0],
-        parentId: moveMsg?.args?.[1],
-        prevId: moveMsg?.args?.[2],
-        nextId: moveMsg?.args?.[3],
+        movedNodeId: moveMsg?.[1],
+        parentId: moveMsg?.[2],
+        prevId: moveMsg?.[3],
+        nextId: moveMsg?.[4],
       };
     }, sonicConfig);
 
@@ -580,17 +580,17 @@ test.describe("Node Commands", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // /n_move args: nodeID, parentID, prevID, nextID, isGroup
-      const moveMsg = messages.find((m) => m.address === "/n_move");
+      const moveMsg = messages.find((m) => m[0] === "/n_move");
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001);
 
       return {
         success: !!moveMsg,
-        movedNodeId: moveMsg?.args?.[0],
-        parentId: moveMsg?.args?.[1],
-        prevId: moveMsg?.args?.[2],
-        nextId: moveMsg?.args?.[3],
+        movedNodeId: moveMsg?.[1],
+        parentId: moveMsg?.[2],
+        prevId: moveMsg?.[3],
+        nextId: moveMsg?.[4],
       };
     }, sonicConfig);
 
@@ -628,20 +628,20 @@ test.describe("Node Commands", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // Should get /n_move for reordered nodes
-      const moveMsgs = messages.filter((m) => m.address === "/n_move");
+      const moveMsgs = messages.filter((m) => m[0] === "/n_move");
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002);
 
       // Check 1001's move notification (1000 may not generate one if already at head)
       // After /n_order, order should be: 1000 -> 1001 -> 1002
-      const move1001 = moveMsgs.find((m) => m.args[0] === 1001);
+      const move1001 = moveMsgs.find((m) => m[1] === 1001);
 
       return {
         success: moveMsgs.length >= 1,
         moveCount: moveMsgs.length,
-        node1001_prevId: move1001?.args?.[2],
-        node1001_nextId: move1001?.args?.[3],
+        node1001_prevId: move1001?.[3],
+        node1001_nextId: move1001?.[4],
       };
     }, sonicConfig);
 
@@ -832,16 +832,16 @@ test.describe("Synth Commands", () => {
       await sonic.send("/s_get", 1000, "note");
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/n_set");
+      const reply = messages.find((m) => m[0] === "/n_set");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
         success: !!reply,
-        nodeId: reply?.args?.[0],
-        control: reply?.args?.[1],
-        value: reply?.args?.[2],
+        nodeId: reply?.[1],
+        control: reply?.[2],
+        value: reply?.[3],
       };
     }, sonicConfig);
 
@@ -870,16 +870,16 @@ test.describe("Synth Commands", () => {
       await sonic.send("/s_getn", 1000, 0, 3); // Get first 3 controls
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/n_setn");
+      const reply = messages.find((m) => m[0] === "/n_setn");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
         success: !!reply,
-        nodeId: reply?.args?.[0],
-        startIndex: reply?.args?.[1],
-        count: reply?.args?.[2],
+        nodeId: reply?.[1],
+        startIndex: reply?.[2],
+        count: reply?.[3],
       };
     }, sonicConfig);
 
@@ -984,7 +984,7 @@ test.describe("Group Commands", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // /n_move args: nodeID, parentID, prevID, nextID, isGroup
-      const moveMsg = messages.find((m) => m.address === "/n_move");
+      const moveMsg = messages.find((m) => m[0] === "/n_move");
 
       // Cleanup
       await sonic.send("/g_freeAll", 100);
@@ -992,10 +992,10 @@ test.describe("Group Commands", () => {
 
       return {
         success: !!moveMsg,
-        movedNodeId: moveMsg?.args?.[0],
-        parentId: moveMsg?.args?.[1],
-        prevId: moveMsg?.args?.[2],
-        nextId: moveMsg?.args?.[3],
+        movedNodeId: moveMsg?.[1],
+        parentId: moveMsg?.[2],
+        prevId: moveMsg?.[3],
+        nextId: moveMsg?.[4],
       };
     }, sonicConfig);
 
@@ -1033,7 +1033,7 @@ test.describe("Group Commands", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // /n_move args: nodeID, parentID, prevID, nextID, isGroup
-      const moveMsg = messages.find((m) => m.address === "/n_move");
+      const moveMsg = messages.find((m) => m[0] === "/n_move");
 
       // Cleanup
       await sonic.send("/g_freeAll", 100);
@@ -1041,10 +1041,10 @@ test.describe("Group Commands", () => {
 
       return {
         success: !!moveMsg,
-        movedNodeId: moveMsg?.args?.[0],
-        parentId: moveMsg?.args?.[1],
-        prevId: moveMsg?.args?.[2],
-        nextId: moveMsg?.args?.[3],
+        movedNodeId: moveMsg?.[1],
+        parentId: moveMsg?.[2],
+        prevId: moveMsg?.[3],
+        nextId: moveMsg?.[4],
       };
     }, sonicConfig);
 
@@ -1171,7 +1171,7 @@ test.describe("Buffer Commands", () => {
 
       // SuperSonic rewrites /b_alloc to /b_allocPtr (JS manages buffer memory)
       const doneMsg = messages.find(
-        (m) => m.address === "/done" && m.args[0] === "/b_allocPtr"
+        (m) => m[0] === "/done" && m[1] === "/b_allocPtr"
       );
 
       // Query buffer info
@@ -1179,17 +1179,17 @@ test.describe("Buffer Commands", () => {
       await sonic.send("/b_query", 0);
       await sonic.sync(2);
 
-      const infoMsg = messages.find((m) => m.address === "/b_info");
+      const infoMsg = messages.find((m) => m[0] === "/b_info");
 
       // Cleanup
       await sonic.send("/b_free", 0);
 
       return {
         success: !!doneMsg && !!infoMsg,
-        bufnum: infoMsg?.args?.[0],
-        frames: infoMsg?.args?.[1],
-        channels: infoMsg?.args?.[2],
-        sampleRate: infoMsg?.args?.[3],
+        bufnum: infoMsg?.[1],
+        frames: infoMsg?.[2],
+        channels: infoMsg?.[3],
+        sampleRate: infoMsg?.[4],
       };
     }, sonicConfig);
 
@@ -1218,7 +1218,7 @@ test.describe("Buffer Commands", () => {
       await sonic.sync(2);
 
       const doneMsg = messages.find(
-        (m) => m.address === "/done" && m.args[0] === "/b_free"
+        (m) => m[0] === "/done" && m[1] === "/b_free"
       );
 
       return { success: !!doneMsg };
@@ -1246,7 +1246,7 @@ test.describe("Buffer Commands", () => {
       await sonic.sync(2);
 
       const doneMsg = messages.find(
-        (m) => m.address === "/done" && m.args[0] === "/b_zero"
+        (m) => m[0] === "/done" && m[1] === "/b_zero"
       );
 
       // Cleanup
@@ -1281,20 +1281,20 @@ test.describe("Buffer Commands", () => {
       await sonic.send("/b_get", 0, 0, 10, 100);
       await sonic.sync(3);
 
-      const reply = messages.find((m) => m.address === "/b_set");
+      const reply = messages.find((m) => m[0] === "/b_set");
 
       // Cleanup
       await sonic.send("/b_free", 0);
 
       return {
         success: !!reply,
-        bufnum: reply?.args?.[0],
-        index0: reply?.args?.[1],
-        value0: reply?.args?.[2],
-        index1: reply?.args?.[3],
-        value1: reply?.args?.[4],
-        index2: reply?.args?.[5],
-        value2: reply?.args?.[6],
+        bufnum: reply?.[1],
+        index0: reply?.[2],
+        value0: reply?.[3],
+        index1: reply?.[4],
+        value1: reply?.[5],
+        index2: reply?.[6],
+        value2: reply?.[7],
       };
     }, sonicConfig);
 
@@ -1333,17 +1333,17 @@ test.describe("Buffer Commands", () => {
       await sonic.send("/b_getn", 0, 0, 4);
       await sonic.sync(3);
 
-      const reply = messages.find((m) => m.address === "/b_setn");
+      const reply = messages.find((m) => m[0] === "/b_setn");
 
       // Cleanup
       await sonic.send("/b_free", 0);
 
       return {
         success: !!reply,
-        bufnum: reply?.args?.[0],
-        startIndex: reply?.args?.[1],
-        count: reply?.args?.[2],
-        values: reply?.args?.slice(3),
+        bufnum: reply?.[1],
+        startIndex: reply?.[2],
+        count: reply?.[3],
+        values: reply?.slice(4),
       };
     }, sonicConfig);
 
@@ -1380,14 +1380,14 @@ test.describe("Buffer Commands", () => {
       await sonic.send("/b_get", 0, 50);
       await sonic.sync(3);
 
-      const reply = messages.find((m) => m.address === "/b_set");
+      const reply = messages.find((m) => m[0] === "/b_set");
 
       // Cleanup
       await sonic.send("/b_free", 0);
 
       return {
         success: !!reply,
-        value: reply?.args?.[2],
+        value: reply?.[3],
       };
     }, sonicConfig);
 
@@ -1415,7 +1415,7 @@ test.describe("Buffer Commands", () => {
       await sonic.sync(2);
 
       const doneMsg = messages.find(
-        (m) => m.address === "/done" && m.args[0] === "/b_gen"
+        (m) => m[0] === "/done" && m[1] === "/b_gen"
       );
 
       // Check peak value (should be ~1.0 due to normalization)
@@ -1423,14 +1423,14 @@ test.describe("Buffer Commands", () => {
       await sonic.send("/b_get", 0, 128); // Quarter way through (should be near peak)
       await sonic.sync(3);
 
-      const valueReply = messages.find((m) => m.address === "/b_set");
+      const valueReply = messages.find((m) => m[0] === "/b_set");
 
       // Cleanup
       await sonic.send("/b_free", 0);
 
       return {
         success: !!doneMsg,
-        peakValue: valueReply?.args?.[2],
+        peakValue: valueReply?.[3],
       };
     }, sonicConfig);
 
@@ -1457,7 +1457,7 @@ test.describe("Buffer Commands", () => {
       await sonic.send("/b_query", 0, 1);
       await sonic.sync(2);
 
-      const infoMsg = messages.find((m) => m.address === "/b_info");
+      const infoMsg = messages.find((m) => m[0] === "/b_info");
 
       // Cleanup
       await sonic.send("/b_free", 0);
@@ -1468,16 +1468,16 @@ test.describe("Buffer Commands", () => {
       return {
         success: !!infoMsg,
         buf0: {
-          bufnum: infoMsg?.args?.[0],
-          frames: infoMsg?.args?.[1],
-          channels: infoMsg?.args?.[2],
-          sampleRate: infoMsg?.args?.[3],
+          bufnum: infoMsg?.[1],
+          frames: infoMsg?.[2],
+          channels: infoMsg?.[3],
+          sampleRate: infoMsg?.[4],
         },
         buf1: {
-          bufnum: infoMsg?.args?.[4],
-          frames: infoMsg?.args?.[5],
-          channels: infoMsg?.args?.[6],
-          sampleRate: infoMsg?.args?.[7],
+          bufnum: infoMsg?.[5],
+          frames: infoMsg?.[6],
+          channels: infoMsg?.[7],
+          sampleRate: infoMsg?.[8],
         },
       };
     }, sonicConfig);
@@ -1517,11 +1517,11 @@ test.describe("Control Bus Commands", () => {
       await sonic.send("/c_get", 0, 1, 2);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/c_set");
+      const reply = messages.find((m) => m[0] === "/c_set");
 
       return {
         success: !!reply,
-        values: reply?.args,
+        values: reply?.slice(1),
       };
     }, sonicConfig);
 
@@ -1556,13 +1556,13 @@ test.describe("Control Bus Commands", () => {
       await sonic.send("/c_getn", 0, 4);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/c_setn");
+      const reply = messages.find((m) => m[0] === "/c_setn");
 
       return {
         success: !!reply,
-        startIndex: reply?.args?.[0],
-        count: reply?.args?.[1],
-        values: reply?.args?.slice(2),
+        startIndex: reply?.[1],
+        count: reply?.[2],
+        values: reply?.slice(3),
       };
     }, sonicConfig);
 
@@ -1595,11 +1595,11 @@ test.describe("Control Bus Commands", () => {
       await sonic.send("/c_get", 5);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/c_set");
+      const reply = messages.find((m) => m[0] === "/c_set");
 
       return {
         success: !!reply,
-        value: reply?.args?.[1],
+        value: reply?.[2],
       };
     }, sonicConfig);
 

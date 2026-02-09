@@ -423,7 +423,7 @@ test.describe('Schema Validation', () => {
       for (let i = 0; i < 5; i++) {
         statusPromises.push(new Promise(resolve => {
           const handler = (reply) => {
-            if (reply.address === '/status.reply') {
+            if (reply[0] === '/status.reply') {
               sonic.off('message', handler);
               resolve(true);
             }

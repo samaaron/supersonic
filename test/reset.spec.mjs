@@ -61,9 +61,9 @@ test.describe("SuperSonic reset()", () => {
       // Set up listener before init
       sonic.on('message', (msg) => {
         if (phase === "before") {
-          messagesBeforeReset.push(JSON.parse(JSON.stringify(msg)));
+          messagesBeforeReset.push(msg);
         } else {
-          messagesAfterReset.push(JSON.parse(JSON.stringify(msg)));
+          messagesAfterReset.push(msg);
         }
       });
 
@@ -98,13 +98,13 @@ test.describe("SuperSonic reset()", () => {
 
     // Should have received /status.reply before reset
     const statusBeforeReset = result.messagesBeforeReset.filter(
-      (m) => m.address === "/status.reply"
+      (m) => m[0] === "/status.reply"
     );
     expect(statusBeforeReset.length).toBe(1);
 
     // Should have received /status.reply after reset (callback still works)
     const statusAfterReset = result.messagesAfterReset.filter(
-      (m) => m.address === "/status.reply"
+      (m) => m[0] === "/status.reply"
     );
     expect(statusAfterReset.length).toBe(1);
   });

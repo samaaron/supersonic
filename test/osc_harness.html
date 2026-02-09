@@ -9,9 +9,11 @@
 
     <script type="module">
       import * as oscFast from "../js/lib/osc_fast.js";
+      import { readTimetag } from "../js/lib/osc_classifier.js";
 
       // Expose to window for Playwright
       window.oscFast = oscFast;
+      window.readTimetag = readTimetag;
 
       // Signal ready
       window.oscReady = true;

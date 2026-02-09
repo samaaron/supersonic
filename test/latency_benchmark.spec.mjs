@@ -20,7 +20,7 @@ async function measureLatency(page, config, iterations = 100) {
           reject(new Error(`Timeout waiting for ${address} after ${timeoutMs}ms`));
         }, timeoutMs);
         const handler = (msg) => {
-          if (msg.address === address) {
+          if (msg[0] === address) {
             clearTimeout(timer);
             sonic.off("message", handler);
             resolve(msg);

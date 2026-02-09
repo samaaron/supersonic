@@ -210,13 +210,13 @@ test.describe("/n_free semantic tests", () => {
 
       // Find /n_end notification for node 1000
       const nEndMsg = messages.find(
-        (m) => m.address === "/n_end" && m.args[0] === 1000
+        (m) => m[0] === "/n_end" && m[1] === 1000
       );
 
       return {
         receivedNEnd: !!nEndMsg,
-        nEndNodeId: nEndMsg?.args?.[0],
-        nEndParentId: nEndMsg?.args?.[1],
+        nEndNodeId: nEndMsg?.[1],
+        nEndParentId: nEndMsg?.[2],
       };
     }, sonicConfig);
 
@@ -338,16 +338,16 @@ test.describe("/n_set semantic tests", () => {
       await sonic.send("/s_get", 1000, "note");
       await sonic.sync(3);
 
-      const reply = messages.find((m) => m.address === "/n_set");
+      const reply = messages.find((m) => m[0] === "/n_set");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
         gotReply: !!reply,
-        nodeId: reply?.args?.[0],
-        controlName: reply?.args?.[1],
-        value: reply?.args?.[2],
+        nodeId: reply?.[1],
+        controlName: reply?.[2],
+        value: reply?.[3],
       };
     }, sonicConfig);
 
@@ -375,8 +375,8 @@ test.describe("/n_set semantic tests", () => {
       // Get initial value of control 0
       await sonic.send("/s_get", 1000, 0);
       await sonic.sync(2);
-      const initialReply = messages.find((m) => m.address === "/n_set");
-      const initialValue = initialReply?.args?.[2];
+      const initialReply = messages.find((m) => m[0] === "/n_set");
+      const initialValue = initialReply?.[3];
 
       // Set control 0 by index to a different value
       const newValue = initialValue === 0.5 ? 0.75 : 0.5;
@@ -388,14 +388,14 @@ test.describe("/n_set semantic tests", () => {
       await sonic.send("/s_get", 1000, 0);
       await sonic.sync(4);
 
-      const reply = messages.find((m) => m.address === "/n_set");
+      const reply = messages.find((m) => m[0] === "/n_set");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
         gotReply: !!reply,
-        value: reply?.args?.[2],
+        value: reply?.[3],
         expectedValue: newValue,
       };
     }, sonicConfig);
@@ -427,25 +427,25 @@ test.describe("/n_set semantic tests", () => {
       messages.length = 0;
       await sonic.send("/s_get", 1000, "note");
       await sonic.sync(3);
-      const noteReply = messages.find((m) => m.address === "/n_set");
+      const noteReply = messages.find((m) => m[0] === "/n_set");
 
       messages.length = 0;
       await sonic.send("/s_get", 1000, "amp");
       await sonic.sync(4);
-      const ampReply = messages.find((m) => m.address === "/n_set");
+      const ampReply = messages.find((m) => m[0] === "/n_set");
 
       messages.length = 0;
       await sonic.send("/s_get", 1000, "pan");
       await sonic.sync(5);
-      const panReply = messages.find((m) => m.address === "/n_set");
+      const panReply = messages.find((m) => m[0] === "/n_set");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
-        noteValue: noteReply?.args?.[2],
-        ampValue: ampReply?.args?.[2],
-        panValue: panReply?.args?.[2],
+        noteValue: noteReply?.[3],
+        ampValue: ampReply?.[3],
+        panValue: panReply?.[3],
       };
     }, sonicConfig);
 
@@ -512,8 +512,8 @@ test.describe("/n_set semantic tests", () => {
         messages.length = 0;
         await sonic.send("/s_get", id, "amp");
         await sonic.sync(3 + id - 1000);
-        const reply = messages.find((m) => m.address === "/n_set");
-        ampValues.push(reply?.args?.[2]);
+        const reply = messages.find((m) => m[0] === "/n_set");
+        ampValues.push(reply?.[3]);
       }
 
       // Cleanup
@@ -592,17 +592,17 @@ test.describe("/n_setn semantic tests", () => {
       await sonic.send("/s_getn", 1000, 0, 3);
       await sonic.sync(3);
 
-      const reply = messages.find((m) => m.address === "/n_setn");
+      const reply = messages.find((m) => m[0] === "/n_setn");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
         gotReply: !!reply,
-        nodeId: reply?.args?.[0],
-        startIndex: reply?.args?.[1],
-        count: reply?.args?.[2],
-        values: reply?.args?.slice(3),
+        nodeId: reply?.[1],
+        startIndex: reply?.[2],
+        count: reply?.[3],
+        values: reply?.slice(4),
       };
     }, sonicConfig);
 
@@ -638,13 +638,13 @@ test.describe("/n_setn semantic tests", () => {
       messages.length = 0;
       await sonic.send("/s_get", 1000, "note");
       await sonic.sync(3);
-      const noteReply = messages.find((m) => m.address === "/n_set");
+      const noteReply = messages.find((m) => m[0] === "/n_set");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
-        noteValue: noteReply?.args?.[2],
+        noteValue: noteReply?.[3],
       };
     }, sonicConfig);
 
@@ -681,8 +681,8 @@ test.describe("/n_fill semantic tests", () => {
       await sonic.send("/s_getn", 1000, 0, 3);
       await sonic.sync(3);
 
-      const reply = messages.find((m) => m.address === "/n_setn");
-      const values = reply?.args?.slice(3);
+      const reply = messages.find((m) => m[0] === "/n_setn");
+      const values = reply?.slice(4);
 
       // Cleanup
       await sonic.send("/n_free", 1000);
@@ -779,13 +779,13 @@ test.describe("/n_map semantic tests", () => {
       messages.length = 0;
       await sonic.send("/s_get", 1000, "note");
       await sonic.sync(5);
-      const reply = messages.find((m) => m.address === "/n_set");
+      const reply = messages.find((m) => m[0] === "/n_set");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
-        noteValue: reply?.args?.[2],
+        noteValue: reply?.[3],
       };
     }, sonicConfig);
 
@@ -1135,25 +1135,25 @@ test.describe("/s_new semantic tests", () => {
       messages.length = 0;
       await sonic.send("/s_get", 1000, "note");
       await sonic.sync(2);
-      const noteReply = messages.find((m) => m.address === "/n_set");
+      const noteReply = messages.find((m) => m[0] === "/n_set");
 
       messages.length = 0;
       await sonic.send("/s_get", 1000, "amp");
       await sonic.sync(3);
-      const ampReply = messages.find((m) => m.address === "/n_set");
+      const ampReply = messages.find((m) => m[0] === "/n_set");
 
       messages.length = 0;
       await sonic.send("/s_get", 1000, "pan");
       await sonic.sync(4);
-      const panReply = messages.find((m) => m.address === "/n_set");
+      const panReply = messages.find((m) => m[0] === "/n_set");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
-        noteValue: noteReply?.args?.[2],
-        ampValue: ampReply?.args?.[2],
-        panValue: panReply?.args?.[2],
+        noteValue: noteReply?.[3],
+        ampValue: ampReply?.[3],
+        panValue: panReply?.[3],
       };
     }, sonicConfig);
 
@@ -1176,7 +1176,7 @@ test.describe("/s_new semantic tests", () => {
       const nGoPromise = new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error("/n_go not received")), 2000);
         const handler = (msg) => {
-          if (msg.address === "/n_go" && msg.args[0] === 1000) {
+          if (msg[0] === "/n_go" && msg[1] === 1000) {
             clearTimeout(timeout);
             sonic.off('message', handler);
             resolve(msg);
@@ -1199,11 +1199,11 @@ test.describe("/s_new semantic tests", () => {
 
       return {
         receivedNGo: !!nGoMsg,
-        nodeId: nGoMsg?.args?.[0],
-        parentId: nGoMsg?.args?.[1],
-        prevId: nGoMsg?.args?.[2],
-        nextId: nGoMsg?.args?.[3],
-        isGroup: nGoMsg?.args?.[4],
+        nodeId: nGoMsg?.[1],
+        parentId: nGoMsg?.[2],
+        prevId: nGoMsg?.[3],
+        nextId: nGoMsg?.[4],
+        isGroup: nGoMsg?.[5],
       };
     }, sonicConfig);
 
@@ -1231,7 +1231,7 @@ test.describe("/s_new semantic tests", () => {
       const synthExists = tree.nodes.some((n) => n.id === 1000);
 
       // Check for /fail message
-      const failMsg = messages.find((m) => m.address === "/fail");
+      const failMsg = messages.find((m) => m[0] === "/fail");
 
       return {
         synthExists,
@@ -1471,16 +1471,16 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
       await sonic.send("/b_query", 0);
       await sonic.sync(2);
 
-      const info = messages.find((m) => m.address === "/b_info");
+      const info = messages.find((m) => m[0] === "/b_info");
 
       // Cleanup
       await sonic.send("/b_free", 0);
 
       return {
-        bufnum: info?.args?.[0],
-        frames: info?.args?.[1],
-        channels: info?.args?.[2],
-        sampleRate: info?.args?.[3],
+        bufnum: info?.[1],
+        frames: info?.[2],
+        channels: info?.[3],
+        sampleRate: info?.[4],
       };
     }, sonicConfig);
 
@@ -1507,14 +1507,14 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
       await sonic.send("/b_query", 0);
       await sonic.sync(2);
 
-      const info = messages.find((m) => m.address === "/b_info");
+      const info = messages.find((m) => m[0] === "/b_info");
 
       // Cleanup
       await sonic.send("/b_free", 0);
 
       return {
-        frames: info?.args?.[1],
-        channels: info?.args?.[2],
+        frames: info?.[2],
+        channels: info?.[3],
       };
     }, sonicConfig);
 
@@ -1541,8 +1541,8 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
       messages.length = 0;
       await sonic.send("/b_query", 0);
       await sonic.sync(2);
-      const info1 = messages.find((m) => m.address === "/b_info");
-      const framesBefore = info1?.args?.[1];
+      const info1 = messages.find((m) => m[0] === "/b_info");
+      const framesBefore = info1?.[2];
 
       // Re-allocate with 2048 frames
       await sonic.send("/b_alloc", 0, 2048, 2);
@@ -1551,9 +1551,9 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
       messages.length = 0;
       await sonic.send("/b_query", 0);
       await sonic.sync(4);
-      const info2 = messages.find((m) => m.address === "/b_info");
-      const framesAfter = info2?.args?.[1];
-      const channelsAfter = info2?.args?.[2];
+      const info2 = messages.find((m) => m[0] === "/b_info");
+      const framesAfter = info2?.[2];
+      const channelsAfter = info2?.[3];
 
       // Cleanup
       await sonic.send("/b_free", 0);
@@ -1599,8 +1599,8 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
       await sonic.send("/b_get", 0, 0, 100, 500);
       await sonic.sync(5);
 
-      const reply = messages.find((m) => m.address === "/b_set");
-      const values = [reply?.args?.[2], reply?.args?.[4], reply?.args?.[6]];
+      const reply = messages.find((m) => m[0] === "/b_set");
+      const values = [reply?.[3], reply?.[5], reply?.[7]];
 
       // Cleanup
       await sonic.send("/b_free", 0);
@@ -1641,23 +1641,23 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
       await sonic.send("/b_query", 0, 1, 2);
       await sonic.sync(3);
 
-      const info = messages.find((m) => m.address === "/b_info");
+      const info = messages.find((m) => m[0] === "/b_info");
 
       // Get values
       messages.length = 0;
       await sonic.send("/b_get", 0, 0);
       await sonic.sync(4);
-      const val0 = messages.find((m) => m.address === "/b_set")?.args?.[2];
+      const val0 = messages.find((m) => m[0] === "/b_set")?.[3];
 
       messages.length = 0;
       await sonic.send("/b_get", 1, 0);
       await sonic.sync(5);
-      const val1 = messages.find((m) => m.address === "/b_set")?.args?.[2];
+      const val1 = messages.find((m) => m[0] === "/b_set")?.[3];
 
       messages.length = 0;
       await sonic.send("/b_get", 2, 0);
       await sonic.sync(6);
-      const val2 = messages.find((m) => m.address === "/b_set")?.args?.[2];
+      const val2 = messages.find((m) => m[0] === "/b_set")?.[3];
 
       // Cleanup
       await sonic.send("/b_free", 0);
@@ -1665,9 +1665,9 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
       await sonic.send("/b_free", 2);
 
       return {
-        buf0Frames: info?.args?.[1],
-        buf1Frames: info?.args?.[5],
-        buf2Frames: info?.args?.[9],
+        buf0Frames: info?.[2],
+        buf1Frames: info?.[6],
+        buf2Frames: info?.[10],
         val0,
         val1,
         val2,
@@ -1702,8 +1702,8 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
       messages.length = 0;
       await sonic.send("/b_get", 0, 50);
       await sonic.sync(3);
-      const valueBefore = messages.find((m) => m.address === "/b_set")
-        ?.args?.[2];
+      const valueBefore = messages.find((m) => m[0] === "/b_set")
+        ?.[3];
 
       // Zero buffer
       await sonic.send("/b_zero", 0);
@@ -1713,8 +1713,8 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
       messages.length = 0;
       await sonic.send("/b_get", 0, 50);
       await sonic.sync(5);
-      const valueAfter = messages.find((m) => m.address === "/b_set")
-        ?.args?.[2];
+      const valueAfter = messages.find((m) => m[0] === "/b_set")
+        ?.[3];
 
       // Cleanup
       await sonic.send("/b_free", 0);
@@ -1758,7 +1758,7 @@ test.describe("/n_run semantic tests", () => {
 
       // Check for /n_off notification
       const nOffMsg = messages.find(
-        (m) => m.address === "/n_off" && m.args[0] === 1000
+        (m) => m[0] === "/n_off" && m[1] === 1000
       );
 
       // Synth should still exist in tree
@@ -1802,7 +1802,7 @@ test.describe("/n_run semantic tests", () => {
 
       // Check for /n_on notification
       const nOnMsg = messages.find(
-        (m) => m.address === "/n_on" && m.args[0] === 1000
+        (m) => m[0] === "/n_on" && m[1] === 1000
       );
 
       // Cleanup
@@ -1840,8 +1840,8 @@ test.describe("/n_run semantic tests", () => {
       await sonic.sync(2);
 
       // Check for /n_off notifications
-      const nOffMsgs = messages.filter((m) => m.address === "/n_off");
-      const pausedIds = nOffMsgs.map((m) => m.args[0]);
+      const nOffMsgs = messages.filter((m) => m[0] === "/n_off");
+      const pausedIds = nOffMsgs.map((m) => m[1]);
 
       // Cleanup
       await sonic.send("/n_free", 1000, 1001, 1002);
@@ -1882,8 +1882,8 @@ test.describe("/n_run semantic tests", () => {
       await sonic.sync(2);
 
       // Should get /n_off for the group
-      const nOffMsgs = messages.filter((m) => m.address === "/n_off");
-      const groupPaused = nOffMsgs.some((m) => m.args[0] === 100);
+      const nOffMsgs = messages.filter((m) => m[0] === "/n_off");
+      const groupPaused = nOffMsgs.some((m) => m[1] === 100);
 
       // Cleanup
       await sonic.send("/n_free", 100);
@@ -2065,14 +2065,14 @@ test.describe("/g_queryTree semantic tests", () => {
       await sonic.send("/g_queryTree", 0, 0);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/g_queryTree.reply");
+      const reply = messages.find((m) => m[0] === "/g_queryTree.reply");
 
       // Cleanup
       await sonic.send("/n_free", 100);
 
       return {
         hasReply: !!reply,
-        args: reply?.args,
+        args: reply?.slice(1),
       };
     }, sonicConfig);
 
@@ -2115,16 +2115,16 @@ test.describe("/g_queryTree semantic tests", () => {
       await sonic.send("/g_queryTree", 0, 1);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/g_queryTree.reply");
+      const reply = messages.find((m) => m[0] === "/g_queryTree.reply");
 
       // Cleanup
       await sonic.send("/n_free", 1000);
 
       return {
         hasReply: !!reply,
-        flag: reply?.args?.[0],
+        flag: reply?.[1],
         // With flag 1, synth entries include control count and values
-        argsLength: reply?.args?.length,
+        argsLength: reply ? reply.length - 1 : undefined,
       };
     }, sonicConfig);
 
@@ -2164,11 +2164,11 @@ test.describe("/g_queryTree semantic tests", () => {
       await sonic.send("/g_queryTree", 0, 1);
       await sonic.sync(3);
 
-      const reply = messages.find((m) => m.address === "/g_queryTree.reply");
+      const reply = messages.find((m) => m[0] === "/g_queryTree.reply");
 
       // Parse the response to find control values
       // Format with flag=1: flag, groupID, numChildren, [nodeID, numChildren/-1, defName?, numControls?, controlName, controlValue, ...]
-      const args = reply?.args || [];
+      const args = reply?.slice(1) || [];
 
       // Find the synth entry (node 1000)
       // Skip: flag(0), groupID(1), numChildren(2), then look for our synth
@@ -2241,10 +2241,10 @@ test.describe("/g_queryTree semantic tests", () => {
       await sonic.send("/g_queryTree", 0, 1);
       await sonic.sync(4);
 
-      const reply = messages.find((m) => m.address === "/g_queryTree.reply");
+      const reply = messages.find((m) => m[0] === "/g_queryTree.reply");
 
       // Parse the response to find control values
-      const args = reply?.args || [];
+      const args = reply?.slice(1) || [];
 
       let controlValues = {};
       let noteIsMapped = false;
@@ -2310,13 +2310,13 @@ test.describe("/g_queryTree semantic tests", () => {
       await sonic.sync(2);
 
       const queryReply = messages.find(
-        (m) => m.address === "/g_queryTree.reply"
+        (m) => m[0] === "/g_queryTree.reply"
       );
 
       // Extract node IDs from queryTree response
       // Format: flag, groupID, numChildren, [childID, numChildren or -1, ...]
       const queryNodeIds = [];
-      const args = queryReply?.args || [];
+      const args = queryReply?.slice(1) || [];
       for (let i = 1; i < args.length; i += 2) {
         if (typeof args[i] === "number" && args[i] >= 0) {
           queryNodeIds.push(args[i]);
@@ -2360,9 +2360,9 @@ test.describe("/b_gen semantic tests", () => {
       messages.length = 0;
       await sonic.send("/b_getn", bufNum, offset, count);
       await sonic.sync(syncId++);
-      const reply = messages.find((m) => m.address === "/b_setn");
+      const reply = messages.find((m) => m[0] === "/b_setn");
       if (reply) {
-        samples.push(...reply.args.slice(3));
+        samples.push(...reply.slice(4));
       }
     }
     return samples;
@@ -2394,8 +2394,8 @@ test.describe("/b_gen semantic tests", () => {
         messages.length = 0;
         await sonic.send("/b_getn", 0, offset, chunkSize);
         await sonic.sync(syncId++);
-        const reply = messages.find((m) => m.address === "/b_setn");
-        if (reply) samples.push(...reply.args.slice(3));
+        const reply = messages.find((m) => m[0] === "/b_setn");
+        if (reply) samples.push(...reply.slice(4));
       }
 
       await sonic.send("/b_free", 0);
@@ -2489,8 +2489,8 @@ test.describe("/b_gen semantic tests", () => {
         messages.length = 0;
         await sonic.send("/b_getn", 0, offset, chunkSize);
         await sonic.sync(syncId++);
-        const reply = messages.find((m) => m.address === "/b_setn");
-        if (reply) samples.push(...reply.args.slice(3));
+        const reply = messages.find((m) => m[0] === "/b_setn");
+        if (reply) samples.push(...reply.slice(4));
       }
 
       await sonic.send("/b_free", 0);
@@ -2560,8 +2560,8 @@ test.describe("/b_gen semantic tests", () => {
         messages.length = 0;
         await sonic.send("/b_getn", 0, offset, chunkSize);
         await sonic.sync(syncId++);
-        const reply = messages.find((m) => m.address === "/b_setn");
-        if (reply) samples.push(...reply.args.slice(3));
+        const reply = messages.find((m) => m[0] === "/b_setn");
+        if (reply) samples.push(...reply.slice(4));
       }
 
       await sonic.send("/b_free", 0);
@@ -2619,8 +2619,8 @@ test.describe("/b_gen semantic tests", () => {
         messages.length = 0;
         await sonic.send("/b_getn", 0, offset, chunkSize);
         await sonic.sync(syncId++);
-        const reply = messages.find((m) => m.address === "/b_setn");
-        if (reply) samples.push(...reply.args.slice(3));
+        const reply = messages.find((m) => m[0] === "/b_setn");
+        if (reply) samples.push(...reply.slice(4));
       }
 
       await sonic.send("/b_free", 0);
@@ -2697,8 +2697,8 @@ test.describe("/b_gen semantic tests", () => {
         messages.length = 0;
         await sonic.send("/b_getn", 0, offset, chunkSize);
         await sonic.sync(syncId++);
-        const reply = messages.find((m) => m.address === "/b_setn");
-        if (reply) samples.push(...reply.args.slice(3));
+        const reply = messages.find((m) => m[0] === "/b_setn");
+        if (reply) samples.push(...reply.slice(4));
       }
 
       await sonic.send("/b_free", 0);
@@ -2771,8 +2771,8 @@ test.describe("/b_gen semantic tests", () => {
         messages.length = 0;
         await sonic.send("/b_getn", 0, offset, chunkSize);
         await sonic.sync(syncId++);
-        const reply = messages.find((m) => m.address === "/b_setn");
-        if (reply) samples.push(...reply.args.slice(3));
+        const reply = messages.find((m) => m[0] === "/b_setn");
+        if (reply) samples.push(...reply.slice(4));
       }
 
       await sonic.send("/b_free", 0);
@@ -2849,8 +2849,8 @@ test.describe("/b_gen semantic tests", () => {
       messages.length = 0;
       await sonic.send("/b_getn", 1, 0, 8);
       await sonic.sync(3);
-      const sourceReply = messages.find((m) => m.address === "/b_setn");
-      const sourceSamples = sourceReply?.args?.slice(3) || [];
+      const sourceReply = messages.find((m) => m[0] === "/b_setn");
+      const sourceSamples = sourceReply?.slice(4) || [];
       const sourceHasData = sourceSamples.some((s) => s !== 0);
 
       // Copy from buffer 1 to buffer 0: destPos=0, srcBuf=1, srcPos=0, count=256
@@ -2861,8 +2861,8 @@ test.describe("/b_gen semantic tests", () => {
       messages.length = 0;
       await sonic.send("/b_getn", 0, 0, 8);
       await sonic.sync(5);
-      const destReply = messages.find((m) => m.address === "/b_setn");
-      const destSamples = destReply?.args?.slice(3) || [];
+      const destReply = messages.find((m) => m[0] === "/b_setn");
+      const destSamples = destReply?.slice(4) || [];
       const destHasData = destSamples.some((s) => s !== 0);
 
       // Cleanup
@@ -2907,11 +2907,11 @@ test.describe("Control bus semantic tests", () => {
       await sonic.send("/c_get", 0);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/c_set");
+      const reply = messages.find((m) => m[0] === "/c_set");
 
       return {
-        busIndex: reply?.args?.[0],
-        value: reply?.args?.[1],
+        busIndex: reply?.[1],
+        value: reply?.[2],
       };
     }, sonicConfig);
 
@@ -2939,8 +2939,8 @@ test.describe("Control bus semantic tests", () => {
         messages.length = 0;
         await sonic.send("/c_get", bus);
         await sonic.sync(2 + bus);
-        const reply = messages.find((m) => m.address === "/c_set");
-        values.push(reply?.args?.[1]);
+        const reply = messages.find((m) => m[0] === "/c_set");
+        values.push(reply?.[2]);
       }
 
       return { values };
@@ -2970,12 +2970,12 @@ test.describe("Control bus semantic tests", () => {
       await sonic.send("/c_getn", 5, 5);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/c_setn");
+      const reply = messages.find((m) => m[0] === "/c_setn");
 
       return {
-        startIndex: reply?.args?.[0],
-        count: reply?.args?.[1],
-        values: reply?.args?.slice(2),
+        startIndex: reply?.[1],
+        count: reply?.[2],
+        values: reply?.slice(3),
       };
     }, sonicConfig);
 
@@ -3007,8 +3007,8 @@ test.describe("Control bus semantic tests", () => {
       await sonic.send("/c_getn", 10, 5);
       await sonic.sync(2);
 
-      const reply = messages.find((m) => m.address === "/c_setn");
-      const values = reply?.args?.slice(2) || [];
+      const reply = messages.find((m) => m[0] === "/c_setn");
+      const values = reply?.slice(3) || [];
 
       return {
         values,
@@ -3042,7 +3042,7 @@ test.describe("Error handling tests", () => {
       await sonic.sync(1);
 
       // Should not receive /n_info for non-existent node
-      const nInfoMsg = messages.find((m) => m.address === "/n_info");
+      const nInfoMsg = messages.find((m) => m[0] === "/n_info");
 
       return {
         receivedNInfo: !!nInfoMsg,
@@ -3161,12 +3161,12 @@ test.describe("Error handling tests", () => {
       await sonic.send("/b_query", 999);
       await sonic.sync(1);
 
-      const reply = messages.find((m) => m.address === "/b_info");
+      const reply = messages.find((m) => m[0] === "/b_info");
 
       return {
         hasReply: !!reply,
         // Non-allocated buffer should report 0 frames
-        frames: reply?.args?.[1],
+        frames: reply?.[2],
       };
     }, sonicConfig);
 
@@ -3209,10 +3209,10 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(2);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
       return {
         serverResponsive: !!statusReply,
-        numGroups: statusReply?.args?.[3],
+        numGroups: statusReply?.[4],
       };
     }, sonicConfig);
 
@@ -3301,7 +3301,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await new Promise((r) => setTimeout(r, 200));
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
       const hasUGenError = debugMessages.some(
         (m) => m.text && m.text.includes("not installed")
       );
@@ -3310,7 +3310,7 @@ test.describe("Malformed input robustness tests", () => {
         serverResponsive: !!statusReply,
         hasUGenError,
         debugMessages: debugMessages.map((m) => m.text).filter(Boolean),
-        allMessages: messages.map((m) => m.address),
+        allMessages: messages.map((m) => m[0]),
       };
     }, sonicConfig);
 
@@ -3364,7 +3364,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(2);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
       return {
         serverResponsive: !!statusReply,
       };
@@ -3400,7 +3400,7 @@ test.describe("Malformed input robustness tests", () => {
       // First verify server works before malformed input
       await sonic.send("/status");
       await new Promise((r) => setTimeout(r, 100));
-      const statusBefore = messages.find((m) => m.address === "/status.reply");
+      const statusBefore = messages.find((m) => m[0] === "/status.reply");
 
       // Send empty synthdef - should be rejected gracefully
       messages.length = 0;
@@ -3413,7 +3413,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await new Promise((r) => setTimeout(r, 200));
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
       const hasErrorMessage = debugMessages.some(
         (m) => m.text && m.text.includes("ERROR") && m.text.includes("d_recv")
       );
@@ -3423,7 +3423,7 @@ test.describe("Malformed input robustness tests", () => {
         serverResponsive: !!statusReply,
         hasErrorMessage,
         debugMessages: debugMessages.map((m) => m.text).filter(Boolean),
-        allMessages: messages.map((m) => m.address),
+        allMessages: messages.map((m) => m[0]),
       };
     }, sonicConfig);
 
@@ -3463,7 +3463,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(2);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
       return {
         serverResponsive: !!statusReply,
       };
@@ -3500,7 +3500,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(2);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
 
       return {
         serverResponsive: !!statusReply,
@@ -3540,7 +3540,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(2);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
 
       return {
         serverResponsive: !!statusReply,
@@ -3578,7 +3578,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(2);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
 
       return {
         serverResponsive: !!statusReply,
@@ -3620,7 +3620,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(3);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
 
       // Cleanup
       await sonic.send("/n_free", 7000);
@@ -3659,7 +3659,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(2);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
 
       return {
         serverResponsive: !!statusReply,
@@ -3695,7 +3695,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(3);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
 
       // Cleanup
       await sonic.send("/b_free", 200);
@@ -3743,11 +3743,11 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(2);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
 
       return {
         serverResponsive: !!statusReply,
-        numGroups: statusReply?.args?.[3],
+        numGroups: statusReply?.[4],
       };
     }, sonicConfig);
 
@@ -3775,7 +3775,7 @@ test.describe("Malformed input robustness tests", () => {
       await sonic.send("/status");
       await sonic.sync(2);
 
-      const statusReply = messages.find((m) => m.address === "/status.reply");
+      const statusReply = messages.find((m) => m[0] === "/status.reply");
 
       return {
         serverResponsive: !!statusReply,
@@ -3859,8 +3859,8 @@ test.describe("/d_freeAll semantic tests", () => {
       messages.length = 0;
       await sonic.send("/status");
       await sonic.sync(1);
-      const statusBefore = messages.find((m) => m.address === "/status.reply");
-      const synthdefCountBefore = statusBefore?.args?.[4] || 0;
+      const statusBefore = messages.find((m) => m[0] === "/status.reply");
+      const synthdefCountBefore = statusBefore?.[5] || 0;
 
       // Free all synthdefs
       await sonic.send("/d_freeAll");
@@ -3870,8 +3870,8 @@ test.describe("/d_freeAll semantic tests", () => {
       messages.length = 0;
       await sonic.send("/status");
       await sonic.sync(3);
-      const statusAfter = messages.find((m) => m.address === "/status.reply");
-      const synthdefCountAfter = statusAfter?.args?.[4] || 0;
+      const statusAfter = messages.find((m) => m[0] === "/status.reply");
+      const synthdefCountAfter = statusAfter?.[5] || 0;
 
       return {
         synthdefCountBefore,
@@ -4284,11 +4284,11 @@ test.describe("/d_recv unknown UGen handling", () => {
 
       // Check if /done was received (it shouldn't be for failed load)
       const doneMsg = messages.find(m =>
-        m.address === "/done" && m.args?.[0] === "/d_recv"
+        m[0] === "/done" && m[1] === "/d_recv"
       );
 
       // Check if /fail was received
-      const failMsg = messages.find(m => m.address === "/fail");
+      const failMsg = messages.find(m => m[0] === "/fail");
 
       // Check debug output for error message
       const hasErrorInDebug = debugMessages.some(m =>
@@ -4312,7 +4312,7 @@ test.describe("/d_recv unknown UGen handling", () => {
       return {
         gotDone: !!doneMsg,
         gotFail: !!failMsg,
-        failMessage: failMsg?.args,
+        failMessage: failMsg?.slice(1),
         hasErrorInDebug,
         debugMessages,
         synthCreated,
