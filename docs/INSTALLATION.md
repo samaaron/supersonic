@@ -28,7 +28,7 @@ This loads the client API and sets up paths to fetch assets from CDN. The WASM e
 
 For production, consider pinning to a specific version:
 ```javascript
-import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.41.0";
+import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.42.0";
 ```
 
 
