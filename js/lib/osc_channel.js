@@ -30,6 +30,8 @@ export class OscChannel {
     #metricsView;        // SAB mode: Int32Array view into metrics region
     #bypassLookaheadS;   // Threshold for bypass vs prescheduler routing
     #sourceId;           // Numeric source ID (0 = main thread, 1+ = workers)
+    #blocking;           // Whether this channel can block with Atomics.wait()
+    #getCurrentNTP;      // Function returning current NTP time in seconds
 
     // Local metrics counters
     // SAB mode: used for tracking, then written atomically to shared memory
@@ -52,6 +54,8 @@ export class OscChannel {
         this.#preschedulerPort = config.preschedulerPort || null;
         this.#bypassLookaheadS = config.bypassLookaheadS ?? DEFAULT_BYPASS_LOOKAHEAD_S;
         this.#sourceId = config.sourceId ?? 0;
+        this.#blocking = config.blocking ?? (this.#sourceId !== 0);
+        this.#getCurrentNTP = config.getCurrentNTP ?? getCurrentNTPFromPerformance;
 
         if (mode === 'postMessage') {
             this.#directPort = config.port;
@@ -99,7 +103,7 @@ export class OscChannel {
      */
     classify(oscData) {
         return classifyOscMessage(oscData, {
-            getCurrentNTP: getCurrentNTPFromPerformance,
+            getCurrentNTP: this.#getCurrentNTP,
             bypassLookaheadS: this.#bypassLookaheadS,
         });
     }
@@ -202,7 +206,7 @@ export class OscChannel {
         } else {
             // SAB mode - write to ring buffer with sourceId in header
             // Logging is handled by osc_out_log_sab_worker reading from ring buffer
-            const isMainThread = this.#sourceId === 0;
+            const canBlock = this.#blocking;
 
             const success = writeToRingBuffer({
                 atomicView: this.#views.atomicView,
@@ -213,16 +217,16 @@ export class OscChannel {
                 controlIndices: this.#sabConfig.controlIndices,
                 oscMessage: oscData,
                 sourceId: this.#sourceId,
-                // Main thread: try once (can't block), will fall back to prescheduler
-                // Workers: use Atomics.wait() for guaranteed delivery (can block)
-                maxSpins: isMainThread ? 0 : 10,
-                useWait: !isMainThread,  // Workers block until lock available
+                // Non-blocking: try once, will fall back to prescheduler
+                // Blocking: use Atomics.wait() for guaranteed delivery
+                maxSpins: canBlock ? 10 : 0,
+                useWait: canBlock,
             });
 
             if (!success) {
-                // Main thread: fall back to prescheduler for guaranteed delivery
+                // Non-blocking: fall back to prescheduler for guaranteed delivery
                 // The prescheduler is a worker and can use Atomics.wait()
-                if (isMainThread && allowFallback && this.#preschedulerPort) {
+                if (!canBlock && allowFallback && this.#preschedulerPort) {
                     if (this.#metricsView) {
                         // Track when optimistic direct write falls back to prescheduler (not an error - message still delivered)
                         Atomics.add(this.#metricsView, MetricsOffsets.RING_BUFFER_DIRECT_WRITE_FAILS, 1);
@@ -315,6 +319,15 @@ export class OscChannel {
     // =========================================================================
 
     /**
+     * Set the NTP time source for classification.
+     * Use in AudioWorklet where performance.timeOrigin is unavailable.
+     * @param {Function} fn - Returns current NTP time in seconds
+     */
+    set getCurrentNTP(fn) {
+        this.#getCurrentNTP = fn;
+    }
+
+    /**
      * Get the transport mode
      * @returns {'sab' | 'postMessage'}
      */
@@ -333,6 +346,7 @@ export class OscChannel {
             preschedulerPort: this.#preschedulerPort,
             bypassLookaheadS: this.#bypassLookaheadS,
             sourceId: this.#sourceId,
+            blocking: this.#blocking,
         };
 
         if (this.#mode === 'postMessage') {
@@ -391,6 +405,7 @@ export class OscChannel {
      * @param {MessagePort} config.preschedulerPort - MessagePort to prescheduler
      * @param {number} [config.bypassLookaheadS=0.2] - Threshold for bypass routing (seconds)
      * @param {number} [config.sourceId=0] - Source ID (0 = main, 1+ = workers)
+     * @param {boolean} [config.blocking] - Whether to use Atomics.wait() (default: true for sourceId !== 0)
      * @returns {OscChannel}
      */
     static createPostMessage(config) {
@@ -411,6 +426,7 @@ export class OscChannel {
      * @param {MessagePort} config.preschedulerPort - MessagePort to prescheduler
      * @param {number} [config.bypassLookaheadS=0.2] - Threshold for bypass routing (seconds)
      * @param {number} [config.sourceId=0] - Source ID (0 = main, 1+ = workers)
+     * @param {boolean} [config.blocking] - Whether to use Atomics.wait() (default: true for sourceId !== 0)
      * @returns {OscChannel}
      */
     static createSAB(config) {
@@ -431,6 +447,7 @@ export class OscChannel {
             preschedulerPort: config.preschedulerPort,
             bypassLookaheadS: config.bypassLookaheadS,
             sourceId: config.sourceId,
+            blocking: config.blocking,
         });
     }
 
@@ -447,6 +464,7 @@ export class OscChannel {
                 preschedulerPort: data.preschedulerPort,
                 bypassLookaheadS: data.bypassLookaheadS,
                 sourceId: data.sourceId,
+                blocking: data.blocking,
             });
         } else {
             return new OscChannel('sab', {
@@ -457,6 +475,7 @@ export class OscChannel {
                 preschedulerPort: data.preschedulerPort,
                 bypassLookaheadS: data.bypassLookaheadS,
                 sourceId: data.sourceId,
+                blocking: data.blocking,
             });
         }
     }

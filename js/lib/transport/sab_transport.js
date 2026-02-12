@@ -237,6 +237,7 @@ export class SABTransport extends Transport {
             preschedulerPort: preschedulerChannel.port2,
             bypassLookaheadS: this._config.bypassLookaheadS,
             sourceId,
+            blocking: options.blocking,
         });
     }
 
