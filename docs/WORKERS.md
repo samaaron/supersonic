@@ -56,7 +56,7 @@ Using a `type` field lets you handle different message types cleanly - for examp
 
 ## Multiple Workers
 
-Each call to `createOscChannel()` returns a new channel with a unique source ID. This means you can have multiple workers all sending OSC independently - they don't need to coordinate with each other, and their messages can be traced back to their source in metrics and logs.
+Each call to `createOscChannel()` returns a new channel with a unique source ID. An optional `blocking` parameter (SAB mode only) controls whether `Atomics.wait()` is used for guaranteed ring buffer delivery (default: `true` for workers where `sourceId !== 0`, `false` for main thread). Set to `false` for AudioWorklet use. This means you can have multiple workers all sending OSC independently - they don't need to coordinate with each other, and their messages can be traced back to their source in metrics and logs.
 
 ```javascript
 const sequencerChannel = supersonic.createOscChannel(); // sourceId: 1
@@ -101,11 +101,12 @@ The 500ms threshold is configurable via `bypassLookaheadMs` in the SuperSonic co
 
 ### Properties
 
-| Property       | Description                     |
-| -------------- | ------------------------------- |
-| `mode`         | `'sab'` or `'postMessage'`      |
-| `transferable` | Data for `postMessage` transfer |
-| `transferList` | Transferable objects array      |
+| Property        | Description                                                   |
+| --------------- | ------------------------------------------------------------- |
+| `mode`          | `'sab'` or `'postMessage'`                                    |
+| `transferable`  | Data for `postMessage` transfer                               |
+| `transferList`  | Transferable objects array                                    |
+| `getCurrentNTP` | (setter) Set NTP time source function for timestamp classification |
 
 ### Static Methods
 
@@ -159,6 +160,41 @@ function tick() {
   const msPerBeat = 60000 / bpm;
   setTimeout(tick, msPerBeat / 4); // 16th notes
 }
+```
+
+## Using OscChannel in an AudioWorklet
+
+OscChannel can also be used inside an `AudioWorkletProcessor`, not just Web Workers. This lets custom AudioWorklet code send OSC directly to scsynth without routing through the main thread.
+
+There are three key differences from worker usage:
+
+**1. Import from the AudioWorklet-safe entry point**
+
+The standard `supersonic-scsynth` entry point pulls in `TextDecoder`, `Worker`, and DOM APIs that aren't available in `AudioWorkletGlobalScope`. Use the slim entry point instead:
+
+```javascript
+import { OscChannel } from 'supersonic-scsynth/osc_channel.js';
+```
+
+This only exports `OscChannel` and its dependencies (ring buffer, classifier, offsets) — nothing that touches the DOM or spawns workers.
+
+**2. Set `blocking: false` (SAB mode)**
+
+In SAB mode, AudioWorklet code runs on the audio rendering thread, which cannot call `Atomics.wait()`. Pass `blocking: false` when creating the channel to ensure non-blocking ring buffer writes (in postMessage mode this has no effect):
+
+```javascript
+const channel = supersonic.createOscChannel({ blocking: false });
+```
+
+**3. Provide an NTP time source**
+
+`performance.timeOrigin` is unavailable in `AudioWorkletGlobalScope`, so the default NTP clock won't work. Use the `getCurrentNTP` setter to provide the AudioWorklet's own NTP time source:
+
+```javascript
+channel.getCurrentNTP = () => {
+  // your AudioWorklet NTP calculation here
+  return currentTime + ntpStartTime + driftOffset;
+};
 ```
 
 ## Cleanup

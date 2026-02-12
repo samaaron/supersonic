@@ -167,6 +167,12 @@ For full details, see [SCSYNTH_COMMAND_REFERENCE.md](SCSYNTH_COMMAND_REFERENCE.m
 
 SuperSonic adds functionality not present in standard scsynth:
 
+### Zombie Synth Prevention
+
+When RT memory is exhausted during UGen construction, upstream scsynth leaves dead synth nodes that never free themselves — no `DoneAction` fires because all units are marked as done at construction time. These "zombie" nodes consume RT memory indefinitely and can prevent all future synth creation.
+
+SuperSonic detects when all units in a synth are dead at construction time and schedules the node for cleanup automatically, using the same mechanism as `DoneAction=2` (`freeSelf`). This is a no-op when any unit survived construction, preserving upstream behavior exactly.
+
 ### `/b_allocFile` - Inline Audio Loading
 
 Load audio from inline file data without needing a URL:

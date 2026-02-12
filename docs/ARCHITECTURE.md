@@ -179,6 +179,8 @@ Main Thread                          AudioWorklet
 4. **PM mode**: AudioWorklet reads buffer, sends via postMessage
 5. **SuperSonic** emits `onReply` event
 
+**Lapping detection**: In SAB mode, the log worker maintains its own read tail (`IN_LOG_TAIL`) independent of the C++ consumer's tail. If the writer wraps the ring buffer and overtakes the log reader, the log worker detects the invalid magic number at its read position, resyncs to head, and skips the corrupted batch rather than reading corrupt data.
+
 ### Debug Messages
 
 Same pattern as OSC replies but via DEBUG buffer and `onDebug` event.
@@ -189,6 +191,8 @@ Same pattern as OSC replies but via DEBUG buffer and `onDebug` event.
 |-----------|------|
 | SuperSonic API | `js/supersonic.js` |
 | OSC routing | `js/lib/osc_channel.js` |
+| OscChannel (AudioWorklet-safe) | `js/osc_channel.js` |
+| Ring buffer read/write | `js/lib/ring_buffer_core.js` |
 | SAB transport | `js/lib/transport/sab_transport.js` |
 | PM transport | `js/lib/transport/postmessage_transport.js` |
 | Prescheduler | `js/workers/osc_out_prescheduler_worker.js` |

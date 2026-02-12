@@ -1119,21 +1119,29 @@ const unixSeconds = Date.now() / 1000;
 const ntpSeconds = unixSeconds + SuperSonic.osc.NTP_EPOCH_OFFSET;
 ```
 
-### `createOscChannel()`
+### `createOscChannel(options?)`
 
-Create an `OscChannel` for sending OSC from a Web Worker directly to the AudioWorklet, bypassing the main thread. Useful for high-frequency control or offloading work.
+Create an `OscChannel` for sending OSC from a Web Worker or AudioWorkletProcessor directly to the AudioWorklet, bypassing the main thread. Useful for high-frequency control or offloading work.
+
+**Options:**
+
+| Option     | Type    | Description |
+|------------|---------|-------------|
+| `blocking` | boolean | SAB mode only. Whether the channel can use `Atomics.wait()` for guaranteed ring buffer delivery. Default: `true` for worker channels (`sourceId !== 0`), `false` for main thread. Set to `false` when using inside an `AudioWorkletProcessor`. In postMessage mode this option has no effect. |
 
 ```javascript
 const channel = supersonic.createOscChannel();
 myWorker.postMessage({ channel: channel.transferable }, channel.transferList);
 ```
 
-In worker:
+In a Web Worker:
 ```javascript
 import { OscChannel } from 'supersonic-scsynth';
 const channel = OscChannel.fromTransferable(event.data.channel);
 channel.send(oscBytes);  // Send directly to AudioWorklet
 ```
+
+For AudioWorklet use, import from the AudioWorklet-safe entry point (`supersonic-scsynth/osc_channel.js`) which avoids `TextDecoder`, `Worker`, and DOM APIs. See [Workers Guide](WORKERS.md#using-oscchannel-in-an-audioworklet) for details.
 
 For detailed usage including multiple workers, see [Workers Guide](WORKERS.md).
 
