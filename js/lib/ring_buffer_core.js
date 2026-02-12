@@ -156,19 +156,30 @@ export function readMessagesFromBuffer({
     let currentTail = tail;
     let messagesRead = 0;
 
-    while (currentTail !== head && messagesRead < maxMessages) {
-        // Check if there's enough space for a header before the end
-        const bytesToEnd = bufferSize - currentTail;
-        if (bytesToEnd < headerSize) {
-            // Not enough space for header, wrap to beginning
-            currentTail = 0;
-            continue;
+    // Helper: read a little-endian uint32 that may span the buffer boundary
+    const readU32Wrap = (relativeOffset) => {
+        const absOff = relativeOffset;
+        if (absOff + 4 <= bufferSize) {
+            return dataView.getUint32(bufferStart + absOff, true);
         }
+        // Split across boundary — read byte by byte (little-endian)
+        let val = 0;
+        for (let b = 0; b < 4; b++) {
+            val |= uint8View[bufferStart + ((absOff + b) % bufferSize)] << (b * 8);
+        }
+        return val;
+    };
 
-        const readPos = bufferStart + currentTail;
+    while (currentTail !== head && messagesRead < maxMessages) {
+        const bytesToEnd = bufferSize - currentTail;
 
-        // Read magic number
-        const magic = dataView.getUint32(readPos, true);
+        // Read magic — may be split across buffer boundary
+        let magic;
+        if (bytesToEnd >= 4) {
+            magic = dataView.getUint32(bufferStart + currentTail, true);
+        } else {
+            magic = readU32Wrap(currentTail);
+        }
 
         // Check for padding marker - skip to beginning
         if (magic === paddingMagic) {
@@ -186,10 +197,10 @@ export function readMessagesFromBuffer({
             continue;
         }
 
-        // Read header fields
-        const length = dataView.getUint32(readPos + 4, true);
-        const sequence = dataView.getUint32(readPos + 8, true);
-        const sourceId = dataView.getUint32(readPos + 12, true);
+        // Read header fields (may span the boundary, matching C++ split-read approach)
+        const length = readU32Wrap((currentTail + 4) % bufferSize);
+        const sequence = readU32Wrap((currentTail + 8) % bufferSize);
+        const sourceId = readU32Wrap((currentTail + 12) % bufferSize);
 
         // Validate message length
         if (length < headerSize || length > bufferSize) {
@@ -203,7 +214,7 @@ export function readMessagesFromBuffer({
 
         // Calculate payload location (no allocation - just arithmetic)
         const payloadLength = length - headerSize;
-        const payloadOffset = readPos + headerSize;
+        const payloadOffset = bufferStart + ((currentTail + headerSize) % bufferSize);
 
         // Call message handler with offset/length (caller reads directly from uint8View)
         onMessage(payloadOffset, payloadLength, sequence, sourceId);
