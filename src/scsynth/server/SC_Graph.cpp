@@ -524,6 +524,32 @@ void Graph_FirstCalc(Graph* inGraph) {
         (*unit->mUnitDef->mUnitCtorFunc)(unit);
     }
 
+    // [SuperSonic] Prevent zombie synth nodes when RT memory is exhausted.
+    //
+    // When RTAlloc fails, UGen constructors (via ClearUnitOnMemFailed) set
+    // unit->mDone = true and replace the calc function with ClearUnitOutputs.
+    // If ALL units are done after construction, this synth will never produce
+    // audio and — critically — will never trigger a DoneAction to free itself.
+    // It becomes a zombie: consuming RT memory, accumulating indefinitely,
+    // and preventing all future synth creation.
+    //
+    // Node_End() safely schedules deletion for the next calc cycle (the same
+    // mechanism used by DoneAction=2 / freeSelf). This is a no-op when any
+    // unit survived construction, preserving upstream behavior exactly.
+    {
+        bool allDone = true;
+        for (uint32 i = 0; i < numUnits; ++i) {
+            if (!units[i]->mDone) {
+                allDone = false;
+                break;
+            }
+        }
+        if (allDone && numUnits > 0) {
+            Node_End(&inGraph->mNode);
+            return;
+        }
+    }
+
     inGraph->mNode.mCalcFunc = (NodeCalcFunc)&Graph_Calc;
     // after setting the calc function!
     Graph_DispatchUnitCmds(inGraph);
