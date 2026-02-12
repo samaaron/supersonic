@@ -459,6 +459,41 @@ extern "C" {
 
         metrics->process_count.fetch_add(1, std::memory_order_relaxed);
 
+        // Calculate and write ring buffer usage to metrics BEFORE consuming messages
+        // so the metric reflects actual queue depth as seen by the audio thread
+        {
+            static uint32_t local_in_peak = 0;
+            static uint32_t local_out_peak = 0;
+            static uint32_t local_debug_peak = 0;
+            static uint32_t metrics_cycle = 0;
+
+            int32_t in_head = control->in_head.load(std::memory_order_relaxed);
+            int32_t in_tail = control->in_tail.load(std::memory_order_relaxed);
+            uint32_t in_used = (in_head - in_tail + IN_BUFFER_SIZE) % IN_BUFFER_SIZE;
+            metrics->in_buffer_used_bytes.store(in_used, std::memory_order_relaxed);
+            if (in_used > local_in_peak) local_in_peak = in_used;
+
+            int32_t out_head = control->out_head.load(std::memory_order_relaxed);
+            int32_t out_tail = control->out_tail.load(std::memory_order_relaxed);
+            uint32_t out_used = (out_head - out_tail + OUT_BUFFER_SIZE) % OUT_BUFFER_SIZE;
+            metrics->out_buffer_used_bytes.store(out_used, std::memory_order_relaxed);
+            if (out_used > local_out_peak) local_out_peak = out_used;
+
+            int32_t debug_head = control->debug_head.load(std::memory_order_relaxed);
+            int32_t debug_tail = control->debug_tail.load(std::memory_order_relaxed);
+            uint32_t debug_used = (debug_head - debug_tail + DEBUG_BUFFER_SIZE) % DEBUG_BUFFER_SIZE;
+            metrics->debug_buffer_used_bytes.store(debug_used, std::memory_order_relaxed);
+            if (debug_used > local_debug_peak) local_debug_peak = debug_used;
+
+            // Write peaks to atomics every 16 cycles (~43ms at 48kHz/128)
+            if (++metrics_cycle >= 16) {
+                metrics_cycle = 0;
+                metrics->in_buffer_peak_bytes.store(local_in_peak, std::memory_order_relaxed);
+                metrics->out_buffer_peak_bytes.store(local_out_peak, std::memory_order_relaxed);
+                metrics->debug_buffer_peak_bytes.store(local_debug_peak, std::memory_order_relaxed);
+            }
+        }
+
         // Process incoming OSC messages if scsynth is ready
         if (g_world) {
             int32_t in_head = control->in_head.load(std::memory_order_acquire);
@@ -791,41 +826,6 @@ extern "C" {
                 }
             }
 
-            // Calculate and write ring buffer usage to metrics
-            // This makes buffer usage available in postMessage mode via the snapshot
-            {
-                // Local peak tracking - updated every cycle, written to atomics every 16 cycles
-                static uint32_t local_in_peak = 0;
-                static uint32_t local_out_peak = 0;
-                static uint32_t local_debug_peak = 0;
-                static uint32_t metrics_cycle = 0;
-
-                int32_t in_head = control->in_head.load(std::memory_order_relaxed);
-                int32_t in_tail = control->in_tail.load(std::memory_order_relaxed);
-                uint32_t in_used = (in_head - in_tail + IN_BUFFER_SIZE) % IN_BUFFER_SIZE;
-                metrics->in_buffer_used_bytes.store(in_used, std::memory_order_relaxed);
-                if (in_used > local_in_peak) local_in_peak = in_used;
-
-                int32_t out_head = control->out_head.load(std::memory_order_relaxed);
-                int32_t out_tail = control->out_tail.load(std::memory_order_relaxed);
-                uint32_t out_used = (out_head - out_tail + OUT_BUFFER_SIZE) % OUT_BUFFER_SIZE;
-                metrics->out_buffer_used_bytes.store(out_used, std::memory_order_relaxed);
-                if (out_used > local_out_peak) local_out_peak = out_used;
-
-                int32_t debug_head = control->debug_head.load(std::memory_order_relaxed);
-                int32_t debug_tail = control->debug_tail.load(std::memory_order_relaxed);
-                uint32_t debug_used = (debug_head - debug_tail + DEBUG_BUFFER_SIZE) % DEBUG_BUFFER_SIZE;
-                metrics->debug_buffer_used_bytes.store(debug_used, std::memory_order_relaxed);
-                if (debug_used > local_debug_peak) local_debug_peak = debug_used;
-
-                // Write peaks to atomics every 16 cycles (~43ms at 48kHz/128)
-                if (++metrics_cycle >= 16) {
-                    metrics_cycle = 0;
-                    metrics->in_buffer_peak_bytes.store(local_in_peak, std::memory_order_relaxed);
-                    metrics->out_buffer_peak_bytes.store(local_out_peak, std::memory_order_relaxed);
-                    metrics->debug_buffer_peak_bytes.store(local_debug_peak, std::memory_order_relaxed);
-                }
-            }
         }
 
         return true; // Keep processor alive
