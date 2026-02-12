@@ -170,6 +170,14 @@ esbuild "$JS_DIR/supersonic.js" \
     --outfile="$OUTPUT_DIR/supersonic.js" \
     --external:./scsynth-nrt.wasm
 
+# Bundle OscChannel entry point (AudioWorklet-safe — no TextDecoder, Worker, or DOM APIs)
+esbuild "$JS_DIR/osc_channel.js" \
+    --bundle \
+    --format=esm \
+    --define:__DEV__=$DEV_FLAG \
+    $MINIFY_FLAG \
+    --outfile="$OUTPUT_DIR/osc_channel.js"
+
 # Process worker files through esbuild (separate output files, same __DEV__ treatment)
 echo "Processing worker files..."
 mkdir -p "$OUTPUT_DIR/workers"
