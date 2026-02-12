@@ -59,6 +59,23 @@ const initRingBuffer = (buffer, base, constants) => {
 };
 
 /**
+ * Peek at the magic uint32 at a given relative buffer position,
+ * handling wrap-around if the 4 bytes straddle the buffer boundary.
+ */
+const peekMagic = (relativeOffset) => {
+    const bufferStart = ringBufferBase + bufferConstants.IN_BUFFER_START;
+    const bufferSize = bufferConstants.IN_BUFFER_SIZE;
+    if (relativeOffset + 4 <= bufferSize) {
+        return dataView.getUint32(bufferStart + relativeOffset, true);
+    }
+    let val = 0;
+    for (let b = 0; b < 4; b++) {
+        val |= uint8View[bufferStart + ((relativeOffset + b) % bufferSize)] << (b * 8);
+    }
+    return val;
+};
+
+/**
  * Read all available messages from IN buffer for logging
  * Uses shared ring_buffer_core for read logic
  */
@@ -68,6 +85,25 @@ const readMessages = () => {
 
     if (head === logTail) {
         return []; // No new messages to log
+    }
+
+    // Check if logTail is still at a valid message boundary.
+    // The writer only checks IN_TAIL (C++ consumer) for space, not IN_LOG_TAIL.
+    // If the C++ consumer is fast and the buffer wraps, the writer can overwrite
+    // positions the log worker hasn't read yet (lapping). Detect this by peeking
+    // at the magic — if it's not MESSAGE_MAGIC, resync to head and skip this batch.
+    const magic = peekMagic(logTail);
+    if (magic !== bufferConstants.MESSAGE_MAGIC) {
+        if (__DEV__) {
+            console.warn(
+                `[OSCOutLogWorker] Resyncing: invalid magic at logTail=${logTail}` +
+                ` (got=0x${(magic >>> 0).toString(16).padStart(8, '0')}` +
+                ` expected=0x${(bufferConstants.MESSAGE_MAGIC >>> 0).toString(16).padStart(8, '0')})` +
+                ` head=${head} — writer likely lapped log reader, skipping to head`
+            );
+        }
+        Atomics.store(atomicView, CONTROL_INDICES.IN_LOG_TAIL, head);
+        return [];
     }
 
     const entries = [];
@@ -97,7 +133,30 @@ const readMessages = () => {
             });
         },
         onCorruption: (position) => {
-            console.error('[OSCOutLogWorker] Corrupted message at position', position);
+            // Rate-limit corruption logs: first 3 in detail, then summary
+            if (!readMessages._corruptCount) readMessages._corruptCount = 0;
+            readMessages._corruptCount++;
+            if (readMessages._corruptCount <= 3) {
+                // Dump diagnostic info: head, logTail, bytes at position, expected magic
+                const absPos = ringBufferBase + bufferConstants.IN_BUFFER_START + position;
+                const got = dataView.getUint32(absPos, true);
+                const byte0 = uint8View[absPos];
+                const byte1 = uint8View[absPos + 1];
+                const byte2 = uint8View[absPos + 2];
+                const byte3 = uint8View[absPos + 3];
+                const inTail = Atomics.load(atomicView, CONTROL_INDICES.IN_TAIL);
+                console.error(
+                    `[OSCOutLogWorker] Corrupted message at position ${position}:` +
+                    ` head=${head} logTail=${logTail} inTail=${inTail}` +
+                    ` got=0x${(got >>> 0).toString(16).padStart(8, '0')}` +
+                    ` expected=0x${(bufferConstants.MESSAGE_MAGIC >>> 0).toString(16).padStart(8, '0')}` +
+                    ` bytes=[${byte0},${byte1},${byte2},${byte3}]` +
+                    ` bufStart=${ringBufferBase + bufferConstants.IN_BUFFER_START}` +
+                    ` bufSize=${bufferConstants.IN_BUFFER_SIZE}`
+                );
+            } else if (readMessages._corruptCount === 4) {
+                console.error(`[OSCOutLogWorker] Suppressing further corruption logs (${readMessages._corruptCount}+ total)`);
+            }
         }
     });
 
