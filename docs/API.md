@@ -1141,7 +1141,7 @@ const channel = OscChannel.fromTransferable(event.data.channel);
 channel.send(oscBytes);  // Send directly to AudioWorklet
 ```
 
-For AudioWorklet use, import from the AudioWorklet-safe entry point (`supersonic-scsynth/osc_channel.js`) which avoids `TextDecoder`, `Worker`, and DOM APIs. See [Workers Guide](WORKERS.md#using-oscchannel-in-an-audioworklet) for details.
+For AudioWorklet use, import from the AudioWorklet-safe entry point (`supersonic-scsynth/osc-channel`) which avoids `TextDecoder`, `Worker`, and DOM APIs. See [Workers Guide](WORKERS.md#using-oscchannel-in-an-audioworklet) for details.
 
 For detailed usage including multiple workers, see [Workers Guide](WORKERS.md).
 

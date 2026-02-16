@@ -1020,7 +1020,7 @@ export class SuperSonic {
    *   myWorker.postMessage({ channel: channel.transferable }, channel.transferList);
    *
    * In worker:
-   *   import { OscChannel } from 'supersonic-scsynth/transport';
+   *   import { OscChannel } from 'supersonic-scsynth';
    *   const channel = OscChannel.fromTransferable(event.data.channel);
    *   channel.send(oscBytes);
    *

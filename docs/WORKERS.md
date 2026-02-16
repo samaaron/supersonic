@@ -173,7 +173,7 @@ There are three key differences from worker usage:
 The standard `supersonic-scsynth` entry point pulls in `TextDecoder`, `Worker`, and DOM APIs that aren't available in `AudioWorkletGlobalScope`. Use the slim entry point instead:
 
 ```javascript
-import { OscChannel } from 'supersonic-scsynth/osc_channel.js';
+import { OscChannel } from 'supersonic-scsynth/osc-channel';
 ```
 
 This only exports `OscChannel` and its dependencies (ring buffer, classifier, offsets) — nothing that touches the DOM or spawns workers.
