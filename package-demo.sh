@@ -64,6 +64,8 @@ sed -i 's|/\* DEMO_BUILD_CONFIG \*/ await orchestrator.init({ development: true 
 # Copy dist files
 echo "Copying distribution files..."
 cp "$PROJECT_ROOT/dist/supersonic.js" "$TEMP_DIR/dist/"
+cp "$PROJECT_ROOT/dist/metrics_component.js" "$TEMP_DIR/dist/"
+cp "$PROJECT_ROOT/dist/metrics-dark.css" "$TEMP_DIR/dist/"
 
 # Copy WASM files (following symlinks)
 # Note: We only copy the stable (non-hashed) WASM file, not the manifest
