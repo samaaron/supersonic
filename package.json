@@ -36,8 +36,13 @@
     "url": "https://github.com/samaaron/supersonic/issues"
   },
   "homepage": "https://github.com/samaaron/supersonic#readme",
+  "exports": {
+    ".": "./dist/supersonic.js",
+    "./osc-channel": "./dist/osc_channel.js"
+  },
   "files": [
     "dist/supersonic.js",
+    "dist/osc_channel.js",
     "README.md",
     "LICENSE"
   ],
