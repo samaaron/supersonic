@@ -1,0 +1,86 @@
+/* supersonic-metrics dark theme
+ * Styles for the <supersonic-metrics> web component (ssm- namespace).
+ * Load this file to get a dark-themed metrics panel with a responsive grid layout.
+ * Override grid-template-columns on supersonic-metrics to control column count. */
+
+/* Default responsive layout — auto-fit collapses empty tracks so the last row fills fully */
+supersonic-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 4px;
+  background: #111;
+}
+
+/* Panel */
+.ssm-panel {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 8px 10px 10px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.ssm-panel--wide { padding-right: 16px; }
+
+/* Title */
+.ssm-title {
+  color: #666;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #282828;
+}
+
+/* Value row */
+.ssm-row {
+  display: flex;
+  justify-content: space-between;
+  color: #888;
+  padding: 1px 0;
+}
+
+.ssm-label { color: #888; }
+
+/* Value kinds */
+.ssm-value                     { color: #7ee787; font-variant-numeric: tabular-nums; }
+.ssm-value[data-kind="green"]  { color: #7ee787; }
+.ssm-value[data-kind="error"]  { color: #f85149; }
+.ssm-value[data-kind="purple"] { color: #d8b4fe; }
+.ssm-value[data-kind="dim"]    { color: #444; }
+.ssm-value[data-kind="muted"]  { color: #888; }
+
+.ssm-sep { color: #444; }
+
+/* Bar chart */
+.ssm-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.ssm-bar-label { color: #888; width: 20px; font-size: 11px; }
+
+.ssm-bar-track {
+  flex: 1;
+  height: 4px;
+  background: #1a1a1a;
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.ssm-bar-fill { height: 100%; transition: width 0.3s; }
+.ssm-bar-fill--blue   { background: #3b82f6; }
+.ssm-bar-fill--green  { background: #4ade80; }
+.ssm-bar-fill--purple { background: #c084fc; }
+
+.ssm-bar-peak { position: absolute; top: 0; width: 2px; height: 100%; left: 0; }
+.ssm-bar-peak--blue   { background: #93c5fd; }
+.ssm-bar-peak--green  { background: #bbf7d0; }
+.ssm-bar-peak--purple { background: #e9d5ff; }
+
+.ssm-bar-value { width: 28px; text-align: right; color: #888; font-size: 11px; }

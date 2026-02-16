@@ -19,6 +19,10 @@ export class MetricsReader {
   // Cached snapshot buffer (postMessage mode)
   #cachedSnapshotBuffer = null;
 
+  // Merged array: slots 0-45 from SAB/snapshot, 46+ from context
+  #mergedArray = new Uint32Array(MetricsOffsets.MERGED_ARRAY_SIZE);
+  #mergedDV = new DataView(this.#mergedArray.buffer);
+
   /**
    * @param {Object} options
    * @param {string} options.mode - 'sab' or 'postMessage'
@@ -368,6 +372,92 @@ export class MetricsReader {
     }
 
     return metrics;
+  }
+
+  /**
+   * Update the merged array with current metrics from SAB/snapshot + context.
+   * Zero-allocation: writes into the pre-allocated Uint32Array.
+   * @param {Object} context - Context with additional metric sources
+   */
+  updateMergedArray(context = {}) {
+    const arr = this.#mergedArray;
+
+    // Copy slots 0-45 from SAB or snapshot
+    if (this.#mode === 'postMessage') {
+      if (context.preschedulerMetrics) {
+        this.overlayPreschedulerMetrics(context.preschedulerMetrics);
+      }
+      if (this.#cachedSnapshotBuffer) {
+        const view = new Uint32Array(this.#cachedSnapshotBuffer, 0, 46);
+        arr.set(view);
+      }
+      // PM mode: overlay transport metrics into the merged array
+      if (context.transportMetrics) {
+        if (context.transportMetrics.oscOutMessagesSent !== undefined) {
+          arr[MetricsOffsets.OSC_OUT_MESSAGES_SENT] = context.transportMetrics.oscOutMessagesSent;
+        }
+        if (context.transportMetrics.oscOutBytesSent !== undefined) {
+          arr[MetricsOffsets.OSC_OUT_BYTES_SENT] = context.transportMetrics.oscOutBytesSent;
+        }
+        if (context.transportMetrics.preschedulerBypassed !== undefined) {
+          arr[MetricsOffsets.PRESCHEDULER_BYPASSED] = context.transportMetrics.preschedulerBypassed;
+        }
+        if (context.transportMetrics.bypassNonBundle !== undefined) {
+          arr[MetricsOffsets.BYPASS_NON_BUNDLE] = context.transportMetrics.bypassNonBundle;
+        }
+        if (context.transportMetrics.bypassImmediate !== undefined) {
+          arr[MetricsOffsets.BYPASS_IMMEDIATE] = context.transportMetrics.bypassImmediate;
+        }
+        if (context.transportMetrics.bypassNearFuture !== undefined) {
+          arr[MetricsOffsets.BYPASS_NEAR_FUTURE] = context.transportMetrics.bypassNearFuture;
+        }
+        if (context.transportMetrics.bypassLate !== undefined) {
+          arr[MetricsOffsets.BYPASS_LATE] = context.transportMetrics.bypassLate;
+        }
+      }
+    } else if (this.#metricsView) {
+      arr.set(this.#metricsView);
+    }
+
+    // Context slots 46+
+    // driftOffsetMs and globalOffsetMs are signed — store as int32 via DataView
+    const dv = this.#mergedDV;
+    dv.setInt32(MetricsOffsets.CTX_DRIFT_OFFSET_MS * 4, context.driftOffsetMs ?? 0, true);
+    dv.setInt32(MetricsOffsets.CTX_GLOBAL_OFFSET_MS * 4, context.globalOffsetMs ?? 0, true);
+
+    // audioContextState enum: unknown=0, running=1, suspended=2, closed=3, interrupted=4
+    const stateStr = context.audioContextState || 'unknown';
+    const stateEnum = { unknown: 0, running: 1, suspended: 2, closed: 3, interrupted: 4 };
+    arr[MetricsOffsets.CTX_AUDIO_CONTEXT_STATE] = stateEnum[stateStr] ?? 0;
+
+    // Buffer pool stats
+    if (context.bufferPoolStats) {
+      arr[MetricsOffsets.CTX_BUFFER_POOL_USED_BYTES] = context.bufferPoolStats.used?.size ?? 0;
+      arr[MetricsOffsets.CTX_BUFFER_POOL_AVAILABLE_BYTES] = context.bufferPoolStats.available ?? 0;
+      arr[MetricsOffsets.CTX_BUFFER_POOL_ALLOCATIONS] = context.bufferPoolStats.used?.count ?? 0;
+    }
+
+    arr[MetricsOffsets.CTX_LOADED_SYNTH_DEFS] = context.loadedSynthDefsCount ?? 0;
+
+    // Static capacities from bufferConstants
+    const bc = this.#bufferConstants;
+    arr[MetricsOffsets.CTX_SCSYNTH_SCHEDULER_CAPACITY] = bc?.scheduler_slot_count ?? 0;
+    arr[MetricsOffsets.CTX_PRESCHEDULER_CAPACITY] = context.preschedulerCapacity ?? 0;
+    arr[MetricsOffsets.CTX_IN_BUFFER_CAPACITY] = bc?.IN_BUFFER_SIZE ?? 0;
+    arr[MetricsOffsets.CTX_OUT_BUFFER_CAPACITY] = bc?.OUT_BUFFER_SIZE ?? 0;
+    arr[MetricsOffsets.CTX_DEBUG_BUFFER_CAPACITY] = bc?.DEBUG_BUFFER_SIZE ?? 0;
+
+    // Mode enum: 0=sab, 1=postMessage
+    arr[MetricsOffsets.CTX_MODE] = this.#mode === 'sab' ? 0 : 1;
+  }
+
+  /**
+   * Get the merged array reference (same Uint32Array every call — zero allocation).
+   * Call updateMergedArray() first to refresh values.
+   * @returns {Uint32Array}
+   */
+  getMergedArray() {
+    return this.#mergedArray;
   }
 
   /**

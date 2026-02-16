@@ -110,3 +110,25 @@ export const SCSYNTH_SCHEDULER_LAST_LATE_TICK = 44; // Process count when last l
 // Ring buffer direct write failures [45] (written by OscChannel in SAB mode)
 // =============================================================================
 export const RING_BUFFER_DIRECT_WRITE_FAILS = 45;   // SAB mode only: optimistic direct writes that failed (delivered via prescheduler)
+
+// =============================================================================
+// Context metrics [46-58] (written by main thread into merged array only)
+// These are NOT in the C++ PerformanceMetrics struct or SAB —
+// MetricsReader writes them into the local merged Uint32Array.
+// =============================================================================
+export const CTX_DRIFT_OFFSET_MS = 46;             // Clock drift (int32, ms)
+export const CTX_GLOBAL_OFFSET_MS = 47;            // Global timing offset (int32, ms)
+export const CTX_AUDIO_CONTEXT_STATE = 48;          // Enum: 0=unknown,1=running,2=suspended,3=closed,4=interrupted
+export const CTX_BUFFER_POOL_USED_BYTES = 49;       // Buffer pool bytes used
+export const CTX_BUFFER_POOL_AVAILABLE_BYTES = 50;  // Buffer pool bytes available
+export const CTX_BUFFER_POOL_ALLOCATIONS = 51;      // Total buffer allocations
+export const CTX_LOADED_SYNTH_DEFS = 52;            // Number of loaded synthdefs
+export const CTX_SCSYNTH_SCHEDULER_CAPACITY = 53;   // Static from bufferConstants
+export const CTX_PRESCHEDULER_CAPACITY = 54;        // Static from config
+export const CTX_IN_BUFFER_CAPACITY = 55;           // Static from bufferConstants
+export const CTX_OUT_BUFFER_CAPACITY = 56;          // Static from bufferConstants
+export const CTX_DEBUG_BUFFER_CAPACITY = 57;        // Static from bufferConstants
+export const CTX_MODE = 58;                         // Enum: 0=sab, 1=postMessage
+
+// Merged array size (slots 0-45 from SAB/snapshot, 46-58 context, 59-63 reserved)
+export const MERGED_ARRAY_SIZE = 64;

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>SuperSonic Simple Metrics Demo</title>
+    <link rel="stylesheet" href="dist/metrics-dark.css" />
+    <style>
+      body { background: #111; color: #ccc; font-family: system-ui, sans-serif; margin: 2rem; }
+      h1 { font-size: 1.4rem; }
+      button { padding: 0.5rem 1.2rem; font-size: 1rem; cursor: pointer; margin-bottom: 1rem; }
+      supersonic-metrics { max-width: 900px; grid-template-columns: repeat(3, 1fr); }
+    </style>
+  </head>
+  <body>
+    <h1>SuperSimple SuperSonic + Metrics</h1>
+    <button id="play">Play Amen Break</button>
+
+    <supersonic-metrics id="metrics"></supersonic-metrics>
+
+    <script type="module" src="dist/metrics_component.js"></script>
+    <script type="module">
+      import { SuperSonic } from "../dist/supersonic.js";
+
+      const button = document.getElementById("play");
+      const metricsEl = document.getElementById("metrics");
+      let sonic = null;
+
+      // Show placeholder panels before boot
+      metricsEl.buildFromSchema(SuperSonic);
+
+      button.onclick = async () => {
+        if (!sonic) {
+          button.textContent = "Booting scsynth...";
+
+          sonic = new SuperSonic({ baseURL: "dist/" });
+          await sonic.init();
+          await sonic.loadSynthDefs(["sonic-pi-basic_stereo_player"]);
+          await sonic.loadSample(0, "loop_amen.flac");
+
+          metricsEl.connect(sonic, { refreshRate: 10 });
+          button.textContent = "Play Amen Break";
+        }
+
+        sonic.send(
+          "/s_new",
+          "sonic-pi-basic_stereo_player",
+          -1,
+          0,
+          0,
+          "buf",
+          0
+        );
+      };
+    </script>
+  </body>
+</html>

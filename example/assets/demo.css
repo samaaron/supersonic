@@ -1417,7 +1417,7 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   #node-tree-panel > div:last-child { height: 140px !important; }
 
   #performance-metrics { order: 99 !important; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #333; }
-  #performance-metrics .metrics-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  supersonic-metrics#performance-metrics { grid-template-columns: repeat(2, 1fr) !important; }
 
   .sponsor-card { border-left: none; border-top: 6px solid var(--c-pink); }
   .sponsor-grid { display: flex !important; flex-direction: column; align-items: center; gap: 1.5rem; max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
@@ -2553,9 +2553,18 @@ pre code { display: block; overflow-x: auto; max-width: 100%; }
   gap: 0.4rem;
 }
 
+/* Override default auto-fit with explicit 5 columns for the demo layout */
+supersonic-metrics { grid-template-columns: repeat(5, 1fr); gap: 0.4rem; }
+
+/* Supersonic demo branded overrides (on top of metrics-dark.css defaults) */
+supersonic-metrics .ssm-panel { background: rgba(20, 20, 30, 0.8); }
+supersonic-metrics .ssm-title { color: #cc6600; border-bottom-color: #333; }
+supersonic-metrics .ssm-value { color: #e6a700; }
+
 @media (max-width: 768px) {
   .metrics-grid--4col { grid-template-columns: repeat(2, 1fr); }
   .metrics-grid--5col { grid-template-columns: repeat(2, 1fr); }
+  supersonic-metrics { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* ===== NODE TREE PANEL ===== */

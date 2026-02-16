@@ -62,7 +62,7 @@ SuperSonic is split into several packages to give you control over what you incl
 
 | Package | Contains | License |
 |---------|----------|---------|
-| `supersonic-scsynth` | Client API only | MIT |
+| `supersonic-scsynth` | Client API + metrics component | MIT |
 | `supersonic-scsynth-core` | WASM engine + workers | GPL-3.0 |
 | `supersonic-scsynth-synthdefs` | 127 synth definitions | MIT |
 | `supersonic-scsynth-samples` | 206 audio samples | CC0 |
@@ -70,7 +70,16 @@ SuperSonic is split into several packages to give you control over what you incl
 
 When importing from CDN, most users just need `supersonic-scsynth` as the other packages are loaded from CDN automatically. When using npm with a bundler, you'll need to configure the asset URLs explicitly (see above).
 
-s
+The `supersonic-scsynth` package also exports a metrics web component and CSS themes:
+
+```javascript
+import "supersonic-scsynth/metrics";           // <supersonic-metrics> custom element
+import "supersonic-scsynth/metrics-dark.css";  // Dark theme
+import "supersonic-scsynth/metrics-light.css"; // Light theme
+```
+
+See [Metrics Component](METRICS_COMPONENT.md) for usage details.
+
 ## Self-Hosted
 
 If you'd like full control over the assets or need to run offline, you can download the pre-built distribution from [GitHub Releases](https://github.com/samaaron/supersonic/releases):

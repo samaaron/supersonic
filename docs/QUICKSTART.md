@@ -103,10 +103,34 @@ The synth parameters control the sound. Here we set `note` to 28 (a low E), `rel
 
 ## Working Example
 
-See `example/simple.html` for a complete working example you can run locally.
+See `example/simple.html` for a complete working example you can run locally, or `example/simple_metrics.html` for the same example with a live metrics dashboard.
 
+
+## Adding a Metrics Dashboard
+
+SuperSonic includes a web component that renders a full metrics dashboard from the schema:
+
+```html
+<link rel="stylesheet" href="https://unpkg.com/supersonic-scsynth@latest/dist/metrics-dark.css" />
+<script type="module" src="https://unpkg.com/supersonic-scsynth@latest/dist/metrics_component.js"></script>
+
+<supersonic-metrics id="metrics"></supersonic-metrics>
+```
+
+Connect it after boot to start live updates:
+
+```javascript
+bootBtn.onclick = async () => {
+  await supersonic.init();
+  await supersonic.loadSynthDef("sonic-pi-prophet");
+  document.getElementById("metrics").connect(supersonic, { refreshRate: 10 });
+};
+```
+
+See [Metrics Component](METRICS_COMPONENT.md) for theming, layout control, and customisation.
 
 ## Next Steps
 
 - [API Reference](API.md) - All methods and configuration options
+- [Metrics Component](METRICS_COMPONENT.md) - Real-time metrics dashboard
 - [scsynth Command Reference](SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling synthesis

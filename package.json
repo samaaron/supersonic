@@ -38,11 +38,17 @@
   "homepage": "https://github.com/samaaron/supersonic#readme",
   "exports": {
     ".": "./dist/supersonic.js",
-    "./osc-channel": "./dist/osc_channel.js"
+    "./osc-channel": "./dist/osc_channel.js",
+    "./metrics": "./dist/metrics_component.js",
+    "./metrics-dark.css": "./dist/metrics-dark.css",
+    "./metrics-light.css": "./dist/metrics-light.css"
   },
   "files": [
     "dist/supersonic.js",
     "dist/osc_channel.js",
+    "dist/metrics_component.js",
+    "dist/metrics-dark.css",
+    "dist/metrics-light.css",
     "README.md",
     "LICENSE"
   ],

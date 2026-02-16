@@ -163,7 +163,7 @@ window.uiState = uiState;
 let isAutoPlaying = false;
 let runState = 'idle'; // 'idle' | 'running' | 'finishing'
 let runGeneration = 0;
-let metricsIntervalId = null;
+let metricsActive = false;
 let isIdle = false, idleTimeoutId = null;
 const IDLE_DELAY_MS = 2000;
 
@@ -219,17 +219,6 @@ function setupTabSystem(buttonSelector, contentSelector, tabAttr, contentAttr) {
       }
     });
   });
-}
-
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let i = 0;
-  while (bytes >= 1024 && i < units.length - 1) {
-    bytes /= 1024;
-    i++;
-  }
-  return `${bytes.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
 // ===== OSC HELPERS =====
@@ -660,192 +649,10 @@ function addSentMessage(oscData, comment = null, sourceId = null) {
 }
 
 // ===== METRICS =====
-// Sentinel value for "unset" min headroom metric (must match prescheduler worker)
-const HEADROOM_UNSET_SENTINEL = 0xFFFFFFFF;
-
-const METRICS_MAP = {
-  scsynthProcessCount: "scsynth_process_count",
-  scsynthMessagesProcessed: "scsynth_messages_processed",
-  scsynthMessagesDropped: "scsynth_messages_dropped",
-  scsynthSchedulerDepth: "scsynth_scheduler_depth",
-  scsynthSchedulerPeakDepth: "scsynth_scheduler_peak_depth",
-  scsynthSchedulerCapacity: "scsynth_scheduler_capacity",
-  scsynthSchedulerDropped: "scsynth_scheduler_dropped",
-  scsynthSequenceGaps: "scsynth_sequence_gaps",
-  scsynthSchedulerLates: "scsynth_scheduler_lates",
-  scsynthSchedulerMaxLateMs: "scsynth_scheduler_max_late_ms",
-  scsynthSchedulerLastLateMs: "scsynth_scheduler_last_late_ms",
-  scsynthSchedulerLastLateTick: "scsynth_scheduler_last_late_tick",
-  preschedulerPending: "prescheduler_pending",
-  preschedulerPendingPeak: "prescheduler_pending_peak",
-  preschedulerDispatched: "prescheduler_dispatched",
-  preschedulerRetriesSucceeded: "prescheduler_retries_succeeded",
-  preschedulerRetriesFailed: "prescheduler_retries_failed",
-  preschedulerRetryQueueSize: "prescheduler_retry_queue_size",
-  preschedulerRetryQueuePeak: "prescheduler_retry_queue_peak",
-  preschedulerBundlesScheduled: "prescheduler_bundles_scheduled",
-  preschedulerEventsCancelled: "prescheduler_events_cancelled",
-  preschedulerTotalDispatches: "prescheduler_total_dispatches",
-  preschedulerMessagesRetried: "prescheduler_messages_retried",
-  preschedulerBypassed: "prescheduler_bypassed",
-  bypassNonBundle: "bypass_non_bundle",
-  bypassImmediate: "bypass_immediate",
-  bypassNearFuture: "bypass_near_future",
-  bypassLate: "bypass_late",
-  oscInMessagesReceived: "osc_in_messages_received",
-  oscInMessagesDropped: "osc_in_messages_dropped",
-  oscInBytesReceived: "osc_in_bytes_received",
-  debugMessagesReceived: "debug_messages_received",
-  debugBytesReceived: "debug_bytes_received",
-  oscOutMessagesSent: "osc_out_messages_sent",
-  oscOutBytesSent: "osc_out_bytes_sent",
-  driftOffsetMs: "drift_offset_ms",
-  preschedulerMinHeadroomMs: "prescheduler_min_headroom_ms",
-  preschedulerMaxHeadroomMs: "prescheduler_max_headroom_ms",
-  preschedulerLates: "prescheduler_lates",
-  preschedulerMaxLateMs: "prescheduler_max_late_ms",
-  scsynthWasmErrors: "scsynth_wasm_errors",
-  oscInCorrupted: "osc_in_corrupted",
-  ringBufferDirectWriteFails: "ring_buffer_direct_write_fails",
-};
-
-// Apply tooltips from schema to metric elements using data-metric attributes
-function applySchemaTooltips() {
-  const schema = SuperSonic.getMetricsSchema();
-  if (!schema) return;
-
-  document.querySelectorAll("[data-metric]").forEach((el) => {
-    const schemaKey = el.dataset.metric;
-    const metricDef = schema[schemaKey];
-    if (!metricDef?.description) return;
-
-    // Apply title to parent row element (.metrics-row or .metrics-bar-row)
-    const row = el.closest(".metrics-row, .metrics-bar-row");
-    if (row) {
-      row.title = metricDef.description;
-    }
-  });
-}
-
-function updateMetrics(m) {
-  const mapped = {};
-  for (const [src, dst] of Object.entries(METRICS_MAP)) {
-    if (m[src] !== undefined) mapped[dst] = m[src];
-  }
-
-  // Buffer usage (current and peak)
-  if (m.inBufferUsed?.percentage !== undefined) {
-    mapped.in_buffer_usage = m.inBufferUsed.percentage;
-    mapped.in_buffer_peak = m.inBufferUsed.peakPercentage;
-  }
-  if (m.outBufferUsed?.percentage !== undefined) {
-    mapped.out_buffer_usage = m.outBufferUsed.percentage;
-    mapped.out_buffer_peak = m.outBufferUsed.peakPercentage;
-  }
-  if (m.debugBufferUsed?.percentage !== undefined) {
-    mapped.debug_buffer_usage = m.debugBufferUsed.percentage;
-    mapped.debug_buffer_peak = m.debugBufferUsed.peakPercentage;
-  }
-
-  // Engine state
-  mapped.buffer_pool_used = m.bufferPoolUsedBytes;
-  mapped.buffer_pool_available = m.bufferPoolAvailableBytes;
-  mapped.buffer_pool_allocations = m.bufferPoolAllocations;
-  mapped.synthdef_count = m.loadedSynthDefs;
-  mapped.audio_context_state = m.audioContextState;
-
-  // Format headroom (HEADROOM_UNSET_SENTINEL means "not yet set")
-  const formatHeadroom = (val) => {
-    if (val === undefined || val === HEADROOM_UNSET_SENTINEL) return "-";
-    return val;
-  };
-
-  // Update DOM
-  const updates = {
-    "metric-sent": mapped.osc_out_messages_sent ?? 0,
-    "metric-bytes-sent": formatBytes(mapped.osc_out_bytes_sent ?? 0),
-    "metric-direct-writes": mapped.prescheduler_bypassed ?? 0,
-    "metric-bypass-non-bundle": mapped.bypass_non_bundle ?? 0,
-    "metric-bypass-immediate": mapped.bypass_immediate ?? 0,
-    "metric-bypass-near-future": mapped.bypass_near_future ?? 0,
-    "metric-bypass-late": mapped.bypass_late ?? 0,
-    "metric-received": mapped.osc_in_messages_received ?? 0,
-    "metric-bytes-received": formatBytes(mapped.osc_in_bytes_received ?? 0),
-    "metric-osc-in-dropped": mapped.osc_in_messages_dropped ?? 0,
-    "metric-messages-processed": mapped.scsynth_messages_processed ?? 0,
-    "metric-messages-dropped": mapped.scsynth_messages_dropped ?? 0,
-    "metric-sequence-gaps": mapped.scsynth_sequence_gaps ?? 0,
-    "metric-process-count": mapped.scsynth_process_count ?? 0,
-    "metric-scheduler-depth": mapped.scsynth_scheduler_depth ?? 0,
-    "metric-scheduler-peak": mapped.scsynth_scheduler_peak_depth ?? 0,
-    "metric-scheduler-dropped": mapped.scsynth_scheduler_dropped ?? 0,
-    "metric-scheduler-lates": mapped.scsynth_scheduler_lates ?? 0,
-    "metric-scheduler-max-late": mapped.scsynth_scheduler_max_late_ms ?? 0,
-    "metric-scheduler-last-late": mapped.scsynth_scheduler_last_late_ms ?? 0,
-    "metric-drift": (mapped.drift_offset_ms ?? 0) + "ms",
-    "metric-prescheduler-pending": mapped.prescheduler_pending ?? 0,
-    "metric-prescheduler-peak": mapped.prescheduler_pending_peak ?? 0,
-    "metric-prescheduler-sent": mapped.prescheduler_dispatched ?? 0,
-    "metric-bundles-scheduled": mapped.prescheduler_bundles_scheduled ?? 0,
-    "metric-events-cancelled": mapped.prescheduler_events_cancelled ?? 0,
-    "metric-min-headroom": formatHeadroom(mapped.prescheduler_min_headroom_ms),
-    "metric-max-headroom": mapped.prescheduler_max_headroom_ms ?? 0,
-    "metric-lates": mapped.prescheduler_lates ?? 0,
-    "metric-presched-max-late": mapped.prescheduler_max_late_ms ?? 0,
-    "metric-prescheduler-retries-succeeded":
-      mapped.prescheduler_retries_succeeded ?? 0,
-    "metric-prescheduler-retries-failed":
-      mapped.prescheduler_retries_failed ?? 0,
-    "metric-prescheduler-retry-queue-size":
-      mapped.prescheduler_retry_queue_size ?? 0,
-    "metric-prescheduler-retry-queue-max":
-      mapped.prescheduler_retry_queue_peak ?? 0,
-    "metric-messages-retried": mapped.prescheduler_messages_retried ?? 0,
-    "metric-total-dispatches": mapped.prescheduler_total_dispatches ?? 0,
-    "metric-debug-received": mapped.debug_messages_received ?? 0,
-    "metric-debug-bytes-received": formatBytes(
-      mapped.debug_bytes_received ?? 0,
-    ),
-    "metric-audio-state": mapped.audio_context_state ?? "-",
-    "metric-synthdefs": mapped.synthdef_count ?? 0,
-    "metric-buffer-used": formatBytes(mapped.buffer_pool_used ?? 0),
-    "metric-buffer-free": formatBytes(mapped.buffer_pool_available ?? 0),
-    "metric-buffer-allocs": mapped.buffer_pool_allocations ?? 0,
-    "metric-wasm-errors": mapped.scsynth_wasm_errors ?? 0,
-    "metric-osc-in-corrupted": mapped.osc_in_corrupted ?? 0,
-    "metric-direct-write-fails": mapped.ring_buffer_direct_write_fails ?? 0,
-  };
-
-  for (const [id, val] of Object.entries(updates)) {
-    const el = $(id);
-    if (el) el.textContent = val;
-  }
-
-  // Buffer bars (works in both SAB and postMessage modes)
-  for (const [name, color] of [
-    ["in", "#1e90ff"],
-    ["out", "#4a4"],
-    ["debug", "#a4a"],
-  ]) {
-    const usage = mapped[`${name}_buffer_usage`];
-    const peak = mapped[`${name}_buffer_peak`];
-    const bar = $(`metric-${name}-bar`);
-    const peakMarker = $(`metric-${name}-peak`);
-    const label = $(`metric-${name}-usage`);
-    if (usage !== undefined) {
-      if (bar) bar.style.width = usage + "%";
-      // Position peak marker (hi-fi style peak hold)
-      if (peakMarker && peak !== undefined) {
-        peakMarker.style.left = `calc(${peak}% - 1px)`;
-      }
-      if (label) label.textContent = usage.toFixed(1) + "%";
-    } else {
-      if (bar) bar.style.width = "0%";
-      if (peakMarker) peakMarker.style.left = "0";
-      if (label) label.textContent = "N/A";
-    }
-  }
-}
+// Metrics rendering is handled by the <supersonic-metrics> web component.
+// See js/lib/metrics_component.js for implementation.
+const metricsEl = $("performance-metrics");
+metricsEl?.buildFromSchema(SuperSonic);
 
 // ===== SCOPE VISUALISER =====
 const scopeCanvas = $("scope-canvas");
@@ -1125,10 +932,8 @@ async function goIdle() {
 
   nodeTreeVizActive = false;
 
-  if (metricsIntervalId) {
-    clearInterval(metricsIntervalId);
-    metricsIntervalId = null;
-  }
+  metricsEl?.disconnect();
+  metricsActive = false;
 
   disconnectVisibilityObserver();
   drawSilentScope();
@@ -1158,8 +963,9 @@ async function wakeUp() {
     nodeTreeVizActive = true;
   }
 
-  if (orchestrator && !metricsIntervalId) {
-    metricsIntervalId = setInterval(() => updateMetrics(orchestrator.getMetrics()), 100);
+  if (orchestrator && !metricsActive) {
+    metricsEl?.connect(orchestrator, { refreshRate: 10 });
+    metricsActive = true;
   }
 
   observeGlowElements();
@@ -2011,7 +1817,9 @@ $("init-button").addEventListener("click", async () => {
 
     orchestrator.on("message:raw", addMessage);
     orchestrator.on("message:sent", (oscData, sourceId) => addSentMessage(oscData, null, sourceId));
-    metricsIntervalId = setInterval(() => updateMetrics(orchestrator.getMetrics()), 100);
+    // Connect the <supersonic-metrics> web component (schema-driven, zero-alloc hot path)
+    metricsEl?.connect(orchestrator, { refreshRate: 10 });
+    metricsActive = true; // Flag for idle/wakeUp to know metrics are active
     orchestrator.on("error", (e) => {
       showError(e.message);
       updateStatus("error");
@@ -2256,5 +2064,4 @@ $("copy-metrics-btn")?.addEventListener("click", async () => {
   }
 });
 
-// Apply schema tooltips to metric elements
-applySchemaTooltips();
+// Metrics tooltips are now applied by the <supersonic-metrics> component from schema

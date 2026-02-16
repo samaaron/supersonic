@@ -89,9 +89,11 @@ myButton.onclick = async () => {
 
 ### Metrics
 
-| Method                        | Description                    |
-| ----------------------------- | ------------------------------ |
-| [`getMetrics()`](#getmetrics) | Get metrics snapshot on demand |
+| Method                                              | Description                                  |
+| --------------------------------------------------- | -------------------------------------------- |
+| [`getMetrics()`](#getmetrics)                       | Get metrics snapshot as an object             |
+| [`getMetricsArray()`](#getmetricsarray)             | Get metrics as a flat Uint32Array (zero-alloc)|
+| [`SuperSonic.getMetricsSchema()`](#getmetricsschema)| Schema with offsets, layout, and sentinels    |
 
 ### Properties
 
@@ -962,24 +964,41 @@ The node tree mirror has a capacity of 1024 nodes by default. If the actual scsy
 
 ## Metrics API
 
-For monitoring performance and debugging. See [Metrics](METRICS.md) for the full list of available metrics.
+For monitoring performance and debugging. See [Metrics](METRICS.md) for the full list of available metrics, or use the [`<supersonic-metrics>` web component](METRICS_COMPONENT.md) for a ready-made UI.
 
 ### `getMetrics()`
 
-Get a metrics snapshot on demand. This is a cheap local memory read in both SAB and postMessage modes - no IPC or copying occurs. Safe to call from `requestAnimationFrame` or high-frequency timers.
+Get a metrics snapshot as a JavaScript object. This is a cheap local memory read in both SAB and postMessage modes - no IPC or copying occurs. Safe to call from `requestAnimationFrame` or high-frequency timers.
 
 ```javascript
 const metrics = supersonic.getMetrics();
 console.log("Messages processed:", metrics.scsynthMessagesProcessed);
-
-// Poll from requestAnimationFrame for smooth UI updates
-function updateLoop() {
-  const m = supersonic.getMetrics();
-  updateMetricsUI(m);
-  requestAnimationFrame(updateLoop);
-}
-requestAnimationFrame(updateLoop);
 ```
+
+### `getMetricsArray()`
+
+Get metrics as a flat `Uint32Array`. Returns the same array reference every call — values are updated in-place, making this zero-allocation. Use `getMetricsSchema().metrics` for the offset of each metric.
+
+```javascript
+const arr = supersonic.getMetricsArray();
+const schema = SuperSonic.getMetricsSchema();
+console.log("Processed:", arr[schema.metrics.scsynthMessagesProcessed.offset]);
+```
+
+This is what the `<supersonic-metrics>` web component uses internally for its delta-diffed rendering loop.
+
+### `SuperSonic.getMetricsSchema()` (static) {#getmetricsschema}
+
+Returns the schema describing all metrics, their array offsets, UI layout, and sentinel values.
+
+```javascript
+const schema = SuperSonic.getMetricsSchema();
+// schema.metrics   — { key: { offset, type, unit, description }, ... }
+// schema.layout    — { panels: [...] } for rendering
+// schema.sentinels — { HEADROOM_UNSET: 0xFFFFFFFF }
+```
+
+See [Metrics Component](METRICS_COMPONENT.md) for full schema documentation.
 
 ## Advanced
 

@@ -178,6 +178,18 @@ esbuild "$JS_DIR/osc_channel.js" \
     $MINIFY_FLAG \
     --outfile="$OUTPUT_DIR/osc_channel.js"
 
+# Bundle metrics component (optional web component for schema-driven metrics UI)
+esbuild "$JS_DIR/lib/metrics_component.js" \
+    --bundle \
+    --format=esm \
+    --define:__DEV__=$DEV_FLAG \
+    $MINIFY_FLAG \
+    --outfile="$OUTPUT_DIR/metrics_component.js"
+
+# Copy metrics CSS themes
+cp "$JS_DIR/lib/metrics-dark.css" "$OUTPUT_DIR/metrics-dark.css"
+cp "$JS_DIR/lib/metrics-light.css" "$OUTPUT_DIR/metrics-light.css"
+
 # Process worker files through esbuild (separate output files, same __DEV__ treatment)
 echo "Processing worker files..."
 mkdir -p "$OUTPUT_DIR/workers"

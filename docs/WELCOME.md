@@ -60,7 +60,11 @@ For other installation options including npm and self-hosting, see the [Installa
 
 - **[scsynth Command Reference](SCSYNTH_COMMAND_REFERENCE.md)** - The full scsynth OSC command reference for controlling synthesis
 
+## Monitoring
+
+- **[Metrics](METRICS.md)** - Performance metrics and monitoring
+- **[Metrics Component](METRICS_COMPONENT.md)** - Ready-made metrics dashboard web component
+
 ## For Contributors
 
 - **[Building](BUILDING.md)** - Building SuperSonic from source
-- **[Metrics](METRICS.md)** - Performance metrics and monitoring

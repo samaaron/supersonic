@@ -181,6 +181,24 @@ Use `version` to skip re-renders when nothing changed - perfect for 60fps visual
 
 For the full API including node structure, tree traversal examples, and comparison with `/g_queryTree`, see [Node Tree API](API.md#node-tree-api).
 
+## Metrics Web Component
+
+For a ready-made metrics UI, use the `<supersonic-metrics>` web component. It renders all metrics panels from the schema with zero manual DOM work:
+
+```html
+<link rel="stylesheet" href="dist/metrics-dark.css" />
+<script type="module" src="dist/metrics_component.js"></script>
+
+<supersonic-metrics id="metrics"></supersonic-metrics>
+```
+
+```javascript
+// After boot:
+document.getElementById("metrics").connect(sonic, { refreshRate: 10 });
+```
+
+See [Metrics Component](METRICS_COMPONENT.md) for full documentation including theming, layout control, and the zero-allocation `getMetricsArray()` API.
+
 ## Example: Simple Monitor
 
 ```javascript

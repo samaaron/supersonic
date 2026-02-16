@@ -178,12 +178,13 @@ test.describe("Bypass Category Counters", () => {
   test("bypass category metrics appear in getMetricsSchema", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const schema = window.SuperSonic.getMetricsSchema();
+      const m = schema.metrics;
       return {
-        hasBypassNonBundle: !!schema.bypassNonBundle,
-        hasBypassImmediate: !!schema.bypassImmediate,
-        hasBypassNearFuture: !!schema.bypassNearFuture,
-        hasBypassLate: !!schema.bypassLate,
-        hasPreschedulerBypassed: !!schema.preschedulerBypassed,
+        hasBypassNonBundle: !!m.bypassNonBundle,
+        hasBypassImmediate: !!m.bypassImmediate,
+        hasBypassNearFuture: !!m.bypassNearFuture,
+        hasBypassLate: !!m.bypassLate,
+        hasPreschedulerBypassed: !!m.preschedulerBypassed,
       };
     }, sonicConfig);
 

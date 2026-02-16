@@ -8,21 +8,96 @@ test.describe('Schema Validation', () => {
     });
   });
 
-  test('getMetricsSchema() returns valid schema object', async ({ page }) => {
-    const schema = await page.evaluate(() => {
-      return window.SuperSonic.getMetricsSchema();
+  test('getMetricsSchema() returns valid schema with metrics, layout, and sentinels', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const schema = window.SuperSonic.getMetricsSchema();
+      const metrics = schema.metrics;
+      const layout = schema.layout;
+      const sentinels = schema.sentinels;
+
+      const metricKeys = Object.keys(metrics);
+
+      // Check each metric has required fields
+      const invalidMetrics = [];
+      for (const [key, def] of Object.entries(metrics)) {
+        if (typeof def.offset !== 'number') invalidMetrics.push(`${key}: missing offset`);
+        if (!def.type) invalidMetrics.push(`${key}: missing type`);
+        if (!def.description) invalidMetrics.push(`${key}: missing description`);
+      }
+
+      // Check layout exists and has panels
+      const hasPanels = Array.isArray(layout?.panels) && layout.panels.length > 0;
+
+      // Check sentinels
+      const hasHeadroomUnset = sentinels?.HEADROOM_UNSET === 0xFFFFFFFF;
+
+      return {
+        metricCount: metricKeys.length,
+        invalidMetrics,
+        hasPanels,
+        panelCount: layout?.panels?.length ?? 0,
+        hasHeadroomUnset,
+      };
     });
 
-    // Schema should be an object with metric definitions
-    expect(typeof schema).toBe('object');
-    expect(Object.keys(schema).length).toBeGreaterThan(10);
+    expect(result.metricCount).toBeGreaterThan(10);
+    expect(result.invalidMetrics).toEqual([]);
+    expect(result.hasPanels).toBe(true);
+    expect(result.panelCount).toBeGreaterThan(5);
+    expect(result.hasHeadroomUnset).toBe(true);
+  });
 
-    // Each metric should have required fields
-    for (const [key, def] of Object.entries(schema)) {
-      expect(def).toHaveProperty('type');
-      expect(def).toHaveProperty('description');
-      expect(typeof def.description).toBe('string');
-    }
+  test('layout panel keys all reference valid metrics', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const schema = window.SuperSonic.getMetricsSchema();
+      const metricKeys = new Set(Object.keys(schema.metrics));
+      const missingKeys = [];
+
+      for (const panel of schema.layout.panels) {
+        for (const row of panel.rows) {
+          if (row.type === 'bar') {
+            // Bar rows reference usedKey, peakKey, capacityKey
+            for (const k of [row.usedKey, row.peakKey, row.capacityKey]) {
+              if (k && !metricKeys.has(k)) missingKeys.push(`${panel.title}: ${k}`);
+            }
+          } else if (row.cells) {
+            for (const cell of row.cells) {
+              if (cell.key && !metricKeys.has(cell.key)) {
+                missingKeys.push(`${panel.title}/${row.label}: ${cell.key}`);
+              }
+            }
+          }
+        }
+      }
+
+      return { missingKeys };
+    });
+
+    expect(result.missingKeys).toEqual([]);
+  });
+
+  test('metric offsets are unique and within merged array bounds', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const schema = window.SuperSonic.getMetricsSchema();
+      const offsets = new Map();
+      const outOfBounds = [];
+
+      for (const [key, def] of Object.entries(schema.metrics)) {
+        if (offsets.has(def.offset)) {
+          // Allow shared offsets only if explicitly expected (none currently)
+          outOfBounds.push(`Duplicate offset ${def.offset}: ${offsets.get(def.offset)} and ${key}`);
+        }
+        offsets.set(def.offset, key);
+        if (def.offset < 0 || def.offset >= 64) {
+          outOfBounds.push(`${key}: offset ${def.offset} out of bounds [0, 63]`);
+        }
+      }
+
+      return { outOfBounds, offsetCount: offsets.size };
+    });
+
+    expect(result.outOfBounds).toEqual([]);
+    expect(result.offsetCount).toBeGreaterThan(10);
   });
 
   test('getTreeSchema() returns valid hierarchical schema', async ({ page }) => {
@@ -66,7 +141,7 @@ test.describe('Schema Validation', () => {
     expect(schema.nodes.itemSchema).toHaveProperty('defName');
   });
 
-  test('getMetrics() keys match schema keys for current mode', async ({ page, sonicConfig }) => {
+  test('getMetrics() keys match schema.metrics keys for current mode', async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
@@ -77,30 +152,38 @@ test.describe('Schema Validation', () => {
 
       await sonic.destroy();
 
-      // Get schema keys that should be present in this mode
-      const expectedKeys = Object.entries(schema)
-        .filter(([key, def]) => {
-          if (!def.modes) return true; // 'mode' itself doesn't have modes array
-          return def.modes.includes(mode);
-        })
-        .map(([key]) => key);
+      // The getMetrics() object has a different shape from the merged array —
+      // it includes derived objects (inBufferUsed, outBufferUsed, debugBufferUsed)
+      // and excludes raw byte metrics that are wrapped into those objects.
+      // Also excludes: inBufferCapacity, outBufferCapacity, debugBufferCapacity (in derived objects)
+      // and some array-only fields (inBufferUsedBytes etc. are deleted in gatherMetrics).
 
-      // Get actual keys from metrics
-      const actualKeys = Object.keys(metrics);
+      // Schema.metrics keys that DON'T appear in getMetrics() because they're array-only:
+      const arrayOnlyKeys = new Set([
+        'inBufferUsedBytes', 'outBufferUsedBytes', 'debugBufferUsedBytes',
+        'inBufferPeakBytes', 'outBufferPeakBytes', 'debugBufferPeakBytes',
+        'inBufferCapacity', 'outBufferCapacity', 'debugBufferCapacity',
+      ]);
+
+      // Keys in getMetrics() that aren't in schema.metrics (derived objects):
+      const derivedKeys = new Set([
+        'inBufferUsed', 'outBufferUsed', 'debugBufferUsed', 'ntpStartTime',
+      ]);
+
+      const schemaKeys = Object.keys(schema.metrics)
+        .filter(k => !arrayOnlyKeys.has(k));
+
+      const actualKeys = Object.keys(metrics)
+        .filter(k => !derivedKeys.has(k));
 
       return {
         mode,
-        expectedKeys: expectedKeys.sort(),
-        actualKeys: actualKeys.sort(),
-        missingFromMetrics: expectedKeys.filter(k => !actualKeys.includes(k)),
-        extraInMetrics: actualKeys.filter(k => !expectedKeys.includes(k))
+        missingFromMetrics: schemaKeys.filter(k => !actualKeys.includes(k)),
+        extraInMetrics: actualKeys.filter(k => !schemaKeys.includes(k)),
       };
     }, sonicConfig);
 
-    // All expected keys should be present in metrics
     expect(result.missingFromMetrics).toEqual([]);
-
-    // No unexpected keys in metrics
     expect(result.extraInMetrics).toEqual([]);
   });
 
@@ -335,7 +418,7 @@ test.describe('Schema Validation', () => {
       const schema = window.SuperSonic.getMetricsSchema();
 
       // Find counter metrics (counters should increment with activity, gauges might legitimately be 0)
-      const counterMetrics = Object.entries(schema)
+      const counterMetrics = Object.entries(schema.metrics)
         .filter(([key, def]) => def.type === 'counter')
         .map(([key]) => key);
 

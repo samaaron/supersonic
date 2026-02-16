@@ -83,97 +83,198 @@ export class SuperSonic {
   }
 
   /**
-   * Get schema describing all available metrics.
-   * Useful for generating UIs or understanding metric types.
+   * Get schema describing all available metrics with array offsets and UI layout.
+   *
+   * - `metrics`: each key maps to { offset, type, unit, description } for the merged Uint32Array
+   * - `layout`: panel structure for rendering a metrics UI
+   * - `sentinels`: magic values used in the metrics array
+   *
+   * The `getMetrics()` object API is unchanged — this schema adds array-offset
+   * metadata and a declarative layout on top.
    */
+  static #metricsSchema = null;
   static getMetricsSchema() {
-    return {
-      // Meta
-      mode: { type: 'string', values: ['sab', 'postMessage'], description: 'Transport mode' },
+    return (this.#metricsSchema ??= {
+      metrics: {
+        // scsynth metrics [0-8]
+        scsynthProcessCount:          { offset: 0,  type: 'counter',  unit: 'count', description: 'Audio process() calls' },
+        scsynthMessagesProcessed:     { offset: 1,  type: 'counter',  unit: 'count', description: 'OSC messages processed by scsynth' },
+        scsynthMessagesDropped:       { offset: 2,  type: 'counter',  unit: 'count', description: 'Messages dropped (ring buffer full)' },
+        scsynthSchedulerDepth:        { offset: 3,  type: 'gauge',    unit: 'count', description: 'Current scheduler queue depth' },
+        scsynthSchedulerPeakDepth:    { offset: 4,  type: 'gauge',    unit: 'count', description: 'Peak scheduler queue depth (high water mark)' },
+        scsynthSchedulerDropped:      { offset: 5,  type: 'counter',  unit: 'count', description: 'Scheduled events dropped' },
+        scsynthSequenceGaps:          { offset: 6,  type: 'counter',  unit: 'count', description: 'Messages lost in transit from JS to scsynth' },
+        scsynthWasmErrors:            { offset: 7,  type: 'counter',  unit: 'count', description: 'WASM execution errors in audio worklet' },
+        scsynthSchedulerLates:        { offset: 8,  type: 'counter',  unit: 'count', description: 'Bundles executed after their scheduled time' },
 
-      // scsynth metrics
-      scsynthProcessCount: { type: 'counter', unit: 'count', description: 'Audio process() calls' },
-      scsynthMessagesProcessed: { type: 'counter', unit: 'count', description: 'OSC messages processed by scsynth' },
-      scsynthMessagesDropped: { type: 'counter', unit: 'count', description: 'Messages dropped (ring buffer full)' },
-      scsynthSchedulerDepth: { type: 'gauge', unit: 'count', description: 'Current scheduler queue depth' },
-      scsynthSchedulerPeakDepth: { type: 'gauge', unit: 'count', description: 'Peak scheduler queue depth (high water mark)' },
-      scsynthSchedulerCapacity: { type: 'constant', unit: 'count', description: 'Maximum scheduler queue size' },
-      scsynthSchedulerDropped: { type: 'counter', unit: 'count', description: 'Scheduled events dropped' },
-      scsynthSequenceGaps: { type: 'counter', unit: 'count', description: 'Messages lost in transit from JS to scsynth' },
-      scsynthSchedulerLates: { type: 'counter', unit: 'count', description: 'Bundles executed after their scheduled time' },
-      scsynthSchedulerMaxLateMs: { type: 'gauge', unit: 'ms', description: 'Maximum lateness observed in scsynth scheduler (ms)' },
-      scsynthSchedulerLastLateMs: { type: 'gauge', unit: 'ms', description: 'Most recent late magnitude in scsynth scheduler (ms)' },
-      scsynthSchedulerLastLateTick: { type: 'gauge', unit: 'count', description: 'Process count when last scsynth late occurred' },
+        // Prescheduler metrics [9-23]
+        preschedulerPending:          { offset: 9,  type: 'gauge',    unit: 'count', description: 'Events waiting to be scheduled' },
+        preschedulerPendingPeak:      { offset: 10, type: 'gauge',    unit: 'count', description: 'Peak pending events' },
+        preschedulerBundlesScheduled: { offset: 11, type: 'counter',  unit: 'count', description: 'Bundles scheduled' },
+        preschedulerDispatched:       { offset: 12, type: 'counter',  unit: 'count', description: 'Events sent to worklet' },
+        preschedulerEventsCancelled:  { offset: 13, type: 'counter',  unit: 'count', description: 'Events cancelled' },
+        preschedulerMinHeadroomMs:    { offset: 14, type: 'gauge',    unit: 'ms',    description: 'Smallest time gap between JS prescheduler dispatch and scsynth scheduler execution' },
+        preschedulerLates:            { offset: 15, type: 'counter',  unit: 'count', description: 'Bundles dispatched after their scheduled execution time' },
+        preschedulerRetriesSucceeded: { offset: 16, type: 'counter',  unit: 'count', description: 'Retries that succeeded' },
+        preschedulerRetriesFailed:    { offset: 17, type: 'counter',  unit: 'count', description: 'Retries that failed' },
+        preschedulerRetryQueueSize:   { offset: 18, type: 'gauge',    unit: 'count', description: 'Current retry queue size' },
+        preschedulerRetryQueuePeak:   { offset: 19, type: 'gauge',    unit: 'count', description: 'Peak retry queue size' },
+        preschedulerMessagesRetried:  { offset: 20, type: 'counter',  unit: 'count', description: 'Messages that needed retry' },
+        preschedulerTotalDispatches:  { offset: 21, type: 'counter',  unit: 'count', description: 'Total dispatch attempts' },
+        preschedulerBypassed:         { offset: 22, type: 'counter',  unit: 'count', description: 'Messages sent directly from JS to scsynth, bypassing prescheduler (aggregate)' },
+        preschedulerMaxLateMs:        { offset: 23, type: 'gauge',    unit: 'ms',    description: 'Maximum lateness at prescheduler (ms)' },
 
-      // Prescheduler metrics
-      preschedulerPending: { type: 'gauge', unit: 'count', description: 'Events waiting to be scheduled' },
-      preschedulerPendingPeak: { type: 'gauge', unit: 'count', description: 'Peak pending events' },
-      preschedulerDispatched: { type: 'counter', unit: 'count', description: 'Events sent to worklet' },
-      preschedulerRetriesSucceeded: { type: 'counter', unit: 'count', description: 'Retries that succeeded' },
-      preschedulerRetriesFailed: { type: 'counter', unit: 'count', description: 'Retries that failed' },
-      preschedulerBundlesScheduled: { type: 'counter', unit: 'count', description: 'Bundles scheduled' },
-      preschedulerEventsCancelled: { type: 'counter', unit: 'count', description: 'Events cancelled' },
-      preschedulerTotalDispatches: { type: 'counter', unit: 'count', description: 'Total dispatch attempts' },
-      preschedulerMessagesRetried: { type: 'counter', unit: 'count', description: 'Messages that needed retry' },
-      preschedulerRetryQueueSize: { type: 'gauge', unit: 'count', description: 'Current retry queue size' },
-      preschedulerRetryQueuePeak: { type: 'gauge', unit: 'count', description: 'Peak retry queue size' },
-      preschedulerBypassed: { type: 'counter', unit: 'count', description: 'Messages sent directly from JS to scsynth, bypassing prescheduler (aggregate)' },
-      bypassNonBundle: { type: 'counter', unit: 'count', description: 'Plain OSC messages (not bundles) that bypassed prescheduler' },
-      bypassImmediate: { type: 'counter', unit: 'count', description: 'Bundles with timetag 0 or 1 that bypassed prescheduler' },
-      bypassNearFuture: { type: 'counter', unit: 'count', description: 'Bundles within bypass lookahead threshold that bypassed prescheduler' },
-      bypassLate: { type: 'counter', unit: 'count', description: 'Timestamped OSC bundles arriving late into SuperSonic bypassing prescheduler' },
-      preschedulerCapacity: { type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler' },
-      preschedulerMinHeadroomMs: { type: 'gauge', unit: 'ms', description: 'Smallest time gap between JS prescheduler dispatch and scsynth scheduler execution' },
-      preschedulerLates: { type: 'counter', unit: 'count', description: 'Bundles dispatched after their scheduled execution time' },
-      preschedulerMaxLateMs: { type: 'gauge', unit: 'ms', description: 'Maximum lateness at prescheduler (ms)' },
+        // OSC Out metrics [24-25]
+        oscOutMessagesSent:           { offset: 24, type: 'counter',  unit: 'count', description: 'OSC messages sent from JS to scsynth' },
+        oscOutBytesSent:              { offset: 25, type: 'counter',  unit: 'bytes', description: 'Total bytes sent from JS to scsynth' },
 
-      // OSC In metrics
-      oscInMessagesReceived: { type: 'counter', unit: 'count', description: 'OSC replies received from scsynth to JS' },
-      oscInMessagesDropped: { type: 'counter', unit: 'count', description: 'Replies lost in transit from scsynth to JS' },
-      oscInBytesReceived: { type: 'counter', unit: 'bytes', description: 'Total bytes received from scsynth to JS' },
+        // OSC In metrics [26-29]
+        oscInMessagesReceived:        { offset: 26, type: 'counter',  unit: 'count', description: 'OSC replies received from scsynth to JS' },
+        oscInBytesReceived:           { offset: 27, type: 'counter',  unit: 'bytes', description: 'Total bytes received from scsynth to JS' },
+        oscInMessagesDropped:         { offset: 28, type: 'counter',  unit: 'count', description: 'Replies lost in transit from scsynth to JS' },
+        oscInCorrupted:               { offset: 29, type: 'counter',  unit: 'count', description: 'Corrupted messages detected from scsynth to JS' },
 
-      // Debug metrics
-      debugMessagesReceived: { type: 'counter', unit: 'count', description: 'Debug messages from scsynth' },
-      debugBytesReceived: { type: 'counter', unit: 'bytes', description: 'Debug bytes received' },
+        // Debug metrics [30-31]
+        debugMessagesReceived:        { offset: 30, type: 'counter',  unit: 'count', description: 'Debug messages from scsynth' },
+        debugBytesReceived:           { offset: 31, type: 'counter',  unit: 'bytes', description: 'Debug bytes received' },
 
-      // Main thread metrics
-      oscOutMessagesSent: { type: 'counter', unit: 'count', description: 'OSC messages sent from JS to scsynth' },
-      oscOutBytesSent: { type: 'counter', unit: 'bytes', description: 'Total bytes sent from JS to scsynth' },
+        // Ring buffer usage [32-37]
+        inBufferUsedBytes:            { offset: 32, type: 'gauge',    unit: 'bytes', description: 'Bytes used in IN ring buffer' },
+        outBufferUsedBytes:           { offset: 33, type: 'gauge',    unit: 'bytes', description: 'Bytes used in OUT ring buffer' },
+        debugBufferUsedBytes:         { offset: 34, type: 'gauge',    unit: 'bytes', description: 'Bytes used in DEBUG ring buffer' },
+        inBufferPeakBytes:            { offset: 35, type: 'gauge',    unit: 'bytes', description: 'Peak bytes used in IN ring buffer' },
+        outBufferPeakBytes:           { offset: 36, type: 'gauge',    unit: 'bytes', description: 'Peak bytes used in OUT ring buffer' },
+        debugBufferPeakBytes:         { offset: 37, type: 'gauge',    unit: 'bytes', description: 'Peak bytes used in DEBUG ring buffer' },
 
-      // Buffer usage
-      inBufferUsed: { type: 'object', description: 'Input ring buffer usage', properties: {
-        bytes: { type: 'gauge', unit: 'bytes', description: 'Bytes used' },
-        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' },
-        capacity: { type: 'constant', unit: 'bytes', description: 'Total buffer capacity' }
-      }},
-      outBufferUsed: { type: 'object', description: 'Output ring buffer usage', properties: {
-        bytes: { type: 'gauge', unit: 'bytes', description: 'Bytes used' },
-        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' },
-        capacity: { type: 'constant', unit: 'bytes', description: 'Total buffer capacity' }
-      }},
-      debugBufferUsed: { type: 'object', description: 'Debug ring buffer usage', properties: {
-        bytes: { type: 'gauge', unit: 'bytes', description: 'Bytes used' },
-        percentage: { type: 'gauge', unit: 'percentage', description: 'Percentage full' },
-        capacity: { type: 'constant', unit: 'bytes', description: 'Total buffer capacity' }
-      }},
+        // Bypass category metrics [38-41]
+        bypassNonBundle:              { offset: 38, type: 'counter',  unit: 'count', description: 'Plain OSC messages (not bundles) that bypassed prescheduler' },
+        bypassImmediate:              { offset: 39, type: 'counter',  unit: 'count', description: 'Bundles with timetag 0 or 1 that bypassed prescheduler' },
+        bypassNearFuture:             { offset: 40, type: 'counter',  unit: 'count', description: 'Bundles within bypass lookahead threshold that bypassed prescheduler' },
+        bypassLate:                   { offset: 41, type: 'counter',  unit: 'count', description: 'Timestamped OSC bundles arriving late into SuperSonic bypassing prescheduler' },
 
-      // Timing
-      driftOffsetMs: { type: 'gauge', unit: 'ms', description: 'Clock drift between AudioContext and wall clock' },
-      ntpStartTime: { type: 'gauge', unit: 'seconds', description: 'NTP time when AudioContext started' },
-      globalOffsetMs: { type: 'gauge', unit: 'ms', description: 'Global timing offset for multi-system sync' },
+        // scsynth late timing diagnostics [42-44]
+        scsynthSchedulerMaxLateMs:    { offset: 42, type: 'gauge',    unit: 'ms',    description: 'Maximum lateness observed in scsynth scheduler (ms)' },
+        scsynthSchedulerLastLateMs:   { offset: 43, type: 'gauge',    unit: 'ms',    description: 'Most recent late magnitude in scsynth scheduler (ms)' },
+        scsynthSchedulerLastLateTick: { offset: 44, type: 'gauge',    unit: 'count', description: 'Process count when last scsynth late occurred' },
 
-      // Engine state
-      audioContextState: { type: 'string', values: ['running', 'suspended', 'closed', 'interrupted'], description: 'AudioContext state' },
-      bufferPoolUsedBytes: { type: 'gauge', unit: 'bytes', description: 'Buffer pool bytes used' },
-      bufferPoolAvailableBytes: { type: 'gauge', unit: 'bytes', description: 'Buffer pool bytes available' },
-      bufferPoolAllocations: { type: 'counter', unit: 'count', description: 'Total buffer allocations' },
-      loadedSynthDefs: { type: 'gauge', unit: 'count', description: 'Number of loaded synthdefs' },
+        // Ring buffer direct write failures [45]
+        ringBufferDirectWriteFails:   { offset: 45, type: 'counter',  unit: 'count', description: 'SAB mode only: optimistic direct writes attempted but failed due to ring buffer lock not being available (delivered via prescheduler instead)' },
 
-      // Error metrics
-      scsynthWasmErrors: { type: 'counter', unit: 'count', description: 'WASM execution errors in audio worklet' },
-      oscInCorrupted: { type: 'counter', unit: 'count', description: 'Corrupted messages detected from scsynth to JS' },
-      ringBufferDirectWriteFails: { type: 'counter', unit: 'count', description: 'SAB mode only: optimistic direct writes attempted but failed due to ring buffer lock not being available (delivered via prescheduler instead)' },
-    };
+        // Context metrics [46+] (main thread only)
+        driftOffsetMs:                { offset: 46, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock drift between AudioContext and wall clock' },
+        globalOffsetMs:               { offset: 47, type: 'gauge',    unit: 'ms',    signed: true, description: 'Global timing offset for multi-system sync' },
+        audioContextState:            { offset: 48, type: 'enum',     values: ['unknown', 'running', 'suspended', 'closed', 'interrupted'], description: 'AudioContext state' },
+        bufferPoolUsedBytes:          { offset: 49, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes used' },
+        bufferPoolAvailableBytes:     { offset: 50, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes available' },
+        bufferPoolAllocations:        { offset: 51, type: 'counter',  unit: 'count', description: 'Total buffer allocations' },
+        loadedSynthDefs:              { offset: 52, type: 'gauge',    unit: 'count', description: 'Number of loaded synthdefs' },
+        scsynthSchedulerCapacity:     { offset: 53, type: 'constant', unit: 'count', description: 'Maximum scheduler queue size' },
+        preschedulerCapacity:         { offset: 54, type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler' },
+        inBufferCapacity:             { offset: 55, type: 'constant', unit: 'bytes', description: 'IN ring buffer capacity' },
+        outBufferCapacity:            { offset: 56, type: 'constant', unit: 'bytes', description: 'OUT ring buffer capacity' },
+        debugBufferCapacity:          { offset: 57, type: 'constant', unit: 'bytes', description: 'DEBUG ring buffer capacity' },
+        mode:                         { offset: 58, type: 'enum',     values: ['sab', 'postMessage'], description: 'Transport mode' },
+      },
+
+      layout: {
+        panels: [
+          {
+            title: 'OSC Out',
+            rows: [
+              { label: 'sent',   cells: [{ key: 'oscOutMessagesSent' }] },
+              { label: 'bytes',  cells: [{ key: 'oscOutBytesSent', kind: 'muted', format: 'bytes' }] },
+              { label: 'bypass', cells: [{ key: 'preschedulerBypassed', kind: 'green' }] },
+              { label: 'lost',   cells: [{ key: 'scsynthSequenceGaps', kind: 'error' }] },
+            ]
+          },
+          {
+            title: 'Bypass',
+            rows: [
+              { label: 'msg',  cells: [{ key: 'bypassNonBundle', kind: 'muted' }] },
+              { label: 'imm',  cells: [{ key: 'bypassImmediate', kind: 'muted' }] },
+              { label: 'near', cells: [{ key: 'bypassNearFuture', kind: 'muted' }] },
+              { label: 'late', cells: [{ key: 'bypassLate', kind: 'muted' }] },
+            ]
+          },
+          {
+            title: 'OSC In',
+            rows: [
+              { label: 'received',  cells: [{ key: 'oscInMessagesReceived' }] },
+              { label: 'bytes',     cells: [{ key: 'oscInBytesReceived', kind: 'muted', format: 'bytes' }] },
+              { label: 'dropped',   cells: [{ key: 'oscInMessagesDropped', kind: 'error' }] },
+              { label: 'corrupted', cells: [{ key: 'oscInCorrupted', kind: 'error' }] },
+            ]
+          },
+          {
+            title: 'Presched Flow',
+            rows: [
+              { label: 'pending',    cells: [{ key: 'preschedulerPending' }, { sep: ' | ' }, { key: 'preschedulerPendingPeak', kind: 'muted' }] },
+              { label: 'scheduled',  cells: [{ key: 'preschedulerBundlesScheduled' }] },
+              { label: 'dispatched', cells: [{ key: 'preschedulerDispatched', kind: 'dim' }] },
+              { label: 'min slack',  cells: [{ key: 'preschedulerMinHeadroomMs', kind: 'dim', format: 'headroom' }, { text: ' ms', kind: 'muted' }] },
+            ]
+          },
+          {
+            title: 'Presched Health',
+            rows: [
+              { label: 'lates',       cells: [{ key: 'preschedulerLates', kind: 'error' }, { sep: ' (' }, { key: 'preschedulerMaxLateMs', kind: 'dim' }, { text: 'ms max)', kind: 'muted' }] },
+              { label: 'cancelled',   cells: [{ key: 'preschedulerEventsCancelled', kind: 'error' }] },
+              { label: 'retried',     cells: [{ key: 'preschedulerMessagesRetried', kind: 'dim' }, { sep: ' | ' }, { key: 'preschedulerRetriesSucceeded', kind: 'green' }, { sep: ' | ' }, { key: 'preschedulerRetriesFailed', kind: 'error' }] },
+              { label: 'retry queue', cells: [{ key: 'preschedulerRetryQueueSize' }, { sep: ' | ' }, { key: 'preschedulerRetryQueuePeak', kind: 'muted' }] },
+            ]
+          },
+          {
+            title: 'scsynth Scheduler',
+            rows: [
+              { label: 'queue',   cells: [{ key: 'scsynthSchedulerDepth' }, { sep: ' | ' }, { key: 'scsynthSchedulerPeakDepth', kind: 'muted' }] },
+              { label: 'dropped', cells: [{ key: 'scsynthSchedulerDropped', kind: 'error' }] },
+              { label: 'lates',   cells: [{ key: 'scsynthSchedulerLates', kind: 'error' }] },
+              { label: 'max | last', cells: [{ key: 'scsynthSchedulerMaxLateMs', kind: 'error' }, { sep: ' | ' }, { key: 'scsynthSchedulerLastLateMs', kind: 'dim' }, { text: ' ms', kind: 'muted' }] },
+            ]
+          },
+          {
+            title: 'scsynth',
+            rows: [
+              { label: 'processed',   cells: [{ key: 'scsynthMessagesProcessed' }] },
+              { label: 'dropped',     cells: [{ key: 'scsynthMessagesDropped', kind: 'error' }] },
+              { label: 'synthdefs',   cells: [{ key: 'loadedSynthDefs' }] },
+              { label: 'clock drift', cells: [{ key: 'driftOffsetMs', format: 'signed' }, { text: 'ms', kind: 'muted' }] },
+            ]
+          },
+          {
+            title: 'Ring Buffer Level',
+            class: 'wide',
+            rows: [
+              { type: 'bar', label: 'in',  usedKey: 'inBufferUsedBytes',  peakKey: 'inBufferPeakBytes',  capacityKey: 'inBufferCapacity',  color: 'blue' },
+              { type: 'bar', label: 'out', usedKey: 'outBufferUsedBytes', peakKey: 'outBufferPeakBytes', capacityKey: 'outBufferCapacity', color: 'green' },
+              { type: 'bar', label: 'dbg', usedKey: 'debugBufferUsedBytes', peakKey: 'debugBufferPeakBytes', capacityKey: 'debugBufferCapacity', color: 'purple' },
+              { label: 'direct write fails', cells: [{ key: 'ringBufferDirectWriteFails', kind: 'error' }] },
+            ]
+          },
+          {
+            title: 'AudioWorklet',
+            rows: [
+              { label: 'audio',       cells: [{ key: 'audioContextState', kind: 'green', format: 'enum' }] },
+              { label: 'ticks',       cells: [{ key: 'scsynthProcessCount', kind: 'dim' }] },
+              { label: 'WASM errors', cells: [{ key: 'scsynthWasmErrors', kind: 'error' }] },
+              { label: 'debug',       cells: [{ key: 'debugMessagesReceived', kind: 'muted' }, { text: ' (' }, { key: 'debugBytesReceived', kind: 'muted', format: 'bytes' }, { text: ')' }] },
+            ]
+          },
+          {
+            title: 'Audio Buffers',
+            rows: [
+              { label: 'used',   cells: [{ key: 'bufferPoolUsedBytes', format: 'bytes' }] },
+              { label: 'free',   cells: [{ key: 'bufferPoolAvailableBytes', kind: 'green', format: 'bytes' }] },
+              { label: 'allocs', cells: [{ key: 'bufferPoolAllocations', kind: 'dim' }] },
+            ]
+          },
+        ]
+      },
+
+      sentinels: {
+        HEADROOM_UNSET: 0xFFFFFFFF,
+      }
+    });
   }
 
   /**
@@ -509,18 +610,30 @@ export class SuperSonic {
   }
 
   /**
+   * Get metrics as a flat Uint32Array for zero-allocation reading.
+   * Returns the same array reference every call — values are updated in-place.
+   * Slots 0-45: SAB/snapshot metrics, 46+: context metrics.
+   * Use getMetricsSchema().metrics for offset mappings.
+   * @returns {Uint32Array}
+   */
+  getMetricsArray() {
+    this.#updateMergedArray();
+    return this.#metricsReader.getMergedArray();
+  }
+
+  /**
    * Get a diagnostic snapshot containing metrics, node tree, and memory info.
    * Useful for debugging timing issues, capturing state for bug reports, etc.
    * @returns {Object} Snapshot with timestamp, metrics (with descriptions), nodeTree, and memory info
    */
   getSnapshot() {
     const rawMetrics = this.#gatherMetrics();
-    const schema = SuperSonic.getMetricsSchema() || {};
+    const schemaMetrics = SuperSonic.getMetricsSchema()?.metrics || {};
 
     // Build metrics with descriptions
     const metricsWithDescriptions = {};
     for (const [key, value] of Object.entries(rawMetrics)) {
-      const def = schema[key];
+      const def = schemaMetrics[key];
       if (def?.description) {
         metricsWithDescriptions[key] = {
           value,
@@ -1690,11 +1803,9 @@ export class SuperSonic {
   // PRIVATE: METRICS
   // ============================================================================
 
-  #gatherMetrics() {
-    const preschedulerMetrics = this.#osc?.getPreschedulerMetrics();
-
-    return this.#metricsReader.gatherMetrics({
-      preschedulerMetrics: preschedulerMetrics,
+  #metricsContext() {
+    return {
+      preschedulerMetrics: this.#osc?.getPreschedulerMetrics(),
       transportMetrics: this.#osc?.getMetrics(),
       driftOffsetMs: this.#ntpTiming?.getDriftOffset() ?? 0,
       ntpStartTime: this.#ntpTiming?.getNTPStartTime() ?? 0,
@@ -1703,7 +1814,15 @@ export class SuperSonic {
       bufferPoolStats: this.#bufferManager?.getStats(),
       loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,
       preschedulerCapacity: this.#config.preschedulerCapacity,
-    });
+    };
+  }
+
+  #gatherMetrics() {
+    return this.#metricsReader.gatherMetrics(this.#metricsContext());
+  }
+
+  #updateMergedArray() {
+    this.#metricsReader.updateMergedArray(this.#metricsContext());
   }
 
   // ============================================================================
