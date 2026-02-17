@@ -300,6 +300,9 @@ extern "C" {
         tree_header->version.store(0, std::memory_order_relaxed);
         tree_header->dropped_count.store(0, std::memory_order_relaxed);
 
+        // Initialize free list and hash table for O(1) node tree operations
+        NodeTree_InitIndices();
+
         worklet_debug("[NodeTree] Initialized at offset %u, size %u bytes",
                      NODE_TREE_START, NODE_TREE_SIZE);
 
@@ -742,8 +745,8 @@ extern "C" {
                     }
                 }
 
-                bundle->Perform();  // Execute the bundle
-                bundle->Release();  // Return slot to pool
+                bundle->Perform();              // Execute the bundle
+                g_scheduler.ReleaseSlot(bundle); // Return slot to free list
             }
 
             // Reset offset

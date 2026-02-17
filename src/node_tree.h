@@ -176,6 +176,13 @@ void NodeTree_Remove(int32_t nodeId, NodeTreeHeader* header, NodeEntry* entries)
 void NodeTree_Update(Node* node, NodeTreeHeader* header, NodeEntry* entries);
 
 /**
+ * Initialize free list and hash table indices.
+ * Must be called once after node tree memory is zeroed (all entries id == -1).
+ * Called from init_memory() in audio_processor.cpp.
+ */
+void NodeTree_InitIndices();
+
+/**
  * Find the array index of a node by ID.
  *
  * @param nodeId  The node ID to search for

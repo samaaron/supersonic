@@ -18,25 +18,120 @@
 #include "scsynth/server/SC_Group.h"  // For Node, Group structs
 #include "scsynth/server/SC_SynthDef.h"  // For NodeDef (mName access)
 #include <cstring>  // For strncpy
+#include <climits>  // For INT32_MIN
 
-// Find index of node in tree (-1 if not found)
-int32_t NodeTree_FindIndex(int32_t nodeId, NodeEntry* entries) {
-    for (uint32_t i = 0; i < NODE_TREE_MIRROR_MAX_NODES; i++) {
-        if (entries[i].id == nodeId) {
-            return static_cast<int32_t>(i);
-        }
+// =============================================================================
+// FREE LIST — O(1) empty slot allocation
+// =============================================================================
+// Parallel array: nt_free_next[i] is the next free slot after i (-1 = end).
+// Slots in use have undefined nt_free_next values (they're not on the list).
+
+static int16_t nt_free_next[NODE_TREE_MIRROR_MAX_NODES];
+static int16_t nt_free_head = -1;
+
+// =============================================================================
+// HASH TABLE — O(1) nodeId → slot lookup
+// =============================================================================
+// Open-addressing with linear probing, 2048 buckets (~50% load at 1024 nodes).
+// Backward-shift deletion (Knuth Algorithm R) avoids tombstone accumulation.
+
+static constexpr int NT_HASH_CAPACITY = 2048;
+static constexpr int NT_HASH_MASK = NT_HASH_CAPACITY - 1;
+static constexpr int32_t NT_HASH_EMPTY = INT32_MIN;  // Sentinel for empty buckets
+
+struct NTHashEntry {
+    int32_t key;    // nodeId (NT_HASH_EMPTY = empty)
+    int16_t value;  // slot index in entries[]
+};
+
+static NTHashEntry nt_hash[NT_HASH_CAPACITY];
+
+// Murmurhash-style integer hash
+static inline uint32_t nt_hash_func(int32_t key) {
+    uint32_t h = static_cast<uint32_t>(key);
+    h ^= h >> 16;
+    h *= 0x45d9f3b;
+    h ^= h >> 16;
+    return h & NT_HASH_MASK;
+}
+
+static void nt_hash_insert(int32_t key, int16_t value) {
+    uint32_t idx = nt_hash_func(key);
+    while (nt_hash[idx].key != NT_HASH_EMPTY) {
+        idx = (idx + 1) & NT_HASH_MASK;
+    }
+    nt_hash[idx].key = key;
+    nt_hash[idx].value = value;
+}
+
+static int16_t nt_hash_find(int32_t key) {
+    uint32_t idx = nt_hash_func(key);
+    while (nt_hash[idx].key != NT_HASH_EMPTY) {
+        if (nt_hash[idx].key == key) return nt_hash[idx].value;
+        idx = (idx + 1) & NT_HASH_MASK;
     }
     return -1;
 }
 
-// Find first empty slot in tree (-1 if full)
-int32_t NodeTree_FindEmptySlot(NodeEntry* entries) {
-    for (uint32_t i = 0; i < NODE_TREE_MIRROR_MAX_NODES; i++) {
-        if (entries[i].id == -1) {
-            return static_cast<int32_t>(i);
+// Backward-shift deletion (Knuth Algorithm R) — no tombstones
+static void nt_hash_remove(int32_t key) {
+    uint32_t i = nt_hash_func(key);
+    while (nt_hash[i].key != NT_HASH_EMPTY) {
+        if (nt_hash[i].key == key) {
+            // Found at position i. Backward-shift to fill the gap.
+            for (;;) {
+                nt_hash[i].key = NT_HASH_EMPTY;  // R1: Mark empty
+                uint32_t j = i;
+                for (;;) {
+                    j = (j + 1) & NT_HASH_MASK;  // R2: Advance j
+                    if (nt_hash[j].key == NT_HASH_EMPTY) return;  // Done
+                    uint32_t r = nt_hash_func(nt_hash[j].key);   // R3: Natural slot
+                    // R4: If r is cyclically between (i, j], entry j is fine — skip
+                    if (i <= j) {
+                        if (i < r && r <= j) continue;
+                    } else {
+                        if (i < r || r <= j) continue;
+                    }
+                    break;  // Entry j needs to move
+                }
+                nt_hash[i] = nt_hash[j];  // R5: Move entry
+                i = j;
+            }
         }
+        i = (i + 1) & NT_HASH_MASK;
     }
-    return -1;
+}
+
+// =============================================================================
+// PUBLIC API
+// =============================================================================
+
+// Initialize free list and hash table. Called once from init_memory().
+void NodeTree_InitIndices() {
+    // Build free list: 0 → 1 → ... → (N-1) → -1
+    for (int i = 0; i < NODE_TREE_MIRROR_MAX_NODES - 1; ++i) {
+        nt_free_next[i] = static_cast<int16_t>(i + 1);
+    }
+    nt_free_next[NODE_TREE_MIRROR_MAX_NODES - 1] = -1;
+    nt_free_head = 0;
+
+    // Clear hash table
+    for (int i = 0; i < NT_HASH_CAPACITY; ++i) {
+        nt_hash[i].key = NT_HASH_EMPTY;
+    }
+}
+
+// Find index of node in tree — O(1) via hash table
+int32_t NodeTree_FindIndex(int32_t nodeId, NodeEntry* entries) {
+    (void)entries;  // Lookup is via hash table, not linear scan
+    return nt_hash_find(nodeId);
+}
+
+// Find first empty slot in tree — O(1) via free list
+int32_t NodeTree_FindEmptySlot(NodeEntry* entries) {
+    (void)entries;  // Allocation is via free list, not linear scan
+    if (nt_free_head < 0) return -1;
+    return nt_free_head;
 }
 
 // Add a node to the tree (called on kNode_Go)
@@ -51,6 +146,9 @@ void NodeTree_Add(Node* node, NodeTreeHeader* header, NodeEntry* entries) {
         worklet_debug("[NodeTree] Mirror full! Node %d dropped, total dropped: %u", node->mID, new_count);
         return;
     }
+
+    // Pop slot from free list
+    nt_free_head = nt_free_next[slot];
 
     NodeEntry* entry = &entries[slot];
     entry->id = node->mID;
@@ -75,6 +173,10 @@ void NodeTree_Add(Node* node, NodeTreeHeader* header, NodeEntry* entries) {
             entry->def_name[NODE_TREE_DEF_NAME_SIZE - 1] = '\0';
         }
     }
+
+    // Insert into hash table (nodeId → slot) before sibling updates
+    // so FindIndex calls can locate this node if needed
+    nt_hash_insert(node->mID, static_cast<int16_t>(slot));
 
     // Update sibling nodes' prev/next pointers
     // If the new node has a previous sibling, update that sibling's next_id
@@ -151,8 +253,13 @@ void NodeTree_Remove(int32_t nodeId, NodeTreeHeader* header, NodeEntry* entries)
         }
     }
 
-    // Mark slot as empty
+    // Remove from hash table and mark slot as empty
+    nt_hash_remove(nodeId);
     entry->id = -1;
+
+    // Push slot back onto free list
+    nt_free_next[slot] = nt_free_head;
+    nt_free_head = static_cast<int16_t>(slot);
 
     // Update header
     uint32_t count = header->node_count.load(std::memory_order_relaxed);

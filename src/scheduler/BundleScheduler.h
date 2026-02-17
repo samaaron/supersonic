@@ -43,8 +43,9 @@ struct ScheduledBundle {
     ReplyAddress mReplyAddr;
     char mData[SCHEDULER_SLOT_SIZE];  // Embedded OSC data (configurable)
     bool mInUse;                       // Pool slot tracking
+    int16_t mNextFree;                 // Intrusive free list link (-1 = end)
 
-    ScheduledBundle() : mTime(0), mSize(0), mWorld(nullptr), mStabilityCount(0), mInUse(false) {
+    ScheduledBundle() : mTime(0), mSize(0), mWorld(nullptr), mStabilityCount(0), mInUse(false), mNextFree(-1) {
         mReplyAddr.mReplyFunc = nullptr;
     }
 
@@ -116,18 +117,32 @@ private:
     QueueEntry mQueue[MAX_SCHEDULED_BUNDLES];      // Priority queue (sorted)
     int mQueueSize;
     int64_t mStabilityCounter;
+    int16_t mFreeHead;                             // Free list head (-1 = empty)
 
 public:
-    BundleScheduler() : mQueueSize(0), mStabilityCounter(0) {}
-
-    // Allocate a slot from the pool
-    int AllocateSlot() {
-        for (int i = 0; i < MAX_SCHEDULED_BUNDLES; ++i) {
-            if (!mPool[i].mInUse) {
-                return i;
-            }
+    BundleScheduler() : mQueueSize(0), mStabilityCounter(0) {
+        // Build free list: 0 → 1 → 2 → ... → (N-1) → -1
+        for (int i = 0; i < MAX_SCHEDULED_BUNDLES - 1; ++i) {
+            mPool[i].mNextFree = static_cast<int16_t>(i + 1);
         }
-        return -1;  // Pool full
+        mPool[MAX_SCHEDULED_BUNDLES - 1].mNextFree = -1;
+        mFreeHead = 0;
+    }
+
+    // Allocate a slot from the pool — O(1) via free list
+    int AllocateSlot() {
+        if (mFreeHead < 0) return -1;  // Pool full
+        int slot = mFreeHead;
+        mFreeHead = mPool[slot].mNextFree;
+        return slot;
+    }
+
+    // Release a slot back to the free list — O(1)
+    void ReleaseSlot(ScheduledBundle* bundle) {
+        bundle->Release();
+        int16_t slot = static_cast<int16_t>(bundle - mPool);
+        bundle->mNextFree = mFreeHead;
+        mFreeHead = slot;
     }
 
     // Add a bundle to the scheduler
@@ -211,6 +226,9 @@ public:
         mQueueSize = 0;
         for (int i = 0; i < MAX_SCHEDULED_BUNDLES; ++i) {
             mPool[i].Release();
+            mPool[i].mNextFree = static_cast<int16_t>(i + 1);
         }
+        mPool[MAX_SCHEDULED_BUNDLES - 1].mNextFree = -1;
+        mFreeHead = 0;
     }
 };
