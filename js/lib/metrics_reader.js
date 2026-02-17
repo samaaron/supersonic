@@ -2,6 +2,7 @@
 // Copyright (c) 2025 Sam Aaron
 
 import * as MetricsOffsets from './metrics_offsets.js';
+import { calculateAllControlIndices } from './control_offsets.js';
 
 /**
  * Reads and aggregates metrics from SharedArrayBuffer or snapshot buffers
@@ -15,11 +16,12 @@ export class MetricsReader {
   // Cached views (SAB mode only)
   #atomicView;
   #metricsView;
+  #controlIndices;
 
   // Cached snapshot buffer (postMessage mode)
   #cachedSnapshotBuffer = null;
 
-  // Merged array: slots 0-45 from SAB/snapshot, 46+ from context
+  // Merged array: slots 0-(SAB_METRICS_COUNT-1) from SAB/snapshot, SAB_METRICS_COUNT+ from context
   #mergedArray = new Uint32Array(MetricsOffsets.MERGED_ARRAY_SIZE);
   #mergedDV = new DataView(this.#mergedArray.buffer);
 
@@ -49,6 +51,7 @@ export class MetricsReader {
     if (this.#mode === 'sab' && sharedBuffer && bufferConstants) {
       // Atomic view for reading control pointers
       this.#atomicView = new Int32Array(sharedBuffer);
+      this.#controlIndices = calculateAllControlIndices(ringBufferBase, bufferConstants.CONTROL_START);
 
       // Cache metrics view for efficient reads
       const metricsBase = ringBufferBase + bufferConstants.METRICS_START;
@@ -205,21 +208,21 @@ export class MetricsReader {
    * @returns {Object|null}
    */
   getBufferUsage() {
-    if (!this.#atomicView || !this.#bufferConstants || !this.#ringBufferBase) {
+    if (!this.#atomicView || !this.#bufferConstants || !this.#controlIndices) {
       return null;
     }
 
-    const controlBase = this.#ringBufferBase + this.#bufferConstants.CONTROL_START;
     const bc = this.#bufferConstants;
+    const idx = this.#controlIndices;
 
     // Read head/tail pointers
     const view = this.#atomicView;
-    const inHead = Atomics.load(view, (controlBase + 0) / 4);
-    const inTail = Atomics.load(view, (controlBase + 4) / 4);
-    const outHead = Atomics.load(view, (controlBase + 8) / 4);
-    const outTail = Atomics.load(view, (controlBase + 12) / 4);
-    const debugHead = Atomics.load(view, (controlBase + 16) / 4);
-    const debugTail = Atomics.load(view, (controlBase + 20) / 4);
+    const inHead = Atomics.load(view, idx.IN_HEAD);
+    const inTail = Atomics.load(view, idx.IN_TAIL);
+    const outHead = Atomics.load(view, idx.OUT_HEAD);
+    const outTail = Atomics.load(view, idx.OUT_TAIL);
+    const debugHead = Atomics.load(view, idx.DEBUG_HEAD);
+    const debugTail = Atomics.load(view, idx.DEBUG_TAIL);
 
     // Calculate bytes used (accounting for wrap-around)
     const inUsed = (inHead - inTail + bc.IN_BUFFER_SIZE) % bc.IN_BUFFER_SIZE;
@@ -253,7 +256,7 @@ export class MetricsReader {
     if (!this.#cachedSnapshotBuffer || !preschedulerMetrics) return;
 
     // Get a view into the metrics portion of the snapshot buffer
-    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 46);
+    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, MetricsOffsets.SAB_METRICS_COUNT);
 
     // Copy prescheduler metrics (offsets 9-22), but NOT offset 22 (PRESCHEDULER_BYPASSED)
     // or offset 23 (PRESCHEDULER_MAX_LATE_MS).
@@ -285,7 +288,7 @@ export class MetricsReader {
 
       // Read metrics from snapshot buffer
       if (this.#cachedSnapshotBuffer) {
-        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, 46);
+        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, MetricsOffsets.SAB_METRICS_COUNT);
         metrics = this.parseMetricsBuffer(metricsView);
       } else {
         metrics = {};
@@ -388,7 +391,7 @@ export class MetricsReader {
         this.overlayPreschedulerMetrics(context.preschedulerMetrics);
       }
       if (this.#cachedSnapshotBuffer) {
-        const view = new Uint32Array(this.#cachedSnapshotBuffer, 0, 46);
+        const view = new Uint32Array(this.#cachedSnapshotBuffer, 0, MetricsOffsets.SAB_METRICS_COUNT);
         arr.set(view);
       }
       // PM mode: overlay transport metrics into the merged array

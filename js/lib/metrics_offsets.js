@@ -111,6 +111,9 @@ export const SCSYNTH_SCHEDULER_LAST_LATE_TICK = 44; // Process count when last l
 // =============================================================================
 export const RING_BUFFER_DIRECT_WRITE_FAILS = 45;   // SAB mode only: optimistic direct writes that failed (delivered via prescheduler)
 
+// Number of metric slots in the SAB/snapshot buffer (indices 0 through RING_BUFFER_DIRECT_WRITE_FAILS)
+export const SAB_METRICS_COUNT = RING_BUFFER_DIRECT_WRITE_FAILS + 1;  // 46
+
 // =============================================================================
 // Context metrics [46-58] (written by main thread into merged array only)
 // These are NOT in the C++ PerformanceMetrics struct or SAB —

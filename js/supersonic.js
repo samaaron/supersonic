@@ -21,7 +21,7 @@ import { EventEmitter } from "./lib/event_emitter.js";
 import { MetricsReader } from "./lib/metrics_reader.js";
 import { NTPTiming } from "./lib/ntp_timing.js";
 import { AudioCapture } from "./lib/audio_capture.js";
-import { inspect, parseNodeTree } from "./lib/inspector.js";
+import { parseNodeTree } from "./lib/node_tree_parser.js";
 import * as oscFast from "./lib/osc_fast.js";
 import { SYNC_TIMEOUT_MS, WORKLET_INIT_TIMEOUT_MS, SNAPSHOT_INTERVAL_MS } from "./timing_constants.js";
 import { MemoryLayout } from "./memory_layout.js";
@@ -74,13 +74,6 @@ export class SuperSonic {
       }
     },
   };
-
-  /**
-   * Inspect a SuperSonic instance or raw SharedArrayBuffer
-   */
-  static inspect(target) {
-    return inspect(target);
-  }
 
   /**
    * Get schema describing all available metrics with array offsets and UI layout.
@@ -1685,7 +1678,6 @@ export class SuperSonic {
         ss.tree = () => ss.primary?.getTree();
         ss.rawTree = () => ss.primary?.getRawTree();
         ss.snapshot = () => ss.primary?.getSnapshot();
-        ss.inspect = () => ss.primary ? SuperSonic.inspect(ss.primary) : null;
       }
       window.__supersonic__.instances.push(this);
     }
