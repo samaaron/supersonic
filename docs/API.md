@@ -247,10 +247,27 @@ Override scsynth server defaults:
 ```javascript
 const supersonic = new SuperSonic({
   scsynthOptions: {
-    numBuffers: 4096, // Max audio buffers (default: 1024)
+    numBuffers: 4096,
+    numOutputBusChannels: 4,
   },
 });
 ```
+
+| Option                  | Default | Range       | Description                                                                                                          |
+|-------------------------|---------|-------------|----------------------------------------------------------------------------------------------------------------------|
+| `numBuffers`            | 1024    | 1-65535     | Maximum audio buffers (SndBuf slots). Each slot has ~104 bytes overhead; actual audio data is stored separately.      |
+| `maxNodes`              | 1024    | 1+          | Maximum synthesis nodes (synths + groups).                                                                            |
+| `maxGraphDefs`          | 1024    | 1+          | Maximum loaded SynthDef definitions.                                                                                  |
+| `maxWireBufs`           | 64      | 1+          | Wire buffers for internal UGen connections. Each uses `bufLength * 8` bytes.                                          |
+| `numAudioBusChannels`   | 128     | 1+          | Audio bus channels for real-time routing between synths.                                                               |
+| `numInputBusChannels`   | 2       | 0+          | Input bus channels from hardware. Actual channels used is `min(configured, hardware)`.                                |
+| `numOutputBusChannels`  | 2       | 1-128       | Output bus channels to hardware. Use values > 2 for surround or multi-output audio interfaces. When > 2 and `autoConnect` is true, sets `destination.channelInterpretation` to `'discrete'` to prevent automatic mixing. |
+| `numControlBusChannels` | 4096    | 1+          | Control bus channels for control-rate data sharing between synths.                                                     |
+| `bufLength`             | 128     | 128 (fixed) | Audio buffer length in samples. Fixed by the WebAudio API — cannot be changed.                                        |
+| `realTimeMemorySize`    | 8192    | 1+          | Real-time memory pool in KB for synthesis-time allocations (UGen memory, etc.).                                        |
+| `numRGens`              | 64      | 1+          | Random number generators. Each synth can use its own RNG for reproducible randomness.                                 |
+| `preferredSampleRate`   | 0       | 0, 8000-384000 | Preferred sample rate. `0` uses the AudioContext default (typically 48000).                                         |
+| `verbosity`             | 0       | 0-4         | Debug verbosity. 0 = quiet, 1 = errors, 2 = warnings, 3 = info, 4 = debug.                                           |
 
 ## Core Methods
 
