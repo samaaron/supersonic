@@ -22,15 +22,17 @@ SuperSonic supports two modes: **PM** and **SAB**. Both modes are first-class ci
 
 ### postMessage Mode
 
-In postMessage (PM) mode, all communication between threads uses the standard [postMessage API](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage).
+In postMessage (PM) mode, all communication between threads uses the standard [postMessage API](https://developer.mozilla.org/en-US/docs/Web/API/MessagePort/postMessage).
 
-This mode works everywhere because postMessage is universally supported. The trade-off is that message passing has inherent overhead - each postMessage involves serialization, event loop scheduling, and deserialization. Overloading the main thread can also have a negative effect on postMessage delivery times.
+This mode works everywhere because postMessage is universally supported. The trade-off is that message passing has inherent overhead - each postMessage involves serialisation, event loop scheduling, and deserialisation. Overloading the main thread can also have a negative effect on postMessage delivery times.
 
 ### SAB Mode
 
-In SAB mode, threads communicate through [SharedArrayBuffer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer) - a region of memory that all threads can read from and write to directly.
+In SAB mode, all OSC messages in and out of scsynth are transported via a ring buffer. This ring buffer exists within a [SharedArrayBuffer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer) - a region of memory that all threads can read from and write to directly.
 
-This provides lower latency and more consistent timing because there's no message passing overhead. However, SharedArrayBuffer requires specific security headers due to [Spectre vulnerability](https://en.wikipedia.org/wiki/Spectre_(security_vulnerability)) mitigations.
+OSC messages to scsynth go straight into the SAB if they are immediate messages or OSC Bundles (with future NTP timestamps) scheduled for the very near future. OSC Bundles for the far future go to a special holding bay called the prescheduler. All OSC bundles sent to the prescheduler are sent via postMessage (they are not in a hurry). The prescheduler ensures that the OSC Bundles get placed into the SAB ring buffer just ahead of their scheduled time.
+
+This provides lower latency and more consistent timing because there's no serialisation or event loop scheduling overhead on the path to scsynth. However, SharedArrayBuffer requires specific security headers due to [Spectre vulnerability](https://en.wikipedia.org/wiki/Spectre_(security_vulnerability)) mitigations.
 
 ## Configuration
 
@@ -166,35 +168,21 @@ See `example/hybrid.html` for a complete example.
 
 ## Technical Details
 
-### Message Flow (SAB Mode)
+### Ring Buffer Coordination (SAB Mode)
 
-In SAB mode, messages are routed based on their timing (same as PM mode):
-
-- **Bypass path**: written directly to a lock-protected ring buffer in shared memory
-- **Far-future path**: held by the prescheduler until closer to execution time
-
-The ring buffer uses a spinlock for coordination. Multiple producers (main thread, workers) can write to the buffer, and a single consumer (audio worklet) reads from it.
+The SAB ring buffer uses a CAS mutex for coordination. Multiple producers (main thread, workers) can write to the buffer, and a single consumer (audio worklet) reads from it. Lock acquisition has two phases: a brief `compareExchange` spin (avoids a kernel round-trip in uncontended cases), then `Atomics.wait()` which sleeps in the OS scheduler until woken by `Atomics.notify()`.
 
 **Lock contention handling:**
-- Workers use `Atomics.wait()` to block until the lock is available (guaranteed delivery)
-- The main thread cannot block (browser restriction), so it uses an optimistic approach: attempt a direct write, and if the lock isn't immediately available, fall back to sending via the prescheduler worker
+- Workers use both phases: a brief CAS spin, then `Atomics.wait()` for guaranteed acquisition
+- The main thread cannot call `Atomics.wait()` (a browser restriction), so it uses an optimistic approach: a single CAS attempt, and if the lock isn't immediately available, fall back to sending via the prescheduler worker (which receives messages via postMessage, so the fallback is always non-blocking)
 
-All messages are guaranteed to be delivered - the `ringBufferDirectWriteFails` metric tracks how often the main thread falls back to the prescheduler path (this is not an error condition).
-
-### Message Flow (postMessage Mode)
-
-In postMessage mode, messages are routed based on their timing:
-
-- **Bypass path** (non-bundles, immediate, near-future, late): sent directly to the worklet via MessagePort
-- **Far-future path** (bundles scheduled >500ms ahead): held by the prescheduler until closer to execution time
-
-While postMessage involves serialization overhead compared to shared memory, the routing logic is the same as SAB mode.
+(All messages are guaranteed to be delivered - the `ringBufferDirectWriteFails` metric tracks how often the main thread falls back to the prescheduler path (this is not an error condition).)
 
 ### Metrics Collection
 
 Both modes support the same metrics, but collection differs:
 
-- **SAB mode**: Metrics are written directly to a shared memory region. Reading metrics is a zero-overhead memory read.
+- **SAB mode**: Metrics are written directly to a shared memory region. Reading metrics is a cheap `Atomics.load()` from shared memory.
 - **postMessage mode**: Aggregated snapshots of the metrics are sent to the main thread periodically (default: every 150ms). Reading metrics accesses this cached snapshot.
 
 In both modes, calling `getMetrics()` is cheap and safe for high-frequency use (e.g., in `requestAnimationFrame`).
@@ -219,7 +207,7 @@ Verify that:
 
 ### Checking if SAB is available
 
-You can check if SharedArrayBuffer is available before initializing:
+You can check if SharedArrayBuffer is available before initialising:
 
 ```javascript
 const sabAvailable = typeof SharedArrayBuffer !== 'undefined';
