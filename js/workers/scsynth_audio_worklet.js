@@ -88,9 +88,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.portSourceIds = new Map();
 
         // Pre-allocated channel views to avoid per-frame subarray() allocations
-        this.leftChannelView = null;
-        this.rightChannelView = null;
+        this.channelViews = null;
         this.lastNumSamples = 0;
+        this.lastNumChannels = 0;
 
         // PM Mode pools - pre-allocated for allocation-free process()
         // Initialized in initPMPools() after mode is known
@@ -1269,7 +1269,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 );
 
                 // Copy scsynth audio output to AudioWorklet outputs
-                if (this.wasmInstance.exports.get_audio_output_bus && outputs[0] && outputs[0].length >= 2) {
+                if (this.wasmInstance.exports.get_audio_output_bus && outputs[0] && outputs[0].length >= 1) {
                     try {
                         const audioBufferPtr = this.wasmInstance.exports.get_audio_output_bus();
                         const numSamples = this.wasmInstance.exports.get_audio_buffer_samples();
@@ -1283,7 +1283,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                             const currentBuffer = wasmMemory.buffer;
                             const bufferSize = currentBuffer.byteLength;
-                            const requiredBytes = audioBufferPtr + (numSamples * 2 * 4);
+                            const configuredOutputChannels = this.worldOptions?.numOutputBusChannels || 2;
+                            const effectiveOutputChannels = Math.min(outputs[0].length, configuredOutputChannels);
+                            const requiredBytes = audioBufferPtr + (numSamples * effectiveOutputChannels * 4);
 
                             if (audioBufferPtr < 0 || audioBufferPtr > bufferSize || requiredBytes > bufferSize) {
                                 return true;
@@ -1293,25 +1295,31 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                             if (!this.audioView ||
                                 this.lastAudioBufferPtr !== audioBufferPtr ||
                                 this.lastWasmBufferSize !== bufferSize ||
+                                this.lastNumChannels !== effectiveOutputChannels ||
                                 currentBuffer !== this.audioView.buffer) {
-                                this.audioView = new Float32Array(currentBuffer, audioBufferPtr, numSamples * 2);
+                                this.audioView = new Float32Array(currentBuffer, audioBufferPtr, numSamples * effectiveOutputChannels);
                                 this.lastAudioBufferPtr = audioBufferPtr;
                                 this.lastWasmBufferSize = bufferSize;
                             }
 
-                            // Recreate channel views only when audioView or numSamples changes
+                            // Recreate channel views only when parameters change
                             // (avoids per-frame subarray() allocation)
-                            if (!this.leftChannelView ||
+                            if (!this.channelViews ||
                                 this.lastNumSamples !== numSamples ||
-                                this.leftChannelView.buffer !== this.audioView.buffer) {
-                                this.leftChannelView = this.audioView.subarray(0, numSamples);
-                                this.rightChannelView = this.audioView.subarray(numSamples, numSamples * 2);
+                                this.lastNumChannels !== effectiveOutputChannels ||
+                                this.channelViews[0].buffer !== this.audioView.buffer) {
+                                this.channelViews = new Array(effectiveOutputChannels);
+                                for (let ch = 0; ch < effectiveOutputChannels; ch++) {
+                                    this.channelViews[ch] = this.audioView.subarray(ch * numSamples, (ch + 1) * numSamples);
+                                }
                                 this.lastNumSamples = numSamples;
+                                this.lastNumChannels = effectiveOutputChannels;
                             }
 
                             // Direct copy using pre-allocated views
-                            outputs[0][0].set(this.leftChannelView);
-                            outputs[0][1].set(this.rightChannelView);
+                            for (let ch = 0; ch < effectiveOutputChannels; ch++) {
+                                outputs[0][ch].set(this.channelViews[ch]);
+                            }
                         }
                     } catch (err) {
                         // Silently fail in real-time audio context

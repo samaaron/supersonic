@@ -396,8 +396,8 @@ export class SuperSonic {
     // numInputBusChannels: must be non-negative
     validateNumber('numInputBusChannels', opts.numInputBusChannels, { min: 0 });
 
-    // numOutputBusChannels: must be positive (need at least 1 output)
-    validateNumber('numOutputBusChannels', opts.numOutputBusChannels, { min: 1 });
+    // numOutputBusChannels: must be 1-128 (C++ static_audio_bus is float[128*128])
+    validateNumber('numOutputBusChannels', opts.numOutputBusChannels, { min: 1, max: 128 });
 
     // numControlBusChannels: must be positive
     validateNumber('numControlBusChannels', opts.numControlBusChannels, { min: 1 });
@@ -1484,14 +1484,20 @@ export class SuperSonic {
   async #initializeAudioWorklet(wasmBytes) {
     await addWorkletModule(this.#audioContext.audioWorklet, this.#config.workletUrl);
 
+    const numOutputChannels = this.#config.worldOptions.numOutputBusChannels;
     this.#workletNode = new AudioWorkletNode(this.#audioContext, "scsynth-processor", {
       numberOfInputs: 1,
       numberOfOutputs: 1,
-      outputChannelCount: [2],
+      outputChannelCount: [numOutputChannels],
     });
 
     if (this.#config.autoConnect) {
-      this.#workletNode.connect(this.#audioContext.destination);
+      const dest = this.#audioContext.destination;
+      if (numOutputChannels > 2) {
+        dest.channelCount = Math.min(numOutputChannels, dest.maxChannelCount);
+        dest.channelInterpretation = 'discrete';
+      }
+      this.#workletNode.connect(dest);
     }
 
     this.#node = this.#createNodeWrapper();
