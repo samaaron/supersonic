@@ -1132,12 +1132,12 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 }
             }
 
-            if (data.type === 'setGlobalOffset') {
-                // Write global offset to WASM memory (Int32, milliseconds)
+            if (data.type === 'setClockOffset') {
+                // Write clock offset to WASM memory (Int32, milliseconds)
                 if (this.wasmMemory && this.ringBufferBase !== null && this.bufferConstants) {
                     const offset = this.ringBufferBase + this.bufferConstants.GLOBAL_OFFSET_START;
                     const view = new Int32Array(this.wasmMemory.buffer, offset, 1);
-                    view[0] = data.globalOffsetMs;
+                    view[0] = data.clockOffsetMs;
                 }
             }
 

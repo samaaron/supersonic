@@ -22,12 +22,12 @@ export class NTPTiming {
   // Cached SAB views (SAB mode only)
   #ntpStartView;
   #driftView;
-  #globalOffsetView;
+  #clockOffsetView;
 
   // Local storage (postMessage mode, or fallback)
   #initialNTPStartTime;
   #localDriftMs = 0;
-  #localGlobalOffsetMs = 0;
+  #localClockOffsetMs = 0;
 
   // Drift update timer
   #driftOffsetTimer = null;
@@ -65,7 +65,7 @@ export class NTPTiming {
         ringBufferBase + bufferConstants.DRIFT_OFFSET_START,
         1
       );
-      this.#globalOffsetView = new Int32Array(
+      this.#clockOffsetView = new Int32Array(
         sharedBuffer,
         ringBufferBase + bufferConstants.GLOBAL_OFFSET_START,
         1
@@ -277,34 +277,37 @@ export class NTPTiming {
   }
 
   /**
-   * Get global offset in milliseconds
+   * Get clock offset in milliseconds (internal use)
    * @returns {number}
    */
-  getGlobalOffset() {
-    if (this.#globalOffsetView) {
-      return Atomics.load(this.#globalOffsetView, 0);
+  getClockOffset() {
+    if (this.#clockOffsetView) {
+      return Atomics.load(this.#clockOffsetView, 0);
     }
-    return this.#localGlobalOffsetMs;
+    return this.#localClockOffsetMs;
   }
 
   /**
-   * Set global timing offset (for multi-system sync)
-   * @param {number} offsetMs - Offset in milliseconds
+   * Set clock offset for multi-system sync (e.g., Ableton Link, NTP server).
+   * Positive values mean the shared/server clock is ahead of local time —
+   * bundles with shared-clock timetags are shifted earlier to compensate.
+   * @param {number} offsetS - Offset in seconds
    */
-  setGlobalOffset(offsetMs) {
-    this.#localGlobalOffsetMs = offsetMs;
+  setClockOffset(offsetS) {
+    const offsetMs = Math.round(offsetS * 1000);
+    this.#localClockOffsetMs = offsetMs;
 
-    if (this.#mode === 'sab' && this.#globalOffsetView) {
-      Atomics.store(this.#globalOffsetView, 0, offsetMs);
+    if (this.#mode === 'sab' && this.#clockOffsetView) {
+      Atomics.store(this.#clockOffsetView, 0, offsetMs);
     } else if (this.#workletPort) {
       this.#workletPort.postMessage({
-        type: 'setGlobalOffset',
-        globalOffsetMs: offsetMs
+        type: 'setClockOffset',
+        clockOffsetMs: offsetMs
       });
     }
 
     if (__DEV__) {
-      console.log(`[Dbg-NTPTiming] Global offset set: ${offsetMs}ms`);
+      console.log(`[Dbg-NTPTiming] Clock offset set: ${offsetMs}ms (${offsetS}s)`);
     }
   }
 
@@ -333,11 +336,11 @@ export class NTPTiming {
     const driftMs = this.getDriftOffset();
     const driftSeconds = driftMs / 1000.0;
 
-    // Read global offset (for future multi-system sync)
-    const globalMs = this.getGlobalOffset();
-    const globalSeconds = globalMs / 1000.0;
+    // Read clock offset (for multi-system sync)
+    const clockMs = this.getClockOffset();
+    const clockSeconds = clockMs / 1000.0;
 
-    const totalOffset = ntpStartTime + driftSeconds + globalSeconds;
+    const totalOffset = ntpStartTime + driftSeconds + clockSeconds;
 
     const view = new DataView(uint8Data.buffer, uint8Data.byteOffset);
     const ntpSeconds = view.getUint32(8, false);
@@ -362,9 +365,9 @@ export class NTPTiming {
     this.stopDriftTimer();
     this.#initialNTPStartTime = undefined;
     this.#localDriftMs = 0;
-    this.#localGlobalOffsetMs = 0;
+    this.#localClockOffsetMs = 0;
     this.#ntpStartView = null;
     this.#driftView = null;
-    this.#globalOffsetView = null;
+    this.#clockOffsetView = null;
   }
 }

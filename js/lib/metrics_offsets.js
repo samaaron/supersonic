@@ -120,7 +120,7 @@ export const SAB_METRICS_COUNT = RING_BUFFER_DIRECT_WRITE_FAILS + 1;  // 46
 // MetricsReader writes them into the local merged Uint32Array.
 // =============================================================================
 export const CTX_DRIFT_OFFSET_MS = 46;             // Clock drift (int32, ms)
-export const CTX_GLOBAL_OFFSET_MS = 47;            // Global timing offset (int32, ms)
+export const CTX_CLOCK_OFFSET_MS = 47;             // Clock offset for multi-system sync (int32, ms)
 export const CTX_AUDIO_CONTEXT_STATE = 48;          // Enum: 0=unknown,1=running,2=suspended,3=closed,4=interrupted
 export const CTX_BUFFER_POOL_USED_BYTES = 49;       // Buffer pool bytes used
 export const CTX_BUFFER_POOL_AVAILABLE_BYTES = 50;  // Buffer pool bytes available

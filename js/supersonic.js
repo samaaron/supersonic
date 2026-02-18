@@ -155,7 +155,7 @@ export class SuperSonic {
 
         // Context metrics [46+] (main thread only)
         driftOffsetMs:                { offset: 46, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock drift between AudioContext and wall clock' },
-        globalOffsetMs:               { offset: 47, type: 'gauge',    unit: 'ms',    signed: true, description: 'Global timing offset for multi-system sync' },
+        clockOffsetMs:                { offset: 47, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock offset for multi-system sync' },
         audioContextState:            { offset: 48, type: 'enum',     values: ['unknown', 'running', 'suspended', 'closed', 'interrupted'], description: 'AudioContext state' },
         bufferPoolUsedBytes:          { offset: 49, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes used' },
         bufferPoolAvailableBytes:     { offset: 50, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes available' },
@@ -660,14 +660,15 @@ export class SuperSonic {
   // ============================================================================
 
   /**
-   * Set global timing offset for multi-system sync (e.g., Ableton Link, NTP server).
+   * Set clock offset for multi-system sync (e.g., Ableton Link, NTP server).
    * This shifts all scheduled bundle execution times by the specified offset.
-   * Positive values delay execution, negative values advance it.
-   * @param {number} offsetMs - Offset in milliseconds
+   * Positive values mean the shared/server clock is ahead of local time —
+   * bundles with shared-clock timetags are shifted earlier to compensate.
+   * @param {number} offsetS - Offset in seconds
    */
-  setGlobalOffset(offsetMs) {
-    this.#ensureInitialized('set global offset');
-    this.#ntpTiming?.setGlobalOffset(offsetMs);
+  setClockOffset(offsetS) {
+    this.#ensureInitialized('set clock offset');
+    this.#ntpTiming?.setClockOffset(offsetS);
   }
 
   // ============================================================================
@@ -1801,7 +1802,7 @@ export class SuperSonic {
       transportMetrics: this.#osc?.getMetrics(),
       driftOffsetMs: this.#ntpTiming?.getDriftOffset() ?? 0,
       ntpStartTime: this.#ntpTiming?.getNTPStartTime() ?? 0,
-      globalOffsetMs: this.#ntpTiming?.getGlobalOffset() ?? 0,
+      clockOffsetMs: this.#ntpTiming?.getClockOffset() ?? 0,
       audioContextState: this.#audioContext?.state || "unknown",
       bufferPoolStats: this.#bufferManager?.getStats(),
       loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,

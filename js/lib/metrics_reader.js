@@ -349,8 +349,8 @@ export class MetricsReader {
     if (context.ntpStartTime !== undefined) {
       metrics.ntpStartTime = context.ntpStartTime;
     }
-    if (context.globalOffsetMs !== undefined) {
-      metrics.globalOffsetMs = context.globalOffsetMs;
+    if (context.clockOffsetMs !== undefined) {
+      metrics.clockOffsetMs = context.clockOffsetMs;
     }
     if (context.audioContextState) {
       metrics.audioContextState = context.audioContextState;
@@ -423,10 +423,10 @@ export class MetricsReader {
     }
 
     // Context slots 46+
-    // driftOffsetMs and globalOffsetMs are signed — store as int32 via DataView
+    // driftOffsetMs and clockOffsetMs are signed — store as int32 via DataView
     const dv = this.#mergedDV;
     dv.setInt32(MetricsOffsets.CTX_DRIFT_OFFSET_MS * 4, context.driftOffsetMs ?? 0, true);
-    dv.setInt32(MetricsOffsets.CTX_GLOBAL_OFFSET_MS * 4, context.globalOffsetMs ?? 0, true);
+    dv.setInt32(MetricsOffsets.CTX_CLOCK_OFFSET_MS * 4, context.clockOffsetMs ?? 0, true);
 
     // audioContextState enum: unknown=0, running=1, suspended=2, closed=3, interrupted=4
     const stateStr = context.audioContextState || 'unknown';

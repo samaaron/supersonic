@@ -8,13 +8,13 @@
  * SuperSonic synchronizes OSC bundles between JavaScript (wall clock) and
  * the AudioWorklet (AudioContext.currentTime). The formula is:
  *
- *   currentNTP = contextTime + ntpStartTime + drift + globalOffset
+ *   currentNTP = contextTime + ntpStartTime + drift + clockOffset
  *
  * Where:
  * - contextTime: AudioContext.currentTime (seconds since context created)
  * - ntpStartTime: NTP time when AudioContext started (calculated at init)
  * - drift: Clock skew correction (measured periodically, in milliseconds)
- * - globalOffset: User-supplied offset for multi-system sync (milliseconds)
+ * - clockOffset: User-supplied offset for multi-system sync (milliseconds)
  *
  * Drift is positive when AudioContext runs slow (behind wall clock),
  * negative when AudioContext runs fast (ahead of wall clock).
@@ -77,7 +77,7 @@ export function calculateDriftMs(expectedContextTime, actualContextTime) {
  * @param {number} ntpFraction - NTP fraction component (0-0xFFFFFFFF)
  * @param {number} ntpStartTime - NTP time when AudioContext started
  * @param {number} driftSeconds - Current drift correction in seconds
- * @param {number} globalOffsetSeconds - Global timing offset in seconds
+ * @param {number} clockOffsetSeconds - Clock offset for multi-system sync in seconds
  * @returns {number} Target AudioContext time in seconds
  */
 export function ntpToAudioTime(
@@ -85,9 +85,9 @@ export function ntpToAudioTime(
   ntpFraction,
   ntpStartTime,
   driftSeconds = 0,
-  globalOffsetSeconds = 0
+  clockOffsetSeconds = 0
 ) {
-  const totalOffset = ntpStartTime + driftSeconds + globalOffsetSeconds;
+  const totalOffset = ntpStartTime + driftSeconds + clockOffsetSeconds;
   const ntpTimeS = ntpSeconds + ntpFraction / 0x100000000;
   return ntpTimeS - totalOffset;
 }
