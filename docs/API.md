@@ -1,5 +1,7 @@
 # API Reference
 
+> **TypeScript users:** Full type declarations are in [`supersonic.d.ts`](../supersonic.d.ts) at the project root. Your IDE will pick these up automatically for autocomplete and type checking.
+
 ## Quick Start
 
 ```javascript
@@ -69,7 +71,6 @@ myButton.onclick = async () => {
 | `message:raw`              | OSC message received (with raw bytes)                                                                         |
 | `message:sent`             | OSC message sent                                                                                              |
 | `debug`                    | Debug output from scsynth                                                                                     |
-| `metrics`                  | Periodic metrics update                                                                                       |
 | `shutdown`                 | Engine shutting down (emitted by `shutdown()`, `reset()`, and `destroy()`)                                    |
 | `destroy`                  | Engine being permanently destroyed (emitted by `destroy()` only)                                              |
 | `audiocontext:statechange` | AudioContext state changed (with `{ state }` payload)                                                         |
@@ -163,6 +164,7 @@ const supersonic = new SuperSonic({
 | `scsynthOptions`       | No       | Server options (see below)                                                                                                                |
 | `snapshotIntervalMs`   | No       | Metrics snapshot interval for postMessage mode (default: 150)                                                                             |
 | `preschedulerCapacity` | No       | Max pending events in JS prescheduler (default: 65536)                                                                                    |
+| `bypassLookaheadMs`    | No       | Bundles within this many ms of now bypass the prescheduler and are sent directly (default: 500)                                           |
 | `fetchMaxRetries`      | No       | Max retries for asset fetches (default: 3)                                                                                                |
 | `fetchRetryDelay`      | No       | Base delay in ms between fetch retries (default: 1000)                                                                                    |
 | `activityEvent`        | No       | Event emission truncation options (see below)                                                                                             |
@@ -355,15 +357,20 @@ await supersonic.loadSample(0, "long-sample.flac", 1000, 1000);
 
 Send an OSC message. Types are auto-detected from JavaScript values.
 
+Most commands are sent synchronously. Buffer allocation commands (`/b_alloc`, `/b_allocRead`, `/b_allocReadChannel`, `/b_allocFile`) are queued and processed in the background because they involve network fetches and audio decoding. Use `sync()` after buffer commands to ensure they complete before using the buffer.
+
 ```javascript
 supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60, "amp", 0.5);
 supersonic.send("/n_free", 1000);
-supersonic.send("/b_allocRead", 0, "bd_haus.flac");
+
+// Buffer commands are processed in the background
+supersonic.send("/b_alloc", 0, 44100, 1);
+await supersonic.sync(); // waits for /b_alloc to complete
 ```
 
 ### `sendOSC(oscBytes, options)`
 
-Send pre-encoded OSC bytes. Useful if you're building OSC messages yourself.
+Send pre-encoded OSC bytes. Useful if you're building OSC messages yourself. Sends bytes as-is without rewriting — use `send()` for buffer allocation commands so they get rewritten to `/b_allocPtr`.
 
 ```javascript
 const oscData = new Uint8Array([...]); // Your OSC bytes
@@ -561,8 +568,8 @@ supersonic.off("message", handler);
 Subscribe to an event once. The listener auto-unsubscribes after the first event.
 
 ```javascript
-supersonic.once("ready", (info) => {
-  console.log("Engine booted in", info.bootTimeMs, "ms");
+supersonic.once("ready", ({ bootStats }) => {
+  console.log("Engine booted in", bootStats.initDuration.toFixed(2), "ms");
 });
 ```
 
@@ -578,11 +585,11 @@ Emitted after init/recover completes, before `ready`. Async handlers are awaited
 ```javascript
 supersonic.on("setup", async () => {
   // Create group structure
-  await supersonic.send("/g_new", 100, 0, 0); // synths group
-  await supersonic.send("/g_new", 101, 1, 0); // fx group (after synths)
+  supersonic.send("/g_new", 100, 0, 0); // synths group
+  supersonic.send("/g_new", 101, 1, 0); // fx group (after synths)
 
   // Create FX chain
-  await supersonic.send("/s_new", "sonic-pi-fx_reverb", 2000, 0, 101, "in_bus", 20, "out_bus", 0, "mix", 0.3);
+  supersonic.send("/s_new", "sonic-pi-fx_reverb", 2000, 0, 101, "in_bus", 20, "out_bus", 0, "mix", 0.3);
 
   await supersonic.sync();
 });
@@ -1132,6 +1139,7 @@ Create an `OscChannel` for sending OSC from a Web Worker or AudioWorkletProcesso
 
 | Option     | Type    | Description |
 |------------|---------|-------------|
+| `sourceId` | number  | Numeric source ID. `0` = main thread (default), `1+` = workers. Auto-assigned from an incrementing counter if omitted. |
 | `blocking` | boolean | SAB mode only. Whether the channel can use `Atomics.wait()` for guaranteed ring buffer delivery. Default: `true` for worker channels (`sourceId !== 0`), `false` for main thread. Set to `false` when using inside an `AudioWorkletProcessor`. In postMessage mode this option has no effect. |
 
 ```javascript
