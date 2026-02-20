@@ -134,3 +134,4 @@ See [Metrics Component](METRICS_COMPONENT.md) for theming, layout control, and c
 - [API Reference](API.md) - All methods and configuration options
 - [Metrics Component](METRICS_COMPONENT.md) - Real-time metrics dashboard
 - [scsynth Command Reference](SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling synthesis
+- [Workers Guide](WORKERS.md) - Send OSC directly from Web Workers (recommended for sequencers and schedulers)
