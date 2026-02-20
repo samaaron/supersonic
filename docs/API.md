@@ -32,11 +32,11 @@ myButton.onclick = async () => {
 | [`suspend()`](#suspend)                              | Suspend the AudioContext (worklet stays loaded)            |
 | [`resume()`](#resume)                                | Resume after suspend, flushes stale messages               |
 | [`reload()`](#reload)                                | Full reload - destroys memory, emits `setup` event        |
-| [`reset(config?)`](#resetconfig)                     | Full teardown and re-initialize (loses all state)         |
+| [`reset()`](#reset)                                  | Full teardown and re-initialize (loses all state)         |
 | [`send(address, ...args)`](#sendaddress-args)        | Send an OSC message                                       |
 | [`sendOSC(data, options)`](#sendoscoscbytes-options) | Send pre-encoded OSC bytes                                |
 | [`sync(syncId)`](#syncsyncid)                        | Wait for server to process all commands                   |
-| [`purge()`](#flushall)                            | Flush all pending OSC from prescheduler and WASM scheduler |
+| [`purge()`](#purge)                            | Flush all pending OSC from prescheduler and WASM scheduler |
 | [`cancelAll()`](#cancelallscheduled)        | Cancel all pending events in the JS prescheduler          |
 
 ### Asset Loading
@@ -103,7 +103,7 @@ myButton.onclick = async () => {
 | [`initializing`](#initializing-read-only)       | Whether engine is currently initialising (read-only)     |
 | [`audioContext`](#audiocontext-read-only)       | The Web Audio AudioContext (read-only)                   |
 | [`node`](#node-read-only)                       | Audio node wrapper for Web Audio connections (read-only) |
-| [`loadedSynthDefs`](#loadedsynthdefs-read-only) | Set of loaded synthdef names (read-only)                 |
+| [`loadedSynthDefs`](#loadedsynthdefs-read-only) | Map of loaded synthdef names to binary data (read-only)  |
 | [`bootStats`](#bootstats-read-only)             | Boot timing information (read-only)                      |
 
 ### Advanced
@@ -111,7 +111,7 @@ myButton.onclick = async () => {
 | Method                                                                    | Description                                    |
 | ------------------------------------------------------------------------- | ---------------------------------------------- |
 | [`getInfo()`](#getinfo)                                                   | Get static engine configuration                |
-| [`SuperSonic.osc.encode()`](#supersonicoscencodemessage)                  | Encode an OSC message to bytes                 |
+| [`SuperSonic.osc.encode()`](#supersonicoscencodemessage)                  | *(Deprecated)* Encode an OSC message to bytes  |
 | [`SuperSonic.osc.decode()`](#supersonicoscdecodedata-options)             | Decode OSC bytes to a message                  |
 | [`SuperSonic.osc.encodeSingleBundle()`](#supersonicoscencodesinglebundle) | Encode a bundle containing a single message    |
 | [`SuperSonic.osc.readTimetag()`](#supersonicoscreadtimetag)               | Read NTP timetag from raw bundle bytes         |
@@ -408,7 +408,7 @@ supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60);
 
 ### `cancelAll()`
 
-Cancel all pending events in the JS prescheduler. This clears future-timestamped bundles that haven't yet been sent to the worklet. Does **not** clear bundles already in the WASM scheduler — use [`purge()`](#flushall) for that.
+Cancel all pending events in the JS prescheduler. This clears future-timestamped bundles that haven't yet been sent to the worklet. Does **not** clear bundles already in the WASM scheduler — use [`purge()`](#purge) for that.
 
 ```javascript
 supersonic.cancelAll();
@@ -473,7 +473,7 @@ await supersonic.resume();
 
 ### `resume()`
 
-Resume after a suspend. Calls [`purge()`](#flushall) internally to clear any stale scheduled messages from before the suspend, then resumes the AudioContext and resyncs timing. Memory and node tree are preserved. Does **not** emit `setup` event.
+Resume after a suspend. Calls [`purge()`](#purge) internally to clear any stale scheduled messages from before the suspend, then resumes the AudioContext and resyncs timing. Memory and node tree are preserved. Does **not** emit `setup` event.
 
 Use when you know the worklet is still running (e.g., tab was briefly backgrounded, or after a manual `suspend()`).
 
@@ -507,19 +507,14 @@ await supersonic.reload();
 // 'setup' event handlers have run, groups/FX rebuilt
 ```
 
-### `reset(config?)`
+### `reset()`
 
 Full teardown and re-initialize. Use this when you need a completely fresh state. Event listeners are preserved across reset, but all other state (synthdefs, buffers) is lost.
-
-**Parameters:**
-| Name | Type | Description |
-|------|------|-------------|
-| `config` | `Object` | Optional configuration overrides for init() |
 
 **Returns:** `Promise<void>`
 
 ```javascript
-// Browser suspended audio, need to recover
+// Need a completely fresh start
 await supersonic.reset();
 // Engine is now re-initialized and ready to use
 ```
@@ -601,9 +596,9 @@ In `postMessage` mode, `recover()` destroys and recreates the WASM memory, so al
 Emitted when the engine is initialised and ready to use.
 
 ```javascript
-supersonic.on("ready", (info) => {
-  console.log("Sample rate:", info.sampleRate);
-  console.log("Boot time:", info.bootTimeMs, "ms");
+supersonic.on("ready", ({ capabilities, bootStats }) => {
+  console.log("Capabilities:", capabilities);
+  console.log("Boot time:", bootStats.initDuration.toFixed(2), "ms");
 });
 ```
 
@@ -643,12 +638,12 @@ supersonic.on("message:raw", (data) => {
 
 ### Event: `message:sent`
 
-Emitted when an OSC message is sent to scsynth.
+Emitted when an OSC message is sent to scsynth. Callback receives three arguments: the raw OSC data, the source channel ID (0 = main thread, 1+ = workers), and a sequence number.
 
 ```javascript
-supersonic.on("message:sent", (oscBytes) => {
-  const decoded = SuperSonic.osc.decode(oscBytes);
-  console.log("Sent:", decoded[0]);
+supersonic.on("message:sent", (oscData, sourceId, sequence) => {
+  const decoded = SuperSonic.osc.decode(oscData);
+  console.log(`Sent from source ${sourceId}:`, decoded[0]);
 });
 ```
 
@@ -828,15 +823,15 @@ analyser.getByteFrequencyData(data);
 
 ### `loadedSynthDefs` (read-only)
 
-A `Set` containing the names of all confirmed loaded synthdefs. A synthdef appears here only after scsynth has confirmed it's ready - not just when the load request was sent. Removed when freed via `/d_free` or `/d_freeAll`.
+A `Map` of synthdef names to their binary data. A synthdef appears here after it's been sent to scsynth via `/d_recv` or `loadSynthDef()`. Removed when freed via `/d_free` or `/d_freeAll`. The binary data is cached so synthdefs can be restored after a `reload()`.
 
 ```javascript
 if (supersonic.loadedSynthDefs.has("sonic-pi-beep")) {
   supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0);
 }
 
-// See all loaded synthdefs
-console.log("Loaded:", [...supersonic.loadedSynthDefs]);
+// See all loaded synthdef names
+console.log("Loaded:", [...supersonic.loadedSynthDefs.keys()]);
 ```
 
 ### `bootStats` (read-only)
@@ -859,7 +854,7 @@ The node tree gives you a live view of all running synths and groups - useful fo
 
 ### `getTree()`
 
-Returns a snapshot of the scsynth node tree - all synths and groups currently running.
+Returns a hierarchical snapshot of the scsynth node tree - all synths and groups currently running, organized as a nested tree structure.
 
 ```javascript
 const tree = supersonic.getTree();
@@ -872,27 +867,32 @@ const tree = supersonic.getTree();
   version: 42,          // Increments on every change
   nodeCount: 5,         // Nodes in mirror
   droppedCount: 0,      // Nodes not mirrored due to overflow
-  nodes: [
-    {
-      id: 0,                    // Node ID
-      parentId: -1,             // Parent group (-1 for root)
-      isGroup: true,            // true = group, false = synth
-      defName: "group",         // "group" or synthdef name
-      headId: 100,              // First child (-1 if empty/synth)
-      prevId: -1,               // Previous sibling (-1 if first)
-      nextId: -1                // Next sibling (-1 if last)
-    },
-    {
-      id: 100,
-      parentId: 0,
-      isGroup: false,
-      defName: "sonic-pi-beep",
-      headId: -1,
-      prevId: -1,
-      nextId: 101
-    },
-    // ...
-  ]
+  root: {
+    id: 0,
+    type: "group",      // "group" or "synth"
+    defName: "",
+    children: [
+      {
+        id: 100,
+        type: "synth",
+        defName: "sonic-pi-beep",
+        children: []
+      },
+      {
+        id: 101,
+        type: "group",
+        defName: "",
+        children: [
+          {
+            id: 200,
+            type: "synth",
+            defName: "sonic-pi-fx_reverb",
+            children: []
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 
@@ -907,7 +907,7 @@ function animate() {
   const tree = supersonic.getTree();
   if (tree.version !== lastVersion) {
     lastVersion = tree.version;
-    updateVisualization(tree.nodes);
+    updateVisualization(tree.root);
   }
   requestAnimationFrame(animate);
 }
@@ -917,61 +917,29 @@ animate();
 **Example: List all running synths**
 
 ```javascript
-const { nodes } = supersonic.getTree();
-const synths = nodes.filter((n) => !n.isGroup);
+function collectSynths(node) {
+  const synths = [];
+  if (node.type === 'synth') synths.push(node);
+  for (const child of node.children) {
+    synths.push(...collectSynths(child));
+  }
+  return synths;
+}
 
-for (const synth of synths) {
+const tree = supersonic.getTree();
+for (const synth of collectSynths(tree.root)) {
   console.log(`Synth ${synth.id}: ${synth.defName}`);
 }
 ```
 
-**Example: Build a nested tree**
+**`getTree()` vs `getRawTree()` vs `/g_queryTree`**
 
-```javascript
-function buildNestedTree(nodes) {
-  const byId = new Map(nodes.map((n) => [n.id, { ...n, children: [] }]));
-
-  for (const node of byId.values()) {
-    if (node.parentId !== -1) {
-      byId.get(node.parentId)?.children.push(node);
-    }
-  }
-
-  return byId.get(0); // root group
-}
-```
-
-**Example: Get children in execution order**
-
-Nodes are linked via `headId`/`nextId`. This is the order scsynth executes them:
-
-```javascript
-function getChildrenInOrder(nodes, groupId) {
-  const group = nodes.find((n) => n.id === groupId);
-  if (!group || group.headId === -1) return [];
-
-  const children = [];
-  let nodeId = group.headId;
-
-  while (nodeId !== -1) {
-    const node = nodes.find((n) => n.id === nodeId);
-    if (!node) break;
-    children.push(node);
-    nodeId = node.nextId;
-  }
-
-  return children;
-}
-```
-
-**`getTree()` vs `/g_queryTree`**
-
-|                | `getTree()`                   | `/g_queryTree`             |
-| -------------- | ----------------------------- | -------------------------- |
-| Latency        | Instant (reads shared memory) | ~40ms round-trip           |
-| Format         | Flat array with links         | Nested in message args     |
-| Control values | Not included                  | Optional (flag=1)          |
-| Use case       | 60fps visualization           | One-off queries, debugging |
+|                | `getTree()`                      | `getRawTree()`                 | `/g_queryTree`             |
+| -------------- | -------------------------------- | ------------------------------ | -------------------------- |
+| Latency        | Instant (reads shared memory)    | Instant (reads shared memory)  | ~40ms round-trip           |
+| Format         | Hierarchical (nested children)   | Flat array with link pointers  | Nested in message args     |
+| Control values | Not included                     | Not included                   | Optional (flag=1)          |
+| Use case       | Tree visualization, UI rendering | Debugging, low-level access    | One-off queries, debugging |
 
 `getTree()` returns node structure only - not control values. For control values, use `/g_queryTree` with flag=1 or `/n_get` for specific nodes. See [scsynth Command Reference](SCSYNTH_COMMAND_REFERENCE.md).
 

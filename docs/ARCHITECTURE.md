@@ -155,7 +155,7 @@ Main Thread                          AudioWorklet
 
 ### Sending OSC to scsynth
 
-1. **SuperSonic** receives OSC via `send()` or `sendBundle()`
+1. **SuperSonic** receives OSC via `send()` or `sendOSC()`
 2. **OSCChannel** classifies the message:
    - **Immediate/non-bundle**: bypass direct to AudioWorklet
    - **Near-future bundle** (<=500ms): bypass direct to AudioWorklet

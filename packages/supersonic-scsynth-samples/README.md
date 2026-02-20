@@ -20,8 +20,8 @@ const supersonic = new SuperSonic({
 await supersonic.init();
 
 // Load any sample
-await supersonic.allocReadBuffer(0, 'bd_haus.flac');
-await supersonic.allocReadBuffer(1, 'loop_amen.flac');
+await supersonic.loadSample(0, 'bd_haus.flac');
+await supersonic.loadSample(1, 'loop_amen.flac');
 
 // Play with basic_mono_player synthdef
 supersonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 1, 'buf', 0);
