@@ -1,7 +1,7 @@
 // Scheduler Worker - runs timing loops isolated from main thread jank
 // Sends OSC directly to AudioWorklet via OscChannel, bypassing main thread
 
-import { OscChannel, oscFast } from "../dist/supersonic.js";
+import { OscChannel, osc } from "../dist/supersonic.js";
 
 const DEV_MODE = false;
 
@@ -41,7 +41,7 @@ const state = {
 
 // ===== TIMING =====
 const getNTP = () =>
-  (performance.timeOrigin + performance.now()) / 1000 + oscFast.NTP_EPOCH_OFFSET;
+  (performance.timeOrigin + performance.now()) / 1000 + osc.NTP_EPOCH_OFFSET;
 
 // ===== TIMELINE (Ableton Link style) =====
 // Single source of truth for beat → time conversion
@@ -93,9 +93,9 @@ const timeline = {
 };
 
 // ===== OSC HELPERS =====
-// Create a single-message bundle using osc_fast (zero-allocation)
+// Create a single-message bundle (zero-allocation)
 function createOSCBundle(ntpTime, address, args) {
-  return oscFast.encodeSingleBundle(ntpTime, address, args);
+  return osc.encodeSingleBundle(ntpTime, address, args);
 }
 
 function getMinorPentatonicScale(root, octaves) {
@@ -219,7 +219,7 @@ class Scheduler {
       this.timeoutId = null;
     }
     if (freeGroup) {
-      const encoded = oscFast.encodeMessage("/g_freeAll", [this.getGroup()]);
+      const encoded = osc.encodeMessage("/g_freeAll", [this.getGroup()]);
       sendOSC(encoded);
     }
     // Reset timeline if all schedulers stopped
