@@ -15,7 +15,7 @@ export function getSynthDefPath(name) {
 }
 
 // CDN URL for browser usage (unpkg)
-export const CDN_BASE = 'https://unpkg.com/supersonic-scsynth-synthdefs@0.48.0';
+export const CDN_BASE = 'https://unpkg.com/supersonic-scsynth-synthdefs@0.49.0';
 export const SYNTHDEFS_CDN = `${CDN_BASE}/synthdefs`;
 
 export const SYNTHDEF_NAMES = [
