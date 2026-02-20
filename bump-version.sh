@@ -12,10 +12,11 @@ set -e
 #   4. packages/supersonic-scsynth-samples/package.json
 #   5. packages/supersonic-scsynth-bundle/package.json
 #
-# Bundle dependencies (3):
+# Bundle dependencies (4):
 #   6. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth dependency
 #   7. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-synthdefs dependency
 #   8. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-samples dependency
+#   8b. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-core dependency
 #
 # CDN constants in index.js (3):
 #   8. packages/supersonic-scsynth-synthdefs/index.js - CDN_BASE constant
@@ -108,6 +109,9 @@ echo "✓ Updated supersonic-scsynth-synthdefs dependency"
 sed -i "s/\"supersonic-scsynth-samples\": \"\\^$CURRENT_VERSION\"/\"supersonic-scsynth-samples\": \"^$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-bundle/package.json"
 echo "✓ Updated supersonic-scsynth-samples dependency"
 
+sed -i "s/\"supersonic-scsynth-core\": \"\\^$CURRENT_VERSION\"/\"supersonic-scsynth-core\": \"^$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-bundle/package.json"
+echo "✓ Updated supersonic-scsynth-core dependency"
+
 echo ""
 echo "Step 3: Updating CDN constants and docs..."
 echo "-------------------------------------------"
@@ -141,7 +145,14 @@ sed -i "s/static const int SUPERSONIC_VERSION_PATCH = $CURRENT_CPP_PATCH;/static
 echo "✓ Updated src/audio_processor.cpp ($CURRENT_CPP_MAJOR.$CURRENT_CPP_MINOR.$CURRENT_CPP_PATCH → $NEW_VERSION)"
 
 echo ""
-echo "Step 5: Rebuilding distribution..."
+echo "Step 5: Regenerating manifests..."
+echo "----------------------------------"
+
+node generate-manifests.mjs
+echo "✓ Manifests regenerated"
+
+echo ""
+echo "Step 6: Rebuilding distribution..."
 echo "-----------------------------------"
 
 # Run build with --release flag
@@ -149,7 +160,7 @@ echo "-----------------------------------"
 echo "✓ Build complete"
 
 echo ""
-echo "Step 6: Committing changes..."
+echo "Step 7: Committing changes..."
 echo "------------------------------"
 
 # Stage all changes

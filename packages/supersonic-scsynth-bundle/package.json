@@ -32,7 +32,7 @@
   ],
   "dependencies": {
     "supersonic-scsynth": "^0.47.0",
-    "supersonic-scsynth-core": "^0.24.3",
+    "supersonic-scsynth-core": "^0.47.0",
     "supersonic-scsynth-synthdefs": "^0.47.0",
     "supersonic-scsynth-samples": "^0.47.0"
   }
