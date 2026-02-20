@@ -653,11 +653,11 @@ export interface SuperSonicEventMap {
    */
   'message': (msg: OscMessage) => void;
 
-  /** Raw OSC bytes received from scsynth (before decoding). */
-  'message:raw': (data: { oscData: Uint8Array; sequence: number }) => void;
+  /** Raw OSC bytes received from scsynth (before decoding). Includes NTP timestamps for timing analysis. */
+  'message:raw': (data: { oscData: Uint8Array; sequence: number; timestamp: number; scheduledTime: number | null }) => void;
 
-  /** Fired when an OSC message is sent to scsynth. Includes source worker ID and sequence number. */
-  'message:sent': (oscData: Uint8Array, sourceId: number, sequence: number) => void;
+  /** Fired when an OSC message is sent to scsynth. Includes source worker ID, sequence number, and NTP timestamps. */
+  'message:sent': (data: { oscData: Uint8Array; sourceId: number; sequence: number; timestamp: number; scheduledTime: number | null }) => void;
 
   /** Debug text output from scsynth (e.g. synthdef compilation messages). */
   'debug': (msg: { text: string }) => void;
@@ -1052,6 +1052,9 @@ export class SuperSonic {
 
   /** The SharedArrayBuffer (SAB mode) or null (postMessage mode). Internal. */
   get sharedBuffer(): SharedArrayBuffer | null;
+
+  /** NTP time (seconds since 1900) when the AudioContext started. Use to compute relative times: `event.timestamp - sonic.initTime`. */
+  get initTime(): number;
 
   /**
    * AudioWorkletNode wrapper for custom audio routing.

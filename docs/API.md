@@ -634,26 +634,36 @@ supersonic.on("message", (msg) => {
 
 ### Event: `message:raw`
 
-Emitted with raw OSC data including the original bytes. Useful for logging.
+Emitted with raw OSC data including the original bytes and timing information. Useful for logging and latency analysis.
 
 ```javascript
-supersonic.on("message:raw", (data) => {
-  console.log("OSC bytes:", data.oscData);
-  const parsed = SuperSonic.osc.decode(data.oscData);
-  console.log("Parsed:", parsed[0], parsed.slice(1));
+supersonic.on("message:raw", ({ oscData, sequence, timestamp, scheduledTime }) => {
+  const parsed = SuperSonic.osc.decode(oscData);
+  const relativeTime = (timestamp - supersonic.initTime).toFixed(2);
+  console.log(`[${sequence}] +${relativeTime}s`, parsed[0], parsed.slice(1));
+  if (scheduledTime && timestamp > scheduledTime) {
+    console.warn("Late by", (timestamp - scheduledTime).toFixed(4), "s");
+  }
 });
 ```
+
+- `timestamp` — NTP seconds when the message was observed
+- `scheduledTime` — NTP seconds from bundle timetag, or `null` if not a bundle
 
 ### Event: `message:sent`
 
-Emitted when an OSC message is sent to scsynth. Callback receives three arguments: the raw OSC data, the source channel ID (0 = main thread, 1+ = workers), and a sequence number.
+Emitted when an OSC message is sent to scsynth. Receives an object with the raw OSC data, source channel ID (0 = main thread, 1+ = workers), sequence number, and timing information.
 
 ```javascript
-supersonic.on("message:sent", (oscData, sourceId, sequence) => {
+supersonic.on("message:sent", ({ oscData, sourceId, sequence, timestamp, scheduledTime }) => {
   const decoded = SuperSonic.osc.decode(oscData);
-  console.log(`Sent from source ${sourceId}:`, decoded[0]);
+  const relativeTime = (timestamp - supersonic.initTime).toFixed(2);
+  console.log(`[${sequence}] +${relativeTime}s [src:${sourceId}]`, decoded[0]);
 });
 ```
+
+- `timestamp` — NTP seconds when the message was written to the ring buffer
+- `scheduledTime` — NTP seconds from bundle timetag, or `null` if not a bundle
 
 ### Event: `debug`
 
@@ -776,6 +786,17 @@ The underlying Web Audio AudioContext.
 ```javascript
 const ctx = supersonic.audioContext;
 console.log("Sample rate:", ctx.sampleRate);
+```
+
+### `initTime` (read-only)
+
+NTP time (seconds since 1900) when the AudioContext started. Use to compute relative times from event timestamps.
+
+```javascript
+supersonic.on("message:raw", ({ timestamp }) => {
+  const relativeSeconds = timestamp - supersonic.initTime;
+  console.log(`+${relativeSeconds.toFixed(2)}s`);
+});
 ```
 
 ### `node` (read-only)

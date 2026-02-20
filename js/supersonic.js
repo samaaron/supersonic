@@ -528,6 +528,9 @@ export class SuperSonic {
   get node() { return this.#node; }
   get osc() { return this.#osc; }
 
+  /** NTP time (seconds since 1900) when the AudioContext started. Use to compute relative times: `event.timestamp - sonic.initTime`. */
+  get initTime() { return this.#ntpTiming?.getNTPStartTime() ?? 0; }
+
   // ============================================================================
   // EVENT EMITTER DELEGATION
   // ============================================================================
@@ -1530,9 +1533,10 @@ export class SuperSonic {
     this.#osc = createTransport(mode, transportConfig);
 
     // Handle raw OSC replies - parse and dispatch
-    this.#osc.onReply((oscData, sequence) => {
-      // Emit raw message event
-      this.#eventEmitter.emit('message:raw', { oscData, sequence });
+    this.#osc.onReply((oscData, sequence, timestamp) => {
+      // Emit raw message event with timing info
+      const scheduledTime = oscFast.getBundleTimeTag(oscData) || null;
+      this.#eventEmitter.emit('message:raw', { oscData, sequence, timestamp, scheduledTime });
 
       // Parse OSC and emit parsed message
       try {
@@ -1591,8 +1595,14 @@ export class SuperSonic {
     // Handle centralized OSC out logging (from worklet)
     this.#osc.onOscLog((entries) => {
       for (const entry of entries) {
-        // Emit message:sent for each logged message, including sourceId and sequence
-        this.#eventEmitter.emit('message:sent', entry.oscData, entry.sourceId, entry.sequence);
+        const scheduledTime = oscFast.getBundleTimeTag(entry.oscData) || null;
+        this.#eventEmitter.emit('message:sent', {
+          oscData: entry.oscData,
+          sourceId: entry.sourceId,
+          sequence: entry.sequence,
+          timestamp: entry.timestamp,
+          scheduledTime,
+        });
       }
     });
 

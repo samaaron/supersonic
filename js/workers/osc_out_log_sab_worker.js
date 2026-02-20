@@ -14,6 +14,10 @@
 import { readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
 import { calculateInControlIndices } from '../lib/control_offsets.js';
 
+// NTP timestamp helper (inline to avoid import in worker)
+const NTP_EPOCH_OFFSET = 2208988800;
+const getCurrentNTP = () => (performance.timeOrigin + performance.now()) / 1000 + NTP_EPOCH_OFFSET;
+
 // Ring buffer configuration
 let sharedBuffer = null;
 let ringBufferBase = null;
@@ -129,7 +133,8 @@ const readMessages = () => {
             entries.push({
                 sourceId,
                 oscData,
-                sequence
+                sequence,
+                timestamp: getCurrentNTP()
             });
         },
         onCorruption: (position) => {

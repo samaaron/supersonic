@@ -4,6 +4,7 @@
 import { Transport } from './transport.js';
 import { createWorker } from '../worker_loader.js';
 import { OscChannel } from '../osc_channel.js';
+import { getCurrentNTPFromPerformance } from '../osc_classifier.js';
 
 /**
  * PostMessage Transport
@@ -466,7 +467,7 @@ export class PostMessageTransport extends Transport {
                         this.#oscInMessagesReceived++;
                         this.#oscInBytesReceived += entry.length;
                         if (this.#onReplyCallback) {
-                            this.#onReplyCallback(oscData, entry.sequence);
+                            this.#onReplyCallback(oscData, entry.sequence, getCurrentNTPFromPerformance());
                         }
                     }
                 }
@@ -512,6 +513,7 @@ export class PostMessageTransport extends Transport {
                                 oscData,
                                 sourceId: entry.sourceId,
                                 sequence: entry.sequence,
+                                timestamp: getCurrentNTPFromPerformance(),
                                 truncated: entry.length < entry.originalLength,
                                 originalLength: entry.originalLength,
                             });

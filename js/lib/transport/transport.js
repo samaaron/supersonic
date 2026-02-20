@@ -55,7 +55,7 @@ export class Transport {
 
     /**
      * Register callback for OSC replies from engine
-     * @param {function(Uint8Array): void} callback
+     * @param {function(Uint8Array, number, number): void} callback - Receives (oscData, sequence, timestamp)
      */
     onReply(callback) {
         throw new Error('Abstract method - implement in subclass');

@@ -586,9 +586,12 @@ function addMessage(msg) {
       messages.push(m);
       if (messages.length > LOG_MAX_ITEMS) messages.shift();
 
+      const initTime = orchestrator?.initTime || 0;
+      const relativeTime = initTime && m.timestamp ? ((m.timestamp - initTime)).toFixed(2) : "";
+      const timeStr = relativeTime ? ` ${relativeTime}` : "";
       html += `
         <div class="message-item">
-          <span class="message-header">[${m.sequence}]</span>
+          <span class="message-header">[${m.sequence}]${timeStr}</span>
           <span class="message-content">${m.oscData ? renderOSCMessage(m.oscData) : m.text || "Unknown"}</span>
         </div>
       `;
@@ -606,9 +609,8 @@ function addMessage(msg) {
   });
 }
 
-function addSentMessage(oscData, comment = null, sourceId = null) {
-  const seq = ++sentMessageSeq;
-  const msg = { oscData, timestamp: Date.now(), comment, seq, sourceId };
+function addSentMessage({ oscData, sourceId, sequence, timestamp, scheduledTime, comment } = {}) {
+  const msg = { oscData, timestamp, comment, sequence, sourceId, scheduledTime };
   logBatch.oscOut.pending.push(msg);
   batchedUpdate(logBatch.oscOut, (pending) => {
     const history = $("sent-message-history");
@@ -622,15 +624,17 @@ function addSentMessage(oscData, comment = null, sourceId = null) {
       sentMessages.push(m);
       if (sentMessages.length > LOG_MAX_ITEMS) sentMessages.shift();
 
-      const relativeTime = ((m.timestamp - appStartTime) / 1000).toFixed(2);
+      const initTime = orchestrator?.initTime || 0;
+      const relativeTime = initTime && m.timestamp ? ((m.timestamp - initTime)).toFixed(2) : "";
       const content = m.comment
         ? `<span class="osc-color-comment">${m.comment}</span>`
         : renderOSCMessage(m.oscData);
 
-      const src = m.sourceId !== null && m.sourceId !== undefined ? `[${m.sourceId}]` : "";
+      const src = m.sourceId !== null && m.sourceId !== undefined ? ` ch${m.sourceId}` : "";
+      const timeStr = relativeTime ? ` ${relativeTime}` : "";
       html += `
         <div class="message-item">
-          <span class="message-header">${m.seq} +${relativeTime}s ${src}</span>
+          <span class="message-header">[${m.sequence ?? "?"}]${timeStr}${src}</span>
           <span class="message-content">${content}</span>
         </div>
       `;
@@ -1816,7 +1820,7 @@ $("init-button").addEventListener("click", async () => {
     });
 
     orchestrator.on("message:raw", addMessage);
-    orchestrator.on("message:sent", (oscData, sourceId) => addSentMessage(oscData, null, sourceId));
+    orchestrator.on("message:sent", addSentMessage);
     // Connect the <supersonic-metrics> web component (schema-driven, zero-alloc hot path)
     metricsEl?.connect(orchestrator, { refreshRate: 10 });
     metricsActive = true; // Flag for idle/wakeUp to know metrics are active
@@ -2009,7 +2013,7 @@ $("message-form").addEventListener("submit", async (e) => {
       return;
     }
 
-    parsed.comments.forEach((c) => addSentMessage(null, c));
+    parsed.comments.forEach((c) => addSentMessage({ comment: c }));
 
     if (parsed.scheduled.size) {
       const now = getNTP();
