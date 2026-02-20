@@ -511,28 +511,7 @@ export class OscChannel {
   /** Get list of transferable objects for postMessage transfer list */
   get transferList(): Transferable[];
 
-  /** Create a postMessage-backed OscChannel */
-  static createPostMessage(config: {
-    port: MessagePort;
-    preschedulerPort?: MessagePort;
-    bypassLookaheadS?: number;
-    sourceId?: number;
-    blocking?: boolean;
-  }): OscChannel;
-
-  /** Create a SAB-backed OscChannel */
-  static createSAB(config: {
-    sharedBuffer: SharedArrayBuffer;
-    ringBufferBase: number;
-    bufferConstants: Record<string, number>;
-    controlIndices?: Record<string, number>;
-    preschedulerPort: MessagePort;
-    bypassLookaheadS?: number;
-    sourceId?: number;
-    blocking?: boolean;
-  }): OscChannel;
-
-  /** Reconstruct an OscChannel from transferred data */
+  /** Reconstruct an OscChannel from transferred data (use in workers) */
   static fromTransferable(data: OscChannelTransferable): OscChannel;
 }
 
