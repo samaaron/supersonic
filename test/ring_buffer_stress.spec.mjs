@@ -192,13 +192,7 @@ test.describe("Ring Buffer Stress Test", () => {
 
         // Create OSC bundle helper
         const createBundle = (ntpTime, address, ...args) => {
-          const message = { address, args: args.map(a =>
-            typeof a === 'string' ? { type: 's', value: a } :
-            typeof a === 'number' && Number.isInteger(a) ? { type: 'i', value: a } :
-            { type: 'f', value: a }
-          )};
-
-          const encodedMessage = window.SuperSonic.osc.encode(message);
+          const encodedMessage = window.SuperSonic.osc.encodeMessage(address, args);
           const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
           const bundle = new Uint8Array(bundleSize);
           const view = new DataView(bundle.buffer);
@@ -320,13 +314,7 @@ test.describe("Ring Buffer Stress Test", () => {
         };
 
         const createBundle = (ntpTime, address, ...args) => {
-          const message = { address, args: args.map(a =>
-            typeof a === 'string' ? { type: 's', value: a } :
-            typeof a === 'number' && Number.isInteger(a) ? { type: 'i', value: a } :
-            { type: 'f', value: a }
-          )};
-
-          const encodedMessage = window.SuperSonic.osc.encode(message);
+          const encodedMessage = window.SuperSonic.osc.encodeMessage(address, args);
           const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
           const bundle = new Uint8Array(bundleSize);
           const view = new DataView(bundle.buffer);

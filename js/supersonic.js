@@ -43,41 +43,6 @@ export class SuperSonic {
     readTimetag: (bundleData) => readTimetag(bundleData),
     ntpNow: () => getCurrentNTPFromPerformance(),
     NTP_EPOCH_OFFSET: oscFast.NTP_EPOCH_OFFSET,
-    // Backwards-compatible encode for tests - handles legacy osc.js format
-    // Deprecated: use encodeMessage() or encodeBundle() instead
-    encode: (packet) => {
-      if (!SuperSonic._encodeDeprecationWarned) {
-        console.warn('SuperSonic.osc.encode() is deprecated. Use encodeMessage() or encodeBundle().');
-        SuperSonic._encodeDeprecationWarned = true;
-      }
-      if (packet.timeTag !== undefined) {
-        // Bundle - convert legacy format
-        let timeTag;
-        if (packet.timeTag.raw) {
-          // Convert { raw: [seconds, fraction] } to NTP float
-          const [seconds, fraction] = packet.timeTag.raw;
-          timeTag = seconds + fraction / oscFast.TWO_POW_32;
-        } else if (typeof packet.timeTag === 'number') {
-          timeTag = packet.timeTag;
-        } else {
-          timeTag = 1; // immediate
-        }
-        // Convert typed args to plain args as arrays
-        const packets = packet.packets.map(p => {
-          const args = (p.args || []).map(a =>
-            (a && typeof a === 'object' && 'value' in a) ? a.value : a
-          );
-          return [p.address, ...args];
-        });
-        return oscFast.copyEncoded(oscFast.encodeBundle(timeTag, packets));
-      } else {
-        // Message - convert typed args to plain args
-        const args = (packet.args || []).map(a =>
-          (a && typeof a === 'object' && 'value' in a) ? a.value : a
-        );
-        return oscFast.copyEncoded(oscFast.encodeMessage(packet.address, args));
-      }
-    },
   };
 
   /**

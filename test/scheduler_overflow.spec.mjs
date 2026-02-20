@@ -109,23 +109,7 @@ test.describe("Scheduler Queue Overflow", () => {
 
         // Create timed bundle with future timestamp
         const createTimedBundle = (ntpTime, nodeId, note) => {
-          const message = {
-            address: "/s_new",
-            args: [
-              { type: 's', value: "sonic-pi-beep" },
-              { type: 'i', value: nodeId },
-              { type: 'i', value: 0 },
-              { type: 'i', value: 0 },
-              { type: 's', value: "note" },
-              { type: 'f', value: note },
-              { type: 's', value: "amp" },
-              { type: 'f', value: 0.05 },
-              { type: 's', value: "release" },
-              { type: 'f', value: 0.2 }  // Longer release so we can hear them
-            ]
-          };
-
-          const encodedMessage = window.SuperSonic.osc.encode(message);
+          const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", note, "amp", 0.05, "release", 0.2]);
           const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
           const bundle = new Uint8Array(bundleSize);
           const view = new DataView(bundle.buffer);
@@ -406,23 +390,7 @@ test.describe("Scheduler Queue Overflow", () => {
       };
 
       const createTimedBundle = (ntpTime, nodeId) => {
-        const message = {
-          address: "/s_new",
-          args: [
-            { type: 's', value: "sonic-pi-beep" },
-            { type: 'i', value: nodeId },
-            { type: 'i', value: 0 },
-            { type: 'i', value: 0 },
-            { type: 's', value: "note" },
-            { type: 'f', value: 60 },
-            { type: 's', value: "amp" },
-            { type: 'f', value: 0.01 },
-            { type: 's', value: "release" },
-            { type: 'f', value: 0.01 }
-          ]
-        };
-
-        const encodedMessage = window.SuperSonic.osc.encode(message);
+        const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", 60, "amp", 0.01, "release", 0.01]);
         const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
         const bundle = new Uint8Array(bundleSize);
         const view = new DataView(bundle.buffer);
@@ -496,14 +464,7 @@ test.describe("Scheduler Queue Overflow", () => {
       // Create an oversized bundle by repeating valid messages
       const createOversizedBundle = (ntpTime, targetSize) => {
         // Create a valid small message
-        const smallMessage = {
-          address: "/test",
-          args: [
-            { type: 's', value: "padding_data_to_make_message_larger" },
-            { type: 'i', value: 12345 },
-          ]
-        };
-        const encodedSmall = window.SuperSonic.osc.encode(smallMessage);
+        const encodedSmall = window.SuperSonic.osc.encodeMessage("/test", ["padding_data_to_make_message_larger", 12345]);
 
         // Calculate how many messages we need to exceed targetSize
         // Bundle overhead: "#bundle\0" (8) + timetag (8) = 16 bytes
@@ -594,19 +555,7 @@ test.describe("Scheduler Queue Overflow", () => {
       };
 
       // Create a normal-sized bundle with a real synth message
-      const message = {
-        address: "/s_new",
-        args: [
-          { type: 's', value: "sonic-pi-beep" },
-          { type: 'i', value: 99999 },
-          { type: 'i', value: 0 },
-          { type: 'i', value: 0 },
-          { type: 's', value: "note" },
-          { type: 'f', value: 60 },
-        ]
-      };
-
-      const encodedMessage = window.SuperSonic.osc.encode(message);
+      const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", 99999, 0, 0, "note", 60]);
       const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
       const bundle = new Uint8Array(bundleSize);
       const view = new DataView(bundle.buffer);
@@ -659,14 +608,7 @@ test.describe("Scheduler Queue Overflow", () => {
       // Create an oversized bundle with IMMEDIATE timetag (1)
       const createImmediateOversizedBundle = (targetSize) => {
         // Create a valid small message
-        const smallMessage = {
-          address: "/test",
-          args: [
-            { type: 's', value: "padding_data_to_make_message_larger" },
-            { type: 'i', value: 12345 },
-          ]
-        };
-        const encodedSmall = window.SuperSonic.osc.encode(smallMessage);
+        const encodedSmall = window.SuperSonic.osc.encodeMessage("/test", ["padding_data_to_make_message_larger", 12345]);
 
         // Calculate how many messages we need to exceed targetSize
         const messageWithSize = 4 + encodedSmall.byteLength;

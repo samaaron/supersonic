@@ -26,21 +26,7 @@ const HELPERS = `
   };
 
   var createTimedBundle = (ntpTime, nodeId) => {
-    const message = {
-      address: "/s_new",
-      args: [
-        { type: 's', value: "sonic-pi-beep" },
-        { type: 'i', value: nodeId },
-        { type: 'i', value: 0 },
-        { type: 'i', value: 0 },
-        { type: 's', value: "amp" },
-        { type: 'f', value: 0.0 },
-        { type: 's', value: "release" },
-        { type: 'f', value: 0.01 }
-      ]
-    };
-
-    const encodedMessage = window.SuperSonic.osc.encode(message);
+    const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "amp", 0.0, "release", 0.01]);
     const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
     const bundle = new Uint8Array(bundleSize);
     const view = new DataView(bundle.buffer);

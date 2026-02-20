@@ -36,23 +36,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const createTimedBundle = (ntpTime, nodeId) => {
-        const message = {
-          address: "/s_new",
-          args: [
-            { type: 's', value: "sonic-pi-beep" },
-            { type: 'i', value: nodeId },
-            { type: 'i', value: 0 },
-            { type: 'i', value: 0 },
-            { type: 's', value: "note" },
-            { type: 'f', value: 60 },
-            { type: 's', value: "amp" },
-            { type: 'f', value: 0.01 },
-            { type: 's', value: "release" },
-            { type: 'f', value: 0.01 }
-          ]
-        };
-
-        const encodedMessage = window.SuperSonic.osc.encode(message);
+        const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", 60, "amp", 0.01, "release", 0.01]);
         const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
         const bundle = new Uint8Array(bundleSize);
         const view = new DataView(bundle.buffer);
@@ -144,23 +128,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const createTimedBundle = (ntpTime, nodeId) => {
-        const message = {
-          address: "/s_new",
-          args: [
-            { type: 's', value: "sonic-pi-beep" },
-            { type: 'i', value: nodeId },
-            { type: 'i', value: 0 },
-            { type: 'i', value: 0 },
-            { type: 's', value: "note" },
-            { type: 'f', value: 60 },
-            { type: 's', value: "amp" },
-            { type: 'f', value: 0.01 },
-            { type: 's', value: "release" },
-            { type: 'f', value: 0.01 }
-          ]
-        };
-
-        const encodedMessage = window.SuperSonic.osc.encode(message);
+        const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", 60, "amp", 0.01, "release", 0.01]);
         const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
         const bundle = new Uint8Array(bundleSize);
         const view = new DataView(bundle.buffer);
@@ -252,23 +220,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const createTimedBundle = (ntpTime, nodeId) => {
-        const message = {
-          address: "/s_new",
-          args: [
-            { type: 's', value: "sonic-pi-beep" },
-            { type: 'i', value: nodeId },
-            { type: 'i', value: 0 },
-            { type: 'i', value: 0 },
-            { type: 's', value: "note" },
-            { type: 'f', value: 60 },
-            { type: 's', value: "amp" },
-            { type: 'f', value: 0.01 },
-            { type: 's', value: "release" },
-            { type: 'f', value: 0.01 }
-          ]
-        };
-
-        const encodedMessage = window.SuperSonic.osc.encode(message);
+        const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", 60, "amp", 0.01, "release", 0.01]);
         const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
         const bundle = new Uint8Array(bundleSize);
         const view = new DataView(bundle.buffer);
@@ -360,23 +312,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const createTimedBundle = (ntpTime, nodeId) => {
-        const message = {
-          address: "/s_new",
-          args: [
-            { type: 's', value: "sonic-pi-beep" },
-            { type: 'i', value: nodeId },
-            { type: 'i', value: 0 },
-            { type: 'i', value: 0 },
-            { type: 's', value: "note" },
-            { type: 'f', value: 60 },
-            { type: 's', value: "amp" },
-            { type: 'f', value: 0.01 },
-            { type: 's', value: "release" },
-            { type: 'f', value: 0.01 }
-          ]
-        };
-
-        const encodedMessage = window.SuperSonic.osc.encode(message);
+        const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", 60, "amp", 0.01, "release", 0.01]);
         const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
         const bundle = new Uint8Array(bundleSize);
         const view = new DataView(bundle.buffer);
@@ -478,23 +414,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const createTimedBundle = (ntpTime, nodeId) => {
-        const message = {
-          address: "/s_new",
-          args: [
-            { type: 's', value: "sonic-pi-beep" },
-            { type: 'i', value: nodeId },
-            { type: 'i', value: 0 },
-            { type: 'i', value: 0 },
-            { type: 's', value: "note" },
-            { type: 'f', value: 60 },
-            { type: 's', value: "amp" },
-            { type: 'f', value: 0.01 },
-            { type: 's', value: "release" },
-            { type: 'f', value: 0.01 }
-          ]
-        };
-
-        const encodedMessage = window.SuperSonic.osc.encode(message);
+        const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", 60, "amp", 0.01, "release", 0.01]);
         const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
         const bundle = new Uint8Array(bundleSize);
         const view = new DataView(bundle.buffer);
@@ -588,24 +508,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const createTimedBundle = (ntpTime, nodeId) => {
-        const message = {
-          address: "/s_new",
-          args: [
-            { type: 's', value: "sonic-pi-beep" },
-            { type: 'i', value: nodeId },
-            { type: 'i', value: 0 },
-            { type: 'i', value: 0 },
-            { type: 's', value: "note" },
-            { type: 'f', value: 60 },
-            { type: 's', value: "amp" },
-            { type: 'f', value: 0.01 },
-            { type: 's', value: "release" },
-            { type: 'f', value: 0.05 },
-          ],
-        };
-
-        // Encode to binary OSC format
-        const encodedMessage = window.SuperSonic.osc.encode(message);
+        const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", 60, "amp", 0.01, "release", 0.05]);
         const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
         const bundle = new Uint8Array(bundleSize);
         const view = new DataView(bundle.buffer);
@@ -701,24 +604,7 @@ test.describe("Prescheduler Cancellation", () => {
       };
 
       const createTimedBundle = (ntpTime, nodeId) => {
-        const message = {
-          address: "/s_new",
-          args: [
-            { type: 's', value: "sonic-pi-beep" },
-            { type: 'i', value: nodeId },
-            { type: 'i', value: 0 },
-            { type: 'i', value: 0 },
-            { type: 's', value: "note" },
-            { type: 'f', value: 60 },
-            { type: 's', value: "amp" },
-            { type: 'f', value: 0.01 },
-            { type: 's', value: "release" },
-            { type: 'f', value: 0.05 },
-          ],
-        };
-
-        // Encode to binary OSC format
-        const encodedMessage = window.SuperSonic.osc.encode(message);
+        const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", 60, "amp", 0.01, "release", 0.05]);
         const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
         const bundle = new Uint8Array(bundleSize);
         const view = new DataView(bundle.buffer);

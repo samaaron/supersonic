@@ -111,7 +111,8 @@ myButton.onclick = async () => {
 | Method                                                                    | Description                                    |
 | ------------------------------------------------------------------------- | ---------------------------------------------- |
 | [`getInfo()`](#getinfo)                                                   | Get static engine configuration                |
-| [`SuperSonic.osc.encode()`](#supersonicoscencodemessage)                  | *(Deprecated)* Encode an OSC message to bytes  |
+| [`SuperSonic.osc.encodeMessage()`](#supersonicoscencodemessage)           | Encode an OSC message to bytes                 |
+| [`SuperSonic.osc.encodeBundle()`](#supersonicoscencodebundle)             | Encode an OSC bundle to bytes                  |
 | [`SuperSonic.osc.decode()`](#supersonicoscdecodedata-options)             | Decode OSC bytes to a message                  |
 | [`SuperSonic.osc.encodeSingleBundle()`](#supersonicoscencodesinglebundle) | Encode a bundle containing a single message    |
 | [`SuperSonic.osc.readTimetag()`](#supersonicoscreadtimetag)               | Read NTP timetag from raw bundle bytes         |
