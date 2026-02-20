@@ -25,11 +25,12 @@ This is SuperSonic. All the synthesis power of **scsynth** - modified and augmen
 Highlights:
 
 - **AudioWorklet** - runs in a dedicated high priority audio thread
-- **WebAssembly** - scsynth's original C++ code compiled for the web
+- **WebAssembly** - scsynth's original C++ code reworked and compiled for the web
 - **OSC API** - talk to the scsynth server through its native OSC API
+- **Tested** - every release successfully passes a comprehensive test suite
 - **Zero Config via CDN** - no installation necessary - works directly from CDNs such as unpkg.
-- **Optional SAB mode** - can use a SharedArrayBuffer (SAB) for lower latency and reduced jitter with internal comms. Requires COOP/COEP headers to enable browsers to use the SAB
-
+- **Performance Mode (SAB)** - can use a SharedArrayBuffer (SAB) for lower latency and reduced jitter with internal comms. This mode is optional and requires COOP/COEP headers.
+- **Upstream Compatible** - SuperSonic is kept in sync with the development of the official native SuperCollider scsynth server.
 
 ## Demo
 
@@ -61,6 +62,7 @@ import { SuperSonic } from 'supersonic-scsynth';
 const sonic = new SuperSonic({
   baseURL: '/assets/supersonic/'  // Where you serve the WASM/workers
 });
+await sonic.init();
 ```
 
 ### Configuration Options
@@ -92,7 +94,7 @@ See [Communication Modes](docs/MODES.md) for details on choosing a mode, server 
 - [API Reference](docs/API.md) - Methods, callbacks, and configuration
 - [Communication Modes](docs/MODES.md) - SAB vs postMessage, server configuration
 - [scsynth Command Reference](docs/SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling scsynth
-- [Workers Guide](docs/WORKERS.md) - Sending OSC from Web Workers
+- [Workers Guide](docs/WORKERS.md) - Send OSC directly from Web Workers and AudioWorklets for the lowest latency.
 - [Metrics](docs/METRICS.md) - Performance monitoring and debugging
 - [Building from Source](docs/BUILDING.md) - Compiling the WASM yourself
 
