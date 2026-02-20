@@ -3,6 +3,7 @@
   "version": "0.48.0",
   "description": "SuperCollider scsynth WebAssembly port for AudioWorklet - Run SuperCollider synthesis in the browser",
   "main": "dist/supersonic.js",
+  "types": "supersonic.d.ts",
   "unpkg": "dist/supersonic.js",
   "jsdelivr": "dist/supersonic.js",
   "type": "module",
@@ -45,6 +46,7 @@
   },
   "files": [
     "dist/supersonic.js",
+    "supersonic.d.ts",
     "dist/osc_channel.js",
     "dist/metrics_component.js",
     "dist/metrics-dark.css",
