@@ -11,8 +11,8 @@ import { shouldBypass, readTimetag, getCurrentNTPFromPerformance } from "./lib/o
 
 // Re-export OscChannel for use in workers
 export { OscChannel };
-// Re-export oscFast for direct use in workers (zero-allocation OSC encoding)
-export { oscFast };
+// Re-export osc utilities for direct use in workers (zero-allocation OSC encoding)
+export { oscFast as osc };
 import { BufferManager } from "./lib/buffer_manager.js";
 import { AssetLoader } from "./lib/asset_loader.js";
 import { OSCRewriter } from "./lib/osc_rewriter.js";
@@ -44,7 +44,12 @@ export class SuperSonic {
     ntpNow: () => getCurrentNTPFromPerformance(),
     NTP_EPOCH_OFFSET: oscFast.NTP_EPOCH_OFFSET,
     // Backwards-compatible encode for tests - handles legacy osc.js format
+    // Deprecated: use encodeMessage() or encodeBundle() instead
     encode: (packet) => {
+      if (!SuperSonic._encodeDeprecationWarned) {
+        console.warn('SuperSonic.osc.encode() is deprecated. Use encodeMessage() or encodeBundle().');
+        SuperSonic._encodeDeprecationWarned = true;
+      }
       if (packet.timeTag !== undefined) {
         // Bundle - convert legacy format
         let timeTag;
@@ -543,6 +548,7 @@ export class SuperSonic {
 
   get initialized() { return this.#initialized; }
   get initializing() { return this.#initializing; }
+  get audioContext() { return this.#audioContext; }
   get mode() { return this.#config.mode; }
   get bufferConstants() { return this.#metricsReader.bufferConstants; }
   get ringBufferBase() { return this.#metricsReader.ringBufferBase; }
@@ -1133,9 +1139,9 @@ export class SuperSonic {
    *
    * @returns {OscChannel}
    */
-  createOscChannel() {
+  createOscChannel(options = {}) {
     this.#ensureInitialized("create OSC channel");
-    return this.#osc.createOscChannel();
+    return this.#osc.createOscChannel(options);
   }
 
   // ============================================================================
@@ -1246,7 +1252,7 @@ export class SuperSonic {
       bufferInfo.numChannels, bufferInfo.sampleRate, bufferInfo.uuid
     );
 
-    return bufferInfo.allocationComplete;
+    return await bufferInfo.allocationComplete;
   }
 
   getLoadedBuffers() {
@@ -1359,9 +1365,9 @@ export class SuperSonic {
     this.#eventEmitter.clearAllListeners();
   }
 
-  async reset(config = {}) {
+  async reset() {
     await this.shutdown();
-    await this.init(config);
+    await this.init();
   }
 
   // ============================================================================
