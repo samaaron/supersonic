@@ -3644,19 +3644,23 @@ test.describe("Malformed input robustness tests", () => {
       const messages = [];
       sonic.on('message', (msg) => messages.push(msg));
 
+      // Absorb async buffer errors (pool-full goes to 'error' event)
+      sonic.on('error', () => {});
+
       await sonic.init();
 
       // Try to allocate an impossibly large buffer
+      // send() is sync but buffer allocs are queued — errors go to 'error' event
+      sonic.send("/b_alloc", 100, 0x7fffffff, 2); // ~2GB buffer
       try {
-        await sonic.send("/b_alloc", 100, 0x7fffffff, 2); // ~2GB buffer
         await sonic.sync(1);
       } catch (e) {
-        // Exception is acceptable
+        // sync timeout is acceptable if the alloc failed
       }
 
       // Verify server still works
       messages.length = 0;
-      await sonic.send("/status");
+      sonic.send("/status");
       await sonic.sync(2);
 
       const statusReply = messages.find((m) => m[0] === "/status.reply");

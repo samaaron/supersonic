@@ -28,6 +28,10 @@ import { MemoryLayout } from "./memory_layout.js";
 import { defaultWorldOptions } from "./scsynth_options.js";
 import { addWorkletModule } from "./lib/worker_loader.js";
 
+const BUFFER_ALLOC_COMMANDS = new Set([
+  '/b_alloc', '/b_allocRead', '/b_allocReadChannel', '/b_allocFile',
+]);
+
 /**
  * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
  */
@@ -325,6 +329,9 @@ export class SuperSonic {
   // Buffer for early debugRawBatch messages
   #earlyDebugMessages = [];
   #debugRawHandler = null;
+
+  // Promise chain for async buffer alloc commands
+  #bufferQueue = Promise.resolve();
 
   /**
    * Validate scsynthOptions (worldOptions) at construction time.
@@ -929,7 +936,7 @@ export class SuperSonic {
   // OSC MESSAGING API
   // ============================================================================
 
-  async send(address, ...args) {
+  send(address, ...args) {
     this.#ensureInitialized("send OSC messages");
 
     // Block unsupported commands
@@ -975,8 +982,6 @@ export class SuperSonic {
       return arg;
     });
 
-    const oscData = SuperSonic.osc.encodeMessage(address, normalizedArgs);
-
     if (this.#config.debug || this.#config.debugOscOut) {
       const maxLen = this.#config.activityConsoleLog.oscOutMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
       const argsStr = args.map(a => {
@@ -987,44 +992,22 @@ export class SuperSonic {
       console.log(`[OSC →] ${address}${argsStr ? ' ' + argsStr : ''}`);
     }
 
-    return this.sendOSC(oscData);
+    // Buffer alloc commands need async rewriting — validate sync, then queue
+    if (BUFFER_ALLOC_COMMANDS.has(address)) {
+      this.#validateBufferCommand(address, normalizedArgs);
+      this.#enqueueBufferCommand(address, normalizedArgs);
+      return;
+    }
+
+    const oscData = SuperSonic.osc.encodeMessage(address, normalizedArgs);
+    this.sendOSC(oscData);
   }
 
-  async sendOSC(oscData, options = {}) {
+  sendOSC(oscData, options = {}) {
     this.#ensureInitialized("send OSC data");
 
     const uint8Data = this.#toUint8Array(oscData);
-    const preparedData = await this.#prepareOutboundPacket(uint8Data);
-
-    // Note: message:sent is now emitted via the centralized OSC log from the worklet
-    // This ensures all messages (from main thread and workers) are captured
-
-    // Classify the message to determine routing
-    const category = this.#oscChannel.classify(preparedData);
-
-    if (shouldBypass(category)) {
-      // Bypass: send direct to worklet
-      if (this.#config.mode === 'sab') {
-        // SAB mode: use OscChannel for direct ring buffer write
-        this.#oscChannel.send(preparedData);
-        // OscChannel writes metrics directly to shared memory
-      } else {
-        // PM mode: use transport's sendImmediate which tracks metrics locally
-        this.#osc.sendImmediate(preparedData, category);
-      }
-    } else {
-      // Far-future: goes to prescheduler for timing
-      // Check size limit: WASM scheduler has fixed slot size
-      const slotSize = this.#metricsReader.bufferConstants?.scheduler_slot_size;
-      if (slotSize && preparedData.length > slotSize) {
-        throw new Error(
-          `OSC bundle too large to schedule (${preparedData.length} > ${slotSize} bytes). ` +
-          `Use immediate timestamp (0 or 1) for large messages, or reduce bundle size.`
-        );
-      }
-      // Send to prescheduler with session/tag options for cancellation
-      this.#osc.sendWithOptions(preparedData, options);
-    }
+    this.#sendPreparedOSC(uint8Data, options);
   }
 
   cancelTag(runTag) {
@@ -1237,6 +1220,9 @@ export class SuperSonic {
   async sync(syncId = Math.floor(Math.random() * 2147483647)) {
     this.#ensureInitialized("sync");
 
+    // Drain pending buffer alloc commands so they reach scsynth before /sync
+    await this.#drainBufferQueue();
+
     const syncPromise = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.#syncListeners?.delete(syncId);
@@ -1253,7 +1239,7 @@ export class SuperSonic {
       this.#syncListeners.set(syncId, messageHandler);
     });
 
-    await this.send("/sync", syncId);
+    this.send("/sync", syncId);
     await syncPromise;
 
     if (this.#config.mode === 'postMessage') {
@@ -1315,6 +1301,7 @@ export class SuperSonic {
 
     this.#oscRewriter = null;
     this.#oscChannel = null;
+    this.#bufferQueue = Promise.resolve();
     this.#initialized = false;
     this.loadedSynthDefs.clear();
     this.#initPromise = null;
@@ -1838,19 +1825,80 @@ export class SuperSonic {
     throw new Error("oscData must be ArrayBuffer or Uint8Array");
   }
 
-  async #prepareOutboundPacket(uint8Data) {
-    try {
-      const decodedPacket = SuperSonic.osc.decode(uint8Data);
-      const { packet, changed } = await this.#oscRewriter.rewritePacket(decodedPacket);
-      if (!changed) return uint8Data;
-      // Re-encode the rewritten packet
-      if (packet.timeTag !== undefined) {
-        return SuperSonic.osc.encodeBundle(packet.timeTag, packet.packets);
+  #sendPreparedOSC(preparedData, options = {}) {
+    // Classify the message to determine routing
+    const category = this.#oscChannel.classify(preparedData);
+
+    if (shouldBypass(category)) {
+      // Bypass: send direct to worklet
+      if (this.#config.mode === 'sab') {
+        // SAB mode: use OscChannel for direct ring buffer write
+        this.#oscChannel.send(preparedData);
+      } else {
+        // PM mode: use transport's sendImmediate which tracks metrics locally
+        this.#osc.sendImmediate(preparedData, category);
       }
-      return SuperSonic.osc.encodeMessage(packet[0], packet.slice(1));
-    } catch (error) {
-      console.error("[SuperSonic] Failed to prepare OSC packet:", error);
-      throw error;
+    } else {
+      // Far-future: goes to prescheduler for timing
+      // Check size limit: WASM scheduler has fixed slot size
+      const slotSize = this.#metricsReader.bufferConstants?.scheduler_slot_size;
+      if (slotSize && preparedData.length > slotSize) {
+        throw new Error(
+          `OSC bundle too large to schedule (${preparedData.length} > ${slotSize} bytes). ` +
+          `Use immediate timestamp (0 or 1) for large messages, or reduce bundle size.`
+        );
+      }
+      // Send to prescheduler with session/tag options for cancellation
+      this.#osc.sendWithOptions(preparedData, options);
     }
+  }
+
+  #validateBufferCommand(address, args) {
+    const requireInt = (idx, msg) => {
+      const v = args[idx];
+      if (!Number.isFinite(v)) throw new Error(msg);
+    };
+    const requireString = (idx, msg) => {
+      if (typeof args[idx] !== 'string') throw new Error(msg);
+    };
+    const requireBlob = (idx, msg) => {
+      const v = args[idx];
+      if (!(v instanceof Uint8Array || v instanceof ArrayBuffer)) throw new Error(msg);
+    };
+
+    switch (address) {
+      case '/b_alloc':
+        requireInt(0, '/b_alloc requires a buffer number');
+        requireInt(1, '/b_alloc requires a frame count');
+        break;
+      case '/b_allocRead':
+        requireInt(0, '/b_allocRead requires a buffer number');
+        requireString(1, '/b_allocRead requires a file path');
+        break;
+      case '/b_allocReadChannel':
+        requireInt(0, '/b_allocReadChannel requires a buffer number');
+        requireString(1, '/b_allocReadChannel requires a file path');
+        break;
+      case '/b_allocFile':
+        requireInt(0, '/b_allocFile requires a buffer number');
+        requireBlob(1, '/b_allocFile requires audio file data as blob');
+        break;
+    }
+  }
+
+  #enqueueBufferCommand(address, args) {
+    this.#bufferQueue = this.#bufferQueue.then(async () => {
+      const message = [address, ...args];
+      const { packet } = await this.#oscRewriter.rewritePacket(message);
+      const oscData = SuperSonic.osc.encodeMessage(packet[0], packet.slice(1));
+      this.#sendPreparedOSC(oscData);
+    }).catch((error) => {
+      console.error(`[SuperSonic] Buffer command ${address} failed:`, error);
+      this.#eventEmitter.emit('error', error);
+    });
+  }
+
+  #drainBufferQueue() {
+    return this.#bufferQueue;
   }
 }

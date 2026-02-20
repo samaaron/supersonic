@@ -639,25 +639,12 @@ test.describe("OSC Bundle Timing", () => {
         const ntpFraction = Math.floor((scheduledNTP % 1) * 0x100000000);
 
         const osc = window.SuperSonic.osc;
-        const bundle = osc.encode({
-          timeTag: { raw: [ntpSeconds, ntpFraction] },
-          packets: [
-            {
-              address: "/s_new",
-              args: [
-                { type: "s", value: "sonic-pi-beep" },
-                { type: "i", value: 1000 },
-                { type: "i", value: 0 },
-                { type: "i", value: 0 },
-                { type: "s", value: "amp" },
-                { type: "f", value: 0.5 },
-              ],
-            },
-          ],
-        });
+        const bundle = osc.encodeBundle([ntpSeconds, ntpFraction], [
+          ["/s_new", "sonic-pi-beep", 1000, 0, 0, "amp", 0.5],
+        ]);
 
         // Send the bundle
-        await sonic.sendOSC(bundle);
+        sonic.sendOSC(bundle);
 
         // Wait for synth to play (200ms is enough for 100ms delay + some audio)
         await new Promise((r) => setTimeout(r, 200));
@@ -709,25 +696,12 @@ test.describe("OSC Bundle Timing", () => {
         const osc = window.SuperSonic.osc;
 
         // Bundle with timetag = 1 means "execute immediately"
-        const immediateBundle = osc.encode({
-          timeTag: { raw: [0, 1] }, // NTP timetag 1 = immediate
-          packets: [
-            {
-              address: "/s_new",
-              args: [
-                { type: "s", value: "sonic-pi-beep" },
-                { type: "i", value: 1000 },
-                { type: "i", value: 0 },
-                { type: "i", value: 0 },
-                { type: "s", value: "amp" },
-                { type: "f", value: 0.5 },
-              ],
-            },
-          ],
-        });
+        const immediateBundle = osc.encodeBundle(1, [
+          ["/s_new", "sonic-pi-beep", 1000, 0, 0, "amp", 0.5],
+        ]);
 
         sonic.startCapture();
-        await sonic.sendOSC(immediateBundle);
+        sonic.sendOSC(immediateBundle);
 
         // Wait a short time
         await new Promise((r) => setTimeout(r, 100));
@@ -774,27 +748,13 @@ test.describe("OSC Bundle Timing", () => {
         const osc = window.SuperSonic.osc;
 
         // Bundle with timetag in the past (1 second ago)
-        // native: expects Unix milliseconds (same as Date.now())
-        const pastTime = Date.now() - 1000; // 1 second ago
-        const pastBundle = osc.encode({
-          timeTag: { native: pastTime },
-          packets: [
-            {
-              address: "/s_new",
-              args: [
-                { type: "s", value: "sonic-pi-beep" },
-                { type: "i", value: 1000 },
-                { type: "i", value: 0 },
-                { type: "i", value: 0 },
-                { type: "s", value: "amp" },
-                { type: "f", value: 0.5 },
-              ],
-            },
-          ],
-        });
+        const pastTimeNTP = (Date.now() - 1000) / 1000 + osc.NTP_EPOCH_OFFSET;
+        const pastBundle = osc.encodeBundle(pastTimeNTP, [
+          ["/s_new", "sonic-pi-beep", 1000, 0, 0, "amp", 0.5],
+        ]);
 
         sonic.startCapture();
-        await sonic.sendOSC(pastBundle);
+        sonic.sendOSC(pastBundle);
 
         await new Promise((r) => setTimeout(r, 100));
 
@@ -883,56 +843,22 @@ test.describe("OSC Bundle Timing", () => {
         const ntpSecondsA = Math.floor(ntpA);
         const ntpFractionA = Math.floor((ntpA % 1) * 0x100000000);
 
-        const bundleA = osc.encode({
-          timeTag: { raw: [ntpSecondsA, ntpFractionA] },
-          packets: [{
-            address: "/s_new",
-            args: [
-              { type: "s", value: "sonic-pi-beep" },
-              { type: "i", value: 2000 },
-              { type: "i", value: 0 },
-              { type: "i", value: 0 },
-              { type: "s", value: "note" },
-              { type: "f", value: 57 }, // A3 = 220Hz
-              { type: "s", value: "amp" },
-              { type: "f", value: 0.5 },
-              { type: "s", value: "sustain" },
-              { type: "f", value: 0.05 },
-              { type: "s", value: "release" },
-              { type: "f", value: 0.01 },
-            ],
-          }],
-        });
+        const bundleA = osc.encodeBundle([ntpSecondsA, ntpFractionA], [
+          ["/s_new", "sonic-pi-beep", 2000, 0, 0, "note", 57, "amp", 0.5, "sustain", 0.05, "release", 0.01],
+        ]);
 
         // Create second bundle - synth B at higher frequency (880Hz) for identification
         const ntpB = captureStartNTP + (secondDelayMs / 1000);
         const ntpSecondsB = Math.floor(ntpB);
         const ntpFractionB = Math.floor((ntpB % 1) * 0x100000000);
 
-        const bundleB = osc.encode({
-          timeTag: { raw: [ntpSecondsB, ntpFractionB] },
-          packets: [{
-            address: "/s_new",
-            args: [
-              { type: "s", value: "sonic-pi-beep" },
-              { type: "i", value: 2001 },
-              { type: "i", value: 0 },
-              { type: "i", value: 0 },
-              { type: "s", value: "note" },
-              { type: "f", value: 81 }, // A5 = 880Hz
-              { type: "s", value: "amp" },
-              { type: "f", value: 0.5 },
-              { type: "s", value: "sustain" },
-              { type: "f", value: 0.05 },
-              { type: "s", value: "release" },
-              { type: "f", value: 0.01 },
-            ],
-          }],
-        });
+        const bundleB = osc.encodeBundle([ntpSecondsB, ntpFractionB], [
+          ["/s_new", "sonic-pi-beep", 2001, 0, 0, "note", 81, "amp", 0.5, "sustain", 0.05, "release", 0.01],
+        ]);
 
         // Send both bundles
-        await sonic.sendOSC(bundleA);
-        await sonic.sendOSC(bundleB);
+        sonic.sendOSC(bundleA);
+        sonic.sendOSC(bundleB);
 
         // Wait for both synths to complete
         await new Promise((r) => setTimeout(r, 200));
@@ -1061,22 +987,11 @@ test.describe("OSC Bundle Timing", () => {
         const ntpFraction = Math.floor((ntpTarget % 1) * 0x100000000);
 
         const osc = window.SuperSonic.osc;
-        const bundle = osc.encode({
-          timeTag: { raw: [ntpSeconds, ntpFraction] },
-          packets: [{
-            address: "/s_new",
-            args: [
-              { type: "s", value: "sonic-pi-beep" },
-              { type: "i", value: 3000 },
-              { type: "i", value: 0 },
-              { type: "i", value: 0 },
-              { type: "s", value: "amp" },
-              { type: "f", value: 0.5 },
-            ],
-          }],
-        });
+        const bundle = osc.encodeBundle([ntpSeconds, ntpFraction], [
+          ["/s_new", "sonic-pi-beep", 3000, 0, 0, "amp", 0.5],
+        ]);
 
-        await sonic.sendOSC(bundle);
+        sonic.sendOSC(bundle);
         await new Promise((r) => setTimeout(r, 150));
 
         const captured = sonic.stopCapture();
@@ -1188,26 +1103,11 @@ test.describe("OSC Bundle Timing", () => {
         const ntpFraction = Math.floor((ntpTarget % 1) * 0x100000000);
 
         const osc = window.SuperSonic.osc;
-        const bundle = osc.encode({
-          timeTag: { raw: [ntpSeconds, ntpFraction] },
-          packets: [{
-            address: "/s_new",
-            args: [
-              { type: "s", value: "test_offset_out" },
-              { type: "i", value: 3000 },
-              { type: "i", value: 0 },
-              { type: "i", value: 0 },
-              { type: "s", value: "amp" },
-              { type: "f", value: 0.5 },
-              { type: "s", value: "freq" },
-              { type: "f", value: 880 },
-              { type: "s", value: "dur" },
-              { type: "f", value: 0.1 },
-            ],
-          }],
-        });
+        const bundle = osc.encodeBundle([ntpSeconds, ntpFraction], [
+          ["/s_new", "test_offset_out", 3000, 0, 0, "amp", 0.5, "freq", 880, "dur", 0.1],
+        ]);
 
-        await sonic.sendOSC(bundle);
+        sonic.sendOSC(bundle);
         await new Promise((r) => setTimeout(r, 200));
 
         const captured = sonic.stopCapture();

@@ -900,28 +900,16 @@ test.describe("Truly Nefarious Edge Cases", () => {
       const now = Date.now();
 
       // Create deeply nested bundle
-      let innermost = {
-        address: "/s_new",
-        args: [
-          { type: "s", value: "sonic-pi-beep" },
-          { type: "i", value: 1000 },
-          { type: "i", value: 0 },
-          { type: "i", value: 0 },
-        ],
-      };
-
-      let current = innermost;
-      for (let i = 0; i < 10; i++) {
-        current = {
-          timeTag: { native: now + 50 },
-          packets: [current],
-        };
+      const ntpTime = (now / 1000) + osc.NTP_EPOCH_OFFSET + 0.05;
+      let current = { timeTag: ntpTime, packets: [["/s_new", "sonic-pi-beep", 1000, 0, 0]] };
+      for (let i = 1; i < 10; i++) {
+        current = { timeTag: ntpTime, packets: [current] };
       }
 
       let error = null;
       try {
-        const bundle = osc.encode(current);
-        await sonic.sendOSC(bundle);
+        const bundle = osc.encodeBundle(ntpTime, [current]);
+        sonic.sendOSC(bundle);
         await new Promise(r => setTimeout(r, 200));
         await sonic.sync(1);
       } catch (e) {
@@ -1077,22 +1065,11 @@ test.describe("Timing Window Exploits", () => {
       const now = Date.now();
 
       for (let i = 0; i < 50; i++) {
-        const targetTime = now + i * processBlockMs;
-        const bundle = osc.encode({
-          timeTag: { native: targetTime },
-          packets: [{
-            address: "/s_new",
-            args: [
-              { type: "s", value: "sonic-pi-beep" },
-              { type: "i", value: 10000 + i },
-              { type: "i", value: 0 },
-              { type: "i", value: 0 },
-              { type: "s", value: "release" },
-              { type: "f", value: 0.001 },
-            ],
-          }],
-        });
-        await sonic.sendOSC(bundle);
+        const targetTime = (now + i * processBlockMs) / 1000 + osc.NTP_EPOCH_OFFSET;
+        const bundle = osc.encodeBundle(targetTime, [
+          ["/s_new", "sonic-pi-beep", 10000 + i, 0, 0, "release", 0.001],
+        ]);
+        sonic.sendOSC(bundle);
       }
 
       // Wait for all to execute
@@ -1825,18 +1802,9 @@ test.describe("Memory Leak Triggers", () => {
 
       // Create and discard many OSC messages without sending
       for (let i = 0; i < 10000; i++) {
-        const bundle = osc.encode({
-          timeTag: { raw: [0, 1] },
-          packets: [{
-            address: "/s_new",
-            args: [
-              { type: "s", value: "sonic-pi-beep" },
-              { type: "i", value: i },
-              { type: "i", value: 0 },
-              { type: "i", value: 0 },
-            ],
-          }],
-        });
+        const bundle = osc.encodeBundle(1, [
+          ["/s_new", "sonic-pi-beep", i, 0, 0],
+        ]);
         // Don't send - just discard
       }
 
