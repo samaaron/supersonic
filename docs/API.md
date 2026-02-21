@@ -355,7 +355,7 @@ await supersonic.loadSample(0, "long-sample.flac", 1000, 1000);
 
 ### `send(address, ...args)`
 
-Send an OSC message. Types are auto-detected from JavaScript values.
+Send an OSC message. Types are auto-detected from JavaScript values. Use `{ type, value }` wrappers to force a specific OSC type (e.g. `{ type: 'float', value: 440 }` to send a whole number as float32). See [`encodeMessage()`](#supersonicoscencodemessage) for the full type reference.
 
 Most commands are sent synchronously. Buffer allocation commands (`/b_alloc`, `/b_allocRead`, `/b_allocReadChannel`, `/b_allocFile`) are queued and processed in the background because they involve network fetches and audio decoding. Use `sync()` after buffer commands to ensure they complete before using the buffer.
 
@@ -565,12 +565,16 @@ supersonic.off("message", handler);
 
 ### `once(event, callback)`
 
-Subscribe to an event once. The listener auto-unsubscribes after the first event.
+Subscribe to an event once. The listener auto-unsubscribes after the first event. Returns an unsubscribe function (matching `on()`).
 
 ```javascript
 supersonic.once("ready", ({ bootStats }) => {
   console.log("Engine booted in", bootStats.initDuration.toFixed(2), "ms");
 });
+
+// Or cancel before it fires:
+const unsub = supersonic.once("message", handler);
+unsub(); // never fires
 ```
 
 ### Event: `setup`
@@ -1039,7 +1043,7 @@ Returns an object containing:
 
 ### `SuperSonic.osc.encodeMessage(address, args)`
 
-Encode an OSC message into binary format. Types are inferred automatically from JavaScript values.
+Encode an OSC message into binary format. Types are inferred automatically from JavaScript values. Strings are encoded as UTF-8.
 
 ```javascript
 const bytes = SuperSonic.osc.encodeMessage("/s_new", [
@@ -1049,6 +1053,34 @@ const bytes = SuperSonic.osc.encodeMessage("/s_new", [
   0,                // integer
 ]);
 // bytes is a Uint8Array
+```
+
+**Auto-detected types:**
+
+| JavaScript value | OSC type |
+|---|---|
+| Integer number (e.g. `42`) | int32 |
+| Non-integer number (e.g. `0.5`) | float32 |
+| String | string (UTF-8) |
+| `true` / `false` | bool |
+| `Uint8Array` / `ArrayBuffer` | blob |
+
+**Tagged type wrappers** — use `{ type, value }` objects to force a specific OSC type:
+
+| Tagged wrapper | OSC type | Use case |
+|---|---|---|
+| `{ type: 'float', value: 440 }` | float32 | Force float for whole numbers |
+| `{ type: 'int', value: 42 }` | int32 | Explicit integer |
+| `{ type: 'string', value: 'hello' }` | string | Explicit string |
+| `{ type: 'blob', value: bytes }` | blob | Explicit blob |
+| `{ type: 'bool', value: true }` | bool | Explicit boolean |
+| `{ type: 'double', value: 3.14159 }` | float64 | Double precision |
+| `{ type: 'int64', value: 9007199254740992n }` | int64 | 64-bit integer |
+| `{ type: 'timetag', value: ntpTime }` | timetag | NTP timestamp as argument |
+
+```javascript
+// Force 440 as float32 (without the wrapper, whole numbers encode as int32)
+SuperSonic.osc.encodeMessage("/n_set", [1001, "freq", { type: 'float', value: 440 }]);
 ```
 
 ### `SuperSonic.osc.encodeBundle(timeTag, packets)`
