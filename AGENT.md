@@ -43,6 +43,28 @@ You can build SuperSonic with:
 
 This compiles all the assets and places the results in the dist dir.
 
+## Testing
+
+Tests use Playwright. The full suite is 1104 tests across SAB and postMessage modes and takes ~3 minutes.
+
+**The output is very large and will truncate. Always use concise output:**
+
+```bash
+# Full suite (summary only)
+npx playwright test --reporter=line 2>&1 | tail -10
+
+# Full suite (with failure details)
+npx playwright test --reporter=line 2>&1 | tail -30
+
+# Single file
+npx playwright test test/some.spec.mjs --reporter=line
+
+# Single project
+npx playwright test --project=SAB --reporter=line
+```
+
+Always set a 5-minute timeout when running the full suite (it takes ~3 min with 8 workers).
+
 ## Running
 
 Start the test server from the example directory:
