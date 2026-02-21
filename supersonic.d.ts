@@ -22,6 +22,11 @@
  *
  * For 64-bit or timetag types, use the tagged object form:
  * @example
+ * { type: 'int', value: 42 }
+ * { type: 'float', value: 440 }     // force float32 for whole numbers
+ * { type: 'string', value: 'hello' }
+ * { type: 'blob', value: new Uint8Array([1,2,3]) }
+ * { type: 'bool', value: true }
  * { type: 'int64', value: 9007199254740992n }
  * { type: 'double', value: 3.141592653589793 }
  * { type: 'timetag', value: ntpTimestamp }
@@ -32,6 +37,11 @@ export type OscArg =
   | boolean
   | Uint8Array
   | ArrayBuffer
+  | { type: 'int'; value: number }
+  | { type: 'float'; value: number }
+  | { type: 'string'; value: string }
+  | { type: 'blob'; value: Uint8Array | ArrayBuffer }
+  | { type: 'bool'; value: boolean }
   | { type: 'int64'; value: number | bigint }
   | { type: 'double'; value: number }
   | { type: 'timetag'; value: number };
@@ -1118,10 +1128,12 @@ export class SuperSonic {
 
   /**
    * Subscribe to an event once. The handler is automatically removed after the first call.
+   * Returns an unsubscribe function (matching {@link on}).
    * @param event - Event name
    * @param callback - Handler function
+   * @returns Unsubscribe function — call it to remove the listener before it fires
    */
-  once<E extends SuperSonicEvent>(event: E, callback: SuperSonicEventMap[E]): this;
+  once<E extends SuperSonicEvent>(event: E, callback: SuperSonicEventMap[E]): () => void;
 
   /**
    * Remove all listeners for an event, or all listeners entirely.

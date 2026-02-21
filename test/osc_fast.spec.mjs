@@ -935,6 +935,177 @@ test.describe('OSC Fast Encoder/Decoder', () => {
   });
 
   // ===========================================================================
+  // UTF-8 STRING ENCODING
+  // ===========================================================================
+
+  test.describe('UTF-8 String Encoding', () => {
+    test('round-trips accented characters', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', ['café', 'über', 'naïve']);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return decoded;
+      });
+
+      expect(result).toEqual(['/test', 'café', 'über', 'naïve']);
+    });
+
+    test('round-trips emoji', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', ['hello 🎵🎶']);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return decoded;
+      });
+
+      expect(result).toEqual(['/test', 'hello 🎵🎶']);
+    });
+
+    test('round-trips CJK characters', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', ['こんにちは', '你好']);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return decoded;
+      });
+
+      expect(result).toEqual(['/test', 'こんにちは', '你好']);
+    });
+
+    test('round-trips mixed ASCII and non-ASCII', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', ['hello', 'wörld', 'plain']);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return decoded;
+      });
+
+      expect(result).toEqual(['/test', 'hello', 'wörld', 'plain']);
+    });
+  });
+
+  // ===========================================================================
+  // TAGGED TYPE WRAPPERS
+  // ===========================================================================
+
+  test.describe('Tagged Type Wrappers', () => {
+    test('{ type: "int" } encodes as int32', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', [
+          { type: 'int', value: 42 },
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return decoded;
+      });
+
+      expect(result).toEqual(['/test', 42]);
+    });
+
+    test('{ type: "float" } forces float32 for whole number', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        // Encode 440 as float - should NOT become int32
+        const encoded = window.oscFast.encodeMessage('/test', [
+          { type: 'float', value: 440 },
+        ]);
+        // Check type tag byte: should be 'f' (0x66), not 'i' (0x69)
+        // Type tags start after address. '/test\0\0\0' = 8 bytes, then ',f\0\0' = 4 bytes
+        const typeTag = encoded[9]; // the 'f' in ',f\0\0'
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return { typeTag, decoded };
+      });
+
+      expect(result.typeTag).toBe(0x66); // 'f' for float
+      expect(result.decoded[0]).toBe('/test');
+      expect(result.decoded[1]).toBeCloseTo(440, 0);
+    });
+
+    test('{ type: "float" } preserves fractional values', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', [
+          { type: 'float', value: 3.14 },
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return decoded;
+      });
+
+      expect(result[1]).toBeCloseTo(3.14, 4);
+    });
+
+    test('{ type: "string" } encodes as string', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', [
+          { type: 'string', value: 'hello' },
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return decoded;
+      });
+
+      expect(result).toEqual(['/test', 'hello']);
+    });
+
+    test('{ type: "blob" } encodes Uint8Array as blob', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', [
+          { type: 'blob', value: new Uint8Array([10, 20, 30]) },
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return {
+          address: decoded[0],
+          blobData: Array.from(decoded[1]),
+        };
+      });
+
+      expect(result.blobData).toEqual([10, 20, 30]);
+    });
+
+    test('{ type: "blob" } encodes ArrayBuffer as blob', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const buf = new Uint8Array([5, 6, 7]).buffer;
+        const encoded = window.oscFast.encodeMessage('/test', [
+          { type: 'blob', value: buf },
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return {
+          address: decoded[0],
+          blobData: Array.from(decoded[1]),
+        };
+      });
+
+      expect(result.blobData).toEqual([5, 6, 7]);
+    });
+
+    test('{ type: "bool" } encodes true/false', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', [
+          { type: 'bool', value: true },
+          { type: 'bool', value: false },
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return decoded;
+      });
+
+      expect(result).toEqual(['/test', true, false]);
+    });
+
+    test('tagged types mix with bare primitives', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/mix', [
+          'name',
+          { type: 'float', value: 440 },
+          42,
+          { type: 'int', value: 100 },
+          true,
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return decoded;
+      });
+
+      expect(result[0]).toBe('/mix');
+      expect(result[1]).toBe('name');
+      expect(result[2]).toBeCloseTo(440, 0);
+      expect(result[3]).toBe(42);
+      expect(result[4]).toBe(100);
+      expect(result[5]).toBe(true);
+    });
+  });
+
+  // ===========================================================================
   // PERFORMANCE (basic sanity checks)
   // ===========================================================================
 

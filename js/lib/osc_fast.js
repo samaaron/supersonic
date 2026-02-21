@@ -19,8 +19,9 @@ let encodeView = mainView;
 const stringCache = new Map();
 const STRING_CACHE_MAX = 1000;
 
-// Text decoder for UTF-8 strings (decoding only)
+// Text decoder/encoder for UTF-8 strings
 const textDecoder = new TextDecoder();
+const textEncoder = new TextEncoder();
 
 // NTP epoch offset (seconds from 1900 to 1970)
 export const NTP_EPOCH_OFFSET = 2208988800;
@@ -62,6 +63,12 @@ function estimateMessageSize(address, args) {
       size += 4 + arg.byteLength + 3;
     } else if (typeof arg === 'string') {
       size += arg.length * 3 + 4; // UTF-8 worst case + null + padding
+    } else if (arg && arg.type === 'string') {
+      size += arg.value.length * 3 + 4; // tagged string: UTF-8 worst case + null + padding
+    } else if (arg && arg.type === 'blob') {
+      const blobVal = arg.value;
+      const blobLen = blobVal instanceof Uint8Array ? blobVal.length : blobVal.byteLength;
+      size += 4 + blobLen + 3; // size + data + padding
     } else {
       size += 8; // numbers, booleans, etc.
     }
@@ -298,9 +305,24 @@ function writeStringCached(str, pos) {
  * @private
  */
 function writeString(str, pos) {
-  // Write string bytes (ASCII fast path)
+  // Check for non-ASCII: scan for any char >= 128
+  let needsUTF8 = false;
   for (let i = 0; i < str.length; i++) {
-    encodeBuffer[pos++] = str.charCodeAt(i);
+    if (str.charCodeAt(i) >= 128) {
+      needsUTF8 = true;
+      break;
+    }
+  }
+
+  if (needsUTF8) {
+    // UTF-8 path using TextEncoder
+    const result = textEncoder.encodeInto(str, encodeBuffer.subarray(pos));
+    pos += result.written;
+  } else {
+    // ASCII fast path
+    for (let i = 0; i < str.length; i++) {
+      encodeBuffer[pos++] = str.charCodeAt(i);
+    }
   }
 
   // Null terminator
@@ -333,6 +355,16 @@ function writeTypeTags(args, pos) {
       encodeBuffer[pos++] = arg ? TAG_TRUE : TAG_FALSE;
     } else if (arg instanceof Uint8Array || arg instanceof ArrayBuffer) {
       encodeBuffer[pos++] = TAG_BLOB;
+    } else if (arg && arg.type === 'int') {
+      encodeBuffer[pos++] = TAG_INT;
+    } else if (arg && arg.type === 'float') {
+      encodeBuffer[pos++] = TAG_FLOAT;
+    } else if (arg && arg.type === 'string') {
+      encodeBuffer[pos++] = TAG_STRING;
+    } else if (arg && arg.type === 'blob') {
+      encodeBuffer[pos++] = TAG_BLOB;
+    } else if (arg && arg.type === 'bool') {
+      encodeBuffer[pos++] = arg.value ? TAG_TRUE : TAG_FALSE;
     } else if (arg && arg.type === 'int64') {
       encodeBuffer[pos++] = TAG_INT64;
     } else if (arg && arg.type === 'double') {
@@ -399,6 +431,38 @@ function writeArg(arg, pos) {
 
   if (arg instanceof ArrayBuffer) {
     return writeArg(new Uint8Array(arg), pos);
+  }
+
+  if (arg && arg.type === 'int') {
+    encodeView.setInt32(pos, arg.value, false);
+    return pos + 4;
+  }
+
+  if (arg && arg.type === 'float') {
+    encodeView.setFloat32(pos, arg.value, false);
+    return pos + 4;
+  }
+
+  if (arg && arg.type === 'string') {
+    return writeString(arg.value, pos);
+  }
+
+  if (arg && arg.type === 'blob') {
+    const blobVal = arg.value instanceof Uint8Array ? arg.value : new Uint8Array(arg.value);
+    const size = blobVal.length;
+    encodeView.setUint32(pos, size, false);
+    pos += 4;
+    encodeBuffer.set(blobVal, pos);
+    pos += size;
+    while (pos & 3) {
+      encodeBuffer[pos++] = 0;
+    }
+    return pos;
+  }
+
+  if (arg && arg.type === 'bool') {
+    // T/F have no data, just type tag (already written)
+    return pos;
   }
 
   if (arg && arg.type === 'int64') {
