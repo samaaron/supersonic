@@ -537,7 +537,7 @@ export class SuperSonic {
 
   on(event, callback) { return this.#eventEmitter.on(event, callback); }
   off(event, callback) { this.#eventEmitter.off(event, callback); return this; }
-  once(event, callback) { this.#eventEmitter.once(event, callback); return this; }
+  once(event, callback) { return this.#eventEmitter.once(event, callback); }
   removeAllListeners(event) { this.#eventEmitter.removeAllListeners(event); return this; }
 
   // ============================================================================

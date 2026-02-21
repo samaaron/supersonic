@@ -43,7 +43,7 @@ export class EventEmitter {
    * Subscribe to an event once (auto-unsubscribes after first call)
    * @param {string} event - Event name
    * @param {Function} callback - Function to call once
-   * @returns {this} For chaining
+   * @returns {Function} Unsubscribe function
    */
   once(event, callback) {
     const wrapper = (...args) => {
