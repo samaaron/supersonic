@@ -96,7 +96,14 @@ SuperSonic is brought to you by Sam Aaron. Please consider joining the community
 
 See [LICENSE](LICENSE) for details.
 
-SuperSonic is carefully structured to isolate the GPL-licensed code (scsynth WASM engine and its AudioWorklet) from the MIT-licensed code (client API, workers, your application). The GPL code runs in a separate execution context (an AudioWorklet thread) and communicates exclusively via the OSC protocol over SharedArrayBuffer or postMessage — there is no linking, no shared memory structures, and no function calls across the boundary. Your application code interacts only with the MIT-licensed client API and is not intended to be a derivative work of the GPL components.
+SuperSonic is structured to cleanly separate and isolate the GPL-licensed code (SuperCollider's scsynth WASM engine and its AudioWorklet) from the MIT-licensed code (everything else). This separation consists of:
+
+- **Separate packages** — GPL code is distributed independently in `supersonic-scsynth-core`
+- **Separate execution contexts** — the GPL code runs in a restricted and highly-isolated AudioWorklet thread
+- **Protocol boundary** — all communication uses the OSC protocol; there is no linking and no function calls across the boundary
+- **Transport only** — in SharedArrayBuffer mode, the shared memory is used purely as a transport layer (ring buffers for OSC messages, a memory region for audio sample data, flat arrays for metrics). In postMessage mode, all data crosses via `postMessage`
+
+Your application code interacts only with the MIT-licensed client API and is not intended to be a derivative work of the GPL components.
 
 **Bundler note:** This isolation depends on the GPL code remaining a separate package loaded at runtime. If `supersonic-scsynth-core` is bundled into your application by a JavaScript bundler (webpack, Rollup, esbuild, etc.), the result is a single combined work and the GPL applies to the entire bundle.
 
