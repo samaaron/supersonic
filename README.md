@@ -48,6 +48,7 @@ SuperSonic can be fetched remotely via CDN, locally via npm or self-built.
 
   const sonic = new SuperSonic({
     baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
+    coreBaseURL: "https://unpkg.com/supersonic-scsynth-core@latest/",
     sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/",
     synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
   });
@@ -93,14 +94,18 @@ SuperSonic is brought to you by Sam Aaron. Please consider joining the community
 
 ## License
 
-See [LICENSE](LICENSE) for details. SuperSonic is designed so that the GPL components (WASM engine and workers) are distributed as separate packages and communicate with your code exclusively through the MIT-licensed client API. This separation is intentional — your application code interacts only with MIT-licensed code and is not intended to be a derivative work of the GPL components. If you distribute the GPL packages, you should provide access to their source (linking to this repository or the npm packages is sufficient).
+See [LICENSE](LICENSE) for details.
 
-| Package                        | License          | Contains              |
-| ------------------------------ | ---------------- | --------------------- |
-| `supersonic-scsynth`           | MIT              | Client API            |
-| `supersonic-scsynth-core`      | GPL-3.0-or-later | WASM engine + workers |
-| `supersonic-scsynth-synthdefs` | MIT              | Synth definitions     |
-| `supersonic-scsynth-samples`   | CC0              | Audio samples         |
+SuperSonic is carefully structured to isolate the GPL-licensed code (scsynth WASM engine and its AudioWorklet) from the MIT-licensed code (client API, workers, your application). The GPL code runs in a separate execution context (an AudioWorklet thread) and communicates exclusively via the OSC protocol over SharedArrayBuffer or postMessage — there is no linking, no shared memory structures, and no function calls across the boundary. Your application code interacts only with the MIT-licensed client API and is not intended to be a derivative work of the GPL components.
+
+**Bundler note:** This isolation depends on the GPL code remaining a separate package loaded at runtime. If `supersonic-scsynth-core` is bundled into your application by a JavaScript bundler (webpack, Rollup, esbuild, etc.), the result is a single combined work and the GPL applies to the entire bundle.
+
+| Package                        | License          | Contains                  |
+| ------------------------------ | ---------------- | ------------------------- |
+| `supersonic-scsynth`           | MIT              | Client API + workers      |
+| `supersonic-scsynth-core`      | GPL-3.0-or-later | WASM engine + AudioWorklet|
+| `supersonic-scsynth-synthdefs` | MIT              | Synth definitions         |
+| `supersonic-scsynth-samples`   | CC0              | Audio samples             |
 
 ## Credits
 

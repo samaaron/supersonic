@@ -6,4 +6,7 @@
 
 export const CORE_CDN = 'https://unpkg.com/supersonic-scsynth-core@latest/';
 export const WASM_CDN = 'https://unpkg.com/supersonic-scsynth-core@latest/wasm/';
+export const WORKLET_CDN = 'https://unpkg.com/supersonic-scsynth-core@latest/workers/scsynth_audio_worklet.js';
+
+/** @deprecated Use WORKLET_CDN instead */
 export const WORKERS_CDN = 'https://unpkg.com/supersonic-scsynth-core@latest/workers/';

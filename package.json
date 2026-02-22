@@ -51,6 +51,10 @@
     "dist/metrics_component.js",
     "dist/metrics-dark.css",
     "dist/metrics-light.css",
+    "dist/workers/debug_worker.js",
+    "dist/workers/osc_in_worker.js",
+    "dist/workers/osc_out_prescheduler_worker.js",
+    "dist/workers/osc_out_log_sab_worker.js",
     "README.md",
     "LICENSE"
   ],

@@ -197,15 +197,15 @@ export interface SuperSonicOptions {
 
   /** Convenience shorthand when all assets (WASM, workers, synthdefs, samples) are co-located. */
   baseURL?: string;
-  /** Base URL for WASM and workers (supersonic-scsynth-core package). */
+  /** Base URL for GPL assets: WASM and AudioWorklet (supersonic-scsynth-core package). Defaults to `baseURL`. */
   coreBaseURL?: string;
-  /** Base URL for worker scripts. Defaults to `coreBaseURL + 'workers/'`. */
+  /** Base URL for MIT worker scripts. Defaults to `baseURL + 'workers/'`. */
   workerBaseURL?: string;
   /** Base URL for WASM files. Defaults to `coreBaseURL + 'wasm/'`. */
   wasmBaseURL?: string;
   /** Full URL to the WASM binary. Overrides wasmBaseURL. */
   wasmUrl?: string;
-  /** Full URL to the AudioWorklet script. Overrides workerBaseURL. */
+  /** Full URL to the AudioWorklet script. Overrides `coreBaseURL`. */
   workletUrl?: string;
 
   /** Base URL for audio sample files (used by {@link SuperSonic.loadSample}). */

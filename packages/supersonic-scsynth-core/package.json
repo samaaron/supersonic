@@ -27,7 +27,7 @@
   "homepage": "https://github.com/samaaron/supersonic#readme",
   "files": [
     "wasm/",
-    "workers/",
+    "workers/scsynth_audio_worklet.js",
     "index.js",
     "README.md",
     "LICENSE"

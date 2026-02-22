@@ -4,10 +4,12 @@ The SuperCollider scsynth WebAssembly engine and AudioWorklet processor for [Sup
 
 ## Overview
 
-This package contains the GPL-licensed runtime components:
+This package contains only the GPL-licensed runtime components:
 
 - `wasm/scsynth-nrt.wasm` - The scsynth engine compiled to WebAssembly
-- `workers/*.js` - AudioWorklet processor and supporting workers
+- `workers/scsynth_audio_worklet.js` - AudioWorklet processor
+
+The MIT-licensed workers (prescheduler, osc_in, debug, osc_out_log) are distributed with the main `supersonic-scsynth` package.
 
 ## Usage
 
@@ -38,7 +40,7 @@ const supersonic = new SuperSonic({
 npm install supersonic-scsynth-core
 ```
 
-Then serve the `wasm/` and `workers/` directories from your static file server.
+Then serve the `wasm/` directory and `workers/scsynth_audio_worklet.js` from your static file server.
 
 ## License
 

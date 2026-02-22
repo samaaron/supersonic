@@ -192,6 +192,7 @@ cp "$JS_DIR/lib/metrics-light.css" "$OUTPUT_DIR/metrics-light.css"
 
 # Process worker files through esbuild (separate output files, same __DEV__ treatment)
 echo "Processing worker files..."
+rm -rf "$OUTPUT_DIR/workers"
 mkdir -p "$OUTPUT_DIR/workers"
 for worker in "$JS_DIR/workers/"*.js; do
     worker_name=$(basename "$worker")
@@ -225,12 +226,13 @@ else
     echo "Warning: samples not found at $SAMPLES_SRC"
 fi
 
-# Copy WASM and workers to supersonic-scsynth-core package
+# Copy GPL assets (WASM + AudioWorklet) to supersonic-scsynth-core package
 CORE_PKG_DIR="$PROJECT_ROOT/packages/supersonic-scsynth-core"
-echo "Copying WASM and workers to supersonic-scsynth-core package..."
+echo "Copying WASM and AudioWorklet to supersonic-scsynth-core package..."
 rm -rf "$CORE_PKG_DIR/wasm" "$CORE_PKG_DIR/workers"
 cp -r "$OUTPUT_DIR/wasm" "$CORE_PKG_DIR/wasm"
-cp -r "$OUTPUT_DIR/workers" "$CORE_PKG_DIR/workers"
+mkdir -p "$CORE_PKG_DIR/workers"
+cp "$OUTPUT_DIR/workers/scsynth_audio_worklet.js" "$CORE_PKG_DIR/workers/"
 
 echo "Build complete!"
 echo "Generated files:"

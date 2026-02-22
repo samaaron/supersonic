@@ -50,6 +50,7 @@ When using a bundler, you'll likely need to configure where assets are loaded fr
 
 ```javascript
 const supersonic = new SuperSonic({
+  baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
   coreBaseURL: "https://unpkg.com/supersonic-scsynth-core@latest/",
   synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
   sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/"
@@ -62,8 +63,8 @@ SuperSonic is split into several packages to give you control over what you incl
 
 | Package | Contains | License |
 |---------|----------|---------|
-| `supersonic-scsynth` | Client API + metrics component | MIT |
-| `supersonic-scsynth-core` | WASM engine + workers | GPL-3.0 |
+| `supersonic-scsynth` | Client API + workers + metrics component | MIT |
+| `supersonic-scsynth-core` | WASM engine + AudioWorklet | GPL-3.0 |
 | `supersonic-scsynth-synthdefs` | 127 synth definitions | MIT |
 | `supersonic-scsynth-samples` | 206 audio samples | CC0 |
 | `supersonic-scsynth-bundle` | All of the above | Mixed |

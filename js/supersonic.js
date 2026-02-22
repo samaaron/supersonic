@@ -435,11 +435,12 @@ export class SuperSonic {
     this.loadedSynthDefs = new Map();
 
     // Configuration
-    // coreBaseURL is for WASM and workers (from supersonic-scsynth-core package)
     // baseURL is a convenience shorthand when all assets are co-located
+    // coreBaseURL is for GPL assets (WASM + AudioWorklet) from supersonic-scsynth-core
+    // workerBaseURL is for MIT workers from supersonic-scsynth (the main package)
     const baseURL = options.baseURL || null;
     const coreBaseURL = options.coreBaseURL || baseURL;
-    const workerBaseURL = options.workerBaseURL || (coreBaseURL ? `${coreBaseURL}workers/` : null);
+    const workerBaseURL = options.workerBaseURL || (baseURL ? `${baseURL}workers/` : null);
     const wasmBaseURL = options.wasmBaseURL || (coreBaseURL ? `${coreBaseURL}wasm/` : null);
 
     if (!workerBaseURL || !wasmBaseURL) {
@@ -447,7 +448,10 @@ export class SuperSonic {
         `SuperSonic requires explicit URL configuration.\n\n` +
         `For CDN usage:\n` +
         `  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@VERSION/dist/supersonic.js';\n` +
-        `  new SuperSonic({ baseURL: 'https://unpkg.com/supersonic-scsynth@VERSION/dist/' })\n\n` +
+        `  new SuperSonic({\n` +
+        `    baseURL: 'https://unpkg.com/supersonic-scsynth@VERSION/dist/',\n` +
+        `    coreBaseURL: 'https://unpkg.com/supersonic-scsynth-core@VERSION/',\n` +
+        `  })\n\n` +
         `For local usage:\n` +
         `  new SuperSonic({ baseURL: '/path/to/supersonic/dist/' })\n\n` +
         `See: https://github.com/samaaron/supersonic#configuration`
@@ -463,7 +467,7 @@ export class SuperSonic {
       snapshotIntervalMs: options.snapshotIntervalMs ?? SNAPSHOT_INTERVAL_MS,
       wasmUrl: options.wasmUrl || wasmBaseURL + "scsynth-nrt.wasm",
       wasmBaseURL: wasmBaseURL,
-      workletUrl: options.workletUrl || workerBaseURL + "scsynth_audio_worklet.js",
+      workletUrl: options.workletUrl || (coreBaseURL ? `${coreBaseURL}workers/scsynth_audio_worklet.js` : workerBaseURL + "scsynth_audio_worklet.js"),
       workerBaseURL: workerBaseURL,
       audioContext: options.audioContext || null,
       autoConnect: options.autoConnect !== false,
