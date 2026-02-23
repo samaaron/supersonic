@@ -1207,21 +1207,49 @@ export class SuperSonic {
       bufferInfo.numChannels, bufferInfo.sampleRate, bufferInfo.uuid
     );
 
-    return await bufferInfo.allocationComplete;
+    await bufferInfo.allocationComplete;
+    const { numFrames: frames, numChannels: channels, sampleRate: sr } = bufferInfo;
+    return {
+      bufnum,
+      hash: bufferInfo.hash,
+      source: typeof source === 'string' ? source : null,
+      numFrames: frames,
+      numChannels: channels,
+      sampleRate: sr,
+      duration: sr > 0 ? frames / sr : 0,
+    };
   }
 
   getLoadedBuffers() {
     this.#ensureInitialized("get loaded buffers");
 
     const buffers = this.#bufferManager?.getAllocatedBuffers() || [];
-    return buffers.map(({ bufnum, numFrames, numChannels, sampleRate, source }) => ({
+    return buffers.map(({ bufnum, numFrames, numChannels, sampleRate, source, hash }) => ({
       bufnum,
+      hash: hash || null,
+      source: source?.path || source?.name || null,
       numFrames,
       numChannels,
       sampleRate,
-      source: source?.path || source?.name || null,
       duration: sampleRate > 0 ? numFrames / sampleRate : 0,
     }));
+  }
+
+  async sampleInfo(source, startFrame = 0, numFrames = 0) {
+    this.#ensureInitialized("get sample info");
+
+    let resolvedSource;
+    if (typeof source === 'string') {
+      resolvedSource = source;
+    } else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
+      resolvedSource = source;
+    } else if (source instanceof Blob) {
+      resolvedSource = await source.arrayBuffer();
+    } else {
+      throw new Error('sampleInfo source must be a path/URL string, ArrayBuffer, TypedArray, or File/Blob');
+    }
+
+    return this.#bufferManager.sampleInfo({ source: resolvedSource, startFrame, numFrames });
   }
 
   async sync(syncId = Math.floor(Math.random() * 2147483647)) {

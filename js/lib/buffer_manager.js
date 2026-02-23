@@ -135,6 +135,109 @@ export class BufferManager {
     }
 
     /**
+     * Hash a Float32Array via SHA-256, returning a hex string
+     * @param {Float32Array} float32Array
+     * @returns {Promise<string>} hex digest
+     */
+    async #hash(float32Array) {
+        const buf = float32Array.byteOffset === 0 && float32Array.byteLength === float32Array.buffer.byteLength
+            ? float32Array.buffer
+            : float32Array.buffer.slice(float32Array.byteOffset, float32Array.byteOffset + float32Array.byteLength);
+        const digest = await crypto.subtle.digest('SHA-256', buf);
+        return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    /**
+     * Fetch (if path) or convert source, decode audio, interleave with guard samples
+     * @returns {Promise<{interleaved: Float32Array, numFrames: number, numChannels: number, sampleRate: number, sourceInfo: object|null}>}
+     */
+    async #fetchAndDecode({ source, startFrame = 0, numFrames = 0, channels = null }) {
+        let arrayBuffer;
+        let sourceInfo;
+
+        if (typeof source === 'string') {
+            const resolvedPath = this.#resolveAudioPath(source);
+            const sampleName = source.split('/').pop();
+            arrayBuffer = await this.#assetLoader.fetch(resolvedPath, { type: 'sample', name: sampleName });
+            sourceInfo = { type: 'file', path: source, startFrame, numFrames, channels };
+        } else {
+            arrayBuffer = source instanceof ArrayBuffer
+                ? source
+                : source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
+            sourceInfo = null;
+        }
+
+        const audioBuffer = await this.#decodeAudioData(arrayBuffer);
+
+        const start = Math.max(0, Math.floor(startFrame || 0));
+        const availableFrames = audioBuffer.length - start;
+        const framesRequested = numFrames && numFrames > 0
+            ? Math.min(Math.floor(numFrames), availableFrames)
+            : availableFrames;
+
+        if (framesRequested <= 0) {
+            throw new Error(`No audio frames available`);
+        }
+
+        const selectedChannels = this.#normalizeChannels(channels, audioBuffer.numberOfChannels);
+        const numCh = selectedChannels.length;
+        const totalSamples = (framesRequested * numCh) + ((this.GUARD_BEFORE + this.GUARD_AFTER) * numCh);
+        const interleaved = new Float32Array(totalSamples);
+        const dataOffset = this.GUARD_BEFORE * numCh;
+
+        for (let frame = 0; frame < framesRequested; frame++) {
+            for (let ch = 0; ch < numCh; ch++) {
+                const channelData = audioBuffer.getChannelData(selectedChannels[ch]);
+                interleaved[dataOffset + (frame * numCh) + ch] = channelData[start + frame];
+            }
+        }
+
+        return { interleaved, numFrames: framesRequested, numChannels: numCh, sampleRate: audioBuffer.sampleRate, sourceInfo };
+    }
+
+    /**
+     * Allocate memory and write interleaved data
+     * @returns {Promise<number>} pointer
+     */
+    async #allocAndWrite(interleaved) {
+        const ptr = this.#malloc(interleaved.length);
+        await this.#writeBufferData(ptr, interleaved);
+        return ptr;
+    }
+
+    /**
+     * Execute a buffer operation with parallel hashing
+     * Wraps #executeBufferOperation, forking hash computation alongside malloc+write
+     * @returns {Promise<Object>} Result with hash field added
+     */
+    async #executeBufferOperationWithHash(bufnum, timeoutMs, decoded, source) {
+        let hash;
+
+        const result = await this.#executeBufferOperation(bufnum, timeoutMs, async () => {
+            const [hashResult, ptr] = await Promise.all([
+                this.#hash(decoded.interleaved),
+                this.#allocAndWrite(decoded.interleaved)
+            ]);
+            hash = hashResult;
+
+            return {
+                ptr,
+                sizeBytes: decoded.interleaved.length * 4,
+                numFrames: decoded.numFrames,
+                numChannels: decoded.numChannels,
+                sampleRate: decoded.sampleRate,
+                source: source || null
+            };
+        });
+
+        // Store hash on allocation record
+        const entry = this.#allocatedBuffers.get(bufnum);
+        if (entry) entry.hash = hash;
+
+        return { ...result, hash };
+    }
+
+    /**
      * Decode audio data, converting AIFF to WAV if necessary
      * Web Audio API doesn't support AIFF, so we convert in-memory first
      * @param {ArrayBuffer} arrayBuffer - Raw audio file data
@@ -274,161 +377,31 @@ export class BufferManager {
     }
 
     async prepareFromBlob(params) {
-        const {
-            bufnum,
-            blob,
-            startFrame = 0,
-            numFrames = 0,
-            channels = null
-        } = params;
-
+        const { bufnum, blob, startFrame = 0, numFrames = 0, channels = null } = params;
         this.#validateBufferNumber(bufnum);
 
         if (!blob || !(blob instanceof ArrayBuffer || ArrayBuffer.isView(blob))) {
             throw new Error('/b_allocFile requires audio data as ArrayBuffer or typed array');
         }
 
-        // Convert to ArrayBuffer if needed (for decodeAudioData)
-        const arrayBuffer = blob instanceof ArrayBuffer
-            ? blob
-            : blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength);
+        const decoded = await this.#fetchAndDecode({ source: blob, startFrame, numFrames, channels });
 
-        // Use 30s timeout for decode (no network, but decode can be slow for large files)
-        return this.#executeBufferOperation(bufnum, 30000, async () => {
-            const audioBuffer = await this.#decodeAudioData(arrayBuffer);
-
-            // Calculate frame range
-            const start = Math.max(0, Math.floor(startFrame || 0));
-            const availableFrames = audioBuffer.length - start;
-            const framesRequested = numFrames && numFrames > 0
-                ? Math.min(Math.floor(numFrames), availableFrames)
-                : availableFrames;
-
-            if (framesRequested <= 0) {
-                throw new Error(`No audio frames available for buffer ${bufnum}`);
-            }
-
-            // Determine channel selection
-            const selectedChannels = this.#normalizeChannels(channels, audioBuffer.numberOfChannels);
-            const numChannels = selectedChannels.length;
-
-            // Allocate memory with guard samples
-            const totalSamples = (framesRequested * numChannels) +
-                ((this.GUARD_BEFORE + this.GUARD_AFTER) * numChannels);
-
-            const ptr = this.#malloc(totalSamples);
-            const interleaved = new Float32Array(totalSamples);
-            const dataOffset = this.GUARD_BEFORE * numChannels;
-
-            // Copy audio data with interleaving
-            for (let frame = 0; frame < framesRequested; frame++) {
-                for (let ch = 0; ch < numChannels; ch++) {
-                    const sourceChannel = selectedChannels[ch];
-                    const channelData = audioBuffer.getChannelData(sourceChannel);
-                    interleaved[dataOffset + (frame * numChannels) + ch] =
-                        channelData[start + frame];
-                }
-            }
-
-            await this.#writeBufferData(ptr, interleaved);
-            const sizeBytes = interleaved.length * 4;
-
-            return {
-                ptr,
-                sizeBytes,
-                numFrames: framesRequested,
-                numChannels,
-                sampleRate: audioBuffer.sampleRate
-            };
-        });
+        return this.#executeBufferOperationWithHash(bufnum, 30000, decoded, null);
     }
 
     async prepareFromFile(params) {
-
-        const {
-            bufnum,
-            path,
-            startFrame = 0,
-            numFrames = 0,
-            channels = null
-        } = params;
-
+        const { bufnum, path, startFrame = 0, numFrames = 0, channels = null } = params;
         this.#validateBufferNumber(bufnum);
 
-        // Use 60s timeout for file operations (network fetch + decode can be slow)
-        return this.#executeBufferOperation(bufnum, 60000, async () => {
-            // Fetch and decode audio file
-            const resolvedPath = this.#resolveAudioPath(path);
-            const sampleName = path.split('/').pop();
+        const decoded = await this.#fetchAndDecode({ source: path, startFrame, numFrames, channels });
 
-            // Fetch using AssetLoader (handles retry, HEAD request, loading:start event)
-            const arrayBuffer = await this.#assetLoader.fetch(resolvedPath, {
-                type: 'sample',
-                name: sampleName,
-            });
-
-            const audioBuffer = await this.#decodeAudioData(arrayBuffer);
-
-            // Calculate frame range
-            const start = Math.max(0, Math.floor(startFrame || 0));
-            const availableFrames = audioBuffer.length - start;
-            const framesRequested = numFrames && numFrames > 0
-                ? Math.min(Math.floor(numFrames), availableFrames)
-                : availableFrames;
-
-            if (framesRequested <= 0) {
-                throw new Error(`No audio frames available for buffer ${bufnum} from ${path}`);
-            }
-
-            // Determine channel selection
-            const selectedChannels = this.#normalizeChannels(channels, audioBuffer.numberOfChannels);
-            const numChannels = selectedChannels.length;
-
-            // Allocate memory with guard samples
-            const totalSamples = (framesRequested * numChannels) +
-                ((this.GUARD_BEFORE + this.GUARD_AFTER) * numChannels);
-
-            const ptr = this.#malloc(totalSamples);
-            const interleaved = new Float32Array(totalSamples);
-            const dataOffset = this.GUARD_BEFORE * numChannels;
-
-            // Copy audio data with interleaving
-            for (let frame = 0; frame < framesRequested; frame++) {
-                for (let ch = 0; ch < numChannels; ch++) {
-                    const sourceChannel = selectedChannels[ch];
-                    const channelData = audioBuffer.getChannelData(sourceChannel);
-                    interleaved[dataOffset + (frame * numChannels) + ch] =
-                        channelData[start + frame];
-                }
-            }
-
-            await this.#writeBufferData(ptr, interleaved);
-            const sizeBytes = interleaved.length * 4;
-
-            return {
-                ptr,
-                sizeBytes,
-                numFrames: framesRequested,
-                numChannels,
-                sampleRate: audioBuffer.sampleRate,
-                // Track source for recovery (postMessage) and public API (both modes)
-                source: { type: 'file', path, startFrame, numFrames, channels }
-            };
-        });
+        return this.#executeBufferOperationWithHash(bufnum, 60000, decoded, decoded.sourceInfo);
     }
 
     async prepareEmpty(params) {
-
-        const {
-            bufnum,
-            numFrames,
-            numChannels = 1,
-            sampleRate = null
-        } = params;
-
+        const { bufnum, numFrames, numChannels = 1, sampleRate = null } = params;
         this.#validateBufferNumber(bufnum);
 
-        // Validate parameters
         if (!Number.isFinite(numFrames) || numFrames <= 0) {
             throw new Error(`/b_alloc requires a positive number of frames (got ${numFrames})`);
         }
@@ -440,26 +413,18 @@ export class BufferManager {
         const roundedFrames = Math.floor(numFrames);
         const roundedChannels = Math.floor(numChannels);
 
-        // Use 5s timeout for allocations (should be nearly instant)
-        return this.#executeBufferOperation(bufnum, 5000, async () => {
-            // Calculate total samples needed with guard samples
-            const totalSamples = (roundedFrames * roundedChannels) +
-                ((this.GUARD_BEFORE + this.GUARD_AFTER) * roundedChannels);
+        const totalSamples = (roundedFrames * roundedChannels) +
+            ((this.GUARD_BEFORE + this.GUARD_AFTER) * roundedChannels);
+        const interleaved = new Float32Array(totalSamples);
 
-            // Allocate and zero-initialize buffer
-            const ptr = this.#malloc(totalSamples);
-            const interleaved = new Float32Array(totalSamples);
-            await this.#writeBufferData(ptr, interleaved);
-            const sizeBytes = interleaved.length * 4;
+        const decoded = {
+            interleaved,
+            numFrames: roundedFrames,
+            numChannels: roundedChannels,
+            sampleRate: sampleRate || this.#audioContext.sampleRate
+        };
 
-            return {
-                ptr,
-                sizeBytes,
-                numFrames: roundedFrames,
-                numChannels: roundedChannels,
-                sampleRate: sampleRate || this.#audioContext.sampleRate
-            };
-        });
+        return this.#executeBufferOperationWithHash(bufnum, 5000, decoded, null);
     }
 
     #normalizeChannels(requestedChannels, fileChannels) {
@@ -777,6 +742,24 @@ export class BufferManager {
     }
 
     /**
+     * Get sample info (including content hash) without allocating a buffer
+     * @param {Object} params - { source, startFrame, numFrames, channels }
+     * @returns {Promise<{hash, source, numFrames, numChannels, sampleRate, duration}>}
+     */
+    async sampleInfo({ source, startFrame = 0, numFrames = 0, channels = null }) {
+        const decoded = await this.#fetchAndDecode({ source, startFrame, numFrames, channels });
+        const hash = await this.#hash(decoded.interleaved);
+        return {
+            hash,
+            source: decoded.sourceInfo?.path || null,
+            numFrames: decoded.numFrames,
+            numChannels: decoded.numChannels,
+            sampleRate: decoded.sampleRate,
+            duration: decoded.sampleRate > 0 ? decoded.numFrames / decoded.sampleRate : 0,
+        };
+    }
+
+    /**
      * Get all allocated buffers for recovery
      * SAB mode: returns info needed to re-send /b_allocPtr (data persists in SAB)
      * postMessage mode: returns source info for re-loading (WASM memory destroyed)
@@ -792,7 +775,8 @@ export class BufferManager {
                 numFrames: entry.numFrames,
                 numChannels: entry.numChannels,
                 sampleRate: entry.sampleRate,
-                source: entry.source || null
+                source: entry.source || null,
+                hash: entry.hash || null
             });
         }
         return buffers;

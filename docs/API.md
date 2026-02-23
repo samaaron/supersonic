@@ -48,6 +48,7 @@ myButton.onclick = async () => {
 | [`loadSynthDef(nameOrPath)`](#loadsynthdefnameorpath)            | Load a synth definition             |
 | [`loadSynthDefs(names)`](#loadsynthdefsnames)                    | Load multiple synthdefs in parallel |
 | [`loadSample(bufnum, source)`](#loadsamplebufnum-source)         | Load a sample into a buffer         |
+| [`sampleInfo(source)`](#sampleinfosource-startframe-numframes)   | Get sample metadata without loading  |
 
 ### Events
 
@@ -351,6 +352,43 @@ await supersonic.loadSample(0, arrayBuffer);
 
 // Load partial sample (frames 1000-2000)
 await supersonic.loadSample(0, "long-sample.flac", 1000, 1000);
+```
+
+**Returns:** `Promise<{bufnum, hash, source, numFrames, numChannels, sampleRate, duration}>` — Buffer slot number and decoded audio metadata. The hash is a SHA-256 hex string — deterministic for the same audio content regardless of how it was loaded.
+
+```javascript
+const result = await supersonic.loadSample(0, "kick.wav");
+console.log(result.hash);       // "a3f2b1c4..." (64-char hex string)
+console.log(result.duration);   // 0.92
+console.log(result.numChannels); // 2
+```
+
+### `sampleInfo(source, startFrame, numFrames)`
+
+Get sample metadata without allocating a buffer. Fetches, decodes, and analyses the audio, returning the same info that would appear in the `loadSample` result. No buffer slot is consumed and no OSC is sent to scsynth.
+
+Use this to inspect audio content or check for duplicates before loading.
+
+**Parameters:**
+
+- `source` - Sample source (string, File, Blob, ArrayBuffer, or TypedArray)
+- `startFrame` - Optional starting frame offset (default: 0)
+- `numFrames` - Optional number of frames (default: 0 = all)
+
+**Returns:** `Promise<{hash, source, numFrames, numChannels, sampleRate, duration}>`
+
+```javascript
+// Inspect before loading
+const info = await supersonic.sampleInfo("kick.wav");
+console.log(info.duration, info.numChannels, info.sampleRate);
+
+// Check for duplicates
+const loaded = supersonic.getLoadedBuffers();
+if (loaded.some(b => b.hash === info.hash)) {
+  console.log("Already loaded, skipping");
+} else {
+  await supersonic.loadSample(nextBufnum, "kick.wav");
+}
 ```
 
 ### `send(address, ...args)`

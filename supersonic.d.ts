@@ -579,20 +579,32 @@ export interface Snapshot {
   } | null;
 }
 
-/** Info about a loaded audio buffer, returned by {@link SuperSonic.getLoadedBuffers}. */
-export interface LoadedBufferInfo {
-  /** Buffer slot number. */
-  bufnum: number;
+/**
+ * Metadata about decoded audio content.
+ *
+ * Returned by {@link SuperSonic.sampleInfo}. Also the shape of each entry
+ * in {@link SuperSonic.getLoadedBuffers} (with `bufnum`) and the return
+ * value of {@link SuperSonic.loadSample} (with `bufnum`).
+ */
+export interface SampleInfo {
+  /** SHA-256 hex hash of the decoded interleaved audio content. */
+  hash: string;
+  /** Original source path/URL, or null for inline data. */
+  source: string | null;
   /** Number of sample frames. */
   numFrames: number;
   /** Number of channels. */
   numChannels: number;
   /** Sample rate in Hz. */
   sampleRate: number;
-  /** Original source path/URL, or null. */
-  source: string | null;
   /** Duration in seconds. */
   duration: number;
+}
+
+/** Info about a loaded audio buffer, returned by {@link SuperSonic.getLoadedBuffers}. */
+export interface LoadedBufferInfo extends SampleInfo {
+  /** Buffer slot number. */
+  bufnum: number;
 }
 
 /** Result from {@link SuperSonic.loadSynthDef}. */
@@ -604,15 +616,9 @@ export interface LoadSynthDefResult {
 }
 
 /** Result from {@link SuperSonic.loadSample}. */
-export interface LoadSampleResult {
+export interface LoadSampleResult extends SampleInfo {
   /** Buffer slot the sample was loaded into. */
   bufnum: number;
-  /** Number of sample frames loaded. */
-  numFrames: number;
-  /** Number of channels. */
-  numChannels: number;
-  /** Sample rate in Hz. */
-  sampleRate: number;
 }
 
 /** Boot timing statistics. */
@@ -1428,6 +1434,35 @@ export class SuperSonic {
    * }
    */
   getLoadedBuffers(): LoadedBufferInfo[];
+
+  /**
+   * Get sample metadata (including content hash) without allocating a buffer.
+   *
+   * Fetches, decodes, and hashes the audio, returning the same info that
+   * would appear in the {@link loadSample} result if the content were loaded.
+   * No buffer slot is consumed and no OSC is sent to scsynth.
+   *
+   * Use this to inspect content or check for duplicates before loading.
+   *
+   * @param source - Sample path/URL, raw bytes, or File/Blob
+   * @param startFrame - First frame to read (default: 0)
+   * @param numFrames - Number of frames to read (default: 0 = all)
+   * @returns Sample metadata including hash, frame count, channels, sample rate, and duration
+   *
+   * @example
+   * const info = await sonic.sampleInfo('kick.wav');
+   * console.log(info.hash, info.duration, info.numChannels);
+   *
+   * const loaded = sonic.getLoadedBuffers();
+   * if (loaded.some(b => b.hash === info.hash)) {
+   *   console.log('Already loaded');
+   * }
+   */
+  sampleInfo(
+    source: string | ArrayBuffer | ArrayBufferView | Blob,
+    startFrame?: number,
+    numFrames?: number,
+  ): Promise<SampleInfo>;
 
   /**
    * Wait for scsynth to process all pending commands.

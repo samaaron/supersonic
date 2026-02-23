@@ -1063,3 +1063,343 @@ test.describe("SuperSonic loadSample()", () => {
     expect(result.buffersAfterFreeAll.length).toBe(0);
   });
 });
+
+test.describe("SuperSonic sample info and content hashing", () => {
+  test.beforeEach(async ({ page }) => {
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        console.error("Browser console error:", msg.text());
+      }
+    });
+
+    page.on("pageerror", (err) => {
+      console.error("Page error:", err.message);
+    });
+
+    await page.goto("/test/harness.html");
+
+    await page.waitForFunction(() => window.supersonicReady === true, {
+      timeout: 10000,
+    });
+  });
+
+  test("loadSample returns full metadata", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        const r = await sonic.loadSample(0, "bd_haus.flac");
+        return { success: true, ...r };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.bufnum).toBe(0);
+    expect(typeof result.hash).toBe("string");
+    expect(result.hash.length).toBe(64);
+    expect(result.source).toBe("bd_haus.flac");
+    expect(result.numFrames).toBeGreaterThan(0);
+    expect(result.numChannels).toBeGreaterThanOrEqual(1);
+    expect(result.sampleRate).toBeGreaterThan(0);
+    expect(result.duration).toBeGreaterThan(0);
+  });
+
+  test("loadSample with inline bytes has null source", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        const response = await fetch("/dist/samples/bd_haus.flac");
+        const arrayBuffer = await response.arrayBuffer();
+        const r = await sonic.loadSample(0, arrayBuffer);
+        return { success: true, source: r.source, hash: r.hash };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.source).toBeNull();
+    expect(typeof result.hash).toBe("string");
+  });
+
+  test("getLoadedBuffers includes full metadata", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        await sonic.loadSample(0, "bd_haus.flac");
+        await sonic.sync(1);
+
+        const buffers = sonic.getLoadedBuffers();
+        const buf0 = buffers.find(b => b.bufnum === 0);
+
+        return { success: true, buf0 };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.buf0.bufnum).toBe(0);
+    expect(typeof result.buf0.hash).toBe("string");
+    expect(result.buf0.hash.length).toBe(64);
+    expect(result.buf0.source).toContain("bd_haus");
+    expect(result.buf0.numFrames).toBeGreaterThan(0);
+    expect(result.buf0.duration).toBeGreaterThan(0);
+  });
+
+  test("same file loaded into two bufnums produces identical hashes", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        const r0 = await sonic.loadSample(0, "bd_haus.flac");
+        const r1 = await sonic.loadSample(1, "bd_haus.flac");
+        return { success: true, hash0: r0.hash, hash1: r1.hash };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.hash0).toBe(result.hash1);
+  });
+
+  test("different files produce different hashes", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        const r0 = await sonic.loadSample(0, "bd_haus.flac");
+        const r1 = await sonic.loadSample(1, "sn_dub.flac");
+        return { success: true, hash0: r0.hash, hash1: r1.hash };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.hash0).not.toBe(result.hash1);
+  });
+
+  test("same audio via filename vs inline bytes produces same hash", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+
+        await sonic.loadSample(0, "bd_haus.flac");
+
+        const response = await fetch("/dist/samples/bd_haus.flac");
+        const fileBytes = new Uint8Array(await response.arrayBuffer());
+        await sonic.send("/b_allocFile", 1, fileBytes);
+        await sonic.sync(1);
+
+        const buffers = sonic.getLoadedBuffers();
+        const hash0 = buffers.find(b => b.bufnum === 0)?.hash;
+        const hash1 = buffers.find(b => b.bufnum === 1)?.hash;
+
+        return { success: true, hash0, hash1 };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.hash0).toBe(result.hash1);
+  });
+
+  test("different startFrame/numFrames produce different hashes", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        const full = await sonic.loadSample(0, "bd_haus.flac");
+        const partial = await sonic.loadSample(1, "bd_haus.flac", 0, 1000);
+        return { success: true, hashFull: full.hash, hashPartial: partial.hash };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.hashFull).not.toBe(result.hashPartial);
+  });
+
+  test("prepareEmpty (/b_alloc) produces a hash", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        await sonic.send("/b_alloc", 0, 4096, 1);
+        await sonic.sync(1);
+
+        const buffers = sonic.getLoadedBuffers();
+        const buf0 = buffers.find(b => b.bufnum === 0);
+        return { success: true, hash: buf0?.hash };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(typeof result.hash).toBe("string");
+    expect(result.hash.length).toBe(64);
+  });
+
+  test("sampleInfo returns full metadata for a filename", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        const info = await sonic.sampleInfo("bd_haus.flac");
+        return { success: true, ...info };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(typeof result.hash).toBe("string");
+    expect(result.hash.length).toBe(64);
+    expect(result.source).toBe("bd_haus.flac");
+    expect(result.numFrames).toBeGreaterThan(0);
+    expect(result.numChannels).toBeGreaterThanOrEqual(1);
+    expect(result.sampleRate).toBeGreaterThan(0);
+    expect(result.duration).toBeGreaterThan(0);
+  });
+
+  test("sampleInfo returns metadata for an ArrayBuffer", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        const response = await fetch("/dist/samples/bd_haus.flac");
+        const arrayBuffer = await response.arrayBuffer();
+        const info = await sonic.sampleInfo(arrayBuffer);
+        return { success: true, ...info };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(typeof result.hash).toBe("string");
+    expect(result.hash.length).toBe(64);
+    expect(result.source).toBeNull();
+    expect(result.numFrames).toBeGreaterThan(0);
+  });
+
+  test("sampleInfo matches loadSample metadata for same content", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+
+        const info = await sonic.sampleInfo("bd_haus.flac");
+        const loaded = await sonic.loadSample(0, "bd_haus.flac");
+
+        return {
+          success: true,
+          infoHash: info.hash,
+          loadedHash: loaded.hash,
+          infoFrames: info.numFrames,
+          loadedFrames: loaded.numFrames,
+          infoDuration: info.duration,
+          loadedDuration: loaded.duration,
+        };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.infoHash).toBe(result.loadedHash);
+    expect(result.infoFrames).toBe(result.loadedFrames);
+    expect(result.infoDuration).toBe(result.loadedDuration);
+  });
+
+  test("sampleInfo is deterministic", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        const info1 = await sonic.sampleInfo("bd_haus.flac");
+        const info2 = await sonic.sampleInfo("bd_haus.flac");
+        return { success: true, hash1: info1.hash, hash2: info2.hash };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.hash1).toBe(result.hash2);
+  });
+
+  test("sampleInfo does not allocate a buffer", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        const before = sonic.getLoadedBuffers();
+        await sonic.sampleInfo("bd_haus.flac");
+        const after = sonic.getLoadedBuffers();
+        return { success: true, before: before.length, after: after.length };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.before).toBe(0);
+    expect(result.after).toBe(0);
+  });
+
+  test("sampleInfo does not send /b_allocPtr", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+
+        const messages = [];
+        sonic.on('message', (msg) => messages.push(msg));
+
+        await sonic.sampleInfo("bd_haus.flac");
+        await new Promise(r => setTimeout(r, 200));
+
+        const allocMessages = messages.filter(m => m[0] === "/b_allocPtr" || m[0] === "/buffer/allocated");
+        return { success: true, allocMessages: allocMessages.length };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.allocMessages).toBe(0);
+  });
+
+  test("loadSample and getLoadedBuffers hashes match", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      try {
+        await sonic.init();
+        const loadResult = await sonic.loadSample(0, "bd_haus.flac");
+        await sonic.sync(1);
+
+        const buffers = sonic.getLoadedBuffers();
+        const loadedHash = buffers.find(b => b.bufnum === 0)?.hash;
+
+        return { success: true, returnHash: loadResult.hash, loadedHash };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }, sonicConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.returnHash).toBe(result.loadedHash);
+  });
+});
