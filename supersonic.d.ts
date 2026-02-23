@@ -960,6 +960,20 @@ export declare const osc: {
 };
 
 // ============================================================================
+// OSC Command Types
+// ============================================================================
+
+/** Node add action: 0=head, 1=tail, 2=before, 3=after, 4=replace */
+export type AddAction = 0 | 1 | 2 | 3 | 4;
+
+/** Commands blocked at runtime — typed as compile-time errors */
+export type BlockedCommand =
+  | '/d_load' | '/d_loadDir'
+  | '/b_read' | '/b_readChannel'
+  | '/b_write' | '/b_close'
+  | '/clearSched' | '/error';
+
+// ============================================================================
 // SuperSonic
 // ============================================================================
 
@@ -1274,6 +1288,162 @@ export class SuperSonic {
    * sonic.send('/d_load', 'beep');
    * // Error: /d_load is not supported. Use loadSynthDef() or send /d_recv instead.
    */
+
+  // ── Blocked commands ─────────────────────────────────────────────────
+  // These throw at runtime. Typed as `never` with deprecation hints.
+
+  /** @deprecated Use loadSynthDef() or send('/d_recv', bytes) instead. Filesystem access is not available in the browser. */
+  send(address: '/d_load', ...args: OscArg[]): never;
+  /** @deprecated Use loadSynthDef() or send('/d_recv', bytes) instead. Filesystem access is not available in the browser. */
+  send(address: '/d_loadDir', ...args: OscArg[]): never;
+  /** @deprecated Use loadSample() instead. Filesystem access is not available in the browser. */
+  send(address: '/b_read', ...args: OscArg[]): never;
+  /** @deprecated Use loadSample() instead. Filesystem access is not available in the browser. */
+  send(address: '/b_readChannel', ...args: OscArg[]): never;
+  /** @deprecated File writing is not available in the browser. */
+  send(address: '/b_write', ...args: OscArg[]): never;
+  /** @deprecated File writing is not available in the browser. */
+  send(address: '/b_close', ...args: OscArg[]): never;
+  /** @deprecated Use purge() to clear both the JS prescheduler and WASM scheduler. */
+  send(address: '/clearSched', ...args: OscArg[]): never;
+  /** @deprecated SuperSonic always enables error notifications so you never miss a /fail reply. */
+  send(address: '/error', ...args: OscArg[]): never;
+
+  // ── Top-level commands ─────────────────────────────────────────────
+
+  /** Query server status. Replies with `/status.reply`: unused, numUGens, numSynths, numGroups, numSynthDefs, avgCPU%, peakCPU%, nominalSampleRate, actualSampleRate. */
+  send(address: '/status'): void;
+  /** Query server version. Replies with `/version.reply`: programName, majorVersion, minorVersion, patchName, gitBranch, commitHash. */
+  send(address: '/version'): void;
+  /** Register (1) or unregister (0) for server notifications (`/n_go`, `/n_end`, `/n_on`, `/n_off`, `/n_move`). Replies with `/done /notify clientID`. */
+  send(address: '/notify', flag: 0 | 1, clientID?: number): void;
+  /** Enable/disable OSC message dumping to debug output. 0=off, 1=parsed, 2=hex, 3=both. */
+  send(address: '/dumpOSC', flag: 0 | 1 | 2 | 3): void;
+  /** Async. Wait for all prior async commands to complete. Replies with `/synced syncID`. */
+  send(address: '/sync', syncID: number): void;
+  /** Query realtime memory usage. Replies with `/rtMemoryStatus.reply`: freeBytes, largestFreeBlockBytes. */
+  send(address: '/rtMemoryStatus'): void;
+
+  // ── SynthDef commands ──────────────────────────────────────────────
+
+  /** Async. Load a compiled synthdef from bytes. Optional completionMessage is an encoded OSC message executed after loading. Replies with `/done /d_recv`. */
+  send(address: '/d_recv', bytes: Uint8Array | ArrayBuffer, completionMessage?: Uint8Array | ArrayBuffer): void;
+  /** Free one or more loaded synthdefs by name. */
+  send(address: '/d_free', ...names: [string, ...string[]]): void;
+  /** Free all loaded synthdefs. Not in the official SC reference but supported by scsynth. */
+  send(address: '/d_freeAll'): void;
+
+  // ── Synth commands ─────────────────────────────────────────────────
+
+  /** Create a new synth from a loaded synthdef. addAction: 0=head, 1=tail, 2=before, 3=after, 4=replace. Controls are alternating name/index and value pairs. Values can be numbers or bus mapping strings like `"c0"` (control bus 0) or `"a0"` (audio bus 0). Use nodeID=-1 for auto-assign. */
+  send(address: '/s_new', defName: string, nodeID: number, addAction: AddAction, targetID: number, ...controls: (string | number)[]): void;
+  /** Get synth control values. Controls can be indices or names. Replies with `/n_set nodeID control value ...`. */
+  send(address: '/s_get', nodeID: number, ...controls: (string | number)[]): void;
+  /** Get sequential synth control values. Control can be an index or name. Replies with `/n_setn nodeID control count values...`. For multiple ranges, use the catch-all overload. */
+  send(address: '/s_getn', nodeID: number, control: number | string, count: number): void;
+  /** Release client-side synth ID tracking. Synths continue running but are reassigned to reserved negative IDs. Use when you no longer need to communicate with the synth and want to reuse the ID. */
+  send(address: '/s_noid', ...nodeIDs: [number, ...number[]]): void;
+
+  // ── Node commands ──────────────────────────────────────────────────
+
+  /** Free (delete) one or more nodes. */
+  send(address: '/n_free', ...nodeIDs: [number, ...number[]]): void;
+  /** Set node control values. Controls are alternating name/index and value pairs. If the node is a group, sets the control on all nodes in the group. */
+  send(address: '/n_set', nodeID: number, ...controls: (string | number)[]): void;
+  /** Set sequential control values starting at the given control index/name. For multiple ranges, use the catch-all overload. */
+  send(address: '/n_setn', nodeID: number, control: number | string, count: number, ...values: number[]): void;
+  /** Fill sequential controls with a single value. For multiple ranges, use the catch-all overload. */
+  send(address: '/n_fill', nodeID: number, control: number | string, count: number, value: number): void;
+  /** Turn nodes on (1) or off (0). Args are repeating [nodeID, flag] pairs. */
+  send(address: '/n_run', ...pairs: [number, 0 | 1, ...(number | 0 | 1)[]]): void;
+  /** Move nodeA to execute immediately before nodeB. Args are repeating [nodeA, nodeB] pairs. */
+  send(address: '/n_before', ...pairs: [number, number, ...number[]]): void;
+  /** Move nodeA to execute immediately after nodeB. Args are repeating [nodeA, nodeB] pairs. */
+  send(address: '/n_after', ...pairs: [number, number, ...number[]]): void;
+  /** Reorder nodes within a group. addAction: 0=head, 1=tail, 2=before target, 3=after target. Does not support 4 (replace). */
+  send(address: '/n_order', addAction: 0 | 1 | 2 | 3, targetID: number, ...nodeIDs: [number, ...number[]]): void;
+  /** Query node info. Replies with `/n_info` for each node: nodeID, parentGroupID, prevNodeID, nextNodeID, isGroup, [headNodeID, tailNodeID]. */
+  send(address: '/n_query', ...nodeIDs: [number, ...number[]]): void;
+  /** Print control values and calculation rates for each node to debug output. No reply message. */
+  send(address: '/n_trace', ...nodeIDs: [number, ...number[]]): void;
+  /** Map controls to read from control buses. Mappings are repeating [control, busIndex] pairs. Set busIndex to -1 to unmap. */
+  send(address: '/n_map', nodeID: number, ...mappings: (string | number)[]): void;
+  /** Map a range of sequential controls to sequential control buses. Mappings are repeating [control, busIndex, count] triplets. */
+  send(address: '/n_mapn', nodeID: number, ...mappings: (string | number)[]): void;
+  /** Map controls to read from audio buses. Mappings are repeating [control, busIndex] pairs. Set busIndex to -1 to unmap. */
+  send(address: '/n_mapa', nodeID: number, ...mappings: (string | number)[]): void;
+  /** Map a range of sequential controls to sequential audio buses. Mappings are repeating [control, busIndex, count] triplets. */
+  send(address: '/n_mapan', nodeID: number, ...mappings: (string | number)[]): void;
+
+  // ── Group commands ─────────────────────────────────────────────────
+
+  /** Create new groups. Args are repeating [groupID, addAction, targetID] triplets. addAction: 0=head, 1=tail, 2=before, 3=after, 4=replace. */
+  send(address: '/g_new', ...args: [number, AddAction, number, ...(number | AddAction)[]]): void;
+  /** Create new parallel groups (children evaluated in unspecified order). Same signature as /g_new. */
+  send(address: '/p_new', ...args: [number, AddAction, number, ...(number | AddAction)[]]): void;
+  /** Free all immediate children of one or more groups (groups themselves remain). */
+  send(address: '/g_freeAll', ...groupIDs: [number, ...number[]]): void;
+  /** Recursively free all synths inside one or more groups and their nested sub-groups. */
+  send(address: '/g_deepFree', ...groupIDs: [number, ...number[]]): void;
+  /** Move node to head of group. Args are repeating [groupID, nodeID] pairs. */
+  send(address: '/g_head', ...pairs: [number, number, ...number[]]): void;
+  /** Move node to tail of group. Args are repeating [groupID, nodeID] pairs. */
+  send(address: '/g_tail', ...pairs: [number, number, ...number[]]): void;
+  /** Print group's node tree to debug output. Args are repeating [groupID, flag] pairs. flag: 0=structure only, non-zero=include control values. No reply message. */
+  send(address: '/g_dumpTree', ...groupFlagPairs: [number, number, ...number[]]): void;
+  /** Query group tree structure. Args are repeating [groupID, flag] pairs. flag: 0=structure only, non-zero=include control values. Replies with `/g_queryTree.reply`. */
+  send(address: '/g_queryTree', ...groupFlagPairs: [number, number, ...number[]]): void;
+
+  // ── UGen commands ──────────────────────────────────────────────────
+
+  /** Send a command to a specific UGen instance within a synth. The command name and args are UGen-specific. */
+  send(address: '/u_cmd', nodeID: number, ugenIndex: number, command: string, ...args: OscArg[]): void;
+
+  // ── Buffer commands ────────────────────────────────────────────────
+
+  /** Async. Allocate an empty buffer. Queued and rewritten to /b_allocPtr internally. Use sync() after to ensure completion. Replies with `/done /b_allocPtr bufnum`. */
+  send(address: '/b_alloc', bufnum: number, numFrames: number, numChannels?: number, sampleRate?: number): void;
+  /** Async. Allocate a buffer and read an audio file into it. The path is fetched via the configured sampleBaseURL. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`. */
+  send(address: '/b_allocRead', bufnum: number, path: string, startFrame?: number, numFrames?: number): void;
+  /** Async. Allocate a buffer and read specific channels from an audio file. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`. */
+  send(address: '/b_allocReadChannel', bufnum: number, path: string, startFrame: number, numFrames: number, ...channels: number[]): void;
+  /** Async. SuperSonic extension: allocate a buffer from inline audio file bytes (WAV, FLAC, OGG, etc.) without URL fetch. Queued and rewritten internally. */
+  send(address: '/b_allocFile', bufnum: number, data: Uint8Array | ArrayBuffer): void;
+  /** Async. Free a buffer. Optional completionMessage is an encoded OSC message executed after freeing. Replies with `/done /b_free bufnum`. */
+  send(address: '/b_free', bufnum: number, completionMessage?: Uint8Array | ArrayBuffer): void;
+  /** Async. Zero a buffer's sample data. Optional completionMessage is an encoded OSC message executed after zeroing. Replies with `/done /b_zero bufnum`. */
+  send(address: '/b_zero', bufnum: number, completionMessage?: Uint8Array | ArrayBuffer): void;
+  /** Query buffer info. Replies with `/b_info` for each buffer: bufnum, numFrames, numChannels, sampleRate. */
+  send(address: '/b_query', ...bufnums: [number, ...number[]]): void;
+  /** Get individual sample values. Replies with `/b_set bufnum index value ...`. */
+  send(address: '/b_get', bufnum: number, ...sampleIndices: [number, ...number[]]): void;
+  /** Set individual buffer samples. Args are repeating [index, value] pairs after bufnum. */
+  send(address: '/b_set', bufnum: number, ...indexValuePairs: number[]): void;
+  /** Set sequential buffer samples starting at startIndex. For multiple ranges, use the catch-all overload. */
+  send(address: '/b_setn', bufnum: number, startIndex: number, count: number, ...values: number[]): void;
+  /** Get sequential sample values. Replies with `/b_setn bufnum startIndex count values...`. For multiple ranges, use the catch-all overload. */
+  send(address: '/b_getn', bufnum: number, startIndex: number, count: number): void;
+  /** Fill sequential buffer samples with a single value. For multiple ranges, use the catch-all overload. */
+  send(address: '/b_fill', bufnum: number, startIndex: number, count: number, value: number): void;
+  /** Async. Generate buffer contents. Commands: "sine1", "sine2", "sine3", "cheby", "copy". Flags (for sine/cheby): 1=normalize, 2=wavetable, 4=clear (OR together, e.g. 7=all). Replies with `/done /b_gen bufnum`. */
+  send(address: '/b_gen', bufnum: number, command: string, ...args: OscArg[]): void;
+
+  // ── Control bus commands ───────────────────────────────────────────
+
+  /** Set control bus values. Args are repeating [busIndex, value] pairs. */
+  send(address: '/c_set', ...busIndexValuePairs: number[]): void;
+  /** Get control bus values. Replies with `/c_set index value ...`. */
+  send(address: '/c_get', ...busIndices: [number, ...number[]]): void;
+  /** Set sequential control bus values starting at startIndex. For multiple ranges, use the catch-all overload. */
+  send(address: '/c_setn', startIndex: number, count: number, ...values: number[]): void;
+  /** Get sequential control bus values. Replies with `/c_setn startIndex count values...`. For multiple ranges, use the catch-all overload. */
+  send(address: '/c_getn', startIndex: number, count: number): void;
+  /** Fill sequential control buses with a single value. For multiple ranges, use the catch-all overload. */
+  send(address: '/c_fill', startIndex: number, count: number, value: number): void;
+
+  // ── Catch-all ──────────────────────────────────────────────────────
+
+  /** Send any OSC message. Use this for commands not covered by typed overloads, or for multi-range variants of commands like /n_setn, /b_fill, /c_getn. */
   send(address: string, ...args: OscArg[]): void;
 
   /**
