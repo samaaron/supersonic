@@ -75,8 +75,6 @@ const size_t ERR_BUF_SIZE(512);
         msg.getb(mMsgData, mMsgSize);                                                                                  \
     }
 
-void PerformCompletionMsg(World* inWorld, OSC_Packet* inPacket);
-
 #define SEND_COMPLETION_MSG                                                                                            \
     if (mMsgSize) {                                                                                                    \
         OSC_Packet packet;                                                                                             \

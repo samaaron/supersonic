@@ -347,12 +347,29 @@ bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket) {
 
 // PerformCompletionMsg - completion messages in NRT mode
 // This is called by sequenced commands after Stage3 to execute completion messages
-// In RT mode this would schedule the message for later execution
-// In NRT mode we execute synchronously, so just return PacketPerformed
+// In NRT mode we execute synchronously and return PacketPerformed
 PacketStatus PerformCompletionMsg(World* inWorld, const OSC_Packet& inPacket) {
-    // In NRT mode, completion messages are processed synchronously via UnrollOSCPacket
-    // We don't need to schedule them - just acknowledge they were handled
-    worklet_debug("PerformCompletionMsg: completion message processed");
+    if (!inPacket.mData || inPacket.mSize <= 0) {
+        worklet_debug("PerformCompletionMsg: empty completion message");
+        return PacketPerformed;
+    }
+
+    // Check if it's a bundle: first 8 bytes are "#bundle\0"
+    bool isBundle = (inPacket.mSize >= 16
+        && inPacket.mData[0] == '#'
+        && inPacket.mData[1] == 'b'
+        && inPacket.mData[2] == 'u'
+        && inPacket.mData[3] == 'n');
+
+    if (isBundle) {
+        OSC_Packet packet = inPacket;
+        packet.mIsBundle = true;
+        PerformOSCBundle(inWorld, &packet);
+    } else {
+        PerformOSCMessage(inWorld, inPacket.mSize, inPacket.mData,
+                          const_cast<ReplyAddress*>(&inPacket.mReplyAddr));
+    }
+
     return PacketPerformed;
 }
 
