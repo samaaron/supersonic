@@ -14,7 +14,13 @@
     "dev": "cd example && npx serve",
     "test": "playwright test --reporter=list --max-failures=1",
     "test:all": "playwright test --reporter=list",
-    "prepublishOnly": "./build.sh --release"
+    "prepublishOnly": "./build.sh --release",
+    "test:types": "tsd"
+  },
+  "tsd": {
+    "compilerOptions": {
+      "module": "esnext"
+    }
   },
   "repository": {
     "type": "git",
@@ -63,7 +69,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.24.0",
+    "tsd": "^0.33.0"
   },
   "engines": {
     "node": ">=18.0.0"
