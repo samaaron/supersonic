@@ -149,6 +149,8 @@ await sonic.init();
 sonic.send('/s_new', 'beep', 1001, 0, 1, 'freq', 440);
 ```
 
+***
+
 #### Constructors
 
 ##### Constructor
@@ -183,6 +185,8 @@ const sonic = new SuperSonic({
 });
 ```
 
+***
+
 #### Constructor Options
 
 | Property                                                    | Type                                        | Description                                                                                                                                                                                                                                                        | Required |
@@ -214,6 +218,8 @@ const sonic = new SuperSonic({
 
 *Required unless both `coreBaseURL`/`workerBaseURL` and `wasmBaseURL` are provided.*
 
+***
+
 #### Server Options
 
 | Property                                                    | Type       | Description                                                                    | Default | Range          |
@@ -235,6 +241,8 @@ const sonic = new SuperSonic({
 | <a id="realtimememorysize"></a> `realTimeMemorySize?`       | `number`   | Real-time memory pool in KB for synthesis allocations. Default: 8192 (8MB).    | 8192    | 1+             |
 | <a id="verbosity"></a> `verbosity?`                         | `number`   | Debug verbosity: 0 = quiet, 1 = errors, 2 = warnings, 3 = info, 4 = debug.     | 0       | 0–4            |
 
+***
+
 #### Properties
 
 | Property                                       | Modifier | Type                                                     | Description                                                                                                                                                                                       |
@@ -249,6 +257,8 @@ const sonic = new SuperSonic({
 | `osc.encodeSingleBundle`                       | `public` | `Uint8Array`                                             | -                                                                                                                                                                                                 |
 | `osc.ntpNow`                                   | `public` | `number`                                                 | -                                                                                                                                                                                                 |
 | `osc.readTimetag`                              | `public` | `object`                                                 | -                                                                                                                                                                                                 |
+
+***
 
 #### Accessors
 
@@ -394,6 +404,8 @@ The SharedArrayBuffer (SAB mode) or null (postMessage mode). Internal.
 ###### Returns
 
 `SharedArrayBuffer`
+
+***
 
 #### Methods
 
@@ -976,6 +988,8 @@ Remove all listeners for an event, or all listeners entirely.
 ###### Returns
 
 `this`
+
+***
 
 #### Event Types
 
@@ -2206,6 +2220,8 @@ Send any OSC message. Use this for commands not covered by typed overloads, or f
 
 `void`
 
+***
+
 #### OSC Argument Types
 
 OSC argument types that can be sent in a message.
@@ -2441,6 +2457,8 @@ const channel = OscChannel.fromTransferable(event.data.channel);
 channel.send(oscBytes);
 ```
 
+***
+
 #### Constructors
 
 ##### Constructor
@@ -2450,6 +2468,8 @@ channel.send(oscBytes);
 ###### Returns
 
 [`OscChannel`](#oscchannel)
+
+***
 
 #### Accessors
 
@@ -2518,6 +2538,8 @@ worker.postMessage({ ch: channel.transferable }, channel.transferList);
 ###### Returns
 
 `Transferable`\[]
+
+***
 
 #### Methods
 
@@ -2675,6 +2697,8 @@ All encode methods return independent copies safe to store or transfer.
 | `ntpNow()`                                                | () => `number`                                                       | Get the current time as an NTP timestamp (seconds since 1900). Use this to schedule bundles relative to now: **Example** `const halfSecondFromNow = osc.ntpNow() + 0.5;`                                 |
 | `readTimetag()`                                           | (`bundleData`) => `object`                                           | Read the timetag from a bundle without fully decoding it.                                                                                                                                                |
 
+***
+
 #### Example
 
 ```ts
@@ -2732,6 +2756,8 @@ Info about a loaded audio buffer, returned by [SuperSonic.getLoadedBuffers](#get
 
 * [`SampleInfo`](#sampleinfo-1)
 
+***
+
 #### Properties
 
 | Property                               | Type     | Description                                                | Inherited from                                                |
@@ -2753,6 +2779,8 @@ Result from [SuperSonic.loadSample](#loadsample).
 #### Extends
 
 * [`SampleInfo`](#sampleinfo-1)
+
+***
 
 #### Properties
 
@@ -2934,6 +2962,8 @@ value of [SuperSonic.loadSample](#loadsample) (with `bufnum`).
 * [`LoadedBufferInfo`](#loadedbufferinfo)
 * [`LoadSampleResult`](#loadsampleresult)
 
+***
+
 #### Properties
 
 | Property                                 | Type     | Description                                                |
@@ -3084,6 +3114,8 @@ const tree = sonic.getTree();
 console.log(tree.root.children); // top-level groups and synths
 console.log(tree.nodeCount);     // total nodes in the tree
 ```
+
+***
 
 #### Properties
 

@@ -526,6 +526,34 @@ function enhanceTables(children) {
 }
 
 /**
+ * Phase 6: Insert thematicBreaks between h4 sections within each class (h3).
+ * Gives each section (Constructor Options, Properties, Methods, etc.) a clear visual boundary.
+ * Skips the first h4 in each class (no rule above the first section).
+ */
+function addSectionSeparators(children) {
+  const inserts = [];
+  for (let i = 0; i < children.length; i++) {
+    const n = children[i];
+    if (n.type !== 'heading' || n.depth !== 3) continue;
+
+    const h3End = findSectionEnd(children, i, 3);
+    let first = true;
+    for (let j = i + 1; j < h3End; j++) {
+      if (children[j].type === 'heading' && children[j].depth === 4) {
+        if (first) {
+          first = false;
+        } else {
+          inserts.push(j);
+        }
+      }
+    }
+  }
+  for (let k = inserts.length - 1; k >= 0; k--) {
+    children.splice(inserts[k], 0, { type: 'thematicBreak' });
+  }
+}
+
+/**
  * Desired document order for h2 and h3 sections.
  */
 const H2_ORDER = ['Classes', 'Variables', 'Interfaces', 'Type Aliases'];
@@ -818,7 +846,10 @@ export default function remarkTypedocSummary() {
     // Phase 6: Reorder sections (SuperSonic first, then osc, then OscChannel)
     reorderSections(children);
 
-    // Phase 7: Generate table of contents
+    // Phase 7: Add horizontal rules between h4 sections within classes
+    addSectionSeparators(children);
+
+    // Phase 8: Generate table of contents
     insertTableOfContents(children);
   };
 }
