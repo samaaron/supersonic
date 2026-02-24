@@ -1,0 +1,23 @@
+{
+  "$schema": "https://typedoc-plugin-markdown.org/schema.json",
+  "entryPoints": ["supersonic.d.ts"],
+  "tsconfig": "tsconfig.typedoc.json",
+
+  "plugin": ["typedoc-plugin-markdown", "typedoc-plugin-remark"],
+  "remarkPlugins": [
+    "remark-gfm",
+    ["./scripts/remark-typedoc-summary.mjs"]
+  ],
+
+  "out": "docs/api-generated",
+  "readme": "none",
+  "outputFileStrategy": "modules",
+  "disableSources": true,
+  "hidePageHeader": true,
+
+  "parametersFormat": "table",
+  "propertiesFormat": "table",
+  "enumMembersFormat": "table",
+  "typeDeclarationFormat": "table",
+  "indexFormat": "table"
+}

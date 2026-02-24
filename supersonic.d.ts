@@ -192,6 +192,8 @@ export interface SuperSonicOptions {
    * Transport mode.
    * - `'postMessage'` (default) — works everywhere, no special headers needed
    * - `'sab'` — lowest latency, requires Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers
+   *
+   * See docs/MODES.md for a full comparison of communication modes.
    */
   mode?: TransportMode;
 
@@ -657,10 +659,11 @@ export interface SuperSonicEventMap {
    * Fired after init completes, before `'ready'`.
    * Use for setting up groups, FX chains, and bus routing.
    * Can be async — init waits for all setup handlers to resolve.
+   * Also fires after `recover()` triggers a `reload()`.
    */
   'setup': () => void | Promise<void>;
 
-  /** Fired when the engine is fully booted and ready to receive messages. */
+  /** Fired when the engine is fully booted and ready to receive messages. Payload includes browser capabilities and boot timing. */
   'ready': (data: { capabilities: SuperSonicInfo['capabilities']; bootStats: BootStats }) => void;
 
   /**
@@ -681,13 +684,13 @@ export interface SuperSonicEventMap {
   /** Error from any component (worklet, transport, workers). */
   'error': (error: Error) => void;
 
-  /** Engine is shutting down. */
+  /** Engine is shutting down. Fired by `shutdown()`, `reset()`, and `destroy()`. */
   'shutdown': () => void;
 
-  /** Engine has been destroyed. */
+  /** Engine has been destroyed. Only fired by `destroy()`, not by `shutdown()` or `reset()`. Last chance to clean up before all listeners are cleared. */
   'destroy': () => void;
 
-  /** Audio resumed after a suspend (AudioContext was re-started). */
+  /** Audio resumed after a suspend (AudioContext was re-started). Emitted after `resume()` succeeds. */
   'resumed': () => void;
 
   /** Full reload started (worklet and WASM will be recreated). */
@@ -696,22 +699,22 @@ export interface SuperSonicEventMap {
   /** Full reload completed. */
   'reload:complete': (data: { success: boolean }) => void;
 
-  /** AudioContext state changed. */
+  /** AudioContext state changed. State is one of: `'running'`, `'suspended'`, `'closed'`, or `'interrupted'`. */
   'audiocontext:statechange': (data: { state: AudioContextState }) => void;
 
-  /** AudioContext was suspended (e.g. tab backgrounded, autoplay policy). */
+  /** AudioContext was suspended (e.g. tab backgrounded, autoplay policy, iOS audio interruption). Show a restart UI and call `recover()` when the user interacts. */
   'audiocontext:suspended': () => void;
 
   /** AudioContext resumed to 'running' state. */
   'audiocontext:resumed': () => void;
 
-  /** AudioContext was interrupted (iOS-specific). */
+  /** AudioContext was interrupted (iOS-specific). Another app or system event took audio focus. Similar to suspended but triggered externally. */
   'audiocontext:interrupted': () => void;
 
-  /** An asset (WASM, synthdef, sample) started loading. */
+  /** An asset started loading. Type is `'wasm'`, `'synthdef'`, or `'sample'`. */
   'loading:start': (data: { type: string; name: string }) => void;
 
-  /** An asset finished loading. */
+  /** An asset finished loading. Size is in bytes. */
   'loading:complete': (data: { type: string; name: string; size: number }) => void;
 }
 
@@ -992,6 +995,23 @@ export interface SendOSCOptions {
  * scsynth with low latency inside a web page.
  *
  * @example
+ * // CDN Quick Start
+ * import { SuperSonic } from 'supersonic-scsynth';
+ *
+ * const sonic = new SuperSonic({
+ *   baseURL: 'https://unpkg.com/supersonic-scsynth@latest/dist/',
+ *   synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/',
+ * });
+ *
+ * // Call init after a user gesture (click/tap) due to browser autoplay policies
+ * myButton.onclick = async () => {
+ *   await sonic.init();
+ *   await sonic.loadSynthDef('sonic-pi-beep');
+ *   sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60);
+ * };
+ *
+ * @example
+ * // Setup + message listeners
  * import { SuperSonic } from 'supersonic-scsynth';
  *
  * const sonic = new SuperSonic({ baseURL: '/dist/' });
@@ -1044,6 +1064,8 @@ export class SuperSonic {
    * Includes array offsets for zero-allocation reading via {@link getMetricsArray},
    * metric types/units/descriptions, and a declarative UI layout used by the
    * `<supersonic-metrics>` web component.
+   *
+   * See docs/METRICS_COMPONENT.md for the metrics component guide.
    */
   static getMetricsSchema(): MetricsSchema;
 
@@ -1112,7 +1134,7 @@ export class SuperSonic {
   /** The internal OscChannel used by the main thread. Advanced use only. */
   get osc(): OscChannel | null;
 
-  /** Map of loaded SynthDef names to their binary data. */
+  /** Map of loaded SynthDef names to their binary data. SynthDefs appear after `/d_recv` or `loadSynthDef()`. Removed on `/d_free` or `/d_freeAll`. Cached for automatic restoration after `reload()`. */
   loadedSynthDefs: Map<string, Uint8Array>;
 
   /** Boot timing statistics. */
@@ -1173,6 +1195,7 @@ export class SuperSonic {
    * when complete.
    *
    * Safe to call multiple times — subsequent calls are no-ops.
+   * Must be called from a user gesture (click/tap) due to browser autoplay policies.
    *
    * @throws If required browser features are missing or WASM fails to load.
    *
@@ -1216,6 +1239,11 @@ export class SuperSonic {
    * from a long background period).
    *
    * @returns true if audio is running after recovery
+   *
+   * @example
+   * document.addEventListener('visibilitychange', () => {
+   *   if (document.visibilityState === 'visible') sonic.recover();
+   * });
    */
   recover(): Promise<boolean>;
 
@@ -1498,6 +1526,10 @@ export class SuperSonic {
    * Unlike {@link cancelAll} which only clears the JS prescheduler, this also
    * clears bundles already consumed from the ring buffer and sitting in the
    * WASM scheduler's priority queue. Resolves when both are confirmed empty.
+   *
+   * Uses a postMessage flag (not the ring buffer) to signal the WASM scheduler,
+   * avoiding the race condition where stale scheduled bundles fire before a
+   * clear command is read from the ring buffer.
    */
   purge(): Promise<void>;
 
@@ -1508,8 +1540,18 @@ export class SuperSonic {
    * worker to send OSC directly to the AudioWorklet without going through
    * the main thread. Works in both SAB and postMessage modes.
    *
+   * The `blocking` option defaults to `true` for worker channels (sourceId !== 0)
+   * and `false` for main thread. Set to `false` for AudioWorkletProcessor use.
+   * In postMessage mode this has no effect.
+   *
+   * For AudioWorkletProcessor use, import from `'supersonic-scsynth/osc-channel'`
+   * which avoids DOM APIs unavailable in the worklet scope.
+   *
+   * See docs/WORKERS.md for the full workers guide.
+   *
    * @param options - Channel options
    * @param options.sourceId - Numeric source ID (0 = main thread, 1+ = workers)
+   * @param options.blocking - Whether sends block until the worklet reads the message
    *
    * @example
    * const channel = sonic.createOscChannel();
@@ -1641,7 +1683,7 @@ export class SuperSonic {
    * loading synthdefs or buffers to ensure they're ready before creating synths.
    *
    * @param syncId - Optional custom sync ID (random if omitted)
-   * @throws After timeout if scsynth doesn't respond
+   * @throws Rejects after 10 seconds if scsynth doesn't respond.
    *
    * @example
    * await sonic.loadSynthDef('beep');
@@ -1657,6 +1699,11 @@ export class SuperSonic {
 
   /**
    * Get current metrics as a named object.
+   *
+   * This is a cheap local memory read in both SAB and postMessage modes — no IPC
+   * or copying. Safe to call from `requestAnimationFrame`.
+   *
+   * See docs/METRICS.md for the full metrics guide.
    *
    * @example
    * const m = sonic.getMetrics();
@@ -1698,6 +1745,10 @@ export class SuperSonic {
 
   /**
    * Get the node tree in hierarchical format.
+   *
+   * The mirror has a default capacity of 1024 nodes. If exceeded,
+   * `droppedCount` will be non-zero and the tree may be incomplete,
+   * but audio continues normally.
    *
    * @example
    * const tree = sonic.getTree();

@@ -15,7 +15,8 @@
     "test": "playwright test --reporter=list --max-failures=1",
     "test:all": "playwright test --reporter=list",
     "prepublishOnly": "./build.sh --release",
-    "test:types": "tsd"
+    "test:types": "tsd",
+    "docs:api": "typedoc && mv docs/api-generated/README.md docs/API.md && rm -rf docs/api-generated"
   },
   "tsd": {
     "compilerOptions": {
@@ -70,7 +71,12 @@
   "devDependencies": {
     "@playwright/test": "^1.49.0",
     "esbuild": "^0.24.0",
-    "tsd": "^0.33.0"
+    "remark-gfm": "^4.0.1",
+    "tsd": "^0.33.0",
+    "typedoc": "^0.28.17",
+    "typedoc-plugin-markdown": "^4.10.0",
+    "typedoc-plugin-remark": "^2.0.1",
+    "typescript": "^5.9.3"
   },
   "engines": {
     "node": ">=18.0.0"

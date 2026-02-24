@@ -234,6 +234,10 @@ cp -r "$OUTPUT_DIR/wasm" "$CORE_PKG_DIR/wasm"
 mkdir -p "$CORE_PKG_DIR/workers"
 cp "$OUTPUT_DIR/workers/scsynth_audio_worklet.js" "$CORE_PKG_DIR/workers/"
 
+# Generate API documentation
+echo "Generating API docs..."
+npm run docs:api
+
 echo "Build complete!"
 echo "Generated files:"
 ls -lh "$OUTPUT_DIR"

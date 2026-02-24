@@ -1,1256 +1,3211 @@
 # API Reference
 
-> **TypeScript users:** Full type declarations are in [`supersonic.d.ts`](../supersonic.d.ts) at the project root. Your IDE will pick these up automatically for autocomplete and type checking.
+## Classes
 
-## Quick Start
+### OscChannel
 
-```javascript
-import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
+OscChannel — unified dispatch for sending OSC to the AudioWorklet.
 
-const sonic = new SuperSonic({
-  baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
-  synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
-});
+Obtain a channel via [SuperSonic.createOscChannel](#createoscchannel) on the main thread,
+then transfer it to a Web Worker for direct communication with the AudioWorklet.
 
-// call init after a user interaction
-// such as a button press
-myButton.onclick = async () => {
-  await sonic.init();
-  await sonic.loadSynthDef("sonic-pi-beep");
-  sonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60);
+| Member                                        | Description                                                                     |
+| --------------------------------------------- | ------------------------------------------------------------------------------- |
+| [`getCurrentNTP`](#getcurrentntp)             | Set the NTP time source for classification (used in AudioWorklet context).      |
+| [`mode`](#mode)                               | Transport mode this channel is using.                                           |
+| [`transferable`](#transferable)               | Serializable config for transferring this channel to a worker via postMessage.  |
+| [`transferList`](#transferlist)               | Array of transferable objects (MessagePorts) for the postMessage transfer list. |
+| [`classify()`](#classify)                     | Classify an OSC message to determine its routing.                               |
+| [`close()`](#close)                           | Close the channel and release its ports.                                        |
+| [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                           |
+| [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                   |
+| [`send()`](#send)                             | Send an OSC message with automatic routing.                                     |
+| [`sendDirect()`](#senddirect)                 | Send directly to worklet without classification or metrics tracking.            |
+| [`sendToPrescheduler()`](#sendtoprescheduler) | Send to prescheduler without classification.                                    |
+| [`fromTransferable()`](#fromtransferable)     | Reconstruct an OscChannel from data received via postMessage in a worker.       |
+
+#### Example
+
+```ts
+// Main thread: create and transfer to worker
+const channel = sonic.createOscChannel();
+myWorker.postMessage(
+  { channel: channel.transferable },
+  channel.transferList,
+);
+
+// Inside worker: reconstruct and send
+import { OscChannel } from 'supersonic-scsynth/osc-channel';
+const channel = OscChannel.fromTransferable(event.data.channel);
+channel.send(oscBytes);
+```
+
+#### Constructors
+
+##### Constructor
+
+> **new OscChannel**(): [`OscChannel`](#oscchannel)
+
+###### Returns
+
+[`OscChannel`](#oscchannel)
+
+#### Accessors
+
+##### getCurrentNTP
+
+###### Set Signature
+
+> **set** **getCurrentNTP**(`fn`): `void`
+
+Set the NTP time source for classification (used in AudioWorklet context).
+
+###### Parameters
+
+| Parameter | Type           |
+| --------- | -------------- |
+| `fn`      | () => `number` |
+
+###### Returns
+
+`void`
+
+##### mode
+
+###### Get Signature
+
+> **get** **mode**(): [`TransportMode`](#transportmode)
+
+Transport mode this channel is using.
+
+###### Returns
+
+[`TransportMode`](#transportmode)
+
+##### transferable
+
+###### Get Signature
+
+> **get** **transferable**(): [`OscChannelTransferable`](#oscchanneltransferable-1)
+
+Serializable config for transferring this channel to a worker via postMessage.
+
+###### Example
+
+```ts
+worker.postMessage({ ch: channel.transferable }, channel.transferList);
+```
+
+###### Returns
+
+[`OscChannelTransferable`](#oscchanneltransferable-1)
+
+##### transferList
+
+###### Get Signature
+
+> **get** **transferList**(): `Transferable`\[]
+
+Array of transferable objects (MessagePorts) for the postMessage transfer list.
+
+###### Example
+
+```ts
+worker.postMessage({ ch: channel.transferable }, channel.transferList);
+```
+
+###### Returns
+
+`Transferable`\[]
+
+#### Methods
+
+##### classify()
+
+> **classify**(`oscData`): [`OscCategory`](#osccategory)
+
+Classify an OSC message to determine its routing.
+
+###### Parameters
+
+| Parameter | Type         | Description       |
+| --------- | ------------ | ----------------- |
+| `oscData` | `Uint8Array` | Encoded OSC bytes |
+
+###### Returns
+
+[`OscCategory`](#osccategory)
+
+##### close()
+
+> **close**(): `void`
+
+Close the channel and release its ports.
+
+###### Returns
+
+`void`
+
+##### getAndResetMetrics()
+
+> **getAndResetMetrics**(): [`OscChannelMetrics`](#oscchannelmetrics)
+
+Get and reset local metrics (for periodic reporting).
+
+###### Returns
+
+[`OscChannelMetrics`](#oscchannelmetrics)
+
+##### getMetrics()
+
+> **getMetrics**(): [`OscChannelMetrics`](#oscchannelmetrics)
+
+Get current metrics snapshot.
+
+###### Returns
+
+[`OscChannelMetrics`](#oscchannelmetrics)
+
+##### send()
+
+> **send**(`oscData`): `boolean`
+
+Send an OSC message with automatic routing.
+
+Classifies the message and routes it:
+
+* bypass categories → sent directly to the AudioWorklet
+* far-future bundles → routed to the prescheduler for timed dispatch
+
+###### Parameters
+
+| Parameter | Type         | Description       |
+| --------- | ------------ | ----------------- |
+| `oscData` | `Uint8Array` | Encoded OSC bytes |
+
+###### Returns
+
+`boolean`
+
+true if sent successfully
+
+##### sendDirect()
+
+> **sendDirect**(`oscData`): `boolean`
+
+Send directly to worklet without classification or metrics tracking.
+
+###### Parameters
+
+| Parameter | Type         | Description       |
+| --------- | ------------ | ----------------- |
+| `oscData` | `Uint8Array` | Encoded OSC bytes |
+
+###### Returns
+
+`boolean`
+
+true if sent successfully
+
+##### sendToPrescheduler()
+
+> **sendToPrescheduler**(`oscData`): `boolean`
+
+Send to prescheduler without classification.
+
+###### Parameters
+
+| Parameter | Type         | Description       |
+| --------- | ------------ | ----------------- |
+| `oscData` | `Uint8Array` | Encoded OSC bytes |
+
+###### Returns
+
+`boolean`
+
+true if sent successfully
+
+##### fromTransferable()
+
+> `static` **fromTransferable**(`data`): [`OscChannel`](#oscchannel)
+
+Reconstruct an OscChannel from data received via postMessage in a worker.
+
+###### Parameters
+
+| Parameter | Type                                                  | Description                                         |
+| --------- | ----------------------------------------------------- | --------------------------------------------------- |
+| `data`    | [`OscChannelTransferable`](#oscchanneltransferable-1) | The transferable config from `channel.transferable` |
+
+###### Returns
+
+[`OscChannel`](#oscchannel)
+
+###### Example
+
+```ts
+// In a Web Worker:
+self.onmessage = (e) => {
+  const channel = OscChannel.fromTransferable(e.data.ch);
+  channel.send(oscBytes);
 };
 ```
 
-## Quick Reference
+***
 
-### Core
+### SuperSonic
 
-| Method                                               | Description                                               |
-| ---------------------------------------------------- | --------------------------------------------------------- |
-| [`init()`](#init)                                    | Initialise the audio engine                               |
-| [`shutdown()`](#shutdown)                            | Shut down, preserving listeners (can call `init()` again) |
-| [`destroy()`](#destroy)                              | Permanently destroy instance, clearing all listeners      |
-| [`recover()`](#recover)                              | Smart recovery - tries resume, falls back to reload       |
-| [`suspend()`](#suspend)                              | Suspend the AudioContext (worklet stays loaded)            |
-| [`resume()`](#resume)                                | Resume after suspend, flushes stale messages               |
-| [`reload()`](#reload)                                | Full reload - destroys memory, emits `setup` event        |
-| [`reset()`](#reset)                                  | Full teardown and re-initialize (loses all state)         |
-| [`send(address, ...args)`](#sendaddress-args)        | Send an OSC message                                       |
-| [`sendOSC(data, options)`](#sendoscoscbytes-options) | Send pre-encoded OSC bytes                                |
-| [`sync(syncId)`](#syncsyncid)                        | Wait for server to process all commands                   |
-| [`purge()`](#purge)                            | Flush all pending OSC from prescheduler and WASM scheduler |
-| [`cancelAll()`](#cancelallscheduled)        | Cancel all pending events in the JS prescheduler          |
+SuperSonic — WebAssembly SuperCollider synthesis engine for the browser.
 
-### Asset Loading
+Coordinates WASM, AudioWorklet, SharedArrayBuffer, and IO Workers to run
+scsynth with low latency inside a web page.
 
-| Method                                                           | Description                         |
-| ---------------------------------------------------------------- | ----------------------------------- |
-| [`loadSynthDef(nameOrPath)`](#loadsynthdefnameorpath)            | Load a synth definition             |
-| [`loadSynthDefs(names)`](#loadsynthdefsnames)                    | Load multiple synthdefs in parallel |
-| [`loadSample(bufnum, source)`](#loadsamplebufnum-source)         | Load a sample into a buffer         |
-| [`sampleInfo(source)`](#sampleinfosource-startframe-numframes)   | Get sample metadata without loading  |
+**Core**
 
-### Events
+| Member                                    | Description                                                                                                                 |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [`init()`](#init)                         | Initialise the engine.                                                                                                      |
+| [`shutdown()`](#shutdown)                 | Shut down the engine.                                                                                                       |
+| [`destroy()`](#destroy)                   | Destroy the engine completely.                                                                                              |
+| [`recover()`](#recover)                   | Smart recovery — tries a quick resume first, falls back to full reload.                                                     |
+| [`suspend()`](#suspend)                   | Suspend the AudioContext and stop the drift timer.                                                                          |
+| [`resume()`](#resume)                     | Quick resume — calls purge to flush stale messages, resumes AudioContext, and resyncs timing.                               |
+| [`reload()`](#reload)                     | Full reload — destroys and recreates the worklet and WASM, then restores all previously loaded synthdefs and audio buffers. |
+| [`reset()`](#reset)                       | Shutdown and immediately re-initialise.                                                                                     |
+| [`send()`](#send)                         | Send any OSC message.                                                                                                       |
+| [`sendOSC()`](#sendosc)                   | Send pre-encoded OSC bytes to scsynth.                                                                                      |
+| [`sync()`](#sync)                         | Wait for scsynth to process all pending commands.                                                                           |
+| [`purge()`](#purge)                       | Flush all pending OSC messages from both the JS prescheduler and the WASM BundleScheduler.                                  |
+| [`cancelAll()`](#cancelall)               | Cancel all scheduled messages in the JS prescheduler.                                                                       |
+| [`cancelSession()`](#cancelsession)       | Cancel all scheduled messages for a session.                                                                                |
+| [`cancelSessionTag()`](#cancelsessiontag) | Cancel scheduled messages matching both a session and run tag.                                                              |
+| [`cancelTag()`](#canceltag)               | Cancel all scheduled messages with the given run tag.                                                                       |
 
-| Method                                                   | Description                                         |
-| -------------------------------------------------------- | --------------------------------------------------- |
-| [`on(event, callback)`](#onevent-callback)               | Subscribe to an event, returns unsubscribe function |
-| [`off(event, callback)`](#offevent-callback)             | Unsubscribe from an event                           |
-| [`once(event, callback)`](#onceevent-callback)           | Subscribe to an event once                          |
-| [`removeAllListeners(event?)`](#removealllistenersevent) | Remove all listeners for an event (or all events)   |
+**Asset Loading**
 
-### Event Types
+| Member                              | Description                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------- |
+| [`loadSynthDef()`](#loadsynthdef)   | Load a SynthDef into scsynth.                                             |
+| [`loadSynthDefs()`](#loadsynthdefs) | Load multiple SynthDefs by name in parallel.                              |
+| [`loadSample()`](#loadsample)       | Load an audio sample into a scsynth buffer slot.                          |
+| [`sampleInfo()`](#sampleinfo)       | Get sample metadata (including content hash) without allocating a buffer. |
 
-| Event                      | Description                                                                                                   |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `setup`                    | Fires after init/recover, before `ready`. Async handlers are awaited. Use for groups, FX chains, bus routing. |
-| `ready`                    | Engine initialised and ready                                                                                  |
-| `loading:start`            | Asset loading started (with `{ type, name }` - type is 'wasm', 'synthdef', or 'sample')                       |
-| `loading:complete`         | Asset loading completed (with `{ type, name, size }` - size in bytes)                                         |
-| `error`                    | Error occurred                                                                                                |
-| `message`                  | OSC message received (parsed)                                                                                 |
-| `message:raw`              | OSC message received (with raw bytes)                                                                         |
-| `message:sent`             | OSC message sent                                                                                              |
-| `debug`                    | Debug output from scsynth                                                                                     |
-| `shutdown`                 | Engine shutting down (emitted by `shutdown()`, `reset()`, and `destroy()`)                                    |
-| `destroy`                  | Engine being permanently destroyed (emitted by `destroy()` only)                                              |
-| `audiocontext:statechange` | AudioContext state changed (with `{ state }` payload)                                                         |
-| `audiocontext:suspended`   | AudioContext was suspended (browser tab backgrounded, etc.)                                                   |
-| `audiocontext:resumed`     | AudioContext resumed running                                                                                  |
-| `audiocontext:interrupted` | AudioContext was interrupted (iOS audio session, etc.)                                                        |
-| `resumed`                  | Quick resume succeeded (emitted by `resume()`)                                                                |
-| `reload:start`             | Full reload starting (emitted by `reload()`)                                                                  |
-| `reload:complete`          | Full reload completed (with `{ success }` payload)                                                            |
+**Events**
 
-### Node Tree
+| Member                                        | Description                                                   |
+| --------------------------------------------- | ------------------------------------------------------------- |
+| [`on()`](#on)                                 | Subscribe to an event.                                        |
+| [`off()`](#off)                               | Unsubscribe from an event.                                    |
+| [`once()`](#once)                             | Subscribe to an event once.                                   |
+| [`removeAllListeners()`](#removealllisteners) | Remove all listeners for an event, or all listeners entirely. |
 
-| Method                        | Description                                                   |
-| ----------------------------- | ------------------------------------------------------------- |
-| [`getTree()`](#gettree)       | Get hierarchical tree structure for visualization             |
-| [`getRawTree()`](#getrawtree) | Get flat array with internal linkage pointers (for debugging) |
+**Node Tree**
 
-### Metrics
+| Member                          | Description                                                         |
+| ------------------------------- | ------------------------------------------------------------------- |
+| [`getTree()`](#gettree)         | Get the node tree in hierarchical format.                           |
+| [`getRawTree()`](#getrawtree)   | Get the node tree in flat format with linkage pointers.             |
+| [`getSnapshot()`](#getsnapshot) | Get a diagnostic snapshot with metrics, node tree, and memory info. |
 
-| Method                                              | Description                                  |
-| --------------------------------------------------- | -------------------------------------------- |
-| [`getMetrics()`](#getmetrics)                       | Get metrics snapshot as an object             |
-| [`getMetricsArray()`](#getmetricsarray)             | Get metrics as a flat Uint32Array (zero-alloc)|
-| [`SuperSonic.getMetricsSchema()`](#getmetricsschema)| Schema with offsets, layout, and sentinels    |
+**Metrics**
 
-### Properties
+| Member                                    | Description                                                    |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| [`getMetrics()`](#getmetrics)             | Get current metrics as a named object.                         |
+| [`getMetricsArray()`](#getmetricsarray)   | Get metrics as a flat Uint32Array for zero-allocation reading. |
+| [`getMetricsSchema()`](#getmetricsschema) | Get the metrics schema describing all available metrics.       |
 
-| Property                                        | Description                                              |
-| ----------------------------------------------- | -------------------------------------------------------- |
-| [`initialized`](#initialized-read-only)         | Whether engine is initialised (read-only)                |
-| [`initializing`](#initializing-read-only)       | Whether engine is currently initialising (read-only)     |
-| [`audioContext`](#audiocontext-read-only)       | The Web Audio AudioContext (read-only)                   |
-| [`node`](#node-read-only)                       | Audio node wrapper for Web Audio connections (read-only) |
-| [`loadedSynthDefs`](#loadedsynthdefs-read-only) | Map of loaded synthdef names to binary data (read-only)  |
-| [`bootStats`](#bootstats-read-only)             | Boot timing information (read-only)                      |
+**Properties**
 
-### Advanced
+| Member                          | Description                                        |
+| ------------------------------- | -------------------------------------------------- |
+| [`initialized`](#initialized)   | Whether the engine has completed initialisation.   |
+| [`initializing`](#initializing) | Whether init is currently in progress.             |
+| [`audioContext`](#audiocontext) | The underlying AudioContext.                       |
+| [`node`](#node)                 | AudioWorkletNode wrapper for custom audio routing. |
 
-| Method                                                                    | Description                                    |
-| ------------------------------------------------------------------------- | ---------------------------------------------- |
-| [`getInfo()`](#getinfo)                                                   | Get static engine configuration                |
-| [`SuperSonic.osc.encodeMessage()`](#supersonicoscencodemessage)           | Encode an OSC message to bytes                 |
-| [`SuperSonic.osc.encodeBundle()`](#supersonicoscencodebundle)             | Encode an OSC bundle to bytes                  |
-| [`SuperSonic.osc.decode()`](#supersonicoscdecodedata-options)             | Decode OSC bytes to a message                  |
-| [`SuperSonic.osc.encodeSingleBundle()`](#supersonicoscencodesinglebundle) | Encode a bundle containing a single message    |
-| [`SuperSonic.osc.readTimetag()`](#supersonicoscreadtimetag)               | Read NTP timetag from raw bundle bytes         |
-| [`SuperSonic.osc.ntpNow()`](#supersonicoscntpnow)                        | Get current time as NTP seconds                |
-| [`SuperSonic.osc.NTP_EPOCH_OFFSET`](#supersonicoscntp_epoch_offset)      | Seconds between Unix epoch (1970) and NTP (1900) |
+**Advanced**
 
-## Creating an Instance
+| Member                                              | Description                                                             |
+| --------------------------------------------------- | ----------------------------------------------------------------------- |
+| [`getInfo()`](#getinfo)                             | Get engine info: sample rate, memory layout, capabilities, and version. |
+| [`createOscChannel()`](#createoscchannel)           | Create an OscChannel for direct worker-to-worklet communication.        |
+| [`startCapture()`](#startcapture)                   | Start capturing audio output to a buffer.                               |
+| [`stopCapture()`](#stopcapture)                     | Stop capturing and return the captured audio data.                      |
+| [`getCaptureFrames()`](#getcaptureframes)           | Get number of audio frames captured so far.                             |
+| [`isCaptureEnabled()`](#iscaptureenabled)           | Check if audio capture is currently enabled.                            |
+| [`getMaxCaptureDuration()`](#getmaxcaptureduration) | Get maximum capture duration in seconds.                                |
+| [`setClockOffset()`](#setclockoffset)               | Set clock offset for multi-system sync (e.g. Ableton Link, NTP server). |
 
-```javascript
-import { SuperSonic } from "supersonic-scsynth";
+**Advanced**
 
-// With explicit baseURL (required)
-const supersonic = new SuperSonic({
-  baseURL: "/supersonic/",
-});
-// Derives: workers/, wasm/, synthdefs/, samples/
+| Member                                    | Description                                                  |
+| ----------------------------------------- | ------------------------------------------------------------ |
+| [`bufferConstants`](#bufferconstants)     | Buffer layout constants from the WASM build.                 |
+| [`initTime`](#inittime)                   | NTP time (seconds since 1900) when the AudioContext started. |
+| [`mode`](#mode)                           | Active transport mode ('sab' or 'postMessage').              |
+| [`osc`](#osc)                             | The internal OscChannel used by the main thread.             |
+| [`ringBufferBase`](#ringbufferbase)       | Ring buffer base offset in SharedArrayBuffer.                |
+| [`sharedBuffer`](#sharedbuffer)           | The SharedArrayBuffer (SAB mode) or null (postMessage mode). |
+| [`getLoadedBuffers()`](#getloadedbuffers) | Get info about all loaded audio buffers.                     |
+| [`getRawTreeSchema()`](#getrawtreeschema) | Get schema describing the raw flat node tree structure.      |
+| [`getTreeSchema()`](#gettreeschema)       | Get schema describing the hierarchical node tree structure.  |
 
-// Or explicit paths
-const supersonic = new SuperSonic({
-  workerBaseURL: "/supersonic/workers/",
-  wasmBaseURL: "/supersonic/wasm/",
-  synthdefBaseURL: "/supersonic/synthdefs/",
-  sampleBaseURL: "/supersonic/samples/",
+#### Examples
+
+```ts
+// CDN Quick Start
+import { SuperSonic } from 'supersonic-scsynth';
+
+const sonic = new SuperSonic({
+  baseURL: 'https://unpkg.com/supersonic-scsynth@latest/dist/',
+  synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/',
 });
 
-// Mix: baseURL with overrides
-const supersonic = new SuperSonic({
-  baseURL: "/supersonic/",
-  sampleBaseURL: "/cdn/samples/", // absolute override
-});
+// Call init after a user gesture (click/tap) due to browser autoplay policies
+myButton.onclick = async () => {
+  await sonic.init();
+  await sonic.loadSynthDef('sonic-pi-beep');
+  sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60);
+};
 ```
 
-### Constructor Options
+```ts
+// Setup + message listeners
+import { SuperSonic } from 'supersonic-scsynth';
 
-| Option                 | Required | Description                                                                                                                               |
-| ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `baseURL`              | Yes*     | Base URL - derives `workers/`, `wasm/`, `synthdefs/`, `samples/` subdirectories. *Required unless `workerBaseURL` and `wasmBaseURL` are both provided. |
-| `workerBaseURL`        | No       | Base URL for worker scripts (overrides baseURL)                                                                                           |
-| `wasmBaseURL`          | No       | Base URL for WASM files (overrides baseURL)                                                                                               |
-| `wasmUrl`              | No       | Full URL to the WASM file (overrides wasmBaseURL)                                                                                         |
-| `workletUrl`           | No       | Full URL to the worklet script (overrides workerBaseURL)                                                                                  |
-| `synthdefBaseURL`      | No       | Base URL for synthdef files (used by `loadSynthDef`)                                                                                      |
-| `sampleBaseURL`        | No       | Base URL for sample files (used by `loadSample`)                                                                                          |
-| `mode`                 | No       | Transport mode: `'postMessage'` (default) or `'sab'`. See [Communication Modes](MODES.md). |
-| `audioContext`         | No       | Use an existing AudioContext instead of creating one                                                                                      |
-| `audioContextOptions`  | No       | Options passed to `new AudioContext()` (see below)                                                                                        |
-| `autoConnect`          | No       | Whether to auto-connect to `audioContext.destination` (default: true)                                                                     |
-| `scsynthOptions`       | No       | Server options (see below)                                                                                                                |
-| `snapshotIntervalMs`   | No       | Metrics snapshot interval for postMessage mode (default: 150)                                                                             |
-| `preschedulerCapacity` | No       | Max pending events in JS prescheduler (default: 65536)                                                                                    |
-| `bypassLookaheadMs`    | No       | Bundles within this many ms of now bypass the prescheduler and are sent directly (default: 500)                                           |
-| `fetchMaxRetries`      | No       | Max retries for asset fetches (default: 3)                                                                                                |
-| `fetchRetryDelay`      | No       | Base delay in ms between fetch retries (default: 1000)                                                                                    |
-| `activityEvent`        | No       | Event emission truncation options (see below)                                                                                             |
-| `debug`                | No       | Log all debug messages to console (scsynth, OSC in, OSC out)                                                                              |
-| `debugScsynth`         | No       | Log scsynth debug messages to console                                                                                                     |
-| `debugOscIn`           | No       | Log incoming OSC messages to console                                                                                                      |
-| `debugOscOut`          | No       | Log outgoing OSC messages to console                                                                                                      |
-| `activityConsoleLog`   | No       | Console output truncation options (see below)                                                                                             |
+const sonic = new SuperSonic({ baseURL: '/dist/' });
 
-**Note:** You must provide either `baseURL` or both `workerBaseURL` and `wasmBaseURL`. For CDN usage, set `baseURL` to the CDN path (e.g., `https://unpkg.com/supersonic-scsynth@latest/dist/`). For self-hosted usage, set it to your local path (e.g., `/supersonic/` or `./`).
-
-### Activity Event Options (`activityEvent`)
-
-Control truncation of event emission for custom log UIs. The `maxLineLength` is the default; specific overrides take precedence when set.
-
-```javascript
-const supersonic = new SuperSonic({
-  baseURL: "/supersonic/",
-  activityEvent: {
-    maxLineLength: 200,            // Default for all (default: 200)
-    scsynthMaxLineLength: 500,     // Override for scsynth messages
-    oscInMaxLineLength: 100,       // Override for incoming OSC
-    oscOutMaxLineLength: 100,      // Override for outgoing OSC
-  },
+sonic.on('setup', async () => {
+  await sonic.loadSynthDef('beep');
 });
+
+sonic.on('message', (msg) => {
+  console.log('OSC from scsynth:', msg[0], msg.slice(1));
+});
+
+await sonic.init();
+sonic.send('/s_new', 'beep', 1001, 0, 1, 'freq', 440);
 ```
 
-| Option                 | Description                                                        |
-| ---------------------- | ------------------------------------------------------------------ |
-| `maxLineLength`        | Default max chars for event emission (default: 200)                |
-| `scsynthMaxLineLength` | Override for scsynth debug events (falls back to `maxLineLength`)  |
-| `oscInMaxLineLength`   | Override for incoming OSC args (falls back to `maxLineLength`)     |
-| `oscOutMaxLineLength`  | Override for outgoing OSC args (falls back to `maxLineLength`)     |
+#### Constructors
 
-### Activity Console Log Options (`activityConsoleLog`)
+##### Constructor
 
-Control truncation of console debug output. The `maxLineLength` is the default; specific overrides take precedence when set.
+> **new SuperSonic**(`options?`): [`SuperSonic`](#supersonic)
 
-```javascript
-const supersonic = new SuperSonic({
-  baseURL: "/supersonic/",
-  debug: true,
-  activityConsoleLog: {
-    maxLineLength: 200,            // Default for all (default: 200)
-    scsynthMaxLineLength: 500,     // Override for scsynth messages
-    oscInMaxLineLength: 100,       // Override for incoming OSC
-    oscOutMaxLineLength: 100,      // Override for outgoing OSC
-  },
+Create a new SuperSonic instance.
+
+Does not start the engine — call [init](#init) to boot.
+
+###### Parameters
+
+| Parameter  | Type                                      | Description                                                                                        |
+| ---------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `options?` | [`SuperSonicOptions`](#supersonicoptions) | Configuration options. Requires `baseURL` or both `coreBaseURL`/`workerBaseURL` and `wasmBaseURL`. |
+
+###### Returns
+
+[`SuperSonic`](#supersonic)
+
+###### Throws
+
+If URL configuration is missing or scsynthOptions are invalid.
+
+###### Example
+
+```ts
+const sonic = new SuperSonic({
+  baseURL: '/supersonic/dist/',
+  mode: 'postMessage',
+  scsynthOptions: { numBuffers: 2048 },
 });
 ```
 
-| Option                 | Description                                                              |
-| ---------------------- | ------------------------------------------------------------------------ |
-| `maxLineLength`        | Default max chars for all console output (default: 200)                  |
-| `scsynthMaxLineLength` | Override for scsynth messages (falls back to `maxLineLength`)            |
-| `oscInMaxLineLength`   | Override for incoming OSC args (falls back to `maxLineLength`)           |
-| `oscOutMaxLineLength`  | Override for outgoing OSC args (falls back to `maxLineLength`)           |
+#### Constructor Options
 
-### AudioContext Options (`audioContextOptions`)
+| Property                                                    | Type                                        | Description                                                                                                                                                                                                                                                        | Required |
+| ----------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| <a id="activityconsolelog"></a> `activityConsoleLog?`       | [`ActivityLineConfig`](#activitylineconfig) | Line length limits for activity console.log output.                                                                                                                                                                                                                |          |
+| <a id="activityevent"></a> `activityEvent?`                 | [`ActivityLineConfig`](#activitylineconfig) | Line length limits for activity events emitted to listeners.                                                                                                                                                                                                       |          |
+| <a id="audiocontext-1"></a> `audioContext?`                 | `AudioContext`                              | Provide your own AudioContext instead of letting SuperSonic create one.                                                                                                                                                                                            |          |
+| <a id="audiocontextoptions"></a> `audioContextOptions?`     | `AudioContextOptions`                       | Options passed to `new AudioContext()`. Ignored if `audioContext` is provided.                                                                                                                                                                                     |          |
+| <a id="autoconnect"></a> `autoConnect?`                     | `boolean`                                   | Auto-connect the AudioWorkletNode to the AudioContext destination. Default: true.                                                                                                                                                                                  |          |
+| <a id="baseurl"></a> `baseURL?`                             | `string`                                    | Convenience shorthand when all assets (WASM, workers, synthdefs, samples) are co-located.                                                                                                                                                                          | Yes\*    |
+| <a id="bypasslookaheadms"></a> `bypassLookaheadMs?`         | `number`                                    | Bundles within this many ms of now bypass the prescheduler. Default: 500.                                                                                                                                                                                          |          |
+| <a id="corebaseurl"></a> `coreBaseURL?`                     | `string`                                    | Base URL for GPL assets: WASM and AudioWorklet (supersonic-scsynth-core package). Defaults to `baseURL`.                                                                                                                                                           |          |
+| <a id="debug-1"></a> `debug?`                               | `boolean`                                   | Enable all debug console logging. Default: false.                                                                                                                                                                                                                  |          |
+| <a id="debugoscin"></a> `debugOscIn?`                       | `boolean`                                   | Log incoming OSC messages to console. Default: false.                                                                                                                                                                                                              |          |
+| <a id="debugoscout"></a> `debugOscOut?`                     | `boolean`                                   | Log outgoing OSC messages to console. Default: false.                                                                                                                                                                                                              |          |
+| <a id="debugscsynth"></a> `debugScsynth?`                   | `boolean`                                   | Log scsynth debug output to console. Default: false.                                                                                                                                                                                                               |          |
+| <a id="fetchmaxretries"></a> `fetchMaxRetries?`             | `number`                                    | Max fetch retries when loading assets. Default: 3.                                                                                                                                                                                                                 |          |
+| <a id="fetchretrydelay"></a> `fetchRetryDelay?`             | `number`                                    | Base delay between retries in ms (exponential backoff). Default: 1000.                                                                                                                                                                                             |          |
+| <a id="mode-5"></a> `mode?`                                 | [`TransportMode`](#transportmode)           | Transport mode. - `'postMessage'` (default) — works everywhere, no special headers needed - `'sab'` — lowest latency, requires Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers See docs/MODES.md for a full comparison of communication modes. |          |
+| <a id="preschedulercapacity-1"></a> `preschedulerCapacity?` | `number`                                    | Max pending events in the JS prescheduler. Default: 65536.                                                                                                                                                                                                         |          |
+| <a id="samplebaseurl"></a> `sampleBaseURL?`                 | `string`                                    | Base URL for audio sample files (used by [SuperSonic.loadSample](#loadsample)).                                                                                                                                                                                    |          |
+| <a id="scsynthoptions-1"></a> `scsynthOptions?`             | [`ScsynthOptions`](#scsynthoptions)         | Engine options passed to scsynth World\_New().                                                                                                                                                                                                                     |          |
+| <a id="snapshotintervalms"></a> `snapshotIntervalMs?`       | `number`                                    | How often to snapshot metrics/tree in postMessage mode (ms).                                                                                                                                                                                                       |          |
+| <a id="synthdefbaseurl"></a> `synthdefBaseURL?`             | `string`                                    | Base URL for synthdef files (used by [SuperSonic.loadSynthDef](#loadsynthdef)).                                                                                                                                                                                    |          |
+| <a id="wasmbaseurl"></a> `wasmBaseURL?`                     | `string`                                    | Base URL for WASM files. Defaults to `coreBaseURL + 'wasm/'`.                                                                                                                                                                                                      |          |
+| <a id="wasmurl"></a> `wasmUrl?`                             | `string`                                    | Full URL to the WASM binary. Overrides wasmBaseURL.                                                                                                                                                                                                                |          |
+| <a id="workerbaseurl"></a> `workerBaseURL?`                 | `string`                                    | Base URL for MIT worker scripts. Defaults to `baseURL + 'workers/'`.                                                                                                                                                                                               |          |
+| <a id="workleturl"></a> `workletUrl?`                       | `string`                                    | Full URL to the AudioWorklet script. Overrides `coreBaseURL`.                                                                                                                                                                                                      |          |
 
-Options passed to the [AudioContext constructor](https://developer.mozilla.org/en-US/docs/Web/API/AudioContext/AudioContext):
+*Required unless both `coreBaseURL`/`workerBaseURL` and `wasmBaseURL` are provided.*
 
-```javascript
-const supersonic = new SuperSonic({
-  audioContextOptions: {
-    sampleRate: 44100,            // Desired sample rate (default: 48000)
-    latencyHint: "playback",      // "interactive" (default), "balanced", "playback", or seconds
-  },
-});
+#### Server Options
+
+| Property                                                    | Type       | Description                                                                    | Default | Range          |
+| ----------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------ | ------- | -------------- |
+| <a id="buflength"></a> `bufLength?`                         | `128`      | Audio buffer length — must be 128 (WebAudio API constraint).                   | 128     | 128 (fixed)    |
+| <a id="loadgraphdefs"></a> `loadGraphDefs?`                 | `0` \| `1` | Auto-load synthdefs from disk: 0 or 1. Default: 0.                             | 0       | 0–1            |
+| <a id="maxgraphdefs"></a> `maxGraphDefs?`                   | `number`   | Max synth definitions. Default: 1024.                                          | 1024    | 1+             |
+| <a id="maxnodes"></a> `maxNodes?`                           | `number`   | Max synthesis nodes — synths + groups. Default: 1024.                          | 1024    | 1+             |
+| <a id="maxwirebufs"></a> `maxWireBufs?`                     | `number`   | Max wire buffers for internal UGen routing. Default: 64.                       | 64      | 1+             |
+| <a id="memorylocking"></a> `memoryLocking?`                 | `boolean`  | Memory locking — not applicable in browser. Default: false.                    | false   | —              |
+| <a id="numaudiobuschannels"></a> `numAudioBusChannels?`     | `number`   | Audio bus channels for routing between synths. Default: 128.                   | 128     | 1+             |
+| <a id="numbuffers"></a> `numBuffers?`                       | `number`   | Max audio buffers (1–65535). Default: 1024.                                    | 1024    | 1–65535        |
+| <a id="numcontrolbuschannels"></a> `numControlBusChannels?` | `number`   | Control bus channels for control-rate data. Default: 4096.                     | 4096    | 1+             |
+| <a id="numinputbuschannels"></a> `numInputBusChannels?`     | `number`   | Hardware input channels. Default: 2 (stereo).                                  | 2       | 0+             |
+| <a id="numoutputbuschannels"></a> `numOutputBusChannels?`   | `number`   | Hardware output channels (1–128). Default: 2 (stereo).                         | 2       | 1–128          |
+| <a id="numrgens"></a> `numRGens?`                           | `number`   | Random number generators per synth. Default: 64.                               | 64      | 1+             |
+| <a id="preferredsamplerate"></a> `preferredSampleRate?`     | `number`   | Preferred sample rate. 0 = use AudioContext default (typically 48000).         | 0       | 0, 8000–384000 |
+| <a id="realtime"></a> `realTime?`                           | `boolean`  | Clock source. Always false in SuperSonic (externally clocked by AudioWorklet). | false   | —              |
+| <a id="realtimememorysize"></a> `realTimeMemorySize?`       | `number`   | Real-time memory pool in KB for synthesis allocations. Default: 8192 (8MB).    | 8192    | 1+             |
+| <a id="verbosity"></a> `verbosity?`                         | `number`   | Debug verbosity: 0 = quiet, 1 = errors, 2 = warnings, 3 = info, 4 = debug.     | 0       | 0–4            |
+
+#### Properties
+
+| Property                                       | Modifier | Type                                                     | Description                                                                                                                                                                                       |
+| ---------------------------------------------- | -------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <a id="bootstats"></a> `bootStats`             | `public` | [`BootStats`](#bootstats-1)                              | Boot timing statistics.                                                                                                                                                                           |
+| <a id="loadedsynthdefs"></a> `loadedSynthDefs` | `public` | `Map`<`string`, `Uint8Array`<`ArrayBufferLike`>>         | Map of loaded SynthDef names to their binary data. SynthDefs appear after `/d_recv` or `loadSynthDef()`. Removed on `/d_free` or `/d_freeAll`. Cached for automatic restoration after `reload()`. |
+| <a id="osc"></a> `osc`                         | `static` | `object`                                                 | OSC encoding/decoding utilities. **Example** `const msg = SuperSonic.osc.encodeMessage('/s_new', ['beep', 1001]); const decoded = SuperSonic.osc.decode(msg);`                                    |
+| `osc.NTP_EPOCH_OFFSET`                         | `public` | `number`                                                 | Seconds between NTP epoch (1900) and Unix epoch (1970): `2208988800`.                                                                                                                             |
+| `osc.decode`                                   | `public` | [`OscBundle`](#oscbundle) \| [`OscMessage`](#oscmessage) | -                                                                                                                                                                                                 |
+| `osc.encodeBundle`                             | `public` | `Uint8Array`                                             | -                                                                                                                                                                                                 |
+| `osc.encodeMessage`                            | `public` | `Uint8Array`                                             | -                                                                                                                                                                                                 |
+| `osc.encodeSingleBundle`                       | `public` | `Uint8Array`                                             | -                                                                                                                                                                                                 |
+| `osc.ntpNow`                                   | `public` | `number`                                                 | -                                                                                                                                                                                                 |
+| `osc.readTimetag`                              | `public` | `object`                                                 | -                                                                                                                                                                                                 |
+
+#### Accessors
+
+##### audioContext
+
+###### Get Signature
+
+> **get** **audioContext**(): `AudioContext`
+
+The underlying AudioContext.
+
+Available after [init](#init). Use this to read `sampleRate`, `currentTime`,
+or to connect additional audio nodes.
+
+###### Returns
+
+`AudioContext`
+
+##### bufferConstants
+
+###### Get Signature
+
+> **get** **bufferConstants**(): `Record`<`string`, `number`>
+
+Buffer layout constants from the WASM build. Mostly internal.
+
+###### Returns
+
+`Record`<`string`, `number`>
+
+##### initialized
+
+###### Get Signature
+
+> **get** **initialized**(): `boolean`
+
+Whether the engine has completed initialisation.
+
+###### Returns
+
+`boolean`
+
+##### initializing
+
+###### Get Signature
+
+> **get** **initializing**(): `boolean`
+
+Whether [init](#init) is currently in progress.
+
+###### Returns
+
+`boolean`
+
+##### initTime
+
+###### Get Signature
+
+> **get** **initTime**(): `number`
+
+NTP time (seconds since 1900) when the AudioContext started. Use to compute relative times: `event.timestamp - sonic.initTime`.
+
+###### Returns
+
+`number`
+
+##### mode
+
+###### Get Signature
+
+> **get** **mode**(): [`TransportMode`](#transportmode)
+
+Active transport mode (`'sab'` or `'postMessage'`).
+
+###### Returns
+
+[`TransportMode`](#transportmode)
+
+##### node
+
+###### Get Signature
+
+> **get** **node**(): `object`
+
+AudioWorkletNode wrapper for custom audio routing.
+
+Use `node.connect()` / `node.disconnect()` to route audio.
+Use `node.input` to connect external audio sources into scsynth.
+
+###### Example
+
+```ts
+// Route scsynth output through an AnalyserNode:
+sonic.node.disconnect();
+sonic.node.connect(analyser);
+analyser.connect(sonic.audioContext.destination);
 ```
 
-| Option        | Type             | Description                                                                 |
-| ------------- | ---------------- | --------------------------------------------------------------------------- |
-| `sampleRate`  | number           | Desired sample rate in Hz (default: 48000)                                  |
-| `latencyHint` | string \| number | `"interactive"` (default), `"balanced"`, `"playback"`, or seconds as number |
+###### Returns
 
-**Note:** The actual sample rate depends on hardware support. Use `getInfo().sampleRate` after init to check the actual rate.
+| Name              | Type                  | Description                                                      |
+| ----------------- | --------------------- | ---------------------------------------------------------------- |
+| `channelCount`    | `number`              | -                                                                |
+| `context`         | `BaseAudioContext`    | -                                                                |
+| `input`           | `AudioWorkletNode`    | The underlying AudioWorkletNode — connect external sources here. |
+| `numberOfInputs`  | `number`              | -                                                                |
+| `numberOfOutputs` | `number`              | -                                                                |
+| `connect()`       | (...`args`) => `void` | -                                                                |
+| `disconnect()`    | (...`args`) => `void` | -                                                                |
 
-### Server Options (`scsynthOptions`)
+##### osc
 
-Override scsynth server defaults:
+###### Get Signature
 
-```javascript
-const supersonic = new SuperSonic({
-  scsynthOptions: {
-    numBuffers: 4096,
-    numOutputBusChannels: 4,
-  },
-});
-```
+> **get** **osc**(): [`OscChannel`](#oscchannel)
 
-| Option                  | Default | Range       | Description                                                                                                          |
-|-------------------------|---------|-------------|----------------------------------------------------------------------------------------------------------------------|
-| `numBuffers`            | 1024    | 1-65535     | Maximum audio buffers (SndBuf slots). Each slot has ~104 bytes overhead; actual audio data is stored separately.      |
-| `maxNodes`              | 1024    | 1+          | Maximum synthesis nodes (synths + groups).                                                                            |
-| `maxGraphDefs`          | 1024    | 1+          | Maximum loaded SynthDef definitions.                                                                                  |
-| `maxWireBufs`           | 64      | 1+          | Wire buffers for internal UGen connections. Each uses `bufLength * 8` bytes.                                          |
-| `numAudioBusChannels`   | 128     | 1+          | Audio bus channels for real-time routing between synths.                                                               |
-| `numInputBusChannels`   | 2       | 0+          | Input bus channels from hardware. Actual channels used is `min(configured, hardware)`.                                |
-| `numOutputBusChannels`  | 2       | 1-128       | Output bus channels to hardware. Use values > 2 for surround or multi-output audio interfaces. When > 2 and `autoConnect` is true, sets `destination.channelInterpretation` to `'discrete'` to prevent automatic mixing. |
-| `numControlBusChannels` | 4096    | 1+          | Control bus channels for control-rate data sharing between synths.                                                     |
-| `bufLength`             | 128     | 128 (fixed) | Audio buffer length in samples. Fixed by the WebAudio API — cannot be changed.                                        |
-| `realTimeMemorySize`    | 8192    | 1+          | Real-time memory pool in KB for synthesis-time allocations (UGen memory, etc.).                                        |
-| `numRGens`              | 64      | 1+          | Random number generators. Each synth can use its own RNG for reproducible randomness.                                 |
-| `preferredSampleRate`   | 0       | 0, 8000-384000 | Preferred sample rate. `0` uses the AudioContext default (typically 48000).                                         |
-| `verbosity`             | 0       | 0-4         | Debug verbosity. 0 = quiet, 1 = errors, 2 = warnings, 3 = info, 4 = debug.                                           |
+The internal OscChannel used by the main thread. Advanced use only.
 
-## Core Methods
+###### Returns
 
-### `init()`
+[`OscChannel`](#oscchannel)
 
-Initialise the audio engine. Call this after a user interaction (e.g., button click) due to browser autoplay policies.
+##### ringBufferBase
 
-```javascript
-await supersonic.init();
-```
+###### Get Signature
 
-All configuration is passed to the [constructor](#constructor-options). Calling `init()` multiple times is safe - it returns immediately if already initialised, or returns the existing promise if initialisation is in progress.
+> **get** **ringBufferBase**(): `number`
 
-### `loadSynthDef(nameOrPath)`
+Ring buffer base offset in SharedArrayBuffer. Internal.
 
-Load a synthdef. Pass a name to use `synthdefBaseURL`, or provide a full path.
+###### Returns
 
-**Returns:** `Promise<{name: string, size: number}>` - The synthdef name and size in bytes.
+`number`
 
-```javascript
-// By name (uses synthdefBaseURL)
-const info = await supersonic.loadSynthDef("sonic-pi-beep");
-console.log(`Loaded ${info.name} (${info.size} bytes)`);
+##### sharedBuffer
 
-// By full path
-await supersonic.loadSynthDef("./custom/my-synth.scsyndef");
-```
+###### Get Signature
 
-### `loadSynthDefs(names)`
+> **get** **sharedBuffer**(): `SharedArrayBuffer`
 
-Load multiple synthdefs in parallel.
+The SharedArrayBuffer (SAB mode) or null (postMessage mode). Internal.
 
-**Returns:** `Promise<Object>` - A map of synthdef name to result object. Each result contains either `{success: true}` or `{success: false, error: string}`.
+###### Returns
 
-```javascript
-const results = await supersonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
+`SharedArrayBuffer`
 
-// Check results
-for (const [name, result] of Object.entries(results)) {
-  if (result.success) {
-    console.log(`Loaded ${name}`);
-  } else {
-    console.error(`Failed to load ${name}: ${result.error}`);
-  }
-}
-```
+#### Methods
 
-### `loadSample(bufnum, source, startFrame, numFrames)`
+##### cancelAll()
 
-Load a sample into a buffer. Accepts multiple source types:
+> **cancelAll**(): `void`
 
-- **String** - filename (uses `sampleBaseURL`) or full path/URL
-- **File/Blob** - browser File object from `<input type="file">`
-- **ArrayBuffer/TypedArray** - raw audio data
+Cancel all scheduled messages in the JS prescheduler.
 
-**Parameters:**
+###### Returns
 
-- `bufnum` - Buffer number (integer)
-- `source` - Sample source (string, File, Blob, ArrayBuffer, or TypedArray)
-- `startFrame` - Optional starting frame offset (integer, default: 0)
-- `numFrames` - Optional number of frames to load (integer, default: 0 = all frames)
+`void`
 
-```javascript
-// By name (uses sampleBaseURL)
-await supersonic.loadSample(0, "loop_amen.flac");
+##### cancelSession()
 
-// By full path/URL
-await supersonic.loadSample(0, "./custom/my-sample.wav");
+> **cancelSession**(`sessionId`): `void`
 
-// From user-selected file
-const file = document.querySelector('input[type="file"]').files[0];
-await supersonic.loadSample(0, file);
+Cancel all scheduled messages for a session.
 
-// From ArrayBuffer (e.g., fetched manually)
-const response = await fetch("./audio/sample.wav");
-const arrayBuffer = await response.arrayBuffer();
-await supersonic.loadSample(0, arrayBuffer);
+###### Parameters
 
-// Load partial sample (frames 1000-2000)
-await supersonic.loadSample(0, "long-sample.flac", 1000, 1000);
-```
+| Parameter   | Type     | Description       |
+| ----------- | -------- | ----------------- |
+| `sessionId` | `string` | Session to cancel |
 
-**Returns:** `Promise<{bufnum, hash, source, numFrames, numChannels, sampleRate, duration}>` — Buffer slot number and decoded audio metadata. The hash is a SHA-256 hex string — deterministic for the same audio content regardless of how it was loaded.
+###### Returns
 
-```javascript
-const result = await supersonic.loadSample(0, "kick.wav");
-console.log(result.hash);       // "a3f2b1c4..." (64-char hex string)
-console.log(result.duration);   // 0.92
-console.log(result.numChannels); // 2
-```
+`void`
 
-### `sampleInfo(source, startFrame, numFrames)`
+##### cancelSessionTag()
 
-Get sample metadata without allocating a buffer. Fetches, decodes, and analyses the audio, returning the same info that would appear in the `loadSample` result. No buffer slot is consumed and no OSC is sent to scsynth.
+> **cancelSessionTag**(`sessionId`, `runTag`): `void`
 
-Use this to inspect audio content or check for duplicates before loading.
+Cancel scheduled messages matching both a session and run tag.
 
-**Parameters:**
+###### Parameters
 
-- `source` - Sample source (string, File, Blob, ArrayBuffer, or TypedArray)
-- `startFrame` - Optional starting frame offset (default: 0)
-- `numFrames` - Optional number of frames (default: 0 = all)
+| Parameter   | Type     | Description                      |
+| ----------- | -------- | -------------------------------- |
+| `sessionId` | `string` | Session to match                 |
+| `runTag`    | `string` | Tag to match within that session |
 
-**Returns:** `Promise<{hash, source, numFrames, numChannels, sampleRate, duration}>`
+###### Returns
 
-```javascript
-// Inspect before loading
-const info = await supersonic.sampleInfo("kick.wav");
-console.log(info.duration, info.numChannels, info.sampleRate);
+`void`
 
-// Check for duplicates
-const loaded = supersonic.getLoadedBuffers();
-if (loaded.some(b => b.hash === info.hash)) {
-  console.log("Already loaded, skipping");
-} else {
-  await supersonic.loadSample(nextBufnum, "kick.wav");
-}
-```
+##### cancelTag()
 
-### `send(address, ...args)`
+> **cancelTag**(`runTag`): `void`
 
-Send an OSC message. Types are auto-detected from JavaScript values. Use `{ type, value }` wrappers to force a specific OSC type (e.g. `{ type: 'float', value: 440 }` to send a whole number as float32). See [`encodeMessage()`](#supersonicoscencodemessage) for the full type reference.
+Cancel all scheduled messages with the given run tag.
+Only affects messages in the JS prescheduler (not yet dispatched to WASM).
 
-Most commands are sent synchronously. Buffer allocation commands (`/b_alloc`, `/b_allocRead`, `/b_allocReadChannel`, `/b_allocFile`) are queued and processed in the background because they involve network fetches and audio decoding. Use `sync()` after buffer commands to ensure they complete before using the buffer.
+###### Parameters
 
-```javascript
-supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60, "amp", 0.5);
-supersonic.send("/n_free", 1000);
+| Parameter | Type     | Description   |
+| --------- | -------- | ------------- |
+| `runTag`  | `string` | Tag to cancel |
 
-// Buffer commands are processed in the background
-supersonic.send("/b_alloc", 0, 44100, 1);
-await supersonic.sync(); // waits for /b_alloc to complete
-```
+###### Returns
 
-### `sendOSC(oscBytes, options)`
+`void`
 
-Send pre-encoded OSC bytes. Useful if you're building OSC messages yourself. Sends bytes as-is without rewriting — use `send()` for buffer allocation commands so they get rewritten to `/b_allocPtr`.
+##### createOscChannel()
 
-```javascript
-const oscData = new Uint8Array([...]); // Your OSC bytes
-supersonic.sendOSC(oscData);
-```
+> **createOscChannel**(`options?`): [`OscChannel`](#oscchannel)
 
-### `sync(syncId)`
+Create an OscChannel for direct worker-to-worklet communication.
 
-Send a `/sync` command and wait for the `/synced` response. Use this to ensure all previous asynchronous commands (like `/d_recv` for synthdefs) have been processed by the server.
+The returned channel can be transferred to a Web Worker, allowing that
+worker to send OSC directly to the AudioWorklet without going through
+the main thread. Works in both SAB and postMessage modes.
 
-**Parameters:**
+The `blocking` option defaults to `true` for worker channels (sourceId !== 0)
+and `false` for main thread. Set to `false` for AudioWorkletProcessor use.
+In postMessage mode this has no effect.
 
-- `syncId` - Optional integer identifier (default: random). The server echoes this back in the `/synced` response.
+For AudioWorkletProcessor use, import from `'supersonic-scsynth/osc-channel'`
+which avoids DOM APIs unavailable in the worklet scope.
 
-**Returns:** `Promise<void>` - Resolves when the server responds, or rejects after 10 seconds.
+See docs/WORKERS.md for the full workers guide.
 
-```javascript
-// Load synthdefs then wait for them to be ready
-await supersonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-prophet"]);
-await supersonic.sync(); // Now safe to use the synthdefs
+###### Parameters
 
-// Use a specific sync ID for tracking
-await supersonic.sync(42);
-```
+| Parameter           | Type                                               | Description                                             |
+| ------------------- | -------------------------------------------------- | ------------------------------------------------------- |
+| `options?`          | { `blocking?`: `boolean`; `sourceId?`: `number`; } | Channel options                                         |
+| `options.blocking?` | `boolean`                                          | Whether sends block until the worklet reads the message |
+| `options.sourceId?` | `number`                                           | Numeric source ID (0 = main thread, 1+ = workers)       |
 
-### `purge()`
+###### Returns
 
-Flush all pending OSC messages from both the JS prescheduler and the WASM BundleScheduler. Returns a promise that resolves when both sides have confirmed the flush is complete.
+[`OscChannel`](#oscchannel)
 
-Unlike `cancelAll()` which only clears the JS prescheduler, this also clears bundles that have already been consumed from the ring buffer and are sitting in the WASM scheduler's priority queue. Uses a postMessage flag (not the ring buffer) to avoid the race condition where stale scheduled bundles would fire before a clear command could be read.
+###### Example
 
-Called internally by `resume()` to prevent stale messages from a previous session interfering with new work.
-
-**Returns:** `Promise<void>`
-
-```javascript
-// Clear everything before starting a new run
-await supersonic.purge();
-
-// Safe to send new events — pipeline is confirmed empty
-supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0, "note", 60);
-```
-
-### `cancelAll()`
-
-Cancel all pending events in the JS prescheduler. This clears future-timestamped bundles that haven't yet been sent to the worklet. Does **not** clear bundles already in the WASM scheduler — use [`purge()`](#purge) for that.
-
-```javascript
-supersonic.cancelAll();
-```
-
-### `shutdown()`
-
-Shut down the engine, releasing all resources but preserving event listeners. After shutdown, you can call `init()` again to restart. Emits the `shutdown` event before teardown begins.
-
-**Returns:** `Promise<void>`
-
-```javascript
-await supersonic.shutdown();
-// Engine is stopped, but listeners are preserved
-
-// Later, restart the engine
-await supersonic.init();
-```
-
-### `destroy()`
-
-Permanently destroy the instance, releasing all resources AND clearing all event listeners. After destroy, the instance cannot be reused - create a new SuperSonic instance instead. Emits `destroy` event, then `shutdown` event, then clears all listeners.
-
-**Returns:** `Promise<void>`
-
-```javascript
-await supersonic.destroy();
-// Instance is now unusable, no memory leaks
-```
-
-### `recover()`
-
-Smart recovery - tries `resume()` first, falls back to `reload()` if the worklet was killed. Use this when you don't know which recovery method is needed.
-
-**Returns:** `Promise<boolean>` - true if audio is running after recovery
-
-```javascript
-// Handle visibility change (e.g., user switches back to tab)
-document.addEventListener("visibilitychange", async () => {
-  if (!document.hidden) {
-    await supersonic.recover();
-  }
-});
-```
-
-### `suspend()`
-
-Suspend the AudioContext. The worklet remains loaded but audio processing stops. Use this to reduce CPU usage when audio is not needed (e.g., nothing is playing).
-
-The `audiocontext:suspended` event is emitted automatically by the AudioContext state change listener.
-
-**Returns:** `Promise<void>`
-
-```javascript
-// Suspend when idle
-await supersonic.suspend();
-// CPU drops to near-zero, worklet and memory preserved
-
-// Later, resume
-await supersonic.resume();
-```
-
-### `resume()`
-
-Resume after a suspend. Calls [`purge()`](#purge) internally to clear any stale scheduled messages from before the suspend, then resumes the AudioContext and resyncs timing. Memory and node tree are preserved. Does **not** emit `setup` event.
-
-Use when you know the worklet is still running (e.g., tab was briefly backgrounded, or after a manual `suspend()`).
-
-**Returns:** `Promise<boolean>` - true if worklet is running after resume
-
-**Events:** Emits `resumed` on success.
-
-```javascript
-// Try quick resume first
-if (await supersonic.resume()) {
-  console.log("Quick resume worked, nodes preserved");
-} else {
-  console.log("Worklet was killed, need full reload");
-  await supersonic.reload();
-}
-```
-
-### `reload()`
-
-Full reload - destroys and recreates the worklet/WASM, then restores synthdefs and buffers from cache. Emits `setup` event so you can rebuild groups, FX chains, and bus routing.
-
-Use when the worklet was killed (e.g., long background, browser reclaimed memory).
-
-**Returns:** `Promise<boolean>` - true if reload succeeded
-
-**Events:** Emits `reload:start`, then `setup`, then `reload:complete`.
-
-```javascript
-// Force full reload (e.g., after known memory issue)
-await supersonic.reload();
-// 'setup' event handlers have run, groups/FX rebuilt
-```
-
-### `reset()`
-
-Full teardown and re-initialize. Use this when you need a completely fresh state. Event listeners are preserved across reset, but all other state (synthdefs, buffers) is lost.
-
-**Returns:** `Promise<void>`
-
-```javascript
-// Need a completely fresh start
-await supersonic.reset();
-// Engine is now re-initialized and ready to use
-```
-
-## Events
-
-Subscribe to events with `on()`, which returns an unsubscribe function for easy cleanup.
-
-### `on(event, callback)`
-
-```javascript
-// Subscribe
-const unsubscribe = supersonic.on("message", (msg) => {
-  console.log("Received:", msg[0]);  // address
-});
-
-// Later, unsubscribe
-unsubscribe();
-```
-
-Multiple listeners can subscribe to the same event - each receives all events independently.
-
-```javascript
-// Both listeners receive all messages
-supersonic.on("message", (msg) => console.log("Listener A:", msg[0]));
-supersonic.on("message", (msg) => console.log("Listener B:", msg[0]));
-```
-
-### `off(event, callback)`
-
-Unsubscribe using the original callback reference. Alternative to using the unsubscribe function.
-
-```javascript
-const handler = (msg) => console.log(msg);
-supersonic.on("message", handler);
-
-// Later
-supersonic.off("message", handler);
-```
-
-### `once(event, callback)`
-
-Subscribe to an event once. The listener auto-unsubscribes after the first event. Returns an unsubscribe function (matching `on()`).
-
-```javascript
-supersonic.once("ready", ({ bootStats }) => {
-  console.log("Engine booted in", bootStats.initDuration.toFixed(2), "ms");
-});
-
-// Or cancel before it fires:
-const unsub = supersonic.once("message", handler);
-unsub(); // never fires
-```
-
-### Event: `setup`
-
-Emitted after init/recover completes, before `ready`. Async handlers are awaited. Use this for any persistent audio infrastructure that needs to exist on both initial boot and after recovery:
-
-- **Groups** - Node tree organization
-- **FX chains** - Reverb, filters, compressors
-- **Bus routing** - Synths that read/write to audio buses
-- **Persistent synths** - Always-on nodes like analyzers or mixers
-
-```javascript
-supersonic.on("setup", async () => {
-  // Create group structure
-  supersonic.send("/g_new", 100, 0, 0); // synths group
-  supersonic.send("/g_new", 101, 1, 0); // fx group (after synths)
-
-  // Create FX chain
-  supersonic.send("/s_new", "sonic-pi-fx_reverb", 2000, 0, 101, "in_bus", 20, "out_bus", 0, "mix", 0.3);
-
-  await supersonic.sync();
-});
-```
-
-**Why use `setup` instead of `ready`?**
-
-In `postMessage` mode, `recover()` destroys and recreates the WASM memory, so all nodes are lost. The `setup` event lets you rebuild consistently on both initial boot and after recovery. In `sab` mode, memory persists across recovery so this is less critical - but using `setup` keeps your code portable.
-
-### Event: `ready`
-
-Emitted when the engine is initialised and ready to use.
-
-```javascript
-supersonic.on("ready", ({ capabilities, bootStats }) => {
-  console.log("Capabilities:", capabilities);
-  console.log("Boot time:", bootStats.initDuration.toFixed(2), "ms");
-});
-```
-
-### Event: `error`
-
-Emitted when an error occurs.
-
-```javascript
-supersonic.on("error", (error) => {
-  console.error("SuperSonic error:", error.message);
-});
-```
-
-### Event: `message`
-
-Emitted when a parsed OSC message is received from scsynth.
-
-```javascript
-supersonic.on("message", (msg) => {
-  // msg is [address, ...args]
-  console.log("Address:", msg[0]);
-  console.log("Args:", msg.slice(1));
-});
-```
-
-### Event: `message:raw`
-
-Emitted with raw OSC data including the original bytes and timing information. Useful for logging and latency analysis.
-
-```javascript
-supersonic.on("message:raw", ({ oscData, sequence, timestamp, scheduledTime }) => {
-  const parsed = SuperSonic.osc.decode(oscData);
-  const relativeTime = (timestamp - supersonic.initTime).toFixed(2);
-  console.log(`[${sequence}] +${relativeTime}s`, parsed[0], parsed.slice(1));
-  if (scheduledTime && timestamp > scheduledTime) {
-    console.warn("Late by", (timestamp - scheduledTime).toFixed(4), "s");
-  }
-});
-```
-
-- `timestamp` — NTP seconds when the message was observed
-- `scheduledTime` — NTP seconds from bundle timetag, or `null` if not a bundle
-
-### Event: `message:sent`
-
-Emitted when an OSC message is sent to scsynth. Receives an object with the raw OSC data, source channel ID (0 = main thread, 1+ = workers), sequence number, and timing information.
-
-```javascript
-supersonic.on("message:sent", ({ oscData, sourceId, sequence, timestamp, scheduledTime }) => {
-  const decoded = SuperSonic.osc.decode(oscData);
-  const relativeTime = (timestamp - supersonic.initTime).toFixed(2);
-  console.log(`[${sequence}] +${relativeTime}s [src:${sourceId}]`, decoded[0]);
-});
-```
-
-- `timestamp` — NTP seconds when the message was written to the ring buffer
-- `scheduledTime` — NTP seconds from bundle timetag, or `null` if not a bundle
-
-### Event: `debug`
-
-Emitted with debug output from scsynth.
-
-```javascript
-supersonic.on("debug", (msg) => {
-  console.log("[scsynth]", msg.text);
-});
-```
-
-### Event: `shutdown`
-
-Emitted when the engine is shutting down. Fired by `shutdown()`, `reset()`, and `destroy()`. Use this to clean up application state that depends on SuperSonic.
-
-```javascript
-supersonic.on("shutdown", () => {
-  console.log("Engine shutting down, cleaning up...");
-  // Reset application state flags, stop loops, etc.
-});
-```
-
-### Event: `destroy`
-
-Emitted when the engine is being permanently destroyed (only fired by `destroy()`, not by `shutdown()` or `reset()`). This is your last chance to clean up before all listeners are cleared.
-
-```javascript
-supersonic.on("destroy", () => {
-  console.log("Engine being destroyed permanently");
-  // Final cleanup before instance becomes unusable
-});
-```
-
-### Event: `audiocontext:statechange`
-
-Emitted when the AudioContext state changes. The payload contains the new state.
-
-```javascript
-supersonic.on("audiocontext:statechange", ({ state }) => {
-  console.log("AudioContext state:", state);
-  // state is one of: 'running', 'suspended', 'interrupted', 'closed'
-});
-```
-
-### Event: `audiocontext:suspended`
-
-Emitted when the AudioContext is suspended. This typically happens when the browser tab is backgrounded or the system suspends audio. Use this to show a "restart" UI to the user.
-
-```javascript
-supersonic.on("audiocontext:suspended", () => {
-  console.log("Audio suspended - show restart button");
-  showRestartUI();
-});
-```
-
-### Event: `audiocontext:resumed`
-
-Emitted when the AudioContext resumes running after being suspended.
-
-```javascript
-supersonic.on("audiocontext:resumed", () => {
-  console.log("Audio resumed");
-  hideRestartUI();
-});
-```
-
-### Event: `audiocontext:interrupted`
-
-Emitted when the AudioContext is interrupted by the system (common on iOS when another app takes audio focus). Similar to `suspended` but triggered externally.
-
-```javascript
-supersonic.on("audiocontext:interrupted", () => {
-  console.log("Audio interrupted by system");
-  showRestartUI();
-});
-```
-
-### `removeAllListeners(event?)`
-
-Remove all listeners for an event, or all listeners entirely. Useful for cleanup.
-
-```javascript
-// Remove all 'message' listeners
-supersonic.removeAllListeners("message");
-
-// Remove ALL listeners (use with caution)
-supersonic.removeAllListeners();
-```
-
-## Properties
-
-### `initialized` (read-only)
-
-Whether the engine has been initialised.
-
-```javascript
-if (supersonic.initialized) {
-  supersonic.send('/s_new', ...);
-}
-```
-
-### `initializing` (read-only)
-
-Whether the engine is currently initialising. Useful for showing loading states in your UI.
-
-```javascript
-if (supersonic.initializing) {
-  console.log("Engine is booting...");
-} else if (supersonic.initialized) {
-  console.log("Engine is ready");
-} else {
-  console.log("Engine not started");
-}
-```
-
-### `audioContext` (read-only)
-
-The underlying Web Audio AudioContext.
-
-```javascript
-const ctx = supersonic.audioContext;
-console.log("Sample rate:", ctx.sampleRate);
-```
-
-### `initTime` (read-only)
-
-NTP time (seconds since 1900) when the AudioContext started. Use to compute relative times from event timestamps.
-
-```javascript
-supersonic.on("message:raw", ({ timestamp }) => {
-  const relativeSeconds = timestamp - supersonic.initTime;
-  console.log(`+${relativeSeconds.toFixed(2)}s`);
-});
-```
-
-### `node` (read-only)
-
-A wrapper around the AudioWorkletNode that provides a clean interface for Web Audio connections.
-
-**Properties:**
-
-| Property          | Description                                         |
-| ----------------- | --------------------------------------------------- |
-| `input`           | The AudioWorkletNode to connect external sources to |
-| `context`         | The AudioContext (same as `audioContext`)           |
-| `numberOfInputs`  | Number of input channels (from scsynth config)      |
-| `numberOfOutputs` | Number of output channels (from scsynth config)     |
-| `channelCount`    | Channel count of the worklet node                   |
-
-**Methods:**
-
-| Method                     | Description                                           |
-| -------------------------- | ----------------------------------------------------- |
-| `connect(destination)`     | Connect SuperSonic's output to another AudioNode      |
-| `disconnect(destination?)` | Disconnect from a destination (or all if no argument) |
-
-**Connecting external audio sources (e.g., microphone):**
-
-```javascript
-// Get mic stream
-const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-const micSource = audioContext.createMediaStreamSource(stream);
-
-// Connect mic to SuperSonic input
-micSource.connect(supersonic.node.input);
-
-// Audio flows through scsynth's input buses (bus 2+ by default)
-// Use In.ar(2) in a synthdef to read the mic signal
-```
-
-**Connecting SuperSonic output to other nodes:**
-
-```javascript
-// Create an analyser for visualization
-const analyser = supersonic.audioContext.createAnalyser();
-
-// Connect SuperSonic output to analyser (in addition to speakers)
-supersonic.node.connect(analyser);
-
-// Read frequency data
-const data = new Uint8Array(analyser.frequencyBinCount);
-analyser.getByteFrequencyData(data);
-```
-
-**Note:** The `input` property exposes the raw AudioWorkletNode for connecting external sources.
-
-### `loadedSynthDefs` (read-only)
-
-A `Map` of synthdef names to their binary data. A synthdef appears here after it's been sent to scsynth via `/d_recv` or `loadSynthDef()`. Removed when freed via `/d_free` or `/d_freeAll`. The binary data is cached so synthdefs can be restored after a `reload()`.
-
-```javascript
-if (supersonic.loadedSynthDefs.has("sonic-pi-beep")) {
-  supersonic.send("/s_new", "sonic-pi-beep", -1, 0, 0);
-}
-
-// See all loaded synthdef names
-console.log("Loaded:", [...supersonic.loadedSynthDefs.keys()]);
-```
-
-### `bootStats` (read-only)
-
-Timing information from engine initialisation.
-
-```javascript
-const stats = supersonic.bootStats;
-console.log(`Engine booted in ${stats.initDuration.toFixed(2)}ms`);
-```
-
-**Properties:**
-
-- `initStartTime` - When `init()` was called (`performance.now()` timestamp)
-- `initDuration` - How long initialisation took (milliseconds)
-
-## Node Tree API
-
-The node tree gives you a live view of all running synths and groups - useful for building visualizations that update at 60fps without any OSC round-trip latency.
-
-### `getTree()`
-
-Returns a hierarchical snapshot of the scsynth node tree - all synths and groups currently running, organized as a nested tree structure.
-
-```javascript
-const tree = supersonic.getTree();
-```
-
-**Returns:**
-
-```javascript
-{
-  version: 42,          // Increments on every change
-  nodeCount: 5,         // Nodes in mirror
-  droppedCount: 0,      // Nodes not mirrored due to overflow
-  root: {
-    id: 0,
-    type: "group",      // "group" or "synth"
-    defName: "",
-    children: [
-      {
-        id: 100,
-        type: "synth",
-        defName: "sonic-pi-beep",
-        children: []
-      },
-      {
-        id: 101,
-        type: "group",
-        defName: "",
-        children: [
-          {
-            id: 200,
-            type: "synth",
-            defName: "sonic-pi-fx_reverb",
-            children: []
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-**Polling for changes:**
-
-Use `version` to skip re-renders when nothing changed:
-
-```javascript
-let lastVersion = 0;
-
-function animate() {
-  const tree = supersonic.getTree();
-  if (tree.version !== lastVersion) {
-    lastVersion = tree.version;
-    updateVisualization(tree.root);
-  }
-  requestAnimationFrame(animate);
-}
-animate();
-```
-
-**Example: List all running synths**
-
-```javascript
-function collectSynths(node) {
-  const synths = [];
-  if (node.type === 'synth') synths.push(node);
-  for (const child of node.children) {
-    synths.push(...collectSynths(child));
-  }
-  return synths;
-}
-
-const tree = supersonic.getTree();
-for (const synth of collectSynths(tree.root)) {
-  console.log(`Synth ${synth.id}: ${synth.defName}`);
-}
-```
-
-**`getTree()` vs `getRawTree()` vs `/g_queryTree`**
-
-|                | `getTree()`                      | `getRawTree()`                 | `/g_queryTree`             |
-| -------------- | -------------------------------- | ------------------------------ | -------------------------- |
-| Latency        | Instant (reads shared memory)    | Instant (reads shared memory)  | ~40ms round-trip           |
-| Format         | Hierarchical (nested children)   | Flat array with link pointers  | Nested in message args     |
-| Control values | Not included                     | Not included                   | Optional (flag=1)          |
-| Use case       | Tree visualization, UI rendering | Debugging, low-level access    | One-off queries, debugging |
-
-`getTree()` returns node structure only - not control values. For control values, use `/g_queryTree` with flag=1 or `/n_get` for specific nodes. See [scsynth Command Reference](SCSYNTH_COMMAND_REFERENCE.md).
-
-**Mirror capacity and overflow**
-
-The node tree mirror has a capacity of 1024 nodes by default. If the actual scsynth node tree grows beyond this limit, excess nodes won't be visible to JavaScript but audio continues working normally. The `droppedCount` field indicates how many nodes were not mirrored due to this overflow - if it's greater than zero, you're seeing a partial view of the tree.
-
-## Metrics API
-
-For monitoring performance and debugging. See [Metrics](METRICS.md) for the full list of available metrics, or use the [`<supersonic-metrics>` web component](METRICS_COMPONENT.md) for a ready-made UI.
-
-### `getMetrics()`
-
-Get a metrics snapshot as a JavaScript object. This is a cheap local memory read in both SAB and postMessage modes - no IPC or copying occurs. Safe to call from `requestAnimationFrame` or high-frequency timers.
-
-```javascript
-const metrics = supersonic.getMetrics();
-console.log("Messages processed:", metrics.scsynthMessagesProcessed);
-```
-
-### `getMetricsArray()`
-
-Get metrics as a flat `Uint32Array`. Returns the same array reference every call — values are updated in-place, making this zero-allocation. Use `getMetricsSchema().metrics` for the offset of each metric.
-
-```javascript
-const arr = supersonic.getMetricsArray();
-const schema = SuperSonic.getMetricsSchema();
-console.log("Processed:", arr[schema.metrics.scsynthMessagesProcessed.offset]);
-```
-
-This is what the `<supersonic-metrics>` web component uses internally for its delta-diffed rendering loop.
-
-### `SuperSonic.getMetricsSchema()` (static) {#getmetricsschema}
-
-Returns the schema describing all metrics, their array offsets, UI layout, and sentinel values.
-
-```javascript
-const schema = SuperSonic.getMetricsSchema();
-// schema.metrics   — { key: { offset, type, unit, description }, ... }
-// schema.layout    — { panels: [...] } for rendering
-// schema.sentinels — { HEADROOM_UNSET: 0xFFFFFFFF }
-```
-
-See [Metrics Component](METRICS_COMPONENT.md) for full schema documentation.
-
-## Advanced
-
-### `getInfo()`
-
-Returns static configuration from boot time - things that don't change after initialisation.
-
-```javascript
-const info = supersonic.getInfo();
-console.log("Sample rate:", info.sampleRate);
-console.log("Boot time:", info.bootTimeMs, "ms");
-```
-
-Returns an object containing:
-
-- `sampleRate` - Audio sample rate (e.g., 48000)
-- `numBuffers` - Maximum number of audio buffers
-- `totalMemory` - Total memory allocated (bytes)
-- `wasmHeapSize` - WASM heap size (bytes)
-- `bufferPoolSize` - Buffer pool size (bytes)
-- `bootTimeMs` - Engine initialisation time (ms)
-- `capabilities` - Browser capabilities object
-- `version` - Engine version string (may be null if not yet received)
-
-### `SuperSonic.osc.encodeMessage(address, args)`
-
-Encode an OSC message into binary format. Types are inferred automatically from JavaScript values. Strings are encoded as UTF-8.
-
-```javascript
-const bytes = SuperSonic.osc.encodeMessage("/s_new", [
-  "sonic-pi-beep",  // string
-  -1,               // integer
-  0,                // integer
-  0,                // integer
-]);
-// bytes is a Uint8Array
-```
-
-**Auto-detected types:**
-
-| JavaScript value | OSC type |
-|---|---|
-| Integer number (e.g. `42`) | int32 |
-| Non-integer number (e.g. `0.5`) | float32 |
-| String | string (UTF-8) |
-| `true` / `false` | bool |
-| `Uint8Array` / `ArrayBuffer` | blob |
-
-**Tagged type wrappers** — use `{ type, value }` objects to force a specific OSC type:
-
-| Tagged wrapper | OSC type | Use case |
-|---|---|---|
-| `{ type: 'float', value: 440 }` | float32 | Force float for whole numbers |
-| `{ type: 'int', value: 42 }` | int32 | Explicit integer |
-| `{ type: 'string', value: 'hello' }` | string | Explicit string |
-| `{ type: 'blob', value: bytes }` | blob | Explicit blob |
-| `{ type: 'bool', value: true }` | bool | Explicit boolean |
-| `{ type: 'double', value: 3.14159 }` | float64 | Double precision |
-| `{ type: 'int64', value: 9007199254740992n }` | int64 | 64-bit integer |
-| `{ type: 'timetag', value: ntpTime }` | timetag | NTP timestamp as argument |
-
-```javascript
-// Force 440 as float32 (without the wrapper, whole numbers encode as int32)
-SuperSonic.osc.encodeMessage("/n_set", [1001, "freq", { type: 'float', value: 440 }]);
-```
-
-### `SuperSonic.osc.encodeBundle(timeTag, packets)`
-
-Encode an OSC bundle with a timestamp and multiple messages.
-
-**TimeTag formats:**
-
-| Value | Meaning |
-|---|---|
-| `1`, `null`, `undefined` | Execute immediately |
-| `[seconds, fraction]` | NTP uint32 pair — preserves full 64-bit precision |
-| Number (e.g. `3913056000.5`) | NTP float — seconds since 1900 (fractional part encoded) |
-
-A `[seconds, fraction]` array must have exactly 2 elements (throws `Error` otherwise). Non-number / non-array values throw `TypeError`. Numbers between 1 and `NTP_EPOCH_OFFSET` trigger a `console.warn` because they look like Unix timestamps.
-
-Each packet is an array: `[address, ...args]`.
-
-```javascript
-// Immediate
-SuperSonic.osc.encodeBundle(1, [["/notify", 1]]);
-
-// NTP float
-const ntpTime = SuperSonic.osc.ntpNow();
-SuperSonic.osc.encodeBundle(ntpTime, [
-  ["/s_new", "sonic-pi-beep", 1001, 0, 0],
-]);
-
-// NTP uint32 pair (full precision, no float loss)
-SuperSonic.osc.encodeBundle([3913056000, 2147483648], [
-  ["/s_new", "sonic-pi-beep", 1001, 0, 0],
-  ["/n_set", 1001, "amp", 0.5],
-]);
-```
-
-### `SuperSonic.osc.decode(data)`
-
-Decode binary OSC data. Messages decode to `[address, ...args]` arrays. Bundles decode to `{ timeTag, packets }` objects where each packet is itself decoded.
-
-**Parameters:**
-
-- `data` - `Uint8Array` or `ArrayBuffer` containing OSC data
-
-```javascript
-// Messages
-const msg = SuperSonic.osc.decode(oscBytes);
-// msg = ["/s_new", "sonic-pi-beep", 1001, 0, 0]
-console.log(msg[0], msg.slice(1));  // address, args
-
-// Bundles
-const bundle = SuperSonic.osc.decode(bundleBytes);
-// bundle = { timeTag: 3913056000.5, packets: [["/s_new", ...], ["/n_set", ...]] }
-```
-
-### `SuperSonic.osc.encodeSingleBundle(timeTag, address, args)`
-
-Encode a bundle containing a single message. This is an optimised path that avoids wrapping the message in an array.
-
-**Parameters:**
-
-- `timeTag` - TimeTag in any accepted format (see [`encodeBundle`](#supersonicoscencodebundletimetag-packets))
-- `address` - OSC address string (e.g. `"/s_new"`)
-- `args` - Array of arguments
-
-```javascript
-const bytes = SuperSonic.osc.encodeSingleBundle(
-  [sec, frac],
-  "/s_new",
-  ["sonic-pi-beep", 1001, 0, 0]
+```ts
+const channel = sonic.createOscChannel();
+myWorker.postMessage(
+  { channel: channel.transferable },
+  channel.transferList,
 );
 ```
 
-### `SuperSonic.osc.readTimetag(bundleData)`
+##### destroy()
 
-Read the NTP timetag from raw bundle bytes without decoding the entire packet. Returns `{ ntpSeconds, ntpFraction }` or `null` if data is too short.
+> **destroy**(): `Promise`<`void`>
 
-**Parameters:**
+Destroy the engine completely. The instance cannot be re-used.
 
-- `bundleData` - `Uint8Array` of at least 16 bytes (the `#bundle\0` header + 8-byte timetag)
+Calls [shutdown](#shutdown) then clears the WASM cache and all event listeners.
+Emits `'destroy'`.
 
-```javascript
-const bytes = SuperSonic.osc.encodeBundle([sec, frac], packets);
-const { ntpSeconds, ntpFraction } = SuperSonic.osc.readTimetag(bytes);
+###### Returns
+
+`Promise`<`void`>
+
+##### getCaptureFrames()
+
+> **getCaptureFrames**(): `number`
+
+Get number of audio frames captured so far.
+
+###### Returns
+
+`number`
+
+##### getInfo()
+
+> **getInfo**(): [`SuperSonicInfo`](#supersonicinfo)
+
+Get engine info: sample rate, memory layout, capabilities, and version.
+
+###### Returns
+
+[`SuperSonicInfo`](#supersonicinfo)
+
+###### Example
+
+```ts
+const info = sonic.getInfo();
+console.log(`Sample rate: ${info.sampleRate}Hz`);
+console.log(`Boot time: ${info.bootTimeMs}ms`);
+console.log(`Version: ${info.version}`);
 ```
 
-### `SuperSonic.osc.ntpNow()`
+##### getLoadedBuffers()
 
-Get the current time as NTP seconds (seconds since 1900-01-01). Derived from `performance.timeOrigin + performance.now()`.
+> **getLoadedBuffers**(): [`LoadedBufferInfo`](#loadedbufferinfo)\[]
 
-```javascript
-const ntpTime = SuperSonic.osc.ntpNow();
-SuperSonic.osc.encodeBundle(ntpTime + 0.5, [/* ... */]);
+Get info about all loaded audio buffers.
+
+###### Returns
+
+[`LoadedBufferInfo`](#loadedbufferinfo)\[]
+
+###### Example
+
+```ts
+const buffers = sonic.getLoadedBuffers();
+for (const buf of buffers) {
+  console.log(`Buffer ${buf.bufnum}: ${buf.duration.toFixed(1)}s, ${buf.source}`);
+}
 ```
 
-### `SuperSonic.osc.NTP_EPOCH_OFFSET`
+##### getMaxCaptureDuration()
 
-Constant: seconds between the Unix epoch (1970) and the NTP epoch (1900). Value: `2208988800`.
+> **getMaxCaptureDuration**(): `number`
 
-```javascript
-const unixSeconds = Date.now() / 1000;
-const ntpSeconds = unixSeconds + SuperSonic.osc.NTP_EPOCH_OFFSET;
+Get maximum capture duration in seconds.
+
+###### Returns
+
+`number`
+
+##### getMetrics()
+
+> **getMetrics**(): [`SuperSonicMetrics`](#supersonicmetrics)
+
+Get current metrics as a named object.
+
+This is a cheap local memory read in both SAB and postMessage modes — no IPC
+or copying. Safe to call from `requestAnimationFrame`.
+
+See docs/METRICS.md for the full metrics guide.
+
+###### Returns
+
+[`SuperSonicMetrics`](#supersonicmetrics)
+
+###### Example
+
+```ts
+const m = sonic.getMetrics();
+console.log(`Messages sent: ${m.oscOutMessagesSent}`);
+console.log(`Scheduler depth: ${m.scsynthSchedulerDepth}`);
 ```
 
-### `createOscChannel(options?)`
+##### getMetricsArray()
 
-Create an `OscChannel` for sending OSC from a Web Worker or AudioWorkletProcessor directly to the AudioWorklet, bypassing the main thread. Useful for high-frequency control or offloading work.
+> **getMetricsArray**(): `Uint32Array`
 
-**Options:**
+Get metrics as a flat Uint32Array for zero-allocation reading.
 
-| Option     | Type    | Description |
-|------------|---------|-------------|
-| `sourceId` | number  | Numeric source ID. `0` = main thread (default), `1+` = workers. Auto-assigned from an incrementing counter if omitted. |
-| `blocking` | boolean | SAB mode only. Whether the channel can use `Atomics.wait()` for guaranteed ring buffer delivery. Default: `true` for worker channels (`sourceId !== 0`), `false` for main thread. Set to `false` when using inside an `AudioWorkletProcessor`. In postMessage mode this option has no effect. |
+Returns the same array reference every call — values are updated in-place.
+Use [SuperSonic.getMetricsSchema](#getmetricsschema) for offset mappings.
 
-```javascript
-const channel = supersonic.createOscChannel();
-myWorker.postMessage({ channel: channel.transferable }, channel.transferList);
+###### Returns
+
+`Uint32Array`
+
+###### Example
+
+```ts
+const schema = SuperSonic.getMetricsSchema();
+const arr = sonic.getMetricsArray();
+const sent = arr[schema.metrics.oscOutMessagesSent.offset];
 ```
 
-In a Web Worker:
-```javascript
-import { OscChannel } from 'supersonic-scsynth';
-const channel = OscChannel.fromTransferable(event.data.channel);
-channel.send(oscBytes);  // Send directly to AudioWorklet
+##### getRawTree()
+
+> **getRawTree**(): [`RawTree`](#rawtree)
+
+Get the node tree in flat format with linkage pointers.
+
+More efficient than [getTree](#gettree) for serialization or custom rendering.
+
+###### Returns
+
+[`RawTree`](#rawtree)
+
+##### getSnapshot()
+
+> **getSnapshot**(): [`Snapshot`](#snapshot)
+
+Get a diagnostic snapshot with metrics, node tree, and memory info.
+
+Useful for capturing state for bug reports or debugging timing issues.
+
+###### Returns
+
+[`Snapshot`](#snapshot)
+
+##### getTree()
+
+> **getTree**(): [`Tree`](#tree)
+
+Get the node tree in hierarchical format.
+
+The mirror has a default capacity of 1024 nodes. If exceeded,
+`droppedCount` will be non-zero and the tree may be incomplete,
+but audio continues normally.
+
+###### Returns
+
+[`Tree`](#tree)
+
+###### Example
+
+```ts
+const tree = sonic.getTree();
+function printTree(node, indent = 0) {
+  const prefix = '  '.repeat(indent);
+  const label = node.type === 'synth' ? node.defName : 'group';
+  console.log(`${prefix}[${node.id}] ${label}`);
+  for (const child of node.children) printTree(child, indent + 1);
+}
+printTree(tree.root);
 ```
 
-For AudioWorklet use, import from the AudioWorklet-safe entry point (`supersonic-scsynth/osc-channel`) which avoids `TextDecoder`, `Worker`, and DOM APIs. See [Workers Guide](WORKERS.md#using-oscchannel-in-an-audioworklet) for details.
+##### init()
 
-For detailed usage including multiple workers, see [Workers Guide](WORKERS.md).
+> **init**(): `Promise`<`void`>
 
-## OSC Commands
+Initialise the engine.
 
-SuperSonic speaks the SuperCollider Server protocol. You control the audio engine by sending OSC messages via `send()`.
+Loads the WASM binary, creates the AudioContext and AudioWorklet,
+starts IO workers, and syncs timing. Emits `'setup'` then `'ready'`
+when complete.
 
-For the full list of supported commands, see the [scsynth Command Reference](SCSYNTH_COMMAND_REFERENCE.md).
+Safe to call multiple times — subsequent calls are no-ops.
+Must be called from a user gesture (click/tap) due to browser autoplay policies.
+
+###### Returns
+
+`Promise`<`void`>
+
+###### Throws
+
+If required browser features are missing or WASM fails to load.
+
+###### Example
+
+```ts
+await sonic.init();
+// Engine is now ready to send/receive OSC
+```
+
+##### isCaptureEnabled()
+
+> **isCaptureEnabled**(): `boolean`
+
+Check if audio capture is currently enabled.
+
+###### Returns
+
+`boolean`
+
+##### loadSample()
+
+> **loadSample**(`bufnum`, `source`, `startFrame?`, `numFrames?`): `Promise`<[`LoadSampleResult`](#loadsampleresult)>
+
+Load an audio sample into a scsynth buffer slot.
+
+Decodes the audio file (WAV, AIFF, etc.) and copies the samples into
+the WASM buffer pool. The buffer is then available for use with `PlayBuf`,
+`BufRd`, etc.
+
+###### Parameters
+
+| Parameter     | Type                                                                        | Description                                 |
+| ------------- | --------------------------------------------------------------------------- | ------------------------------------------- |
+| `bufnum`      | `number`                                                                    | Buffer slot number (0 to numBuffers-1)      |
+| `source`      | `string` \| `ArrayBuffer` \| `ArrayBufferView`<`ArrayBufferLike`> \| `Blob` | Sample path/URL, raw bytes, or File/Blob    |
+| `startFrame?` | `number`                                                                    | First frame to read (default: 0)            |
+| `numFrames?`  | `number`                                                                    | Number of frames to read (default: 0 = all) |
+
+###### Returns
+
+`Promise`<[`LoadSampleResult`](#loadsampleresult)>
+
+Buffer info including frame count, channels, and sample rate
+
+###### Example
+
+```ts
+// Load from URL:
+await sonic.loadSample(0, '/samples/kick.wav');
+
+// Use in a synth:
+await sonic.send('/s_new', 'sampler', 1001, 0, 1, 'bufnum', 0);
+```
+
+##### loadSynthDef()
+
+> **loadSynthDef**(`source`): `Promise`<[`LoadSynthDefResult`](#loadsynthdefresult)>
+
+Load a SynthDef into scsynth.
+
+Accepts multiple source types:
+
+* **Name string** — fetched from `synthdefBaseURL` (e.g. `'beep'` → `synthdefBaseURL/beep.scsyndef`)
+* **Path/URL string** — fetched directly (must contain `/` or `://`)
+* **ArrayBuffer / Uint8Array** — raw synthdef bytes
+* **File / Blob** — e.g. from a file input
+
+###### Parameters
+
+| Parameter | Type                                                                        | Description                                      |
+| --------- | --------------------------------------------------------------------------- | ------------------------------------------------ |
+| `source`  | `string` \| `ArrayBuffer` \| `ArrayBufferView`<`ArrayBufferLike`> \| `Blob` | SynthDef name, path/URL, raw bytes, or File/Blob |
+
+###### Returns
+
+`Promise`<[`LoadSynthDefResult`](#loadsynthdefresult)>
+
+The extracted name and byte size
+
+###### Throws
+
+If the source type is invalid or the synthdef can't be parsed
+
+###### Example
+
+```ts
+// By name (uses synthdefBaseURL):
+await sonic.loadSynthDef('beep');
+
+// By URL:
+await sonic.loadSynthDef('/assets/synthdefs/pad.scsyndef');
+
+// From raw bytes:
+const bytes = await fetch('/my-synth.scsyndef').then(r => r.arrayBuffer());
+await sonic.loadSynthDef(bytes);
+
+// From file input:
+fileInput.onchange = async (e) => {
+  await sonic.loadSynthDef(e.target.files[0]);
+};
+```
+
+##### loadSynthDefs()
+
+> **loadSynthDefs**(`names`): `Promise`<`Record`<`string`, { `error?`: `string`; `success`: `boolean`; }>>
+
+Load multiple SynthDefs by name in parallel.
+
+###### Parameters
+
+| Parameter | Type        | Description             |
+| --------- | ----------- | ----------------------- |
+| `names`   | `string`\[] | Array of synthdef names |
+
+###### Returns
+
+`Promise`<`Record`<`string`, { `error?`: `string`; `success`: `boolean`; }>>
+
+Object mapping each name to `{ success: true }` or `{ success: false, error: string }`
+
+###### Example
+
+```ts
+const results = await sonic.loadSynthDefs(['beep', 'pad', 'kick']);
+if (!results.kick.success) console.error(results.kick.error);
+```
+
+##### off()
+
+> **off**<`E`>(`event`, `callback`): `this`
+
+Unsubscribe from an event.
+
+###### Type Parameters
+
+| Type Parameter                                                  |
+| --------------------------------------------------------------- |
+| `E` *extends* keyof [`SuperSonicEventMap`](#supersoniceventmap) |
+
+###### Parameters
+
+| Parameter  | Type                                              | Description                                     |
+| ---------- | ------------------------------------------------- | ----------------------------------------------- |
+| `event`    | `E`                                               | Event name                                      |
+| `callback` | [`SuperSonicEventMap`](#supersoniceventmap)\[`E`] | The same function reference passed to [on](#on) |
+
+###### Returns
+
+`this`
+
+##### on()
+
+> **on**<`E`>(`event`, `callback`): () => `void`
+
+Subscribe to an event.
+
+###### Type Parameters
+
+| Type Parameter                                                  |
+| --------------------------------------------------------------- |
+| `E` *extends* keyof [`SuperSonicEventMap`](#supersoniceventmap) |
+
+###### Parameters
+
+| Parameter  | Type                                              | Description                               |
+| ---------- | ------------------------------------------------- | ----------------------------------------- |
+| `event`    | `E`                                               | Event name                                |
+| `callback` | [`SuperSonicEventMap`](#supersoniceventmap)\[`E`] | Handler function (type-checked per event) |
+
+###### Returns
+
+Unsubscribe function — call it to remove the listener
+
+> (): `void`
+
+###### Returns
+
+`void`
+
+###### Example
+
+```ts
+const unsub = sonic.on('message', (msg) => {
+  console.log(msg[0], msg.slice(1));
+});
+
+// Later:
+unsub();
+```
+
+##### once()
+
+> **once**<`E`>(`event`, `callback`): () => `void`
+
+Subscribe to an event once. The handler is automatically removed after the first call.
+Returns an unsubscribe function (matching [on](#on)).
+
+###### Type Parameters
+
+| Type Parameter                                                  |
+| --------------------------------------------------------------- |
+| `E` *extends* keyof [`SuperSonicEventMap`](#supersoniceventmap) |
+
+###### Parameters
+
+| Parameter  | Type                                              | Description      |
+| ---------- | ------------------------------------------------- | ---------------- |
+| `event`    | `E`                                               | Event name       |
+| `callback` | [`SuperSonicEventMap`](#supersoniceventmap)\[`E`] | Handler function |
+
+###### Returns
+
+Unsubscribe function — call it to remove the listener before it fires
+
+> (): `void`
+
+###### Returns
+
+`void`
+
+##### purge()
+
+> **purge**(): `Promise`<`void`>
+
+Flush all pending OSC messages from both the JS prescheduler and the
+WASM BundleScheduler.
+
+Unlike [cancelAll](#cancelall) which only clears the JS prescheduler, this also
+clears bundles already consumed from the ring buffer and sitting in the
+WASM scheduler's priority queue. Resolves when both are confirmed empty.
+
+Uses a postMessage flag (not the ring buffer) to signal the WASM scheduler,
+avoiding the race condition where stale scheduled bundles fire before a
+clear command is read from the ring buffer.
+
+###### Returns
+
+`Promise`<`void`>
+
+##### recover()
+
+> **recover**(): `Promise`<`boolean`>
+
+Smart recovery — tries a quick resume first, falls back to full reload.
+
+Use when you're not sure if the worklet is still alive (e.g. returning
+from a long background period).
+
+###### Returns
+
+`Promise`<`boolean`>
+
+true if audio is running after recovery
+
+###### Example
+
+```ts
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') sonic.recover();
+});
+```
+
+##### reload()
+
+> **reload**(): `Promise`<`boolean`>
+
+Full reload — destroys and recreates the worklet and WASM, then restores
+all previously loaded synthdefs and audio buffers.
+
+Emits `'setup'` so you can rebuild groups, FX chains, and bus routing.
+Use when the worklet was killed (e.g. long background, browser reclaimed memory).
+
+###### Returns
+
+`Promise`<`boolean`>
+
+true if reload succeeded
+
+##### removeAllListeners()
+
+> **removeAllListeners**(`event?`): `this`
+
+Remove all listeners for an event, or all listeners entirely.
+
+###### Parameters
+
+| Parameter | Type                                              | Description                              |
+| --------- | ------------------------------------------------- | ---------------------------------------- |
+| `event?`  | keyof [`SuperSonicEventMap`](#supersoniceventmap) | Event name, or omit to remove everything |
+
+###### Returns
+
+`this`
+
+#### Event Types
+
+| Event                                                           | Description                                                                                                                                                                                                           |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <a id="audiocontextinterrupted"></a> `audiocontext:interrupted` | AudioContext was interrupted (iOS-specific). Another app or system event took audio focus. Similar to suspended but triggered externally.                                                                             |
+| <a id="audiocontextresumed"></a> `audiocontext:resumed`         | AudioContext resumed to 'running' state.                                                                                                                                                                              |
+| <a id="audiocontextstatechange"></a> `audiocontext:statechange` | AudioContext state changed. State is one of: `'running'`, `'suspended'`, `'closed'`, or `'interrupted'`.                                                                                                              |
+| <a id="audiocontextsuspended"></a> `audiocontext:suspended`     | AudioContext was suspended (e.g. tab backgrounded, autoplay policy, iOS audio interruption). Show a restart UI and call `recover()` when the user interacts.                                                          |
+| <a id="debug"></a> `debug`                                      | Debug text output from scsynth (e.g. synthdef compilation messages).                                                                                                                                                  |
+| <a id="destroy-1"></a> `destroy`                                | Engine has been destroyed. Only fired by `destroy()`, not by `shutdown()` or `reset()`. Last chance to clean up before all listeners are cleared.                                                                     |
+| <a id="error"></a> `error`                                      | Error from any component (worklet, transport, workers).                                                                                                                                                               |
+| <a id="loadingcomplete"></a> `loading:complete`                 | An asset finished loading. Size is in bytes.                                                                                                                                                                          |
+| <a id="loadingstart"></a> `loading:start`                       | An asset started loading. Type is `'wasm'`, `'synthdef'`, or `'sample'`.                                                                                                                                              |
+| <a id="message"></a> `message`                                  | Decoded OSC message received from scsynth. Messages are plain arrays: `[address, ...args]`.                                                                                                                           |
+| <a id="messageraw"></a> `message:raw`                           | Raw OSC bytes received from scsynth (before decoding). Includes NTP timestamps for timing analysis.                                                                                                                   |
+| <a id="messagesent"></a> `message:sent`                         | Fired when an OSC message is sent to scsynth. Includes source worker ID, sequence number, and NTP timestamps.                                                                                                         |
+| <a id="ready"></a> `ready`                                      | Fired when the engine is fully booted and ready to receive messages. Payload includes browser capabilities and boot timing.                                                                                           |
+| <a id="reloadcomplete"></a> `reload:complete`                   | Full reload completed.                                                                                                                                                                                                |
+| <a id="reloadstart"></a> `reload:start`                         | Full reload started (worklet and WASM will be recreated).                                                                                                                                                             |
+| <a id="resumed"></a> `resumed`                                  | Audio resumed after a suspend (AudioContext was re-started). Emitted after `resume()` succeeds.                                                                                                                       |
+| <a id="setup"></a> `setup`                                      | Fired after init completes, before `'ready'`. Use for setting up groups, FX chains, and bus routing. Can be async — init waits for all setup handlers to resolve. Also fires after `recover()` triggers a `reload()`. |
+| <a id="shutdown-1"></a> `shutdown`                              | Engine is shutting down. Fired by `shutdown()`, `reset()`, and `destroy()`.                                                                                                                                           |
+
+##### reset()
+
+> **reset**(): `Promise`<`void`>
+
+Shutdown and immediately re-initialise.
+
+Equivalent to `await sonic.shutdown(); await sonic.init();`
+
+###### Returns
+
+`Promise`<`void`>
+
+##### resume()
+
+> **resume**(): `Promise`<`boolean`>
+
+Quick resume — calls [purge](#purge) to flush stale messages, resumes
+AudioContext, and resyncs timing.
+
+Memory, node tree, and loaded synthdefs are preserved. Does not emit `'setup'`.
+Use when you know the worklet is still running (e.g. tab was briefly backgrounded).
+
+###### Returns
+
+`Promise`<`boolean`>
+
+true if the worklet is running after resume
+
+##### sampleInfo()
+
+> **sampleInfo**(`source`, `startFrame?`, `numFrames?`): `Promise`<[`SampleInfo`](#sampleinfo-1)>
+
+Get sample metadata (including content hash) without allocating a buffer.
+
+Fetches, decodes, and hashes the audio, returning the same info that
+would appear in the [loadSample](#loadsample) result if the content were loaded.
+No buffer slot is consumed and no OSC is sent to scsynth.
+
+Use this to inspect content or check for duplicates before loading.
+
+###### Parameters
+
+| Parameter     | Type                                                                        | Description                                 |
+| ------------- | --------------------------------------------------------------------------- | ------------------------------------------- |
+| `source`      | `string` \| `ArrayBuffer` \| `ArrayBufferView`<`ArrayBufferLike`> \| `Blob` | Sample path/URL, raw bytes, or File/Blob    |
+| `startFrame?` | `number`                                                                    | First frame to read (default: 0)            |
+| `numFrames?`  | `number`                                                                    | Number of frames to read (default: 0 = all) |
+
+###### Returns
+
+`Promise`<[`SampleInfo`](#sampleinfo-1)>
+
+Sample metadata including hash, frame count, channels, sample rate, and duration
+
+###### Example
+
+```ts
+const info = await sonic.sampleInfo('kick.wav');
+console.log(info.hash, info.duration, info.numChannels);
+
+const loaded = sonic.getLoadedBuffers();
+if (loaded.some(b => b.hash === info.hash)) {
+  console.log('Already loaded');
+}
+```
+
+##### send()
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `never`
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `"/d_load"`            |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`never`
+
+###### Deprecated
+
+Use loadSynthDef() or send('/d\_recv', bytes) instead. Filesystem access is not available in the browser.
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `never`
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `"/d_loadDir"`         |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`never`
+
+###### Deprecated
+
+Use loadSynthDef() or send('/d\_recv', bytes) instead. Filesystem access is not available in the browser.
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `never`
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `"/b_read"`            |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`never`
+
+###### Deprecated
+
+Use loadSample() instead. Filesystem access is not available in the browser.
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `never`
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `"/b_readChannel"`     |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`never`
+
+###### Deprecated
+
+Use loadSample() instead. Filesystem access is not available in the browser.
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `never`
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `"/b_write"`           |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`never`
+
+###### Deprecated
+
+File writing is not available in the browser.
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `never`
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `"/b_close"`           |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`never`
+
+###### Deprecated
+
+File writing is not available in the browser.
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `never`
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `"/clearSched"`        |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`never`
+
+###### Deprecated
+
+Use purge() to clear both the JS prescheduler and WASM scheduler.
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `never`
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `"/error"`             |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`never`
+
+###### Deprecated
+
+SuperSonic always enables error notifications so you never miss a /fail reply.
+
+###### Call Signature
+
+> **send**(`address`): `void`
+
+Query server status. Replies with `/status.reply`: unused, numUGens, numSynths, numGroups, numSynthDefs, avgCPU%, peakCPU%, nominalSampleRate, actualSampleRate.
+
+###### Parameters
+
+| Parameter | Type        |
+| --------- | ----------- |
+| `address` | `"/status"` |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`): `void`
+
+Query server version. Replies with `/version.reply`: programName, majorVersion, minorVersion, patchName, gitBranch, commitHash.
+
+###### Parameters
+
+| Parameter | Type         |
+| --------- | ------------ |
+| `address` | `"/version"` |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `flag`, `clientID?`): `void`
+
+Register (1) or unregister (0) for server notifications (`/n_go`, `/n_end`, `/n_on`, `/n_off`, `/n_move`). Replies with `/done /notify clientID`.
+
+###### Parameters
+
+| Parameter   | Type        |
+| ----------- | ----------- |
+| `address`   | `"/notify"` |
+| `flag`      | `0` \| `1`  |
+| `clientID?` | `number`    |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `flag`): `void`
+
+Enable/disable OSC message dumping to debug output. 0=off, 1=parsed, 2=hex, 3=both.
+
+###### Parameters
+
+| Parameter | Type                     |
+| --------- | ------------------------ |
+| `address` | `"/dumpOSC"`             |
+| `flag`    | `0` \| `1` \| `2` \| `3` |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `syncID`): `void`
+
+Async. Wait for all prior async commands to complete. Replies with `/synced syncID`.
+
+###### Parameters
+
+| Parameter | Type      |
+| --------- | --------- |
+| `address` | `"/sync"` |
+| `syncID`  | `number`  |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`): `void`
+
+Query realtime memory usage. Replies with `/rtMemoryStatus.reply`: freeBytes, largestFreeBlockBytes.
+
+###### Parameters
+
+| Parameter | Type                |
+| --------- | ------------------- |
+| `address` | `"/rtMemoryStatus"` |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bytes`, `completionMessage?`): `void`
+
+Async. Load a compiled synthdef from bytes. Optional completionMessage is an encoded OSC message executed after loading. Replies with `/done /d_recv`.
+
+###### Parameters
+
+| Parameter            | Type                                             |
+| -------------------- | ------------------------------------------------ |
+| `address`            | `"/d_recv"`                                      |
+| `bytes`              | `ArrayBuffer` \| `Uint8Array`<`ArrayBufferLike`> |
+| `completionMessage?` | `ArrayBuffer` \| `Uint8Array`<`ArrayBufferLike`> |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`names`): `void`
+
+Free one or more loaded synthdefs by name.
+
+###### Parameters
+
+| Parameter  | Type                       |
+| ---------- | -------------------------- |
+| `address`  | `"/d_free"`                |
+| ...`names` | \[`string`, `...string[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`): `void`
+
+Free all loaded synthdefs. Not in the official SC reference but supported by scsynth.
+
+###### Parameters
+
+| Parameter | Type           |
+| --------- | -------------- |
+| `address` | `"/d_freeAll"` |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `defName`, `nodeID`, `addAction`, `targetID`, ...`controls`): `void`
+
+Create a new synth from a loaded synthdef. addAction: 0=head, 1=tail, 2=before, 3=after, 4=replace. Controls are alternating name/index and value pairs. Values can be numbers or bus mapping strings like `"c0"` (control bus 0) or `"a0"` (audio bus 0). Use nodeID=-1 for auto-assign.
+
+###### Parameters
+
+| Parameter     | Type                      |
+| ------------- | ------------------------- |
+| `address`     | `"/s_new"`                |
+| `defName`     | `string`                  |
+| `nodeID`      | `number`                  |
+| `addAction`   | [`AddAction`](#addaction) |
+| `targetID`    | `number`                  |
+| ...`controls` | (`string` \| `number`)\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `nodeID`, ...`controls`): `void`
+
+Get synth control values. Controls can be indices or names. Replies with `/n_set nodeID control value ...`.
+
+###### Parameters
+
+| Parameter     | Type                      |
+| ------------- | ------------------------- |
+| `address`     | `"/s_get"`                |
+| `nodeID`      | `number`                  |
+| ...`controls` | (`string` \| `number`)\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `nodeID`, `control`, `count`): `void`
+
+Get sequential synth control values. Control can be an index or name. Replies with `/n_setn nodeID control count values...`. For multiple ranges, use the catch-all overload.
+
+###### Parameters
+
+| Parameter | Type                 |
+| --------- | -------------------- |
+| `address` | `"/s_getn"`          |
+| `nodeID`  | `number`             |
+| `control` | `string` \| `number` |
+| `count`   | `number`             |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`nodeIDs`): `void`
+
+Release client-side synth ID tracking. Synths continue running but are reassigned to reserved negative IDs. Use when you no longer need to communicate with the synth and want to reuse the ID.
+
+###### Parameters
+
+| Parameter    | Type                       |
+| ------------ | -------------------------- |
+| `address`    | `"/s_noid"`                |
+| ...`nodeIDs` | \[`number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`nodeIDs`): `void`
+
+Free (delete) one or more nodes.
+
+###### Parameters
+
+| Parameter    | Type                       |
+| ------------ | -------------------------- |
+| `address`    | `"/n_free"`                |
+| ...`nodeIDs` | \[`number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `nodeID`, ...`controls`): `void`
+
+Set node control values. Controls are alternating name/index and value pairs. If the node is a group, sets the control on all nodes in the group.
+
+###### Parameters
+
+| Parameter     | Type                      |
+| ------------- | ------------------------- |
+| `address`     | `"/n_set"`                |
+| `nodeID`      | `number`                  |
+| ...`controls` | (`string` \| `number`)\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `nodeID`, `control`, `count`, ...`values`): `void`
+
+Set sequential control values starting at the given control index/name. For multiple ranges, use the catch-all overload.
+
+###### Parameters
+
+| Parameter   | Type                 |
+| ----------- | -------------------- |
+| `address`   | `"/n_setn"`          |
+| `nodeID`    | `number`             |
+| `control`   | `string` \| `number` |
+| `count`     | `number`             |
+| ...`values` | `number`\[]          |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `nodeID`, `control`, `count`, `value`): `void`
+
+Fill sequential controls with a single value. For multiple ranges, use the catch-all overload.
+
+###### Parameters
+
+| Parameter | Type                 |
+| --------- | -------------------- |
+| `address` | `"/n_fill"`          |
+| `nodeID`  | `number`             |
+| `control` | `string` \| `number` |
+| `count`   | `number`             |
+| `value`   | `number`             |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`pairs`): `void`
+
+Turn nodes on (1) or off (0). Args are repeating \[nodeID, flag] pairs.
+
+###### Parameters
+
+| Parameter  | Type                                   |
+| ---------- | -------------------------------------- |
+| `address`  | `"/n_run"`                             |
+| ...`pairs` | \[`number`, `0` \| `1`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`pairs`): `void`
+
+Move nodeA to execute immediately before nodeB. Args are repeating \[nodeA, nodeB] pairs.
+
+###### Parameters
+
+| Parameter  | Type                                 |
+| ---------- | ------------------------------------ |
+| `address`  | `"/n_before"`                        |
+| ...`pairs` | \[`number`, `number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`pairs`): `void`
+
+Move nodeA to execute immediately after nodeB. Args are repeating \[nodeA, nodeB] pairs.
+
+###### Parameters
+
+| Parameter  | Type                                 |
+| ---------- | ------------------------------------ |
+| `address`  | `"/n_after"`                         |
+| ...`pairs` | \[`number`, `number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `addAction`, `targetID`, ...`nodeIDs`): `void`
+
+Reorder nodes within a group. addAction: 0=head, 1=tail, 2=before target, 3=after target. Does not support 4 (replace).
+
+###### Parameters
+
+| Parameter    | Type                       |
+| ------------ | -------------------------- |
+| `address`    | `"/n_order"`               |
+| `addAction`  | `0` \| `1` \| `2` \| `3`   |
+| `targetID`   | `number`                   |
+| ...`nodeIDs` | \[`number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`nodeIDs`): `void`
+
+Query node info. Replies with `/n_info` for each node: nodeID, parentGroupID, prevNodeID, nextNodeID, isGroup, \[headNodeID, tailNodeID].
+
+###### Parameters
+
+| Parameter    | Type                       |
+| ------------ | -------------------------- |
+| `address`    | `"/n_query"`               |
+| ...`nodeIDs` | \[`number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`nodeIDs`): `void`
+
+Print control values and calculation rates for each node to debug output. No reply message.
+
+###### Parameters
+
+| Parameter    | Type                       |
+| ------------ | -------------------------- |
+| `address`    | `"/n_trace"`               |
+| ...`nodeIDs` | \[`number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `nodeID`, ...`mappings`): `void`
+
+Map controls to read from control buses. Mappings are repeating \[control, busIndex] pairs. Set busIndex to -1 to unmap.
+
+###### Parameters
+
+| Parameter     | Type                      |
+| ------------- | ------------------------- |
+| `address`     | `"/n_map"`                |
+| `nodeID`      | `number`                  |
+| ...`mappings` | (`string` \| `number`)\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `nodeID`, ...`mappings`): `void`
+
+Map a range of sequential controls to sequential control buses. Mappings are repeating \[control, busIndex, count] triplets.
+
+###### Parameters
+
+| Parameter     | Type                      |
+| ------------- | ------------------------- |
+| `address`     | `"/n_mapn"`               |
+| `nodeID`      | `number`                  |
+| ...`mappings` | (`string` \| `number`)\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `nodeID`, ...`mappings`): `void`
+
+Map controls to read from audio buses. Mappings are repeating \[control, busIndex] pairs. Set busIndex to -1 to unmap.
+
+###### Parameters
+
+| Parameter     | Type                      |
+| ------------- | ------------------------- |
+| `address`     | `"/n_mapa"`               |
+| `nodeID`      | `number`                  |
+| ...`mappings` | (`string` \| `number`)\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `nodeID`, ...`mappings`): `void`
+
+Map a range of sequential controls to sequential audio buses. Mappings are repeating \[control, busIndex, count] triplets.
+
+###### Parameters
+
+| Parameter     | Type                      |
+| ------------- | ------------------------- |
+| `address`     | `"/n_mapan"`              |
+| `nodeID`      | `number`                  |
+| ...`mappings` | (`string` \| `number`)\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `void`
+
+Create new groups. Args are repeating \[groupID, addAction, targetID] triplets. addAction: 0=head, 1=tail, 2=before, 3=after, 4=replace.
+
+###### Parameters
+
+| Parameter | Type                                                            |
+| --------- | --------------------------------------------------------------- |
+| `address` | `"/g_new"`                                                      |
+| ...`args` | \[`number`, [`AddAction`](#addaction), `number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `void`
+
+Create new parallel groups (children evaluated in unspecified order). Same signature as /g\_new.
+
+###### Parameters
+
+| Parameter | Type                                                            |
+| --------- | --------------------------------------------------------------- |
+| `address` | `"/p_new"`                                                      |
+| ...`args` | \[`number`, [`AddAction`](#addaction), `number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`groupIDs`): `void`
+
+Free all immediate children of one or more groups (groups themselves remain).
+
+###### Parameters
+
+| Parameter     | Type                       |
+| ------------- | -------------------------- |
+| `address`     | `"/g_freeAll"`             |
+| ...`groupIDs` | \[`number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`groupIDs`): `void`
+
+Recursively free all synths inside one or more groups and their nested sub-groups.
+
+###### Parameters
+
+| Parameter     | Type                       |
+| ------------- | -------------------------- |
+| `address`     | `"/g_deepFree"`            |
+| ...`groupIDs` | \[`number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`pairs`): `void`
+
+Move node to head of group. Args are repeating \[groupID, nodeID] pairs.
+
+###### Parameters
+
+| Parameter  | Type                                 |
+| ---------- | ------------------------------------ |
+| `address`  | `"/g_head"`                          |
+| ...`pairs` | \[`number`, `number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`pairs`): `void`
+
+Move node to tail of group. Args are repeating \[groupID, nodeID] pairs.
+
+###### Parameters
+
+| Parameter  | Type                                 |
+| ---------- | ------------------------------------ |
+| `address`  | `"/g_tail"`                          |
+| ...`pairs` | \[`number`, `number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`groupFlagPairs`): `void`
+
+Print group's node tree to debug output. Args are repeating \[groupID, flag] pairs. flag: 0=structure only, non-zero=include control values. No reply message.
+
+###### Parameters
+
+| Parameter           | Type                                 |
+| ------------------- | ------------------------------------ |
+| `address`           | `"/g_dumpTree"`                      |
+| ...`groupFlagPairs` | \[`number`, `number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`groupFlagPairs`): `void`
+
+Query group tree structure. Args are repeating \[groupID, flag] pairs. flag: 0=structure only, non-zero=include control values. Replies with `/g_queryTree.reply`.
+
+###### Parameters
+
+| Parameter           | Type                                 |
+| ------------------- | ------------------------------------ |
+| `address`           | `"/g_queryTree"`                     |
+| ...`groupFlagPairs` | \[`number`, `number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `nodeID`, `ugenIndex`, `command`, ...`args`): `void`
+
+Send a command to a specific UGen instance within a synth. The command name and args are UGen-specific.
+
+###### Parameters
+
+| Parameter   | Type                   |
+| ----------- | ---------------------- |
+| `address`   | `"/u_cmd"`             |
+| `nodeID`    | `number`               |
+| `ugenIndex` | `number`               |
+| `command`   | `string`               |
+| ...`args`   | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `numFrames`, `numChannels?`, `sampleRate?`): `void`
+
+Async. Allocate an empty buffer. Queued and rewritten to /b\_allocPtr internally. Use sync() after to ensure completion. Replies with `/done /b_allocPtr bufnum`.
+
+###### Parameters
+
+| Parameter      | Type         |
+| -------------- | ------------ |
+| `address`      | `"/b_alloc"` |
+| `bufnum`       | `number`     |
+| `numFrames`    | `number`     |
+| `numChannels?` | `number`     |
+| `sampleRate?`  | `number`     |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `path`, `startFrame?`, `numFrames?`): `void`
+
+Async. Allocate a buffer and read an audio file into it. The path is fetched via the configured sampleBaseURL. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`.
+
+###### Parameters
+
+| Parameter     | Type             |
+| ------------- | ---------------- |
+| `address`     | `"/b_allocRead"` |
+| `bufnum`      | `number`         |
+| `path`        | `string`         |
+| `startFrame?` | `number`         |
+| `numFrames?`  | `number`         |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `path`, `startFrame`, `numFrames`, ...`channels`): `void`
+
+Async. Allocate a buffer and read specific channels from an audio file. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`.
+
+###### Parameters
+
+| Parameter     | Type                    |
+| ------------- | ----------------------- |
+| `address`     | `"/b_allocReadChannel"` |
+| `bufnum`      | `number`                |
+| `path`        | `string`                |
+| `startFrame`  | `number`                |
+| `numFrames`   | `number`                |
+| ...`channels` | `number`\[]             |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `data`): `void`
+
+Async. SuperSonic extension: allocate a buffer from inline audio file bytes (WAV, FLAC, OGG, etc.) without URL fetch. Queued and rewritten internally.
+
+###### Parameters
+
+| Parameter | Type                                             |
+| --------- | ------------------------------------------------ |
+| `address` | `"/b_allocFile"`                                 |
+| `bufnum`  | `number`                                         |
+| `data`    | `ArrayBuffer` \| `Uint8Array`<`ArrayBufferLike`> |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `completionMessage?`): `void`
+
+Async. Free a buffer. Optional completionMessage is an encoded OSC message executed after freeing. Replies with `/done /b_free bufnum`.
+
+###### Parameters
+
+| Parameter            | Type                                             |
+| -------------------- | ------------------------------------------------ |
+| `address`            | `"/b_free"`                                      |
+| `bufnum`             | `number`                                         |
+| `completionMessage?` | `ArrayBuffer` \| `Uint8Array`<`ArrayBufferLike`> |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `completionMessage?`): `void`
+
+Async. Zero a buffer's sample data. Optional completionMessage is an encoded OSC message executed after zeroing. Replies with `/done /b_zero bufnum`.
+
+###### Parameters
+
+| Parameter            | Type                                             |
+| -------------------- | ------------------------------------------------ |
+| `address`            | `"/b_zero"`                                      |
+| `bufnum`             | `number`                                         |
+| `completionMessage?` | `ArrayBuffer` \| `Uint8Array`<`ArrayBufferLike`> |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`bufnums`): `void`
+
+Query buffer info. Replies with `/b_info` for each buffer: bufnum, numFrames, numChannels, sampleRate.
+
+###### Parameters
+
+| Parameter    | Type                       |
+| ------------ | -------------------------- |
+| `address`    | `"/b_query"`               |
+| ...`bufnums` | \[`number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, ...`sampleIndices`): `void`
+
+Get individual sample values. Replies with `/b_set bufnum index value ...`.
+
+###### Parameters
+
+| Parameter          | Type                       |
+| ------------------ | -------------------------- |
+| `address`          | `"/b_get"`                 |
+| `bufnum`           | `number`                   |
+| ...`sampleIndices` | \[`number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, ...`indexValuePairs`): `void`
+
+Set individual buffer samples. Args are repeating \[index, value] pairs after bufnum.
+
+###### Parameters
+
+| Parameter            | Type        |
+| -------------------- | ----------- |
+| `address`            | `"/b_set"`  |
+| `bufnum`             | `number`    |
+| ...`indexValuePairs` | `number`\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `startIndex`, `count`, ...`values`): `void`
+
+Set sequential buffer samples starting at startIndex. For multiple ranges, use the catch-all overload.
+
+###### Parameters
+
+| Parameter    | Type        |
+| ------------ | ----------- |
+| `address`    | `"/b_setn"` |
+| `bufnum`     | `number`    |
+| `startIndex` | `number`    |
+| `count`      | `number`    |
+| ...`values`  | `number`\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `startIndex`, `count`): `void`
+
+Get sequential sample values. Replies with `/b_setn bufnum startIndex count values...`. For multiple ranges, use the catch-all overload.
+
+###### Parameters
+
+| Parameter    | Type        |
+| ------------ | ----------- |
+| `address`    | `"/b_getn"` |
+| `bufnum`     | `number`    |
+| `startIndex` | `number`    |
+| `count`      | `number`    |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `startIndex`, `count`, `value`): `void`
+
+Fill sequential buffer samples with a single value. For multiple ranges, use the catch-all overload.
+
+###### Parameters
+
+| Parameter    | Type        |
+| ------------ | ----------- |
+| `address`    | `"/b_fill"` |
+| `bufnum`     | `number`    |
+| `startIndex` | `number`    |
+| `count`      | `number`    |
+| `value`      | `number`    |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `command`, ...`args`): `void`
+
+Async. Generate buffer contents. Commands: "sine1", "sine2", "sine3", "cheby", "copy". Flags (for sine/cheby): 1=normalize, 2=wavetable, 4=clear (OR together, e.g. 7=all). Replies with `/done /b_gen bufnum`.
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `"/b_gen"`             |
+| `bufnum`  | `number`               |
+| `command` | `string`               |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`busIndexValuePairs`): `void`
+
+Set control bus values. Args are repeating \[busIndex, value] pairs.
+
+###### Parameters
+
+| Parameter               | Type        |
+| ----------------------- | ----------- |
+| `address`               | `"/c_set"`  |
+| ...`busIndexValuePairs` | `number`\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`busIndices`): `void`
+
+Get control bus values. Replies with `/c_set index value ...`.
+
+###### Parameters
+
+| Parameter       | Type                       |
+| --------------- | -------------------------- |
+| `address`       | `"/c_get"`                 |
+| ...`busIndices` | \[`number`, `...number[]`] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `startIndex`, `count`, ...`values`): `void`
+
+Set sequential control bus values starting at startIndex. For multiple ranges, use the catch-all overload.
+
+###### Parameters
+
+| Parameter    | Type        |
+| ------------ | ----------- |
+| `address`    | `"/c_setn"` |
+| `startIndex` | `number`    |
+| `count`      | `number`    |
+| ...`values`  | `number`\[] |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `startIndex`, `count`): `void`
+
+Get sequential control bus values. Replies with `/c_setn startIndex count values...`. For multiple ranges, use the catch-all overload.
+
+###### Parameters
+
+| Parameter    | Type        |
+| ------------ | ----------- |
+| `address`    | `"/c_getn"` |
+| `startIndex` | `number`    |
+| `count`      | `number`    |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `startIndex`, `count`, `value`): `void`
+
+Fill sequential control buses with a single value. For multiple ranges, use the catch-all overload.
+
+###### Parameters
+
+| Parameter    | Type        |
+| ------------ | ----------- |
+| `address`    | `"/c_fill"` |
+| `startIndex` | `number`    |
+| `count`      | `number`    |
+| `value`      | `number`    |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, ...`args`): `void`
+
+Send any OSC message. Use this for commands not covered by typed overloads, or for multi-range variants of commands like /n\_setn, /b\_fill, /c\_getn.
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `string`               |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`void`
+
+#### OSC Argument Types
+
+OSC argument types that can be sent in a message.
+
+Plain JS values are mapped to OSC types automatically:
+
+* `number` (integer) → `i` (int32)
+* `number` (float) → `f` (float32)
+* `string` → `s`
+* `boolean` → `T` / `F`
+* `Uint8Array` / `ArrayBuffer` → `b` (blob)
+
+For 64-bit or timetag types, use the tagged object form:
+
+```ts
+{ type: 'int', value: 42 }
+{ type: 'float', value: 440 }     // force float32 for whole numbers
+{ type: 'string', value: 'hello' }
+{ type: 'blob', value: new Uint8Array([1,2,3]) }
+{ type: 'bool', value: true }
+{ type: 'int64', value: 9007199254740992n }
+{ type: 'double', value: 3.141592653589793 }
+{ type: 'timetag', value: ntpTimestamp }
+```
+
+##### sendOSC()
+
+> **sendOSC**(`oscData`, `options?`): `void`
+
+Send pre-encoded OSC bytes to scsynth.
+
+Use this when you've already encoded the message (e.g. via `SuperSonic.osc.encodeMessage`)
+or when sending from a worker that produces raw OSC. Sends bytes as-is without
+rewriting — buffer allocation commands (`/b_alloc*`) are not transformed.
+Use [send](#send-1) for buffer commands so they get rewritten to `/b_allocPtr`.
+
+###### Parameters
+
+| Parameter  | Type                                             | Description                           |
+| ---------- | ------------------------------------------------ | ------------------------------------- |
+| `oscData`  | `ArrayBuffer` \| `Uint8Array`<`ArrayBufferLike`> | Encoded OSC message or bundle bytes   |
+| `options?` | [`SendOSCOptions`](#sendoscoptions)              | Optional session/tag for cancellation |
+
+###### Returns
+
+`void`
+
+###### Throws
+
+If the bundle is too large for the WASM scheduler slot size
+
+###### Example
+
+```ts
+const msg = SuperSonic.osc.encodeMessage('/n_set', [1001, 'freq', 880]);
+sonic.sendOSC(msg);
+
+// With cancellation tags:
+const bundle = SuperSonic.osc.encodeBundle(futureTime, packets);
+sonic.sendOSC(bundle, { sessionId: 'song1', runTag: 'verse' });
+```
+
+##### setClockOffset()
+
+> **setClockOffset**(`offsetS`): `void`
+
+Set clock offset for multi-system sync (e.g. Ableton Link, NTP server).
+
+Shifts all scheduled bundle execution times by the specified offset.
+Positive values mean the shared/server clock is ahead of local time.
+
+###### Parameters
+
+| Parameter | Type     | Description       |
+| --------- | -------- | ----------------- |
+| `offsetS` | `number` | Offset in seconds |
+
+###### Returns
+
+`void`
+
+##### shutdown()
+
+> **shutdown**(): `Promise`<`void`>
+
+Shut down the engine. The instance can be re-initialised with [init](#init).
+
+Closes the AudioContext, terminates workers, and releases memory.
+Emits `'shutdown'`.
+
+###### Returns
+
+`Promise`<`void`>
+
+##### startCapture()
+
+> **startCapture**(): `void`
+
+Start capturing audio output to a buffer. SAB mode only.
+
+###### Returns
+
+`void`
+
+##### stopCapture()
+
+> **stopCapture**(): `Float32Array`
+
+Stop capturing and return the captured audio data.
+
+###### Returns
+
+`Float32Array`
+
+##### suspend()
+
+> **suspend**(): `Promise`<`void`>
+
+Suspend the AudioContext and stop the drift timer.
+
+The worklet remains loaded but audio processing stops.
+Use [resume](#resume) or [recover](#recover) to restart.
+
+###### Returns
+
+`Promise`<`void`>
+
+##### sync()
+
+> **sync**(`syncId?`): `Promise`<`void`>
+
+Wait for scsynth to process all pending commands.
+
+Sends a `/sync` message and waits for the `/synced` reply. Use after
+loading synthdefs or buffers to ensure they're ready before creating synths.
+
+###### Parameters
+
+| Parameter | Type     | Description                                 |
+| --------- | -------- | ------------------------------------------- |
+| `syncId?` | `number` | Optional custom sync ID (random if omitted) |
+
+###### Returns
+
+`Promise`<`void`>
+
+###### Throws
+
+Rejects after 10 seconds if scsynth doesn't respond.
+
+###### Example
+
+```ts
+await sonic.loadSynthDef('beep');
+await sonic.sync();
+// SynthDef is now guaranteed to be loaded
+await sonic.send('/s_new', 'beep', 1001, 0, 1);
+```
+
+##### getMetricsSchema()
+
+> `static` **getMetricsSchema**(): [`MetricsSchema`](#metricsschema)
+
+Get the metrics schema describing all available metrics.
+
+Includes array offsets for zero-allocation reading via [getMetricsArray](#getmetricsarray),
+metric types/units/descriptions, and a declarative UI layout used by the
+`<supersonic-metrics>` web component.
+
+See docs/METRICS\_COMPONENT.md for the metrics component guide.
+
+###### Returns
+
+[`MetricsSchema`](#metricsschema)
+
+##### getRawTreeSchema()
+
+> `static` **getRawTreeSchema**(): `Record`<`string`, `unknown`>
+
+Get schema describing the raw flat node tree structure.
+
+###### Returns
+
+`Record`<`string`, `unknown`>
+
+##### getTreeSchema()
+
+> `static` **getTreeSchema**(): `Record`<`string`, `unknown`>
+
+Get schema describing the hierarchical node tree structure.
+
+###### Returns
+
+`Record`<`string`, `unknown`>
+
+## Interfaces
+
+### ActivityLineConfig
+
+Configuration for truncating activity log lines.
+
+#### Properties
+
+| Property                                                  | Type     | Description                                                                  |
+| --------------------------------------------------------- | -------- | ---------------------------------------------------------------------------- |
+| <a id="maxlinelength"></a> `maxLineLength?`               | `number` | Default max line length for all activity types. Default: 200.                |
+| <a id="oscinmaxlinelength"></a> `oscInMaxLineLength?`     | `number` | Override max line length for OSC in messages. null = use maxLineLength.      |
+| <a id="oscoutmaxlinelength"></a> `oscOutMaxLineLength?`   | `number` | Override max line length for OSC out messages. null = use maxLineLength.     |
+| <a id="scsynthmaxlinelength"></a> `scsynthMaxLineLength?` | `number` | Override max line length for scsynth debug output. null = use maxLineLength. |
+
+***
+
+### BootStats
+
+Boot timing statistics.
+
+#### Properties
+
+| Property                                   | Type     | Description                                                 |
+| ------------------------------------------ | -------- | ----------------------------------------------------------- |
+| <a id="initduration"></a> `initDuration`   | `number` | Total boot duration in ms, or null if not yet booted.       |
+| <a id="initstarttime"></a> `initStartTime` | `number` | Timestamp when init() started (performance.now()), or null. |
+
+***
+
+### LoadedBufferInfo
+
+Info about a loaded audio buffer, returned by [SuperSonic.getLoadedBuffers](#getloadedbuffers).
+
+#### Extends
+
+* [`SampleInfo`](#sampleinfo-1)
+
+#### Properties
+
+| Property                               | Type     | Description                                                | Inherited from                                                |
+| -------------------------------------- | -------- | ---------------------------------------------------------- | ------------------------------------------------------------- |
+| <a id="bufnum"></a> `bufnum`           | `number` | Buffer slot number.                                        | -                                                             |
+| <a id="duration"></a> `duration`       | `number` | Duration in seconds.                                       | [`SampleInfo`](#sampleinfo-1).[`duration`](#duration-2)       |
+| <a id="hash"></a> `hash`               | `string` | SHA-256 hex hash of the decoded interleaved audio content. | [`SampleInfo`](#sampleinfo-1).[`hash`](#hash-2)               |
+| <a id="numchannels"></a> `numChannels` | `number` | Number of channels.                                        | [`SampleInfo`](#sampleinfo-1).[`numChannels`](#numchannels-2) |
+| <a id="numframes"></a> `numFrames`     | `number` | Number of sample frames.                                   | [`SampleInfo`](#sampleinfo-1).[`numFrames`](#numframes-2)     |
+| <a id="samplerate"></a> `sampleRate`   | `number` | Sample rate in Hz.                                         | [`SampleInfo`](#sampleinfo-1).[`sampleRate`](#samplerate-2)   |
+| <a id="source"></a> `source`           | `string` | Original source path/URL, or null for inline data.         | [`SampleInfo`](#sampleinfo-1).[`source`](#source-2)           |
+
+***
+
+### LoadSampleResult
+
+Result from [SuperSonic.loadSample](#loadsample).
+
+#### Extends
+
+* [`SampleInfo`](#sampleinfo-1)
+
+#### Properties
+
+| Property                                 | Type     | Description                                                | Inherited from                                                |
+| ---------------------------------------- | -------- | ---------------------------------------------------------- | ------------------------------------------------------------- |
+| <a id="bufnum-1"></a> `bufnum`           | `number` | Buffer slot the sample was loaded into.                    | -                                                             |
+| <a id="duration-1"></a> `duration`       | `number` | Duration in seconds.                                       | [`SampleInfo`](#sampleinfo-1).[`duration`](#duration-2)       |
+| <a id="hash-1"></a> `hash`               | `string` | SHA-256 hex hash of the decoded interleaved audio content. | [`SampleInfo`](#sampleinfo-1).[`hash`](#hash-2)               |
+| <a id="numchannels-1"></a> `numChannels` | `number` | Number of channels.                                        | [`SampleInfo`](#sampleinfo-1).[`numChannels`](#numchannels-2) |
+| <a id="numframes-1"></a> `numFrames`     | `number` | Number of sample frames.                                   | [`SampleInfo`](#sampleinfo-1).[`numFrames`](#numframes-2)     |
+| <a id="samplerate-1"></a> `sampleRate`   | `number` | Sample rate in Hz.                                         | [`SampleInfo`](#sampleinfo-1).[`sampleRate`](#samplerate-2)   |
+| <a id="source-1"></a> `source`           | `string` | Original source path/URL, or null for inline data.         | [`SampleInfo`](#sampleinfo-1).[`source`](#source-2)           |
+
+***
+
+### LoadSynthDefResult
+
+Result from [SuperSonic.loadSynthDef](#loadsynthdef).
+
+#### Properties
+
+| Property                 | Type     | Description                           |
+| ------------------------ | -------- | ------------------------------------- |
+| <a id="name"></a> `name` | `string` | Extracted SynthDef name.              |
+| <a id="size"></a> `size` | `number` | Size of the synthdef binary in bytes. |
+
+***
+
+### MetricDefinition
+
+Schema entry describing a single metric field.
+
+#### Properties
+
+| Property                               | Type                                                 | Description                                                            |
+| -------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------- |
+| <a id="description"></a> `description` | `string`                                             | Human-readable description.                                            |
+| <a id="offset"></a> `offset`           | `number`                                             | Offset into the flat metrics Uint32Array.                              |
+| <a id="signed"></a> `signed?`          | `boolean`                                            | Whether the value should be read as signed int32.                      |
+| <a id="type"></a> `type`               | `"counter"` \| `"gauge"` \| `"constant"` \| `"enum"` | Metric type: counter (cumulative), gauge (current), constant, or enum. |
+| <a id="unit"></a> `unit?`              | `string`                                             | Unit of measurement.                                                   |
+| <a id="values"></a> `values?`          | `string`\[]                                          | Enum value names (for type 'enum').                                    |
+
+***
+
+### MetricsSchema
+
+Metrics schema returned by [SuperSonic.getMetricsSchema](#getmetricsschema).
+
+Contains metric definitions with array offsets (for zero-allocation reading),
+a declarative UI layout for rendering metrics panels, and sentinel values.
+
+#### Properties
+
+| Property                           | Type                                                                                                | Description                                                                      |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| <a id="layout"></a> `layout`       | `object`                                                                                            | Panel structure for rendering a metrics UI. Used by `<supersonic-metrics>`.      |
+| `layout.panels`                    | `object`\[]                                                                                         | -                                                                                |
+| <a id="metrics"></a> `metrics`     | `Record`\<keyof [`SuperSonicMetrics`](#supersonicmetrics), [`MetricDefinition`](#metricdefinition)> | Each key maps to offset, type, unit, and description for the merged Uint32Array. |
+| <a id="sentinels"></a> `sentinels` | `object`                                                                                            | Magic values used in the metrics array.                                          |
+| `sentinels.HEADROOM_UNSET`         | `number`                                                                                            | Value of preschedulerMinHeadroomMs before any data arrives.                      |
+
+***
+
+### OscBundle
+
+Decoded OSC bundle containing a timetag and nested packets.
+
+#### Properties
+
+| Property                       | Type                                                          | Description                          |
+| ------------------------------ | ------------------------------------------------------------- | ------------------------------------ |
+| <a id="packets"></a> `packets` | ([`OscBundle`](#oscbundle) \| [`OscMessage`](#oscmessage))\[] | Nested messages or bundles.          |
+| <a id="timetag"></a> `timeTag` | `number`                                                      | NTP timestamp in seconds since 1900. |
+
+***
+
+### OscChannelMetrics
+
+OscChannel metrics counters.
+
+#### Properties
+
+| Property                                 | Type     |
+| ---------------------------------------- | -------- |
+| <a id="bypassed"></a> `bypassed`         | `number` |
+| <a id="bytessent"></a> `bytesSent`       | `number` |
+| <a id="immediate"></a> `immediate`       | `number` |
+| <a id="late"></a> `late`                 | `number` |
+| <a id="messagessent"></a> `messagesSent` | `number` |
+| <a id="nearfuture"></a> `nearFuture`     | `number` |
+| <a id="nonbundle"></a> `nonBundle`       | `number` |
+
+***
+
+### OscChannelPMTransferable
+
+Transferable config for postMessage mode OscChannel.
+
+#### Properties
+
+| Property                                         | Type            |
+| ------------------------------------------------ | --------------- |
+| <a id="blocking"></a> `blocking`                 | `boolean`       |
+| <a id="bypasslookaheads"></a> `bypassLookaheadS` | `number`        |
+| <a id="mode-2"></a> `mode`                       | `"postMessage"` |
+| <a id="port"></a> `port`                         | `MessagePort`   |
+| <a id="preschedulerport"></a> `preschedulerPort` | `MessagePort`   |
+| <a id="sourceid"></a> `sourceId`                 | `number`        |
+
+***
+
+### OscChannelSABTransferable
+
+Transferable config for SAB mode OscChannel.
+
+#### Properties
+
+| Property                                           | Type                         |
+| -------------------------------------------------- | ---------------------------- |
+| <a id="blocking-1"></a> `blocking`                 | `boolean`                    |
+| <a id="bufferconstants-1"></a> `bufferConstants`   | `Record`<`string`, `number`> |
+| <a id="bypasslookaheads-1"></a> `bypassLookaheadS` | `number`                     |
+| <a id="controlindices"></a> `controlIndices`       | `Record`<`string`, `number`> |
+| <a id="mode-3"></a> `mode`                         | `"sab"`                      |
+| <a id="preschedulerport-1"></a> `preschedulerPort` | `MessagePort`                |
+| <a id="ringbufferbase-1"></a> `ringBufferBase`     | `number`                     |
+| <a id="sharedbuffer-1"></a> `sharedBuffer`         | `SharedArrayBuffer`          |
+| <a id="sourceid-1"></a> `sourceId`                 | `number`                     |
+
+***
+
+### RawTree
+
+Flat node tree returned by [SuperSonic.getRawTree](#getrawtree).
+
+Contains all nodes as a flat array with parent/sibling linkage pointers.
+More efficient than the hierarchical tree for serialization or custom rendering.
+
+#### Properties
+
+| Property                                 | Type                             | Description                          |
+| ---------------------------------------- | -------------------------------- | ------------------------------------ |
+| <a id="droppedcount"></a> `droppedCount` | `number`                         | Nodes that exceeded mirror capacity. |
+| <a id="nodecount"></a> `nodeCount`       | `number`                         | Total number of nodes.               |
+| <a id="nodes"></a> `nodes`               | [`RawTreeNode`](#rawtreenode)\[] | Flat array of all nodes.             |
+| <a id="version"></a> `version`           | `number`                         | Increments on any tree change.       |
+
+***
+
+### RawTreeNode
+
+A node in the flat (raw) tree representation with linkage pointers.
+
+#### Properties
+
+| Property                         | Type      | Description                                           |
+| -------------------------------- | --------- | ----------------------------------------------------- |
+| <a id="defname"></a> `defName`   | `string`  | SynthDef name (synths only, empty string for groups). |
+| <a id="headid"></a> `headId`     | `number`  | First child node ID (groups only, -1 if empty).       |
+| <a id="id"></a> `id`             | `number`  | Unique node ID.                                       |
+| <a id="isgroup"></a> `isGroup`   | `boolean` | true if group, false if synth.                        |
+| <a id="nextid"></a> `nextId`     | `number`  | Next sibling node ID (-1 if none).                    |
+| <a id="parentid"></a> `parentId` | `number`  | Parent node ID (-1 for root).                         |
+| <a id="previd"></a> `prevId`     | `number`  | Previous sibling node ID (-1 if none).                |
+
+***
+
+### SampleInfo
+
+Metadata about decoded audio content.
+
+Returned by [SuperSonic.sampleInfo](#sampleinfo). Also the shape of each entry
+in [SuperSonic.getLoadedBuffers](#getloadedbuffers) (with `bufnum`) and the return
+value of [SuperSonic.loadSample](#loadsample) (with `bufnum`).
+
+#### Extended by
+
+* [`LoadedBufferInfo`](#loadedbufferinfo)
+* [`LoadSampleResult`](#loadsampleresult)
+
+#### Properties
+
+| Property                                 | Type     | Description                                                |
+| ---------------------------------------- | -------- | ---------------------------------------------------------- |
+| <a id="duration-2"></a> `duration`       | `number` | Duration in seconds.                                       |
+| <a id="hash-2"></a> `hash`               | `string` | SHA-256 hex hash of the decoded interleaved audio content. |
+| <a id="numchannels-2"></a> `numChannels` | `number` | Number of channels.                                        |
+| <a id="numframes-2"></a> `numFrames`     | `number` | Number of sample frames.                                   |
+| <a id="samplerate-2"></a> `sampleRate`   | `number` | Sample rate in Hz.                                         |
+| <a id="source-2"></a> `source`           | `string` | Original source path/URL, or null for inline data.         |
+
+### SendOSCOptions
+
+Options for [SuperSonic.sendOSC](#sendosc).
+
+#### Properties
+
+| Property                            | Type     | Description                                                                 |
+| ----------------------------------- | -------- | --------------------------------------------------------------------------- |
+| <a id="runtag"></a> `runTag?`       | `string` | Run tag for cancellation via [SuperSonic.cancelTag](#canceltag).            |
+| <a id="sessionid"></a> `sessionId?` | `string` | Session ID for cancellation via [SuperSonic.cancelSession](#cancelsession). |
+
+***
+
+### Snapshot
+
+Diagnostic snapshot returned by [SuperSonic.getSnapshot](#getsnapshot).
+
+Captures metrics with descriptions, the current node tree, and JS heap
+memory info. Useful for bug reports and debugging timing issues.
+
+#### Properties
+
+| Property                           | Type                                                                 | Description                                                |
+| ---------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------- |
+| <a id="memory"></a> `memory`       | `object`                                                             | JS heap memory info (Chrome only, null in other browsers). |
+| `memory.jsHeapSizeLimit`           | `number`                                                             | -                                                          |
+| `memory.totalJSHeapSize`           | `number`                                                             | -                                                          |
+| `memory.usedJSHeapSize`            | `number`                                                             | -                                                          |
+| <a id="metrics-1"></a> `metrics`   | `Record`<`string`, { `description?`: `string`; `value`: `number`; }> | All metrics with their current values and descriptions.    |
+| <a id="nodetree"></a> `nodeTree`   | [`RawTree`](#rawtree)                                                | Current node tree in flat format.                          |
+| <a id="timestamp"></a> `timestamp` | `string`                                                             | ISO 8601 timestamp when the snapshot was taken.            |
+
+### SuperSonicInfo
+
+Engine info returned by [SuperSonic.getInfo](#getinfo).
+
+#### Properties
+
+| Property                                     | Type      | Description                                                  |
+| -------------------------------------------- | --------- | ------------------------------------------------------------ |
+| <a id="boottimems"></a> `bootTimeMs`         | `number`  | Time taken to boot in ms, or null if not yet booted.         |
+| <a id="bufferpoolsize"></a> `bufferPoolSize` | `number`  | Audio sample buffer pool size in bytes.                      |
+| <a id="capabilities"></a> `capabilities`     | `object`  | Browser capability detection results.                        |
+| `capabilities.atomics`                       | `boolean` | -                                                            |
+| `capabilities.audioWorklet`                  | `boolean` | -                                                            |
+| `capabilities.crossOriginIsolated`           | `boolean` | -                                                            |
+| `capabilities.sharedArrayBuffer`             | `boolean` | -                                                            |
+| `capabilities.webWorker`                     | `boolean` | -                                                            |
+| <a id="numbuffers-1"></a> `numBuffers`       | `number`  | Max audio buffers configured.                                |
+| <a id="samplerate-3"></a> `sampleRate`       | `number`  | AudioContext sample rate (e.g. 48000).                       |
+| <a id="totalmemory"></a> `totalMemory`       | `number`  | Total WebAssembly memory in bytes.                           |
+| <a id="version-1"></a> `version`             | `string`  | scsynth WASM version string, or null if not yet initialised. |
+| <a id="wasmheapsize"></a> `wasmHeapSize`     | `number`  | WASM heap size available for scsynth allocations.            |
+
+***
+
+### SuperSonicMetrics
+
+Complete metrics snapshot returned by [SuperSonic.getMetrics](#getmetrics-1).
+
+All values are numbers. Counter metrics are cumulative; gauge metrics
+reflect current state. Use [SuperSonic.getMetricsSchema](#getmetricsschema) for
+descriptions, units, and UI layout metadata.
+
+#### Properties
+
+| Property                                                                 | Type     | Description                                                                                   |
+| ------------------------------------------------------------------------ | -------- | --------------------------------------------------------------------------------------------- |
+| <a id="audiocontextstate"></a> `audioContextState`                       | `number` | AudioContext state as enum index: 0=unknown, 1=running, 2=suspended, 3=closed, 4=interrupted. |
+| <a id="bufferpoolallocations"></a> `bufferPoolAllocations`               | `number` | Total buffer pool allocations.                                                                |
+| <a id="bufferpoolavailablebytes"></a> `bufferPoolAvailableBytes`         | `number` | Buffer pool bytes available.                                                                  |
+| <a id="bufferpoolusedbytes"></a> `bufferPoolUsedBytes`                   | `number` | Buffer pool bytes currently in use.                                                           |
+| <a id="bypassimmediate"></a> `bypassImmediate`                           | `number` | Bundles with timetag 0 or 1 that bypassed prescheduler.                                       |
+| <a id="bypasslate"></a> `bypassLate`                                     | `number` | Late bundles that bypassed prescheduler.                                                      |
+| <a id="bypassnearfuture"></a> `bypassNearFuture`                         | `number` | Bundles within lookahead threshold that bypassed prescheduler.                                |
+| <a id="bypassnonbundle"></a> `bypassNonBundle`                           | `number` | Plain OSC messages (not bundles) that bypassed prescheduler.                                  |
+| <a id="clockoffsetms"></a> `clockOffsetMs`                               | `number` | Clock offset for multi-system sync (ms, signed).                                              |
+| <a id="debugbuffercapacity"></a> `debugBufferCapacity`                   | `number` | DEBUG ring buffer capacity (bytes).                                                           |
+| <a id="debugbufferpeakbytes"></a> `debugBufferPeakBytes`                 | `number` | Peak bytes used in DEBUG ring buffer.                                                         |
+| <a id="debugbufferusedbytes"></a> `debugBufferUsedBytes`                 | `number` | Bytes used in DEBUG ring buffer.                                                              |
+| <a id="debugbytesreceived"></a> `debugBytesReceived`                     | `number` | Debug bytes received from scsynth.                                                            |
+| <a id="debugmessagesreceived"></a> `debugMessagesReceived`               | `number` | Debug messages received from scsynth.                                                         |
+| <a id="driftoffsetms"></a> `driftOffsetMs`                               | `number` | Clock drift between AudioContext and wall clock (ms, signed).                                 |
+| <a id="inbuffercapacity"></a> `inBufferCapacity`                         | `number` | IN ring buffer capacity (bytes).                                                              |
+| <a id="inbufferpeakbytes"></a> `inBufferPeakBytes`                       | `number` | Peak bytes used in IN ring buffer.                                                            |
+| <a id="inbufferusedbytes"></a> `inBufferUsedBytes`                       | `number` | Bytes used in IN ring buffer (JS → scsynth).                                                  |
+| <a id="loadedsynthdefs-1"></a> `loadedSynthDefs`                         | `number` | Number of loaded synthdefs.                                                                   |
+| <a id="mode-4"></a> `mode`                                               | `number` | Transport mode as enum index: 0=sab, 1=postMessage.                                           |
+| <a id="oscinbytesreceived"></a> `oscInBytesReceived`                     | `number` | Total bytes received from scsynth.                                                            |
+| <a id="oscincorrupted"></a> `oscInCorrupted`                             | `number` | Corrupted messages detected from scsynth.                                                     |
+| <a id="oscinmessagesdropped"></a> `oscInMessagesDropped`                 | `number` | Replies lost in transit from scsynth to JS.                                                   |
+| <a id="oscinmessagesreceived"></a> `oscInMessagesReceived`               | `number` | OSC replies received from scsynth.                                                            |
+| <a id="oscoutbytessent"></a> `oscOutBytesSent`                           | `number` | Total bytes sent from JS to scsynth.                                                          |
+| <a id="oscoutmessagessent"></a> `oscOutMessagesSent`                     | `number` | OSC messages sent from JS to scsynth.                                                         |
+| <a id="outbuffercapacity"></a> `outBufferCapacity`                       | `number` | OUT ring buffer capacity (bytes).                                                             |
+| <a id="outbufferpeakbytes"></a> `outBufferPeakBytes`                     | `number` | Peak bytes used in OUT ring buffer.                                                           |
+| <a id="outbufferusedbytes"></a> `outBufferUsedBytes`                     | `number` | Bytes used in OUT ring buffer (scsynth → JS).                                                 |
+| <a id="preschedulerbundlesscheduled"></a> `preschedulerBundlesScheduled` | `number` | Bundles added to prescheduler.                                                                |
+| <a id="preschedulerbypassed"></a> `preschedulerBypassed`                 | `number` | Messages sent directly, bypassing prescheduler (aggregate).                                   |
+| <a id="preschedulercapacity"></a> `preschedulerCapacity`                 | `number` | Maximum pending events in JS prescheduler.                                                    |
+| <a id="preschedulerdispatched"></a> `preschedulerDispatched`             | `number` | Events sent from prescheduler to worklet.                                                     |
+| <a id="preschedulereventscancelled"></a> `preschedulerEventsCancelled`   | `number` | Bundles cancelled before dispatch.                                                            |
+| <a id="preschedulerlates"></a> `preschedulerLates`                       | `number` | Bundles dispatched after their scheduled time.                                                |
+| <a id="preschedulermaxlatems"></a> `preschedulerMaxLateMs`               | `number` | Maximum lateness at prescheduler (ms).                                                        |
+| <a id="preschedulermessagesretried"></a> `preschedulerMessagesRetried`   | `number` | Total messages that needed retry.                                                             |
+| <a id="preschedulerminheadroomms"></a> `preschedulerMinHeadroomMs`       | `number` | Smallest time gap between dispatch and execution (ms). 0xFFFFFFFF = no data yet.              |
+| <a id="preschedulerpending"></a> `preschedulerPending`                   | `number` | Events waiting in JS prescheduler queue.                                                      |
+| <a id="preschedulerpendingpeak"></a> `preschedulerPendingPeak`           | `number` | Peak pending events.                                                                          |
+| <a id="preschedulerretriesfailed"></a> `preschedulerRetriesFailed`       | `number` | Ring buffer write retries that failed.                                                        |
+| <a id="preschedulerretriessucceeded"></a> `preschedulerRetriesSucceeded` | `number` | Ring buffer write retries that succeeded.                                                     |
+| <a id="preschedulerretryqueuepeak"></a> `preschedulerRetryQueuePeak`     | `number` | Peak retry queue size.                                                                        |
+| <a id="preschedulerretryqueuesize"></a> `preschedulerRetryQueueSize`     | `number` | Current retry queue size.                                                                     |
+| <a id="preschedulertotaldispatches"></a> `preschedulerTotalDispatches`   | `number` | Total dispatch cycles.                                                                        |
+| <a id="ringbufferdirectwritefails"></a> `ringBufferDirectWriteFails`     | `number` | SAB mode only: optimistic direct writes that fell back to prescheduler.                       |
+| <a id="scsynthmessagesdropped"></a> `scsynthMessagesDropped`             | `number` | Messages dropped by scsynth (scheduler queue full).                                           |
+| <a id="scsynthmessagesprocessed"></a> `scsynthMessagesProcessed`         | `number` | OSC messages processed by scsynth.                                                            |
+| <a id="scsynthprocesscount"></a> `scsynthProcessCount`                   | `number` | Audio process() calls (cumulative).                                                           |
+| <a id="scsynthschedulercapacity"></a> `scsynthSchedulerCapacity`         | `number` | Maximum scsynth scheduler queue size (compile-time constant).                                 |
+| <a id="scsynthschedulerdepth"></a> `scsynthSchedulerDepth`               | `number` | Current scsynth scheduler queue depth.                                                        |
+| <a id="scsynthschedulerdropped"></a> `scsynthSchedulerDropped`           | `number` | Messages dropped from scsynth scheduler queue.                                                |
+| <a id="scsynthschedulerlastlatems"></a> `scsynthSchedulerLastLateMs`     | `number` | Most recent late magnitude in scsynth scheduler (ms).                                         |
+| <a id="scsynthschedulerlastlatetick"></a> `scsynthSchedulerLastLateTick` | `number` | Process count when last scsynth late occurred.                                                |
+| <a id="scsynthschedulerlates"></a> `scsynthSchedulerLates`               | `number` | Bundles executed after their scheduled time.                                                  |
+| <a id="scsynthschedulermaxlatems"></a> `scsynthSchedulerMaxLateMs`       | `number` | Maximum lateness observed in scsynth scheduler (ms).                                          |
+| <a id="scsynthschedulerpeakdepth"></a> `scsynthSchedulerPeakDepth`       | `number` | Peak scsynth scheduler queue depth (high water mark).                                         |
+| <a id="scsynthsequencegaps"></a> `scsynthSequenceGaps`                   | `number` | Messages lost in transit from JS to scsynth.                                                  |
+| <a id="scsynthwasmerrors"></a> `scsynthWasmErrors`                       | `number` | WASM execution errors in audio worklet.                                                       |
+
+### Tree
+
+Hierarchical node tree returned by [SuperSonic.getTree](#gettree).
+
+#### Example
+
+```ts
+const tree = sonic.getTree();
+console.log(tree.root.children); // top-level groups and synths
+console.log(tree.nodeCount);     // total nodes in the tree
+```
+
+#### Properties
+
+| Property                                   | Type                    | Description                                                          |
+| ------------------------------------------ | ----------------------- | -------------------------------------------------------------------- |
+| <a id="droppedcount-1"></a> `droppedCount` | `number`                | Nodes that exceeded mirror capacity (tree may be incomplete if > 0). |
+| <a id="nodecount-1"></a> `nodeCount`       | `number`                | Total number of nodes.                                               |
+| <a id="root"></a> `root`                   | [`TreeNode`](#treenode) | Root group (always id 0).                                            |
+| <a id="version-2"></a> `version`           | `number`                | Increments on any tree change — useful for detecting updates.        |
+
+***
+
+### TreeNode
+
+A node in the hierarchical synth tree.
+
+Groups contain children; synths are leaves.
+
+#### Properties
+
+| Property                         | Type                       | Description                                           |
+| -------------------------------- | -------------------------- | ----------------------------------------------------- |
+| <a id="children"></a> `children` | [`TreeNode`](#treenode)\[] | Child nodes (groups only, empty array for synths).    |
+| <a id="defname-1"></a> `defName` | `string`                   | SynthDef name (synths only, empty string for groups). |
+| <a id="id-1"></a> `id`           | `number`                   | Unique node ID.                                       |
+| <a id="type-1"></a> `type`       | `"group"` \| `"synth"`     | `'group'` for groups, `'synth'` for synth nodes.      |
+
+## Type Aliases
+
+### AddAction
+
+> **AddAction** = `0` | `1` | `2` | `3` | `4`
+
+Node add action: 0=head, 1=tail, 2=before, 3=after, 4=replace
+
+***
+
+### BlockedCommand
+
+> **BlockedCommand** = `"/d_load"` | `"/d_loadDir"` | `"/b_read"` | `"/b_readChannel"` | `"/b_write"` | `"/b_close"` | `"/clearSched"` | `"/error"`
+
+Commands blocked at runtime — typed as compile-time errors
+
+***
+
+### NTPTimeTag
+
+> **NTPTimeTag** = `number` | \[`number`, `number`] | `1` | `null` | `undefined`
+
+NTP timetag for bundle encoding.
+
+* `1` or `null` or `undefined` → immediate execution
+* `number` → NTP seconds since 1900
+* `[seconds, fraction]` → raw NTP pair (both uint32)
+
+### OscBundlePacket
+
+> **OscBundlePacket** = [`OscMessage`](#oscmessage) | { `address`: `string`; `args?`: [`OscArg`](#oscarg)\[]; } | { `packets`: [`OscBundlePacket`](#oscbundlepacket)\[]; `timeTag`: [`NTPTimeTag`](#ntptimetag); }
+
+A packet that can be included in an OSC bundle.
+
+Accepts three formats:
+
+#### Example
+
+```ts
+// Array format (preferred):
+["/s_new", "beep", 1001, 0, 1]
+
+// Object format (legacy):
+{ address: "/s_new", args: ["beep", 1001, 0, 1] }
+
+// Nested bundle:
+{ timeTag: ntpTime, packets: [ ["/n_set", 1001, "freq", 880] ] }
+```
+
+***
+
+### OscCategory
+
+> **OscCategory** = `"nonBundle"` | `"immediate"` | `"nearFuture"` | `"late"` | `"farFuture"`
+
+Classification category for OSC message routing.
+
+* `'nonBundle'` — plain message (not a bundle), sent directly
+* `'immediate'` — bundle with timetag 0 or 1, sent directly
+* `'nearFuture'` — bundle within the bypass lookahead threshold, sent directly
+* `'late'` — bundle past its scheduled time, sent directly
+* `'farFuture'` — bundle beyond the lookahead threshold, routed to the prescheduler
+
+***
+
+### OscChannelTransferable
+
+> **OscChannelTransferable** = [`OscChannelSABTransferable`](#oscchannelsabtransferable) | [`OscChannelPMTransferable`](#oscchannelpmtransferable)
+
+Opaque config produced by `channel.transferable` and consumed by `OscChannel.fromTransferable()`.
+
+***
+
+### OscMessage
+
+> **OscMessage** = \[`string`, `...OscArg[]`]
+
+Decoded OSC message as a plain array.
+
+The first element is always the address string, followed by zero or more arguments.
+
+#### Example
+
+```ts
+// A decoded /s_new message:
+["/s_new", "beep", 1001, 0, 1, "freq", 440]
+
+// Access parts:
+const address = msg[0];  // "/s_new"
+const args = msg.slice(1);  // ["beep", 1001, 0, 1, "freq", 440]
+```
+
+***
+
+### SuperSonicEvent
+
+> **SuperSonicEvent** = keyof [`SuperSonicEventMap`](#supersoniceventmap)
+
+Union of all event names.
+
+***
+
+### TransportMode
+
+> **TransportMode** = `"sab"` | `"postMessage"`
+
+Transport mode for communication between JS and the AudioWorklet.
+
+* `'sab'` — SharedArrayBuffer: lowest latency, requires COOP/COEP headers
+* `'postMessage'` — postMessage: works everywhere including CDN, slightly higher latency
+
+## Variables
+
+### osc
+
+> `const` **osc**: `object`
+
+Static OSC encoding/decoding utilities.
+
+Available as `SuperSonic.osc` or via the named `osc` export.
+All encode methods return independent copies safe to store or transfer.
+
+#### Type Declaration
+
+| Name                                                      | Type                                                                 | Description                                                                                                                                                                                              |
+| --------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <a id="property-ntp_epoch_offset"></a> `NTP_EPOCH_OFFSET` | `number`                                                             | Seconds between NTP epoch (1900) and Unix epoch (1970): `2208988800`.                                                                                                                                    |
+| `decode()`                                                | (`data`) => [`OscBundle`](#oscbundle) \| [`OscMessage`](#oscmessage) | Decode an OSC packet (message or bundle).                                                                                                                                                                |
+| `encodeBundle()`                                          | (`timeTag`, `packets`) => `Uint8Array`                               | Encode an OSC bundle with multiple packets. **Example** `const time = osc.ntpNow() + 1.0; // 1 second from now osc.encodeBundle(time, [ ['/n_set', 1001, 'freq', 880], ['/n_set', 1001, 'amp', 0.5], ])` |
+| `encodeMessage()`                                         | (`address`, `args?`) => `Uint8Array`                                 | Encode an OSC message. **Example** `osc.encodeMessage('/s_new', ['beep', 1001, 0, 1, 'freq', 440])`                                                                                                      |
+| `encodeSingleBundle()`                                    | (`timeTag`, `address`, `args?`) => `Uint8Array`                      | Encode a single-message bundle (common case optimisation). Equivalent to `encodeBundle(timeTag, [[address, ...args]])` but faster.                                                                       |
+| `ntpNow()`                                                | () => `number`                                                       | Get the current time as an NTP timestamp (seconds since 1900). Use this to schedule bundles relative to now: **Example** `const halfSecondFromNow = osc.ntpNow() + 0.5;`                                 |
+| `readTimetag()`                                           | (`bundleData`) => `object`                                           | Read the timetag from a bundle without fully decoding it.                                                                                                                                                |
+
+#### Example
+
+```ts
+import { SuperSonic } from 'supersonic-scsynth';
+
+// Encode a message
+const msg = SuperSonic.osc.encodeMessage('/s_new', ['beep', 1001, 0, 1]);
+
+// Encode a timed bundle
+const time = SuperSonic.osc.ntpNow() + 0.5; // 500ms from now
+const bundle = SuperSonic.osc.encodeBundle(time, [
+  ['/s_new', 'beep', 1001, 0, 1, 'freq', 440],
+  ['/s_new', 'beep', 1002, 0, 1, 'freq', 660],
+]);
+
+// Decode incoming data
+const decoded = SuperSonic.osc.decode(rawBytes);
+```
