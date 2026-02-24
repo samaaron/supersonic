@@ -525,6 +525,226 @@ function enhanceTables(children) {
   }
 }
 
+/**
+ * Desired document order for h2 and h3 sections.
+ */
+const H2_ORDER = ['Classes', 'Variables', 'Interfaces', 'Type Aliases'];
+const CLASS_ORDER = ['SuperSonic', 'OscChannel'];
+
+/**
+ * Phase 6: Reorder h2 sections and h3 sub-sections within Classes.
+ */
+function reorderSections(children) {
+  const firstH2 = children.findIndex((n) => n.type === 'heading' && n.depth === 2);
+  if (firstH2 === -1) return;
+
+  const header = children.slice(0, firstH2);
+
+  // Extract h2 sections into a map (preserving original order for unlisted ones)
+  const h2Map = new Map();
+  const h2Order = [];
+  for (let i = firstH2; i < children.length; ) {
+    if (children[i].type === 'heading' && children[i].depth === 2) {
+      const name = extractText(children[i]);
+      const end = findSectionEnd(children, i, 2);
+      h2Map.set(name, children.slice(i, end));
+      h2Order.push(name);
+      i = end;
+    } else {
+      i++;
+    }
+  }
+
+  // Within Classes, reorder h3 sub-sections
+  if (h2Map.has('Classes')) {
+    h2Map.set('Classes', reorderSubSections(h2Map.get('Classes'), 3, CLASS_ORDER));
+  }
+
+  // Rebuild children in desired h2 order
+  children.length = 0;
+  children.push(...header);
+  const placed = new Set();
+  for (const name of H2_ORDER) {
+    if (h2Map.has(name)) {
+      children.push(...h2Map.get(name));
+      placed.add(name);
+    }
+  }
+  for (const name of h2Order) {
+    if (!placed.has(name)) children.push(...h2Map.get(name));
+  }
+}
+
+/**
+ * Reorder sub-sections (h3s within an h2) according to a priority list.
+ * Strips and re-adds thematicBreaks between sections.
+ */
+function reorderSubSections(sectionNodes, depth, order) {
+  const firstH = sectionNodes.findIndex((n) => n.type === 'heading' && n.depth === depth);
+  if (firstH === -1) return sectionNodes;
+
+  const preamble = sectionNodes.slice(0, firstH);
+  const subMap = new Map();
+  const subOrder = [];
+
+  for (let i = firstH; i < sectionNodes.length; ) {
+    if (sectionNodes[i].type === 'thematicBreak') {
+      i++;
+      continue;
+    }
+    if (sectionNodes[i].type === 'heading' && sectionNodes[i].depth === depth) {
+      const name = extractText(sectionNodes[i]);
+      let end = i + 1;
+      while (
+        end < sectionNodes.length &&
+        sectionNodes[end].type !== 'thematicBreak' &&
+        !(sectionNodes[end].type === 'heading' && sectionNodes[end].depth <= depth)
+      )
+        end++;
+      subMap.set(name, sectionNodes.slice(i, end));
+      subOrder.push(name);
+      i = end;
+    } else {
+      i++;
+    }
+  }
+
+  // Rebuild with thematicBreaks between sections
+  const result = [...preamble];
+  const placed = new Set();
+  let first = true;
+  for (const name of order) {
+    if (subMap.has(name)) {
+      if (!first) result.push({ type: 'thematicBreak' });
+      result.push(...subMap.get(name));
+      placed.add(name);
+      first = false;
+    }
+  }
+  for (const name of subOrder) {
+    if (!placed.has(name)) {
+      if (!first) result.push({ type: 'thematicBreak' });
+      result.push(...subMap.get(name));
+      first = false;
+    }
+  }
+  return result;
+}
+
+/**
+ * Phase 7: Generate a table of contents after the h1 heading.
+ * Classes/Variables h3s become top-level ToC items with h4 sub-links.
+ * Interfaces/Type Aliases are compact single-line entries.
+ */
+const TOC_SKIP_H4 = new Set([
+  'Example', 'Examples', 'Extends', 'Extended by', 'Constructors', 'Type Declaration',
+]);
+
+function insertTableOfContents(children) {
+  // Compute GitHub-style anchors for all headings in final document order
+  const slugCounts = new Map();
+  const headingAnchors = new Map();
+  for (let i = 0; i < children.length; i++) {
+    if (children[i].type !== 'heading') continue;
+    const base = slugify(extractText(children[i]));
+    const count = slugCounts.get(base) || 0;
+    slugCounts.set(base, count + 1);
+    headingAnchors.set(i, count === 0 ? base : `${base}-${count}`);
+  }
+
+  // Collect ToC structure from h2/h3/h4 headings
+  const tocItems = [];
+  for (let i = 0; i < children.length; i++) {
+    if (children[i].type !== 'heading' || children[i].depth !== 2) continue;
+    const h2Text = extractText(children[i]);
+    const h2End = findSectionEnd(children, i, 2);
+    const promoteSections = h2Text === 'Classes' || h2Text === 'Variables';
+
+    const h3Items = [];
+    for (let j = i + 1; j < h2End; j++) {
+      if (children[j].type !== 'heading' || children[j].depth !== 3) continue;
+      const h3Text = extractText(children[j]);
+      const h3Anchor = headingAnchors.get(j);
+      const h3End = findSectionEnd(children, j, 3);
+
+      // Collect h4 sub-items for promoted sections (Classes)
+      const h4Items = [];
+      if (promoteSections) {
+        for (let k = j + 1; k < h3End; k++) {
+          if (children[k].type !== 'heading' || children[k].depth !== 4) continue;
+          const h4Text = extractText(children[k]);
+          if (TOC_SKIP_H4.has(h4Text)) continue;
+          h4Items.push({ text: h4Text, anchor: headingAnchors.get(k) });
+        }
+      }
+      h3Items.push({ text: h3Text, anchor: h3Anchor, h4Items });
+    }
+    tocItems.push({ h2Text, promote: promoteSections, h3Items });
+  }
+
+  // Build the list AST
+  const listItems = [];
+  for (const section of tocItems) {
+    if (section.promote) {
+      // Each h3 gets its own top-level ToC entry
+      for (const h3 of section.h3Items) {
+        const para = [makeLink(h3.text, h3.anchor)];
+        if (h3.h4Items.length > 0) {
+          para.push({ type: 'text', value: ' — ' });
+          para.push(...joinWithSep(h3.h4Items.map((h4) => makeLink(h4.text, h4.anchor))));
+        }
+        listItems.push({ type: 'listItem', children: [{ type: 'paragraph', children: para }] });
+      }
+    } else {
+      // Compact: bold label + inline h3 links
+      const para = [{ type: 'strong', children: [{ type: 'text', value: section.h2Text }] }];
+      if (section.h3Items.length > 0) {
+        para.push({ type: 'text', value: ' — ' });
+        para.push(...joinWithSep(section.h3Items.map((h3) => makeLink(h3.text, h3.anchor))));
+      }
+      listItems.push({ type: 'listItem', children: [{ type: 'paragraph', children: para }] });
+    }
+  }
+
+  // Insert note + ToC after h1
+  const h1Idx = children.findIndex((n) => n.type === 'heading' && n.depth === 1);
+  if (h1Idx !== -1) {
+    const note = {
+      type: 'blockquote',
+      children: [
+        {
+          type: 'paragraph',
+          children: [
+            { type: 'text', value: 'Auto-generated from ' },
+            {
+              type: 'link',
+              url: '../supersonic.d.ts',
+              children: [{ type: 'inlineCode', value: 'supersonic.d.ts' }],
+            },
+            { type: 'text', value: '. For worked examples and patterns, see the ' },
+            { type: 'link', url: 'GUIDE.md', children: [{ type: 'text', value: 'Guide' }] },
+            { type: 'text', value: '.' },
+          ],
+        },
+      ],
+    };
+    children.splice(h1Idx + 1, 0, note, { type: 'list', ordered: false, children: listItems });
+  }
+}
+
+function makeLink(text, anchor) {
+  return { type: 'link', url: `#${anchor}`, children: [{ type: 'text', value: text }] };
+}
+
+function joinWithSep(nodes, sep = ' · ') {
+  const result = [];
+  for (let i = 0; i < nodes.length; i++) {
+    if (i > 0) result.push({ type: 'text', value: sep });
+    result.push(nodes[i]);
+  }
+  return result;
+}
+
 export default function remarkTypedocSummary() {
   return (tree) => {
     const children = tree.children;
@@ -532,6 +752,7 @@ export default function remarkTypedocSummary() {
     // Rename the h1 to "API Reference"
     const h1 = children.find((n) => n.type === 'heading' && n.depth === 1);
     if (h1) h1.children = [{ type: 'text', value: 'API Reference' }];
+
 
     // Phase 1+4: Build and insert summary tables (grouped for SuperSonic)
     const inserts = [];
@@ -593,5 +814,11 @@ export default function remarkTypedocSummary() {
 
     // Phase 5: Enhance tables
     enhanceTables(children);
+
+    // Phase 6: Reorder sections (SuperSonic first, then osc, then OscChannel)
+    reorderSections(children);
+
+    // Phase 7: Generate table of contents
+    insertTableOfContents(children);
   };
 }

@@ -1,257 +1,18 @@
 # API Reference
 
+> Auto-generated from [`supersonic.d.ts`](../supersonic.d.ts). For worked examples and patterns, see the [Guide](GUIDE.md).
+
+* [SuperSonic](#supersonic) — [Constructor Options](#constructor-options) · [Server Options](#server-options) · [Properties](#properties) · [Accessors](#accessors) · [Methods](#methods) · [Event Types](#event-types) · [OSC Argument Types](#osc-argument-types)
+
+* [OscChannel](#oscchannel) — [Accessors](#accessors-1) · [Methods](#methods-1)
+
+* [osc](#osc-1)
+
+* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [SendOSCOptions](#sendoscoptions) · [Snapshot](#snapshot) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [Tree](#tree) · [TreeNode](#treenode)
+
+* **Type Aliases** — [AddAction](#addaction) · [BlockedCommand](#blockedcommand) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscCategory](#osccategory) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode)
+
 ## Classes
-
-### OscChannel
-
-OscChannel — unified dispatch for sending OSC to the AudioWorklet.
-
-Obtain a channel via [SuperSonic.createOscChannel](#createoscchannel) on the main thread,
-then transfer it to a Web Worker for direct communication with the AudioWorklet.
-
-| Member                                        | Description                                                                     |
-| --------------------------------------------- | ------------------------------------------------------------------------------- |
-| [`getCurrentNTP`](#getcurrentntp)             | Set the NTP time source for classification (used in AudioWorklet context).      |
-| [`mode`](#mode)                               | Transport mode this channel is using.                                           |
-| [`transferable`](#transferable)               | Serializable config for transferring this channel to a worker via postMessage.  |
-| [`transferList`](#transferlist)               | Array of transferable objects (MessagePorts) for the postMessage transfer list. |
-| [`classify()`](#classify)                     | Classify an OSC message to determine its routing.                               |
-| [`close()`](#close)                           | Close the channel and release its ports.                                        |
-| [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                           |
-| [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                   |
-| [`send()`](#send)                             | Send an OSC message with automatic routing.                                     |
-| [`sendDirect()`](#senddirect)                 | Send directly to worklet without classification or metrics tracking.            |
-| [`sendToPrescheduler()`](#sendtoprescheduler) | Send to prescheduler without classification.                                    |
-| [`fromTransferable()`](#fromtransferable)     | Reconstruct an OscChannel from data received via postMessage in a worker.       |
-
-#### Example
-
-```ts
-// Main thread: create and transfer to worker
-const channel = sonic.createOscChannel();
-myWorker.postMessage(
-  { channel: channel.transferable },
-  channel.transferList,
-);
-
-// Inside worker: reconstruct and send
-import { OscChannel } from 'supersonic-scsynth/osc-channel';
-const channel = OscChannel.fromTransferable(event.data.channel);
-channel.send(oscBytes);
-```
-
-#### Constructors
-
-##### Constructor
-
-> **new OscChannel**(): [`OscChannel`](#oscchannel)
-
-###### Returns
-
-[`OscChannel`](#oscchannel)
-
-#### Accessors
-
-##### getCurrentNTP
-
-###### Set Signature
-
-> **set** **getCurrentNTP**(`fn`): `void`
-
-Set the NTP time source for classification (used in AudioWorklet context).
-
-###### Parameters
-
-| Parameter | Type           |
-| --------- | -------------- |
-| `fn`      | () => `number` |
-
-###### Returns
-
-`void`
-
-##### mode
-
-###### Get Signature
-
-> **get** **mode**(): [`TransportMode`](#transportmode)
-
-Transport mode this channel is using.
-
-###### Returns
-
-[`TransportMode`](#transportmode)
-
-##### transferable
-
-###### Get Signature
-
-> **get** **transferable**(): [`OscChannelTransferable`](#oscchanneltransferable-1)
-
-Serializable config for transferring this channel to a worker via postMessage.
-
-###### Example
-
-```ts
-worker.postMessage({ ch: channel.transferable }, channel.transferList);
-```
-
-###### Returns
-
-[`OscChannelTransferable`](#oscchanneltransferable-1)
-
-##### transferList
-
-###### Get Signature
-
-> **get** **transferList**(): `Transferable`\[]
-
-Array of transferable objects (MessagePorts) for the postMessage transfer list.
-
-###### Example
-
-```ts
-worker.postMessage({ ch: channel.transferable }, channel.transferList);
-```
-
-###### Returns
-
-`Transferable`\[]
-
-#### Methods
-
-##### classify()
-
-> **classify**(`oscData`): [`OscCategory`](#osccategory)
-
-Classify an OSC message to determine its routing.
-
-###### Parameters
-
-| Parameter | Type         | Description       |
-| --------- | ------------ | ----------------- |
-| `oscData` | `Uint8Array` | Encoded OSC bytes |
-
-###### Returns
-
-[`OscCategory`](#osccategory)
-
-##### close()
-
-> **close**(): `void`
-
-Close the channel and release its ports.
-
-###### Returns
-
-`void`
-
-##### getAndResetMetrics()
-
-> **getAndResetMetrics**(): [`OscChannelMetrics`](#oscchannelmetrics)
-
-Get and reset local metrics (for periodic reporting).
-
-###### Returns
-
-[`OscChannelMetrics`](#oscchannelmetrics)
-
-##### getMetrics()
-
-> **getMetrics**(): [`OscChannelMetrics`](#oscchannelmetrics)
-
-Get current metrics snapshot.
-
-###### Returns
-
-[`OscChannelMetrics`](#oscchannelmetrics)
-
-##### send()
-
-> **send**(`oscData`): `boolean`
-
-Send an OSC message with automatic routing.
-
-Classifies the message and routes it:
-
-* bypass categories → sent directly to the AudioWorklet
-* far-future bundles → routed to the prescheduler for timed dispatch
-
-###### Parameters
-
-| Parameter | Type         | Description       |
-| --------- | ------------ | ----------------- |
-| `oscData` | `Uint8Array` | Encoded OSC bytes |
-
-###### Returns
-
-`boolean`
-
-true if sent successfully
-
-##### sendDirect()
-
-> **sendDirect**(`oscData`): `boolean`
-
-Send directly to worklet without classification or metrics tracking.
-
-###### Parameters
-
-| Parameter | Type         | Description       |
-| --------- | ------------ | ----------------- |
-| `oscData` | `Uint8Array` | Encoded OSC bytes |
-
-###### Returns
-
-`boolean`
-
-true if sent successfully
-
-##### sendToPrescheduler()
-
-> **sendToPrescheduler**(`oscData`): `boolean`
-
-Send to prescheduler without classification.
-
-###### Parameters
-
-| Parameter | Type         | Description       |
-| --------- | ------------ | ----------------- |
-| `oscData` | `Uint8Array` | Encoded OSC bytes |
-
-###### Returns
-
-`boolean`
-
-true if sent successfully
-
-##### fromTransferable()
-
-> `static` **fromTransferable**(`data`): [`OscChannel`](#oscchannel)
-
-Reconstruct an OscChannel from data received via postMessage in a worker.
-
-###### Parameters
-
-| Parameter | Type                                                  | Description                                         |
-| --------- | ----------------------------------------------------- | --------------------------------------------------- |
-| `data`    | [`OscChannelTransferable`](#oscchanneltransferable-1) | The transferable config from `channel.transferable` |
-
-###### Returns
-
-[`OscChannel`](#oscchannel)
-
-###### Example
-
-```ts
-// In a Web Worker:
-self.onmessage = (e) => {
-  const channel = OscChannel.fromTransferable(e.data.ch);
-  channel.send(oscBytes);
-};
-```
-
-***
 
 ### SuperSonic
 
@@ -2640,6 +2401,299 @@ Get schema describing the hierarchical node tree structure.
 
 `Record`<`string`, `unknown`>
 
+***
+
+### OscChannel
+
+OscChannel — unified dispatch for sending OSC to the AudioWorklet.
+
+Obtain a channel via [SuperSonic.createOscChannel](#createoscchannel) on the main thread,
+then transfer it to a Web Worker for direct communication with the AudioWorklet.
+
+| Member                                        | Description                                                                     |
+| --------------------------------------------- | ------------------------------------------------------------------------------- |
+| [`getCurrentNTP`](#getcurrentntp)             | Set the NTP time source for classification (used in AudioWorklet context).      |
+| [`mode`](#mode)                               | Transport mode this channel is using.                                           |
+| [`transferable`](#transferable)               | Serializable config for transferring this channel to a worker via postMessage.  |
+| [`transferList`](#transferlist)               | Array of transferable objects (MessagePorts) for the postMessage transfer list. |
+| [`classify()`](#classify)                     | Classify an OSC message to determine its routing.                               |
+| [`close()`](#close)                           | Close the channel and release its ports.                                        |
+| [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                           |
+| [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                   |
+| [`send()`](#send)                             | Send an OSC message with automatic routing.                                     |
+| [`sendDirect()`](#senddirect)                 | Send directly to worklet without classification or metrics tracking.            |
+| [`sendToPrescheduler()`](#sendtoprescheduler) | Send to prescheduler without classification.                                    |
+| [`fromTransferable()`](#fromtransferable)     | Reconstruct an OscChannel from data received via postMessage in a worker.       |
+
+#### Example
+
+```ts
+// Main thread: create and transfer to worker
+const channel = sonic.createOscChannel();
+myWorker.postMessage(
+  { channel: channel.transferable },
+  channel.transferList,
+);
+
+// Inside worker: reconstruct and send
+import { OscChannel } from 'supersonic-scsynth/osc-channel';
+const channel = OscChannel.fromTransferable(event.data.channel);
+channel.send(oscBytes);
+```
+
+#### Constructors
+
+##### Constructor
+
+> **new OscChannel**(): [`OscChannel`](#oscchannel)
+
+###### Returns
+
+[`OscChannel`](#oscchannel)
+
+#### Accessors
+
+##### getCurrentNTP
+
+###### Set Signature
+
+> **set** **getCurrentNTP**(`fn`): `void`
+
+Set the NTP time source for classification (used in AudioWorklet context).
+
+###### Parameters
+
+| Parameter | Type           |
+| --------- | -------------- |
+| `fn`      | () => `number` |
+
+###### Returns
+
+`void`
+
+##### mode
+
+###### Get Signature
+
+> **get** **mode**(): [`TransportMode`](#transportmode)
+
+Transport mode this channel is using.
+
+###### Returns
+
+[`TransportMode`](#transportmode)
+
+##### transferable
+
+###### Get Signature
+
+> **get** **transferable**(): [`OscChannelTransferable`](#oscchanneltransferable-1)
+
+Serializable config for transferring this channel to a worker via postMessage.
+
+###### Example
+
+```ts
+worker.postMessage({ ch: channel.transferable }, channel.transferList);
+```
+
+###### Returns
+
+[`OscChannelTransferable`](#oscchanneltransferable-1)
+
+##### transferList
+
+###### Get Signature
+
+> **get** **transferList**(): `Transferable`\[]
+
+Array of transferable objects (MessagePorts) for the postMessage transfer list.
+
+###### Example
+
+```ts
+worker.postMessage({ ch: channel.transferable }, channel.transferList);
+```
+
+###### Returns
+
+`Transferable`\[]
+
+#### Methods
+
+##### classify()
+
+> **classify**(`oscData`): [`OscCategory`](#osccategory)
+
+Classify an OSC message to determine its routing.
+
+###### Parameters
+
+| Parameter | Type         | Description       |
+| --------- | ------------ | ----------------- |
+| `oscData` | `Uint8Array` | Encoded OSC bytes |
+
+###### Returns
+
+[`OscCategory`](#osccategory)
+
+##### close()
+
+> **close**(): `void`
+
+Close the channel and release its ports.
+
+###### Returns
+
+`void`
+
+##### getAndResetMetrics()
+
+> **getAndResetMetrics**(): [`OscChannelMetrics`](#oscchannelmetrics)
+
+Get and reset local metrics (for periodic reporting).
+
+###### Returns
+
+[`OscChannelMetrics`](#oscchannelmetrics)
+
+##### getMetrics()
+
+> **getMetrics**(): [`OscChannelMetrics`](#oscchannelmetrics)
+
+Get current metrics snapshot.
+
+###### Returns
+
+[`OscChannelMetrics`](#oscchannelmetrics)
+
+##### send()
+
+> **send**(`oscData`): `boolean`
+
+Send an OSC message with automatic routing.
+
+Classifies the message and routes it:
+
+* bypass categories → sent directly to the AudioWorklet
+* far-future bundles → routed to the prescheduler for timed dispatch
+
+###### Parameters
+
+| Parameter | Type         | Description       |
+| --------- | ------------ | ----------------- |
+| `oscData` | `Uint8Array` | Encoded OSC bytes |
+
+###### Returns
+
+`boolean`
+
+true if sent successfully
+
+##### sendDirect()
+
+> **sendDirect**(`oscData`): `boolean`
+
+Send directly to worklet without classification or metrics tracking.
+
+###### Parameters
+
+| Parameter | Type         | Description       |
+| --------- | ------------ | ----------------- |
+| `oscData` | `Uint8Array` | Encoded OSC bytes |
+
+###### Returns
+
+`boolean`
+
+true if sent successfully
+
+##### sendToPrescheduler()
+
+> **sendToPrescheduler**(`oscData`): `boolean`
+
+Send to prescheduler without classification.
+
+###### Parameters
+
+| Parameter | Type         | Description       |
+| --------- | ------------ | ----------------- |
+| `oscData` | `Uint8Array` | Encoded OSC bytes |
+
+###### Returns
+
+`boolean`
+
+true if sent successfully
+
+##### fromTransferable()
+
+> `static` **fromTransferable**(`data`): [`OscChannel`](#oscchannel)
+
+Reconstruct an OscChannel from data received via postMessage in a worker.
+
+###### Parameters
+
+| Parameter | Type                                                  | Description                                         |
+| --------- | ----------------------------------------------------- | --------------------------------------------------- |
+| `data`    | [`OscChannelTransferable`](#oscchanneltransferable-1) | The transferable config from `channel.transferable` |
+
+###### Returns
+
+[`OscChannel`](#oscchannel)
+
+###### Example
+
+```ts
+// In a Web Worker:
+self.onmessage = (e) => {
+  const channel = OscChannel.fromTransferable(e.data.ch);
+  channel.send(oscBytes);
+};
+```
+
+## Variables
+
+### osc
+
+> `const` **osc**: `object`
+
+Static OSC encoding/decoding utilities.
+
+Available as `SuperSonic.osc` or via the named `osc` export.
+All encode methods return independent copies safe to store or transfer.
+
+#### Type Declaration
+
+| Name                                                      | Type                                                                 | Description                                                                                                                                                                                              |
+| --------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <a id="property-ntp_epoch_offset"></a> `NTP_EPOCH_OFFSET` | `number`                                                             | Seconds between NTP epoch (1900) and Unix epoch (1970): `2208988800`.                                                                                                                                    |
+| `decode()`                                                | (`data`) => [`OscBundle`](#oscbundle) \| [`OscMessage`](#oscmessage) | Decode an OSC packet (message or bundle).                                                                                                                                                                |
+| `encodeBundle()`                                          | (`timeTag`, `packets`) => `Uint8Array`                               | Encode an OSC bundle with multiple packets. **Example** `const time = osc.ntpNow() + 1.0; // 1 second from now osc.encodeBundle(time, [ ['/n_set', 1001, 'freq', 880], ['/n_set', 1001, 'amp', 0.5], ])` |
+| `encodeMessage()`                                         | (`address`, `args?`) => `Uint8Array`                                 | Encode an OSC message. **Example** `osc.encodeMessage('/s_new', ['beep', 1001, 0, 1, 'freq', 440])`                                                                                                      |
+| `encodeSingleBundle()`                                    | (`timeTag`, `address`, `args?`) => `Uint8Array`                      | Encode a single-message bundle (common case optimisation). Equivalent to `encodeBundle(timeTag, [[address, ...args]])` but faster.                                                                       |
+| `ntpNow()`                                                | () => `number`                                                       | Get the current time as an NTP timestamp (seconds since 1900). Use this to schedule bundles relative to now: **Example** `const halfSecondFromNow = osc.ntpNow() + 0.5;`                                 |
+| `readTimetag()`                                           | (`bundleData`) => `object`                                           | Read the timetag from a bundle without fully decoding it.                                                                                                                                                |
+
+#### Example
+
+```ts
+import { SuperSonic } from 'supersonic-scsynth';
+
+// Encode a message
+const msg = SuperSonic.osc.encodeMessage('/s_new', ['beep', 1001, 0, 1]);
+
+// Encode a timed bundle
+const time = SuperSonic.osc.ntpNow() + 0.5; // 500ms from now
+const bundle = SuperSonic.osc.encodeBundle(time, [
+  ['/s_new', 'beep', 1001, 0, 1, 'freq', 440],
+  ['/s_new', 'beep', 1002, 0, 1, 'freq', 660],
+]);
+
+// Decode incoming data
+const decoded = SuperSonic.osc.decode(rawBytes);
+```
+
 ## Interfaces
 
 ### ActivityLineConfig
@@ -3167,45 +3221,3 @@ Transport mode for communication between JS and the AudioWorklet.
 
 * `'sab'` — SharedArrayBuffer: lowest latency, requires COOP/COEP headers
 * `'postMessage'` — postMessage: works everywhere including CDN, slightly higher latency
-
-## Variables
-
-### osc
-
-> `const` **osc**: `object`
-
-Static OSC encoding/decoding utilities.
-
-Available as `SuperSonic.osc` or via the named `osc` export.
-All encode methods return independent copies safe to store or transfer.
-
-#### Type Declaration
-
-| Name                                                      | Type                                                                 | Description                                                                                                                                                                                              |
-| --------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <a id="property-ntp_epoch_offset"></a> `NTP_EPOCH_OFFSET` | `number`                                                             | Seconds between NTP epoch (1900) and Unix epoch (1970): `2208988800`.                                                                                                                                    |
-| `decode()`                                                | (`data`) => [`OscBundle`](#oscbundle) \| [`OscMessage`](#oscmessage) | Decode an OSC packet (message or bundle).                                                                                                                                                                |
-| `encodeBundle()`                                          | (`timeTag`, `packets`) => `Uint8Array`                               | Encode an OSC bundle with multiple packets. **Example** `const time = osc.ntpNow() + 1.0; // 1 second from now osc.encodeBundle(time, [ ['/n_set', 1001, 'freq', 880], ['/n_set', 1001, 'amp', 0.5], ])` |
-| `encodeMessage()`                                         | (`address`, `args?`) => `Uint8Array`                                 | Encode an OSC message. **Example** `osc.encodeMessage('/s_new', ['beep', 1001, 0, 1, 'freq', 440])`                                                                                                      |
-| `encodeSingleBundle()`                                    | (`timeTag`, `address`, `args?`) => `Uint8Array`                      | Encode a single-message bundle (common case optimisation). Equivalent to `encodeBundle(timeTag, [[address, ...args]])` but faster.                                                                       |
-| `ntpNow()`                                                | () => `number`                                                       | Get the current time as an NTP timestamp (seconds since 1900). Use this to schedule bundles relative to now: **Example** `const halfSecondFromNow = osc.ntpNow() + 0.5;`                                 |
-| `readTimetag()`                                           | (`bundleData`) => `object`                                           | Read the timetag from a bundle without fully decoding it.                                                                                                                                                |
-
-#### Example
-
-```ts
-import { SuperSonic } from 'supersonic-scsynth';
-
-// Encode a message
-const msg = SuperSonic.osc.encodeMessage('/s_new', ['beep', 1001, 0, 1]);
-
-// Encode a timed bundle
-const time = SuperSonic.osc.ntpNow() + 0.5; // 500ms from now
-const bundle = SuperSonic.osc.encodeBundle(time, [
-  ['/s_new', 'beep', 1001, 0, 1, 'freq', 440],
-  ['/s_new', 'beep', 1002, 0, 1, 'freq', 660],
-]);
-
-// Decode incoming data
-const decoded = SuperSonic.osc.decode(rawBytes);
-```
