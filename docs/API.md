@@ -6,7 +6,7 @@
 
 * [OscChannel](#oscchannel) — [Accessors](#accessors-1) · [Methods](#methods-1)
 
-* [osc](#osc-1)
+* [osc](#osc)
 
 * **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [SendOSCOptions](#sendoscoptions) · [Snapshot](#snapshot) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [Tree](#tree) · [TreeNode](#treenode)
 
@@ -105,7 +105,6 @@ scsynth with low latency inside a web page.
 | [`bufferConstants`](#bufferconstants)     | Buffer layout constants from the WASM build.                 |
 | [`initTime`](#inittime)                   | NTP time (seconds since 1900) when the AudioContext started. |
 | [`mode`](#mode)                           | Active transport mode ('sab' or 'postMessage').              |
-| [`osc`](#osc)                             | The internal OscChannel used by the main thread.             |
 | [`ringBufferBase`](#ringbufferbase)       | Ring buffer base offset in SharedArrayBuffer.                |
 | [`sharedBuffer`](#sharedbuffer)           | The SharedArrayBuffer (SAB mode) or null (postMessage mode). |
 | [`getLoadedBuffers()`](#getloadedbuffers) | Get info about all loaded audio buffers.                     |
@@ -368,18 +367,6 @@ analyser.connect(sonic.audioContext.destination);
 | `numberOfOutputs` | `number`              | -                                                                |
 | `connect()`       | (...`args`) => `void` | -                                                                |
 | `disconnect()`    | (...`args`) => `void` | -                                                                |
-
-##### osc
-
-###### Get Signature
-
-> **get** **osc**(): [`OscChannel`](#oscchannel)
-
-The internal OscChannel used by the main thread. Advanced use only.
-
-###### Returns
-
-[`OscChannel`](#oscchannel)
 
 ##### ringBufferBase
 

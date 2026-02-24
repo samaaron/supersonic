@@ -1131,8 +1131,6 @@ export class SuperSonic {
     readonly input: AudioWorkletNode;
   } | null;
 
-  /** The internal OscChannel used by the main thread. Advanced use only. */
-  get osc(): OscChannel | null;
 
   /** Map of loaded SynthDef names to their binary data. SynthDefs appear after `/d_recv` or `loadSynthDef()`. Removed on `/d_free` or `/d_freeAll`. Cached for automatic restoration after `reload()`. */
   loadedSynthDefs: Map<string, Uint8Array>;
