@@ -268,6 +268,294 @@ test.describe("Inbound UUID rewriting", () => {
 });
 
 // =============================================================================
+// SECONDARY NODE ID REWRITING
+// =============================================================================
+// Lifecycle replies (/n_go, /n_end, /n_info etc.) return:
+//   nodeID, parentGroupID, prevNodeID, nextNodeID, isGroup, [headNodeID, tailNodeID]
+// Currently only the first arg (nodeID) is rewritten. These tests document
+// the gaps where secondary node IDs should also be UUIDs.
+
+test.describe("Secondary node ID rewriting", () => {
+  test("/n_go prevNodeID should be UUID when prev node was UUID-created", async ({
+    page,
+    sonicConfig,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on("message", (msg) => messages.push(msg));
+      await sonic.init();
+      await sonic.send("/notify", 1);
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      const uuidA = new Uint8Array([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x10, 0x80, 0x00, 0xAA,
+        0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+      ]);
+      const uuidB = new Uint8Array([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x11, 0x80, 0x00, 0xBB,
+        0xBB, 0xBB, 0xBB, 0xBB, 0xBB,
+      ]);
+
+      // Create A then B in default group (addAction=0 = head)
+      // B added to head, so B's prevNodeID should be -1 and A's prevNodeID is B
+      // Use addAction=1 (tail) so B goes after A: B.prev = A
+      await sonic.send("/s_new", "sonic-pi-beep", { type: "uuid", value: uuidA }, 1, 0, "release", 60);
+      await sonic.sync(1);
+      await sonic.send("/s_new", "sonic-pi-beep", { type: "uuid", value: uuidB }, 1, 0, "release", 60);
+      await sonic.sync(2);
+      await new Promise((r) => setTimeout(r, 200));
+
+      // B's /n_go is the second one — its prevNodeID (arg index 3) should be A's UUID
+      const nGoMsgs = messages.filter((m) => m[0] === "/n_go");
+      const bNGo = nGoMsgs[1];
+
+      return {
+        gotBothNGo: nGoMsgs.length >= 2,
+        // arg layout: ["/n_go", nodeID, parentGroupID, prevNodeID, nextNodeID, isGroup]
+        prevNodeId: bNGo?.[3],
+        prevNodeIdIsUuid: bNGo?.[3]?.type === "uuid",
+        prevNodeIdBytes: bNGo?.[3]?.type === "uuid"
+          ? Array.from(bNGo[3].value)
+          : null,
+      };
+    }, sonicConfig);
+
+    expect(result.gotBothNGo).toBe(true);
+    expect(result.prevNodeIdIsUuid).toBe(true);
+    expect(result.prevNodeIdBytes).toEqual([
+      0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x10, 0x80, 0x00, 0xAA,
+      0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+    ]);
+  });
+
+  test("/n_info nextNodeID should be UUID when next node was UUID-created", async ({
+    page,
+    sonicConfig,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on("message", (msg) => messages.push(msg));
+      await sonic.init();
+      await sonic.send("/notify", 1);
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      const uuidA = new Uint8Array([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x12, 0x80, 0x00, 0xCC,
+        0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+      ]);
+      const uuidB = new Uint8Array([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x13, 0x80, 0x00, 0xDD,
+        0xDD, 0xDD, 0xDD, 0xDD, 0xDD,
+      ]);
+
+      // Create A then B (tail), so A.next = B
+      await sonic.send("/s_new", "sonic-pi-beep", { type: "uuid", value: uuidA }, 1, 0, "release", 60);
+      await sonic.sync(1);
+      await sonic.send("/s_new", "sonic-pi-beep", { type: "uuid", value: uuidB }, 1, 0, "release", 60);
+      await sonic.sync(2);
+
+      // Query A's info — its nextNodeID should be B's UUID
+      await sonic.send("/n_query", { type: "uuid", value: uuidA });
+      await sonic.sync(3);
+      await new Promise((r) => setTimeout(r, 200));
+
+      const nInfo = messages.find((m) => m[0] === "/n_info");
+      // /n_info layout: ["/n_info", nodeID, parentGroupID, prevNodeID, nextNodeID, isGroup]
+      return {
+        gotNInfo: !!nInfo,
+        nextNodeId: nInfo?.[4],
+        nextNodeIdIsUuid: nInfo?.[4]?.type === "uuid",
+        nextNodeIdBytes: nInfo?.[4]?.type === "uuid"
+          ? Array.from(nInfo[4].value)
+          : null,
+      };
+    }, sonicConfig);
+
+    expect(result.gotNInfo).toBe(true);
+    expect(result.nextNodeIdIsUuid).toBe(true);
+    expect(result.nextNodeIdBytes).toEqual([
+      0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x13, 0x80, 0x00, 0xDD,
+      0xDD, 0xDD, 0xDD, 0xDD, 0xDD,
+    ]);
+  });
+
+  test("/n_go parentGroupID should be UUID when parent group was UUID-created", async ({
+    page,
+    sonicConfig,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on("message", (msg) => messages.push(msg));
+      await sonic.init();
+      await sonic.send("/notify", 1);
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      const groupUuid = new Uint8Array([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x14, 0x80, 0x00, 0xEE,
+        0xEE, 0xEE, 0xEE, 0xEE, 0xEE,
+      ]);
+      const synthUuid = new Uint8Array([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x15, 0x80, 0x00, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+      ]);
+
+      // Create group with UUID, then synth inside it
+      await sonic.send("/g_new", { type: "uuid", value: groupUuid }, 1, 0);
+      await sonic.sync(1);
+      await sonic.send("/s_new", "sonic-pi-beep", { type: "uuid", value: synthUuid }, 0, { type: "uuid", value: groupUuid }, "release", 60);
+      await sonic.sync(2);
+      await new Promise((r) => setTimeout(r, 200));
+
+      // The synth's /n_go should have the group UUID as parentGroupID (arg index 2)
+      const nGoMsgs = messages.filter((m) => m[0] === "/n_go");
+      // First /n_go is the group, second is the synth
+      const synthNGo = nGoMsgs.find((m) => m[1]?.type === "uuid" &&
+        Array.from(m[1].value).every((b, i) => b === synthUuid[i]));
+
+      return {
+        gotSynthNGo: !!synthNGo,
+        parentGroupId: synthNGo?.[2],
+        parentGroupIdIsUuid: synthNGo?.[2]?.type === "uuid",
+        parentGroupIdBytes: synthNGo?.[2]?.type === "uuid"
+          ? Array.from(synthNGo[2].value)
+          : null,
+      };
+    }, sonicConfig);
+
+    expect(result.gotSynthNGo).toBe(true);
+    expect(result.parentGroupIdIsUuid).toBe(true);
+    expect(result.parentGroupIdBytes).toEqual([
+      0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x14, 0x80, 0x00, 0xEE,
+      0xEE, 0xEE, 0xEE, 0xEE, 0xEE,
+    ]);
+  });
+
+  test("/n_set reply should contain UUID as first arg", async ({
+    page,
+    sonicConfig,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on("message", (msg) => messages.push(msg));
+      await sonic.init();
+      await sonic.send("/notify", 1);
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      const uuid = new Uint8Array([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x16, 0x80, 0x00, 0x11,
+        0x11, 0x11, 0x11, 0x11, 0x11,
+      ]);
+
+      await sonic.send("/s_new", "sonic-pi-beep", { type: "uuid", value: uuid }, 0, 0, "release", 60);
+      await sonic.sync(1);
+
+      // /s_get triggers a /n_set reply with the node ID as first arg
+      await sonic.send("/s_get", { type: "uuid", value: uuid }, "out");
+      await sonic.sync(2);
+      await new Promise((r) => setTimeout(r, 200));
+
+      const nSet = messages.find((m) => m[0] === "/n_set");
+      return {
+        gotNSet: !!nSet,
+        firstArgIsUuid: nSet?.[1]?.type === "uuid",
+        firstArgBytes: nSet?.[1]?.type === "uuid"
+          ? Array.from(nSet[1].value)
+          : null,
+      };
+    }, sonicConfig);
+
+    expect(result.gotNSet).toBe(true);
+    expect(result.firstArgIsUuid).toBe(true);
+    expect(result.firstArgBytes).toEqual([
+      0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x16, 0x80, 0x00, 0x11,
+      0x11, 0x11, 0x11, 0x11, 0x11,
+    ]);
+  });
+
+  test("/n_end secondary args should be UUIDs for UUID-created neighbours", async ({
+    page,
+    sonicConfig,
+  }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const messages = [];
+      sonic.on("message", (msg) => messages.push(msg));
+      await sonic.init();
+      await sonic.send("/notify", 1);
+      await sonic.loadSynthDef("sonic-pi-beep");
+
+      const uuidA = new Uint8Array([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x17, 0x80, 0x00, 0x22,
+        0x22, 0x22, 0x22, 0x22, 0x22,
+      ]);
+      const uuidB = new Uint8Array([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x18, 0x80, 0x00, 0x33,
+        0x33, 0x33, 0x33, 0x33, 0x33,
+      ]);
+      const uuidC = new Uint8Array([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x19, 0x80, 0x00, 0x44,
+        0x44, 0x44, 0x44, 0x44, 0x44,
+      ]);
+
+      // Create A, B, C in order (tail), so A.next=B, B.prev=A, B.next=C
+      await sonic.send("/s_new", "sonic-pi-beep", { type: "uuid", value: uuidA }, 1, 0, "release", 60);
+      await sonic.send("/s_new", "sonic-pi-beep", { type: "uuid", value: uuidB }, 1, 0, "release", 60);
+      await sonic.send("/s_new", "sonic-pi-beep", { type: "uuid", value: uuidC }, 1, 0, "release", 60);
+      await sonic.sync(1);
+
+      // Free B — its /n_end should have A as prevNodeID and C as nextNodeID
+      await sonic.send("/n_free", { type: "uuid", value: uuidB });
+      await sonic.sync(2);
+      await new Promise((r) => setTimeout(r, 200));
+
+      const nEnd = messages.find((m) => m[0] === "/n_end" && m[1]?.type === "uuid" &&
+        Array.from(m[1].value).every((b, i) => b === uuidB[i]));
+
+      // /n_end layout: ["/n_end", nodeID, parentGroupID, prevNodeID, nextNodeID, isGroup]
+      return {
+        gotNEnd: !!nEnd,
+        prevNodeIdIsUuid: nEnd?.[3]?.type === "uuid",
+        prevNodeIdBytes: nEnd?.[3]?.type === "uuid"
+          ? Array.from(nEnd[3].value)
+          : null,
+        nextNodeIdIsUuid: nEnd?.[4]?.type === "uuid",
+        nextNodeIdBytes: nEnd?.[4]?.type === "uuid"
+          ? Array.from(nEnd[4].value)
+          : null,
+      };
+    }, sonicConfig);
+
+    expect(result.gotNEnd).toBe(true);
+    // prevNodeID should be UUID A
+    expect(result.prevNodeIdIsUuid).toBe(true);
+    expect(result.prevNodeIdBytes).toEqual([
+      0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x17, 0x80, 0x00, 0x22,
+      0x22, 0x22, 0x22, 0x22, 0x22,
+    ]);
+    // nextNodeID should be UUID C
+    expect(result.nextNodeIdIsUuid).toBe(true);
+    expect(result.nextNodeIdBytes).toEqual([
+      0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x19, 0x80, 0x00, 0x44,
+      0x44, 0x44, 0x44, 0x44, 0x44,
+    ]);
+  });
+});
+
+// =============================================================================
 // MAP PRUNING
 // =============================================================================
 

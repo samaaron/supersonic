@@ -438,16 +438,27 @@ bool rewrite_uuid_to_int32(char* osc_data, uint32_t* payload_size) {
 // INBOUND REWRITING: i → u (copy to static buffer, messages grow)
 // =============================================================================
 
-// Known node-lifecycle reply addresses where first arg is node ID
-static bool is_node_lifecycle_address(const char* addr) {
-    if (std::strcmp(addr, "/n_go") == 0) return true;
-    if (std::strcmp(addr, "/n_end") == 0) return true;
-    if (std::strcmp(addr, "/n_off") == 0) return true;
-    if (std::strcmp(addr, "/n_on") == 0) return true;
-    if (std::strcmp(addr, "/n_move") == 0) return true;
-    if (std::strcmp(addr, "/n_info") == 0) return true;
-    if (std::strcmp(addr, "/tr") == 0) return true;
-    return false;
+// Bitmask of which arg positions contain node IDs for known reply addresses.
+// Returns 0 if address is not a known reply type.
+static uint32_t node_id_arg_mask(const char* addr) {
+    // /n_go, /n_end, /n_off, /n_on, /n_move, /n_info reply format:
+    //   arg 0: nodeID, 1: parentGroupID, 2: prevNodeID, 3: nextNodeID,
+    //   4: isGroup (flag, NOT a node ID), 5: headNodeID, 6: tailNodeID
+    if (std::strcmp(addr, "/n_go") == 0 ||
+        std::strcmp(addr, "/n_end") == 0 ||
+        std::strcmp(addr, "/n_off") == 0 ||
+        std::strcmp(addr, "/n_on") == 0 ||
+        std::strcmp(addr, "/n_move") == 0 ||
+        std::strcmp(addr, "/n_info") == 0) {
+        return 0x6F;  // bits 0,1,2,3,5,6
+    }
+    // /tr, /n_set, /n_setn: only arg 0 is a node ID
+    if (std::strcmp(addr, "/tr") == 0 ||
+        std::strcmp(addr, "/n_set") == 0 ||
+        std::strcmp(addr, "/n_setn") == 0) {
+        return 0x01;
+    }
+    return 0;
 }
 
 void rewrite_int32_to_uuid(const char* msg, int size, char* out_buf, int* out_size) {
@@ -464,7 +475,8 @@ void rewrite_int32_to_uuid(const char* msg, int size, char* out_buf, int* out_si
     }
     addr[addr_len] = '\0';
 
-    if (!is_node_lifecycle_address(addr)) return;
+    uint32_t mask = node_id_arg_mask(addr);
+    if (mask == 0) return;
 
     // Find type tags
     uint32_t pos = osc_string_end(msg, 0, size);
@@ -477,49 +489,81 @@ void rewrite_int32_to_uuid(const char* msg, int size, char* out_buf, int* out_si
 
     if (num_tags == 0) return;
 
-    // First arg must be 'i' for node ID
-    if (msg[tags_start] != 'i') return;
-
     uint32_t args_start = (tags_end + 1 + 3) & ~3;
-    if (args_start + 4 > (uint32_t)size) return;
 
-    // Read first int32 arg
-    int32_t node_id = read_int32_be(msg + args_start);
+    // First pass: identify which args need rewriting
+    struct { bool rewrite; uint64_t hi; uint64_t lo; } rewrites[8] = {};
+    int32_t first_node_id = 0;  // For /n_end cleanup
+    int rewrite_count = 0;
 
-    // Look up UUID via reverse hash table (O(1))
-    uint64_t uuid_hi, uuid_lo;
-    if (!rev_find(node_id, &uuid_hi, &uuid_lo)) return;
+    uint32_t arg_pos = args_start;
+    for (uint32_t i = 0; i < num_tags && arg_pos < (uint32_t)size; i++) {
+        char tag = msg[tags_start + i];
+        uint32_t arg_bytes = osc_arg_size(tag, msg, arg_pos, size);
 
-    // Check output buffer size (message grows by 12 bytes per UUID)
-    int new_size = size + 12;
+        if (i < 8 && (mask & (1u << i)) && tag == 'i' && arg_pos + 4 <= (uint32_t)size) {
+            int32_t node_id = read_int32_be(msg + arg_pos);
+            if (i == 0) first_node_id = node_id;
+            uint64_t hi, lo;
+            if (rev_find(node_id, &hi, &lo)) {
+                rewrites[i].rewrite = true;
+                rewrites[i].hi = hi;
+                rewrites[i].lo = lo;
+                rewrite_count++;
+            }
+        } else if (i == 0) {
+            // First arg isn't 'i' — nothing to rewrite
+            if (tag == 'i' && arg_pos + 4 <= (uint32_t)size)
+                first_node_id = read_int32_be(msg + arg_pos);
+        }
+
+        arg_pos += arg_bytes;
+    }
+
+    if (rewrite_count == 0) return;
+
+    // Check output buffer size (each rewrite adds 12 bytes)
+    int new_size = size + rewrite_count * 12;
     if (new_size > 4096) {
         worklet_debug("WARNING: reply rewrite overflow (%d > 4096), passing through as int32", new_size);
         return;
     }
 
-    // Copy address + type tag string, modifying first tag from 'i' to 'u'
+    // Copy address + type tag region, then modify tags
     std::memcpy(out_buf, msg, args_start);
-    out_buf[tags_start] = 'u';
-
-    // Write UUID (16 bytes) where int32 (4 bytes) was
-    uint32_t out_pos = args_start;
-    write_uuid_be(out_buf + out_pos, uuid_hi, uuid_lo);
-    out_pos += 16;
-
-    // Copy remaining args (skip first 4 bytes of original args)
-    uint32_t remaining = size - (args_start + 4);
-    if (remaining > 0) {
-        std::memcpy(out_buf + out_pos, msg + args_start + 4, remaining);
-        out_pos += remaining;
+    for (uint32_t i = 0; i < num_tags && i < 8; i++) {
+        if (rewrites[i].rewrite) {
+            out_buf[tags_start + i] = 'u';
+        }
     }
 
-    *out_size = out_pos;
+    // Second pass: copy args, expanding rewritten ones
+    uint32_t read_pos = args_start;
+    uint32_t write_pos = args_start;
+    for (uint32_t i = 0; i < num_tags; i++) {
+        char tag = msg[tags_start + i];
+        uint32_t arg_bytes = osc_arg_size(tag, msg, read_pos, size);
+
+        if (i < 8 && rewrites[i].rewrite) {
+            write_uuid_be(out_buf + write_pos, rewrites[i].hi, rewrites[i].lo);
+            write_pos += 16;
+            read_pos += 4;
+        } else {
+            if (arg_bytes > 0) {
+                std::memcpy(out_buf + write_pos, msg + read_pos, arg_bytes);
+            }
+            write_pos += arg_bytes;
+            read_pos += arg_bytes;
+        }
+    }
+
+    *out_size = write_pos;
 
     // On /n_end, remove the mapping (node freed)
     bool is_n_end = (addr[0] == '/' && addr[1] == 'n' && addr[2] == '_' &&
                      addr[3] == 'e' && addr[4] == 'n' && addr[5] == 'd' && addr[6] == '\0');
     if (is_n_end) {
-        uuid_delete_by_id(node_id);
+        uuid_delete_by_id(first_node_id);
     }
 }
 
