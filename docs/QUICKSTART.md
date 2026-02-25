@@ -131,6 +131,7 @@ See [Metrics Component](METRICS_COMPONENT.md) for theming, layout control, and c
 
 ## Next Steps
 
+- [Guide](GUIDE.md) - Practical patterns and worked examples
 - [API Reference](API.md) - All methods and configuration options
 - [Metrics Component](METRICS_COMPONENT.md) - Real-time metrics dashboard
 - [scsynth Command Reference](SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling synthesis

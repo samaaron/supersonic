@@ -39,7 +39,7 @@ supersonic.on("setup", async () => {
 });
 ```
 
-**Why `setup` instead of `ready`?** In postMessage mode, `recover()` destroys and recreates the WASM memory, so all nodes are lost. The `setup` event lets you rebuild consistently on both initial boot and after recovery. In SAB mode memory persists across recovery, so this is less critical — but using `setup` keeps your code portable.
+**Why `setup` instead of `ready`?** When `recover()` falls through to a full `reload()`, WASM memory is destroyed and recreated, so all nodes are lost. The `setup` event lets you rebuild consistently on both initial boot and after recovery, regardless of transport mode. See [Communication Modes](MODES.md) for more on SAB vs postMessage.
 
 ### Tab Visibility & Recovery
 
@@ -55,7 +55,7 @@ document.addEventListener("visibilitychange", async () => {
 
 ### Resume vs Reload
 
-`resume()` is fast but only works if the worklet is still alive. `reload()` is a full restart. When you don't know which is needed, use `recover()` — or handle it manually:
+`resume()` is fast but only works if the worklet is still alive — it calls `purge()` to flush stale scheduled messages, resumes the AudioContext, and resyncs timing. `reload()` is a full restart. When you don't know which is needed, use `recover()` — or handle it manually:
 
 ```javascript
 if (await supersonic.resume()) {
@@ -216,7 +216,7 @@ supersonic.on("message:raw", ({ oscData, sequence, timestamp, scheduledTime }) =
 
 ### Multi-Worker Source Tracking with `message:sent`
 
-When using multiple OscChannels, `sourceId` identifies which channel sent each message:
+When using multiple OscChannels (see [Workers Guide](WORKERS.md)), `sourceId` identifies which channel sent each message:
 
 ```javascript
 supersonic.on("message:sent", ({ oscData, sourceId, sequence, timestamp, scheduledTime }) => {

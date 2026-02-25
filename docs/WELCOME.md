@@ -53,6 +53,7 @@ For other installation options including npm and self-hosting, see the [Installa
 
 - **[Installation](INSTALLATION.md)** - CDN, npm, self-hosting options
 - **[Quick Start](QUICKSTART.md)** - Boot and play your first synth
+- **[Guide](GUIDE.md)** - Practical patterns and worked examples
 - **[API Reference](API.md)** - The SuperSonic JavaScript API for initialising, controlling, and communicating with the scsynth Audioworklet
 - **[Communication Modes](MODES.md)** - SAB vs postMessage, server configuration
 

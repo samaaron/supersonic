@@ -173,13 +173,13 @@ const tree = supersonic.getTree();
 //   version: 42,        // Increments on every change
 //   nodeCount: 5,       // Total nodes
 //   droppedCount: 0,    // Overflow (capacity exceeded)
-//   nodes: [...]        // All synths and groups
+//   root: { ... }       // Hierarchical TreeNode (always id 0)
 // }
 ```
 
 Use `version` to skip re-renders when nothing changed - perfect for 60fps visualizations.
 
-For the full API including node structure, tree traversal examples, and comparison with `/g_queryTree`, see [Node Tree API](API.md#node-tree-api).
+For the full API including node structure, tree traversal examples, and comparison with `/g_queryTree`, see [API Reference](API.md) and [Guide](GUIDE.md).
 
 ## Metrics Web Component
 

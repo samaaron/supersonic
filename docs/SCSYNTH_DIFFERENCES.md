@@ -142,7 +142,7 @@ No filesystem in browser, so file-based commands aren't available:
 
 | Command | Reason / Alternative |
 |---------|---------------------|
-| `/clearSched` | Use `cancelAll()` or fine-grained `cancelTag()`, `cancelSession()`, `cancelSessionTag()` |
+| `/clearSched` | Use `purge()` to clear both the JS prescheduler and WASM scheduler |
 | `/error` | SuperSonic always enables error notifications |
 | `/quit` | Use `destroy()` to shut down SuperSonic |
 
