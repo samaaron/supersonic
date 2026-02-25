@@ -1,8 +1,8 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2026-01-25
-**Last Sync Commit**: 765ac9982ebca76079f75db9555a940fa2e8f35c
-**Upstream Branch**: supercollider/develop (tracked to 2026-01-25)
+**Last Updated**: 2026-02-25
+**Last Sync Commit**: 71813a9
+**Upstream Branch**: supercollider/develop (tracked to 2026-02-25)
 **Verified Against**: SuperCollider 3.14.1 + PR #7329 (Plugin API v4)
 
 ---
@@ -596,6 +596,24 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 ---
 
 ## Reference: Previous Sync Summary
+
+### World_Cleanup ordering fix + dead code removal (2026-02-25)
+
+Reviewed upstream commits 5076833 and 71813a9.
+
+**Applied:**
+- **SC_World.cpp**: Moved `deinitialize_library()` call from before `Group_DeleteAll()` to after it, matching upstream commit 5076833. This fixes a bug where plugins could be unloaded while nodes still reference them during cleanup.
+- **SC_Lib_Cintf.cpp**: Removed ~150 lines of dead dynamic-loading code (`PlugIn_Load`, `PlugIn_LoadDir`, `checkAPIVersion`, `checkServerVersion`, `open_handles`, directory scanning, Apple mach-o preloading). SuperSonic always compiles with `-DSTATIC_PLUGINS` so none of this code could execute. Also removed unused includes (`dirent.h`, `dlfcn.h`, `libgen.h`, `filesystem`, `iostream`, etc.).
+
+**Skipped (not applicable to WASM):**
+- Plugin loading rework (71813a9) — dynamic loading infrastructure changes
+- CoreAudio boost→std::optional migration — platform-specific audio driver code
+
+**Upstream commits:**
+- https://github.com/supercollider/supercollider/commit/5076833
+- https://github.com/supercollider/supercollider/commit/71813a9
+
+---
 
 ### Plugin API v4 Update (2026-01-25)
 

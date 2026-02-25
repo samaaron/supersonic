@@ -999,9 +999,6 @@ void World_Cleanup(World* world, bool unload_plugins) {
     }
 #endif
 
-    if (unload_plugins)
-        deinitialize_library();
-
     HiddenWorld* hw = world->hw;
 
     if (hw && world->mRealTime)
@@ -1011,6 +1008,11 @@ void World_Cleanup(World* world, bool unload_plugins) {
 
     if (world->mTopGroup)
         Group_DeleteAll(world->mTopGroup);
+
+    // Unload plugins after all nodes are destroyed, so that unit commands
+    // and destructor functions are still available during node cleanup.
+    if (unload_plugins)
+        deinitialize_library();
 
     reinterpret_cast<SC_Lock*>(world->mDriverLock)->lock();
     if (hw) {
