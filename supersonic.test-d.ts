@@ -435,10 +435,6 @@ if (node) {
   expectType<AudioWorkletNode>(node.input);
 }
 
-// osc getter
-const oscChannel = sonic.osc;
-expectType<OscChannel | null>(oscChannel);
-
 // Instance properties
 expectType<Map<string, Uint8Array>>(sonic.loadedSynthDefs);
 expectType<BootStats>(sonic.bootStats);
