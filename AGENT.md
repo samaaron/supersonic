@@ -4,6 +4,11 @@ SuperSonic is a port of SuperCollider's scsynth audio engine to work within the 
 
 **See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full architectural documentation including message flow diagrams and component relationships.**
 
+## Key Reference Files
+
+* `supersonic.d.ts` — The TypeScript type declarations are the canonical API reference. They document every `send()` overload, all OSC reply formats, event types, and the full public surface area. Read this early when working on any feature that touches the API or OSC messages.
+* `example/demo.html` — Interactive demo with a BOOT button, OSC text input, and live debug/OSC in/out panels. Useful for understanding the system end-to-end.
+
 ## AudioWorklet Constraints
 
 The WASM scsynth runs inside an AudioWorklet which has strict requirements:
