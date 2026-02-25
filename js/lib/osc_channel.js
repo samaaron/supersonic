@@ -381,9 +381,9 @@ export class OscChannel {
             this.#claimNodeIdRange();
         }
         const id = this.#nextNodeId++;
-        // Pre-request next range when 1000 IDs remain (PM worker only)
+        // Pre-request next range at halfway through current range (PM worker only)
         if (this.#nodeIdPort && !this.#pendingNodeIdRange &&
-            (this.#nodeIdTo - this.#nextNodeId) <= 1000) {
+            (this.#nodeIdTo - this.#nextNodeId) <= (this.#nodeIdRangeSize >>> 1)) {
             this.#requestNodeIdRange();
         }
         return id;

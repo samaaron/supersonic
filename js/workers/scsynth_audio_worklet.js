@@ -96,6 +96,25 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         // Initialized in initPMPools() after mode is known
         this.pmPools = null;
 
+        // Node ID allocation (PM mode only — SAB mode uses shared atomic counter)
+        // The C++ UUID rewriter uses fetch_add on NODE_ID_COUNTER in WASM memory.
+        // In PM mode, that memory is local, so we seed it with a range from the
+        // main thread and top up asynchronously via a MessagePort.
+        //
+        // Two pre-allocated range slots (no allocation during process):
+        //   nodeIdRanges[0] = current range being consumed by C++
+        //   nodeIdRanges[1] = pre-fetched next range (disjoint)
+        // After process_audio(), we read the counter back. If it's past
+        // range[0].to, we trim range[0] and jump to range[1].from.
+        this.nodeIdRanges = [
+            { from: 0, to: 0 },  // slot 0: current
+            { from: 0, to: 0 },  // slot 1: prefetch
+        ];
+        this.nodeIdRangeCount = 0;     // Active slots (0, 1, or 2)
+        this.nodeIdRefillRequested = false; // True while waiting for async refill
+        this.nodeIdPort = null;        // MessagePort for requesting more ranges
+        this.nodeIdCounterView = null; // Int32Array(1) view into WASM NODE_ID_COUNTER
+
         // Pre-allocated objects for checkStatus() to avoid allocation on audio thread
         this._statusObj = {
             bufferFull: false,
@@ -223,6 +242,40 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             // This ensures we only log messages from this point forward
             const currentHead = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
             this.atomicStore(this.CONTROL_INDICES.IN_LOG_TAIL, currentHead);
+        }
+    }
+
+    // Set up Int32Array view for NODE_ID_COUNTER in WASM memory.
+    // In PM mode, this view is used to seed the counter with range-based
+    // allocation values before process_audio() and read it back after.
+    // In SAB mode, the counter is shared and managed atomically — no seeding needed.
+    initNodeIdCounter() {
+        if (!this.wasmMemory || !this.bufferConstants || !this.ringBufferBase) return;
+        if (this.mode !== 'postMessage') return;  // SAB mode uses shared atomic
+
+        const counterBase = this.ringBufferBase + this.bufferConstants.NODE_ID_COUNTER_START;
+        this.nodeIdCounterView = new Int32Array(this.wasmMemory.buffer, counterBase, 1);
+
+        // If ranges were received before WASM loaded, seed counter with first range
+        if (this.nodeIdRangeCount > 0) {
+            Atomics.store(this.nodeIdCounterView, 0, this.nodeIdRanges[0].from);
+        }
+    }
+
+    // Push a node ID range into the pre-allocated slots.
+    // Called from message handler — never during process().
+    pushNodeIdRange(from, to) {
+        if (this.nodeIdRangeCount < 2) {
+            const slot = this.nodeIdRanges[this.nodeIdRangeCount];
+            slot.from = from;
+            slot.to = to;
+            this.nodeIdRangeCount++;
+            this.nodeIdRefillRequested = false;
+
+            // If this is the first range and counter view is ready, seed it
+            if (this.nodeIdRangeCount === 1 && this.nodeIdCounterView) {
+                Atomics.store(this.nodeIdCounterView, 0, from);
+            }
         }
     }
 
@@ -897,6 +950,25 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 return;
             }
 
+            if (data.type === 'nodeIdRange') {
+                // PM mode: receive node ID range (initial or refill)
+                if (data.from !== undefined && data.to !== undefined) {
+                    this.pushNodeIdRange(data.from, data.to);
+                }
+
+                // Accept refill port (transferred via ports array on initial message)
+                const port = event.ports[0];
+                if (port) {
+                    this.nodeIdPort = port;
+                    this.nodeIdPort.onmessage = (e) => {
+                        if (e.data.type === 'nodeIdRange') {
+                            this.pushNodeIdRange(e.data.from, e.data.to);
+                        }
+                    };
+                }
+                return;
+            }
+
             if (data.type === 'init') {
                 // Set mode from init message
                 this.mode = data.mode || 'sab';
@@ -1015,6 +1087,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                             // Pass actual sample rate from AudioContext (not hardcoded!)
                             this.wasmInstance.exports.init_memory(this.sampleRate);
 
+                            // Set up node ID counter view for PM mode range-based allocation
+                            this.initNodeIdCounter();
+
                             this.isInitialized = true;
 
                             // Include initial snapshot buffer for postMessage mode
@@ -1055,6 +1130,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         if (this.wasmInstance.exports.init_memory) {
                             // Pass actual sample rate from AudioContext (not hardcoded!)
                             this.wasmInstance.exports.init_memory(this.sampleRate);
+
+                            // Set up node ID counter view for PM mode range-based allocation
+                            this.initNodeIdCounter();
 
                             this.isInitialized = true;
 
@@ -1269,6 +1347,41 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     outputChannels,
                     inputChannels
                 );
+
+                // PM mode: check if C++ consumed node IDs past our current range.
+                // With halfway pre-fetch (request at 50% remaining), the refill arrives
+                // long before exhaustion — a postMessage round-trip is ~microseconds while
+                // burning 5000+ IDs requires thousands of synth creations per audio block.
+                if (this.nodeIdCounterView && this.nodeIdRangeCount > 0) {
+                    const current = Atomics.load(this.nodeIdCounterView, 0);
+
+                    if (current >= this.nodeIdRanges[0].to) {
+                        // Current range exhausted — trim it
+                        if (this.nodeIdRangeCount > 1) {
+                            // Promote range[1] to range[0], jump counter to new range
+                            const next = this.nodeIdRanges[1];
+                            this.nodeIdRanges[0].from = next.from;
+                            this.nodeIdRanges[0].to = next.to;
+                            next.from = 0;
+                            next.to = 0;
+                            this.nodeIdRangeCount = 1;
+                            Atomics.store(this.nodeIdCounterView, 0, this.nodeIdRanges[0].from);
+                        }
+                        // Request refill if we haven't already
+                        if (!this.nodeIdRefillRequested && this.nodeIdPort) {
+                            this.nodeIdRefillRequested = true;
+                            this.nodeIdPort.postMessage({ type: 'requestNodeIdRange' });
+                        }
+                    } else if (!this.nodeIdRefillRequested && this.nodeIdRangeCount < 2 && this.nodeIdPort) {
+                        // Pre-fetch at halfway through the range
+                        const remaining = this.nodeIdRanges[0].to - current;
+                        const rangeSize = this.nodeIdRanges[0].to - this.nodeIdRanges[0].from;
+                        if (remaining <= (rangeSize >>> 1)) {
+                            this.nodeIdRefillRequested = true;
+                            this.nodeIdPort.postMessage({ type: 'requestNodeIdRange' });
+                        }
+                    }
+                }
 
                 // Copy scsynth audio output to AudioWorklet outputs
                 if (this.wasmInstance.exports.get_audio_output_bus && outputs[0] && outputs[0].length >= 1) {

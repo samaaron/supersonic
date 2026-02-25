@@ -41,6 +41,7 @@ const TAG_FALSE = 0x46;  // 'F'
 const TAG_INT64 = 0x68;  // 'h'
 const TAG_DOUBLE = 0x64; // 'd'
 const TAG_TIMETAG = 0x74; // 't'
+const TAG_UUID = 0x75;    // 'u'
 
 // ============================================================================
 // ENCODING
@@ -69,6 +70,8 @@ function estimateMessageSize(address, args) {
       const blobVal = arg.value;
       const blobLen = blobVal instanceof Uint8Array ? blobVal.length : blobVal.byteLength;
       size += 4 + blobLen + 3; // size + data + padding
+    } else if (arg && arg.type === 'uuid') {
+      size += 16; // 16 bytes, already 4-byte aligned
     } else {
       size += 8; // numbers, booleans, etc.
     }
@@ -371,6 +374,8 @@ function writeTypeTags(args, pos) {
       encodeBuffer[pos++] = TAG_DOUBLE;
     } else if (arg && arg.type === 'timetag') {
       encodeBuffer[pos++] = TAG_TIMETAG;
+    } else if (arg && arg.type === 'uuid') {
+      encodeBuffer[pos++] = TAG_UUID;
     } else if (arg === null || arg === undefined) {
       throw new Error(`OSC argument at index ${i} is ${arg}`);
     } else {
@@ -478,6 +483,12 @@ function writeArg(arg, pos) {
 
   if (arg && arg.type === 'timetag') {
     return writeTimeTag(arg.value, pos);
+  }
+
+  if (arg && arg.type === 'uuid') {
+    // Write 16 bytes directly (already 4-byte aligned)
+    encodeBuffer.set(arg.value, pos);
+    return pos + 16;
   }
 
   // Unknown type - skip
@@ -632,6 +643,11 @@ export function decodeMessage(data) {
         const fraction = view.getUint32(pos + 4, false);
         result.push(seconds + fraction / TWO_POW_32);
         pos += 8;
+        break;
+
+      case TAG_UUID: // 'u' - uuid (16 bytes)
+        result.push({ type: 'uuid', value: data.slice(pos, pos + 16) });
+        pos += 16;
         break;
     }
   }

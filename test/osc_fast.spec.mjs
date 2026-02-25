@@ -1106,6 +1106,176 @@ test.describe('OSC Fast Encoder/Decoder', () => {
   });
 
   // ===========================================================================
+  // UUID TYPE TAG
+  // ===========================================================================
+
+  test.describe('UUID Type Tag', () => {
+    test('encode/decode UUID round-trip', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const uuid = new Uint8Array([
+          0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x00,
+          0x80, 0x00, 0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe,
+        ]);
+        const encoded = window.oscFast.encodeMessage('/test', [
+          { type: 'uuid', value: uuid },
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return {
+          address: decoded[0],
+          argType: decoded[1]?.type,
+          argBytes: Array.from(decoded[1]?.value || []),
+        };
+      });
+
+      expect(result.address).toBe('/test');
+      expect(result.argType).toBe('uuid');
+      expect(result.argBytes).toEqual([
+        0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x00,
+        0x80, 0x00, 0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe,
+      ]);
+    });
+
+    test('UUID is exactly 16 bytes in wire format', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const uuid = new Uint8Array(16);
+        const noArgs = window.oscFast.encodeMessage('/test', []);
+        const withUuid = window.oscFast.encodeMessage('/test', [
+          { type: 'uuid', value: uuid },
+        ]);
+        return {
+          baseSize: noArgs.length,
+          uuidSize: withUuid.length,
+        };
+      });
+
+      // Type tags grow by 1 byte ('u'), padded to 4. With just comma: ',\0\0\0' (4 bytes).
+      // With uuid: ',u\0\0' (4 bytes) — same padding.
+      // Data: +16 bytes for UUID payload.
+      expect(result.uuidSize - result.baseSize).toBe(16);
+    });
+
+    test('UUID in bundle', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const uuid = new Uint8Array([
+          0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11,
+          0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+        ]);
+        const encoded = window.oscFast.encodeBundle(1, [
+          { address: '/test', args: [{ type: 'uuid', value: uuid }] },
+        ]);
+        const decoded = window.oscFast.decodeBundle(encoded);
+        const msg = decoded.packets[0];
+        return {
+          address: msg[0],
+          argType: msg[1]?.type,
+          argBytes: Array.from(msg[1]?.value || []),
+        };
+      });
+
+      expect(result.address).toBe('/test');
+      expect(result.argType).toBe('uuid');
+      expect(result.argBytes).toEqual([
+        0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11,
+        0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+      ]);
+    });
+
+    test('mixed args: int, uuid, string, float', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const uuid = new Uint8Array(16);
+        for (let i = 0; i < 16; i++) uuid[i] = i + 1;
+        const encoded = window.oscFast.encodeMessage('/mix', [
+          42,
+          { type: 'uuid', value: uuid },
+          'hello',
+          3.14,
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return {
+          address: decoded[0],
+          int: decoded[1],
+          uuidType: decoded[2]?.type,
+          uuidFirst: decoded[2]?.value?.[0],
+          uuidLast: decoded[2]?.value?.[15],
+          str: decoded[3],
+          float: decoded[4],
+        };
+      });
+
+      expect(result.address).toBe('/mix');
+      expect(result.int).toBe(42);
+      expect(result.uuidType).toBe('uuid');
+      expect(result.uuidFirst).toBe(1);
+      expect(result.uuidLast).toBe(16);
+      expect(result.str).toBe('hello');
+      expect(result.float).toBeCloseTo(3.14, 4);
+    });
+
+    test('multiple UUIDs in one message', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const uuid1 = new Uint8Array(16).fill(0xAA);
+        const uuid2 = new Uint8Array(16).fill(0xBB);
+        const encoded = window.oscFast.encodeMessage('/multi', [
+          { type: 'uuid', value: uuid1 },
+          { type: 'uuid', value: uuid2 },
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return {
+          count: decoded.length - 1,
+          first: Array.from(decoded[1]?.value || []),
+          second: Array.from(decoded[2]?.value || []),
+        };
+      });
+
+      expect(result.count).toBe(2);
+      expect(result.first).toEqual(new Array(16).fill(0xAA));
+      expect(result.second).toEqual(new Array(16).fill(0xBB));
+    });
+
+    test('UUID with zero bytes', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const uuid = new Uint8Array(16); // all zeros
+        const encoded = window.oscFast.encodeMessage('/test', [
+          { type: 'uuid', value: uuid },
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return {
+          argType: decoded[1]?.type,
+          allZero: decoded[1]?.value?.every(b => b === 0),
+          length: decoded[1]?.value?.length,
+        };
+      });
+
+      expect(result.argType).toBe('uuid');
+      expect(result.allZero).toBe(true);
+      expect(result.length).toBe(16);
+    });
+
+    test('UUID data preserved exactly (byte-for-byte)', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        // Use a specific UUID v7 pattern
+        const uuid = new Uint8Array([
+          0x01, 0x93, 0xa5, 0xb0, 0x7c, 0x8a, 0x70, 0x12,
+          0x83, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01,
+        ]);
+        const encoded = window.oscFast.encodeMessage('/test', [
+          { type: 'uuid', value: uuid },
+        ]);
+        const decoded = window.oscFast.decodeMessage(encoded);
+        const out = decoded[1]?.value;
+        let mismatch = -1;
+        for (let i = 0; i < 16; i++) {
+          if (out[i] !== uuid[i]) { mismatch = i; break; }
+        }
+        return { mismatch, length: out?.length };
+      });
+
+      expect(result.mismatch).toBe(-1);
+      expect(result.length).toBe(16);
+    });
+  });
+
+  // ===========================================================================
   // PERFORMANCE (basic sanity checks)
   // ===========================================================================
 

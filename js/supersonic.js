@@ -1600,6 +1600,23 @@ export class SuperSonic {
         this.#nodeIdCounter += rangeSize;
         return { from, to: from + rangeSize };
       };
+
+      // PM mode: provision the AudioWorklet with its own node ID range
+      // for the C++ UUID rewriter (same protocol as OscChannel workers)
+      const workletNodeIdRangeSize = 10000;
+      const workletRange = transportConfig.nodeIdSource(workletNodeIdRangeSize);
+      const nodeIdChannel = new MessageChannel();
+      const nodeIdSource = transportConfig.nodeIdSource;
+      nodeIdChannel.port1.onmessage = (e) => {
+        if (e.data.type === 'requestNodeIdRange') {
+          const r = nodeIdSource(workletNodeIdRangeSize);
+          nodeIdChannel.port1.postMessage({ type: 'nodeIdRange', from: r.from, to: r.to });
+        }
+      };
+      this.#workletNode.port.postMessage(
+        { type: 'nodeIdRange', from: workletRange.from, to: workletRange.to },
+        [nodeIdChannel.port2]
+      );
     }
 
     this.#osc = createTransport(mode, transportConfig);

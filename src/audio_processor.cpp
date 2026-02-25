@@ -40,6 +40,9 @@
 // Node tree for SharedArrayBuffer polling
 #include "node_tree.h"
 
+// UUID ↔ int32 rewriter for tau-state UUID node IDs
+#include "uuid_rewriter.h"
+
 // Forward declarations
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
@@ -305,6 +308,9 @@ extern "C" {
 
         worklet_debug("[NodeTree] Initialized at offset %u, size %u bytes",
                      NODE_TREE_START, NODE_TREE_SIZE);
+
+        // Initialize UUID rewriter (uses NODE_ID_COUNTER for int32 allocation)
+        uuid_rewriter_init(shared_memory, NODE_ID_COUNTER_START);
 
         // Initialize audio capture
         audio_capture = reinterpret_cast<AudioCaptureHeader*>(shared_memory + AUDIO_CAPTURE_START);
@@ -593,6 +599,9 @@ extern "C" {
                     std::memcpy(osc_buffer, shared_memory + payload_offset, bytes_to_end);
                     std::memcpy(osc_buffer + bytes_to_end, shared_memory + IN_BUFFER_START, payload_size - bytes_to_end);
                 }
+
+                // Rewrite UUID args to int32 for scsynth (zero-alloc, in-place in static buffer)
+                rewrite_uuid_to_int32(osc_buffer, &payload_size);
 
                 // RT-SAFE message processing - no malloc!
                 // Setup reply address - zero-initialize for consistent comparison in /notify
@@ -927,6 +936,17 @@ extern "C" {
         return control ? control->status_flags.load(std::memory_order_relaxed) : 0;
     }
 
+    // UUID map diagnostics (for testing)
+    EMSCRIPTEN_KEEPALIVE
+    uint32_t get_uuid_map_count() {
+        return uuid_map_get_count();
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    uint32_t get_uuid_map_capacity() {
+        return uuid_map_get_capacity();
+    }
+
     // scsynth audio output accessors
     // Returns the accumulated audio buffer (128 samples per channel from double-loop)
     EMSCRIPTEN_KEEPALIVE
@@ -1109,11 +1129,22 @@ bool ring_buffer_write(
 
 // OSC reply callback for scsynth
 // This is called by scsynth when it needs to send OSC replies (e.g., /done, /n_go, etc.)
+// Pre-allocated reply rewrite buffer (4KB — replies are tiny, ~50 bytes)
+alignas(8) static char reply_rewrite_buffer[4096];
+
 void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
     using namespace scsynth;  // Access globals from scsynth namespace
 
     if (!control || !shared_memory) {
         return;
+    }
+
+    // Rewrite int32 node IDs back to UUIDs for known reply addresses
+    char* write_msg = msg;
+    int write_size = size;
+    rewrite_int32_to_uuid(msg, size, reply_rewrite_buffer, &write_size);
+    if (write_size != size) {
+        write_msg = reply_rewrite_buffer;
     }
 
     // Use unified ring buffer write with full protection
@@ -1123,8 +1154,8 @@ void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
         OUT_BUFFER_START,           // buffer_start_offset
         &control->out_head,         // head
         &control->out_tail,         // tail
-        msg,                        // data
-        size,                       // data_size
+        write_msg,                  // data
+        write_size,                 // data_size
         metrics                     // metrics
     );
 }
