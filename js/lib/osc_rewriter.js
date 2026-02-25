@@ -121,6 +121,7 @@ export class OSCRewriter {
     }
 
     if (this.#argAt(args, argIndex)?.type === "b") {
+      if (__DEV__) console.warn('[OSCRewriter] /b_alloc completion message detected but not supported — it will be dropped. Buffer allocation is async via the buffer pipeline.');
       argIndex++;
     }
 

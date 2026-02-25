@@ -52,12 +52,12 @@ export type OscArg =
  * The first element is always the address string, followed by zero or more arguments.
  *
  * @example
- * // A decoded /s_new message:
- * ["/s_new", "beep", 1001, 0, 1, "freq", 440]
+ * // A decoded /n_go message received from scsynth:
+ * ["/n_go", 1001, 0, -1, -1, 0]
  *
  * // Access parts:
- * const address = msg[0];  // "/s_new"
- * const args = msg.slice(1);  // ["beep", 1001, 0, 1, "freq", 440]
+ * const address = msg[0];  // "/n_go"
+ * const args = msg.slice(1);  // [1001, 0, -1, -1, 0]
  */
 export type OscMessage = [string, ...OscArg[]];
 
@@ -678,8 +678,8 @@ export interface SuperSonicEventMap {
   /** Fired when an OSC message is sent to scsynth. Includes source worker ID, sequence number, and NTP timestamps. */
   'message:sent': (data: { oscData: Uint8Array; sourceId: number; sequence: number; timestamp: number; scheduledTime: number | null }) => void;
 
-  /** Debug text output from scsynth (e.g. synthdef compilation messages). */
-  'debug': (msg: { text: string }) => void;
+  /** Debug text output from scsynth (e.g. synthdef compilation messages). Includes NTP timestamp and sequence number. */
+  'debug': (msg: { text: string; timestamp: number; sequence: number }) => void;
 
   /** Error from any component (worklet, transport, workers). */
   'error': (error: Error) => void;
@@ -831,6 +831,20 @@ export class OscChannel {
   /** Get and reset local metrics (for periodic reporting). */
   getAndResetMetrics(): OscChannelMetrics;
 
+  /**
+   * Get the next unique node ID.
+   *
+   * Returns globally unique scsynth node IDs. IDs start at 1000 following
+   * sclang convention — 0 is the root group, 1 is the default group, and
+   * 2–999 are left free for manual use.
+   *
+   * SAB mode: single atomic increment via `Atomics.add` — lock-free and
+   * thread-safe. PM mode: range-based allocation with async pre-fetching.
+   *
+   * @returns A unique node ID (>= 1000)
+   */
+  nextNodeId(): number;
+
   /** Close the channel and release its ports. */
   close(): void;
 
@@ -974,7 +988,8 @@ export type BlockedCommand =
   | '/d_load' | '/d_loadDir'
   | '/b_read' | '/b_readChannel'
   | '/b_write' | '/b_close'
-  | '/clearSched' | '/error';
+  | '/clearSched' | '/error'
+  | '/quit';
 
 // ============================================================================
 // SuperSonic
@@ -1053,7 +1068,7 @@ export class SuperSonic {
    * OSC encoding/decoding utilities.
    *
    * @example
-   * const msg = SuperSonic.osc.encodeMessage('/s_new', ['beep', 1001]);
+   * const msg = SuperSonic.osc.encodeMessage('/s_new', ['beep', 1001, 0, 0]);
    * const decoded = SuperSonic.osc.decode(msg);
    */
   static osc: typeof osc;
@@ -1334,14 +1349,16 @@ export class SuperSonic {
   send(address: '/clearSched', ...args: OscArg[]): never;
   /** @deprecated SuperSonic always enables error notifications so you never miss a /fail reply. */
   send(address: '/error', ...args: OscArg[]): never;
+  /** @deprecated Use destroy() to shut down SuperSonic. */
+  send(address: '/quit', ...args: OscArg[]): never;
 
   // ── Top-level commands ─────────────────────────────────────────────
 
   /** Query server status. Replies with `/status.reply`: unused, numUGens, numSynths, numGroups, numSynthDefs, avgCPU%, peakCPU%, nominalSampleRate, actualSampleRate. */
   send(address: '/status'): void;
-  /** Query server version. Replies with `/version.reply`: programName, majorVersion, minorVersion, patchName, gitBranch, commitHash. */
+  /** Query server version. Replies with `/version.reply`: programName, majorVersion, minorVersion, patchVersion, gitBranch, commitHash. */
   send(address: '/version'): void;
-  /** Register (1) or unregister (0) for server notifications (`/n_go`, `/n_end`, `/n_on`, `/n_off`, `/n_move`). Replies with `/done /notify clientID`. */
+  /** Register (1) or unregister (0) for server notifications (`/n_go`, `/n_end`, `/n_on`, `/n_off`, `/n_move`). Replies with `/done /notify clientID [maxLogins]`. */
   send(address: '/notify', flag: 0 | 1, clientID?: number): void;
   /** Enable/disable OSC message dumping to debug output. 0=off, 1=parsed, 2=hex, 3=both. */
   send(address: '/dumpOSC', flag: 0 | 1 | 2 | 3): void;
@@ -1427,13 +1444,13 @@ export class SuperSonic {
 
   // ── Buffer commands ────────────────────────────────────────────────
 
-  /** Async. Allocate an empty buffer. Queued and rewritten to /b_allocPtr internally. Use sync() after to ensure completion. Replies with `/done /b_allocPtr bufnum`. */
+  /** Async. Allocate an empty buffer. Queued and rewritten to /b_allocPtr internally. Use sync() after to ensure completion. Replies with `/done /b_allocPtr bufnum`. Note: completion messages are not supported (dropped during rewrite). */
   send(address: '/b_alloc', bufnum: number, numFrames: number, numChannels?: number, sampleRate?: number): void;
   /** Async. Allocate a buffer and read an audio file into it. The path is fetched via the configured sampleBaseURL. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`. */
   send(address: '/b_allocRead', bufnum: number, path: string, startFrame?: number, numFrames?: number): void;
   /** Async. Allocate a buffer and read specific channels from an audio file. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`. */
   send(address: '/b_allocReadChannel', bufnum: number, path: string, startFrame: number, numFrames: number, ...channels: number[]): void;
-  /** Async. SuperSonic extension: allocate a buffer from inline audio file bytes (WAV, FLAC, OGG, etc.) without URL fetch. Queued and rewritten internally. */
+  /** Async. SuperSonic extension: allocate a buffer from inline audio file bytes (WAV, FLAC, OGG, etc.) without URL fetch. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`. */
   send(address: '/b_allocFile', bufnum: number, data: Uint8Array | ArrayBuffer): void;
   /** Async. Free a buffer. Optional completionMessage is an encoded OSC message executed after freeing. Replies with `/done /b_free bufnum`. */
   send(address: '/b_free', bufnum: number, completionMessage?: Uint8Array | ArrayBuffer): void;
@@ -1559,6 +1576,26 @@ export class SuperSonic {
    * );
    */
   createOscChannel(options?: { sourceId?: number; blocking?: boolean }): OscChannel;
+
+  /**
+   * Get the next unique node ID.
+   *
+   * Returns globally unique scsynth node IDs without coordination conflicts.
+   * IDs start at 1000 following sclang convention — 0 is the root group,
+   * 1 is the default group, and 2–999 are left free for manual use.
+   *
+   * SAB mode uses a single atomic increment per call. PM mode uses
+   * range-based allocation with async pre-fetching from the main thread.
+   *
+   * Also available on {@link OscChannel} for use in Web Workers.
+   *
+   * @returns A unique node ID (>= 1000)
+   *
+   * @example
+   * const id = sonic.nextNodeId();
+   * sonic.send('/s_new', 'beep', id, 0, 1, 'freq', 440);
+   */
+  nextNodeId(): number;
 
   // ──────────────────────────────────────────────────────────────────────────
   // Asset Loading

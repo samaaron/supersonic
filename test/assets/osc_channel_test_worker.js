@@ -148,6 +148,43 @@ self.onmessage = (e) => {
         metrics: oscChannel.getAndResetMetrics(),
       });
       break;
+
+    case "generateNodeIds": {
+      if (!oscChannel) {
+        self.postMessage({ type: "error", error: "No channel" });
+        return;
+      }
+      // Rate-limited generation: batchSize IDs per tick at the given rate
+      // rate = IDs per second, default = unlimited (tight loop)
+      const count = data.count;
+      const rate = data.rate;
+      if (!rate) {
+        // Tight loop (original behavior)
+        const ids = [];
+        for (let i = 0; i < count; i++) {
+          ids.push(oscChannel.nextNodeId());
+        }
+        self.postMessage({ type: "nodeIds", ids });
+      } else {
+        // Rate-limited: generate in batches, yielding between them
+        const ids = [];
+        const batchSize = Math.max(1, Math.floor(rate / 50)); // 50 ticks/sec = 20ms interval
+        const intervalMs = 20;
+        const generate = () => {
+          const end = Math.min(ids.length + batchSize, count);
+          while (ids.length < end) {
+            ids.push(oscChannel.nextNodeId());
+          }
+          if (ids.length >= count) {
+            self.postMessage({ type: "nodeIds", ids });
+          } else {
+            setTimeout(generate, intervalMs);
+          }
+        };
+        generate();
+      }
+      break;
+    }
   }
 };
 

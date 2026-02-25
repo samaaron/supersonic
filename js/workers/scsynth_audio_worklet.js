@@ -138,9 +138,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             throw new Error('WASM memory not available');
         }
 
-        // Read the struct (34 uint32_t fields + 1 uint8_t + 3 padding bytes = 140 bytes)
-        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 34);
-        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 140);
+        // Read the struct (36 uint32_t fields + 1 uint8_t + 3 padding bytes = 148 bytes)
+        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 36);
+        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 148);
 
         // Extract constants (order matches BufferLayout struct in shared_memory.h)
         // NOTE: NODE_TREE is now contiguous with METRICS for efficient postMessage copying
@@ -174,13 +174,15 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             AUDIO_CAPTURE_FRAMES: uint32View[25],
             AUDIO_CAPTURE_CHANNELS: uint32View[26],
             AUDIO_CAPTURE_SAMPLE_RATE: uint32View[27],
-            TOTAL_BUFFER_SIZE: uint32View[28],
-            MAX_MESSAGE_SIZE: uint32View[29],
-            MESSAGE_MAGIC: uint32View[30],
-            PADDING_MAGIC: uint32View[31],
-            scheduler_slot_size: uint32View[32],
-            scheduler_slot_count: uint32View[33],
-            DEBUG_PADDING_MARKER: uint8View[136],  // After 34 uint32s = 136 bytes
+            NODE_ID_COUNTER_START: uint32View[28],
+            NODE_ID_COUNTER_SIZE: uint32View[29],
+            TOTAL_BUFFER_SIZE: uint32View[30],
+            MAX_MESSAGE_SIZE: uint32View[31],
+            MESSAGE_MAGIC: uint32View[32],
+            PADDING_MAGIC: uint32View[33],
+            scheduler_slot_size: uint32View[34],
+            scheduler_slot_count: uint32View[35],
+            DEBUG_PADDING_MARKER: uint8View[144],  // After 36 uint32s = 144 bytes
             MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, padding)
         };
 

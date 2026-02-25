@@ -33,6 +33,17 @@ export class OscChannel {
     #blocking;           // Whether this channel can block with Atomics.wait()
     #getCurrentNTP;      // Function returning current NTP time in seconds
 
+    // Node ID allocation (range-based)
+    #nodeIdView;         // SAB mode: Int32Array view for atomic counter
+    #nodeIdFrom;         // Start of current range (inclusive)
+    #nodeIdTo;           // End of current range (exclusive)
+    #nextNodeId;         // Next ID to return within range
+    #nodeIdRangeSize;    // Number of IDs per range allocation
+    #nodeIdSource;       // PM mode (main thread): function to claim a range directly
+    #nodeIdPort;         // PM mode (worker): MessagePort for requesting ranges from main thread
+    #pendingNodeIdRange; // PM mode (worker): pre-fetched next range
+    #transferNodeIdPort; // PM mode: port to include in transferList (created by transferable getter)
+
     // Local metrics counters
     // SAB mode: used for tracking, then written atomically to shared memory
     // PM mode: accumulated locally, reported via getMetrics()
@@ -56,6 +67,7 @@ export class OscChannel {
         this.#sourceId = config.sourceId ?? 0;
         this.#blocking = config.blocking ?? (this.#sourceId !== 0);
         this.#getCurrentNTP = config.getCurrentNTP ?? getCurrentNTPFromPerformance;
+        this.#nodeIdRangeSize = 1000;
 
         if (mode === 'postMessage') {
             this.#directPort = config.port;
@@ -77,6 +89,38 @@ export class OscChannel {
                     config.bufferConstants.METRICS_SIZE / 4
                 );
             }
+
+            // Create node ID counter view for atomic range allocation
+            if (config.sharedBuffer && config.bufferConstants?.NODE_ID_COUNTER_START !== undefined) {
+                const counterBase = config.ringBufferBase + config.bufferConstants.NODE_ID_COUNTER_START;
+                this.#nodeIdView = new Int32Array(config.sharedBuffer, counterBase, 1);
+                this.#claimNodeIdRange();
+            }
+        }
+
+        // PM mode: accept a direct range source function (main thread)
+        if (config.nodeIdSource) {
+            this.#nodeIdSource = config.nodeIdSource;
+            this.#claimNodeIdRange();
+        }
+
+        // Accept a pre-assigned range (for PM worker channels via fromTransferable)
+        if (config.nodeIdRange) {
+            this.#nodeIdFrom = config.nodeIdRange.from;
+            this.#nodeIdTo = config.nodeIdRange.to;
+            this.#nextNodeId = config.nodeIdRange.from;
+        }
+
+        // PM mode (worker): MessagePort for requesting more ranges from main thread
+        if (config.nodeIdPort) {
+            this.#nodeIdPort = config.nodeIdPort;
+            this.#nodeIdPort.onmessage = (e) => {
+                if (e.data.type === 'nodeIdRange') {
+                    this.#pendingNodeIdRange = { from: e.data.from, to: e.data.to };
+                }
+            };
+            // Pre-request the first extra range
+            this.#requestNodeIdRange();
         }
     }
 
@@ -315,6 +359,77 @@ export class OscChannel {
     }
 
     // =========================================================================
+    // Node ID Allocation
+    // =========================================================================
+
+    /**
+     * Get the next unique node ID.
+     *
+     * SAB mode: single atomic increment — always correct, no batching needed.
+     * PM mode: range-based allocation with async pre-fetching from main thread.
+     *
+     * @returns {number} A unique node ID (>= 1000)
+     */
+    nextNodeId() {
+        // SAB mode: direct atomic increment, no ranges
+        if (this.#nodeIdView) {
+            return Atomics.add(this.#nodeIdView, 0, 1);
+        }
+
+        // PM mode: range-based allocation
+        if (this.#nextNodeId >= this.#nodeIdTo) {
+            this.#claimNodeIdRange();
+        }
+        const id = this.#nextNodeId++;
+        // Pre-request next range when 1000 IDs remain (PM worker only)
+        if (this.#nodeIdPort && !this.#pendingNodeIdRange &&
+            (this.#nodeIdTo - this.#nextNodeId) <= 1000) {
+            this.#requestNodeIdRange();
+        }
+        return id;
+    }
+
+    /**
+     * Claim a new range of node IDs (PM mode only).
+     * Main thread: use the direct source function.
+     * Worker: use pre-fetched range from main thread.
+     */
+    #claimNodeIdRange() {
+        if (this.#nodeIdSource) {
+            // PM mode (main thread): direct range allocation
+            const range = this.#nodeIdSource(this.#nodeIdRangeSize);
+            this.#nodeIdFrom = range.from;
+            this.#nodeIdTo = range.to;
+            this.#nextNodeId = range.from;
+        } else if (this.#pendingNodeIdRange) {
+            // PM mode (worker): use pre-fetched range
+            this.#nodeIdFrom = this.#pendingNodeIdRange.from;
+            this.#nodeIdTo = this.#pendingNodeIdRange.to;
+            this.#nextNodeId = this.#pendingNodeIdRange.from;
+            this.#pendingNodeIdRange = null;
+            // Pre-request the next range
+            this.#requestNodeIdRange();
+        } else if (this.#nodeIdPort) {
+            // PM mode (worker): pre-fetched range hasn't arrived yet.
+            // This only happens if IDs are consumed faster than the postMessage
+            // round-trip — i.e. a tight synchronous loop of >9000 IDs without
+            // yielding to the event loop. Request again and warn.
+            console.warn('[OscChannel] nextNodeId() range exhausted before async refill arrived. IDs may not be unique. Yield to the event loop between large batches of nextNodeId() calls.');
+            this.#requestNodeIdRange();
+        }
+    }
+
+    /**
+     * Request a new node ID range from the main thread via MessagePort.
+     * Used by PM mode worker channels.
+     */
+    #requestNodeIdRange() {
+        if (this.#nodeIdPort) {
+            this.#nodeIdPort.postMessage({ type: 'requestNodeIdRange' });
+        }
+    }
+
+    // =========================================================================
     // Properties
     // =========================================================================
 
@@ -350,9 +465,35 @@ export class OscChannel {
         };
 
         if (this.#mode === 'postMessage') {
+            // Claim a large initial range for the worker channel.
+            // PM workers can't claim ranges synchronously (no SAB),
+            // so we give them a generous initial allocation.
+            // They can request more async via nodeIdPort.
+            const workerRangeSize = this.#nodeIdRangeSize * 10;
+            let nodeIdRange;
+            let nodeIdPort;
+            if (this.#nodeIdSource) {
+                const range = this.#nodeIdSource(workerRangeSize);
+                nodeIdRange = { from: range.from, to: range.to };
+
+                // Create a MessageChannel for the worker to request more ranges
+                const nodeIdChannel = new MessageChannel();
+                const source = this.#nodeIdSource;
+                const rangeSize = this.#nodeIdRangeSize;
+                nodeIdChannel.port1.onmessage = (e) => {
+                    if (e.data.type === 'requestNodeIdRange') {
+                        const r = source(rangeSize);
+                        nodeIdChannel.port1.postMessage({ type: 'nodeIdRange', from: r.from, to: r.to });
+                    }
+                };
+                nodeIdPort = nodeIdChannel.port2;
+                this.#transferNodeIdPort = nodeIdPort;
+            }
             return {
                 ...base,
                 port: this.#directPort,
+                nodeIdRange,
+                nodeIdPort,
             };
         } else {
             return {
@@ -377,6 +518,10 @@ export class OscChannel {
         if (this.#preschedulerPort) {
             list.push(this.#preschedulerPort);
         }
+        if (this.#transferNodeIdPort) {
+            list.push(this.#transferNodeIdPort);
+            this.#transferNodeIdPort = null;
+        }
         return list;
     }
 
@@ -400,6 +545,7 @@ export class OscChannel {
 
     /**
      * Create a postMessage-backed OscChannel
+     * @private
      * @param {Object} config
      * @param {MessagePort} config.port - MessagePort connected to the worklet
      * @param {MessagePort} config.preschedulerPort - MessagePort to prescheduler
@@ -418,6 +564,7 @@ export class OscChannel {
 
     /**
      * Create a SAB-backed OscChannel
+     * @private
      * @param {Object} config
      * @param {SharedArrayBuffer} config.sharedBuffer
      * @param {number} config.ringBufferBase
@@ -465,6 +612,8 @@ export class OscChannel {
                 bypassLookaheadS: data.bypassLookaheadS,
                 sourceId: data.sourceId,
                 blocking: data.blocking,
+                nodeIdRange: data.nodeIdRange,
+                nodeIdPort: data.nodeIdPort,
             });
         } else {
             return new OscChannel('sab', {

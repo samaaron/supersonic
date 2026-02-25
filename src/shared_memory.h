@@ -69,9 +69,11 @@ constexpr uint32_t NTP_START_TIME_START = NODE_TREE_START + NODE_TREE_SIZE;
 constexpr uint32_t DRIFT_OFFSET_START = NTP_START_TIME_START + NTP_START_TIME_SIZE;
 constexpr uint32_t GLOBAL_OFFSET_START = DRIFT_OFFSET_START + DRIFT_OFFSET_SIZE;
 constexpr uint32_t AUDIO_CAPTURE_START = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
+constexpr uint32_t NODE_ID_COUNTER_SIZE = 4;     // Int32, atomic — for nextNodeId() range allocation
+constexpr uint32_t NODE_ID_COUNTER_START = AUDIO_CAPTURE_START + AUDIO_CAPTURE_SIZE;
 
 // Total buffer size (for validation)
-constexpr uint32_t TOTAL_BUFFER_SIZE  = AUDIO_CAPTURE_START + AUDIO_CAPTURE_SIZE;
+constexpr uint32_t TOTAL_BUFFER_SIZE  = NODE_ID_COUNTER_START + NODE_ID_COUNTER_SIZE;
 
 // Message structure
 struct alignas(4) Message {
@@ -270,6 +272,8 @@ struct BufferLayout {
     uint32_t audio_capture_frames;
     uint32_t audio_capture_channels;
     uint32_t audio_capture_sample_rate;
+    uint32_t node_id_counter_start;
+    uint32_t node_id_counter_size;
     uint32_t total_buffer_size;
     uint32_t max_message_size;
     uint32_t message_magic;
@@ -311,6 +315,8 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     AUDIO_CAPTURE_FRAMES,
     AUDIO_CAPTURE_CHANNELS,
     AUDIO_CAPTURE_SAMPLE_RATE,
+    NODE_ID_COUNTER_START,
+    NODE_ID_COUNTER_SIZE,
     TOTAL_BUFFER_SIZE,
     MAX_MESSAGE_SIZE,
     MESSAGE_MAGIC,

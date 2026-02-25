@@ -82,6 +82,8 @@ If you're new to audio synthesis and SuperCollider in particular, here are some 
 | [`/g_queryTree`](#g_querytree)               | Query group tree structure                         |
 | **Buffers**                                  |                                                    |
 | [`/b_alloc`](#b_alloc)                       | Allocate an empty buffer                           |
+| [`/b_allocRead`](#b_allocread)               | Allocate buffer and load audio file                |
+| [`/b_allocReadChannel`](#b_allocreadchannel) | Allocate buffer and load specific channels         |
 | [`/b_free`](#b_free)                         | Free a buffer                                      |
 | [`/b_zero`](#b_zero)                         | Zero buffer contents                               |
 | [`/b_set`](#b_set)                           | Set individual samples                             |
@@ -834,7 +836,7 @@ Allocate a buffer.
 | sampleRate | float | Sample rate (optional, default: server rate) |
 
 **Async:** Yes
-**Reply:** `/done /b_alloc bufnum`
+**Reply:** `/done /b_allocPtr bufnum` (SuperSonic rewrites `/b_alloc` to `/b_allocPtr` internally)
 
 ```javascript
 // Allocate mono buffer with 44100 frames
@@ -842,6 +844,54 @@ supersonic.send("/b_alloc", 0, 44100, 1);
 
 // Allocate stereo buffer
 supersonic.send("/b_alloc", 1, 44100, 2);
+```
+
+---
+
+### `/b_allocRead`
+
+Allocate a buffer and read an audio file into it. The path is fetched via the configured `sampleBaseURL`. SuperSonic rewrites this internally to `/b_allocPtr` using the buffer pipeline — no filesystem access needed.
+
+| Parameter  | Type   | Description                            |
+| ---------- | ------ | -------------------------------------- |
+| bufnum     | int    | Buffer number                          |
+| path       | string | Audio file path (fetched via HTTP)     |
+| startFrame | int    | Starting frame to read (default: 0)    |
+| numFrames  | int    | Number of frames to read (0 = all)     |
+
+**Async:** Yes
+**Reply:** `/done /b_allocPtr bufnum`
+
+```javascript
+supersonic.send("/b_allocRead", 0, "kick.wav");
+
+// Read a section of a file
+supersonic.send("/b_allocRead", 1, "loop_amen.flac", 0, 44100);
+```
+
+---
+
+### `/b_allocReadChannel`
+
+Allocate a buffer and read specific channels from an audio file. Like `/b_allocRead` but with channel selection.
+
+| Parameter  | Type   | Description                            |
+| ---------- | ------ | -------------------------------------- |
+| bufnum     | int    | Buffer number                          |
+| path       | string | Audio file path (fetched via HTTP)     |
+| startFrame | int    | Starting frame to read (default: 0)    |
+| numFrames  | int    | Number of frames to read (0 = all)     |
+| channels   | int... | Channel indices to read (0-indexed)    |
+
+**Async:** Yes
+**Reply:** `/done /b_allocPtr bufnum`
+
+```javascript
+// Read only the left channel from a stereo file
+supersonic.send("/b_allocReadChannel", 0, "stereo.wav", 0, 0, 0);
+
+// Read both channels
+supersonic.send("/b_allocReadChannel", 1, "stereo.wav", 0, 0, 0, 1);
 ```
 
 ---
@@ -1299,7 +1349,7 @@ supersonic.send("/b_allocFile", 0, fileBytes);
 
 This is useful when you want to send sample data directly via OSC without needing a URL - for example, from an external controller or when embedding audio data.
 
-**Reply:** `/done /b_allocFile bufnum`
+**Reply:** `/done /b_allocPtr bufnum` (SuperSonic rewrites `/b_allocFile` to `/b_allocPtr` internally)
 
 ---
 
@@ -1336,8 +1386,6 @@ No filesystem in browser/WASM, so file-based commands aren't available:
 | `/d_loadDir`         | `loadSynthDefs()`                                                         |
 | `/b_read`            | `loadSample()`                                                            |
 | `/b_readChannel`     | `loadSample()`                                                            |
-| `/b_allocRead`       | `loadSample()` or `/b_allocFile` with inline bytes                        |
-| `/b_allocReadChannel`| `loadSample()` (channel selection not supported)                          |
 | `/b_write`           | Not available                                                             |
 | `/b_close`           | Not available                                                             |
 

@@ -288,6 +288,8 @@ sonic.on('error', (err) => {
 // debug event
 sonic.on('debug', (msg) => {
   expectType<string>(msg.text);
+  expectType<number>(msg.timestamp);
+  expectType<number>(msg.sequence);
 });
 
 // message:raw event
@@ -389,6 +391,7 @@ expectType<OscCategory>(channel.classify(new Uint8Array()));
 expectType<boolean>(channel.send(new Uint8Array()));
 expectType<boolean>(channel.sendDirect(new Uint8Array()));
 expectType<boolean>(channel.sendToPrescheduler(new Uint8Array()));
+expectType<number>(channel.nextNodeId());
 expectType<OscChannelMetrics>(channel.getMetrics());
 expectType<OscChannelMetrics>(channel.getAndResetMetrics());
 expectType<void>(channel.close());
@@ -472,6 +475,9 @@ expectType<Promise<void>>(sonic.purge());
 expectType<OscChannel>(sonic.createOscChannel());
 expectType<OscChannel>(sonic.createOscChannel({ sourceId: 1 }));
 expectType<OscChannel>(sonic.createOscChannel({ sourceId: 1, blocking: true }));
+
+// nextNodeId
+expectType<number>(sonic.nextNodeId());
 
 // Asset loading
 expectType<Promise<LoadSynthDefResult>>(sonic.loadSynthDef('beep'));
@@ -579,7 +585,7 @@ expectAssignable<AddAction>(4);
 expectNotAssignable<AddAction>(5);
 expectNotAssignable<AddAction>(-1);
 
-// BlockedCommand — all 8
+// BlockedCommand — all 9
 expectAssignable<BlockedCommand>('/d_load');
 expectAssignable<BlockedCommand>('/d_loadDir');
 expectAssignable<BlockedCommand>('/b_read');
@@ -588,6 +594,7 @@ expectAssignable<BlockedCommand>('/b_write');
 expectAssignable<BlockedCommand>('/b_close');
 expectAssignable<BlockedCommand>('/clearSched');
 expectAssignable<BlockedCommand>('/error');
+expectAssignable<BlockedCommand>('/quit');
 expectNotAssignable<BlockedCommand>('/s_new');
 
 // ============================================================================
@@ -603,6 +610,7 @@ expectType<never>(sonic.send('/b_write', 0, '/file'));
 expectType<never>(sonic.send('/b_close', 0));
 expectType<never>(sonic.send('/clearSched'));
 expectType<never>(sonic.send('/error', 1));
+expectType<never>(sonic.send('/quit'));
 
 // --- Top-level commands ---
 expectType<void>(sonic.send('/status'));

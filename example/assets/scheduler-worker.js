@@ -40,8 +40,7 @@ const state = {
 };
 
 // ===== TIMING =====
-const getNTP = () =>
-  (performance.timeOrigin + performance.now()) / 1000 + osc.NTP_EPOCH_OFFSET;
+const getNTP = () => osc.ntpNow();
 
 // ===== TIMELINE (Ableton Link style) =====
 // Single source of truth for beat → time conversion

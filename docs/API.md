@@ -108,6 +108,7 @@ scsynth with low latency inside a web page.
 | [`ringBufferBase`](#ringbufferbase)       | Ring buffer base offset in SharedArrayBuffer.                |
 | [`sharedBuffer`](#sharedbuffer)           | The SharedArrayBuffer (SAB mode) or null (postMessage mode). |
 | [`getLoadedBuffers()`](#getloadedbuffers) | Get info about all loaded audio buffers.                     |
+| [`nextNodeId()`](#nextnodeid)             | Get the next unique node ID.                                 |
 | [`getRawTreeSchema()`](#getrawtreeschema) | Get schema describing the raw flat node tree structure.      |
 | [`getTreeSchema()`](#gettreeschema)       | Get schema describing the hierarchical node tree structure.  |
 
@@ -248,7 +249,7 @@ const sonic = new SuperSonic({
 | ---------------------------------------------- | -------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | <a id="bootstats"></a> `bootStats`             | `public` | [`BootStats`](#bootstats-1)                              | Boot timing statistics.                                                                                                                                                                           |
 | <a id="loadedsynthdefs"></a> `loadedSynthDefs` | `public` | `Map`<`string`, `Uint8Array`<`ArrayBufferLike`>>         | Map of loaded SynthDef names to their binary data. SynthDefs appear after `/d_recv` or `loadSynthDef()`. Removed on `/d_free` or `/d_freeAll`. Cached for automatic restoration after `reload()`. |
-| <a id="osc"></a> `osc`                         | `static` | `object`                                                 | OSC encoding/decoding utilities. **Example** `const msg = SuperSonic.osc.encodeMessage('/s_new', ['beep', 1001]); const decoded = SuperSonic.osc.decode(msg);`                                    |
+| <a id="osc"></a> `osc`                         | `static` | `object`                                                 | OSC encoding/decoding utilities. **Example** `const msg = SuperSonic.osc.encodeMessage('/s_new', ['beep', 1001, 0, 0]); const decoded = SuperSonic.osc.decode(msg);`                              |
 | `osc.NTP_EPOCH_OFFSET`                         | `public` | `number`                                                 | Seconds between NTP epoch (1900) and Unix epoch (1970): `2208988800`.                                                                                                                             |
 | `osc.decode`                                   | `public` | [`OscBundle`](#oscbundle) \| [`OscMessage`](#oscmessage) | -                                                                                                                                                                                                 |
 | `osc.encodeBundle`                             | `public` | `Uint8Array`                                             | -                                                                                                                                                                                                 |
@@ -809,6 +810,34 @@ const results = await sonic.loadSynthDefs(['beep', 'pad', 'kick']);
 if (!results.kick.success) console.error(results.kick.error);
 ```
 
+##### nextNodeId()
+
+> **nextNodeId**(): `number`
+
+Get the next unique node ID.
+
+Returns globally unique scsynth node IDs without coordination conflicts.
+IDs start at 1000 following sclang convention — 0 is the root group,
+1 is the default group, and 2–999 are left free for manual use.
+
+SAB mode uses a single atomic increment per call. PM mode uses
+range-based allocation with async pre-fetching from the main thread.
+
+Also available on [OscChannel](#oscchannel) for use in Web Workers.
+
+###### Returns
+
+`number`
+
+A unique node ID (>= 1000)
+
+###### Example
+
+```ts
+const id = sonic.nextNodeId();
+sonic.send('/s_new', 'beep', id, 0, 1, 'freq', 440);
+```
+
 ##### off()
 
 > **off**<`E`>(`event`, `callback`): `this`
@@ -986,7 +1015,7 @@ Remove all listeners for an event, or all listeners entirely.
 | <a id="audiocontextresumed"></a> `audiocontext:resumed`         | AudioContext resumed to 'running' state.                                                                                                                                                                              |
 | <a id="audiocontextstatechange"></a> `audiocontext:statechange` | AudioContext state changed. State is one of: `'running'`, `'suspended'`, `'closed'`, or `'interrupted'`.                                                                                                              |
 | <a id="audiocontextsuspended"></a> `audiocontext:suspended`     | AudioContext was suspended (e.g. tab backgrounded, autoplay policy, iOS audio interruption). Show a restart UI and call `recover()` when the user interacts.                                                          |
-| <a id="debug"></a> `debug`                                      | Debug text output from scsynth (e.g. synthdef compilation messages).                                                                                                                                                  |
+| <a id="debug"></a> `debug`                                      | Debug text output from scsynth (e.g. synthdef compilation messages). Includes NTP timestamp and sequence number.                                                                                                      |
 | <a id="destroy-1"></a> `destroy`                                | Engine has been destroyed. Only fired by `destroy()`, not by `shutdown()` or `reset()`. Last chance to clean up before all listeners are cleared.                                                                     |
 | <a id="error"></a> `error`                                      | Error from any component (worklet, transport, workers).                                                                                                                                                               |
 | <a id="loadingcomplete"></a> `loading:complete`                 | An asset finished loading. Size is in bytes.                                                                                                                                                                          |
@@ -1223,6 +1252,25 @@ SuperSonic always enables error notifications so you never miss a /fail reply.
 
 ###### Call Signature
 
+> **send**(`address`, ...`args`): `never`
+
+###### Parameters
+
+| Parameter | Type                   |
+| --------- | ---------------------- |
+| `address` | `"/quit"`              |
+| ...`args` | [`OscArg`](#oscarg)\[] |
+
+###### Returns
+
+`never`
+
+###### Deprecated
+
+Use destroy() to shut down SuperSonic.
+
+###### Call Signature
+
 > **send**(`address`): `void`
 
 Query server status. Replies with `/status.reply`: unused, numUGens, numSynths, numGroups, numSynthDefs, avgCPU%, peakCPU%, nominalSampleRate, actualSampleRate.
@@ -1241,7 +1289,7 @@ Query server status. Replies with `/status.reply`: unused, numUGens, numSynths, 
 
 > **send**(`address`): `void`
 
-Query server version. Replies with `/version.reply`: programName, majorVersion, minorVersion, patchName, gitBranch, commitHash.
+Query server version. Replies with `/version.reply`: programName, majorVersion, minorVersion, patchVersion, gitBranch, commitHash.
 
 ###### Parameters
 
@@ -1257,7 +1305,7 @@ Query server version. Replies with `/version.reply`: programName, majorVersion, 
 
 > **send**(`address`, `flag`, `clientID?`): `void`
 
-Register (1) or unregister (0) for server notifications (`/n_go`, `/n_end`, `/n_on`, `/n_off`, `/n_move`). Replies with `/done /notify clientID`.
+Register (1) or unregister (0) for server notifications (`/n_go`, `/n_end`, `/n_on`, `/n_off`, `/n_move`). Replies with `/done /notify clientID [maxLogins]`.
 
 ###### Parameters
 
@@ -1858,7 +1906,7 @@ Send a command to a specific UGen instance within a synth. The command name and 
 
 > **send**(`address`, `bufnum`, `numFrames`, `numChannels?`, `sampleRate?`): `void`
 
-Async. Allocate an empty buffer. Queued and rewritten to /b\_allocPtr internally. Use sync() after to ensure completion. Replies with `/done /b_allocPtr bufnum`.
+Async. Allocate an empty buffer. Queued and rewritten to /b\_allocPtr internally. Use sync() after to ensure completion. Replies with `/done /b_allocPtr bufnum`. Note: completion messages are not supported (dropped during rewrite).
 
 ###### Parameters
 
@@ -1919,7 +1967,7 @@ Async. Allocate a buffer and read specific channels from an audio file. Queued a
 
 > **send**(`address`, `bufnum`, `data`): `void`
 
-Async. SuperSonic extension: allocate a buffer from inline audio file bytes (WAV, FLAC, OGG, etc.) without URL fetch. Queued and rewritten internally.
+Async. SuperSonic extension: allocate a buffer from inline audio file bytes (WAV, FLAC, OGG, etc.) without URL fetch. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`.
 
 ###### Parameters
 
@@ -2423,6 +2471,7 @@ then transfer it to a Web Worker for direct communication with the AudioWorklet.
 | [`close()`](#close)                           | Close the channel and release its ports.                                        |
 | [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                           |
 | [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                   |
+| [`nextNodeId()`](#nextnodeid)                 | Get the next unique node ID.                                                    |
 | [`send()`](#send)                             | Send an OSC message with automatic routing.                                     |
 | [`sendDirect()`](#senddirect)                 | Send directly to worklet without classification or metrics tracking.            |
 | [`sendToPrescheduler()`](#sendtoprescheduler) | Send to prescheduler without classification.                                    |
@@ -2575,6 +2624,25 @@ Get current metrics snapshot.
 ###### Returns
 
 [`OscChannelMetrics`](#oscchannelmetrics)
+
+##### nextNodeId()
+
+> **nextNodeId**(): `number`
+
+Get the next unique node ID.
+
+Returns globally unique scsynth node IDs. IDs start at 1000 following
+sclang convention — 0 is the root group, 1 is the default group, and
+2–999 are left free for manual use.
+
+SAB mode: single atomic increment via `Atomics.add` — lock-free and
+thread-safe. PM mode: range-based allocation with async pre-fetching.
+
+###### Returns
+
+`number`
+
+A unique node ID (>= 1000)
 
 ##### send()
 
@@ -3142,7 +3210,7 @@ Node add action: 0=head, 1=tail, 2=before, 3=after, 4=replace
 
 ### BlockedCommand
 
-> **BlockedCommand** = `"/d_load"` | `"/d_loadDir"` | `"/b_read"` | `"/b_readChannel"` | `"/b_write"` | `"/b_close"` | `"/clearSched"` | `"/error"`
+> **BlockedCommand** = `"/d_load"` | `"/d_loadDir"` | `"/b_read"` | `"/b_readChannel"` | `"/b_write"` | `"/b_close"` | `"/clearSched"` | `"/error"` | `"/quit"`
 
 Commands blocked at runtime — typed as compile-time errors
 
@@ -3214,12 +3282,12 @@ The first element is always the address string, followed by zero or more argumen
 #### Example
 
 ```ts
-// A decoded /s_new message:
-["/s_new", "beep", 1001, 0, 1, "freq", 440]
+// A decoded /n_go message received from scsynth:
+["/n_go", 1001, 0, -1, -1, 0]
 
 // Access parts:
-const address = msg[0];  // "/s_new"
-const args = msg.slice(1);  // ["beep", 1001, 0, 1, "freq", 440]
+const address = msg[0];  // "/n_go"
+const args = msg.slice(1);  // [1001, 0, -1, -1, 0]
 ```
 
 ***

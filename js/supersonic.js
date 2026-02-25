@@ -11,8 +11,6 @@ import { shouldBypass, readTimetag, getCurrentNTPFromPerformance } from "./lib/o
 
 // Re-export OscChannel for use in workers
 export { OscChannel };
-// Re-export osc utilities for direct use in workers (zero-allocation OSC encoding)
-export { oscFast as osc };
 import { BufferManager } from "./lib/buffer_manager.js";
 import { AssetLoader } from "./lib/asset_loader.js";
 import { OSCRewriter } from "./lib/osc_rewriter.js";
@@ -316,6 +314,11 @@ export class SuperSonic {
 
   // Main thread OscChannel for sending OSC
   #oscChannel;
+
+  // Node ID counter for PM mode (SAB mode uses shared memory).
+  // Starts at 1000 following sclang convention — 0 is the root group,
+  // 1 is the default group, and 2–999 are left free for manual use.
+  #nodeIdCounter = 1000;
 
   // Track AudioContext state for recovery detection
   #previousAudioContextState = null;
@@ -956,6 +959,7 @@ export class SuperSonic {
       "/b_close": "Writing audio files is not available in the browser.",
       "/clearSched": "Use purge() to clear both the JS prescheduler and WASM scheduler.",
       "/error": "SuperSonic always enables error notifications so you never miss a /fail message.",
+      "/quit": "Use destroy() to shut down SuperSonic.",
     };
 
     if (blocked[address]) {
@@ -1097,6 +1101,25 @@ export class SuperSonic {
   createOscChannel(options = {}) {
     this.#ensureInitialized("create OSC channel");
     return this.#osc.createOscChannel(options);
+  }
+
+  /**
+   * Get the next unique node ID.
+   *
+   * Returns globally unique scsynth node IDs without coordination conflicts.
+   * IDs start at 1000 following sclang convention — 0 is the root group,
+   * 1 is the default group, and 2–999 are left free for manual use.
+   *
+   * SAB mode uses a single atomic increment per call. PM mode uses
+   * range-based allocation with async pre-fetching from the main thread.
+   *
+   * Also available on OscChannel for use in Web Workers.
+   *
+   * @returns {number} A unique node ID (>= 1000)
+   */
+  nextNodeId() {
+    this.#ensureInitialized("allocate node IDs");
+    return this.#oscChannel.nextNodeId();
   }
 
   // ============================================================================
@@ -1560,6 +1583,23 @@ export class SuperSonic {
       transportConfig.sharedBuffer = sharedBuffer;
       transportConfig.ringBufferBase = ringBufferBase;
       transportConfig.bufferConstants = bc;
+
+      // Initialize node ID counter in shared memory.
+      // Starts at 1000 following sclang convention — 0 is the root group,
+      // 1 is the default group, and 2–999 are left free for manual use.
+      if (bc?.NODE_ID_COUNTER_START !== undefined) {
+        const counterBase = ringBufferBase + bc.NODE_ID_COUNTER_START;
+        const counterView = new Int32Array(sharedBuffer, counterBase, 1);
+        Atomics.store(counterView, 0, 1000);
+      }
+    } else {
+      // PM mode: provide a node ID source function
+      this.#nodeIdCounter = 1000;
+      transportConfig.nodeIdSource = (rangeSize) => {
+        const from = this.#nodeIdCounter;
+        this.#nodeIdCounter += rangeSize;
+        return { from, to: from + rangeSize };
+      };
     }
 
     this.#osc = createTransport(mode, transportConfig);
@@ -1944,3 +1984,6 @@ export class SuperSonic {
     return this.#bufferQueue;
   }
 }
+
+// Re-export curated osc utilities for direct use in workers (zero-allocation OSC encoding)
+export const osc = SuperSonic.osc;

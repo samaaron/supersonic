@@ -259,6 +259,7 @@ export class PostMessageTransport extends Transport {
             bypassLookaheadS: this._config.bypassLookaheadS,
             sourceId,
             blocking: options.blocking,
+            nodeIdSource: this._config.nodeIdSource,
         });
     }
 
