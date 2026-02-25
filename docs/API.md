@@ -36,7 +36,7 @@ scsynth with low latency inside a web page.
 | [`send()`](#send)                         | Send any OSC message.                                                                                                       |
 | [`sendOSC()`](#sendosc)                   | Send pre-encoded OSC bytes to scsynth.                                                                                      |
 | [`sync()`](#sync)                         | Wait for scsynth to process all pending commands.                                                                           |
-| [`purge()`](#purge)                       | Flush all pending OSC messages from both the JS prescheduler and the WASM BundleScheduler.                                  |
+| [`purge()`](#purge)                       | Cancel all pending scheduled messages everywhere in the pipeline.                                                           |
 | [`cancelAll()`](#cancelall)               | Cancel all scheduled messages in the JS prescheduler.                                                                       |
 | [`cancelSession()`](#cancelsession)       | Cancel all scheduled messages for a session.                                                                                |
 | [`cancelSessionTag()`](#cancelsessiontag) | Cancel scheduled messages matching both a session and run tag.                                                              |
@@ -197,7 +197,7 @@ const sonic = new SuperSonic({
 | <a id="audiocontextoptions"></a> `audioContextOptions?`     | `AudioContextOptions`                       | Options passed to `new AudioContext()`. Ignored if `audioContext` is provided.                                                                                                                                                                                     |          |
 | <a id="autoconnect"></a> `autoConnect?`                     | `boolean`                                   | Auto-connect the AudioWorkletNode to the AudioContext destination. Default: true.                                                                                                                                                                                  |          |
 | <a id="baseurl"></a> `baseURL?`                             | `string`                                    | Convenience shorthand when all assets (WASM, workers, synthdefs, samples) are co-located.                                                                                                                                                                          | Yes\*    |
-| <a id="bypasslookaheadms"></a> `bypassLookaheadMs?`         | `number`                                    | Bundles within this many ms of now bypass the prescheduler. Default: 500.                                                                                                                                                                                          |          |
+| <a id="bypasslookaheadms"></a> `bypassLookaheadMs?`         | `number`                                    | Bundles scheduled within this many ms of now are dispatched immediately for lowest latency. Bundles further in the future are held and dispatched closer to their scheduled time. Default: 500.                                                                    |          |
 | <a id="corebaseurl"></a> `coreBaseURL?`                     | `string`                                    | Base URL for GPL assets: WASM and AudioWorklet (supersonic-scsynth-core package). Defaults to `baseURL`.                                                                                                                                                           |          |
 | <a id="debug-1"></a> `debug?`                               | `boolean`                                   | Enable all debug console logging. Default: false.                                                                                                                                                                                                                  |          |
 | <a id="debugoscin"></a> `debugOscIn?`                       | `boolean`                                   | Log incoming OSC messages to console. Default: false.                                                                                                                                                                                                              |          |
@@ -816,12 +816,9 @@ if (!results.kick.success) console.error(results.kick.error);
 
 Get the next unique node ID.
 
-Returns globally unique scsynth node IDs without coordination conflicts.
-IDs start at 1000 following sclang convention — 0 is the root group,
-1 is the default group, and 2–999 are left free for manual use.
-
-SAB mode uses a single atomic increment per call. PM mode uses
-range-based allocation with async pre-fetching from the main thread.
+Thread-safe — can be called concurrently from multiple workers and no
+two callers will ever receive the same ID. IDs start at 1000 (0 is
+the root group, 1 is the default group, 2–999 are reserved for manual use).
 
 Also available on [OscChannel](#oscchannel) for use in Web Workers.
 
@@ -935,16 +932,11 @@ Unsubscribe function — call it to remove the listener before it fires
 
 > **purge**(): `Promise`<`void`>
 
-Flush all pending OSC messages from both the JS prescheduler and the
-WASM BundleScheduler.
+Cancel all pending scheduled messages everywhere in the pipeline.
 
-Unlike [cancelAll](#cancelall) which only clears the JS prescheduler, this also
-clears bundles already consumed from the ring buffer and sitting in the
-WASM scheduler's priority queue. Resolves when both are confirmed empty.
-
-Uses a postMessage flag (not the ring buffer) to signal the WASM scheduler,
-avoiding the race condition where stale scheduled bundles fire before a
-clear command is read from the ring buffer.
+Unlike [cancelAll](#cancelall) which only clears messages still waiting in JS,
+`purge()` guarantees that nothing already in-flight will fire either.
+Resolves when the flush is confirmed complete.
 
 ###### Returns
 
@@ -2291,7 +2283,7 @@ Send pre-encoded OSC bytes to scsynth.
 Use this when you've already encoded the message (e.g. via `SuperSonic.osc.encodeMessage`)
 or when sending from a worker that produces raw OSC. Sends bytes as-is without
 rewriting — buffer allocation commands (`/b_alloc*`) are not transformed.
-Use [send](#send-1) for buffer commands so they get rewritten to `/b_allocPtr`.
+Use [send](#send-1) for buffer commands so they are handled correctly.
 
 ###### Parameters
 
@@ -2306,7 +2298,7 @@ Use [send](#send-1) for buffer commands so they get rewritten to `/b_allocPtr`.
 
 ###### Throws
 
-If the bundle is too large for the WASM scheduler slot size
+If the bundle exceeds the maximum schedulable size
 
 ###### Example
 
@@ -2631,12 +2623,9 @@ Get current metrics snapshot.
 
 Get the next unique node ID.
 
-Returns globally unique scsynth node IDs. IDs start at 1000 following
-sclang convention — 0 is the root group, 1 is the default group, and
-2–999 are left free for manual use.
-
-SAB mode: single atomic increment via `Atomics.add` — lock-free and
-thread-safe. PM mode: range-based allocation with async pre-fetching.
+Thread-safe — can be called concurrently from multiple workers and no
+two callers will ever receive the same ID. IDs start at 1000 (0 is
+the root group, 1 is the default group, 2–999 are reserved for manual use).
 
 ###### Returns
 

@@ -110,9 +110,9 @@ export type OscBundlePacket =
 export type TransportMode = 'sab' | 'postMessage';
 
 /**
- * scsynth engine options passed to World_New().
+ * Engine configuration options controlling resource limits and audio behaviour.
  *
- * These configure the internal SuperCollider engine. All values have sensible defaults.
+ * All values have sensible defaults.
  * Override via `new SuperSonic({ scsynthOptions: { ... } })`.
  */
 export interface ScsynthOptions {
@@ -229,7 +229,7 @@ export interface SuperSonicOptions {
   snapshotIntervalMs?: number;
   /** Max pending events in the JS prescheduler. Default: 65536. */
   preschedulerCapacity?: number;
-  /** Bundles within this many ms of now bypass the prescheduler. Default: 500. */
+  /** Bundles scheduled within this many ms of now are dispatched immediately for lowest latency. Bundles further in the future are held and dispatched closer to their scheduled time. Default: 500. */
   bypassLookaheadMs?: number;
 
   /** Enable all debug console logging. Default: false. */
@@ -834,12 +834,9 @@ export class OscChannel {
   /**
    * Get the next unique node ID.
    *
-   * Returns globally unique scsynth node IDs. IDs start at 1000 following
-   * sclang convention — 0 is the root group, 1 is the default group, and
-   * 2–999 are left free for manual use.
-   *
-   * SAB mode: single atomic increment via `Atomics.add` — lock-free and
-   * thread-safe. PM mode: range-based allocation with async pre-fetching.
+   * Thread-safe — can be called concurrently from multiple workers and no
+   * two callers will ever receive the same ID. IDs start at 1000 (0 is
+   * the root group, 1 is the default group, 2–999 are reserved for manual use).
    *
    * @returns A unique node ID (>= 1000)
    */
@@ -1495,11 +1492,11 @@ export class SuperSonic {
    * Use this when you've already encoded the message (e.g. via `SuperSonic.osc.encodeMessage`)
    * or when sending from a worker that produces raw OSC. Sends bytes as-is without
    * rewriting — buffer allocation commands (`/b_alloc*`) are not transformed.
-   * Use {@link send} for buffer commands so they get rewritten to `/b_allocPtr`.
+   * Use {@link send} for buffer commands so they are handled correctly.
    *
    * @param oscData - Encoded OSC message or bundle bytes
    * @param options - Optional session/tag for cancellation
-   * @throws If the bundle is too large for the WASM scheduler slot size
+   * @throws If the bundle exceeds the maximum schedulable size
    *
    * @example
    * const msg = SuperSonic.osc.encodeMessage('/n_set', [1001, 'freq', 880]);
@@ -1535,16 +1532,11 @@ export class SuperSonic {
   cancelAll(): void;
 
   /**
-   * Flush all pending OSC messages from both the JS prescheduler and the
-   * WASM BundleScheduler.
+   * Cancel all pending scheduled messages everywhere in the pipeline.
    *
-   * Unlike {@link cancelAll} which only clears the JS prescheduler, this also
-   * clears bundles already consumed from the ring buffer and sitting in the
-   * WASM scheduler's priority queue. Resolves when both are confirmed empty.
-   *
-   * Uses a postMessage flag (not the ring buffer) to signal the WASM scheduler,
-   * avoiding the race condition where stale scheduled bundles fire before a
-   * clear command is read from the ring buffer.
+   * Unlike {@link cancelAll} which only clears messages still waiting in JS,
+   * `purge()` guarantees that nothing already in-flight will fire either.
+   * Resolves when the flush is confirmed complete.
    */
   purge(): Promise<void>;
 
@@ -1580,12 +1572,9 @@ export class SuperSonic {
   /**
    * Get the next unique node ID.
    *
-   * Returns globally unique scsynth node IDs without coordination conflicts.
-   * IDs start at 1000 following sclang convention — 0 is the root group,
-   * 1 is the default group, and 2–999 are left free for manual use.
-   *
-   * SAB mode uses a single atomic increment per call. PM mode uses
-   * range-based allocation with async pre-fetching from the main thread.
+   * Thread-safe — can be called concurrently from multiple workers and no
+   * two callers will ever receive the same ID. IDs start at 1000 (0 is
+   * the root group, 1 is the default group, 2–999 are reserved for manual use).
    *
    * Also available on {@link OscChannel} for use in Web Workers.
    *
