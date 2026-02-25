@@ -1,6 +1,6 @@
 {
   "name": "supersonic-scsynth-bundle",
-  "version": "0.53.0",
+  "version": "0.54.0",
   "description": "Complete SuperSonic bundle: scsynth engine + Sonic Pi synthdefs and samples",
   "main": "index.js",
   "type": "module",
@@ -31,9 +31,9 @@
     "LICENSE"
   ],
   "dependencies": {
-    "supersonic-scsynth": "^0.53.0",
-    "supersonic-scsynth-core": "^0.53.0",
-    "supersonic-scsynth-synthdefs": "^0.53.0",
-    "supersonic-scsynth-samples": "^0.53.0"
+    "supersonic-scsynth": "^0.54.0",
+    "supersonic-scsynth-core": "^0.54.0",
+    "supersonic-scsynth-synthdefs": "^0.54.0",
+    "supersonic-scsynth-samples": "^0.54.0"
   }
 }
