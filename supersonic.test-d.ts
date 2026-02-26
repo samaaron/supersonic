@@ -34,6 +34,8 @@ import type {
   SendOSCOptions,
   AddAction,
   BlockedCommand,
+  UUID,
+  NodeID,
 } from './supersonic';
 import { SuperSonic, OscChannel, osc } from './supersonic';
 
@@ -163,7 +165,7 @@ expectType<string>(schema.layout.panels[0].title);
 // ============================================================================
 
 declare const treeNode: TreeNode;
-expectType<number>(treeNode.id);
+expectType<NodeID>(treeNode.id);
 expectType<'group' | 'synth'>(treeNode.type);
 expectType<string>(treeNode.defName);
 expectType<TreeNode[]>(treeNode.children);
@@ -175,12 +177,12 @@ expectType<number>(tree.droppedCount);
 expectType<TreeNode>(tree.root);
 
 declare const rawNode: RawTreeNode;
-expectType<number>(rawNode.id);
-expectType<number>(rawNode.parentId);
+expectType<NodeID>(rawNode.id);
+expectType<NodeID>(rawNode.parentId);
 expectType<boolean>(rawNode.isGroup);
-expectType<number>(rawNode.prevId);
-expectType<number>(rawNode.nextId);
-expectType<number>(rawNode.headId);
+expectType<NodeID>(rawNode.prevId);
+expectType<NodeID>(rawNode.nextId);
+expectType<NodeID>(rawNode.headId);
 expectType<string>(rawNode.defName);
 
 declare const rawTree: RawTree;
