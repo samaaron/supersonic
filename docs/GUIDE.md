@@ -196,12 +196,30 @@ if (loaded.some(b => b.hash === info.hash)) {
 
 ## Events & Debugging
 
-### Latency Analysis with `message:raw`
+### Text Events (`in:text` / `out:text`)
 
-The `message:raw` event includes timing information for measuring delivery latency:
+Pre-formatted text representations of OSC messages. Only emitted when listeners are attached or debug logging is enabled:
 
 ```javascript
-supersonic.on("message:raw", ({ oscData, sequence, timestamp, scheduledTime }) => {
+supersonic.on("in:text", ({ text, sequence, timestamp }) => {
+  console.log(`← ${text}`);
+});
+
+supersonic.on("out:text", ({ text, sequence, timestamp }) => {
+  console.log(`→ ${text}`);
+});
+```
+
+- `text` — Human-readable string like `/s_new "beep", 1001, 0, 1, "freq", 440`
+- `sequence` — Incrementing message counter
+- `timestamp` — NTP seconds when the message was observed
+
+### Latency Analysis with `in:osc`
+
+The `in:osc` event includes timing information for measuring delivery latency:
+
+```javascript
+supersonic.on("in:osc", ({ oscData, sequence, timestamp, scheduledTime }) => {
   const parsed = SuperSonic.osc.decode(oscData);
   const relativeTime = (timestamp - supersonic.initTime).toFixed(2);
   console.log(`[${sequence}] +${relativeTime}s`, parsed[0], parsed.slice(1));
@@ -214,12 +232,12 @@ supersonic.on("message:raw", ({ oscData, sequence, timestamp, scheduledTime }) =
 - `timestamp` — NTP seconds when the message was observed
 - `scheduledTime` — NTP seconds from bundle timetag, or `null` if not a bundle
 
-### Multi-Worker Source Tracking with `message:sent`
+### Multi-Worker Source Tracking with `out:osc`
 
 When using multiple OscChannels (see [Workers Guide](WORKERS.md)), `sourceId` identifies which channel sent each message:
 
 ```javascript
-supersonic.on("message:sent", ({ oscData, sourceId, sequence, timestamp, scheduledTime }) => {
+supersonic.on("out:osc", ({ oscData, sourceId, sequence, timestamp, scheduledTime }) => {
   const decoded = SuperSonic.osc.decode(oscData);
   const relativeTime = (timestamp - supersonic.initTime).toFixed(2);
   console.log(`[${sequence}] +${relativeTime}s [src:${sourceId}]`, decoded[0]);
@@ -256,30 +274,6 @@ const supersonic = new SuperSonic({
 | `scsynthMaxLineLength` | Override for scsynth debug events (falls back to `maxLineLength`)  |
 | `oscInMaxLineLength`   | Override for incoming OSC args (falls back to `maxLineLength`)     |
 | `oscOutMaxLineLength`  | Override for outgoing OSC args (falls back to `maxLineLength`)     |
-
-### Activity Console Log Options (`activityConsoleLog`)
-
-Control truncation of console debug output. The `maxLineLength` is the default; specific overrides take precedence when set.
-
-```javascript
-const supersonic = new SuperSonic({
-  baseURL: "/supersonic/",
-  debug: true,
-  activityConsoleLog: {
-    maxLineLength: 200,            // Default for all (default: 200)
-    scsynthMaxLineLength: 500,     // Override for scsynth messages
-    oscInMaxLineLength: 100,       // Override for incoming OSC
-    oscOutMaxLineLength: 100,      // Override for outgoing OSC
-  },
-});
-```
-
-| Option                 | Description                                                              |
-| ---------------------- | ------------------------------------------------------------------------ |
-| `maxLineLength`        | Default max chars for all console output (default: 200)                  |
-| `scsynthMaxLineLength` | Override for scsynth messages (falls back to `maxLineLength`)            |
-| `oscInMaxLineLength`   | Override for incoming OSC args (falls back to `maxLineLength`)           |
-| `oscOutMaxLineLength`  | Override for outgoing OSC args (falls back to `maxLineLength`)           |
 
 ### AudioContext Options (`audioContextOptions`)
 

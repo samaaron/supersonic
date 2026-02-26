@@ -507,11 +507,11 @@ test.describe('Schema Validation', () => {
         statusPromises.push(new Promise(resolve => {
           const handler = (reply) => {
             if (reply[0] === '/status.reply') {
-              sonic.off('message', handler);
+              sonic.off('in', handler);
               resolve(true);
             }
           };
-          sonic.on('message', handler);
+          sonic.on('in', handler);
           sonic.send('/status');
         }));
       }

@@ -286,7 +286,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -356,7 +356,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -417,7 +417,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDefs(["sonic-pi-beep", "sonic-pi-saw"]);
@@ -472,7 +472,7 @@ test.describe("getTree() vs /g_queryTree comparison", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -534,7 +534,7 @@ test.describe("getTree() vs /n_query comparison", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
 
       await sonic.init();
       // Must register for notifications to receive /n_info
@@ -587,7 +587,7 @@ test.describe("getTree() vs /n_query comparison", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
 
       await sonic.init();
       // Must register for notifications to receive /n_info
@@ -657,7 +657,7 @@ test.describe("getTree() vs /n_query comparison", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
 
       await sonic.init();
       // Must register for notifications to receive /n_info
@@ -1331,7 +1331,7 @@ test.describe("getTree() with auto-assigned IDs", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1); // Enable OSC notifications
@@ -3165,7 +3165,7 @@ test.describe("getTree() overflow and droppedCount", () => {
       // even if not in mirror
       let oscTreeNodeCount = 0;
       const oscPromise = new Promise((resolve) => {
-        sonic.on("message", (msg) => {
+        sonic.on("in", (msg) => {
           if (msg[0] === "/g_queryTree.reply") {
             // Count nodes in OSC reply
             // Format: [flag, nodeID, numChildren, ...]

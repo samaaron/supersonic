@@ -21,7 +21,7 @@ test.describe("Completion Messages", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -62,7 +62,7 @@ test.describe("Completion Messages", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -100,7 +100,7 @@ test.describe("Completion Messages", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -141,7 +141,7 @@ test.describe("Completion Messages", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 

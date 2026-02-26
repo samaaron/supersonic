@@ -16,17 +16,17 @@ async function measureLatency(page, config, iterations = 100) {
     function waitForMessage(address, timeoutMs = 5000) {
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
-          sonic.off("message", handler);
+          sonic.off("in", handler);
           reject(new Error(`Timeout waiting for ${address} after ${timeoutMs}ms`));
         }, timeoutMs);
         const handler = (msg) => {
           if (msg[0] === address) {
             clearTimeout(timer);
-            sonic.off("message", handler);
+            sonic.off("in", handler);
             resolve(msg);
           }
         };
-        sonic.on("message", handler);
+        sonic.on("in", handler);
       });
     }
 

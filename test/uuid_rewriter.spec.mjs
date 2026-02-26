@@ -35,7 +35,7 @@ test.describe("Outbound UUID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -81,7 +81,7 @@ test.describe("Outbound UUID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -113,7 +113,7 @@ test.describe("Outbound UUID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -159,7 +159,7 @@ test.describe("Inbound UUID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -200,7 +200,7 @@ test.describe("Inbound UUID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -241,7 +241,7 @@ test.describe("Inbound UUID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -285,7 +285,7 @@ test.describe("Secondary node ID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -340,7 +340,7 @@ test.describe("Secondary node ID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -394,7 +394,7 @@ test.describe("Secondary node ID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -448,7 +448,7 @@ test.describe("Secondary node ID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -493,7 +493,7 @@ test.describe("Secondary node ID rewriting", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -566,7 +566,7 @@ test.describe("UUID map pruning", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -620,7 +620,7 @@ test.describe("UUID stress tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on("message", (msg) => messages.push(msg));
+      sonic.on("in", (msg) => messages.push(msg));
       await sonic.init();
       await sonic.send("/notify", 1);
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -666,7 +666,7 @@ test.describe("UUID stress tests", () => {
       const sonic = new window.SuperSonic(config);
       const nGoMessages = [];
       const nEndMessages = [];
-      sonic.on("message", (msg) => {
+      sonic.on("in", (msg) => {
         if (msg[0] === "/n_go") nGoMessages.push(msg);
         else if (msg[0] === "/n_end") nEndMessages.push(msg);
       });

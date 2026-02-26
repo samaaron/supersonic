@@ -1819,8 +1819,8 @@ $("init-button").addEventListener("click", async () => {
       checkIdle();
     });
 
-    orchestrator.on("message:raw", addMessage);
-    orchestrator.on("message:sent", addSentMessage);
+    orchestrator.on("in:osc", addMessage);
+    orchestrator.on("out:osc", addSentMessage);
     // Connect the <supersonic-metrics> web component (schema-driven, zero-alloc hot path)
     metricsEl?.connect(orchestrator, { refreshRate: 10 });
     metricsActive = true; // Flag for idle/wakeUp to know metrics are active

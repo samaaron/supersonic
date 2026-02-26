@@ -261,8 +261,6 @@ export interface SuperSonicOptions {
 
   /** Line length limits for activity events emitted to listeners. */
   activityEvent?: ActivityLineConfig;
-  /** Line length limits for activity console.log output. */
-  activityConsoleLog?: ActivityLineConfig;
 
   /** Max fetch retries when loading assets. Default: 3. */
   fetchMaxRetries?: number;
@@ -660,7 +658,7 @@ export interface BootStats {
  * for type-safe event subscriptions.
  *
  * @example
- * sonic.on('message', (msg) => {
+ * sonic.on('in', (msg) => {
  *   // msg is typed as OscMessage — [address, ...args]
  *   if (msg[0] === '/n_go') {
  *     console.log('Node started:', msg[1]);
@@ -688,13 +686,25 @@ export interface SuperSonicEventMap {
    * Decoded OSC message received from scsynth.
    * Messages are plain arrays: `[address, ...args]`.
    */
-  'message': (msg: OscMessage) => void;
+  'in': (msg: OscMessage) => void;
 
   /** Raw OSC bytes received from scsynth (before decoding). Includes NTP timestamps for timing analysis. */
-  'message:raw': (data: { oscData: Uint8Array; sequence: number; timestamp: number; scheduledTime: number | null }) => void;
+  'in:osc': (data: { oscData: Uint8Array; sequence: number; timestamp: number; scheduledTime: number | null }) => void;
 
-  /** Fired when an OSC message is sent to scsynth. Includes source worker ID, sequence number, and NTP timestamps. */
-  'message:sent': (data: { oscData: Uint8Array; sourceId: number; sequence: number; timestamp: number; scheduledTime: number | null }) => void;
+  /** Pre-formatted text representation of an incoming OSC message. Only emitted when listeners are attached or debug logging is enabled. */
+  'in:text': (data: { text: string; sequence: number; timestamp: number }) => void;
+
+  /**
+   * Decoded OSC message sent to scsynth.
+   * Messages are plain arrays: `[address, ...args]`. Mirrors the `'in'` event for outgoing messages.
+   */
+  'out': (msg: OscMessage) => void;
+
+  /** Raw OSC bytes sent to scsynth. Includes source worker ID, sequence number, and NTP timestamps. */
+  'out:osc': (data: { oscData: Uint8Array; sourceId: number; sequence: number; timestamp: number; scheduledTime: number | null }) => void;
+
+  /** Pre-formatted text representation of an outgoing OSC message. Only emitted when listeners are attached or debug logging is enabled. */
+  'out:text': (data: { text: string; sequence: number; timestamp: number }) => void;
 
   /** Debug text output from scsynth (e.g. synthdef compilation messages). Includes NTP timestamp and sequence number. */
   'debug': (msg: { text: string; timestamp: number; sequence: number }) => void;
@@ -1050,7 +1060,7 @@ export interface SendOSCOptions {
  *   await sonic.loadSynthDef('beep');
  * });
  *
- * sonic.on('message', (msg) => {
+ * sonic.on('in', (msg) => {
  *   console.log('OSC from scsynth:', msg[0], msg.slice(1));
  * });
  *
@@ -1180,7 +1190,7 @@ export class SuperSonic {
    * @returns Unsubscribe function — call it to remove the listener
    *
    * @example
-   * const unsub = sonic.on('message', (msg) => {
+   * const unsub = sonic.on('in', (msg) => {
    *   console.log(msg[0], msg.slice(1));
    * });
    *

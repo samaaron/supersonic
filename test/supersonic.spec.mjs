@@ -59,7 +59,7 @@ test.describe("SuperSonic", () => {
         const sonic = new window.SuperSonic(config);
 
         const messages = [];
-        sonic.on('message', (msg) => {
+        sonic.on('in', (msg) => {
           messages.push(msg);
         });
 
@@ -276,7 +276,7 @@ test.describe("SuperSonic", () => {
         const sonic = new window.SuperSonic(config);
 
         const messages = [];
-        sonic.on('message', (msg) => {
+        sonic.on('in', (msg) => {
           messages.push(msg);
         });
 
@@ -397,7 +397,7 @@ test.describe("SuperSonic", () => {
         const sonic = new window.SuperSonic(config);
 
         const messages = [];
-        sonic.on('message', (msg) => {
+        sonic.on('in', (msg) => {
           messages.push(msg);
         });
 
@@ -571,7 +571,7 @@ test.describe("Event Emitter", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      const unsubscribe = sonic.on('message', (msg) => {
+      const unsubscribe = sonic.on('in', (msg) => {
         messages.push(msg[0]);
       });
 
@@ -613,15 +613,15 @@ test.describe("Event Emitter", () => {
       const listener2Messages = [];
       const listener3Messages = [];
 
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         listener1Messages.push({ listener: 1, address: msg[0] });
       });
 
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         listener2Messages.push({ listener: 2, address: msg[0] });
       });
 
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         listener3Messages.push({ listener: 3, address: msg[0] });
       });
 
@@ -652,15 +652,15 @@ test.describe("Event Emitter", () => {
       const listenerB = [];
       const listenerC = [];
 
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         listenerA.push(msg[0]);
       });
 
-      const unsubB = sonic.on('message', (msg) => {
+      const unsubB = sonic.on('in', (msg) => {
         listenerB.push(msg[0]);
       });
 
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         listenerC.push(msg[0]);
       });
 
@@ -705,11 +705,11 @@ test.describe("Event Emitter", () => {
       const onceMessages = [];
       const regularMessages = [];
 
-      sonic.once('message', (msg) => {
+      sonic.once('in', (msg) => {
         onceMessages.push(msg[0]);
       });
 
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         regularMessages.push(msg[0]);
       });
 
@@ -744,7 +744,7 @@ test.describe("Event Emitter", () => {
         messages.push(msg[0]);
       };
 
-      sonic.on('message', callback);
+      sonic.on('in', callback);
 
       await sonic.init();
       sonic.send("/status");
@@ -752,7 +752,7 @@ test.describe("Event Emitter", () => {
 
       const countBefore = messages.length;
 
-      sonic.off('message', callback);
+      sonic.off('in', callback);
 
       sonic.send("/status");
       await sonic.sync(2);
@@ -777,15 +777,15 @@ test.describe("Event Emitter", () => {
       const goodListener1 = [];
       const goodListener2 = [];
 
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         goodListener1.push(msg[0]);
       });
 
-      sonic.on('message', () => {
+      sonic.on('in', () => {
         throw new Error("Intentional test error");
       });
 
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         goodListener2.push(msg[0]);
       });
 
@@ -813,7 +813,7 @@ test.describe("Event Emitter", () => {
       const messageEvents = [];
       const debugEvents = [];
 
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         messageEvents.push(msg);
       });
 

@@ -151,7 +151,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -193,7 +193,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -260,7 +260,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -429,7 +429,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -479,7 +479,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -514,7 +514,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -563,7 +563,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -688,7 +688,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -740,7 +740,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -790,7 +790,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -839,7 +839,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -887,7 +887,7 @@ test.describe("SuperSonic loadSample()", () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       try {
         await sonic.init();
@@ -1366,7 +1366,7 @@ test.describe("SuperSonic sample info and content hashing", () => {
         await sonic.init();
 
         const messages = [];
-        sonic.on('message', (msg) => messages.push(msg));
+        sonic.on('in', (msg) => messages.push(msg));
 
         await sonic.sampleInfo("bd_haus.flac");
         await new Promise(r => setTimeout(r, 200));

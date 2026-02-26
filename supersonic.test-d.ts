@@ -126,7 +126,7 @@ expectAssignable<SuperSonicOptions>({ autoConnect: false });
 // ActivityLineConfig
 expectAssignable<ActivityLineConfig>({ maxLineLength: 200 });
 expectAssignable<ActivityLineConfig>({ scsynthMaxLineLength: null, oscInMaxLineLength: 100 });
-expectAssignable<SuperSonicOptions>({ activityEvent: { maxLineLength: 200 }, activityConsoleLog: {} });
+expectAssignable<SuperSonicOptions>({ activityEvent: { maxLineLength: 200 } });
 
 // ============================================================================
 // Section 3: Metrics Types
@@ -243,12 +243,15 @@ expectType<number | null>(bootStats.initDuration);
 // Section 6: Event Types
 // ============================================================================
 
-// All 18 event names are valid SuperSonicEvent values
+// All 21 event names are valid SuperSonicEvent values
 expectAssignable<SuperSonicEvent>('setup');
 expectAssignable<SuperSonicEvent>('ready');
-expectAssignable<SuperSonicEvent>('message');
-expectAssignable<SuperSonicEvent>('message:raw');
-expectAssignable<SuperSonicEvent>('message:sent');
+expectAssignable<SuperSonicEvent>('in');
+expectAssignable<SuperSonicEvent>('in:osc');
+expectAssignable<SuperSonicEvent>('in:text');
+expectAssignable<SuperSonicEvent>('out');
+expectAssignable<SuperSonicEvent>('out:osc');
+expectAssignable<SuperSonicEvent>('out:text');
 expectAssignable<SuperSonicEvent>('debug');
 expectAssignable<SuperSonicEvent>('error');
 expectAssignable<SuperSonicEvent>('shutdown');
@@ -271,7 +274,7 @@ expectNotAssignable<SuperSonicEvent>('');
 declare const sonic: SuperSonic;
 
 // on() returns unsubscribe function
-const unsub = sonic.on('message', (msg) => {
+const unsub = sonic.on('in', (msg) => {
   expectType<OscMessage>(msg);
 });
 expectType<() => void>(unsub);
@@ -294,21 +297,40 @@ sonic.on('debug', (msg) => {
   expectType<number>(msg.sequence);
 });
 
-// message:raw event
-sonic.on('message:raw', (data) => {
+// in:osc event
+sonic.on('in:osc', (data) => {
   expectType<Uint8Array>(data.oscData);
   expectType<number>(data.sequence);
   expectType<number>(data.timestamp);
   expectType<number | null>(data.scheduledTime);
 });
 
-// message:sent event
-sonic.on('message:sent', (data) => {
+// in:text event
+sonic.on('in:text', (data) => {
+  expectType<string>(data.text);
+  expectType<number>(data.sequence);
+  expectType<number>(data.timestamp);
+});
+
+// out event
+sonic.on('out', (msg) => {
+  expectType<OscMessage>(msg);
+});
+
+// out:osc event
+sonic.on('out:osc', (data) => {
   expectType<Uint8Array>(data.oscData);
   expectType<number>(data.sourceId);
   expectType<number>(data.sequence);
   expectType<number>(data.timestamp);
   expectType<number | null>(data.scheduledTime);
+});
+
+// out:text event
+sonic.on('out:text', (data) => {
+  expectType<string>(data.text);
+  expectType<number>(data.sequence);
+  expectType<number>(data.timestamp);
 });
 
 // reload:complete event
@@ -333,7 +355,7 @@ sonic.on('loading:complete', (data) => {
 });
 
 // off() returns this (SuperSonic)
-const offResult = sonic.off('message', (_msg) => {});
+const offResult = sonic.off('in', (_msg) => {});
 expectType<SuperSonic>(offResult);
 
 // once() returns unsubscribe function
@@ -341,7 +363,7 @@ const onceUnsub = sonic.once('ready', () => {});
 expectType<() => void>(onceUnsub);
 
 // removeAllListeners returns this
-expectType<SuperSonic>(sonic.removeAllListeners('message'));
+expectType<SuperSonic>(sonic.removeAllListeners('in'));
 expectType<SuperSonic>(sonic.removeAllListeners());
 
 // ============================================================================

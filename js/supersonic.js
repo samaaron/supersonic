@@ -510,12 +510,6 @@ export class SuperSonic {
       debugScsynth: options.debugScsynth ?? false,
       debugOscIn: options.debugOscIn ?? false,
       debugOscOut: options.debugOscOut ?? false,
-      activityConsoleLog: {
-        maxLineLength: options.activityConsoleLog?.maxLineLength ?? 200,
-        scsynthMaxLineLength: options.activityConsoleLog?.scsynthMaxLineLength ?? null,
-        oscInMaxLineLength: options.activityConsoleLog?.oscInMaxLineLength ?? null,
-        oscOutMaxLineLength: options.activityConsoleLog?.oscOutMaxLineLength ?? null,
-      },
     };
 
     this.#sampleBaseURL = options.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null);
@@ -1009,12 +1003,6 @@ export class SuperSonic {
       if (arg instanceof ArrayBuffer) return new Uint8Array(arg);
       return arg;
     });
-
-    if (this.#config.debug || this.#config.debugOscOut) {
-      const maxLen = this.#config.activityConsoleLog.oscOutMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
-      const argsStr = args.map(a => formatOscArg(a, maxLen)).join(', ');
-      console.log(`[OSC →] ${address}${argsStr ? ' ' + argsStr : ''}`);
-    }
 
     // Buffer alloc commands need async rewriting — validate sync, then queue
     if (BUFFER_ALLOC_COMMANDS.has(address)) {
@@ -1638,7 +1626,7 @@ export class SuperSonic {
     this.#osc.onReply((oscData, sequence, timestamp) => {
       // Emit raw message event with timing info
       const scheduledTime = oscFast.getBundleTimeTag(oscData) || null;
-      this.#eventEmitter.emit('message:raw', { oscData, sequence, timestamp, scheduledTime });
+      this.#eventEmitter.emit('in:osc', { oscData, sequence, timestamp, scheduledTime });
 
       // Parse OSC and emit parsed message
       try {
@@ -1658,12 +1646,13 @@ export class SuperSonic {
           }
         }
 
-        this.#eventEmitter.emit('message', msg);
+        this.#eventEmitter.emit('in', msg);
 
-        if (this.#config.debug || this.#config.debugOscIn) {
-          const maxLen = this.#config.activityConsoleLog.oscInMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
+        if (this.#eventEmitter.hasListeners('in:text') || this.#config.debug || this.#config.debugOscIn) {
+          const maxLen = this.#config.activityEvent.oscInMaxLineLength ?? this.#config.activityEvent.maxLineLength;
           const argsStr = args.map(a => formatOscArg(a, maxLen)).join(', ') || '';
-          console.log(`[← OSC] ${address}${argsStr ? ' ' + argsStr : ''}`);
+          const text = `${address}${argsStr ? ' ' + argsStr : ''}`;
+          this.#eventEmitter.emit('in:text', { text, sequence, timestamp });
         }
       } catch (e) {
         console.error('[SuperSonic] Failed to decode OSC message:', e);
@@ -1677,12 +1666,6 @@ export class SuperSonic {
         msg = { ...msg, text: msg.text.slice(0, eventMaxLen) + '...' };
       }
       this.#eventEmitter.emit('debug', msg);
-
-      if (this.#config.debug || this.#config.debugScsynth) {
-        const maxLen = this.#config.activityConsoleLog.scsynthMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
-        const text = msg.text.length > maxLen ? msg.text.slice(0, maxLen) + '...' : msg.text;
-        console.log(`[synth] ${text}`);
-      }
     });
 
     // Handle errors
@@ -1695,15 +1678,45 @@ export class SuperSonic {
     this.#osc.onOscLog((entries) => {
       for (const entry of entries) {
         const scheduledTime = oscFast.getBundleTimeTag(entry.oscData) || null;
-        this.#eventEmitter.emit('message:sent', {
+        this.#eventEmitter.emit('out:osc', {
           oscData: entry.oscData,
           sourceId: entry.sourceId,
           sequence: entry.sequence,
           timestamp: entry.timestamp,
           scheduledTime,
         });
+
+        const needsDecode = this.#eventEmitter.hasListeners('out') ||
+          this.#eventEmitter.hasListeners('out:text') ||
+          this.#config.debug || this.#config.debugOscOut;
+        if (needsDecode) {
+          try {
+            const msg = oscFast.decodePacket(entry.oscData);
+            this.#eventEmitter.emit('out', msg);
+
+            if (this.#eventEmitter.hasListeners('out:text') || this.#config.debug || this.#config.debugOscOut) {
+              const maxLen = this.#config.activityEvent.oscOutMaxLineLength ?? this.#config.activityEvent.maxLineLength;
+              const outAddr = msg[0];
+              const outArgs = msg.slice(1);
+              const argsStr = outArgs.map(a => formatOscArg(a, maxLen)).join(', ');
+              const text = `${outAddr}${argsStr ? ' ' + argsStr : ''}`;
+              this.#eventEmitter.emit('out:text', { text, sequence: entry.sequence, timestamp: entry.timestamp });
+            }
+          } catch (e) { /* skip decoded events on decode failure */ }
+        }
       }
     });
+
+    // Internal console debug listeners
+    if (this.#config.debug || this.#config.debugOscIn) {
+      this.on('in:text', ({ text }) => console.log(`[← OSC] ${text}`));
+    }
+    if (this.#config.debug || this.#config.debugOscOut) {
+      this.on('out:text', ({ text }) => console.log(`[OSC →] ${text}`));
+    }
+    if (this.#config.debug || this.#config.debugScsynth) {
+      this.on('debug', (msg) => console.log(`[synth] ${msg.text}`));
+    }
 
     // Initialize transport
     if (mode === 'sab') {

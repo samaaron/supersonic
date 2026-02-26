@@ -193,7 +193,7 @@ test.describe("/n_free semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1); // Register for notifications
@@ -320,7 +320,7 @@ test.describe("/n_set semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -363,7 +363,7 @@ test.describe("/n_set semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -410,7 +410,7 @@ test.describe("/n_set semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -460,7 +460,7 @@ test.describe("/n_set semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -574,7 +574,7 @@ test.describe("/n_setn semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -621,7 +621,7 @@ test.describe("/n_setn semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -663,7 +663,7 @@ test.describe("/n_fill semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -744,7 +744,7 @@ test.describe("/n_map semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -1108,7 +1108,7 @@ test.describe("/s_new semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -1178,11 +1178,11 @@ test.describe("/s_new semantic tests", () => {
         const handler = (msg) => {
           if (msg[0] === "/n_go" && msg[1] === 1000) {
             clearTimeout(timeout);
-            sonic.off('message', handler);
+            sonic.off('in', handler);
             resolve(msg);
           }
         };
-        sonic.on('message', handler);
+        sonic.on('in', handler);
       });
 
       await sonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "release", 60);
@@ -1219,7 +1219,7 @@ test.describe("/s_new semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1458,7 +1458,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1496,7 +1496,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1530,7 +1530,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1576,7 +1576,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1620,7 +1620,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1688,7 +1688,7 @@ test.describe("/b_alloc and /b_free semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -1741,7 +1741,7 @@ test.describe("/n_run semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -1784,7 +1784,7 @@ test.describe("/n_run semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -1822,7 +1822,7 @@ test.describe("/n_run semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -1864,7 +1864,7 @@ test.describe("/n_run semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -2049,7 +2049,7 @@ test.describe("/g_queryTree semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -2091,7 +2091,7 @@ test.describe("/g_queryTree semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -2140,7 +2140,7 @@ test.describe("/g_queryTree semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -2210,7 +2210,7 @@ test.describe("/g_queryTree semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -2290,7 +2290,7 @@ test.describe("/g_queryTree semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -2374,7 +2374,7 @@ test.describe("/b_gen semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -2468,7 +2468,7 @@ test.describe("/b_gen semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -2539,7 +2539,7 @@ test.describe("/b_gen semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -2598,7 +2598,7 @@ test.describe("/b_gen semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -2675,7 +2675,7 @@ test.describe("/b_gen semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -2748,7 +2748,7 @@ test.describe("/b_gen semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -2832,7 +2832,7 @@ test.describe("/b_gen semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -2894,7 +2894,7 @@ test.describe("Control bus semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -2925,7 +2925,7 @@ test.describe("Control bus semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -2957,7 +2957,7 @@ test.describe("Control bus semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -2994,7 +2994,7 @@ test.describe("Control bus semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3032,7 +3032,7 @@ test.describe("Error handling tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3152,7 +3152,7 @@ test.describe("Error handling tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3189,7 +3189,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3230,7 +3230,7 @@ test.describe("Malformed input robustness tests", () => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
       const debugMessages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
       sonic.on('debug', (msg) => debugMessages.push(msg));
 
       await sonic.init();
@@ -3327,7 +3327,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3392,7 +3392,7 @@ test.describe("Malformed input robustness tests", () => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
       const debugMessages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
       sonic.on('debug', (msg) => debugMessages.push(msg));
 
       await sonic.init();
@@ -3441,7 +3441,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3481,7 +3481,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3521,7 +3521,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -3559,7 +3559,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3599,7 +3599,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.loadSynthDef("sonic-pi-beep");
@@ -3642,7 +3642,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       // Absorb async buffer errors (pool-full goes to 'error' event)
       sonic.on('error', () => {});
@@ -3682,7 +3682,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3721,7 +3721,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3766,7 +3766,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3796,7 +3796,7 @@ test.describe("Malformed input robustness tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -3851,7 +3851,7 @@ test.describe("/d_freeAll semantic tests", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
       await sonic.send("/notify", 1);
@@ -4271,7 +4271,7 @@ test.describe("/d_recv unknown UGen handling", () => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
       const debugMessages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
       sonic.on('debug', (msg) => debugMessages.push(msg.text));
 
       await sonic.init();
@@ -4373,7 +4373,7 @@ test.describe("/d_recv unknown UGen handling", () => {
 
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 

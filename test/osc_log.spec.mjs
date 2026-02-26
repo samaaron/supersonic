@@ -32,7 +32,7 @@ test.describe("Centralized OSC Out Logging", () => {
     });
   });
 
-  test("message:sent event is emitted for main thread messages", async ({ page, sonicConfig }) => {
+  test("out:osc event is emitted for main thread messages", async ({ page, sonicConfig }) => {
     // Capture worklet console output for debugging
     const workletLogs = [];
     page.on("console", (msg) => {
@@ -51,8 +51,8 @@ test.describe("Centralized OSC Out Logging", () => {
       const workletDebugMessages = [];
       const debugInfo = { mode: config.mode };
 
-      // Listen for message:sent events
-      sonic.on("message:sent", ({ oscData, sourceId }) => {
+      // Listen for out:osc events
+      sonic.on("out:osc", ({ oscData, sourceId }) => {
         receivedMessages.push({
           size: oscData?.byteLength ?? oscData?.length ?? 0,
           sourceId: sourceId,
@@ -108,8 +108,8 @@ test.describe("Centralized OSC Out Logging", () => {
 
       const sourceIds = new Set();
 
-      // Listen for message:sent events
-      sonic.on("message:sent", ({ sourceId }) => {
+      // Listen for out:osc events
+      sonic.on("out:osc", ({ sourceId }) => {
         sourceIds.add(sourceId);
       });
 
@@ -144,8 +144,8 @@ test.describe("Centralized OSC Out Logging", () => {
       const sourceIds = new Set();
       const messagesBySource = new Map();
 
-      // Listen for message:sent events
-      sonic.on("message:sent", ({ sourceId }) => {
+      // Listen for out:osc events
+      sonic.on("out:osc", ({ sourceId }) => {
         sourceIds.add(sourceId);
         const count = messagesBySource.get(sourceId) || 0;
         messagesBySource.set(sourceId, count + 1);
@@ -229,8 +229,8 @@ test.describe("Centralized OSC Out Logging", () => {
       const sourceIds = new Set();
       const messagesBySource = new Map();
 
-      // Listen for message:sent events
-      sonic.on("message:sent", ({ sourceId }) => {
+      // Listen for out:osc events
+      sonic.on("out:osc", ({ sourceId }) => {
         sourceIds.add(sourceId);
         const count = messagesBySource.get(sourceId) || 0;
         messagesBySource.set(sourceId, count + 1);
@@ -335,8 +335,8 @@ test.describe("Centralized OSC Out Logging", () => {
 
       const messagesBySource = new Map();
 
-      // Listen for message:sent events
-      sonic.on("message:sent", ({ sourceId }) => {
+      // Listen for out:osc events
+      sonic.on("out:osc", ({ sourceId }) => {
         const count = messagesBySource.get(sourceId) || 0;
         messagesBySource.set(sourceId, count + 1);
       });
@@ -410,7 +410,7 @@ test.describe("Centralized OSC Out Logging", () => {
     console.log(`Main thread messages: ${result.mainThreadCount}, Worker messages: ${result.workerCount}`);
   });
 
-  test("oscData in message:sent contains valid OSC bytes", async ({ page, sonicConfig }) => {
+  test("oscData in out:osc contains valid OSC bytes", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
@@ -418,8 +418,8 @@ test.describe("Centralized OSC Out Logging", () => {
 
       const receivedMessages = [];
 
-      // Listen for message:sent events
-      sonic.on("message:sent", ({ oscData, sourceId }) => {
+      // Listen for out:osc events
+      sonic.on("out:osc", ({ oscData, sourceId }) => {
         // Check if it's valid OSC (starts with / for messages or # for bundles)
         const bytes = new Uint8Array(oscData.buffer || oscData);
         const firstChar = String.fromCharCode(bytes[0]);
@@ -465,8 +465,8 @@ test.describe("Centralized OSC Out Logging", () => {
 
       const messagesBySource = new Map();
 
-      // Listen for message:sent events
-      sonic.on("message:sent", ({ sourceId }) => {
+      // Listen for out:osc events
+      sonic.on("out:osc", ({ sourceId }) => {
         const count = messagesBySource.get(sourceId) || 0;
         messagesBySource.set(sourceId, count + 1);
       });
@@ -535,7 +535,7 @@ test.describe("Centralized OSC Out Logging", () => {
     console.log(`Far-future test - sourceIds: ${JSON.stringify(result.sourceIds)}, by source: ${JSON.stringify(result.messagesBySource)}`);
   });
 
-  test("message:sent includes incrementing sequence numbers", async ({ page, sonicConfig }) => {
+  test("out:osc includes incrementing sequence numbers", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
@@ -543,8 +543,8 @@ test.describe("Centralized OSC Out Logging", () => {
 
       const sequences = [];
 
-      // Listen for message:sent events with sequence
-      sonic.on("message:sent", ({ sequence }) => {
+      // Listen for out:osc events with sequence
+      sonic.on("out:osc", ({ sequence }) => {
         sequences.push(sequence);
       });
 
@@ -592,7 +592,7 @@ test.describe("Centralized OSC Out Logging", () => {
       const sonic = new window.SuperSonic(config);
 
       // Set up listener BEFORE init to catch any early messages
-      sonic.on("message:sent", ({ sequence }) => {
+      sonic.on("out:osc", ({ sequence }) => {
         const now = performance.now();
         if (syncTime === 0) {
           messagesBeforeSync.push({ sequence, time: now });
@@ -653,7 +653,7 @@ test.describe("Centralized OSC Out Logging", () => {
       const sequencesSeen = new Map(); // sequence -> count
       const duplicates = [];
 
-      sonic.on("message:sent", ({ sequence }) => {
+      sonic.on("out:osc", ({ sequence }) => {
         const count = (sequencesSeen.get(sequence) || 0) + 1;
         sequencesSeen.set(sequence, count);
         if (count > 1) {
@@ -724,7 +724,7 @@ test.describe("Centralized OSC Out Logging", () => {
       let lastSequence = null;
       let messageCount = 0;
 
-      sonic.on("message:sent", ({ sequence }) => {
+      sonic.on("out:osc", ({ sequence }) => {
         if (firstSequence === null) firstSequence = sequence;
         lastSequence = sequence;
         messageCount++;
@@ -770,7 +770,7 @@ test.describe("Centralized OSC Out Logging", () => {
 
       const loggedMessages = [];
 
-      sonic.on("message:sent", ({ oscData, sequence }) => {
+      sonic.on("out:osc", ({ oscData, sequence }) => {
         // Decode the OSC address to identify our test message
         const view = new DataView(oscData.buffer || oscData);
         let address = '';
@@ -813,7 +813,7 @@ test.describe("Centralized OSC Out Logging", () => {
       const sonic = new window.SuperSonic(config);
 
       const loggedMessages = [];
-      sonic.on("message:sent", ({ oscData, sequence }) => {
+      sonic.on("out:osc", ({ oscData, sequence }) => {
         const view = new DataView(oscData.buffer || oscData);
         let address = '';
         for (let i = 0; i < oscData.length && oscData[i] !== 0; i++) {
@@ -880,7 +880,7 @@ test.describe("Centralized OSC Out Logging", () => {
       await sonic.sync();
 
       const sequences = [];
-      sonic.on("message:sent", ({ sequence }) => {
+      sonic.on("out:osc", ({ sequence }) => {
         sequences.push(sequence);
       });
 
@@ -941,7 +941,7 @@ test.describe("Centralized OSC Out Logging", () => {
         await sonic.sync();
 
         const sequences = [];
-        sonic.on("message:sent", ({ sequence }) => {
+        sonic.on("out:osc", ({ sequence }) => {
           sequences.push(sequence);
         });
 

@@ -24,7 +24,7 @@ test.describe("Parallel Sample Loading", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -74,7 +74,7 @@ test.describe("Parallel Sample Loading", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -443,7 +443,7 @@ test.describe("Operations During State Transitions", () => {
       const synthCount = tree.nodes.filter(n => !n.isGroup).length;
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
       await sonic.send("/b_query", 0, 1, 2);
       await sonic.sync(3);
 
@@ -1104,7 +1104,7 @@ test.describe("Timing Window Exploits", () => {
       let operationsInCallback = 0;
 
       // Set up listener that does operations
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         if (msg[0] === "/status.reply") {
           // Do operations inside callback
           sonic.send("/s_new", "sonic-pi-beep", 50000 + operationsInCallback, 0, 0, "release", 0.001);
@@ -1321,7 +1321,7 @@ test.describe("Memory Stability", () => {
           error: () => {},
         };
 
-        sonic.on('message', callbacks.message);
+        sonic.on('in', callbacks.message);
         sonic.on('ready', callbacks.ready);
         sonic.on('shutdown', callbacks.shutdown);
         sonic.on('error', callbacks.error);
@@ -1359,12 +1359,12 @@ test.describe("Memory Stability", () => {
       const tripleListener = () => tripleListenerCalls++;
 
       // Add single listener once
-      sonic.on('message', singleListener);
+      sonic.on('in', singleListener);
 
       // Add triple listener three times - should deduplicate (Set-based)
-      sonic.on('message', tripleListener);
-      sonic.on('message', tripleListener);
-      sonic.on('message', tripleListener);
+      sonic.on('in', tripleListener);
+      sonic.on('in', tripleListener);
+      sonic.on('in', tripleListener);
 
       // Trigger message(s)
       sonic.send("/status");
@@ -1377,7 +1377,7 @@ test.describe("Memory Stability", () => {
 
       // Now test that off() works for the triple listener
       tripleListenerCalls = 0;
-      sonic.off('message', tripleListener);
+      sonic.off('in', tripleListener);
       sonic.send("/status");
       await sonic.sync(2);
 
@@ -1572,8 +1572,8 @@ test.describe("Memory Leak Triggers", () => {
       // Add and remove listener 1000 times
       for (let i = 0; i < 1000; i++) {
         const listener = (msg) => { /* capture nothing */ };
-        sonic.on('message', listener);
-        sonic.off('message', listener);
+        sonic.on('in', listener);
+        sonic.off('in', listener);
       }
 
       forceGC();
@@ -1613,7 +1613,7 @@ test.describe("Memory Leak Triggers", () => {
       for (let i = 0; i < 100; i++) {
         const bigArray = new Array(25000).fill(i); // ~100KB per listener
         const listener = () => { bigArray.length; };
-        sonic.on('message', listener);
+        sonic.on('in', listener);
         listeners.push(listener);
       }
 
@@ -1623,7 +1623,7 @@ test.describe("Memory Leak Triggers", () => {
 
       // Remove all listeners
       for (const listener of listeners) {
-        sonic.off('message', listener);
+        sonic.off('in', listener);
       }
       listeners.length = 0; // Clear our reference too
 
@@ -1746,7 +1746,7 @@ test.describe("Memory Leak Triggers", () => {
       const collectedMessages = [];
 
       // Listener that stores all messages (potential leak pattern)
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         messageCount++;
         // Storing messages would leak - don't do this in real code
         // collectedMessages.push(msg);

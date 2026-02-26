@@ -59,7 +59,7 @@ test.describe("SuperSonic reset()", () => {
       let phase = "before";
 
       // Set up listener before init
-      sonic.on('message', (msg) => {
+      sonic.on('in', (msg) => {
         if (phase === "before") {
           messagesBeforeReset.push(msg);
         } else {
@@ -533,7 +533,7 @@ test.describe("SuperSonic shutdown()", () => {
       const sonic = new window.SuperSonic(config);
 
       let messageCount = 0;
-      sonic.on('message', () => messageCount++);
+      sonic.on('in', () => messageCount++);
 
       try {
         await sonic.init();
@@ -671,7 +671,7 @@ test.describe("SuperSonic destroy()", () => {
       const sonic = new window.SuperSonic(config);
 
       let callCount = 0;
-      sonic.on('message', () => callCount++);
+      sonic.on('in', () => callCount++);
       sonic.on('ready', () => callCount++);
       sonic.on('shutdown', () => callCount++);
 
@@ -802,8 +802,8 @@ test.describe("SuperSonic removeAllListeners()", () => {
       let messageCount = 0;
       let readyCount = 0;
 
-      sonic.on('message', () => messageCount++);
-      sonic.on('message', () => messageCount++); // Two listeners
+      sonic.on('in', () => messageCount++);
+      sonic.on('in', () => messageCount++); // Two listeners
       sonic.on('ready', () => readyCount++);
 
       try {
@@ -811,7 +811,7 @@ test.describe("SuperSonic removeAllListeners()", () => {
         const readyCountAfterInit = readyCount; // Should be 1
 
         // Remove only message listeners
-        sonic.removeAllListeners('message');
+        sonic.removeAllListeners('in');
 
         // Generate a message - should NOT increment messageCount
         sonic.send("/status");
@@ -845,7 +845,7 @@ test.describe("SuperSonic removeAllListeners()", () => {
 
       let anyEventFired = false;
 
-      sonic.on('message', () => { anyEventFired = true; });
+      sonic.on('in', () => { anyEventFired = true; });
       sonic.on('ready', () => { anyEventFired = true; });
       sonic.on('shutdown', () => { anyEventFired = true; });
 
@@ -877,9 +877,9 @@ test.describe("SuperSonic removeAllListeners()", () => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
 
-      sonic.on('message', () => {});
+      sonic.on('in', () => {});
 
-      const returnValue = sonic.removeAllListeners('message');
+      const returnValue = sonic.removeAllListeners('in');
 
       return {
         success: true,

@@ -247,7 +247,7 @@ test.describe('Recovery and Caching', () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -303,7 +303,7 @@ test.describe('Recovery and Caching', () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -349,7 +349,7 @@ test.describe('Recovery and Caching', () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 
@@ -419,7 +419,7 @@ test.describe('Recovery and Caching', () => {
       const sonic = new window.SuperSonic(config);
 
       const messages = [];
-      sonic.on('message', (msg) => messages.push(msg));
+      sonic.on('in', (msg) => messages.push(msg));
 
       await sonic.init();
 

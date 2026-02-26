@@ -141,7 +141,7 @@ sonic.on('setup', async () => {
   await sonic.loadSynthDef('beep');
 });
 
-sonic.on('message', (msg) => {
+sonic.on('in', (msg) => {
   console.log('OSC from scsynth:', msg[0], msg.slice(1));
 });
 
@@ -191,7 +191,6 @@ const sonic = new SuperSonic({
 
 | Property                                                    | Type                                        | Description                                                                                                                                                                                                                                                        | Required |
 | ----------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
-| <a id="activityconsolelog"></a> `activityConsoleLog?`       | [`ActivityLineConfig`](#activitylineconfig) | Line length limits for activity console.log output.                                                                                                                                                                                                                |          |
 | <a id="activityevent"></a> `activityEvent?`                 | [`ActivityLineConfig`](#activitylineconfig) | Line length limits for activity events emitted to listeners.                                                                                                                                                                                                       |          |
 | <a id="audiocontext-1"></a> `audioContext?`                 | `AudioContext`                              | Provide your own AudioContext instead of letting SuperSonic create one.                                                                                                                                                                                            |          |
 | <a id="audiocontextoptions"></a> `audioContextOptions?`     | `AudioContextOptions`                       | Options passed to `new AudioContext()`. Ignored if `audioContext` is provided.                                                                                                                                                                                     |          |
@@ -890,7 +889,7 @@ Unsubscribe function — call it to remove the listener
 ###### Example
 
 ```ts
-const unsub = sonic.on('message', (msg) => {
+const unsub = sonic.on('in', (msg) => {
   console.log(msg[0], msg.slice(1));
 });
 
@@ -1010,11 +1009,14 @@ Remove all listeners for an event, or all listeners entirely.
 | <a id="debug"></a> `debug`                                      | Debug text output from scsynth (e.g. synthdef compilation messages). Includes NTP timestamp and sequence number.                                                                                                      |
 | <a id="destroy-1"></a> `destroy`                                | Engine has been destroyed. Only fired by `destroy()`, not by `shutdown()` or `reset()`. Last chance to clean up before all listeners are cleared.                                                                     |
 | <a id="error"></a> `error`                                      | Error from any component (worklet, transport, workers).                                                                                                                                                               |
+| <a id="in"></a> `in`                                            | Decoded OSC message received from scsynth. Messages are plain arrays: `[address, ...args]`.                                                                                                                           |
+| <a id="inosc"></a> `in:osc`                                     | Raw OSC bytes received from scsynth (before decoding). Includes NTP timestamps for timing analysis.                                                                                                                   |
+| <a id="intext"></a> `in:text`                                   | Pre-formatted text representation of an incoming OSC message. Only emitted when listeners are attached or debug logging is enabled.                                                                                   |
 | <a id="loadingcomplete"></a> `loading:complete`                 | An asset finished loading. Size is in bytes.                                                                                                                                                                          |
 | <a id="loadingstart"></a> `loading:start`                       | An asset started loading. Type is `'wasm'`, `'synthdef'`, or `'sample'`.                                                                                                                                              |
-| <a id="message"></a> `message`                                  | Decoded OSC message received from scsynth. Messages are plain arrays: `[address, ...args]`.                                                                                                                           |
-| <a id="messageraw"></a> `message:raw`                           | Raw OSC bytes received from scsynth (before decoding). Includes NTP timestamps for timing analysis.                                                                                                                   |
-| <a id="messagesent"></a> `message:sent`                         | Fired when an OSC message is sent to scsynth. Includes source worker ID, sequence number, and NTP timestamps.                                                                                                         |
+| <a id="out"></a> `out`                                          | Decoded OSC message sent to scsynth. Messages are plain arrays: `[address, ...args]`. Mirrors the `'in'` event for outgoing messages.                                                                                 |
+| <a id="outosc"></a> `out:osc`                                   | Raw OSC bytes sent to scsynth. Includes source worker ID, sequence number, and NTP timestamps.                                                                                                                        |
+| <a id="outtext"></a> `out:text`                                 | Pre-formatted text representation of an outgoing OSC message. Only emitted when listeners are attached or debug logging is enabled.                                                                                   |
 | <a id="ready"></a> `ready`                                      | Fired when the engine is fully booted and ready to receive messages. Payload includes browser capabilities and boot timing.                                                                                           |
 | <a id="reloadcomplete"></a> `reload:complete`                   | Full reload completed.                                                                                                                                                                                                |
 | <a id="reloadstart"></a> `reload:start`                         | Full reload started (worklet and WASM will be recreated).                                                                                                                                                             |
