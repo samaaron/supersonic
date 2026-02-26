@@ -30,6 +30,23 @@ const BUFFER_ALLOC_COMMANDS = new Set([
   '/b_alloc', '/b_allocRead', '/b_allocReadChannel', '/b_allocFile',
 ]);
 
+const HEX = [];
+for (let i = 0; i < 256; i++) HEX[i] = i.toString(16).padStart(2, '0');
+
+function formatUUID(bytes) {
+  return HEX[bytes[0]] + HEX[bytes[1]] + HEX[bytes[2]] + HEX[bytes[3]] + '-' +
+    HEX[bytes[4]] + HEX[bytes[5]] + '-' + HEX[bytes[6]] + HEX[bytes[7]] + '-' +
+    HEX[bytes[8]] + HEX[bytes[9]] + '-' + HEX[bytes[10]] + HEX[bytes[11]] +
+    HEX[bytes[12]] + HEX[bytes[13]] + HEX[bytes[14]] + HEX[bytes[15]];
+}
+
+function formatOscArg(a, maxLen) {
+  if (a && a.type === 'uuid' && a.value) return formatUUID(a.value);
+  if (a instanceof Uint8Array || a instanceof ArrayBuffer) return `<${a.byteLength || a.length} bytes>`;
+  const str = JSON.stringify(a);
+  return maxLen && str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
+}
+
 /**
  * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
  */
@@ -995,11 +1012,7 @@ export class SuperSonic {
 
     if (this.#config.debug || this.#config.debugOscOut) {
       const maxLen = this.#config.activityConsoleLog.oscOutMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
-      const argsStr = args.map(a => {
-        if (a instanceof Uint8Array || a instanceof ArrayBuffer) return `<${a.byteLength || a.length} bytes>`;
-        const str = JSON.stringify(a);
-        return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
-      }).join(', ');
+      const argsStr = args.map(a => formatOscArg(a, maxLen)).join(', ');
       console.log(`[OSC →] ${address}${argsStr ? ' ' + argsStr : ''}`);
     }
 
@@ -1649,10 +1662,7 @@ export class SuperSonic {
 
         if (this.#config.debug || this.#config.debugOscIn) {
           const maxLen = this.#config.activityConsoleLog.oscInMaxLineLength ?? this.#config.activityConsoleLog.maxLineLength;
-          const argsStr = args.map(a => {
-            const str = JSON.stringify(a);
-            return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
-          }).join(', ') || '';
+          const argsStr = args.map(a => formatOscArg(a, maxLen)).join(', ') || '';
           console.log(`[← OSC] ${address}${argsStr ? ' ' + argsStr : ''}`);
         }
       } catch (e) {
