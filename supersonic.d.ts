@@ -7,6 +7,22 @@
 // see docs/API.md
 
 // ============================================================================
+// Core Types
+// ============================================================================
+
+/** A v7 UUID as 16 raw bytes. */
+export type UUID = Uint8Array;
+
+/**
+ * A node identifier — either a classic i32 or a v7 UUID.
+ *
+ * UUIDs are rewritten to i32s at the AudioWorklet boundary and back again
+ * on the way out, so concurrent clients can create and track synths without
+ * coordinating over a shared integer numbering system.
+ */
+export type NodeID = number | UUID;
+
+// ============================================================================
 // OSC Types
 // ============================================================================
 
@@ -20,7 +36,7 @@
  * - `boolean` → `T` / `F`
  * - `Uint8Array` / `ArrayBuffer` → `b` (blob)
  *
- * For 64-bit or timetag types, use the tagged object form:
+ * For 64-bit, timetag, or UUID types, use the tagged object form:
  * @example
  * { type: 'int', value: 42 }
  * { type: 'float', value: 440 }     // force float32 for whole numbers
@@ -30,6 +46,7 @@
  * { type: 'int64', value: 9007199254740992n }
  * { type: 'double', value: 3.141592653589793 }
  * { type: 'timetag', value: ntpTimestamp }
+ * { type: 'uuid', value: new Uint8Array(16) }
  */
 export type OscArg =
   | number
@@ -44,7 +61,8 @@ export type OscArg =
   | { type: 'bool'; value: boolean }
   | { type: 'int64'; value: number | bigint }
   | { type: 'double'; value: number }
-  | { type: 'timetag'; value: number };
+  | { type: 'timetag'; value: number }
+  | { type: 'uuid'; value: UUID };
 
 /**
  * Decoded OSC message as a plain array.
@@ -467,7 +485,7 @@ export interface MetricsSchema {
  */
 export interface TreeNode {
   /** Unique node ID. */
-  id: number;
+  id: NodeID;
   /** `'group'` for groups, `'synth'` for synth nodes. */
   type: 'group' | 'synth';
   /** SynthDef name (synths only, empty string for groups). */
@@ -498,17 +516,17 @@ export interface Tree {
 /** A node in the flat (raw) tree representation with linkage pointers. */
 export interface RawTreeNode {
   /** Unique node ID. */
-  id: number;
+  id: NodeID;
   /** Parent node ID (-1 for root). */
-  parentId: number;
+  parentId: NodeID;
   /** true if group, false if synth. */
   isGroup: boolean;
   /** Previous sibling node ID (-1 if none). */
-  prevId: number;
+  prevId: NodeID;
   /** Next sibling node ID (-1 if none). */
-  nextId: number;
+  nextId: NodeID;
   /** First child node ID (groups only, -1 if empty). */
-  headId: number;
+  headId: NodeID;
   /** SynthDef name (synths only, empty string for groups). */
   defName: string;
 }
@@ -1376,68 +1394,68 @@ export class SuperSonic {
   // ── Synth commands ─────────────────────────────────────────────────
 
   /** Create a new synth from a loaded synthdef. addAction: 0=head, 1=tail, 2=before, 3=after, 4=replace. Controls are alternating name/index and value pairs. Values can be numbers or bus mapping strings like `"c0"` (control bus 0) or `"a0"` (audio bus 0). Use nodeID=-1 for auto-assign. */
-  send(address: '/s_new', defName: string, nodeID: number, addAction: AddAction, targetID: number, ...controls: (string | number)[]): void;
+  send(address: '/s_new', defName: string, nodeID: NodeID, addAction: AddAction, targetID: NodeID, ...controls: (string | number)[]): void;
   /** Get synth control values. Controls can be indices or names. Replies with `/n_set nodeID control value ...`. */
-  send(address: '/s_get', nodeID: number, ...controls: (string | number)[]): void;
+  send(address: '/s_get', nodeID: NodeID, ...controls: (string | number)[]): void;
   /** Get sequential synth control values. Control can be an index or name. Replies with `/n_setn nodeID control count values...`. For multiple ranges, use the catch-all overload. */
-  send(address: '/s_getn', nodeID: number, control: number | string, count: number): void;
+  send(address: '/s_getn', nodeID: NodeID, control: number | string, count: number): void;
   /** Release client-side synth ID tracking. Synths continue running but are reassigned to reserved negative IDs. Use when you no longer need to communicate with the synth and want to reuse the ID. */
-  send(address: '/s_noid', ...nodeIDs: [number, ...number[]]): void;
+  send(address: '/s_noid', ...nodeIDs: [NodeID, ...NodeID[]]): void;
 
   // ── Node commands ──────────────────────────────────────────────────
 
   /** Free (delete) one or more nodes. */
-  send(address: '/n_free', ...nodeIDs: [number, ...number[]]): void;
+  send(address: '/n_free', ...nodeIDs: [NodeID, ...NodeID[]]): void;
   /** Set node control values. Controls are alternating name/index and value pairs. If the node is a group, sets the control on all nodes in the group. */
-  send(address: '/n_set', nodeID: number, ...controls: (string | number)[]): void;
+  send(address: '/n_set', nodeID: NodeID, ...controls: (string | number)[]): void;
   /** Set sequential control values starting at the given control index/name. For multiple ranges, use the catch-all overload. */
-  send(address: '/n_setn', nodeID: number, control: number | string, count: number, ...values: number[]): void;
+  send(address: '/n_setn', nodeID: NodeID, control: number | string, count: number, ...values: number[]): void;
   /** Fill sequential controls with a single value. For multiple ranges, use the catch-all overload. */
-  send(address: '/n_fill', nodeID: number, control: number | string, count: number, value: number): void;
+  send(address: '/n_fill', nodeID: NodeID, control: number | string, count: number, value: number): void;
   /** Turn nodes on (1) or off (0). Args are repeating [nodeID, flag] pairs. */
-  send(address: '/n_run', ...pairs: [number, 0 | 1, ...(number | 0 | 1)[]]): void;
+  send(address: '/n_run', ...pairs: [NodeID, 0 | 1, ...(NodeID | 0 | 1)[]]): void;
   /** Move nodeA to execute immediately before nodeB. Args are repeating [nodeA, nodeB] pairs. */
-  send(address: '/n_before', ...pairs: [number, number, ...number[]]): void;
+  send(address: '/n_before', ...pairs: [NodeID, NodeID, ...NodeID[]]): void;
   /** Move nodeA to execute immediately after nodeB. Args are repeating [nodeA, nodeB] pairs. */
-  send(address: '/n_after', ...pairs: [number, number, ...number[]]): void;
+  send(address: '/n_after', ...pairs: [NodeID, NodeID, ...NodeID[]]): void;
   /** Reorder nodes within a group. addAction: 0=head, 1=tail, 2=before target, 3=after target. Does not support 4 (replace). */
-  send(address: '/n_order', addAction: 0 | 1 | 2 | 3, targetID: number, ...nodeIDs: [number, ...number[]]): void;
+  send(address: '/n_order', addAction: 0 | 1 | 2 | 3, targetID: NodeID, ...nodeIDs: [NodeID, ...NodeID[]]): void;
   /** Query node info. Replies with `/n_info` for each node: nodeID, parentGroupID, prevNodeID, nextNodeID, isGroup, [headNodeID, tailNodeID]. */
-  send(address: '/n_query', ...nodeIDs: [number, ...number[]]): void;
+  send(address: '/n_query', ...nodeIDs: [NodeID, ...NodeID[]]): void;
   /** Print control values and calculation rates for each node to debug output. No reply message. */
-  send(address: '/n_trace', ...nodeIDs: [number, ...number[]]): void;
+  send(address: '/n_trace', ...nodeIDs: [NodeID, ...NodeID[]]): void;
   /** Map controls to read from control buses. Mappings are repeating [control, busIndex] pairs. Set busIndex to -1 to unmap. */
-  send(address: '/n_map', nodeID: number, ...mappings: (string | number)[]): void;
+  send(address: '/n_map', nodeID: NodeID, ...mappings: (string | number)[]): void;
   /** Map a range of sequential controls to sequential control buses. Mappings are repeating [control, busIndex, count] triplets. */
-  send(address: '/n_mapn', nodeID: number, ...mappings: (string | number)[]): void;
+  send(address: '/n_mapn', nodeID: NodeID, ...mappings: (string | number)[]): void;
   /** Map controls to read from audio buses. Mappings are repeating [control, busIndex] pairs. Set busIndex to -1 to unmap. */
-  send(address: '/n_mapa', nodeID: number, ...mappings: (string | number)[]): void;
+  send(address: '/n_mapa', nodeID: NodeID, ...mappings: (string | number)[]): void;
   /** Map a range of sequential controls to sequential audio buses. Mappings are repeating [control, busIndex, count] triplets. */
-  send(address: '/n_mapan', nodeID: number, ...mappings: (string | number)[]): void;
+  send(address: '/n_mapan', nodeID: NodeID, ...mappings: (string | number)[]): void;
 
   // ── Group commands ─────────────────────────────────────────────────
 
   /** Create new groups. Args are repeating [groupID, addAction, targetID] triplets. addAction: 0=head, 1=tail, 2=before, 3=after, 4=replace. */
-  send(address: '/g_new', ...args: [number, AddAction, number, ...(number | AddAction)[]]): void;
+  send(address: '/g_new', ...args: [NodeID, AddAction, NodeID, ...(NodeID | AddAction)[]]): void;
   /** Create new parallel groups (children evaluated in unspecified order). Same signature as /g_new. */
-  send(address: '/p_new', ...args: [number, AddAction, number, ...(number | AddAction)[]]): void;
+  send(address: '/p_new', ...args: [NodeID, AddAction, NodeID, ...(NodeID | AddAction)[]]): void;
   /** Free all immediate children of one or more groups (groups themselves remain). */
-  send(address: '/g_freeAll', ...groupIDs: [number, ...number[]]): void;
+  send(address: '/g_freeAll', ...groupIDs: [NodeID, ...NodeID[]]): void;
   /** Recursively free all synths inside one or more groups and their nested sub-groups. */
-  send(address: '/g_deepFree', ...groupIDs: [number, ...number[]]): void;
+  send(address: '/g_deepFree', ...groupIDs: [NodeID, ...NodeID[]]): void;
   /** Move node to head of group. Args are repeating [groupID, nodeID] pairs. */
-  send(address: '/g_head', ...pairs: [number, number, ...number[]]): void;
+  send(address: '/g_head', ...pairs: [NodeID, NodeID, ...NodeID[]]): void;
   /** Move node to tail of group. Args are repeating [groupID, nodeID] pairs. */
-  send(address: '/g_tail', ...pairs: [number, number, ...number[]]): void;
+  send(address: '/g_tail', ...pairs: [NodeID, NodeID, ...NodeID[]]): void;
   /** Print group's node tree to debug output. Args are repeating [groupID, flag] pairs. flag: 0=structure only, non-zero=include control values. No reply message. */
-  send(address: '/g_dumpTree', ...groupFlagPairs: [number, number, ...number[]]): void;
+  send(address: '/g_dumpTree', ...groupFlagPairs: [NodeID, number, ...(NodeID | number)[]]): void;
   /** Query group tree structure. Args are repeating [groupID, flag] pairs. flag: 0=structure only, non-zero=include control values. Replies with `/g_queryTree.reply`. */
-  send(address: '/g_queryTree', ...groupFlagPairs: [number, number, ...number[]]): void;
+  send(address: '/g_queryTree', ...groupFlagPairs: [NodeID, number, ...(NodeID | number)[]]): void;
 
   // ── UGen commands ──────────────────────────────────────────────────
 
   /** Send a command to a specific UGen instance within a synth. The command name and args are UGen-specific. */
-  send(address: '/u_cmd', nodeID: number, ugenIndex: number, command: string, ...args: OscArg[]): void;
+  send(address: '/u_cmd', nodeID: NodeID, ugenIndex: number, command: string, ...args: OscArg[]): void;
 
   // ── Buffer commands ────────────────────────────────────────────────
 

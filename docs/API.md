@@ -10,7 +10,7 @@
 
 * **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [SendOSCOptions](#sendoscoptions) · [Snapshot](#snapshot) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [Tree](#tree) · [TreeNode](#treenode)
 
-* **Type Aliases** — [AddAction](#addaction) · [BlockedCommand](#blockedcommand) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscCategory](#osccategory) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode)
+* **Type Aliases** — [AddAction](#addaction) · [BlockedCommand](#blockedcommand) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscCategory](#osccategory) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
 
 ## Classes
 
@@ -1424,9 +1424,9 @@ Create a new synth from a loaded synthdef. addAction: 0=head, 1=tail, 2=before, 
 | ------------- | ------------------------- |
 | `address`     | `"/s_new"`                |
 | `defName`     | `string`                  |
-| `nodeID`      | `number`                  |
+| `nodeID`      | [`NodeID`](#nodeid)       |
 | `addAction`   | [`AddAction`](#addaction) |
-| `targetID`    | `number`                  |
+| `targetID`    | [`NodeID`](#nodeid)       |
 | ...`controls` | (`string` \| `number`)\[] |
 
 ###### Returns
@@ -1444,7 +1444,7 @@ Get synth control values. Controls can be indices or names. Replies with `/n_set
 | Parameter     | Type                      |
 | ------------- | ------------------------- |
 | `address`     | `"/s_get"`                |
-| `nodeID`      | `number`                  |
+| `nodeID`      | [`NodeID`](#nodeid)       |
 | ...`controls` | (`string` \| `number`)\[] |
 
 ###### Returns
@@ -1462,7 +1462,7 @@ Get sequential synth control values. Control can be an index or name. Replies wi
 | Parameter | Type                 |
 | --------- | -------------------- |
 | `address` | `"/s_getn"`          |
-| `nodeID`  | `number`             |
+| `nodeID`  | [`NodeID`](#nodeid)  |
 | `control` | `string` \| `number` |
 | `count`   | `number`             |
 
@@ -1478,10 +1478,10 @@ Release client-side synth ID tracking. Synths continue running but are reassigne
 
 ###### Parameters
 
-| Parameter    | Type                       |
-| ------------ | -------------------------- |
-| `address`    | `"/s_noid"`                |
-| ...`nodeIDs` | \[`number`, `...number[]`] |
+| Parameter    | Type                                  |
+| ------------ | ------------------------------------- |
+| `address`    | `"/s_noid"`                           |
+| ...`nodeIDs` | \[[`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1495,10 +1495,10 @@ Free (delete) one or more nodes.
 
 ###### Parameters
 
-| Parameter    | Type                       |
-| ------------ | -------------------------- |
-| `address`    | `"/n_free"`                |
-| ...`nodeIDs` | \[`number`, `...number[]`] |
+| Parameter    | Type                                  |
+| ------------ | ------------------------------------- |
+| `address`    | `"/n_free"`                           |
+| ...`nodeIDs` | \[[`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1515,7 +1515,7 @@ Set node control values. Controls are alternating name/index and value pairs. If
 | Parameter     | Type                      |
 | ------------- | ------------------------- |
 | `address`     | `"/n_set"`                |
-| `nodeID`      | `number`                  |
+| `nodeID`      | [`NodeID`](#nodeid)       |
 | ...`controls` | (`string` \| `number`)\[] |
 
 ###### Returns
@@ -1533,7 +1533,7 @@ Set sequential control values starting at the given control index/name. For mult
 | Parameter   | Type                 |
 | ----------- | -------------------- |
 | `address`   | `"/n_setn"`          |
-| `nodeID`    | `number`             |
+| `nodeID`    | [`NodeID`](#nodeid)  |
 | `control`   | `string` \| `number` |
 | `count`     | `number`             |
 | ...`values` | `number`\[]          |
@@ -1553,7 +1553,7 @@ Fill sequential controls with a single value. For multiple ranges, use the catch
 | Parameter | Type                 |
 | --------- | -------------------- |
 | `address` | `"/n_fill"`          |
-| `nodeID`  | `number`             |
+| `nodeID`  | [`NodeID`](#nodeid)  |
 | `control` | `string` \| `number` |
 | `count`   | `number`             |
 | `value`   | `number`             |
@@ -1570,10 +1570,10 @@ Turn nodes on (1) or off (0). Args are repeating \[nodeID, flag] pairs.
 
 ###### Parameters
 
-| Parameter  | Type                                   |
-| ---------- | -------------------------------------- |
-| `address`  | `"/n_run"`                             |
-| ...`pairs` | \[`number`, `0` \| `1`, `...number[]`] |
+| Parameter  | Type                                              |
+| ---------- | ------------------------------------------------- |
+| `address`  | `"/n_run"`                                        |
+| ...`pairs` | \[[`NodeID`](#nodeid), `0` \| `1`, `...NodeID[]`] |
 
 ###### Returns
 
@@ -1587,10 +1587,10 @@ Move nodeA to execute immediately before nodeB. Args are repeating \[nodeA, node
 
 ###### Parameters
 
-| Parameter  | Type                                 |
-| ---------- | ------------------------------------ |
-| `address`  | `"/n_before"`                        |
-| ...`pairs` | \[`number`, `number`, `...number[]`] |
+| Parameter  | Type                                                       |
+| ---------- | ---------------------------------------------------------- |
+| `address`  | `"/n_before"`                                              |
+| ...`pairs` | \[[`NodeID`](#nodeid), [`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1604,10 +1604,10 @@ Move nodeA to execute immediately after nodeB. Args are repeating \[nodeA, nodeB
 
 ###### Parameters
 
-| Parameter  | Type                                 |
-| ---------- | ------------------------------------ |
-| `address`  | `"/n_after"`                         |
-| ...`pairs` | \[`number`, `number`, `...number[]`] |
+| Parameter  | Type                                                       |
+| ---------- | ---------------------------------------------------------- |
+| `address`  | `"/n_after"`                                               |
+| ...`pairs` | \[[`NodeID`](#nodeid), [`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1621,12 +1621,12 @@ Reorder nodes within a group. addAction: 0=head, 1=tail, 2=before target, 3=afte
 
 ###### Parameters
 
-| Parameter    | Type                       |
-| ------------ | -------------------------- |
-| `address`    | `"/n_order"`               |
-| `addAction`  | `0` \| `1` \| `2` \| `3`   |
-| `targetID`   | `number`                   |
-| ...`nodeIDs` | \[`number`, `...number[]`] |
+| Parameter    | Type                                  |
+| ------------ | ------------------------------------- |
+| `address`    | `"/n_order"`                          |
+| `addAction`  | `0` \| `1` \| `2` \| `3`              |
+| `targetID`   | [`NodeID`](#nodeid)                   |
+| ...`nodeIDs` | \[[`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1640,10 +1640,10 @@ Query node info. Replies with `/n_info` for each node: nodeID, parentGroupID, pr
 
 ###### Parameters
 
-| Parameter    | Type                       |
-| ------------ | -------------------------- |
-| `address`    | `"/n_query"`               |
-| ...`nodeIDs` | \[`number`, `...number[]`] |
+| Parameter    | Type                                  |
+| ------------ | ------------------------------------- |
+| `address`    | `"/n_query"`                          |
+| ...`nodeIDs` | \[[`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1657,10 +1657,10 @@ Print control values and calculation rates for each node to debug output. No rep
 
 ###### Parameters
 
-| Parameter    | Type                       |
-| ------------ | -------------------------- |
-| `address`    | `"/n_trace"`               |
-| ...`nodeIDs` | \[`number`, `...number[]`] |
+| Parameter    | Type                                  |
+| ------------ | ------------------------------------- |
+| `address`    | `"/n_trace"`                          |
+| ...`nodeIDs` | \[[`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1677,7 +1677,7 @@ Map controls to read from control buses. Mappings are repeating \[control, busIn
 | Parameter     | Type                      |
 | ------------- | ------------------------- |
 | `address`     | `"/n_map"`                |
-| `nodeID`      | `number`                  |
+| `nodeID`      | [`NodeID`](#nodeid)       |
 | ...`mappings` | (`string` \| `number`)\[] |
 
 ###### Returns
@@ -1695,7 +1695,7 @@ Map a range of sequential controls to sequential control buses. Mappings are rep
 | Parameter     | Type                      |
 | ------------- | ------------------------- |
 | `address`     | `"/n_mapn"`               |
-| `nodeID`      | `number`                  |
+| `nodeID`      | [`NodeID`](#nodeid)       |
 | ...`mappings` | (`string` \| `number`)\[] |
 
 ###### Returns
@@ -1713,7 +1713,7 @@ Map controls to read from audio buses. Mappings are repeating \[control, busInde
 | Parameter     | Type                      |
 | ------------- | ------------------------- |
 | `address`     | `"/n_mapa"`               |
-| `nodeID`      | `number`                  |
+| `nodeID`      | [`NodeID`](#nodeid)       |
 | ...`mappings` | (`string` \| `number`)\[] |
 
 ###### Returns
@@ -1731,7 +1731,7 @@ Map a range of sequential controls to sequential audio buses. Mappings are repea
 | Parameter     | Type                      |
 | ------------- | ------------------------- |
 | `address`     | `"/n_mapan"`              |
-| `nodeID`      | `number`                  |
+| `nodeID`      | [`NodeID`](#nodeid)       |
 | ...`mappings` | (`string` \| `number`)\[] |
 
 ###### Returns
@@ -1746,10 +1746,10 @@ Create new groups. Args are repeating \[groupID, addAction, targetID] triplets. 
 
 ###### Parameters
 
-| Parameter | Type                                                            |
-| --------- | --------------------------------------------------------------- |
-| `address` | `"/g_new"`                                                      |
-| ...`args` | \[`number`, [`AddAction`](#addaction), `number`, `...number[]`] |
+| Parameter | Type                                                                                           |
+| --------- | ---------------------------------------------------------------------------------------------- |
+| `address` | `"/g_new"`                                                                                     |
+| ...`args` | \[[`NodeID`](#nodeid), [`AddAction`](#addaction), [`NodeID`](#nodeid), ...(number \| UUID)\[]] |
 
 ###### Returns
 
@@ -1763,10 +1763,10 @@ Create new parallel groups (children evaluated in unspecified order). Same signa
 
 ###### Parameters
 
-| Parameter | Type                                                            |
-| --------- | --------------------------------------------------------------- |
-| `address` | `"/p_new"`                                                      |
-| ...`args` | \[`number`, [`AddAction`](#addaction), `number`, `...number[]`] |
+| Parameter | Type                                                                                           |
+| --------- | ---------------------------------------------------------------------------------------------- |
+| `address` | `"/p_new"`                                                                                     |
+| ...`args` | \[[`NodeID`](#nodeid), [`AddAction`](#addaction), [`NodeID`](#nodeid), ...(number \| UUID)\[]] |
 
 ###### Returns
 
@@ -1780,10 +1780,10 @@ Free all immediate children of one or more groups (groups themselves remain).
 
 ###### Parameters
 
-| Parameter     | Type                       |
-| ------------- | -------------------------- |
-| `address`     | `"/g_freeAll"`             |
-| ...`groupIDs` | \[`number`, `...number[]`] |
+| Parameter     | Type                                  |
+| ------------- | ------------------------------------- |
+| `address`     | `"/g_freeAll"`                        |
+| ...`groupIDs` | \[[`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1797,10 +1797,10 @@ Recursively free all synths inside one or more groups and their nested sub-group
 
 ###### Parameters
 
-| Parameter     | Type                       |
-| ------------- | -------------------------- |
-| `address`     | `"/g_deepFree"`            |
-| ...`groupIDs` | \[`number`, `...number[]`] |
+| Parameter     | Type                                  |
+| ------------- | ------------------------------------- |
+| `address`     | `"/g_deepFree"`                       |
+| ...`groupIDs` | \[[`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1814,10 +1814,10 @@ Move node to head of group. Args are repeating \[groupID, nodeID] pairs.
 
 ###### Parameters
 
-| Parameter  | Type                                 |
-| ---------- | ------------------------------------ |
-| `address`  | `"/g_head"`                          |
-| ...`pairs` | \[`number`, `number`, `...number[]`] |
+| Parameter  | Type                                                       |
+| ---------- | ---------------------------------------------------------- |
+| `address`  | `"/g_head"`                                                |
+| ...`pairs` | \[[`NodeID`](#nodeid), [`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1831,10 +1831,10 @@ Move node to tail of group. Args are repeating \[groupID, nodeID] pairs.
 
 ###### Parameters
 
-| Parameter  | Type                                 |
-| ---------- | ------------------------------------ |
-| `address`  | `"/g_tail"`                          |
-| ...`pairs` | \[`number`, `number`, `...number[]`] |
+| Parameter  | Type                                                       |
+| ---------- | ---------------------------------------------------------- |
+| `address`  | `"/g_tail"`                                                |
+| ...`pairs` | \[[`NodeID`](#nodeid), [`NodeID`](#nodeid), `...NodeID[]`] |
 
 ###### Returns
 
@@ -1848,10 +1848,10 @@ Print group's node tree to debug output. Args are repeating \[groupID, flag] pai
 
 ###### Parameters
 
-| Parameter           | Type                                 |
-| ------------------- | ------------------------------------ |
-| `address`           | `"/g_dumpTree"`                      |
-| ...`groupFlagPairs` | \[`number`, `number`, `...number[]`] |
+| Parameter           | Type                                            |
+| ------------------- | ----------------------------------------------- |
+| `address`           | `"/g_dumpTree"`                                 |
+| ...`groupFlagPairs` | \[[`NodeID`](#nodeid), `number`, `...NodeID[]`] |
 
 ###### Returns
 
@@ -1865,10 +1865,10 @@ Query group tree structure. Args are repeating \[groupID, flag] pairs. flag: 0=s
 
 ###### Parameters
 
-| Parameter           | Type                                 |
-| ------------------- | ------------------------------------ |
-| `address`           | `"/g_queryTree"`                     |
-| ...`groupFlagPairs` | \[`number`, `number`, `...number[]`] |
+| Parameter           | Type                                            |
+| ------------------- | ----------------------------------------------- |
+| `address`           | `"/g_queryTree"`                                |
+| ...`groupFlagPairs` | \[[`NodeID`](#nodeid), `number`, `...NodeID[]`] |
 
 ###### Returns
 
@@ -1885,7 +1885,7 @@ Send a command to a specific UGen instance within a synth. The command name and 
 | Parameter   | Type                   |
 | ----------- | ---------------------- |
 | `address`   | `"/u_cmd"`             |
-| `nodeID`    | `number`               |
+| `nodeID`    | [`NodeID`](#nodeid)    |
 | `ugenIndex` | `number`               |
 | `command`   | `string`               |
 | ...`args`   | [`OscArg`](#oscarg)\[] |
@@ -2261,7 +2261,7 @@ Plain JS values are mapped to OSC types automatically:
 * `boolean` → `T` / `F`
 * `Uint8Array` / `ArrayBuffer` → `b` (blob)
 
-For 64-bit or timetag types, use the tagged object form:
+For 64-bit, timetag, or UUID types, use the tagged object form:
 
 ```ts
 { type: 'int', value: 42 }
@@ -2272,6 +2272,7 @@ For 64-bit or timetag types, use the tagged object form:
 { type: 'int64', value: 9007199254740992n }
 { type: 'double', value: 3.141592653589793 }
 { type: 'timetag', value: ntpTimestamp }
+{ type: 'uuid', value: new Uint8Array(16) }
 ```
 
 ##### sendOSC()
@@ -2981,15 +2982,15 @@ A node in the flat (raw) tree representation with linkage pointers.
 
 #### Properties
 
-| Property                         | Type      | Description                                           |
-| -------------------------------- | --------- | ----------------------------------------------------- |
-| <a id="defname"></a> `defName`   | `string`  | SynthDef name (synths only, empty string for groups). |
-| <a id="headid"></a> `headId`     | `number`  | First child node ID (groups only, -1 if empty).       |
-| <a id="id"></a> `id`             | `number`  | Unique node ID.                                       |
-| <a id="isgroup"></a> `isGroup`   | `boolean` | true if group, false if synth.                        |
-| <a id="nextid"></a> `nextId`     | `number`  | Next sibling node ID (-1 if none).                    |
-| <a id="parentid"></a> `parentId` | `number`  | Parent node ID (-1 for root).                         |
-| <a id="previd"></a> `prevId`     | `number`  | Previous sibling node ID (-1 if none).                |
+| Property                         | Type                | Description                                           |
+| -------------------------------- | ------------------- | ----------------------------------------------------- |
+| <a id="defname"></a> `defName`   | `string`            | SynthDef name (synths only, empty string for groups). |
+| <a id="headid"></a> `headId`     | [`NodeID`](#nodeid) | First child node ID (groups only, -1 if empty).       |
+| <a id="id"></a> `id`             | [`NodeID`](#nodeid) | Unique node ID.                                       |
+| <a id="isgroup"></a> `isGroup`   | `boolean`           | true if group, false if synth.                        |
+| <a id="nextid"></a> `nextId`     | [`NodeID`](#nodeid) | Next sibling node ID (-1 if none).                    |
+| <a id="parentid"></a> `parentId` | [`NodeID`](#nodeid) | Parent node ID (-1 for root).                         |
+| <a id="previd"></a> `prevId`     | [`NodeID`](#nodeid) | Previous sibling node ID (-1 if none).                |
 
 ***
 
@@ -3184,7 +3185,7 @@ Groups contain children; synths are leaves.
 | -------------------------------- | -------------------------- | ----------------------------------------------------- |
 | <a id="children"></a> `children` | [`TreeNode`](#treenode)\[] | Child nodes (groups only, empty array for synths).    |
 | <a id="defname-1"></a> `defName` | `string`                   | SynthDef name (synths only, empty string for groups). |
-| <a id="id-1"></a> `id`           | `number`                   | Unique node ID.                                       |
+| <a id="id-1"></a> `id`           | [`NodeID`](#nodeid)        | Unique node ID.                                       |
 | <a id="type-1"></a> `type`       | `"group"` \| `"synth"`     | `'group'` for groups, `'synth'` for synth nodes.      |
 
 ## Type Aliases
@@ -3202,6 +3203,18 @@ Node add action: 0=head, 1=tail, 2=before, 3=after, 4=replace
 > **BlockedCommand** = `"/d_load"` | `"/d_loadDir"` | `"/b_read"` | `"/b_readChannel"` | `"/b_write"` | `"/b_close"` | `"/clearSched"` | `"/error"` | `"/quit"`
 
 Commands blocked at runtime — typed as compile-time errors
+
+***
+
+### NodeID
+
+> **NodeID** = `number` | [`UUID`](#uuid)
+
+A node identifier — either a classic i32 or a v7 UUID.
+
+UUIDs are rewritten to i32s at the AudioWorklet boundary and back again
+on the way out, so concurrent clients can create and track synths without
+coordinating over a shared integer numbering system.
 
 ***
 
@@ -3297,3 +3310,11 @@ Transport mode for communication between JS and the AudioWorklet.
 
 * `'sab'` — SharedArrayBuffer: lowest latency, requires COOP/COEP headers
 * `'postMessage'` — postMessage: works everywhere including CDN, slightly higher latency
+
+***
+
+### UUID
+
+> **UUID** = `Uint8Array`
+
+A v7 UUID as 16 raw bytes.
