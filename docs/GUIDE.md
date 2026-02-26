@@ -214,6 +214,26 @@ supersonic.on("out:text", ({ text, sequence, timestamp }) => {
 - `sequence` — Incrementing message counter
 - `timestamp` — NTP seconds when the message was observed
 
+### HTML Events (`in:html` / `out:html`)
+
+Pre-formatted HTML with CSS classes for colorized log display. Only emitted when listeners are attached:
+
+```javascript
+supersonic.on("in:html", ({ html, sequence, timestamp }) => {
+  logPanel.insertAdjacentHTML("beforeend", `<div>${html}</div>`);
+});
+
+supersonic.on("out:html", ({ html, sequence, timestamp }) => {
+  sentPanel.insertAdjacentHTML("beforeend", `<div>${html}</div>`);
+});
+```
+
+- `html` — Complete log line with `supersonic-scsynth-*` CSS classes for styling
+- `sequence` — Incrementing message counter
+- `timestamp` — NTP seconds when the message was observed
+
+CSS classes: `supersonic-scsynth-seq`, `supersonic-scsynth-time`, `supersonic-scsynth-source`, `supersonic-scsynth-address`, `supersonic-scsynth-float`, `supersonic-scsynth-int`, `supersonic-scsynth-string`, `supersonic-scsynth-param`, `supersonic-scsynth-binary`, `supersonic-scsynth-error`, `supersonic-scsynth-bundle`, `supersonic-scsynth-comment`
+
 ### Latency Analysis with `in:osc`
 
 The `in:osc` event includes timing information for measuring delivery latency:

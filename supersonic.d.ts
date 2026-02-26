@@ -694,6 +694,9 @@ export interface SuperSonicEventMap {
   /** Pre-formatted text representation of an incoming OSC message. Only emitted when listeners are attached or debug logging is enabled. */
   'in:text': (data: { text: string; sequence: number; timestamp: number }) => void;
 
+  /** Pre-formatted HTML representation of an incoming OSC message with CSS classes for colorization. Only emitted when listeners are attached. */
+  'in:html': (data: { html: string; sequence: number; timestamp: number }) => void;
+
   /**
    * Decoded OSC message sent to scsynth.
    * Messages are plain arrays: `[address, ...args]`. Mirrors the `'in'` event for outgoing messages.
@@ -705,6 +708,9 @@ export interface SuperSonicEventMap {
 
   /** Pre-formatted text representation of an outgoing OSC message. Only emitted when listeners are attached or debug logging is enabled. */
   'out:text': (data: { text: string; sequence: number; timestamp: number }) => void;
+
+  /** Pre-formatted HTML representation of an outgoing OSC message with CSS classes for colorization. Only emitted when listeners are attached. */
+  'out:html': (data: { html: string; sequence: number; timestamp: number }) => void;
 
   /** Debug text output from scsynth (e.g. synthdef compilation messages). Includes NTP timestamp and sequence number. */
   'debug': (msg: { text: string; timestamp: number; sequence: number }) => void;

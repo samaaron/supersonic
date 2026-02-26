@@ -243,15 +243,17 @@ expectType<number | null>(bootStats.initDuration);
 // Section 6: Event Types
 // ============================================================================
 
-// All 21 event names are valid SuperSonicEvent values
+// All 23 event names are valid SuperSonicEvent values
 expectAssignable<SuperSonicEvent>('setup');
 expectAssignable<SuperSonicEvent>('ready');
 expectAssignable<SuperSonicEvent>('in');
 expectAssignable<SuperSonicEvent>('in:osc');
 expectAssignable<SuperSonicEvent>('in:text');
+expectAssignable<SuperSonicEvent>('in:html');
 expectAssignable<SuperSonicEvent>('out');
 expectAssignable<SuperSonicEvent>('out:osc');
 expectAssignable<SuperSonicEvent>('out:text');
+expectAssignable<SuperSonicEvent>('out:html');
 expectAssignable<SuperSonicEvent>('debug');
 expectAssignable<SuperSonicEvent>('error');
 expectAssignable<SuperSonicEvent>('shutdown');
@@ -312,6 +314,13 @@ sonic.on('in:text', (data) => {
   expectType<number>(data.timestamp);
 });
 
+// in:html event
+sonic.on('in:html', (data) => {
+  expectType<string>(data.html);
+  expectType<number>(data.sequence);
+  expectType<number>(data.timestamp);
+});
+
 // out event
 sonic.on('out', (msg) => {
   expectType<OscMessage>(msg);
@@ -329,6 +338,13 @@ sonic.on('out:osc', (data) => {
 // out:text event
 sonic.on('out:text', (data) => {
   expectType<string>(data.text);
+  expectType<number>(data.sequence);
+  expectType<number>(data.timestamp);
+});
+
+// out:html event
+sonic.on('out:html', (data) => {
+  expectType<string>(data.html);
   expectType<number>(data.sequence);
   expectType<number>(data.timestamp);
 });

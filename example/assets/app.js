@@ -266,41 +266,6 @@ function createOSCBundle(ntpTime, messages) {
   return SuperSonic.osc.encodeBundle(ntpTime, packets);
 }
 
-function colorizeOSCArgs(oscMsg) {
-  const address = oscMsg[0];
-  const args = oscMsg.slice(1);
-  if (args.length === 0) return "";
-
-  const isSnew = address === "/s_new";
-  return args
-    .map((arg, i) => {
-      let value = arg,
-        type = null;
-      if (typeof arg === "object" && arg.value !== undefined) {
-        value = arg.value;
-        type = arg.type;
-      }
-
-      if (type === "b" || value instanceof Uint8Array) {
-        return `<span class="osc-color-string">&lt;binary ${value.length || "?"} bytes&gt;</span>`;
-      }
-      const isFloat =
-        type === "f" ||
-        (type === null &&
-          typeof value === "number" &&
-          !Number.isInteger(value));
-      const isInt = type === "i" || (type === null && Number.isInteger(value));
-      const isParam =
-        isSnew && i >= 4 && (i - 4) % 2 === 0 && typeof value === "string";
-
-      if (isFloat) return `<span class="osc-color-float">${parseFloat(value.toFixed(3))}</span>`;
-      if (isInt) return `<span class="osc-color-int">${value}</span>`;
-      if (isParam) return `<span class="osc-color-param">${value}</span>`;
-      return `<span class="osc-color-string">${value}</span>`;
-    })
-    .join(" ");
-}
-
 function parseOscTextInput(rawText) {
   const scheduled = new Map(),
     immediate = [],
@@ -552,28 +517,8 @@ function endLoadingSequence(success = true) {
 }
 
 // ===== MESSAGE RENDERING =====
-function renderOSCMessage(oscData, showSequence = null) {
-  try {
-    const msg = SuperSonic.osc.decode(oscData);
-    if (msg.packets) {
-      const content = msg.packets
-        .map(
-          (p) =>
-            `<span class="osc-color-address">${p[0]}</span> ${colorizeOSCArgs(p)}`,
-        )
-        .join("<br>");
-      // For single-packet bundles, just show the content
-      if (msg.packets.length === 1) return content;
-      return `<span class="osc-color-string">Bundle (${msg.packets.length})</span><br>${content}`;
-    }
-    return `<span class="osc-color-address">${msg[0]}</span> ${colorizeOSCArgs(msg)}`;
-  } catch (e) {
-    return `<span class="osc-color-error">Decode error: ${e.message}</span>`;
-  }
-}
-
-function addMessage(msg) {
-  logBatch.oscIn.pending.push(msg);
+function addMessage({ html, sequence, timestamp }) {
+  logBatch.oscIn.pending.push({ html, sequence, timestamp });
   batchedUpdate(logBatch.oscIn, (pending) => {
     const history = $("message-history");
     if (!history) return;
@@ -581,25 +526,15 @@ function addMessage(msg) {
     const empty = history.querySelector(".message-empty");
     if (empty) empty.remove();
 
-    let html = "";
+    let batch = "";
     for (const m of pending) {
       messages.push(m);
       if (messages.length > LOG_MAX_ITEMS) messages.shift();
-
-      const initTime = orchestrator?.initTime || 0;
-      const relativeTime = initTime && m.timestamp ? ((m.timestamp - initTime)).toFixed(2) : "";
-      const timeStr = relativeTime ? ` ${relativeTime}` : "";
-      html += `
-        <div class="message-item">
-          <span class="message-header">[${m.sequence}]${timeStr}</span>
-          <span class="message-content">${m.oscData ? renderOSCMessage(m.oscData) : m.text || "Unknown"}</span>
-        </div>
-      `;
+      batch += `<div class="message-item">${m.html}</div>`;
     }
 
-    history.insertAdjacentHTML("beforeend", html);
+    history.insertAdjacentHTML("beforeend", batch);
 
-    // Trim excess DOM nodes if over limit
     while (history.children.length > LOG_MAX_ITEMS) {
       history.removeChild(history.firstChild);
     }
@@ -609,9 +544,8 @@ function addMessage(msg) {
   });
 }
 
-function addSentMessage({ oscData, sourceId, sequence, timestamp, scheduledTime, comment } = {}) {
-  const msg = { oscData, timestamp, comment, sequence, sourceId, scheduledTime };
-  logBatch.oscOut.pending.push(msg);
+function addSentMessage({ html, sequence, timestamp, comment } = {}) {
+  logBatch.oscOut.pending.push({ html, sequence, timestamp, comment });
   batchedUpdate(logBatch.oscOut, (pending) => {
     const history = $("sent-message-history");
     if (!history) return;
@@ -619,30 +553,18 @@ function addSentMessage({ oscData, sourceId, sequence, timestamp, scheduledTime,
     const empty = history.querySelector(".message-empty");
     if (empty) empty.remove();
 
-    let html = "";
+    let batch = "";
     for (const m of pending) {
       sentMessages.push(m);
       if (sentMessages.length > LOG_MAX_ITEMS) sentMessages.shift();
-
-      const initTime = orchestrator?.initTime || 0;
-      const relativeTime = initTime && m.timestamp ? ((m.timestamp - initTime)).toFixed(2) : "";
       const content = m.comment
-        ? `<span class="osc-color-comment">${m.comment}</span>`
-        : renderOSCMessage(m.oscData);
-
-      const src = m.sourceId !== null && m.sourceId !== undefined ? ` ch${m.sourceId}` : "";
-      const timeStr = relativeTime ? ` ${relativeTime}` : "";
-      html += `
-        <div class="message-item">
-          <span class="message-header">[${m.sequence ?? "?"}]${timeStr}${src}</span>
-          <span class="message-content">${content}</span>
-        </div>
-      `;
+        ? `<span class="supersonic-scsynth-comment">${m.comment}</span>`
+        : m.html;
+      batch += `<div class="message-item">${content}</div>`;
     }
 
-    history.insertAdjacentHTML("beforeend", html);
+    history.insertAdjacentHTML("beforeend", batch);
 
-    // Trim excess DOM nodes if over limit
     while (history.children.length > LOG_MAX_ITEMS) {
       history.removeChild(history.firstChild);
     }
@@ -1819,8 +1741,8 @@ $("init-button").addEventListener("click", async () => {
       checkIdle();
     });
 
-    orchestrator.on("in:osc", addMessage);
-    orchestrator.on("out:osc", addSentMessage);
+    orchestrator.on("in:html", addMessage);
+    orchestrator.on("out:html", addSentMessage);
     // Connect the <supersonic-metrics> web component (schema-driven, zero-alloc hot path)
     metricsEl?.connect(orchestrator, { refreshRate: 10 });
     metricsActive = true; // Flag for idle/wakeUp to know metrics are active

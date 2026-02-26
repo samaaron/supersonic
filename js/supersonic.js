@@ -47,6 +47,68 @@ function formatOscArg(a, maxLen) {
   return maxLen && str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function formatOscArgHtml(arg, address, argIndex) {
+  if (arg && arg.type === 'uuid' && arg.value) {
+    return `<span class="supersonic-scsynth-string">${formatUUID(arg.value)}</span>`;
+  }
+  let value = arg, type = null;
+  if (typeof arg === 'object' && arg !== null && arg.value !== undefined) {
+    value = arg.value;
+    type = arg.type;
+  }
+  if (type === 'b' || value instanceof Uint8Array || value instanceof ArrayBuffer) {
+    const len = value.byteLength ?? value.length ?? '?';
+    return `<span class="supersonic-scsynth-binary">&lt;${len} bytes&gt;</span>`;
+  }
+  const isFloat = type === 'f' || (type === null && typeof value === 'number' && !Number.isInteger(value));
+  const isInt = type === 'i' || (type === null && Number.isInteger(value));
+  const isSnew = address === '/s_new';
+  const isParam = isSnew && argIndex >= 4 && (argIndex - 4) % 2 === 0 && typeof value === 'string';
+  if (isFloat) return `<span class="supersonic-scsynth-float">${parseFloat(value.toFixed(3))}</span>`;
+  if (isInt) return `<span class="supersonic-scsynth-int">${value}</span>`;
+  if (isParam) return `<span class="supersonic-scsynth-param">${escapeHtml(value)}</span>`;
+  if (typeof value === 'string') return `<span class="supersonic-scsynth-string">${escapeHtml(JSON.stringify(value))}</span>`;
+  return `<span class="supersonic-scsynth-string">${escapeHtml(value)}</span>`;
+}
+
+function formatOscLineHtml(msg, sequence, timestamp, initTime, sourceId) {
+  const address = msg[0];
+  const args = msg.slice(1);
+  const relTime = initTime && timestamp ? ((timestamp - initTime)).toFixed(2) : '';
+  let html = `<span class="supersonic-scsynth-seq">[${sequence}]</span>`;
+  if (relTime) html += ` <span class="supersonic-scsynth-time">${relTime}</span>`;
+  if (sourceId !== undefined) html += ` <span class="supersonic-scsynth-source">ch${sourceId}</span>`;
+  html += ` <span class="supersonic-scsynth-address">${escapeHtml(address)}</span>`;
+  if (args.length > 0) {
+    const argsHtml = args.map((a, i) => formatOscArgHtml(a, address, i)).join(', ');
+    html += ' ' + argsHtml;
+  }
+  return html;
+}
+
+function formatBundleHtml(decoded, sequence, timestamp, initTime, sourceId) {
+  if (!decoded.packets) return formatOscLineHtml(decoded, sequence, timestamp, initTime, sourceId);
+  if (decoded.packets.length === 1) return formatOscLineHtml(decoded.packets[0], sequence, timestamp, initTime, sourceId);
+  const relTime = initTime && timestamp ? ((timestamp - initTime)).toFixed(2) : '';
+  let html = `<span class="supersonic-scsynth-seq">[${sequence}]</span>`;
+  if (relTime) html += ` <span class="supersonic-scsynth-time">${relTime}</span>`;
+  if (sourceId !== undefined) html += ` <span class="supersonic-scsynth-source">ch${sourceId}</span>`;
+  html += ` <span class="supersonic-scsynth-bundle">Bundle (${decoded.packets.length})</span>`;
+  for (const pkt of decoded.packets) {
+    const addr = pkt[0];
+    const pktArgs = pkt.slice(1);
+    html += `<br><span class="supersonic-scsynth-address">${escapeHtml(addr)}</span>`;
+    if (pktArgs.length > 0) {
+      html += ' ' + pktArgs.map((a, i) => formatOscArgHtml(a, addr, i)).join(', ');
+    }
+  }
+  return html;
+}
+
 /**
  * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
  */
@@ -1654,6 +1716,11 @@ export class SuperSonic {
           const text = `${address}${argsStr ? ' ' + argsStr : ''}`;
           this.#eventEmitter.emit('in:text', { text, sequence, timestamp });
         }
+
+        if (this.#eventEmitter.hasListeners('in:html')) {
+          const html = formatOscLineHtml(msg, sequence, timestamp, this.initTime);
+          this.#eventEmitter.emit('in:html', { html, sequence, timestamp });
+        }
       } catch (e) {
         console.error('[SuperSonic] Failed to decode OSC message:', e);
       }
@@ -1688,6 +1755,7 @@ export class SuperSonic {
 
         const needsDecode = this.#eventEmitter.hasListeners('out') ||
           this.#eventEmitter.hasListeners('out:text') ||
+          this.#eventEmitter.hasListeners('out:html') ||
           this.#config.debug || this.#config.debugOscOut;
         if (needsDecode) {
           try {
@@ -1701,6 +1769,11 @@ export class SuperSonic {
               const argsStr = outArgs.map(a => formatOscArg(a, maxLen)).join(', ');
               const text = `${outAddr}${argsStr ? ' ' + argsStr : ''}`;
               this.#eventEmitter.emit('out:text', { text, sequence: entry.sequence, timestamp: entry.timestamp });
+            }
+
+            if (this.#eventEmitter.hasListeners('out:html')) {
+              const html = formatBundleHtml(msg, entry.sequence, entry.timestamp, this.initTime, entry.sourceId);
+              this.#eventEmitter.emit('out:html', { html, sequence: entry.sequence, timestamp: entry.timestamp });
             }
           } catch (e) { /* skip decoded events on decode failure */ }
         }

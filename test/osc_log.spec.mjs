@@ -988,5 +988,209 @@ test.describe("Centralized OSC Out Logging", () => {
   });
 });
 
+test.describe("HTML Log Events (in:html / out:html)", () => {
+  test.beforeEach(async ({ page }) => {
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        console.error("Browser console error:", msg.text());
+      }
+    });
+    await page.goto("/test/harness.html");
+    await page.waitForFunction(() => window.supersonicReady === true, {
+      timeout: 10000,
+    });
+  });
+
+  test("in:html emits HTML with supersonic-scsynth CSS classes", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.sync();
+
+      const received = [];
+      sonic.on("in:html", (data) => {
+        received.push(data);
+      });
+
+      // /status triggers a /status.reply
+      await sonic.send("/status");
+      await new Promise(r => setTimeout(r, 200));
+
+      await sonic.shutdown();
+
+      return {
+        count: received.length,
+        first: received[0] || null,
+      };
+    }, sonicConfig);
+
+    expect(result.count).toBeGreaterThanOrEqual(1);
+
+    const { html, sequence, timestamp } = result.first;
+    expect(typeof html).toBe("string");
+    expect(typeof sequence).toBe("number");
+    expect(typeof timestamp).toBe("number");
+
+    // Should contain CSS class spans
+    expect(html).toContain('supersonic-scsynth-seq');
+    expect(html).toContain('supersonic-scsynth-address');
+  });
+
+  test("out:html emits HTML with supersonic-scsynth CSS classes", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.sync();
+
+      const received = [];
+      sonic.on("out:html", (data) => {
+        received.push(data);
+      });
+
+      for (let i = 0; i < 3; i++) {
+        await sonic.send("/status");
+      }
+      await new Promise(r => setTimeout(r, 200));
+
+      await sonic.shutdown();
+
+      return {
+        count: received.length,
+        first: received[0] || null,
+      };
+    }, sonicConfig);
+
+    expect(result.count).toBeGreaterThanOrEqual(3);
+
+    const { html, sequence, timestamp } = result.first;
+    expect(typeof html).toBe("string");
+    expect(typeof sequence).toBe("number");
+    expect(typeof timestamp).toBe("number");
+
+    // Should contain CSS class spans
+    expect(html).toContain('supersonic-scsynth-seq');
+    expect(html).toContain('supersonic-scsynth-source');
+    expect(html).toContain('supersonic-scsynth-address');
+  });
+
+  test("in:html colorizes args with correct type classes", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.sync();
+
+      const received = [];
+      sonic.on("in:html", (data) => {
+        received.push(data);
+      });
+
+      // /status triggers /status.reply with int and float args
+      await sonic.send("/status");
+      await new Promise(r => setTimeout(r, 200));
+
+      await sonic.shutdown();
+
+      // Find the /status.reply
+      const statusReply = received.find(r => r.html.includes("/status.reply"));
+      return {
+        html: statusReply?.html || null,
+      };
+    }, sonicConfig);
+
+    expect(result.html).not.toBeNull();
+    // /status.reply has int args (like ugen count, synth count, etc.)
+    expect(result.html).toContain('supersonic-scsynth-int');
+    expect(result.html).toContain('supersonic-scsynth-address');
+  });
+
+  test("out:html includes time span when initTime is available", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.sync();
+
+      const received = [];
+      sonic.on("out:html", (data) => {
+        received.push(data);
+      });
+
+      await sonic.send("/status");
+      await new Promise(r => setTimeout(r, 200));
+
+      await sonic.shutdown();
+
+      return {
+        html: received[0]?.html || null,
+      };
+    }, sonicConfig);
+
+    expect(result.html).not.toBeNull();
+    expect(result.html).toContain('supersonic-scsynth-time');
+  });
+
+  test("no in:html emitted when no listeners attached", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.sync();
+
+      // Track whether formatOscLineHtml was called by checking out:html
+      // We subscribe to in:osc (raw) to confirm messages DO arrive
+      let rawCount = 0;
+      sonic.on("in:osc", () => { rawCount++; });
+
+      // Do NOT subscribe to in:html
+
+      await sonic.send("/status");
+      await new Promise(r => setTimeout(r, 200));
+
+      // Now subscribe and check we didn't miss buffered events
+      let lateCount = 0;
+      sonic.on("in:html", () => { lateCount++; });
+      await new Promise(r => setTimeout(r, 50));
+
+      await sonic.shutdown();
+
+      return { rawCount, lateCount };
+    }, sonicConfig);
+
+    // Raw events should have fired
+    expect(result.rawCount).toBeGreaterThanOrEqual(1);
+    // No late HTML events (they weren't buffered)
+    expect(result.lateCount).toBe(0);
+  });
+
+  test("no out:html emitted when no listeners attached", async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.sync();
+
+      // Track raw out events
+      let rawCount = 0;
+      sonic.on("out:osc", () => { rawCount++; });
+
+      // Do NOT subscribe to out:html
+
+      for (let i = 0; i < 3; i++) {
+        await sonic.send("/status");
+      }
+      await new Promise(r => setTimeout(r, 200));
+
+      // Now subscribe late
+      let lateCount = 0;
+      sonic.on("out:html", () => { lateCount++; });
+      await new Promise(r => setTimeout(r, 50));
+
+      await sonic.shutdown();
+
+      return { rawCount, lateCount };
+    }, sonicConfig);
+
+    expect(result.rawCount).toBeGreaterThanOrEqual(3);
+    expect(result.lateCount).toBe(0);
+  });
+});
+
 // Define MAIN_COUNT and WORKER_COUNT as constants for reference in expects
 const MAIN_COUNT = 5;

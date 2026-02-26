@@ -575,11 +575,16 @@ textarea:disabled, select:disabled, input:disabled {
 .progress-bar-fill.blue { background: var(--c-blue); }
 .progress-bar-fill.green { background: #00ff00; }
 
-/* ===== OSC COLORS ===== */
-.osc-color-address, .osc-color-param { color: var(--c-gold); }
-.osc-color-float, .osc-color-int, .osc-color-error { color: var(--c-orange-dark); }
-.osc-color-string { color: var(--c-orange); }
-.osc-color-comment { color: #999; }
+/* ===== OSC COLORS (supersonic-scsynth-* classes from in:html/out:html events) ===== */
+.supersonic-scsynth-seq { color: var(--c-gray-500); }
+.supersonic-scsynth-time { color: var(--c-gray-500); }
+.supersonic-scsynth-source { color: var(--c-royal-blue); }
+.supersonic-scsynth-address, .supersonic-scsynth-param { color: var(--c-gold); }
+.supersonic-scsynth-float, .supersonic-scsynth-int, .supersonic-scsynth-error { color: var(--c-orange-dark); }
+.supersonic-scsynth-string { color: var(--c-orange); }
+.supersonic-scsynth-binary { color: var(--c-orange); }
+.supersonic-scsynth-bundle { color: var(--c-pink); }
+.supersonic-scsynth-comment { color: #999; }
 
 /* ===== TABS (connected to log panel) ===== */
 .tab-buttons {
