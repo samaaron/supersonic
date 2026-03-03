@@ -76,7 +76,12 @@ echo "STACK_SIZE: $((WASM_STACK_SIZE / 1024))KB"
 SCSYNTH_SERVER_SOURCES=$(find "$SRC_DIR/scsynth/server" -name "*.cpp" ! -name "SC_*Plugins.cpp" ! -name "scsynth_main.cpp" ! -name "SC_WebAudio.cpp" ! -name "SC_Wasm.cpp" ! -name "SC_WasmOscBuilder.cpp" 2>/dev/null | tr '\n' ' ')
 SCSYNTH_COMMON_SOURCES=$(find "$SRC_DIR/scsynth/common" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
 SCSYNTH_COMMON_C_SOURCES=$(find "$SRC_DIR/scsynth/common" -name "*.c" 2>/dev/null | tr '\n' ' ')
-SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
+# MdaUGens.cpp excluded: its pianoData array (586k shorts) embeds 1.1MB of piano samples
+# directly in the WASM binary, nearly doubling its size (2.6MB → 1.4MB without it).
+# TODO: Re-implement MdaPiano with sample data loaded at runtime (like a buffer/sample)
+# rather than statically compiled into the WASM. The data is just PCM — it can be fetched
+# and loaded into a scsynth buffer on demand.
+SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" ! -name "MdaUGens.cpp" 2>/dev/null | tr '\n' ' ')
 
 # Compile audio processor with all scsynth sources and oscpack (standalone WASM for AudioWorklet)
 # Note: Memory is fixed (ALLOW_MEMORY_GROWTH=0) because SharedArrayBuffer cannot be resized

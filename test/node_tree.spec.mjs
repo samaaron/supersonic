@@ -1628,9 +1628,9 @@ test.describe("getTree() defName handling", () => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
-      // sonic-pi-piano has a reasonably long name
-      await sonic.loadSynthDef("sonic-pi-piano");
-      await sonic.send("/s_new", "sonic-pi-piano", 1000, 0, 0, "release", 60);
+      // sonic-pi-organ_tonewheel has a reasonably long name
+      await sonic.loadSynthDef("sonic-pi-organ_tonewheel");
+      await sonic.send("/s_new", "sonic-pi-organ_tonewheel", 1000, 0, 0, "release", 60);
       await sonic.sync(1);
 
       const tree = sonic.getRawTree();
@@ -1645,7 +1645,7 @@ test.describe("getTree() defName handling", () => {
       };
     }, sonicConfig);
 
-    expect(result.defName).toBe("sonic-pi-piano");
+    expect(result.defName).toBe("sonic-pi-organ_tonewheel");
     expect(result.defNameLength).toBeLessThanOrEqual(32); // NODE_TREE_DEF_NAME_SIZE
   });
 });

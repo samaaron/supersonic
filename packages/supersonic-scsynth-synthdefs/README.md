@@ -61,7 +61,8 @@ All 120 Sonic Pi synthdefs including:
 - dark_ambience, hollow, growl, organ_tonewheel
 
 ### Plucked & Percussion
-- pluck, kalimba, piano, rhodey
+- pluck, kalimba, rhodey
+- ~~piano~~ (temporarily excluded — requires MdaPiano UGen, see build.sh)
 
 ### Effects (fx_*)
 All standard effects:

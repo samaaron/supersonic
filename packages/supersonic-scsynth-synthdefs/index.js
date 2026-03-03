@@ -108,7 +108,7 @@ export const SYNTHDEF_NAMES = [
   "sonic-pi-mono_player",
   "sonic-pi-noise",
   "sonic-pi-organ_tonewheel",
-  "sonic-pi-piano",
+  // "sonic-pi-piano",  // Excluded: requires MdaPiano UGen (not currently compiled — see build.sh)
   "sonic-pi-pluck",
   "sonic-pi-pnoise",
   "sonic-pi-pretty_bell",
