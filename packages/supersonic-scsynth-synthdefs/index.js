@@ -15,7 +15,7 @@ export function getSynthDefPath(name) {
 }
 
 // CDN URL for browser usage (unpkg)
-export const CDN_BASE = 'https://unpkg.com/supersonic-scsynth-synthdefs@0.57.0';
+export const CDN_BASE = 'https://unpkg.com/supersonic-scsynth-synthdefs@0.58.0';
 export const SYNTHDEFS_CDN = `${CDN_BASE}/synthdefs`;
 
 export const SYNTHDEF_NAMES = [
@@ -108,7 +108,7 @@ export const SYNTHDEF_NAMES = [
   "sonic-pi-mono_player",
   "sonic-pi-noise",
   "sonic-pi-organ_tonewheel",
-  // "sonic-pi-piano",  // Excluded: requires MdaPiano UGen (not currently compiled — see build.sh)
+  "sonic-pi-piano",
   "sonic-pi-pluck",
   "sonic-pi-pnoise",
   "sonic-pi-pretty_bell",
