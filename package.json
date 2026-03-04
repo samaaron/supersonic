@@ -16,7 +16,8 @@
     "test:all": "playwright test --reporter=list",
     "prepublishOnly": "./build.sh --release",
     "test:types": "tsd",
-    "docs:api": "typedoc && mv docs/api-generated/README.md docs/API.md && rm -rf docs/api-generated"
+    "docs:api": "typedoc && mv docs/api-generated/README.md docs/API.md && rm -rf docs/api-generated",
+    "docs:npm-readme": "node scripts/build-npm-readme.mjs"
   },
   "tsd": {
     "compilerOptions": {

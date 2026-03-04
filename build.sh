@@ -247,6 +247,9 @@ cp "$OUTPUT_DIR/workers/scsynth_audio_worklet.js" "$CORE_PKG_DIR/workers/"
 echo "Generating API docs..."
 npm run docs:api
 
+echo "Generating npm README..."
+node scripts/build-npm-readme.mjs
+
 echo "Build complete!"
 echo "Generated files:"
 ls -lh "$OUTPUT_DIR"

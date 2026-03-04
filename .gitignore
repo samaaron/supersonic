@@ -7,3 +7,6 @@ package-lock.json
 
 # Playwright
 test-results/
+
+# Generated npm README
+README.npm.md

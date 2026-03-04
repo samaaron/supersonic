@@ -51,6 +51,9 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Generate npm README
+        run: cp README.npm.md README.md
+
       - name: Publish supersonic-scsynth
         run: npm publish --provenance --access public
 
