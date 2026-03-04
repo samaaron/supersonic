@@ -1107,7 +1107,10 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
         return kSCFalse;
     }
 #else
-    // Emscripten: Scope buffers not supported (no shared memory)
+    // TODO: Scope buffers are currently disabled under Emscripten because they relied on
+    // native shared memory (shm). To support ScopeOut/ScopeOut2 UGens in the AudioWorklet,
+    // we'd need to route scope data out via the existing ring buffer or postMessage path.
+    // See also: ScopeOut/ScopeOut2 in DelayUGens.cpp.
     hnd->internalData = nullptr;
     return kSCFalse;
 #endif
@@ -1119,7 +1122,7 @@ void pushScopeBuffer(World* inWorld, ScopeBufferHnd* hnd, int frames) {
     writer.push(frames);
     hnd->data = writer.data();
 #else
-    // Emscripten: No-op (scope buffers not supported)
+    // Emscripten: No-op (see getScopeBuffer TODO above)
 #endif
 }
 
@@ -1131,7 +1134,7 @@ void releaseScopeBuffer(World* inWorld, ScopeBufferHnd* hnd) {
         shm->release_scope_buffer_writer(writer);
     }
 #else
-    // Emscripten: No-op (scope buffers not supported)
+    // Emscripten: No-op (see getScopeBuffer TODO above)
 #endif
 }
 

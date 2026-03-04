@@ -33,6 +33,10 @@ const int kMAXMEDIANSIZE = 32;
 
 static InterfaceTable* ft;
 
+// TODO: ScopeOut/ScopeOut2 are dead code in WASM — the server-side scope buffer functions
+// (getScopeBuffer, pushScopeBuffer, releaseScopeBuffer in SC_World.cpp) are all no-ops
+// under Emscripten. Either remove these UGens entirely, or figure out how to pipe scope
+// data out of the AudioWorklet (e.g. via the existing ring buffer / postMessage path).
 struct ScopeOut : public Unit {
     SndBuf* m_buf;
     SndBufUpdates* m_bufupdates;
