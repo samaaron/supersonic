@@ -44,13 +44,15 @@ Both modes are first class citizens and are fully supported and tested. SAB mode
 
 You can build SuperSonic with:
 
+```bash
 scripts/build.sh
+```
 
 This compiles all the assets and places the results in the dist dir.
 
 ## Testing
 
-Tests use Playwright. The full suite is 1104 tests across SAB and postMessage modes and takes ~3 minutes.
+Tests use Playwright. The full suite is ~1200 tests across SAB and postMessage modes and takes ~3 minutes.
 
 **The output is very large and will truncate. Always use concise output:**
 
