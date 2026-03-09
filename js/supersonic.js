@@ -547,6 +547,7 @@ export class SuperSonic {
     this.#config = {
       mode: mode,
       snapshotIntervalMs: options.snapshotIntervalMs ?? SNAPSHOT_INTERVAL_MS,
+      wasmBytes: options.wasmBytes ?? null,
       wasmUrl: options.wasmUrl || wasmBaseURL + "scsynth-nrt.wasm",
       wasmBaseURL: wasmBaseURL,
       workletUrl: options.workletUrl || (coreBaseURL ? `${coreBaseURL}workers/scsynth_audio_worklet.js` : workerBaseURL + "scsynth_audio_worklet.js"),
@@ -586,6 +587,7 @@ export class SuperSonic {
       onLoadingEvent: (event, data) => this.#eventEmitter.emit(event, data),
       maxRetries: this.#fetchRetryConfig.maxRetries,
       baseDelay: this.#fetchRetryConfig.baseDelay,
+      skipHeadRequests: options.skipHeadRequests ?? false,
     });
 
     this.bootStats = {
@@ -1546,15 +1548,16 @@ export class SuperSonic {
     if (this.#cachedWasmBytes) return this.#cachedWasmBytes;
 
     const wasmName = this.#config.wasmUrl.split('/').pop();
-    this.#eventEmitter.emit('loading:start', { type: 'wasm', name: wasmName });
 
-    const wasmResponse = await fetch(this.#config.wasmUrl);
-    if (!wasmResponse.ok) {
-      throw new Error(`Failed to load WASM: ${wasmResponse.status} ${wasmResponse.statusText}`);
+    // If caller provided pre-fetched WASM bytes, use them directly
+    if (this.#config.wasmBytes) {
+      const wasmBytes = this.#config.wasmBytes;
+      this.#eventEmitter.emit('loading:start', { type: 'wasm', name: wasmName, size: wasmBytes.byteLength });
+      this.#eventEmitter.emit('loading:complete', { type: 'wasm', name: wasmName, size: wasmBytes.byteLength });
+      this.#cachedWasmBytes = wasmBytes;
+      return wasmBytes;
     }
-
-    const wasmBytes = await wasmResponse.arrayBuffer();
-    this.#eventEmitter.emit('loading:complete', { type: 'wasm', name: wasmName, size: wasmBytes.byteLength });
+    const wasmBytes = await this.#assetLoader.fetch(this.#config.wasmUrl, { type: 'wasm', name: wasmName });
     this.#cachedWasmBytes = wasmBytes;
 
     return wasmBytes;

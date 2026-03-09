@@ -17,17 +17,20 @@ export class AssetLoader {
   #onLoadingEvent;
   #maxRetries;
   #baseDelay;
+  #skipHeadRequests;
 
   constructor(options = {}) {
     const {
       onLoadingEvent = null,
       maxRetries = DEFAULT_MAX_RETRIES,
       baseDelay = DEFAULT_BASE_DELAY,
+      skipHeadRequests = false,
     } = options;
 
     this.#onLoadingEvent = onLoadingEvent;
     this.#maxRetries = maxRetries;
     this.#baseDelay = baseDelay;
+    this.#skipHeadRequests = skipHeadRequests;
   }
 
   /**
@@ -39,18 +42,21 @@ export class AssetLoader {
    * @returns {Promise<ArrayBuffer>} The fetched data
    */
   async fetch(url, { type, name }) {
-    // Fire HEAD and GET requests in parallel
-    // HEAD returns quickly with Content-Length, GET starts downloading immediately
-    const headPromise = this.#fetchHead(url);
     const getPromise = this.#fetchWithRetry(url);
 
-    // Wait for HEAD to get size, then emit loading:start
-    const downloadSize = await headPromise;
-    this.#onLoadingEvent?.('loading:start', {
-      type,
-      name,
-      ...(downloadSize != null && { size: downloadSize }),
-    });
+    if (this.#skipHeadRequests) {
+      // Skip HEAD — emit loading:start without size, do GET only
+      this.#onLoadingEvent?.('loading:start', { type, name });
+    } else {
+      // Fire HEAD and GET requests in parallel
+      // HEAD returns quickly with Content-Length, GET starts downloading immediately
+      const downloadSize = await this.#fetchHead(url);
+      this.#onLoadingEvent?.('loading:start', {
+        type,
+        name,
+        ...(downloadSize != null && { size: downloadSize }),
+      });
+    }
 
     // Wait for GET to complete
     const response = await getPromise;
