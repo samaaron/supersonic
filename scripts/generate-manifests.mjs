@@ -9,7 +9,8 @@ import { readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = join(SCRIPT_DIR, '..');
 
 function getNames(dir, extension) {
   return readdirSync(dir)
@@ -46,15 +47,15 @@ function updateIndexFile(filePath, exportName, names) {
 }
 
 // Synthdefs
-const synthdefsDir = join(__dirname, 'packages/supersonic-scsynth-synthdefs/synthdefs');
+const synthdefsDir = join(PROJECT_ROOT, 'packages/supersonic-scsynth-synthdefs/synthdefs');
 const synthdefNames = getNames(synthdefsDir, '.scsyndef');
-const synthdefIndex = join(__dirname, 'packages/supersonic-scsynth-synthdefs/index.js');
+const synthdefIndex = join(PROJECT_ROOT, 'packages/supersonic-scsynth-synthdefs/index.js');
 const synthCount = updateIndexFile(synthdefIndex, 'SYNTHDEF_NAMES', synthdefNames);
 console.log(`Wrote ${synthCount} synthdef names to ${synthdefIndex}`);
 
 // Samples
-const samplesDir = join(__dirname, 'packages/supersonic-scsynth-samples/samples');
+const samplesDir = join(PROJECT_ROOT, 'packages/supersonic-scsynth-samples/samples');
 const sampleNames = getNames(samplesDir, '.flac');
-const samplesIndex = join(__dirname, 'packages/supersonic-scsynth-samples/index.js');
+const samplesIndex = join(PROJECT_ROOT, 'packages/supersonic-scsynth-samples/index.js');
 const sampleCount = updateIndexFile(samplesIndex, 'SAMPLE_NAMES', sampleNames);
 console.log(`Wrote ${sampleCount} sample names to ${samplesIndex}`);
