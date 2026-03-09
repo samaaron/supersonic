@@ -8,5 +8,8 @@ package-lock.json
 # Playwright
 test-results/
 
+# Bundled test dependencies
+test/assets/fast-check.bundle.js
+
 # Generated npm README
 README.npm.md

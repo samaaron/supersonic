@@ -12,6 +12,7 @@
     "build:release": "./build.sh --release",
     "clean": "./clean.sh",
     "dev": "cd example && npx serve",
+    "pretest": "esbuild node_modules/fast-check/lib/fast-check.js --bundle --format=esm --outfile=test/assets/fast-check.bundle.js",
     "test": "playwright test --reporter=list --max-failures=1",
     "test:all": "playwright test --reporter=list",
     "prepublishOnly": "./build.sh --release",
@@ -74,6 +75,7 @@
   "devDependencies": {
     "@playwright/test": "^1.49.0",
     "esbuild": "^0.24.0",
+    "fast-check": "^4.6.0",
     "remark-gfm": "^4.0.1",
     "tsd": "^0.33.0",
     "typedoc": "^0.28.17",
