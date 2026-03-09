@@ -44,7 +44,7 @@ Both modes are first class citizens and are fully supported and tested. SAB mode
 
 You can build SuperSonic with:
 
-./build.sh
+scripts/build.sh
 
 This compiles all the assets and places the results in the dist dir.
 

@@ -8,7 +8,7 @@
 
     Build-time configuration (memory layout):
       - Defined in js/memory_layout.js
-      - Requires ./build.sh when changed
+      - Requires scripts/build.sh when changed
 
     Can be overridden via:
       - new SuperSonic({ scsynthOptions: { numBuffers: 2048 } })

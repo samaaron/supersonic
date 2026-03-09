@@ -16,7 +16,7 @@ fi
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$SCRIPT_DIR"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SRC_DIR="$PROJECT_ROOT/src"
 JS_DIR="$PROJECT_ROOT/js"
 OUTPUT_DIR="$PROJECT_ROOT/dist"

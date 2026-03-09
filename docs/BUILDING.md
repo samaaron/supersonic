@@ -42,7 +42,7 @@ source ~/path/to/emsdk_env.sh
 Then run the build script:
 
 ```bash
-./build.sh
+scripts/build.sh
 ```
 
 This will:

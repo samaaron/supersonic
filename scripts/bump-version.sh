@@ -40,13 +40,13 @@ NC='\033[0m' # No Color
 # Check if version argument provided
 if [ -z "$1" ]; then
     echo -e "${RED}Error: Version number required${NC}"
-    echo "Usage: ./bump-version.sh <version>"
-    echo "Example: ./bump-version.sh 0.1.2"
+    echo "Usage: scripts/bump-version.sh <version>"
+    echo "Example: scripts/bump-version.sh 0.1.2"
     exit 1
 fi
 
 NEW_VERSION=$1
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Validate version format (basic check)
 if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -148,7 +148,7 @@ echo ""
 echo "Step 5: Regenerating manifests..."
 echo "----------------------------------"
 
-node generate-manifests.mjs
+node "$PROJECT_ROOT/scripts/generate-manifests.mjs"
 echo "✓ Manifests regenerated"
 
 echo ""
@@ -156,7 +156,7 @@ echo "Step 6: Rebuilding distribution..."
 echo "-----------------------------------"
 
 # Run build with --release flag
-./build.sh --release
+"$PROJECT_ROOT/scripts/build.sh" --release
 echo "✓ Build complete"
 
 echo ""

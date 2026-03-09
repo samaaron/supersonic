@@ -37,7 +37,7 @@ jobs:
           actions-cache-folder: 'emsdk-cache'
 
       - name: Build (release mode)
-        run: ./build.sh --release
+        run: ./scripts/build.sh --release
 
       - name: Install npm dependencies
         run: npm install

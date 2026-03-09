@@ -9,11 +9,9 @@ COPY js /build/js/
 COPY scripts /build/scripts/
 COPY packages /build/packages/
 COPY package.json /build/
-COPY build.sh /build/
-
 RUN --mount=type=cache,id=em-cache,target=/em_cache \
     --mount=type=cache,id=npm-cache,target=/root/.npm \
-	EM_CACHE=/em_cache bash build.sh
+	EM_CACHE=/em_cache bash scripts/build.sh
 
 FROM node:22-slim AS runtime
 

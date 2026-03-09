@@ -41,7 +41,7 @@ jobs:
         run: emcc --version
 
       - name: Run build script (release mode)
-        run: ./build.sh --release
+        run: ./scripts/build.sh --release
 
       - name: Verify build output
         run: |

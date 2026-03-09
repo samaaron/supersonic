@@ -8,14 +8,14 @@
   "jsdelivr": "dist/supersonic.js",
   "type": "module",
   "scripts": {
-    "build": "./build.sh",
-    "build:release": "./build.sh --release",
-    "clean": "./clean.sh",
+    "build": "./scripts/build.sh",
+    "build:release": "./scripts/build.sh --release",
+    "clean": "./scripts/clean.sh",
     "dev": "cd example && npx serve",
     "pretest": "esbuild node_modules/fast-check/lib/fast-check.js --bundle --format=esm --outfile=test/assets/fast-check.bundle.js",
     "test": "playwright test --reporter=list --max-failures=1",
     "test:all": "playwright test --reporter=list",
-    "prepublishOnly": "./build.sh --release",
+    "prepublishOnly": "./scripts/build.sh --release",
     "test:types": "tsd",
     "docs:api": "typedoc && mv docs/api-generated/README.md docs/API.md && rm -rf docs/api-generated",
     "docs:npm-readme": "node scripts/build-npm-readme.mjs"
