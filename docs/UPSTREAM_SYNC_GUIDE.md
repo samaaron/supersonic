@@ -1,9 +1,9 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2026-02-25
-**Last Sync Commit**: 71813a9
-**Upstream Branch**: supercollider/develop (tracked to 2026-02-25)
-**Verified Against**: SuperCollider 3.14.1 + PR #7329 (Plugin API v4)
+**Last Updated**: 2026-03-09
+**Last Sync Commit**: 99be55460
+**Upstream Branch**: supercollider/develop (tracked to 2026-03-09)
+**Verified Against**: SuperCollider 3.15.0-dev + PR #7395 (SynthDef v3)
 
 ---
 
@@ -597,6 +597,53 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 
 ## Reference: Previous Sync Summary
 
+### SynthDef v3 format support (2026-03-09)
+
+Applied SuperCollider PR #7395 (commit 99be55460) which introduces SynthDef version 3 and substantially improves the GraphDef parser.
+
+**Format Change:**
+- v3 adds a 4-byte size field before each synthdef definition, enabling forward-compatible parsing. Parsers can skip unknown fields in future versions without breaking.
+
+**Applied:**
+- **ReadWriteMacros.h**: All buffer-based read functions now take `const char*& buf, const char* end` and perform bounds checking via `checkBufferSpace()`. Fixes UB on truncated data. Return types corrected (e.g. `readInt8` returns `int8` not `int32`).
+- **SC_GraphDef.cpp**: Major refactor:
+  - Unified `GraphDef_Read`/`GraphDef_ReadVer1` into single version-aware `GraphDef_Read` with `readCount()` helper
+  - Unified `calcParamSpecs`/`calcParamSpecs1`, `ParamSpec_Read`/`ParamSpec_ReadVer1`, `InputSpec_Read`/`InputSpec_ReadVer1`, `UnitSpec_Read`/`UnitSpec_ReadVer1`
+  - v3 support in `GraphDefLib_Read` with per-definition size field parsing
+  - `GraphDefLib_Read` and `GraphDef_Recv` signatures changed to take `const char* buffer, size_t size`
+  - `malloc`/`calloc`/`free` replaced with `new`/`delete` throughout
+  - `std::unique_ptr` with custom deleter for exception-safe GraphDef cleanup
+  - `BufColorAllocator` modernized from raw arrays to `std::vector`
+  - Throws on invalid magic/version instead of silently returning
+- **SC_GraphDef.h**: `GraphDef_Recv` signature updated (adds `size_t size` parameter)
+- **SC_SequencedCommand.h**: Added `mSize` field to `RecvSynthDefCmd`
+- **SC_SequencedCommand.cpp**: `RecvSynthDefCmd` stores and passes buffer size through to `GraphDef_Recv`
+
+**JS Changes:**
+- **js/lib/synthdef_parser.js**: `extractSynthDefName` updated to handle v3 format (name offset is 14 instead of 10 due to size field prefix)
+
+**WASM Adaptations:**
+- Kept `worklet_debug` instead of upstream `scprintf`
+- Kept `g_lastGraphDefError` static for Emscripten exception handling
+- Kept `std::string* outErrorMsg` parameter on `GraphDef_Recv` for error reporting to JS
+
+**Bug Fix:**
+- Bounds checking on all buffer reads now prevents server crashes from truncated/corrupted synthdef data. Previously, truncated v2 synthdefs could crash the WASM server by reading past buffer boundaries.
+
+**Testing:**
+- Compiled v1, v2, and v3 test fixtures using sclang 3.15.0-dev (commit 99be55460)
+- 36 new Playwright tests across SAB and postMessage modes covering:
+  - Loading and name extraction for all versions
+  - Synth creation and control for all versions
+  - Synthdef count verification for all versions
+  - Corruption resilience (truncated data) for all versions
+
+**Upstream:**
+- https://github.com/supercollider/supercollider/commit/99be55460
+- https://github.com/supercollider/supercollider/pull/7395
+
+---
+
 ### World_Cleanup ordering fix + dead code removal (2026-02-25)
 
 Reviewed upstream commits 5076833 and 71813a9.
@@ -723,6 +770,6 @@ If uncertain about a commit:
 
 ---
 
-**Last Updated**: 2025-11-19
+**Last Updated**: 2026-03-09
 **Maintainer**: See git log for recent contributors
 **Upstream**: https://github.com/supercollider/supercollider

@@ -28,7 +28,8 @@ export function extractSynthDefName(input) {
   }
 
   // Handle binary data - parse scsyndef format
-  // Format: "SCgf" (4) + version (4) + numDefs (2) + [nameLen (1) + name (n) + ...]
+  // v0/v1/v2: "SCgf" (4) + version (4) + numDefs (2) + nameLen (1) + name (n) + ...
+  // v3:       "SCgf" (4) + version (4) + numDefs (2) + defSize (4) + nameLen (1) + name (n) + ...
   const bytes = input instanceof ArrayBuffer ? new Uint8Array(input) : input;
   if (!(bytes instanceof Uint8Array) || bytes.length < 11) return null;
 
@@ -42,12 +43,18 @@ export function extractSynthDefName(input) {
     return null;
   }
 
-  // Name starts at offset 10 (after magic + version + numDefs)
-  const nameLen = bytes[10];
-  if (nameLen === 0 || 11 + nameLen > bytes.length) return null;
+  // Read version (big-endian int32 at offset 4)
+  const version = (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7];
+
+  // v3 has a 4-byte size field before each definition
+  const nameOffset = version >= 3 ? 14 : 10;
+  if (nameOffset >= bytes.length) return null;
+
+  const nameLen = bytes[nameOffset];
+  if (nameLen === 0 || nameOffset + 1 + nameLen > bytes.length) return null;
 
   try {
-    return new TextDecoder().decode(bytes.slice(11, 11 + nameLen));
+    return new TextDecoder().decode(bytes.slice(nameOffset + 1, nameOffset + 1 + nameLen));
   } catch {
     return null;
   }

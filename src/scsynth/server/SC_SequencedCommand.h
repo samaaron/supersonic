@@ -466,6 +466,7 @@ public:
 
 protected:
     char* mBuffer;
+    size_t mSize;
     GraphDef* mDefs;
     std::string mErrorMsg;
 
