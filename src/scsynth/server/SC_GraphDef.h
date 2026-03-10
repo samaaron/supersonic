@@ -72,9 +72,11 @@ struct GraphDef {
 typedef struct GraphDef GraphDef;
 
 GraphDef* GraphDef_Recv(World* inWorld, const char* buffer, size_t size, GraphDef* inList, std::string* outErrorMsg = nullptr);
+#ifndef __EMSCRIPTEN__
 GraphDef* GraphDef_Load(struct World* inWorld, const std::filesystem::path& path, GraphDef* inList);
 GraphDef* GraphDef_LoadDir(struct World* inWorld, const std::filesystem::path& path, GraphDef* inList);
 GraphDef* GraphDef_LoadGlob(World* inWorld, const char* pattern, GraphDef* inList);
+#endif
 SCErr GraphDef_Remove(World* inWorld, int32* inName);
 SCErr GraphDef_DeleteMsg(struct World* inWorld, GraphDef* inDef);
 void GraphDef_Dump(GraphDef* inGraphDef);

@@ -627,6 +627,10 @@ Applied SuperCollider PR #7395 (commit 99be55460) which introduces SynthDef vers
 - Kept `g_lastGraphDefError` static for Emscripten exception handling
 - Kept `std::string* outErrorMsg` parameter on `GraphDef_Recv` for error reporting to JS
 
+**Filesystem code guarded:**
+- Wrapped filesystem-based synthdef loading in `#ifndef __EMSCRIPTEN__`: `load_file`, `GraphDef_Load`, `GraphDef_LoadDir`, `GraphDef_LoadGlob` (SC_GraphDef.cpp/.h), `LoadSynthDefCmd`, `LoadSynthDefDirCmd` (SC_SequencedCommand.h/.cpp), `meth_d_load`, `meth_d_loadDir` (SC_MiscCmds.cpp), `World_LoadGraphDefs` body (SC_World.cpp)
+- Code inside guards matches upstream exactly (uses `scprintf`, not `worklet_debug`) for easy future syncing
+
 **Bug Fix:**
 - Bounds checking on all buffer reads now prevents server crashes from truncated/corrupted synthdef data. Previously, truncated v2 synthdefs could crash the WASM server by reading past buffer boundaries.
 
@@ -756,6 +760,15 @@ Some upstream features are excluded due to AudioWorklet constraints:
 - ❌ **Threading UGens** - no thread spawning in AudioWorklet
 - ❌ **Disk I/O UGens** (DiskIn, DiskOut, VDiskIn) - no filesystem access
 - ❌ **OSC Network UGens** (SendReply via UDP) - no network sockets
+
+## `#ifndef __EMSCRIPTEN__` Guarded Code
+
+The following upstream code is wrapped in `#ifndef __EMSCRIPTEN__` guards because it requires filesystem access not available in WASM. The code inside the guards **matches upstream exactly** (uses `scprintf`, not `worklet_debug`) so that future syncs can be applied mechanically. During syncs, update the guarded code to match upstream — don't skip it.
+
+- **SC_GraphDef.cpp/.h**: `load_file()`, `GraphDef_Load()`, `GraphDef_LoadDir()`, `GraphDef_LoadGlob()`
+- **SC_SequencedCommand.h/.cpp**: `LoadSynthDefCmd` class, `LoadSynthDefDirCmd` class
+- **SC_MiscCmds.cpp**: `meth_d_load()`, `meth_d_loadDir()`, and their `NEW_COMMAND` registrations
+- **SC_World.cpp**: `World_LoadGraphDefs()` body
 
 ---
 

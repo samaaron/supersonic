@@ -1427,6 +1427,7 @@ void RecvSynthDefCmd::Stage4() {
 
 ///////////////////////////////////////////////////////////////////////////
 
+#ifndef __EMSCRIPTEN__
 LoadSynthDefCmd::LoadSynthDefCmd(World* inWorld, ReplyAddress* inReplyAddress):
     SC_SequencedCommand(inWorld, inReplyAddress),
     mFilename(nullptr) {}
@@ -1466,7 +1467,7 @@ bool LoadSynthDefCmd::Stage2() {
         char str[ERR_BUF_SIZE];
         snprintf(str, ERR_BUF_SIZE, "File '%s' could not be opened\n", mFilename);
         SendFailure(&mReplyAddress, "/d_load", mFilename);
-        worklet_debug(str);
+        scprintf(str);
         return false;
     }
 }
@@ -1515,7 +1516,7 @@ bool LoadSynthDefDirCmd::Stage2() {
         char str[ERR_BUF_SIZE];
         snprintf(str, ERR_BUF_SIZE, "Could not load synthdefs. Directory '%s' does not exist\n", mFilename);
         SendFailure(&mReplyAddress, "/d_loadDir", mFilename);
-        worklet_debug(str);
+        scprintf(str);
         return false;
     }
     mDefs = GraphDef_LoadDir(mWorld, mFilename, mDefs);
@@ -1526,7 +1527,7 @@ bool LoadSynthDefDirCmd::Stage2() {
         char str[ERR_BUF_SIZE];
         snprintf(str, ERR_BUF_SIZE, "No synthdefs found in directory: '%s'\n", mFilename);
         SendFailure(&mReplyAddress, "/d_loadDir", mFilename);
-        worklet_debug(str);
+        scprintf(str);
         return false;
     }
 }
@@ -1538,6 +1539,7 @@ bool LoadSynthDefDirCmd::Stage3() {
 }
 
 void LoadSynthDefDirCmd::Stage4() { SendDone("/d_loadDir"); }
+#endif // !__EMSCRIPTEN__
 
 ///////////////////////////////////////////////////////////////////////////
 

@@ -58,8 +58,8 @@ namespace fs = std::filesystem;
 // This file has the following changes from upstream SuperCollider:
 //
 // 1. worklet_debug: Replaces scprintf throughout (declaration from SC_InterfaceTable.h)
-// 2. GraphDef_Load/GraphDef_LoadDir: Exception handlers emptied (filesystem not
-//    available in WASM - synthdefs loaded via OSC /d_recv instead)
+// 2. Filesystem functions guarded with #ifndef __EMSCRIPTEN__ (GraphDef_Load,
+//    GraphDef_LoadDir, GraphDef_LoadGlob, load_file — not available in WASM)
 // 3. GraphDef_Recv: Extra std::string* outErrorMsg parameter for WASM error reporting
 // 4. g_lastGraphDefError: Static error storage for Emscripten/WASM exception handling
 //
@@ -481,6 +481,7 @@ GraphDef* GraphDef_Recv(World* inWorld, const char* buffer, size_t size, GraphDe
     return inList;
 }
 
+#ifndef __EMSCRIPTEN__
 GraphDef* GraphDef_LoadGlob(World* inWorld, const char* pattern, GraphDef* inList) {
     SC_Filesystem::Glob* glob = SC_Filesystem::makeGlob(pattern);
     if (!glob)
@@ -500,7 +501,7 @@ GraphDef* GraphDef_LoadGlob(World* inWorld, const char* pattern, GraphDef* inLis
 }
 
 std::string load_file(const std::filesystem::path& file_path) {
-    std::ifstream file(file_path);
+    std::ifstream file(file_path, std::ifstream::binary);
     if (!file.is_open()) {
         throw std::runtime_error("Could not open file: " + file_path.string());
     }
@@ -509,16 +510,14 @@ std::string load_file(const std::filesystem::path& file_path) {
     return buffer.str();
 }
 
-// NOTE: This function requires filesystem access which is not available in WASM.
-// SuperSonic loads synthdefs via OSC (/d_recv) through GraphDef_Recv instead.
 GraphDef* GraphDef_Load(World* inWorld, const fs::path& path, GraphDef* inList) {
     try {
         std::string file_contents = load_file(path);
         inList = GraphDefLib_Read(inWorld, file_contents.data(), file_contents.size(), inList);
     } catch (const std::exception& e) {
-        // Filesystem not available in WASM - this function won't be called
+        scprintf("exception in GraphDef_Load: %s\n", e.what());
     } catch (...) {
-        // Filesystem not available in WASM - this function won't be called
+        scprintf("unknown exception in GraphDef_Load\n");
     }
 
     return inList;
@@ -529,7 +528,7 @@ GraphDef* GraphDef_LoadDir(World* inWorld, const fs::path& dirname, GraphDef* in
     fs::recursive_directory_iterator rditer(dirname, fs::directory_options::follow_directory_symlink, ec);
 
     if (ec) {
-        worklet_debug("*** ERROR: open directory failed '%s'\n", SC_Codecvt::path_to_utf8_str(dirname).c_str());
+        scprintf("*** ERROR: open directory failed '%s'\n", SC_Codecvt::path_to_utf8_str(dirname).c_str());
         return inList;
     }
 
@@ -549,7 +548,7 @@ GraphDef* GraphDef_LoadDir(World* inWorld, const fs::path& dirname, GraphDef* in
 
         rditer.increment(ec);
         if (ec) {
-            worklet_debug("*** ERROR: Could not iterate on '%s': %s\n", SC_Codecvt::path_to_utf8_str(path).c_str(),
+            scprintf("*** ERROR: Could not iterate on '%s': %s\n", SC_Codecvt::path_to_utf8_str(path).c_str(),
                      ec.message().c_str());
             return inList;
         }
@@ -557,6 +556,7 @@ GraphDef* GraphDef_LoadDir(World* inWorld, const fs::path& dirname, GraphDef* in
 
     return inList;
 }
+#endif // !__EMSCRIPTEN__
 
 void UnitSpec_Free(UnitSpec* inUnitSpec);
 void UnitSpec_Free(UnitSpec* inUnitSpec) {

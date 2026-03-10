@@ -786,12 +786,14 @@ SCErr meth_b_query(World* inWorld, int inSize, char* inData, ReplyAddress* inRep
 }
 
 
+#ifndef __EMSCRIPTEN__
 SCErr meth_d_load(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_load(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
     CallSequencedCommand(LoadSynthDefCmd, inWorld, inSize, inData, inReply);
 
     return kSCErr_None;
 }
+#endif // !__EMSCRIPTEN__
 
 SCErr meth_d_recv(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_recv(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
@@ -800,12 +802,14 @@ SCErr meth_d_recv(World* inWorld, int inSize, char* inData, ReplyAddress* inRepl
     return kSCErr_None;
 }
 
+#ifndef __EMSCRIPTEN__
 SCErr meth_d_loadDir(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_loadDir(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
     CallSequencedCommand(LoadSynthDefDirCmd, inWorld, inSize, inData, inReply);
 
     return kSCErr_None;
 }
+#endif // !__EMSCRIPTEN__
 
 SCErr meth_d_freeAll(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_freeAll(World* inWorld, int /*inSize*/, char* /*inData*/, ReplyAddress* /*inReply*/) {
@@ -1963,8 +1967,10 @@ void initMiscCommands() {
     NEW_COMMAND(rtMemoryStatus);
 
     NEW_COMMAND(d_recv);
+#ifndef __EMSCRIPTEN__
     NEW_COMMAND(d_load);
     NEW_COMMAND(d_loadDir);
+#endif
     NEW_COMMAND(d_freeAll);
     NEW_COMMAND(d_free);
 

@@ -431,6 +431,7 @@ protected:
 
 #include "SC_GraphDef.h"
 
+#ifndef __EMSCRIPTEN__
 class LoadSynthDefCmd : public SC_SequencedCommand {
 public:
     LoadSynthDefCmd(World* inWorld, ReplyAddress* inReplyAddress);
@@ -448,6 +449,7 @@ protected:
 
     virtual void CallDestructor();
 };
+#endif // !__EMSCRIPTEN__
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -475,6 +477,7 @@ protected:
 
 ///////////////////////////////////////////////////////////////////////////
 
+#ifndef __EMSCRIPTEN__
 class LoadSynthDefDirCmd : public SC_SequencedCommand {
 public:
     LoadSynthDefDirCmd(World* inWorld, ReplyAddress* inReplyAddress);
@@ -492,6 +495,7 @@ protected:
 
     virtual void CallDestructor();
 };
+#endif // !__EMSCRIPTEN__
 
 ///////////////////////////////////////////////////////////////////////////
 

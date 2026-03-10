@@ -289,6 +289,7 @@ void initializeScheduler();
 
 static void World_LoadGraphDefs(World* world);
 void World_LoadGraphDefs(World* world) {
+#ifndef __EMSCRIPTEN__
     GraphDef* list = nullptr;
     using DirName = SC_Filesystem::DirName;
 
@@ -305,6 +306,7 @@ void World_LoadGraphDefs(World* world) {
         list = GraphDef_LoadDir(world, path, list);
         GraphDef_Define(world, list);
     }
+#endif // !__EMSCRIPTEN__
 }
 
 namespace scsynth {
