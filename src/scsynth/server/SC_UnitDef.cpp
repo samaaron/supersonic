@@ -19,6 +19,7 @@
 */
 
 #include <stdlib.h>
+#include <type_traits>
 
 #include "SC_Endian.h" // first to avoid win32 IN clash
 
@@ -60,15 +61,12 @@ bool UnitDef_Create(const char* inName, size_t inAllocSize, UnitCtorFunc inCtor,
 }
 
 
-bool UnitDef_AddCmd(const char* inUnitDefName, const char* inCmdName, UnitCmdFunc inFunc) {
-    if (strlen(inUnitDefName) >= kSCNameByteLen)
+template <typename Func> static SCBool UnitDef_DoAddCmd(const char* inUnitDefName, const char* inCmdName, Func inFunc) {
+    if (strlen(inUnitDefName) >= kSCNameByteLen || strlen(inCmdName) >= kSCNameByteLen)
         return false;
-    int32 unitDefName[kSCNameLen];
-    memset(unitDefName, 0, kSCNameByteLen);
-    strcpy((char*)unitDefName, inUnitDefName);
 
-    if (strlen(inCmdName) >= kSCNameByteLen)
-        return false;
+    int32 unitDefName[kSCNameLen];
+    strncpy((char*)unitDefName, inUnitDefName, kSCNameByteLen);
 
     UnitDef* unitDef = GetUnitDef(unitDefName);
     if (!unitDef)
@@ -78,14 +76,27 @@ bool UnitDef_AddCmd(const char* inUnitDefName, const char* inCmdName, UnitCmdFun
         unitDef->mCmds = new HashTable<UnitCmd, Malloc>(&gMalloc, 4, true);
 
     UnitCmd* cmd = new UnitCmd();
-    memset(cmd->mCmdName, 0, kSCNameByteLen);
-    strcpy((char*)cmd->mCmdName, inCmdName);
+    strncpy((char*)cmd->mCmdName, inCmdName, kSCNameByteLen);
 
-    cmd->mFunc = inFunc;
+    if constexpr (std::is_same_v<Func, UnitCmdFuncEx>) {
+        cmd->mFuncEx = inFunc;
+        cmd->mHasFuncEx = true;
+    } else {
+        cmd->mFunc = inFunc;
+        cmd->mHasFuncEx = false;
+    }
     cmd->mHash = Hash(cmd->mCmdName);
     unitDef->mCmds->Add(cmd);
 
     return true;
+}
+
+bool UnitDef_AddCmd(const char* inUnitDefName, const char* inCmdName, UnitCmdFunc inFunc) {
+    return UnitDef_DoAddCmd(inUnitDefName, inCmdName, inFunc);
+}
+
+SCBool UnitDef_AddCmdEx(const char* inUnitDefName, const char* inCmdName, UnitCmdFuncEx inFunc) {
+    return UnitDef_DoAddCmd(inUnitDefName, inCmdName, inFunc);
 }
 
 bool PlugIn_DefineCmd(const char* inCmdName, PlugInCmdFunc inFunc, void* inUserData) {
@@ -93,8 +104,7 @@ bool PlugIn_DefineCmd(const char* inCmdName, PlugInCmdFunc inFunc, void* inUserD
         return false;
 
     PlugInCmd* cmd = new PlugInCmd();
-    memset(cmd->mCmdName, 0, kSCNameByteLen);
-    strcpy((char*)cmd->mCmdName, inCmdName);
+    strncpy((char*)cmd->mCmdName, inCmdName, kSCNameByteLen);
 
     cmd->mFunc = inFunc;
     cmd->mHash = Hash(cmd->mCmdName);
@@ -106,9 +116,9 @@ bool PlugIn_DefineCmd(const char* inCmdName, PlugInCmdFunc inFunc, void* inUserD
 
 void Graph_FirstCalc(Graph* inGraph);
 void Graph_NullFirstCalc(Graph* inGraph);
-void Graph_QueueUnitCmd(Graph* inGraph, int inSize, const char* inData);
+void Graph_QueueUnitCmd(Graph* inGraph, int inSize, const char* inData, const ReplyAddress* inReplyAddress);
 
-int Unit_DoCmd(World* inWorld, int inSize, char* inData) {
+SCErr Unit_DoCmd(World* inWorld, int inSize, const char* inData, ReplyAddress* inReplyAddress) {
     sc_msg_iter msg(inSize, inData);
     int nodeID = msg.geti();
     gMissingNodeID = nodeID;
@@ -137,12 +147,20 @@ int Unit_DoCmd(World* inWorld, int inSize, char* inData) {
     // only run unit command if the ctor has been called!
     if (graph->mNode.mCalcFunc == (NodeCalcFunc)&Graph_FirstCalc
         || graph->mNode.mCalcFunc == (NodeCalcFunc)&Graph_NullFirstCalc) {
-        Graph_QueueUnitCmd(graph, inSize, inData);
+        Graph_QueueUnitCmd(graph, inSize, inData, inReplyAddress);
     } else {
-        (cmd->mFunc)(unit, &msg);
+        Unit_RunCommand(cmd, unit, &msg, inReplyAddress);
     }
 
     return kSCErr_None;
+}
+
+void Unit_RunCommand(const UnitCmd* cmd, Unit* unit, sc_msg_iter* msg, ReplyAddress* inReplyAddr) {
+    if (cmd->mHasFuncEx) {
+        cmd->mFuncEx(unit, msg, inReplyAddr);
+    } else {
+        cmd->mFunc(unit, msg);
+    }
 }
 
 int PlugIn_DoCmd(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {

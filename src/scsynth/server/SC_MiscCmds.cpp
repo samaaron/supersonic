@@ -239,8 +239,8 @@ SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* in
 #endif
 
 SCErr meth_u_cmd(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
-SCErr meth_u_cmd(World* inWorld, int inSize, char* inData, ReplyAddress* /*inReply*/) {
-    return Unit_DoCmd(inWorld, inSize, inData);
+SCErr meth_u_cmd(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
+    return Unit_DoCmd(inWorld, inSize, inData, inReply);
 };
 
 SCErr meth_cmd(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);

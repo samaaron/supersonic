@@ -34,6 +34,7 @@
 #include "SC_Prototypes.h"
 #include "SC_Errors.h"
 #include "Unroll.h"
+#include "SC_ReplyImpl.hpp"
 
 // =============================================================================
 // SUPERSONIC MODIFICATIONS
@@ -55,6 +56,7 @@ void Unit_ChooseMulAddFunc(Unit* unit);
 
 struct QueuedCmd {
     struct QueuedCmd* mNext;
+    ReplyAddress mReplyAddress;
     int mSize;
     char mData[1];
 };
@@ -64,7 +66,7 @@ struct QueuedCmd {
 void Graph_FirstCalc(Graph* inGraph);
 void Graph_NullFirstCalc(Graph* inGraph);
 
-void Graph_Dtor(Graph* inGraph) {
+static void Graph_Dtor(Graph* inGraph) {
     // scprintf("->Graph_Dtor %d\n", inGraph->mNode.mID);
     World* world = inGraph->mNode.mWorld;
     uint32 numUnits = inGraph->mNumUnits;
@@ -80,8 +82,8 @@ void Graph_Dtor(Graph* inGraph) {
         }
     }
     // free queued Unit commands
-    // AFAICT this can only happen if a Graph is created, Unit commands are sent and the Graph
-    // is deleted all at the same time stamp.
+    // AFAICT this can only happen if a Graph is created, Unit commands are sent and
+    // the Graph is deleted all at in the same control block.
     QueuedCmd* cmd = (QueuedCmd*)inGraph->mPrivate;
     while (cmd) {
         QueuedCmd* next = cmd->mNext;
@@ -103,9 +105,51 @@ void Graph_Dtor(Graph* inGraph) {
     // scprintf("<-Graph_Dtor\n");
 }
 
+// This is called by asynchronous unit commands to prevent the Graph
+// from being destroyed while the command is still pending.
+void Graph_AddRef(Graph* inGraph) {
+    // this should only be called on Graphs that are still alive!
+    assert(inGraph->mRefCount > 0);
+    inGraph->mRefCount++;
+}
+
+// This is called by asynchronous unit commands after they have finished.
+// If the reference count reaches zero, the Graph will finally be destroyed.
+void Graph_Release(Graph* inGraph) {
+    assert(inGraph->mRefCount > 0);
+    if (--inGraph->mRefCount == 0) {
+        Graph_Dtor(inGraph);
+    }
+}
+
+// This is called when a Graph resp. one of its parent Nodes is freed by the user.
+void Graph_Delete(Graph* inGraph) {
+    assert(inGraph->mRefCount > 0);
+    int newRefCount = --inGraph->mRefCount;
+    if (newRefCount > 0) {
+        // the Graph is being referenced by one or more asynchronous unit commands.
+        // We keep it alive, but remove it from the Node tree. Async unit commands
+        // can call Graph_HasParent() to check whether the Graph has been removed.
+        Node_Remove(&inGraph->mNode);
+        // Also remove the Node from the World so that the ID becomes free again.
+        // This also prevents users from (accidentally) re-adding the Graph to
+        // the Server tree.
+        World_RemoveNode(inGraph->mNode.mWorld, &inGraph->mNode);
+    } else {
+        // Nobody else is referencing the Graph, so we can immediately destroy it.
+        Graph_Dtor(inGraph);
+    }
+}
+
+// This is called by asynchronous unit commands to check whether the
+// owning Graph has been removed.
+bool Graph_HasParent(const Graph* inGraph) { return inGraph->mNode.mParent != nullptr; }
+
 ////////////////////////////////////////////////////////////////////////////////
 
-int Graph_New(struct World* inWorld, struct GraphDef* inGraphDef, int32 inID, struct sc_msg_iter* args,
+static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter* msg, bool argtype);
+
+int Graph_New(World* inWorld, GraphDef* inGraphDef, int32 inID, sc_msg_iter* args,
               Graph** outGraph, bool argtype) // true for normal args , false for setn type args
 {
     Graph* graph;
@@ -120,8 +164,8 @@ int Graph_New(struct World* inWorld, struct GraphDef* inGraphDef, int32 inID, st
     return err;
 }
 
-void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter* msg,
-                bool argtype) // true for normal args , false for setn type args
+static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter* msg,
+                       bool argtype) // true for normal args , false for setn type args
 {
     // scprintf("->Graph_Ctor\n");
 
@@ -466,15 +510,21 @@ void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter*
         }
     }
 
+    graph->mRefCount = 1;
+
     inGraphDef->mRefCount++;
 }
 
-void Graph_QueueUnitCmd(Graph* inGraph, int inSize, const char* inData) {
+void Graph_QueueUnitCmd(Graph* inGraph, int inSize, const char* inData, const ReplyAddress* inReplyAddress) {
     // put the unit command on a queue and dispatch it right after the first
     // calc function, i.e. after calling the unit constructors.
     // scprintf("->Graph_QueueUnitCmd\n");
     QueuedCmd* cmd = (QueuedCmd*)World_Alloc(inGraph->mNode.mWorld, sizeof(QueuedCmd) + inSize);
     cmd->mNext = nullptr;
+    if (inReplyAddress)
+        cmd->mReplyAddress = *inReplyAddress;
+    else
+        cmd->mReplyAddress.mReplyFunc = null_reply_func;
     cmd->mSize = inSize;
     memcpy(cmd->mData, inData, inSize);
     if (inGraph->mPrivate) {
@@ -506,7 +556,7 @@ static void Graph_DispatchUnitCmds(Graph* inGraph) {
         int32* cmdName = msg.gets4();
         UnitCmd* cmd = unitDef->mCmds->Get(cmdName);
 
-        (cmd->mFunc)(unit, &msg);
+        Unit_RunCommand(cmd, unit, &msg, &item->mReplyAddress);
 
         World_Free(inGraph->mNode.mWorld, item);
 

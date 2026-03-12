@@ -1,9 +1,9 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2026-03-09
-**Last Sync Commit**: 99be55460
-**Upstream Branch**: supercollider/develop (tracked to 2026-03-09)
-**Verified Against**: SuperCollider 3.15.0-dev + PR #7395 (SynthDef v3)
+**Last Updated**: 2026-03-12
+**Last Sync Commit**: 613f26f9
+**Upstream Branch**: supercollider/develop (tracked to 2026-03-12)
+**Verified Against**: SuperCollider 3.15.0-dev + PR #7405 (Plugin/Unit command extensions)
 
 ---
 
@@ -596,6 +596,51 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 ---
 
 ## Reference: Previous Sync Summary
+
+### Plugin command and unit command extensions (2026-03-12)
+
+Applied SuperCollider PR #7405 (commit 613f26f9) which adds extended plugin commands, async unit commands, and Graph refcounting.
+
+**New Plugin API (v4 → v5):**
+- `DoAsynchronousCommandEx` — async plugin commands with reply address passed to stage functions
+- `DefineUnitCmdEx` — unit commands with reply address (for async unit commands)
+- `DoAsyncUnitCommand` — async unit commands with Graph refcounting to keep the graph alive
+
+**Applied:**
+- **SC_Command.h** (NEW): Central typedef declarations for command function types, extracted from multiple headers
+- **SC_InterfaceTable.h**: API version bumped to 5, added function pointers and macros for new functions
+- **SC_Graph.h**: Added `int32 mRefCount` to Graph struct
+- **SC_Graph.cpp**: Added `Graph_AddRef`, `Graph_Release`, `Graph_Delete`, `Graph_HasParent`. Made `Graph_Dtor` static. Added `mRefCount = 1` in Graph_Ctor. Updated `Graph_QueueUnitCmd` to pass ReplyAddress
+- **SC_Node.cpp**: Added null-parent guard in `Node_Remove`. Changed `Node_Delete` to call `Graph_Delete` instead of `Graph_Dtor`
+- **SC_UnitDef.h**: `UnitCmd` struct now uses union for `mFunc`/`mFuncEx` with `mHasFuncEx` bool
+- **SC_UnitDef.cpp**: Templated `UnitDef_DoAddCmd`. Added `UnitDef_AddCmdEx`, `Unit_RunCommand`. Updated `Unit_DoCmd` to pass ReplyAddress
+- **SC_Prototypes.h**: Updated declarations for new graph functions and async command functions
+- **SC_SequencedCommand.h**: Templated `AsyncPlugInCmd_<StageFn>` with `if constexpr` stage dispatch. Added `AsyncUnitCmd` class with Graph refcounting
+- **SC_SequencedCommand.cpp**: Added `PerformAsynchronousCommandEx` and `PerformAsyncUnitCommand`. Full `AsyncUnitCmd` implementation
+- **SC_MiscCmds.cpp**: `meth_u_cmd` now passes reply address to `Unit_DoCmd`
+- **SC_World.cpp**: Registered new function pointers in interface table
+- **SC_GraphDef.h**: Removed redundant typedef
+- **SC_Lib_Cintf.cpp**: Added DemoUGens plugin loading
+- **DemoUGens.cpp**: Updated to match upstream — uses `DoAsynchronousCommandEx`, adds `UnitCmdDemo` with async `testCommand`, `DefineDtorUnit`, destructor with `SendMsgFromRT`
+
+**WASM Adaptations:**
+- `worklet_debug` used for error messages in `PerformAsyncUnitCommand` (instead of upstream `scprintf`)
+- `DemoUGens_Load` declared outside `extern "C"` block in `SC_Lib_Cintf.cpp` to match C++ linkage of `PluginLoad()` macro
+- In WASM NRT mode (`mRealTime=false`), `CallEveryStage()` processes all async command stages synchronously — no RT/NRT thread interleaving. This means concurrent synth free during async commands cannot happen
+
+**Testing:**
+- Compiled `u_cmd_test` and `number` test synthdefs using sclang 3.15.0-dev (commit 613f26f9)
+- 24 new Playwright tests (12 per mode) across SAB and postMessage covering:
+  - Async plugin commands: success with /done, failure with no /done, minimal args
+  - Synchronous unit commands: setValue queued and non-queued
+  - Async unit commands: success /done, failure no /done, concurrent free safety, multiple commands
+  - Graph refcounting: null parent guard, ID reuse after async free, rapid create-command-free cycles
+
+**Upstream:**
+- https://github.com/supercollider/supercollider/commit/613f26f9549693f1d3032145048f1fc14a863981
+- https://github.com/supercollider/supercollider/pull/7405
+
+---
 
 ### SynthDef v3 format support (2026-03-09)
 

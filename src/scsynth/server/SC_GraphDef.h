@@ -69,7 +69,6 @@ struct GraphDef {
     uint32 mNumVariants;
     struct GraphDef* mVariants;
 };
-typedef struct GraphDef GraphDef;
 
 GraphDef* GraphDef_Recv(World* inWorld, const char* buffer, size_t size, GraphDef* inList, std::string* outErrorMsg = nullptr);
 #ifndef __EMSCRIPTEN__

@@ -84,6 +84,9 @@ extern "C" {
     void Distortion_Load(InterfaceTable* table);
     // void Mda_Load(InterfaceTable* table);  // Excluded from build (see build.sh)
 }
+// demo plugins (for testing plugin/unit commands)
+// Note: NOT extern "C" - must match C++ linkage of PluginLoad() macro
+void DemoUGens_Load(InterfaceTable* table);
 
 extern void DiskIO_Unload(void);
 extern void UIUGens_Unload(void);
@@ -133,5 +136,7 @@ void initialize_library(const char* uGensPluginPath) {
     // sc3-plugins
     Distortion_Load(&gInterfaceTable);
     // Mda_Load(&gInterfaceTable);  // Excluded from build (see build.sh)
+    // demo plugins (for testing plugin/unit commands)
+    DemoUGens_Load(&gInterfaceTable);
 #endif // STATIC_PLUGINS
 }
