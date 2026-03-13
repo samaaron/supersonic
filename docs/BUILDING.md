@@ -52,11 +52,62 @@ This will:
 
 ### Native (JUCE) backend
 
+The native build produces a standalone executable that uses JUCE for audio I/O. This is the backend used by Sonic Pi.
+
+**Linux dependencies:**
+
+```bash
+sudo apt-get install -y build-essential cmake libasound2-dev \
+  libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
+  libxinerama-dev libxcursor-dev libxcomposite-dev
+```
+
+**macOS/Windows:** CMake and a C++17 compiler. No additional dependencies.
+
 ```bash
 scripts/build-native.sh            # Release build
 scripts/build-native.sh --debug    # Debug build
 scripts/build-native.sh --clean    # Clean rebuild
 scripts/build-native.bat           # Windows
+```
+
+The binary lands at `build/native/SuperSonic_artefacts/Release/SuperSonic`.
+
+**Running native tests:**
+
+The native test suite uses Catch2. Build with `--tests` and run the test binary directly:
+
+```bash
+scripts/build-native.sh --tests
+./build/native/test/native/SuperSonicNativeTests
+```
+
+On Windows the test binary is at `build/native/test/native/Release/SuperSonicNativeTests.exe`.
+
+### NIF (Erlang/Elixir)
+
+The NIF build produces a shared library (`.so` on Linux/macOS, `.dll` on Windows) that can be loaded as a BEAM Native Interface Function from Erlang or Elixir.
+
+**Prerequisites:** Everything needed for the native build, plus Erlang/OTP 27+ and Elixir 1.18+.
+
+```bash
+cmake -B build/nif -DBUILD_NIF=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build/nif --target supersonic_nif --config Release --parallel
+```
+
+**Running NIF tests:**
+
+```bash
+cd test/nif
+SUPERSONIC_NIF_PATH=../../build/nif mix test
+```
+
+**Headless mode:**
+
+On systems without an audio device (CI, containers), set `SUPERSONIC_HEADLESS=1` to use the built-in HeadlessDriver instead of a real audio device. The HeadlessDriver calls `process_audio()` at real audio rate on a high-priority timer thread.
+
+```bash
+SUPERSONIC_NIF_PATH=../../build/nif SUPERSONIC_HEADLESS=1 mix test
 ```
 
 ## Output

@@ -16,18 +16,20 @@ This then led to a suite of powerful new live coding languages using **scsynth**
 
 _What if you didn't just bring your language to scsynth? What if you brought scsynth to your environment?_
 
-This is SuperSonic. All the synthesis power of **scsynth** - modified and augmented to run in your web browser.
+This is SuperSonic. All the synthesis power of **scsynth** - rearchitected to reach new places.
 
 # Welcome to SuperSonic
 
-**SuperSonic** is [SuperCollider](https://supercollider.github.io/)'s powerful audio synthesis engine **scsynth** running in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet).
+**SuperSonic** is a reworking of [SuperCollider](https://supercollider.github.io/)'s audio synthesis engine **scsynth** designed to run wherever you need it - in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), as a standalone native backend, or embedded directly into the [BEAM](https://www.erlang.org/) via a NIF.
 
 Highlights:
 
-- **AudioWorklet** - runs in a dedicated high priority audio thread
-- **WebAssembly** - scsynth's original C++ code reworked and compiled for the web
-- **OSC API** - talk to the scsynth server through its native OSC API
-- **Tested** - 1100+ tests across both communication modes run on every release
+- **AudioWorklet** - runs in a dedicated high priority audio thread in the browser
+- **WebAssembly** - scsynth's original C++ code compiled for the web
+- **Native Backend** - standalone JUCE-based executable for desktop integration
+- **BEAM NIF** - embed scsynth directly in Erlang/Elixir applications
+- **OSC API** - the same OSC protocol across all targets
+- **Tested** - 1400+ tests across web, native and NIF targets run on every release
 - **Zero Config via CDN** - no installation necessary - works directly from CDNs such as unpkg.
 - **Performance Mode (SAB)** - can use a SharedArrayBuffer (SAB) for lower latency and reduced jitter with internal comms. This mode is optional and requires COOP/COEP headers.
 - **Upstream Compatible** - SuperSonic is kept in sync with the development of the official native SuperCollider scsynth server.
@@ -40,7 +42,7 @@ Try the live demo: [**sonic-pi.net/supersonic/demo.html**](https://sonic-pi.net/
 
 SuperSonic can be fetched remotely via CDN, locally via npm or self-built.
 
-### CDN Usage
+### CDN
 
 ```html
 <script type="module">
@@ -58,7 +60,7 @@ SuperSonic can be fetched remotely via CDN, locally via npm or self-built.
 </script>
 ```
 
-### npm / Bundler Usage
+### npm / Bundler
 
 ```javascript
 import { SuperSonic } from "supersonic-scsynth";
@@ -83,7 +85,7 @@ For the full list of configuration options, see the [API Reference](docs/API.md#
 - [scsynth Command Reference](docs/SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling scsynth
 - [Workers Guide](docs/WORKERS.md) - Send OSC directly from Web Workers and AudioWorklets for the lowest latency.
 - [Metrics](docs/METRICS.md) - Performance monitoring and debugging
-- [Building from Source](docs/BUILDING.md) - Compiling the WASM yourself
+- [Building from Source](docs/BUILDING.md) - WASM, native (JUCE), and NIF (Erlang/Elixir) builds
 
 ## Support
 
