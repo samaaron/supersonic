@@ -22,12 +22,16 @@ jobs:
             name: linux-x64
             deps: |
               sudo apt-get update
-              sudo apt-get install -y build-essential cmake libasound2-dev
+              sudo apt-get install -y build-essential cmake libasound2-dev \
+                libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
+                libxinerama-dev libxcursor-dev libxcomposite-dev
           - os: ubuntu-24.04-arm
             name: linux-arm64
             deps: |
               sudo apt-get update
-              sudo apt-get install -y build-essential cmake libasound2-dev
+              sudo apt-get install -y build-essential cmake libasound2-dev \
+                libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
+                libxinerama-dev libxcursor-dev libxcomposite-dev
           - os: macos-latest
             name: macos-arm64
             deps: ""
@@ -134,7 +138,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libasound2-dev
+          sudo apt-get install -y build-essential cmake libasound2-dev \
+            libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxcomposite-dev
 
       - name: Setup Erlang/Elixir
         uses: erlef/setup-beam@v1
