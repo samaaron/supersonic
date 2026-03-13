@@ -35,7 +35,7 @@ jobs:
           - os: macos-latest
             name: macos-arm64
             deps: ""
-          - os: macos-13
+          - os: macos-15-intel
             name: macos-x64
             deps: ""
           - os: windows-latest
@@ -118,7 +118,7 @@ jobs:
             name: macos-arm64
             ext: dylib
             audio: ""
-          - os: macos-13
+          - os: macos-15-intel
             name: macos-x64
             ext: dylib
             audio: ""
