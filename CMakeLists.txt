@@ -395,7 +395,6 @@ if(BUILD_NIF)
     set_target_properties(supersonic_nif PROPERTIES
         PREFIX ""
         OUTPUT_NAME "supersonic"
-        SUFFIX ".so"
     )
     target_include_directories(supersonic_nif PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}/erlang_generated   # generated erl_int_sizes_config.h
@@ -404,8 +403,14 @@ if(BUILD_NIF)
     target_link_libraries(supersonic_nif PRIVATE supersonic_engine)
 
     if(APPLE)
+        # erlang:load_nif expects .so on all Unix platforms (not .dylib)
         set_target_properties(supersonic_nif PROPERTIES
+            SUFFIX ".so"
             LINK_FLAGS "-undefined dynamic_lookup")
+    endif()
+    if(UNIX AND NOT APPLE)
+        # Linux already defaults to .so, but be explicit
+        set_target_properties(supersonic_nif PROPERTIES SUFFIX ".so")
     endif()
 endif()
 
