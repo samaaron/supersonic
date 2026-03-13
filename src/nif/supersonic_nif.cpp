@@ -30,9 +30,8 @@ static std::mutex g_engine_mutex;
 static std::unique_ptr<SupersonicEngine> g_engine;
 static bool g_headless = false;  // true when started without audio device
 
-// JUCE runtime — initialised lazily on first start() call (dirty scheduler)
-static std::once_flag g_juce_init_flag;
-static std::unique_ptr<juce::ScopedJuceInitialiser_GUI> g_juce_init;
+// JUCE runtime — initialised on first start() call (dirty scheduler)
+static std::atomic<bool> g_juce_initialised{false};
 
 // Notification context (same pattern as tau5_discovery)
 struct NotificationContext {
@@ -155,10 +154,11 @@ static ERL_NIF_TERM nif_is_loaded(ErlNifEnv* env, int, const ERL_NIF_TERM[]) {
 static ERL_NIF_TERM nif_start(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     if (argc != 1) return enif_make_badarg(env);
 
-    // Initialise JUCE runtime once (safe on dirty scheduler)
-    std::call_once(g_juce_init_flag, [] {
-        g_juce_init = std::make_unique<juce::ScopedJuceInitialiser_GUI>();
-    });
+    // Initialise JUCE runtime if not already done
+    if (!g_juce_initialised.load()) {
+        juce::initialiseJuce_GUI();
+        g_juce_initialised.store(true);
+    }
 
     std::lock_guard<std::mutex> lock(g_engine_mutex);
 
@@ -287,7 +287,22 @@ static void on_unload(ErlNifEnv*, void*) {
             g_engine.reset();
         }
     }
-    g_juce_init.reset();
+#ifdef __APPLE__
+    // Do NOT call shutdownJuce_GUI() on macOS.  The teardown path
+    // (MessageManager::doPlatformSpecificShutdown → ~AppDelegate) calls
+    // NSRunLoop/NSNotificationCenter/NSApp APIs that require the main
+    // thread.  on_unload runs on an arbitrary BEAM scheduler, causing
+    // an abort (trap 6).
+    //
+    // This is safe because on_unload only fires at VM shutdown (we pass
+    // NULL for both reload and upgrade in ERL_NIF_INIT, so hot reload
+    // is not supported).  The OS reclaims all process memory at exit.
+#else
+    if (g_juce_initialised.load()) {
+        juce::shutdownJuce_GUI();
+        g_juce_initialised.store(false);
+    }
+#endif
 }
 
 // ─── Function table ────────────────────────────────────────────────────────
