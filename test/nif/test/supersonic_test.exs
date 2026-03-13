@@ -1,6 +1,11 @@
 defmodule SupersonicTest do
   use ExUnit.Case
 
+  # When SUPERSONIC_HEADLESS=1 is set (e.g. Windows CI with no audio device),
+  # tests use headless mode + tick() to drive audio processing manually.
+  # Otherwise tests boot with a real audio device.
+  @headless System.get_env("SUPERSONIC_HEADLESS") == "1"
+
   # Tests share a single global NIF engine — ensure clean state between tests
   setup do
     :supersonic.stop()
@@ -9,6 +14,19 @@ defmodule SupersonicTest do
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────────
+
+  defp start_config(overrides \\ %{}) do
+    if @headless do
+      Map.merge(%{headless: true}, overrides)
+    else
+      overrides
+    end
+  end
+
+  defp ensure_processing do
+    if @headless, do: :supersonic.tick()
+    :ok
+  end
 
   # Build a minimal OSC message from an address string.
   # OSC format: null-terminated string padded to 4-byte boundary + type tag ","
@@ -47,13 +65,13 @@ defmodule SupersonicTest do
   # ── Lifecycle ────────────────────────────────────────────────────────────
 
   test "start and stop" do
-    assert :ok = :supersonic.start(%{})
+    assert :ok = :supersonic.start(start_config())
     assert :ok = :supersonic.stop()
   end
 
   test "double start returns error" do
-    assert :ok = :supersonic.start(%{})
-    assert {:error, :already_running} = :supersonic.start(%{})
+    assert :ok = :supersonic.start(start_config())
+    assert {:error, :already_running} = :supersonic.start(start_config())
   end
 
   test "stop when not running is ok" do
@@ -67,12 +85,12 @@ defmodule SupersonicTest do
   end
 
   test "send_osc with valid message returns ok" do
-    :ok = :supersonic.start(%{})
+    :ok = :supersonic.start(start_config())
     assert :ok = :supersonic.send_osc(osc_message("/status"))
   end
 
   test "send_osc with non-binary returns badarg" do
-    :ok = :supersonic.start(%{})
+    :ok = :supersonic.start(start_config())
     assert_raise ArgumentError, fn -> :supersonic.send_osc(:not_a_binary) end
   end
 
@@ -84,20 +102,21 @@ defmodule SupersonicTest do
   end
 
   test "receive /version.reply" do
-    :ok = :supersonic.start(%{})
+    :ok = :supersonic.start(start_config())
     :ok = :supersonic.set_notification_pid()
     :ok = :supersonic.send_osc(osc_message("/version"))
+    ensure_processing()
 
     assert {:ok, reply} = wait_for_reply()
     assert is_binary(reply)
-    # /version.reply starts with the address pattern
     assert String.starts_with?(reply, "/version.reply")
   end
 
   test "receive /g_queryTree.reply" do
-    :ok = :supersonic.start(%{})
+    :ok = :supersonic.start(start_config())
     :ok = :supersonic.set_notification_pid()
     :ok = :supersonic.send_osc(osc_message("/g_queryTree", 0))
+    ensure_processing()
 
     assert {:ok, reply} = wait_for_reply()
     assert is_binary(reply)
@@ -107,13 +126,13 @@ defmodule SupersonicTest do
   # ── Config options ───────────────────────────────────────────────────────
 
   test "start with custom config" do
-    config = %{
+    config = start_config(%{
       sample_rate: 44100,
       num_output_channels: 2,
       num_input_channels: 0,
       max_nodes: 512,
       num_buffers: 256
-    }
+    })
     assert :ok = :supersonic.start(config)
   end
 end

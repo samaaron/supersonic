@@ -101,6 +101,7 @@ jobs:
           - os: ubuntu-latest
             name: linux-x64
             ext: so
+            headless: ""
             audio: |
               sudo apt-get install -y pulseaudio
               pulseaudio --start --exit-idle-time=-1
@@ -109,6 +110,7 @@ jobs:
           - os: ubuntu-24.04-arm
             name: linux-arm64
             ext: so
+            headless: ""
             audio: |
               sudo apt-get install -y pulseaudio
               pulseaudio --start --exit-idle-time=-1
@@ -117,15 +119,18 @@ jobs:
           - os: macos-latest
             name: macos-arm64
             ext: so
+            headless: ""
             audio: ""
           - os: macos-15-intel
             name: macos-x64
             ext: so
+            headless: ""
             audio: ""
           - os: windows-latest
             name: windows-x64
             ext: dll
             audio: ""
+            headless: "1"
 
     runs-on: ${{ matrix.os }}
     name: nif-${{ matrix.name }}
@@ -166,6 +171,7 @@ jobs:
         working-directory: test/nif
         env:
           SUPERSONIC_NIF_PATH: ${{ github.workspace }}/build/nif
+          SUPERSONIC_HEADLESS: ${{ matrix.headless }}
         shell: bash
         run: |
           mix local.hex --force
