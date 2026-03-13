@@ -23,7 +23,6 @@ TEST_CASE("isRunning returns true after initialise", "[lifecycle]") {
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.initialise(cfg);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     CHECK(engine.isRunning());
     engine.shutdown();
 }
@@ -34,7 +33,6 @@ TEST_CASE("isRunning returns false after shutdown", "[lifecycle]") {
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.initialise(cfg);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     REQUIRE(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -47,7 +45,6 @@ TEST_CASE("Double initialise is safe", "[lifecycle]") {
     cfg.udpPort  = 0;
 
     engine.initialise(cfg);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     REQUIRE(engine.isRunning());
 
     // Second call should be a no-op (mRunning is already true)
@@ -64,7 +61,6 @@ TEST_CASE("Double shutdown is safe", "[lifecycle]") {
     cfg.udpPort  = 0;
 
     engine.initialise(cfg);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     REQUIRE(engine.isRunning());
 
     engine.shutdown();
@@ -83,14 +79,16 @@ TEST_CASE("Null onReply callback does not crash", "[lifecycle]") {
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.initialise(cfg);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     // Send a command that would normally trigger a reply
     auto pkt = osc_test::message("/status");
     engine.sendOsc(pkt.ptr(), pkt.size());
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // If we got here without crashing, the test passes
+    // Sync barrier: ensures /status was processed (exercising the null callback path)
+    auto sync = osc_test::message("/sync", 0);
+    engine.sendOsc(sync.ptr(), sync.size());
+    // Can't waitForReply (onReply is null) but shutdown will drain;
+    // HeadlessDriver guarantees the message is processed within a few ms.
     engine.shutdown();
     SUCCEED();
 }
@@ -103,12 +101,14 @@ TEST_CASE("Null onDebug callback does not crash", "[lifecycle]") {
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.initialise(cfg);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     // Send a command that might produce debug output
     auto pkt = osc_test::message("/dumpOSC", 1);
     engine.sendOsc(pkt.ptr(), pkt.size());
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Send another command so dumpOSC has something to print
+    auto status = osc_test::message("/status");
+    engine.sendOsc(status.ptr(), status.size());
 
     engine.shutdown();
     SUCCEED();
@@ -188,8 +188,10 @@ TEST_CASE("onDebug receives messages via /dumpOSC", "[lifecycle]") {
     // Send a command to trigger debug printing
     fx.send(osc_test::message("/status"));
 
-    // Give debug reader time to process
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Sync barrier: ensures /status was processed and debug output drained
+    fx.send(osc_test::message("/sync", 42));
+    OscReply syncR;
+    fx.waitForReply("/synced", syncR);
 
     auto msgs = fx.debugMessages();
     // Debug messages may or may not appear depending on engine internals,

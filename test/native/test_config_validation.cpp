@@ -47,8 +47,6 @@ TEST_CASE("Engine boots with minimum viable config", "[config]") {
     cfg.numRGens     = 4;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     CHECK(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -67,8 +65,6 @@ TEST_CASE("Engine boots with large config values", "[config]") {
     cfg.numBuffers = 4096;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     CHECK(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -86,8 +82,6 @@ TEST_CASE("Engine boots at 44100 Hz", "[config]") {
     cfg.sampleRate = 44100;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     CHECK(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -102,8 +96,6 @@ TEST_CASE("Engine boots at 96000 Hz", "[config]") {
     cfg.udpPort    = 0;
     cfg.sampleRate = 96000;
     engine.initialise(cfg);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -122,8 +114,6 @@ TEST_CASE("Engine boots with bufferSize=64", "[config]") {
     cfg.bufferSize = 64;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     CHECK(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -139,8 +129,6 @@ TEST_CASE("Engine boots with bufferSize=256", "[config]") {
     cfg.bufferSize = 256;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     CHECK(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -155,8 +143,6 @@ TEST_CASE("Engine boots with bufferSize=512", "[config]") {
     cfg.udpPort    = 0;
     cfg.bufferSize = 512;
     engine.initialise(cfg);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -188,8 +174,6 @@ TEST_CASE("udpPort=0 disables UDP listener", "[config]") {
     cfg.udpPort  = 0;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     // Engine should still be running, just without UDP
     CHECK(engine.isRunning());
 
@@ -209,8 +193,6 @@ TEST_CASE("Engine boots with mono output", "[config]") {
     cfg.numOutputChannels = 1;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     CHECK(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -227,8 +209,6 @@ TEST_CASE("Engine boots with zero input channels", "[config]") {
     cfg.udpPort          = 0;
     cfg.numInputChannels = 0;
     engine.initialise(cfg);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -247,8 +227,6 @@ TEST_CASE("Engine boots with short prescheduler lookahead", "[config]") {
     cfg.preschedulerLookaheadS = 0.050;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     CHECK(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -263,8 +241,6 @@ TEST_CASE("Engine boots with long prescheduler lookahead", "[config]") {
     cfg.udpPort                = 0;
     cfg.preschedulerLookaheadS = 2.0;
     engine.initialise(cfg);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -283,8 +259,6 @@ TEST_CASE("Engine boots with small numControlBusChannels", "[config]") {
     cfg.numControlBusChannels = 128;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     CHECK(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -302,8 +276,6 @@ TEST_CASE("Engine boots with small realTimeMemorySize", "[config]") {
     cfg.realTimeMemorySize = 256;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     CHECK(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -318,8 +290,6 @@ TEST_CASE("Engine boots with large realTimeMemorySize", "[config]") {
     cfg.udpPort            = 0;
     cfg.realTimeMemorySize = 32768;
     engine.initialise(cfg);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     CHECK(engine.isRunning());
     engine.shutdown();

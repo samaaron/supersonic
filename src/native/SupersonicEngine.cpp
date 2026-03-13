@@ -7,7 +7,9 @@
 #include "osc/OscReceivedElements.h"
 #include "RingBufferWriter.h"
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <chrono>
 #include <cstring>
+#include <thread>
 
 extern "C" {
     void destroy_world();
@@ -275,6 +277,18 @@ void SupersonicEngine::initialise(const Config& cfg) {
     mSampleLoader.startThread(juce::Thread::Priority::normal);
     if (mDeviceManager)
         mUdpServer.startThread(juce::Thread::Priority::normal);
+
+    // Block until the audio callback fires at least once — ensures
+    // sendOsc() calls made immediately after initialise() don't race
+    // device startup (observed on macOS Intel CI).
+    {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        uint32_t snapshot = mAudioCallback.processCount.load(std::memory_order_acquire);
+        while (mAudioCallback.processCount.load(std::memory_order_acquire) == snapshot
+               && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
 
     mRunning.store(true);
 }

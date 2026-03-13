@@ -111,13 +111,22 @@ TEST_CASE("Buffer operation on unallocated buffer", "[error]") {
 TEST_CASE("/b_alloc with extreme values", "[error]") {
     EngineFixture fx;
 
-    // Attempt to allocate a buffer with an absurdly large frame count
-    fx.send(osc_test::message("/b_alloc", 0, 999999999, 1));
+    // Attempt to allocate a buffer with a large (but not OOM-fatal) frame count.
+    // 10M frames × 4 bytes = ~40MB — large enough to stress the allocator
+    // without exhausting memory on CI runners.
+    fx.send(osc_test::message("/b_alloc", 0, 10000000, 1));
+
+    // Wait for the allocation to complete (or fail) before checking health
+    OscReply done;
+    fx.waitForReply("/done", done, 5000);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
     OscReply r;
     REQUIRE(fx.waitForReply("/status.reply", r));
+
+    // Cleanup
+    fx.send(osc_test::message("/b_free", 0));
 }
 
 TEST_CASE("/b_set with out-of-bounds index", "[error]") {

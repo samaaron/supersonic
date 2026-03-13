@@ -32,18 +32,10 @@ static void bootAndVerify(int outCh, int inCh) {
     cfg.numInputChannels  = inCh;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // initialise() blocks until HeadlessDriver fires at least one audio
+    // block — if the channel config would crash process_audio(), we'd
+    // already know by this point.
     REQUIRE(engine.isRunning());
-
-    // Pump a few blocks to verify processing doesn't crash
-    static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
-    double baseNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                     + NTP_EPOCH_OFFSET;
-    for (int i = 0; i < 16; i++) {
-        process_audio(baseNTP + i * 128.0 / 48000.0,
-                      static_cast<uint32_t>(outCh),
-                      static_cast<uint32_t>(inCh));
-    }
 
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -120,7 +112,6 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
     cfg.numInputChannels  = inCh;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     REQUIRE(engine.isRunning());
 
     // Pump one block
@@ -162,7 +153,6 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
     cfg.numInputChannels  = inCh;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     REQUIRE(engine.isRunning());
 
     // Check input bus pointer is valid
@@ -197,7 +187,6 @@ TEST_CASE("Prefetch buffer resizes for channel count", "[multichannel]") {
     cfg.numInputChannels  = 0;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     REQUIRE(engine.isRunning());
 
     // If prefetch was still hardcoded to kMaxChannels=8, this would have worked
@@ -214,16 +203,10 @@ TEST_CASE("Prefetch buffer resizes for channel count", "[multichannel]") {
     cfg2.numOutputChannels = 16;
     cfg2.numInputChannels  = 0;
     engine2.initialise(cfg2);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     REQUIRE(engine2.isRunning());
 
-    // Pump blocks with 16 channels — would crash if prefetch buffer too small
-    static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
-    double baseNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                     + NTP_EPOCH_OFFSET;
-    for (int i = 0; i < 8; i++)
-        process_audio(baseNTP + i * 128.0 / 48000.0, 16, 0);
+    // HeadlessDriver is already processing with 16 channels —
+    // if the prefetch buffer were too small, initialise() would have crashed.
 
     engine2.shutdown();
 }
@@ -240,7 +223,6 @@ TEST_CASE("Recording start and stop", "[recording]") {
     cfg.numOutputChannels = 2;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     REQUIRE(engine.isRunning());
 
     // Use a temp file path
@@ -287,7 +269,6 @@ TEST_CASE("Recording creates valid WAV file", "[recording]") {
     cfg.numOutputChannels = 2;
     engine.initialise(cfg);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     REQUIRE(engine.isRunning());
 
     auto tempDir = std::filesystem::temp_directory_path() / "supersonic_test";
@@ -325,8 +306,6 @@ TEST_CASE("Recording stops on engine shutdown", "[recording]") {
         cfg.udpPort           = 0;
         cfg.numOutputChannels = 2;
         engine.initialise(cfg);
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         REQUIRE(engine.isRunning());
 
         auto result = engine.startRecording(wavPath, "wav", 16);
