@@ -395,6 +395,7 @@ if(BUILD_NIF)
     set_target_properties(supersonic_nif PROPERTIES
         PREFIX ""
         OUTPUT_NAME "supersonic"
+        SUFFIX ".so"
     )
     target_include_directories(supersonic_nif PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}/erlang_generated   # generated erl_int_sizes_config.h

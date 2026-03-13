@@ -116,11 +116,11 @@ jobs:
               pactl set-default-sink virtual
           - os: macos-latest
             name: macos-arm64
-            ext: dylib
+            ext: so
             audio: ""
           - os: macos-15-intel
             name: macos-x64
-            ext: dylib
+            ext: so
             audio: ""
           - os: windows-latest
             name: windows-x64
