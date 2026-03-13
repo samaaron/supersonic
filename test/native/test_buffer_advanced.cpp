@@ -27,7 +27,6 @@ TEST_CASE("/b_set and /b_get round-trip", "[buffer]") {
                         << (int32_t)100 << -0.25f;
         fx.send(b.end());
     }
-    fx.pump(8);
     fx.clearReplies();
 
     // Get those samples back
@@ -50,7 +49,6 @@ TEST_CASE("/b_set and /b_get round-trip", "[buffer]") {
     CHECK(p.argFloat(6) == Catch::Approx(-0.25f).margin(0.001f));
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -73,7 +71,6 @@ TEST_CASE("/b_setn and /b_getn round-trip", "[buffer]") {
           << 0.1f << 0.2f << 0.3f << 0.4f;
         fx.send(b.end());
     }
-    fx.pump(8);
     fx.clearReplies();
 
     // Get them back
@@ -96,7 +93,6 @@ TEST_CASE("/b_setn and /b_getn round-trip", "[buffer]") {
     CHECK(p.argFloat(6) == Catch::Approx(0.4f).margin(0.01f));
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -118,7 +114,6 @@ TEST_CASE("/b_fill fills range with value", "[buffer]") {
         s << (int32_t)0 << (int32_t)0 << (int32_t)100 << 0.5f;
         fx.send(b.end());
     }
-    fx.pump(8);
     fx.clearReplies();
 
     // Verify sample 50
@@ -134,7 +129,6 @@ TEST_CASE("/b_fill fills range with value", "[buffer]") {
     CHECK(r.parsed().argFloat(2) == Catch::Approx(0.5f).margin(0.001f));
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("/b_fill then /b_zero clears", "[buffer]") {
@@ -152,7 +146,6 @@ TEST_CASE("/b_fill then /b_zero clears", "[buffer]") {
         s << (int32_t)0 << (int32_t)0 << (int32_t)100 << 0.999f;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // Zero it
     fx.send(osc_test::message("/b_zero", 0));
@@ -173,7 +166,6 @@ TEST_CASE("/b_fill then /b_zero clears", "[buffer]") {
     CHECK(r.parsed().argFloat(2) == Catch::Approx(0.0f).margin(0.001f));
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -214,7 +206,6 @@ TEST_CASE("/b_gen sine1 generates waveform", "[buffer]") {
     CHECK(std::abs(peak) > 0.9f);
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("/b_gen sine1 multiple harmonics", "[buffer]") {
@@ -237,7 +228,6 @@ TEST_CASE("/b_gen sine1 multiple harmonics", "[buffer]") {
     REQUIRE(fx.waitForReply("/done", done));
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("/b_gen cheby generates transfer function", "[buffer]") {
@@ -259,7 +249,6 @@ TEST_CASE("/b_gen cheby generates transfer function", "[buffer]") {
     REQUIRE(fx.waitForReply("/done", done));
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("/b_gen copy transfers samples between buffers", "[buffer]") {
@@ -282,7 +271,6 @@ TEST_CASE("/b_gen copy transfers samples between buffers", "[buffer]") {
         s << (int32_t)0 << (int32_t)0 << (int32_t)256 << 0.5f;
         fx.send(b.end());
     }
-    fx.pump(4);
     fx.clearReplies();
 
     // Copy from buffer 0 to buffer 1
@@ -302,7 +290,6 @@ TEST_CASE("/b_gen copy transfers samples between buffers", "[buffer]") {
 
     fx.send(osc_test::message("/b_free", 0));
     fx.send(osc_test::message("/b_free", 1));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -340,7 +327,6 @@ TEST_CASE("/b_query returns info for multiple buffers", "[buffer]") {
 
     fx.send(osc_test::message("/b_free", 0));
     fx.send(osc_test::message("/b_free", 1));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -375,7 +361,6 @@ TEST_CASE("re-allocating buffer replaces previous", "[buffer]") {
     CHECK(q2.parsed().argInt(2) == 2);
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("multiple buffers are independent", "[buffer]") {
@@ -401,6 +386,5 @@ TEST_CASE("multiple buffers are independent", "[buffer]") {
 
     for (int i = 0; i < 3; i++) {
         fx.send(osc_test::message("/b_free", i));
-        fx.pump(2);
     }
 }

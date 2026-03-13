@@ -42,7 +42,6 @@ TEST_CASE("/d_free frees a loaded synthdef", "[synthdef]") {
 
     // Free the synthdef
     fx.send(osc_test::message("/d_free", "sonic-pi-beep"));
-    fx.pump(8);
 
     // Get count after free
     fx.send(osc_test::message("/status"));
@@ -65,10 +64,8 @@ TEST_CASE("Loading same synthdef twice is idempotent", "[synthdef]") {
     s << "sonic-pi-beep" << (int32_t)1000 << (int32_t)0 << (int32_t)1;
     auto pkt = b.end();
     fx.send(pkt);
-    fx.pump(8);
 
     // Clean up
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }

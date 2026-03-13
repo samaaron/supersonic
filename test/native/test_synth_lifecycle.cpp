@@ -35,7 +35,6 @@ TEST_CASE("/s_new creates a synth", "[synth]") {
     CHECK(p.argInt(2) >= 1);  // root group has children
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("/n_free frees a synth", "[synth]") {
@@ -43,7 +42,6 @@ TEST_CASE("/n_free frees a synth", "[synth]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     // Confirm synth exists via status
     fx.send(osc_test::message("/status"));
@@ -52,7 +50,6 @@ TEST_CASE("/n_free frees a synth", "[synth]") {
 
     // Free it
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(8);
 
     // If we got here without crash, the free was processed
     SUCCEED();
@@ -62,7 +59,6 @@ TEST_CASE("Freeing non-existent node does not crash", "[synth]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/n_free", 99999));
-    fx.pump(8);
     SUCCEED();
 }
 
@@ -72,15 +68,12 @@ TEST_CASE("/s_new with add-to-tail", "[synth]") {
 
     // Create group
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
 
     // Add to tail (action 1) of group 100
     fx.send(sNew("sonic-pi-beep", 1000, 1, 100));
-    fx.pump(4);
 
     // Add another to tail
     fx.send(sNew("sonic-pi-beep", 1001, 1, 100));
-    fx.pump(4);
 
     // Query tree — both should exist
     fx.send(osc_test::message("/status"));
@@ -91,7 +84,6 @@ TEST_CASE("/s_new with add-to-tail", "[synth]") {
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("/n_run turns synth on/off", "[synth]") {
@@ -99,23 +91,18 @@ TEST_CASE("/n_run turns synth on/off", "[synth]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Turn off
     fx.send(osc_test::message("/n_run", 1000, 0));
-    fx.pump(8);
 
     // Turn on
     fx.send(osc_test::message("/n_run", 1000, 1));
-    fx.pump(8);
 
     // If we didn't crash, success
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -124,7 +111,6 @@ TEST_CASE("/n_set changes synth control value", "[synth]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNewWithNote("sonic-pi-beep", 1000, 0, 1, 60.0f));
-    fx.pump(4);
 
     // Change note
     {
@@ -133,7 +119,6 @@ TEST_CASE("/n_set changes synth control value", "[synth]") {
         s << (int32_t)1000 << "note" << 72.0f;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // /n_set should not crash — verify by querying status
     fx.send(osc_test::message("/status"));
@@ -141,7 +126,6 @@ TEST_CASE("/n_set changes synth control value", "[synth]") {
     REQUIRE(fx.waitForReply("/status.reply", r));
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("Multiple synths can run simultaneously", "[synth]") {
@@ -151,7 +135,6 @@ TEST_CASE("Multiple synths can run simultaneously", "[synth]") {
     for (int i = 0; i < 10; i++) {
         fx.send(sNewWithNote("sonic-pi-beep", 2000 + i, 0, 1, 60.0f + i));
     }
-    fx.pump(16);
 
     // Verify synths exist via g_queryTree
     fx.send(osc_test::message("/g_queryTree", 0, 0));
@@ -163,5 +146,4 @@ TEST_CASE("Multiple synths can run simultaneously", "[synth]") {
     for (int i = 0; i < 10; i++) {
         fx.send(osc_test::message("/n_free", 2000 + i));
     }
-    fx.pump(8);
 }

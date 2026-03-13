@@ -149,7 +149,6 @@ TEST_CASE("sendOsc works after initialise", "[lifecycle]") {
     // Verify the engine can receive and process OSC via sendOsc
     auto pkt = osc_test::message("/status");
     fx.engine().sendOsc(pkt.ptr(), pkt.size());
-    fx.pump(8);
 
     OscReply r;
     REQUIRE(fx.waitForReply("/status.reply", r));
@@ -185,11 +184,9 @@ TEST_CASE("onDebug receives messages via /dumpOSC", "[lifecycle]") {
 
     // Enable dumpOSC so subsequent commands generate debug output
     fx.send(osc_test::message("/dumpOSC", 1));
-    fx.pump(4);
 
     // Send a command to trigger debug printing
     fx.send(osc_test::message("/status"));
-    fx.pump(16);
 
     // Give debug reader time to process
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -199,7 +196,6 @@ TEST_CASE("onDebug receives messages via /dumpOSC", "[lifecycle]") {
     // but the callback path should not crash.
     // Disable dumpOSC to avoid noise for any subsequent operations
     fx.send(osc_test::message("/dumpOSC", 0));
-    fx.pump(4);
     SUCCEED();
 }
 

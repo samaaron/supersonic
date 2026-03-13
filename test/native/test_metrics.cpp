@@ -13,7 +13,12 @@ TEST_CASE("process_count increments after pump", "[metrics]") {
     auto* metrics = reinterpret_cast<PerformanceMetrics*>(ring_buffer_storage + METRICS_START);
 
     uint32_t before = metrics->process_count.load(std::memory_order_relaxed);
-    fx.pump(4);
+
+    // Sync barrier: wait for at least one audio block to be processed
+    fx.send(osc_test::message("/sync", 200));
+    OscReply syncR;
+    fx.waitForReply("/synced", syncR);
+
     uint32_t after = metrics->process_count.load(std::memory_order_relaxed);
 
     CHECK(after > before);
@@ -25,7 +30,12 @@ TEST_CASE("messages_processed increases after sending /status", "[metrics]") {
 
     uint32_t before = metrics->messages_processed.load(std::memory_order_relaxed);
     fx.send(osc_test::message("/status"));
-    fx.pump(8);
+
+    // Sync barrier: ensure /status has been processed before reading metric
+    fx.send(osc_test::message("/sync", 201));
+    OscReply syncR;
+    fx.waitForReply("/synced", syncR);
+
     uint32_t after = metrics->messages_processed.load(std::memory_order_relaxed);
 
     CHECK(after > before);
@@ -64,7 +74,6 @@ TEST_CASE("in_buffer_peak_bytes is non-zero after sending messages", "[metrics]"
     auto* metrics = reinterpret_cast<PerformanceMetrics*>(ring_buffer_storage + METRICS_START);
 
     fx.send(osc_test::message("/status"));
-    fx.pump(8);
 
     uint32_t peak = metrics->in_buffer_peak_bytes.load(std::memory_order_relaxed);
     CHECK(peak > 0);
@@ -114,7 +123,11 @@ TEST_CASE("Multiple /status sends increases messages_processed proportionally", 
     for (int i = 0; i < numSends; ++i) {
         fx.send(osc_test::message("/status"));
     }
-    fx.pump(16);
+
+    // Sync barrier: ensure all /status messages have been processed
+    fx.send(osc_test::message("/sync", 202));
+    OscReply syncR;
+    fx.waitForReply("/synced", syncR);
 
     uint32_t after = metrics->messages_processed.load(std::memory_order_relaxed);
     uint32_t delta = after - before;
@@ -128,7 +141,6 @@ TEST_CASE("Buffer usage metrics are within expected ranges", "[metrics]") {
     auto* metrics = reinterpret_cast<PerformanceMetrics*>(ring_buffer_storage + METRICS_START);
 
     fx.send(osc_test::message("/status"));
-    fx.pump(8);
 
     uint32_t inUsed    = metrics->in_buffer_used_bytes.load(std::memory_order_relaxed);
     uint32_t outUsed   = metrics->out_buffer_used_bytes.load(std::memory_order_relaxed);
@@ -150,7 +162,6 @@ TEST_CASE("prescheduler_bypassed increments for FAR_FUTURE bundles", "[metrics]"
                      + static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
                      + 60.0;
     fx.engine().sendBundle(futureNTP, { OscBuilder::message("/status") });
-    fx.pump(4);
 
     uint32_t after = metrics->prescheduler_bypassed.load(std::memory_order_relaxed);
     CHECK(after > before);
@@ -162,7 +173,6 @@ TEST_CASE("wasm_errors is 0 in normal operation", "[metrics]") {
 
     // Send a few normal commands
     fx.send(osc_test::message("/status"));
-    fx.pump(8);
 
     uint32_t errors = metrics->wasm_errors.load(std::memory_order_relaxed);
     CHECK(errors == 0);

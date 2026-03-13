@@ -1,5 +1,10 @@
 /*
  * EngineFixture.cpp
+ *
+ * The HeadlessDriver ticks process_audio() at real audio rate (2.67ms per
+ * 128-sample block at 48kHz).  Worker threads (ReplyReader, DebugReader)
+ * drain ring buffers naturally — just like the AudioWorklet + JS workers
+ * in the WASM build.  Tests simply send OSC and waitForReply().
  */
 #include "EngineFixture.h"
 #include "JuceAudioCallback.h"
@@ -8,13 +13,6 @@
 #include <chrono>
 #include <thread>
 #include <filesystem>
-
-extern "C" {
-    bool process_audio(double current_time, uint32_t active_output_channels,
-                       uint32_t active_input_channels);
-}
-
-static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
 
 EngineFixture::EngineFixture() {
     // Wire reply/debug callbacks before initialising
@@ -45,17 +43,23 @@ EngineFixture::EngineFixture() {
     cfg.headless      = true;
     mEngine.initialise(cfg);
 
-    // Stop the HeadlessDriver — tests use manual pump() for deterministic control
-    mEngine.mHeadlessDriver.signalThreadShouldExit();
-    mEngine.mHeadlessDriver.stopThread(1000);
-
-    // Pump a few blocks so the engine is ready to process commands
-    pump(16);
+    // HeadlessDriver is now ticking — wait for the engine to be ready
+    OscReply r;
+    mEngine.sendOsc(osc_test::message("/sync", 0).ptr(),
+                    osc_test::message("/sync", 0).size());
+    waitForReply("/synced", r);
 
     // Create default group (1) — scsynth only creates root group (0).
     // All SuperCollider clients create group 1 at startup.
     send(osc_test::message("/g_new", 1, 0, 0));
-    pump(8);
+    // Barrier: wait until /g_new has been processed (node tree mirror updated)
+    auto syncPkt = osc_test::message("/sync", 1);
+    mEngine.sendOsc(syncPkt.ptr(), syncPkt.size());
+    waitForReply("/synced", r);
+
+    // Clear any boot-time debug/reply output so tests start with a clean slate
+    clearReplies();
+    clearDebugMessages();
 }
 
 EngineFixture::~EngineFixture() {
@@ -70,8 +74,6 @@ void EngineFixture::send(const osc_test::Packet& pkt) {
 
 void EngineFixture::send(const uint8_t* data, uint32_t size) {
     mEngine.sendOsc(data, size);
-    // Pump audio so the message gets processed
-    pump(4);
 }
 
 // ── Reply collection ─────────────────────────────────────────────────────────
@@ -80,9 +82,6 @@ bool EngineFixture::waitForReply(const std::string& addr, OscReply& out,
                                   int timeoutMs) {
     auto deadline = std::chrono::steady_clock::now()
                   + std::chrono::milliseconds(timeoutMs);
-
-    // Pump a few blocks to kick things off
-    pump(4);
 
     std::unique_lock<std::mutex> lk(mReplyMutex);
     while (true) {
@@ -94,32 +93,10 @@ bool EngineFixture::waitForReply(const std::string& addr, OscReply& out,
             }
         }
 
-        // Wait briefly for a cv notification (e.g. from ReplyReader), then
-        // pump again.  This handles async replies (SampleLoader) that need
-        // installPendingBuffers() to run before the reply hits the OUT buffer.
-        auto waitEnd = std::min(deadline,
-            std::chrono::steady_clock::now() + std::chrono::milliseconds(50));
-        mReplyCv.wait_until(lk, waitEnd);
-
-        if (std::chrono::steady_clock::now() >= deadline) {
-            // Final pump attempt before giving up
-            lk.unlock();
-            pump(8);
-            lk.lock();
-            for (auto it = mReplies.begin(); it != mReplies.end(); ++it) {
-                if (it->address == addr) {
-                    out = *it;
-                    mReplies.erase(it);
-                    return true;
-                }
-            }
+        if (std::chrono::steady_clock::now() >= deadline)
             return false;
-        }
 
-        // Not at deadline — pump and loop
-        lk.unlock();
-        pump(4);
-        lk.lock();
+        mReplyCv.wait_until(lk, deadline);
     }
 }
 
@@ -147,19 +124,9 @@ std::vector<std::string> EngineFixture::debugMessages() const {
     return mDebugMessages;
 }
 
-// ── Audio pump ───────────────────────────────────────────────────────────────
-
-void EngineFixture::pump(int numBlocks) {
-    for (int i = 0; i < numBlocks; i++) {
-        mEngine.mSampleLoader.installPendingBuffers();
-        double wallNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                         + NTP_EPOCH_OFFSET;
-        process_audio(wallNTP,
-                      static_cast<uint32_t>(mEngine.mCurrentConfig.numOutputChannels),
-                      static_cast<uint32_t>(mEngine.mCurrentConfig.numInputChannels));
-    }
-    mEngine.mAudioCallback.processCount.fetch_add(1, std::memory_order_release);
-    mEngine.mAudioCallback.processCount.notify_all();
+void EngineFixture::clearDebugMessages() {
+    std::lock_guard<std::mutex> lk(mDebugMutex);
+    mDebugMessages.clear();
 }
 
 // ── Synthdef helpers ─────────────────────────────────────────────────────────

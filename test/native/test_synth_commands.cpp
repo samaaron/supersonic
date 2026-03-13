@@ -29,7 +29,6 @@ TEST_CASE("/s_get returns control value set at creation", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     // Create synth with note=60
@@ -40,7 +39,6 @@ TEST_CASE("/s_get returns control value set at creation", "[synth_cmd]") {
           << "note" << 60.0f << "release" << 60.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
     fx.clearReplies();
 
     // Query note value
@@ -59,7 +57,6 @@ TEST_CASE("/s_get returns control value set at creation", "[synth_cmd]") {
     CHECK(p.argFloat(2) == Catch::Approx(60.0f).margin(0.01f));
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("/s_get after /n_set reflects new value", "[synth_cmd]") {
@@ -67,11 +64,9 @@ TEST_CASE("/s_get after /n_set reflects new value", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     fx.send(sNewWithNote("sonic-pi-beep", 1000, 0, 1, 60.0f));
-    fx.pump(8);
 
     // Set note to 72
     {
@@ -80,7 +75,6 @@ TEST_CASE("/s_get after /n_set reflects new value", "[synth_cmd]") {
         s << (int32_t)1000 << "note" << 72.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
     fx.clearReplies();
 
     // Get note
@@ -96,7 +90,6 @@ TEST_CASE("/s_get after /n_set reflects new value", "[synth_cmd]") {
     CHECK(r.parsed().argFloat(2) == Catch::Approx(72.0f).margin(0.01f));
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("/s_get by control index", "[synth_cmd]") {
@@ -104,11 +97,9 @@ TEST_CASE("/s_get by control index", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
     fx.clearReplies();
 
     // Get control at index 0
@@ -124,7 +115,6 @@ TEST_CASE("/s_get by control index", "[synth_cmd]") {
     CHECK(r.parsed().argInt(0) == 1000);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -136,11 +126,9 @@ TEST_CASE("/s_getn returns sequential control values", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
     fx.clearReplies();
 
     // Get first 3 controls
@@ -159,7 +147,6 @@ TEST_CASE("/s_getn returns sequential control values", "[synth_cmd]") {
     CHECK(p.argInt(2) == 3);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -170,7 +157,6 @@ TEST_CASE("/p_new creates parallel group", "[synth_cmd]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/p_new", 100, 0, 0));
-    fx.pump(8);
 
     // Query tree — root should have our parallel group
     fx.send(osc_test::message("/g_queryTree", 0, 0));
@@ -181,7 +167,6 @@ TEST_CASE("/p_new creates parallel group", "[synth_cmd]") {
     CHECK(p.argInt(2) >= 1);  // root has children
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("/p_new parallel group holds synths", "[synth_cmd]") {
@@ -190,12 +175,10 @@ TEST_CASE("/p_new parallel group holds synths", "[synth_cmd]") {
 
     // Create parallel group
     fx.send(osc_test::message("/p_new", 100, 0, 0));
-    fx.pump(4);
 
     // Add synths to it
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -203,7 +186,6 @@ TEST_CASE("/p_new parallel group holds synths", "[synth_cmd]") {
     CHECK(r.parsed().argInt(2) >= 2);  // numSynths >= 2
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -215,7 +197,6 @@ TEST_CASE("/s_noid removes synth node ID", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Remove the node ID
     {
@@ -224,7 +205,6 @@ TEST_CASE("/s_noid removes synth node ID", "[synth_cmd]") {
         s << (int32_t)1000;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Synth should still be running (just without a node ID)
     fx.send(osc_test::message("/status"));
@@ -242,7 +222,6 @@ TEST_CASE("/n_setn sets sequential controls by index", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Set controls 0,1,2 to specific values
     {
@@ -252,7 +231,6 @@ TEST_CASE("/n_setn sets sequential controls by index", "[synth_cmd]") {
           << 0.111f << 0.222f << 0.333f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify with /s_getn
     fx.clearReplies();
@@ -271,7 +249,6 @@ TEST_CASE("/n_setn sets sequential controls by index", "[synth_cmd]") {
     CHECK(p.argFloat(5) == Catch::Approx(0.333f).margin(0.01f));
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("/n_setn sets controls by name", "[synth_cmd]") {
@@ -279,7 +256,6 @@ TEST_CASE("/n_setn sets controls by name", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Set 2 controls starting from "note"
     {
@@ -288,7 +264,6 @@ TEST_CASE("/n_setn sets controls by name", "[synth_cmd]") {
         s << (int32_t)1000 << "note" << (int32_t)2 << 72.0f << 0.75f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify note was set
     fx.clearReplies();
@@ -304,7 +279,6 @@ TEST_CASE("/n_setn sets controls by name", "[synth_cmd]") {
     CHECK(r.parsed().argFloat(2) == Catch::Approx(72.0f).margin(0.01f));
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -316,7 +290,6 @@ TEST_CASE("/n_fill fills range of controls", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Fill controls 0-2 with 0.5
     {
@@ -325,7 +298,6 @@ TEST_CASE("/n_fill fills range of controls", "[synth_cmd]") {
         s << (int32_t)1000 << (int32_t)0 << (int32_t)3 << 0.5f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify with /s_getn
     fx.clearReplies();
@@ -344,7 +316,6 @@ TEST_CASE("/n_fill fills range of controls", "[synth_cmd]") {
     }
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -356,7 +327,6 @@ TEST_CASE("/n_mapa maps control to audio bus", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     {
         osc_test::Builder b;
@@ -364,7 +334,6 @@ TEST_CASE("/n_mapa maps control to audio bus", "[synth_cmd]") {
         s << (int32_t)1000 << "note" << (int32_t)0;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Synth should still be running
     fx.send(osc_test::message("/status"));
@@ -373,7 +342,6 @@ TEST_CASE("/n_mapa maps control to audio bus", "[synth_cmd]") {
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("/n_mapan maps sequential controls to audio buses", "[synth_cmd]") {
@@ -381,7 +349,6 @@ TEST_CASE("/n_mapan maps sequential controls to audio buses", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     {
         osc_test::Builder b;
@@ -389,14 +356,12 @@ TEST_CASE("/n_mapan maps sequential controls to audio buses", "[synth_cmd]") {
         s << (int32_t)1000 << "note" << (int32_t)0 << (int32_t)1;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
     REQUIRE(fx.waitForReply("/status.reply", r));
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("/n_mapn maps sequential controls to control buses", "[synth_cmd]") {
@@ -404,7 +369,6 @@ TEST_CASE("/n_mapn maps sequential controls to control buses", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     {
         osc_test::Builder b;
@@ -412,14 +376,12 @@ TEST_CASE("/n_mapn maps sequential controls to control buses", "[synth_cmd]") {
         s << (int32_t)1000 << "note" << (int32_t)0 << (int32_t)1;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
     REQUIRE(fx.waitForReply("/status.reply", r));
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -432,11 +394,9 @@ TEST_CASE("/g_dumpTree without controls", "[synth_cmd]") {
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
-    fx.pump(8);
 
     // Dump tree structure (flag 0 = no controls)
     fx.send(osc_test::message("/g_dumpTree", 0, 0));
-    fx.pump(16);
 
     // Verify synth and group still exist after dump
     fx.send(osc_test::message("/status"));
@@ -446,7 +406,6 @@ TEST_CASE("/g_dumpTree without controls", "[synth_cmd]") {
     CHECK(st.parsed().argInt(3) >= 3);  // root + default + 100
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("/g_dumpTree with controls", "[synth_cmd]") {
@@ -455,11 +414,9 @@ TEST_CASE("/g_dumpTree with controls", "[synth_cmd]") {
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
-    fx.pump(8);
 
     // Dump tree with controls (flag 1)
     fx.send(osc_test::message("/g_dumpTree", 0, 1));
-    fx.pump(16);
 
     // Verify synth and group still exist after dump
     fx.send(osc_test::message("/status"));
@@ -468,7 +425,6 @@ TEST_CASE("/g_dumpTree with controls", "[synth_cmd]") {
     CHECK(st.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -480,10 +436,8 @@ TEST_CASE("/n_trace traces synth execution", "[synth_cmd]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/n_trace", 1000));
-    fx.pump(16);
 
     // Verify synth still exists after trace
     fx.send(osc_test::message("/status"));
@@ -492,5 +446,4 @@ TEST_CASE("/n_trace traces synth execution", "[synth_cmd]") {
     CHECK(st.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }

@@ -68,7 +68,6 @@ TEST_CASE("/b_allocRead loads sample file", "[load_sample]") {
     CHECK(info.parsed().argInt(1) > 0);     // frames
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -87,7 +86,6 @@ TEST_CASE("/b_allocRead buffer has non-zero frame count", "[load_sample]") {
     CHECK(info.parsed().argInt(1) > 0);
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -108,7 +106,6 @@ TEST_CASE("/b_allocRead buffer has valid channel count", "[load_sample]") {
     CHECK(channels <= 2);
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -128,7 +125,6 @@ TEST_CASE("/b_allocRead buffer has non-zero sample rate", "[load_sample]") {
     CHECK(sampleRate > 0.0f);
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -146,7 +142,6 @@ TEST_CASE("/b_allocRead loads multiple samples into different buffers",
 
     if (!tryAllocRead(fx, 1, "drum_snare_hard.flac")) {
         fx.send(osc_test::message("/b_free", 0));
-        fx.pump(4);
         SKIP("/b_allocRead failed for second sample");
     }
     fx.clearReplies();
@@ -165,7 +160,6 @@ TEST_CASE("/b_allocRead loads multiple samples into different buffers",
 
     fx.send(osc_test::message("/b_free", 0));
     fx.send(osc_test::message("/b_free", 1));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -180,7 +174,6 @@ TEST_CASE("/b_allocRead with non-existent file does not crash",
         std::string(SUPERSONIC_SAMPLES_DIR) + "/no_such_file_12345.flac";
 
     fx.send(makeAllocRead(0, badPath.c_str()));
-    fx.pump(16);
 
     // Engine should remain responsive regardless
     fx.clearReplies();
@@ -208,7 +201,6 @@ TEST_CASE("/b_allocRead then /b_free clears the buffer", "[load_sample]") {
 
     // Free
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(8);
     fx.clearReplies();
 
     // After freeing, frames should be 0
@@ -237,7 +229,8 @@ TEST_CASE("/b_allocRead with startFrame offset loads partial sample",
     fx.clearReplies();
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
+    OscReply freeDone;
+    fx.waitForReply("/done", freeDone);
     fx.clearReplies();
 
     // Load with startFrame offset
@@ -254,5 +247,4 @@ TEST_CASE("/b_allocRead with startFrame offset loads partial sample",
     CHECK(partialFrames < totalFrames);
 
     fx.send(osc_test::message("/b_free", 1));
-    fx.pump(4);
 }

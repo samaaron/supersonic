@@ -23,7 +23,6 @@ TEST_CASE("/status generates exactly one /status.reply callback", "[callback]") 
     REQUIRE(fx.waitForReply("/status.reply", r));
 
     // Pump a few more blocks to let any straggler replies arrive
-    fx.pump(16);
 
     // waitForReply consumed the first reply; verify no duplicates remain
     auto all = fx.allReplies();
@@ -47,7 +46,6 @@ TEST_CASE("/sync generates exactly one /synced callback with matching ID", "[cal
     CHECK(p.argInt(0) == 77);
 
     // Pump extra to ensure no duplicates
-    fx.pump(16);
 
     // waitForReply consumed the first reply; verify no duplicates remain
     auto all = fx.allReplies();
@@ -66,25 +64,13 @@ TEST_CASE("Multiple /sync commands generate matching /synced replies", "[callbac
     // Send 5 syncs with distinct IDs
     for (int i = 0; i < 5; ++i) {
         fx.send(osc_test::message("/sync", 100 + i));
-        fx.pump(4);
     }
 
-    // Wait for the last one to ensure all have been processed
-    fx.pump(16);
-
-    auto all = fx.allReplies();
-
-    // Collect all /synced reply IDs
-    std::vector<int32_t> syncedIds;
-    for (auto& reply : all) {
-        if (reply.address == "/synced") {
-            syncedIds.push_back(reply.parsed().argInt(0));
-        }
-    }
-
-    REQUIRE(syncedIds.size() == 5);
+    // Wait for all 5 /synced replies
     for (int i = 0; i < 5; ++i) {
-        CHECK(syncedIds[i] == 100 + i);
+        OscReply r;
+        REQUIRE(fx.waitForReply("/synced", r));
+        CHECK(r.parsed().argInt(0) == 100 + i);
     }
 }
 
@@ -155,11 +141,14 @@ TEST_CASE("Sending invalid OSC command generates debug output", "[callback]") {
 
     // Enable dumpOSC so the engine prints debug info about incoming commands
     fx.send(osc_test::message("/dumpOSC", 1));
-    fx.pump(8);
 
     // Send a command that does not exist — scsynth logs an error for unknown commands
     fx.send(osc_test::message("/nonexistent_command"));
-    fx.pump(16);
+    // Use /sync as a barrier — ensures the command was processed on the
+    // audio thread and workers have drained the ring buffers.
+    fx.send(osc_test::message("/sync", 999));
+    OscReply syncReply;
+    fx.waitForReply("/synced", syncReply);
 
     auto msgs = fx.debugMessages();
     // The engine should produce at least some debug output (dumpOSC echo
@@ -191,8 +180,10 @@ TEST_CASE("clearReplies() actually clears collected replies", "[callback]") {
     // Generate replies without consuming them via waitForReply
     fx.send(osc_test::message("/sync", 500));
     fx.send(osc_test::message("/sync", 501));
-    fx.pump(16);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Wait for the last one to ensure both are in mReplies
+    OscReply barrier;
+    fx.waitForReply("/synced", barrier);
 
     // Should have accumulated replies
     CHECK(!fx.allReplies().empty());

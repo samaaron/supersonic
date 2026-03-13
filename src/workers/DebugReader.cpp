@@ -116,11 +116,6 @@ void DebugReader::run() {
         }
 
         if (threadShouldExit()) break;
-
-        // Drain debug buffer every N audio events (~21ms at 48kHz/128)
-        if (++mEventCount >= mEventsPerDrain) {
-            mEventCount = 0;
-            drainBuffer();
-        }
+        drainBuffer();
     }
 }

@@ -70,7 +70,6 @@ TEST_CASE("DeviceManagement: /d_free removes from cache", "[DeviceManagement]") 
     REQUIRE(fix.engine().stateCache().synthDefs().count("sonic-pi-beep") == 1);
 
     fix.send(osc_test::message("/d_free", "sonic-pi-beep"));
-    fix.pump(4);
 
     REQUIRE(fix.engine().stateCache().synthDefs().count("sonic-pi-beep") == 0);
 }
@@ -80,7 +79,6 @@ TEST_CASE("DeviceManagement: /d_freeAll clears cache", "[DeviceManagement]") {
     REQUIRE(fix.loadSynthDef("sonic-pi-beep"));
 
     fix.send(osc_test::message("/d_freeAll"));
-    fix.pump(4);
 
     REQUIRE(fix.engine().stateCache().synthDefs().empty());
 }
@@ -95,7 +93,6 @@ TEST_CASE("DeviceManagement: /b_allocRead caches buffer metadata",
       << static_cast<osc::int32>(0) << static_cast<osc::int32>(44100);
     auto pkt = b.end();
     fix.send(pkt);
-    fix.pump(4);
 
     auto bufs = fix.engine().stateCache().buffers();
     REQUIRE(bufs.size() == 1);
@@ -112,12 +109,10 @@ TEST_CASE("DeviceManagement: /b_free uncaches buffer", "[DeviceManagement]") {
       << static_cast<osc::int32>(0) << static_cast<osc::int32>(0);
     auto pkt = b.end();
     fix.send(pkt);
-    fix.pump(4);
 
     REQUIRE(fix.engine().stateCache().buffers().size() == 1);
 
     fix.send(osc_test::message("/b_free", 5));
-    fix.pump(4);
 
     REQUIRE(fix.engine().stateCache().buffers().empty());
 }
@@ -137,7 +132,6 @@ TEST_CASE("DeviceManagement: pause and resume", "[DeviceManagement]") {
     REQUIRE_FALSE(cb.isPaused());
 
     // Verify pump still works after pause/resume cycle
-    fix.pump(4);
     OscReply reply;
     fix.send(osc_test::message("/status"));
     REQUIRE(fix.waitForReply("/status.reply", reply));
@@ -169,7 +163,6 @@ TEST_CASE("DeviceManagement: purge clears ring buffer and scheduler",
     fix.engine().purge();
 
     // Verify engine still works after purge
-    fix.pump(4);
     OscReply reply;
     fix.send(osc_test::message("/status"));
     REQUIRE(fix.waitForReply("/status.reply", reply));
@@ -198,7 +191,6 @@ TEST_CASE("OscBuilder: variadic send via engine", "[OscBuilder]") {
 
     // Use the templated send() method
     fix.engine().send("/status");
-    fix.pump(4);
     OscReply reply;
     REQUIRE(fix.waitForReply("/status.reply", reply));
 }

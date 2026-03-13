@@ -18,7 +18,6 @@ TEST_CASE("/c_set and /c_get round-trip single bus", "[control_bus]") {
         s << (int32_t)0 << 440.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
     fx.clearReplies();
 
     // Get bus 0
@@ -43,7 +42,6 @@ TEST_CASE("/c_set multiple buses", "[control_bus]") {
           << (int32_t)2 << 880.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
     fx.clearReplies();
 
     // Get all three
@@ -80,7 +78,6 @@ TEST_CASE("/c_setn and /c_getn round-trip", "[control_bus]") {
           << 100.0f << 200.0f << 300.0f << 400.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
     fx.clearReplies();
 
     // Get buses 0-3
@@ -111,7 +108,6 @@ TEST_CASE("/c_fill fills range of buses", "[control_bus]") {
         s << (int32_t)0 << (int32_t)10 << 0.5f;
         fx.send(b.end());
     }
-    fx.pump(8);
     fx.clearReplies();
 
     // Get bus 5
@@ -137,7 +133,6 @@ TEST_CASE("/n_map maps synth control to bus", "[control_bus]") {
         s << (int32_t)0 << 72.0f;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // Create synth
     {
@@ -146,7 +141,6 @@ TEST_CASE("/n_map maps synth control to bus", "[control_bus]") {
         s << "sonic-pi-beep" << (int32_t)1000 << (int32_t)0 << (int32_t)1;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // Map note to bus 0
     {
@@ -155,7 +149,6 @@ TEST_CASE("/n_map maps synth control to bus", "[control_bus]") {
         s << (int32_t)1000 << "note" << (int32_t)0;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // Verify synth still exists
     fx.send(osc_test::message("/status"));
@@ -170,8 +163,6 @@ TEST_CASE("/n_map maps synth control to bus", "[control_bus]") {
         s << (int32_t)1000 << "note" << (int32_t)-1;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }

@@ -20,15 +20,12 @@ TEST_CASE("/n_query returns node info", "[osc]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(8);
     fx.clearReplies();
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(16);
     fx.clearReplies();
 
     fx.send(osc_test::message("/n_query", 1000));
-    fx.pump(16);
 
     OscReply r;
     // /n_info may not arrive in headless mode — check but don't require
@@ -38,7 +35,6 @@ TEST_CASE("/n_query returns node info", "[osc]") {
     }
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -47,13 +43,11 @@ TEST_CASE("/n_before moves node before another", "[osc]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     // Create two synths at head of default group — order: 1001, 1000
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 1));
-    fx.pump(8);
     fx.clearReplies();
 
     // Move 1000 before 1001 → order should become: 1000, 1001
@@ -66,7 +60,6 @@ TEST_CASE("/n_before moves node before another", "[osc]") {
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
-    fx.pump(4);
 }
 
 TEST_CASE("/n_after moves node after another", "[osc]") {
@@ -74,13 +67,11 @@ TEST_CASE("/n_after moves node after another", "[osc]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     // Create two synths at head — order: 1001, 1000
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 1));
-    fx.pump(8);
     fx.clearReplies();
 
     // Move 1001 after 1000 → order should become: 1000, 1001
@@ -93,7 +84,6 @@ TEST_CASE("/n_after moves node after another", "[osc]") {
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
-    fx.pump(4);
 }
 
 TEST_CASE("/n_order reorders nodes", "[osc]") {
@@ -101,14 +91,12 @@ TEST_CASE("/n_order reorders nodes", "[osc]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     // Create three synths at head — order: 1002, 1001, 1000
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 1));
     fx.send(sNew("sonic-pi-beep", 1002, 0, 1));
-    fx.pump(8);
     fx.clearReplies();
 
     // Reorder: 1000, 1001 at head of default group (1)
@@ -118,13 +106,11 @@ TEST_CASE("/n_order reorders nodes", "[osc]") {
         s << (int32_t)0 << (int32_t)1 << (int32_t)1000 << (int32_t)1001;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // If we got here without crash, the command was processed
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 1002));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -138,11 +124,9 @@ TEST_CASE("/c_set sets control bus value", "[osc]") {
 
     // Set control bus 0 to 72
     fx.send(osc_test::message("/c_set", 0, 72));
-    fx.pump(4);
 
     // Create synth and map to control bus
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     {
         osc_test::Builder b;
@@ -150,7 +134,6 @@ TEST_CASE("/c_set sets control bus value", "[osc]") {
         s << (int32_t)1000 << "note" << (int32_t)0;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // Unmap
     {
@@ -159,10 +142,8 @@ TEST_CASE("/c_set sets control bus value", "[osc]") {
         s << (int32_t)1000 << "note" << (int32_t)-1;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -210,7 +191,6 @@ TEST_CASE("/b_query returns buffer info", "[osc][buffer]") {
     CHECK(p.argInt(2) == 2);      // num channels
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("/b_zero zeroes a buffer", "[osc][buffer]") {
@@ -226,7 +206,6 @@ TEST_CASE("/b_zero zeroes a buffer", "[osc][buffer]") {
     REQUIRE(fx.waitForReply("/done", r));
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 // =============================================================================

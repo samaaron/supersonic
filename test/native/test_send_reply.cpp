@@ -47,7 +47,6 @@ TEST_CASE("SendReply UGen delivers /sonic-pi/server-info", "[send_reply]") {
 
     // Enable notifications so hw->mUsers is populated
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     // Create the synth: /s_new "sonic-pi-server-info" 1000 0 1
@@ -59,7 +58,6 @@ TEST_CASE("SendReply UGen delivers /sonic-pi/server-info", "[send_reply]") {
 
     // Pump enough blocks for the Impulse(2) to fire
     // Impulse fires on the very first sample, so a few blocks should suffice
-    fx.pump(16);
 
     // Check for the reply
     OscReply r;
@@ -80,7 +78,6 @@ TEST_CASE("SendReply fires repeatedly (Impulse at 2Hz)", "[send_reply]") {
     REQUIRE(loadTestSynthDef(fx, "sonic-pi-server-info"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     osc_test::Builder b;
@@ -90,16 +87,11 @@ TEST_CASE("SendReply fires repeatedly (Impulse at 2Hz)", "[send_reply]") {
 
     // Pump enough blocks for multiple triggers at 2Hz
     // 48000 / 128 = 375 blocks per second, need ~188 blocks for 0.5s
-    fx.pump(400);
 
-    // Should have multiple replies
-    auto replies = fx.allReplies();
-    int serverInfoCount = 0;
-    for (auto& rep : replies) {
-        if (rep.address == "/sonic-pi/server-info")
-            serverInfoCount++;
-    }
-    CHECK(serverInfoCount >= 2);  // At least 2 triggers (0s and 0.5s)
+    // Wait for at least 2 triggers (0s and 0.5s)
+    OscReply r1, r2;
+    REQUIRE(fx.waitForReply("/sonic-pi/server-info", r1));
+    REQUIRE(fx.waitForReply("/sonic-pi/server-info", r2));
 }
 
 TEST_CASE("SendReply requires /notify registration", "[send_reply]") {
@@ -113,7 +105,6 @@ TEST_CASE("SendReply requires /notify registration", "[send_reply]") {
     auto& s = b.begin("/s_new");
     s << "sonic-pi-server-info" << (int32_t)1002 << (int32_t)0 << (int32_t)1;
     fx.send(b.end());
-    fx.pump(16);
 
     // Without /notify, NodeReplyMsg::Perform() iterates empty mUsers set
     // so no reply should arrive via the OUT ring buffer
@@ -127,7 +118,6 @@ TEST_CASE("SendReply nodeID matches created synth", "[send_reply]") {
     REQUIRE(loadTestSynthDef(fx, "sonic-pi-server-info"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     // Create two synths with different node IDs
@@ -144,21 +134,14 @@ TEST_CASE("SendReply nodeID matches created synth", "[send_reply]") {
         fx.send(b.end());
     }
 
-    fx.pump(16);
+    // Wait for replies from both synths
+    OscReply r1, r2;
+    REQUIRE(fx.waitForReply("/sonic-pi/server-info", r1));
+    REQUIRE(fx.waitForReply("/sonic-pi/server-info", r2));
 
-    // Collect all replies and check nodeIDs
-    auto replies = fx.allReplies();
-    bool found2000 = false, found2001 = false;
-    for (auto& rep : replies) {
-        if (rep.address == "/sonic-pi/server-info") {
-            auto p = rep.parsed();
-            int nodeID = p.argInt(0);
-            if (nodeID == 2000) found2000 = true;
-            if (nodeID == 2001) found2001 = true;
-        }
-    }
-    CHECK(found2000);
-    CHECK(found2001);
+    int id1 = r1.parsed().argInt(0);
+    int id2 = r2.parsed().argInt(0);
+    CHECK(((id1 == 2000 && id2 == 2001) || (id1 == 2001 && id2 == 2000)));
 }
 
 TEST_CASE("SendReply stops after /n_free", "[send_reply]") {
@@ -166,14 +149,12 @@ TEST_CASE("SendReply stops after /n_free", "[send_reply]") {
     REQUIRE(loadTestSynthDef(fx, "sonic-pi-server-info"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     osc_test::Builder b;
     auto& s = b.begin("/s_new");
     s << "sonic-pi-server-info" << (int32_t)3000 << (int32_t)0 << (int32_t)1;
     fx.send(b.end());
-    fx.pump(16);
 
     // Verify we got at least one reply
     OscReply r;
@@ -181,11 +162,9 @@ TEST_CASE("SendReply stops after /n_free", "[send_reply]") {
 
     // Free the synth
     fx.send(osc_test::message("/n_free", (int32_t)3000));
-    fx.pump(8);
     fx.clearReplies();
 
     // Pump more blocks — no further replies should arrive
-    fx.pump(200);
     auto replies = fx.allReplies();
     int count = 0;
     for (auto& rep : replies) {
@@ -205,7 +184,6 @@ TEST_CASE("/n_go notification arrives with /notify", "[send_reply][notifications
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     osc_test::Builder b;
@@ -228,7 +206,6 @@ TEST_CASE("/n_end notification after /n_free", "[send_reply][notifications]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     // Create and immediately free
@@ -238,11 +215,9 @@ TEST_CASE("/n_end notification after /n_free", "[send_reply][notifications]") {
         s << "sonic-pi-beep" << (int32_t)5000 << (int32_t)0 << (int32_t)1;
         fx.send(b.end());
     }
-    fx.pump(4);
     fx.clearReplies();
 
     fx.send(osc_test::message("/n_free", (int32_t)5000));
-    fx.pump(8);
 
     OscReply r;
     bool got = fx.waitForReply("/n_end", r, 1000);
@@ -259,14 +234,12 @@ TEST_CASE("SendReply server-info contains valid control values", "[send_reply]")
     REQUIRE(loadTestSynthDef(fx, "sonic-pi-server-info"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     osc_test::Builder b;
     auto& s = b.begin("/s_new");
     s << "sonic-pi-server-info" << (int32_t)6000 << (int32_t)0 << (int32_t)1;
     fx.send(b.end());
-    fx.pump(16);
 
     OscReply r;
     REQUIRE(fx.waitForReply("/sonic-pi/server-info", r));

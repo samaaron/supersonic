@@ -50,10 +50,8 @@ TEST_CASE("/dumpOSC does not crash", "[boot]") {
 
     // Enable parsed output
     fx.send(osc_test::message("/dumpOSC", 1));
-    fx.pump(4);
     // Disable
     fx.send(osc_test::message("/dumpOSC", 0));
-    fx.pump(4);
     // If we got here without crashing, the test passes
     SUCCEED();
 }
@@ -63,9 +61,7 @@ TEST_CASE("Debug callback works", "[boot]") {
 
     // Trigger some debug output by sending /dumpOSC 1 then a command
     fx.send(osc_test::message("/dumpOSC", 1));
-    fx.pump(4);
     fx.send(osc_test::message("/status"));
-    fx.pump(16);
 
     auto msgs = fx.debugMessages();
     // Debug messages may or may not be generated depending on engine state

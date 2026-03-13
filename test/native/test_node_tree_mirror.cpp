@@ -35,6 +35,14 @@ static osc_test::Packet sNew(const char* def, int32_t id, int32_t addAction, int
     return b.end();
 }
 
+// ── Helper: /sync barrier — waits for engine to process all prior commands ───
+
+static void syncBarrier(EngineFixture& fx, int32_t syncId) {
+    fx.send(osc_test::message("/sync", syncId));
+    OscReply syncR;
+    fx.waitForReply("/synced", syncR);
+}
+
 // =============================================================================
 // SECTION: Initial boot state
 // =============================================================================
@@ -112,13 +120,12 @@ TEST_CASE("Creating a new group increases node_count", "[node_tree_mirror]") {
     uint32_t before = header->node_count.load(std::memory_order_acquire);
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(8);
+    syncBarrier(fx, 100);
 
     uint32_t after = header->node_count.load(std::memory_order_acquire);
     CHECK(after > before);
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("Creating a synth adds it to the mirror with correct def_name", "[node_tree_mirror]") {
@@ -129,14 +136,13 @@ TEST_CASE("Creating a synth adds it to the mirror with correct def_name", "[node
     auto& s = b.begin("/s_new");
     s << "sonic-pi-beep" << (int32_t)1000 << (int32_t)0 << (int32_t)1;
     fx.send(b.end());
-    fx.pump(8);
+    syncBarrier(fx, 101);
 
     const NodeEntry* synth = findNode(1000);
     REQUIRE(synth != nullptr);
     CHECK(std::string(synth->def_name) == "sonic-pi-beep");
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("Freeing a synth decreases node_count", "[node_tree_mirror]") {
@@ -147,13 +153,13 @@ TEST_CASE("Freeing a synth decreases node_count", "[node_tree_mirror]") {
     auto& s = b.begin("/s_new");
     s << "sonic-pi-beep" << (int32_t)1000 << (int32_t)0 << (int32_t)1;
     fx.send(b.end());
-    fx.pump(8);
+    syncBarrier(fx, 102);
 
     auto* header = getHeader();
     uint32_t before = header->node_count.load(std::memory_order_acquire);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(8);
+    syncBarrier(fx, 103);
 
     uint32_t after = header->node_count.load(std::memory_order_acquire);
     CHECK(after < before);
@@ -168,11 +174,10 @@ TEST_CASE("Creating nested groups: parent_id is correct", "[node_tree_mirror]") 
 
     // Create group 100 at head of root
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(8);
 
     // Create group 200 inside group 100
     fx.send(osc_test::message("/g_new", 200, 0, 100));
-    fx.pump(8);
+    syncBarrier(fx, 104);
 
     const NodeEntry* g200 = findNode(200);
     REQUIRE(g200 != nullptr);
@@ -180,7 +185,6 @@ TEST_CASE("Creating nested groups: parent_id is correct", "[node_tree_mirror]") 
 
     fx.send(osc_test::message("/n_free", 200));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("Group's head_id points to first child after adding synth", "[node_tree_mirror]") {
@@ -189,14 +193,13 @@ TEST_CASE("Group's head_id points to first child after adding synth", "[node_tre
 
     // Create a group
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(8);
 
     // Add synth 1000 at head of group 100
     osc_test::Builder b;
     auto& s = b.begin("/s_new");
     s << "sonic-pi-beep" << (int32_t)1000 << (int32_t)0 << (int32_t)100;
     fx.send(b.end());
-    fx.pump(8);
+    syncBarrier(fx, 105);
 
     const NodeEntry* g100 = findNode(100);
     REQUIRE(g100 != nullptr);
@@ -204,7 +207,6 @@ TEST_CASE("Group's head_id points to first child after adding synth", "[node_tre
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("Synth's parent_id matches the group it was added to", "[node_tree_mirror]") {
@@ -213,14 +215,13 @@ TEST_CASE("Synth's parent_id matches the group it was added to", "[node_tree_mir
 
     // Create group 100 at head of root
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(8);
 
     // Add synth 1000 to group 100
     osc_test::Builder b;
     auto& s = b.begin("/s_new");
     s << "sonic-pi-beep" << (int32_t)1000 << (int32_t)0 << (int32_t)100;
     fx.send(b.end());
-    fx.pump(8);
+    syncBarrier(fx, 106);
 
     const NodeEntry* synth = findNode(1000);
     REQUIRE(synth != nullptr);
@@ -228,7 +229,6 @@ TEST_CASE("Synth's parent_id matches the group it was added to", "[node_tree_mir
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -243,13 +243,12 @@ TEST_CASE("version increments when tree changes", "[node_tree_mirror]") {
 
     // Create a group — should bump version
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(8);
+    syncBarrier(fx, 107);
 
     uint32_t versionAfter = header->version.load(std::memory_order_acquire);
     CHECK(versionAfter > versionBefore);
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -282,7 +281,7 @@ TEST_CASE("Freeing all synths returns to base count (2 groups)", "[node_tree_mir
         s << "sonic-pi-beep" << (int32_t)(2000 + i) << (int32_t)0 << (int32_t)1;
         fx.send(b.end());
     }
-    fx.pump(8);
+    syncBarrier(fx, 108);
 
     uint32_t withSynths = header->node_count.load(std::memory_order_acquire);
     REQUIRE(withSynths > baseCount);
@@ -291,7 +290,7 @@ TEST_CASE("Freeing all synths returns to base count (2 groups)", "[node_tree_mir
     for (int i = 0; i < 5; i++) {
         fx.send(osc_test::message("/n_free", 2000 + i));
     }
-    fx.pump(8);
+    syncBarrier(fx, 109);
 
     uint32_t afterFree = header->node_count.load(std::memory_order_acquire);
     CHECK(afterFree == baseCount);
@@ -312,12 +311,11 @@ TEST_CASE("def_name is \"group\" for group entries", "[node_tree_mirror]") {
 
     // Create a new group and check it too
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(8);
+    syncBarrier(fx, 110);
 
     const NodeEntry* g100 = findNode(100);
     REQUIRE(g100 != nullptr);
     CHECK(std::string(g100->def_name) == "group");
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }

@@ -40,27 +40,23 @@ TEST_CASE("synth appears after /s_new", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     int count = getSynthCount(fx);
     CHECK(count >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("group appears after /g_new", "[node_tree]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(8);
 
     // root(0) + default(1) + 100 = at least 3
     int count = getGroupCount(fx);
     CHECK(count >= 3);
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("node disappears after /n_free", "[node_tree]") {
@@ -68,13 +64,11 @@ TEST_CASE("node disappears after /n_free", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     int before = getSynthCount(fx);
     REQUIRE(before >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(8);
 
     int after = getSynthCount(fx);
     CHECK(after < before);
@@ -85,22 +79,18 @@ TEST_CASE("/g_freeAll removes all children", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1002, 0, 100));
-    fx.pump(8);
 
     // Free all children of group 100
     fx.send(osc_test::message("/g_freeAll", 100));
-    fx.pump(8);
 
     int synths = getSynthCount(fx);
     CHECK(synths == 0);
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("/g_deepFree removes all synths recursively", "[node_tree]") {
@@ -109,20 +99,16 @@ TEST_CASE("/g_deepFree removes all synths recursively", "[node_tree]") {
 
     // Create group 100 at head of root, group 200 inside 100
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 200, 0, 100));
-    fx.pump(4);
 
     // Add synth to each group
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 200));
-    fx.pump(8);
 
     REQUIRE(getSynthCount(fx) >= 2);
 
     // g_deepFree removes synths but keeps groups
     fx.send(osc_test::message("/g_deepFree", 100));
-    fx.pump(8);
 
     CHECK(getSynthCount(fx) == 0);
 
@@ -133,7 +119,6 @@ TEST_CASE("/g_deepFree removes all synths recursively", "[node_tree]") {
     // Cleanup
     fx.send(osc_test::message("/n_free", 200));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -147,11 +132,9 @@ TEST_CASE("/n_before updates order", "[node_tree]") {
     // Create 2 synths at head of default group — order: 1001, 1000
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 1));
-    fx.pump(8);
 
     // /n_before 1000 1001 → order should become: 1000, 1001
     fx.send(osc_test::message("/n_before", 1000, 1001));
-    fx.pump(8);
 
     // Verify via /g_queryTree — both synths still in default group
     fx.send(osc_test::message("/g_queryTree", 1, 0));
@@ -161,7 +144,6 @@ TEST_CASE("/n_before updates order", "[node_tree]") {
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
-    fx.pump(4);
 }
 
 TEST_CASE("/n_after updates order", "[node_tree]") {
@@ -171,11 +153,9 @@ TEST_CASE("/n_after updates order", "[node_tree]") {
     // Create 2 synths at head — order: 1001, 1000
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 1));
-    fx.pump(8);
 
     // /n_after 1001 1000 → reorder
     fx.send(osc_test::message("/n_after", 1001, 1000));
-    fx.pump(8);
 
     fx.send(osc_test::message("/g_queryTree", 1, 0));
     OscReply r;
@@ -184,7 +164,6 @@ TEST_CASE("/n_after updates order", "[node_tree]") {
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
-    fx.pump(4);
 }
 
 TEST_CASE("/g_head moves to head", "[node_tree]") {
@@ -192,15 +171,12 @@ TEST_CASE("/g_head moves to head", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
-    fx.pump(8);
 
     // Move 1000 to head of group 100
     fx.send(osc_test::message("/g_head", 100, 1000));
-    fx.pump(8);
 
     // Verify synth count in group 100
     fx.send(osc_test::message("/g_queryTree", 100, 0));
@@ -211,7 +187,6 @@ TEST_CASE("/g_head moves to head", "[node_tree]") {
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("/g_tail moves to tail", "[node_tree]") {
@@ -219,15 +194,12 @@ TEST_CASE("/g_tail moves to tail", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
-    fx.pump(8);
 
     // Move 1001 to tail of group 100
     fx.send(osc_test::message("/g_tail", 100, 1001));
-    fx.pump(8);
 
     // Verify synth count in group 100
     fx.send(osc_test::message("/g_queryTree", 100, 0));
@@ -238,7 +210,6 @@ TEST_CASE("/g_tail moves to tail", "[node_tree]") {
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("moving node between groups updates parent", "[node_tree]") {
@@ -246,17 +217,13 @@ TEST_CASE("moving node between groups updates parent", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 200, 0, 0));
-    fx.pump(4);
 
     // Synth 1000 in group 100
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
-    fx.pump(8);
 
     // Move synth 1000 to head of group 200
     fx.send(osc_test::message("/g_head", 200, 1000));
-    fx.pump(8);
 
     // Query group 200 — should have children
     fx.send(osc_test::message("/g_queryTree", 200, 0));
@@ -268,7 +235,6 @@ TEST_CASE("moving node between groups updates parent", "[node_tree]") {
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 200));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -280,15 +246,10 @@ TEST_CASE("deeply nested groups", "[node_tree]") {
 
     // Create 5 levels: 100 → 101 → 102 → 103 → 104
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 101, 0, 100));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 102, 0, 101));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 103, 0, 102));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 104, 0, 103));
-    fx.pump(8);
 
     // root(0) + default(1) + 100 + 101 + 102 + 103 + 104 = 7
     int groups = getGroupCount(fx);
@@ -296,7 +257,6 @@ TEST_CASE("deeply nested groups", "[node_tree]") {
 
     // Free the top-level group (should cascade via /n_free on a group)
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("multiple synths in multiple groups", "[node_tree]") {
@@ -304,21 +264,17 @@ TEST_CASE("multiple synths in multiple groups", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 200, 0, 0));
-    fx.pump(4);
 
     // 3 synths in group 100
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1002, 0, 100));
-    fx.pump(4);
 
     // 3 synths in group 200
     fx.send(sNew("sonic-pi-beep", 1003, 0, 200));
     fx.send(sNew("sonic-pi-beep", 1004, 0, 200));
     fx.send(sNew("sonic-pi-beep", 1005, 0, 200));
-    fx.pump(8);
 
     CHECK(getSynthCount(fx) == 6);
 
@@ -327,7 +283,6 @@ TEST_CASE("multiple synths in multiple groups", "[node_tree]") {
         fx.send(osc_test::message("/n_free", i));
     fx.send(osc_test::message("/n_free", 200));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("sibling order preserved", "[node_tree]") {
@@ -335,20 +290,17 @@ TEST_CASE("sibling order preserved", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
 
     // Create 3 synths at tail of group 100
     fx.send(sNew("sonic-pi-beep", 1000, 1, 100)); // add to tail
     fx.send(sNew("sonic-pi-beep", 1001, 1, 100));
     fx.send(sNew("sonic-pi-beep", 1002, 1, 100));
-    fx.pump(8);
 
     int before = getSynthCount(fx);
     REQUIRE(before >= 3);
 
     // Free middle synth
     fx.send(osc_test::message("/n_free", 1001));
-    fx.pump(8);
 
     int after = getSynthCount(fx);
     CHECK(after < before);
@@ -360,7 +312,6 @@ TEST_CASE("sibling order preserved", "[node_tree]") {
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1002));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -372,37 +323,30 @@ TEST_CASE("g_deepFree removes synths in nested hierarchy", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 200, 0, 100));
-    fx.pump(4);
 
     // Synth in group 200 (nested)
     fx.send(sNew("sonic-pi-beep", 1001, 0, 200));
     // Synth in group 100
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
-    fx.pump(8);
 
     REQUIRE(getSynthCount(fx) >= 2);
 
     fx.send(osc_test::message("/g_deepFree", 100));
-    fx.pump(8);
 
     CHECK(getSynthCount(fx) == 0);
 
     // Cleanup groups
     fx.send(osc_test::message("/n_free", 200));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("g_deepFree on empty hierarchy is no-op", "[node_tree]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
 
     fx.send(osc_test::message("/g_deepFree", 100));
-    fx.pump(8);
 
     // Group 100 should still exist
     fx.send(osc_test::message("/status"));
@@ -411,7 +355,6 @@ TEST_CASE("g_deepFree on empty hierarchy is no-op", "[node_tree]") {
     CHECK(r.parsed().argInt(3) >= 3);  // root + default + 100
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("g_deepFree preserves sibling groups", "[node_tree]") {
@@ -419,17 +362,13 @@ TEST_CASE("g_deepFree preserves sibling groups", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 200, 0, 0));
-    fx.pump(4);
 
     // Add synth to group 100
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
-    fx.pump(8);
 
     // g_deepFree root — removes all synths, keeps groups
     fx.send(osc_test::message("/g_deepFree", 0));
-    fx.pump(8);
 
     CHECK(getSynthCount(fx) == 0);
 
@@ -440,7 +379,6 @@ TEST_CASE("g_deepFree preserves sibling groups", "[node_tree]") {
     // Cleanup
     fx.send(osc_test::message("/n_free", 200));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("g_deepFree vs g_freeAll", "[node_tree]") {
@@ -449,17 +387,13 @@ TEST_CASE("g_deepFree vs g_freeAll", "[node_tree]") {
 
     // Group 100 with subgroup 200 and synths in both
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 200, 0, 100));
-    fx.pump(4);
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 200));
-    fx.pump(8);
 
     // Step 1: g_deepFree removes synths, keeps groups
     fx.send(osc_test::message("/g_deepFree", 100));
-    fx.pump(8);
 
     CHECK(getSynthCount(fx) == 0);
     // Group 200 should still exist
@@ -468,7 +402,6 @@ TEST_CASE("g_deepFree vs g_freeAll", "[node_tree]") {
 
     // Step 2: g_freeAll removes everything (including subgroups)
     fx.send(osc_test::message("/g_freeAll", 100));
-    fx.pump(8);
 
     // Group 200 should be gone now, but 100 still exists
     int groupsAfterFreeAll = getGroupCount(fx);
@@ -476,14 +409,12 @@ TEST_CASE("g_deepFree vs g_freeAll", "[node_tree]") {
 
     // Cleanup
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("g_deepFree on non-existent group is no-op", "[node_tree]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/g_deepFree", 99999));
-    fx.pump(8);
 
     // Engine still responsive
     fx.send(osc_test::message("/status"));
@@ -497,20 +428,17 @@ TEST_CASE("g_deepFree on synth node is no-op", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     int before = getSynthCount(fx);
     REQUIRE(before >= 1);
 
     // g_deepFree on a synth node — should be a no-op
     fx.send(osc_test::message("/g_deepFree", 1000));
-    fx.pump(8);
 
     int after = getSynthCount(fx);
     CHECK(after >= 1); // synth still exists
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -522,17 +450,14 @@ TEST_CASE("freeing non-existent node doesn't corrupt tree", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/n_free", 99999));
-    fx.pump(8);
 
     // Tree should still work — create and verify a synth
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     int count = getSynthCount(fx);
     CHECK(count >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("double-free doesn't corrupt tree", "[node_tree]") {
@@ -540,32 +465,26 @@ TEST_CASE("double-free doesn't corrupt tree", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Free once
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(8);
 
     // Free again (already freed)
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(8);
 
     // Tree should still work
     fx.send(sNew("sonic-pi-beep", 1001, 0, 1));
-    fx.pump(8);
 
     int count = getSynthCount(fx);
     CHECK(count >= 1);
 
     fx.send(osc_test::message("/n_free", 1001));
-    fx.pump(4);
 }
 
 TEST_CASE("moving non-existent node doesn't corrupt", "[node_tree]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/n_before", 99999, 1));
-    fx.pump(8);
 
     // Engine still responsive
     fx.send(osc_test::message("/status"));
@@ -580,17 +499,14 @@ TEST_CASE("creating synth in non-existent group doesn't corrupt", "[node_tree]")
 
     // Attempt to create synth in non-existent group 99999
     fx.send(sNew("sonic-pi-beep", 1000, 0, 99999));
-    fx.pump(8);
 
     // Tree should still work — create synth in valid group
     fx.send(sNew("sonic-pi-beep", 1001, 0, 1));
-    fx.pump(8);
 
     int count = getSynthCount(fx);
     CHECK(count >= 1);
 
     fx.send(osc_test::message("/n_free", 1001));
-    fx.pump(4);
 }
 
 TEST_CASE("creating group in non-existent parent doesn't corrupt", "[node_tree]") {
@@ -598,24 +514,20 @@ TEST_CASE("creating group in non-existent parent doesn't corrupt", "[node_tree]"
 
     // Attempt to create group 100 in non-existent parent 99999
     fx.send(osc_test::message("/g_new", 100, 0, 99999));
-    fx.pump(8);
 
     // Tree should still work
     fx.send(osc_test::message("/g_new", 200, 0, 0));
-    fx.pump(8);
 
     int groups = getGroupCount(fx);
     CHECK(groups >= 3); // root + default + 200
 
     fx.send(osc_test::message("/n_free", 200));
-    fx.pump(4);
 }
 
 TEST_CASE("g_freeAll on non-existent group doesn't corrupt", "[node_tree]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/g_freeAll", 99999));
-    fx.pump(8);
 
     // Engine still responsive
     fx.send(osc_test::message("/status"));
@@ -630,22 +542,18 @@ TEST_CASE("reusing freed node ID works", "[node_tree]") {
 
     // Create synth 1000
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
     REQUIRE(getSynthCount(fx) >= 1);
 
     // Free it
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(8);
 
     // Create synth 1000 again (reuse ID)
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     int count = getSynthCount(fx);
     CHECK(count >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("creating duplicate node ID fails gracefully", "[node_tree]") {
@@ -654,12 +562,10 @@ TEST_CASE("creating duplicate node ID fails gracefully", "[node_tree]") {
 
     // Create synth 1000
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
     REQUIRE(getSynthCount(fx) >= 1);
 
     // Try to create synth 1000 again (duplicate)
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // First synth should still exist
     int count = getSynthCount(fx);
@@ -667,7 +573,6 @@ TEST_CASE("creating duplicate node ID fails gracefully", "[node_tree]") {
 
     // Cleanup
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -679,16 +584,13 @@ TEST_CASE("swap two nodes via /n_before", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
 
     // A(1000) first, then B(1001) at tail — order: A, B
     fx.send(sNew("sonic-pi-beep", 1000, 1, 100)); // add to tail
     fx.send(sNew("sonic-pi-beep", 1001, 1, 100)); // add to tail
-    fx.pump(8);
 
     // /n_before 1001 1000 → order becomes B, A
     fx.send(osc_test::message("/n_before", 1001, 1000));
-    fx.pump(8);
 
     // Verify both synths still exist
     fx.send(osc_test::message("/g_queryTree", 100, 0));
@@ -699,7 +601,6 @@ TEST_CASE("swap two nodes via /n_before", "[node_tree]") {
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("move node through multiple groups", "[node_tree]") {
@@ -707,23 +608,17 @@ TEST_CASE("move node through multiple groups", "[node_tree]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 200, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 300, 0, 0));
-    fx.pump(4);
 
     // Synth 1000 in group 100
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
-    fx.pump(8);
 
     // Move to 200
     fx.send(osc_test::message("/g_head", 200, 1000));
-    fx.pump(8);
 
     // Move to 300
     fx.send(osc_test::message("/g_head", 300, 1000));
-    fx.pump(8);
 
     // Verify synth is now in group 300
     fx.send(osc_test::message("/g_queryTree", 300, 0));
@@ -735,7 +630,6 @@ TEST_CASE("move node through multiple groups", "[node_tree]") {
     fx.send(osc_test::message("/n_free", 300));
     fx.send(osc_test::message("/n_free", 200));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("move group with children", "[node_tree]") {
@@ -744,17 +638,13 @@ TEST_CASE("move group with children", "[node_tree]") {
 
     // Group 100 and 200 in root
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 200, 0, 0));
-    fx.pump(4);
 
     // Synth 1000 in group 100
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
-    fx.pump(8);
 
     // Move group 100 into group 200
     fx.send(osc_test::message("/g_head", 200, 100));
-    fx.pump(8);
 
     // Query group 200 — should have children (group 100)
     fx.send(osc_test::message("/g_queryTree", 200, 0));
@@ -767,7 +657,6 @@ TEST_CASE("move group with children", "[node_tree]") {
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 100));
     fx.send(osc_test::message("/n_free", 200));
-    fx.pump(4);
 }
 
 TEST_CASE("rapid sequential moves", "[node_tree]") {
@@ -778,7 +667,6 @@ TEST_CASE("rapid sequential moves", "[node_tree]") {
     for (int i = 0; i < 5; i++) {
         fx.send(sNew("sonic-pi-beep", 3000 + i, 0, 1));
     }
-    fx.pump(8);
 
     // Do 10 moves: alternate /n_before and /n_after
     for (int i = 0; i < 10; i++) {
@@ -788,7 +676,6 @@ TEST_CASE("rapid sequential moves", "[node_tree]") {
             fx.send(osc_test::message("/n_before", a, b));
         else
             fx.send(osc_test::message("/n_after", a, b));
-        fx.pump(4);
     }
 
     // All 5 synths should still exist
@@ -799,7 +686,6 @@ TEST_CASE("rapid sequential moves", "[node_tree]") {
 
     for (int i = 0; i < 5; i++)
         fx.send(osc_test::message("/n_free", 3000 + i));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -823,7 +709,6 @@ TEST_CASE("status updates after operations", "[node_tree]") {
     // Create 5 synths
     for (int i = 0; i < 5; i++)
         fx.send(sNew("sonic-pi-beep", 4000 + i, 0, 1));
-    fx.pump(8);
 
     CHECK(getSynthCount(fx) == 5);
 
@@ -831,14 +716,12 @@ TEST_CASE("status updates after operations", "[node_tree]") {
     fx.send(osc_test::message("/n_free", 4000));
     fx.send(osc_test::message("/n_free", 4001));
     fx.send(osc_test::message("/n_free", 4002));
-    fx.pump(8);
 
     CHECK(getSynthCount(fx) == 2);
 
     // Cleanup
     fx.send(osc_test::message("/n_free", 4003));
     fx.send(osc_test::message("/n_free", 4004));
-    fx.pump(4);
 }
 
 TEST_CASE("many concurrent synths", "[node_tree]") {
@@ -848,14 +731,12 @@ TEST_CASE("many concurrent synths", "[node_tree]") {
     // Create 50 synths
     for (int i = 0; i < 50; i++)
         fx.send(sNew("sonic-pi-beep", 5000 + i, 0, 1));
-    fx.pump(16);
 
     CHECK(getSynthCount(fx) == 50);
 
     // Free all
     for (int i = 0; i < 50; i++)
         fx.send(osc_test::message("/n_free", 5000 + i));
-    fx.pump(16);
 
     CHECK(getSynthCount(fx) == 0);
 }

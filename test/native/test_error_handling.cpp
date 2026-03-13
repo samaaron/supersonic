@@ -35,7 +35,6 @@ TEST_CASE("Invalid node ID returns error or is handled", "[error]") {
         s << (int32_t)99999 << "freq" << 440.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Engine must still be responsive
     fx.send(osc_test::message("/status"));
@@ -50,11 +49,9 @@ TEST_CASE("Duplicate node ID fails gracefully", "[error]") {
 
     // Create synth 1000
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Attempt to create another synth with the same ID
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // /status.reply args: unused(0), numUgens(1), numSynths(2), numGroups(3)
     fx.send(osc_test::message("/status"));
@@ -64,7 +61,6 @@ TEST_CASE("Duplicate node ID fails gracefully", "[error]") {
 
     // Cleanup
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("Freeing root group is prevented", "[error]") {
@@ -72,7 +68,6 @@ TEST_CASE("Freeing root group is prevented", "[error]") {
 
     // Attempt to free node 0 (root group)
     fx.send(osc_test::message("/n_free", 0));
-    fx.pump(8);
 
     // Engine must still be alive and the root group must still exist
     fx.send(osc_test::message("/status"));
@@ -90,7 +85,6 @@ TEST_CASE("Setting controls on non-existent node", "[error]") {
         s << (int32_t)99999 << "note" << 72.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
@@ -107,7 +101,6 @@ TEST_CASE("Buffer operation on unallocated buffer", "[error]") {
 
     // Query a buffer that was never allocated
     fx.send(osc_test::message("/b_query", 999));
-    fx.pump(8);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
@@ -120,7 +113,6 @@ TEST_CASE("/b_alloc with extreme values", "[error]") {
 
     // Attempt to allocate a buffer with an absurdly large frame count
     fx.send(osc_test::message("/b_alloc", 0, 999999999, 1));
-    fx.pump(8);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
@@ -144,7 +136,6 @@ TEST_CASE("/b_set with out-of-bounds index", "[error]") {
         s << (int32_t)0 << (int32_t)999 << 0.5f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
@@ -153,7 +144,6 @@ TEST_CASE("/b_set with out-of-bounds index", "[error]") {
 
     // Cleanup
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -166,7 +156,6 @@ TEST_CASE("Truncated synthdef header", "[error]") {
     // SCgf magic bytes, but truncated (only 4 bytes instead of a full synthdef)
     uint8_t truncated[] = { 0x53, 0x43, 0x67, 0x66 };
     fx.send(osc_test::messageWithBlob("/d_recv", truncated, sizeof(truncated)));
-    fx.pump(8);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
@@ -180,7 +169,6 @@ TEST_CASE("Empty synthdef data", "[error]") {
     // Send /d_recv with an empty blob
     std::vector<uint8_t> empty;
     fx.send(osc_test::messageWithBlob("/d_recv", empty.data(), 0));
-    fx.pump(8);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
@@ -194,7 +182,6 @@ TEST_CASE("Random garbage as synthdef", "[error]") {
     // 256 bytes of deterministic garbage (fixed pattern, not rand())
     std::vector<uint8_t> garbage(256, 0xAB);
     fx.send(osc_test::messageWithBlob("/d_recv", garbage.data(), garbage.size()));
-    fx.pump(8);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
@@ -208,14 +195,12 @@ TEST_CASE("Valid synthdef loads after malformed attempts", "[error]") {
     // Send garbage synthdef first
     std::vector<uint8_t> garbage(256, 0xAB);
     fx.send(osc_test::messageWithBlob("/d_recv", garbage.data(), garbage.size()));
-    fx.pump(8);
 
     // Now load a real synthdef — it must still succeed
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     // Create a synth to prove the valid def is usable
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -224,7 +209,6 @@ TEST_CASE("Valid synthdef loads after malformed attempts", "[error]") {
 
     // Cleanup
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -235,7 +219,6 @@ TEST_CASE("Unknown OSC command handled gracefully", "[error]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/nonexistent_command"));
-    fx.pump(8);
 
     // Engine must still respond to /status
     fx.send(osc_test::message("/status"));
@@ -248,7 +231,6 @@ TEST_CASE("/s_new with non-existent synthdef", "[error]") {
     EngineFixture fx;
 
     fx.send(sNew("totally_fake_synthdef", 1000, 0, 1));
-    fx.pump(8);
 
     // No synth should have been created
     fx.send(osc_test::message("/status"));
@@ -268,7 +250,6 @@ TEST_CASE("/s_new with invalid add action", "[error]") {
         s << "sonic-pi-beep" << (int32_t)1000 << (int32_t)99 << (int32_t)1;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
@@ -277,7 +258,6 @@ TEST_CASE("/s_new with invalid add action", "[error]") {
 
     // Cleanup attempt — the synth may or may not have been created
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("/g_new with non-existent target", "[error]") {
@@ -285,7 +265,6 @@ TEST_CASE("/g_new with non-existent target", "[error]") {
 
     // Create group 100 with add-to-head of non-existent target 99999
     fx.send(osc_test::message("/g_new", 100, 0, 99999));
-    fx.pump(8);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
@@ -304,7 +283,6 @@ TEST_CASE("Engine recovers after rapid malformed commands", "[error]") {
     for (int i = 0; i < 50; ++i) {
         std::string cmd = "/badcmd" + std::to_string(i);
         fx.send(osc_test::message(cmd.c_str()));
-        fx.pump(1);
     }
 
     // Engine must still respond to /status
@@ -321,7 +299,6 @@ TEST_CASE("Engine works after buffer errors", "[error]") {
     fx.send(osc_test::message("/b_free", 999));     // never allocated
     fx.send(osc_test::message("/b_zero", 998));      // never allocated
     fx.send(osc_test::message("/b_query", 997));     // never allocated
-    fx.pump(8);
 
     // Now do a legitimate buffer allocation
     fx.send(osc_test::message("/b_alloc", 0, 1024, 1));
@@ -330,7 +307,6 @@ TEST_CASE("Engine works after buffer errors", "[error]") {
 
     // Cleanup
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("Engine works after node errors", "[error]") {
@@ -345,12 +321,10 @@ TEST_CASE("Engine works after node errors", "[error]") {
         fx.send(b.end());
     }
     fx.send(osc_test::message("/n_run", 77777, 0));
-    fx.pump(8);
 
     // Now do legitimate synth work
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -359,7 +333,6 @@ TEST_CASE("Engine works after node errors", "[error]") {
 
     // Cleanup
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -373,7 +346,6 @@ TEST_CASE("Very long synthdef name in /s_new", "[error]") {
     // Build a 200-character synthdef name (all 'x')
     std::string longName(200, 'x');
     fx.send(sNew(longName.c_str(), 1000, 0, 1));
-    fx.pump(8);
 
     // Engine must still respond
     fx.send(osc_test::message("/status"));
@@ -387,7 +359,6 @@ TEST_CASE("Many arguments in single /n_set", "[error]") {
 
     // Create a synth to target
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Send /n_set with 50 control pairs
     {
@@ -399,7 +370,6 @@ TEST_CASE("Many arguments in single /n_set", "[error]") {
         }
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Engine must still respond and synth still exists
     fx.send(osc_test::message("/status"));
@@ -409,5 +379,4 @@ TEST_CASE("Many arguments in single /n_set", "[error]") {
 
     // Cleanup
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }

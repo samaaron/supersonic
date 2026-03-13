@@ -105,7 +105,6 @@ TEST_CASE("/b_zero completion message triggers embedded OSC", "[completion]") {
 
     // Clean up
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("/d_recv completion chains /s_new", "[completion]") {
@@ -124,7 +123,6 @@ TEST_CASE("/d_recv completion chains /s_new", "[completion]") {
                                     static_cast<uint32_t>(synthdefBytes.size()),
                                     sNewMsg);
     fx.send(pkt);
-    fx.pump(16);
 
     // Wait for /done from d_recv
     OscReply done;
@@ -137,7 +135,6 @@ TEST_CASE("/d_recv completion chains /s_new", "[completion]") {
     CHECK(status.parsed().argInt(2) >= 1);  // numSynths >= 1
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("/b_alloc completion message triggers /status", "[completion]") {
@@ -160,5 +157,4 @@ TEST_CASE("/b_alloc completion message triggers /status", "[completion]") {
     REQUIRE(fx.waitForReply("/status.reply", status));
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }

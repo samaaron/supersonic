@@ -36,7 +36,6 @@ TEST_CASE("rapid create and immediate free - 100 cycles", "[stress]") {
     for (int i = 0; i < 100; i++) {
         fx.send(sNew("sonic-pi-beep", 1000 + i, 0, 1));
         fx.send(osc_test::message("/n_free", 1000 + i));
-        fx.pump(2);
     }
 
     // Engine should still be healthy
@@ -54,25 +53,21 @@ TEST_CASE("interleaved create/free with overlapping IDs", "[stress]") {
     for (int i = 0; i < 10; i++) {
         fx.send(sNew("sonic-pi-beep", 1000 + i, 0, 1));
     }
-    fx.pump(8);
 
     // Free 1000-1004
     for (int i = 0; i < 5; i++) {
         fx.send(osc_test::message("/n_free", 1000 + i));
     }
-    fx.pump(8);
 
     // Reuse IDs 1000-1004
     for (int i = 0; i < 5; i++) {
         fx.send(sNew("sonic-pi-beep", 1000 + i, 0, 1));
     }
-    fx.pump(8);
 
     // Free all 1000-1009
     for (int i = 0; i < 10; i++) {
         fx.send(osc_test::message("/n_free", 1000 + i));
     }
-    fx.pump(8);
 
     // Engine should still be healthy with 0 synths
     fx.send(osc_test::message("/status"));
@@ -85,13 +80,10 @@ TEST_CASE("mass synth creation then mass free", "[stress]") {
     EngineFixture fx;
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
-    // Create 100 synths, pump every 10
+    // Create 100 synths
     for (int i = 0; i < 100; i++) {
         fx.send(sNew("sonic-pi-beep", 2000 + i, 0, 1));
-        if ((i + 1) % 5 == 0)
-            fx.pump(4);
     }
-    fx.pump(16);
 
     // Verify all created (allow slight margin for ring buffer capacity)
     fx.send(osc_test::message("/status"));
@@ -103,7 +95,6 @@ TEST_CASE("mass synth creation then mass free", "[stress]") {
     for (int i = 0; i < 100; i++) {
         fx.send(osc_test::message("/n_free", 2000 + i));
     }
-    fx.pump(16);
 
     fx.send(osc_test::message("/status"));
     OscReply freed;
@@ -121,7 +112,6 @@ TEST_CASE("extreme node ID values", "[stress]") {
 
     // Near INT_MAX
     fx.send(sNew("sonic-pi-beep", 2147483646, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -129,7 +119,6 @@ TEST_CASE("extreme node ID values", "[stress]") {
     CHECK(r.parsed().argInt(2) >= 1);  // synth exists
 
     fx.send(osc_test::message("/n_free", 2147483646));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -139,11 +128,9 @@ TEST_CASE("NaN in synth parameters doesn't crash", "[stress]") {
 
     fx.send(sNewWithParam("sonic-pi-beep", 1000, 0, 1,
                            "note", std::numeric_limits<float>::quiet_NaN()));
-    fx.pump(16);
 
     // No crash = success
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -153,10 +140,8 @@ TEST_CASE("Infinity in synth parameters doesn't crash", "[stress]") {
 
     fx.send(sNewWithParam("sonic-pi-beep", 1000, 0, 1,
                            "note", std::numeric_limits<float>::infinity()));
-    fx.pump(16);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -166,10 +151,8 @@ TEST_CASE("subnormal floats don't crash", "[stress]") {
 
     fx.send(sNewWithParam("sonic-pi-beep", 1000, 0, 1,
                            "note", std::numeric_limits<float>::denorm_min()));
-    fx.pump(16);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -179,10 +162,8 @@ TEST_CASE("extreme float values don't crash", "[stress]") {
 
     fx.send(sNewWithParam("sonic-pi-beep", 1000, 0, 1,
                            "note", std::numeric_limits<float>::max()));
-    fx.pump(16);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -195,11 +176,9 @@ TEST_CASE("group creation with invalid parent doesn't crash", "[stress]") {
 
     // Attempt to create group with non-existent parent 99999
     fx.send(osc_test::message("/g_new", 100, 0, 99999));
-    fx.pump(8);
 
     // Engine should still function — create a valid group
     fx.send(osc_test::message("/g_new", 200, 0, 0));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -209,7 +188,6 @@ TEST_CASE("group creation with invalid parent doesn't crash", "[stress]") {
     fx.send(osc_test::message("/n_free", 200));
     // Group 100 may or may not have been created; free it too (safe even if absent)
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -218,7 +196,6 @@ TEST_CASE("hundreds of parameters in single message", "[stress]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     // Build /n_set message with 50 repeated control index/value pairs
     {
@@ -230,11 +207,9 @@ TEST_CASE("hundreds of parameters in single message", "[stress]") {
         }
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // No crash = success
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -271,13 +246,10 @@ TEST_CASE("sync with extreme IDs", "[stress]") {
 TEST_CASE("5000 messages without corruption", "[stress]") {
     EngineFixture fx;
 
-    // Send /status 5000 times, pumping every 50 messages
+    // Send /status 5000 times
     for (int i = 0; i < 5000; i++) {
         fx.send(osc_test::message("/status"));
-        if ((i + 1) % 50 == 0)
-            fx.pump(1);
     }
-    fx.pump(8);
 
     // Verify engine still responds correctly
     fx.clearReplies();
@@ -293,18 +265,18 @@ TEST_CASE("rapid OSC messages stay intact", "[stress]") {
     // Send 100 /sync commands with incrementing IDs
     for (int i = 1; i <= 100; i++) {
         fx.send(osc_test::message("/sync", i));
-        fx.pump(1);
     }
-    fx.pump(8);
 
-    // Verify at least the last /synced arrives with the correct ID
-    // We may not catch every single one, but the last should be there.
-    // Clear and re-send to confirm engine integrity.
-    fx.clearReplies();
-    fx.send(osc_test::message("/sync", 100));
+    // Wait for the batch to drain, then verify engine integrity
+    // with a unique ID that wasn't in the batch (1-100).
+    fx.send(osc_test::message("/sync", 9999));
     OscReply r;
     REQUIRE(fx.waitForReply("/synced", r));
-    CHECK(r.parsed().argInt(0) == 100);
+    // Find our unique sync
+    while (r.parsed().argInt(0) != 9999) {
+        REQUIRE(fx.waitForReply("/synced", r));
+    }
+    CHECK(r.parsed().argInt(0) == 9999);
 }
 
 TEST_CASE("mixed immediate messages concurrently", "[stress]") {
@@ -318,10 +290,7 @@ TEST_CASE("mixed immediate messages concurrently", "[stress]") {
             case 2: fx.send(osc_test::message("/g_queryTree", 0, 0)); break;
             case 3: fx.send(osc_test::message("/version"));           break;
         }
-        if ((i + 1) % 20 == 0)
-            fx.pump(2);
     }
-    fx.pump(8);
 
     // After all that, /status should still work
     fx.clearReplies();
@@ -344,19 +313,15 @@ TEST_CASE("multiple engine operations interleaved", "[stress]") {
 
         // Create group, add 5 synths, free all
         fx.send(osc_test::message("/g_new", groupId, 0, 0));
-        fx.pump(2);
 
         for (int j = 0; j < 5; j++) {
             fx.send(sNew("sonic-pi-beep", 3000 + round * 10 + j, 0, groupId));
         }
-        fx.pump(4);
 
         fx.send(osc_test::message("/g_freeAll", groupId));
-        fx.pump(4);
 
         // Clean up the group itself
         fx.send(osc_test::message("/n_free", groupId));
-        fx.pump(2);
     }
 
     // Engine should still be healthy
@@ -397,12 +362,10 @@ TEST_CASE("synthdef reload stress", "[stress]") {
     // Load the same synthdef 20 times
     for (int i = 0; i < 20; i++) {
         REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
-        fx.pump(2);
     }
 
     // Creating a synth should still work after repeated reloads
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -410,5 +373,4 @@ TEST_CASE("synthdef reload stress", "[stress]") {
     CHECK(r.parsed().argInt(2) >= 1);  // at least our synth
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }

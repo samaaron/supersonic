@@ -31,7 +31,6 @@ TEST_CASE("frees single synth", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Confirm synth exists
     fx.send(osc_test::message("/status"));
@@ -44,7 +43,6 @@ TEST_CASE("frees single synth", "[osc_semantic]") {
 
     // Free the synth
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply after;
@@ -60,7 +58,6 @@ TEST_CASE("frees multiple nodes in single command", "[osc_semantic]") {
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 1));
     fx.send(sNew("sonic-pi-beep", 1002, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply before;
@@ -76,7 +73,6 @@ TEST_CASE("frees multiple nodes in single command", "[osc_semantic]") {
         s << (int32_t)1000 << (int32_t)1001 << (int32_t)1002;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply after;
@@ -89,7 +85,6 @@ TEST_CASE("freeing non-existent node does not crash", "[osc_semantic]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/n_free", 99999));
-    fx.pump(8);
 
     // Engine is still responsive
     fx.send(osc_test::message("/status"));
@@ -104,11 +99,9 @@ TEST_CASE("freeing group frees group and all children", "[osc_semantic]") {
 
     // Create group 100 and add 3 synths to it
     fx.send(osc_test::message("/g_new", 100, 0, 1));
-    fx.pump(4);
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1002, 0, 100));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply before;
@@ -119,7 +112,6 @@ TEST_CASE("freeing group frees group and all children", "[osc_semantic]") {
 
     // Free group 100 — should remove the group and all synths inside
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply after;
@@ -133,14 +125,11 @@ TEST_CASE("freeing already-freed node is idempotent", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(8);
 
     // Free again — should not crash
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -155,12 +144,9 @@ TEST_CASE("freeing nested groups frees entire subtree", "[osc_semantic]") {
     // Build nested hierarchy: group 100 -> group 101 -> synth 1000
     //                         group 100 -> synth 1001
     fx.send(osc_test::message("/g_new", 100, 0, 1));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 101, 0, 100));
-    fx.pump(4);
     fx.send(sNew("sonic-pi-beep", 1000, 0, 101));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply before;
@@ -171,7 +157,6 @@ TEST_CASE("freeing nested groups frees entire subtree", "[osc_semantic]") {
 
     // Free top-level group 100 — entire subtree should be gone
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply after;
@@ -195,7 +180,6 @@ TEST_CASE("/s_get returns control value after /n_set by name", "[osc_semantic]")
           << "note" << 60.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Change note to 72
     {
@@ -204,7 +188,6 @@ TEST_CASE("/s_get returns control value after /n_set by name", "[osc_semantic]")
         s << (int32_t)1000 << "note" << 72.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Query note value
     {
@@ -219,7 +202,6 @@ TEST_CASE("/s_get returns control value after /n_set by name", "[osc_semantic]")
     CHECK(r.parsed().argFloat(2) == 72.0f);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("/n_set multiple controls in single command", "[osc_semantic]") {
@@ -227,7 +209,6 @@ TEST_CASE("/n_set multiple controls in single command", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Set multiple controls at once
     {
@@ -239,7 +220,6 @@ TEST_CASE("/n_set multiple controls in single command", "[osc_semantic]") {
           << "pan"  << -0.5f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify note
     {
@@ -253,7 +233,6 @@ TEST_CASE("/n_set multiple controls in single command", "[osc_semantic]") {
     CHECK(rNote.parsed().argFloat(2) == 64.0f);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("setting control on group affects all children", "[osc_semantic]") {
@@ -261,11 +240,9 @@ TEST_CASE("setting control on group affects all children", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 1));
-    fx.pump(4);
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1002, 0, 100));
-    fx.pump(8);
 
     // Set amp on group — should propagate to all children
     {
@@ -274,7 +251,6 @@ TEST_CASE("setting control on group affects all children", "[osc_semantic]") {
         s << (int32_t)100 << "amp" << 0.1f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify all synths still running after group-level control set
     fx.send(osc_test::message("/status"));
@@ -286,7 +262,6 @@ TEST_CASE("setting control on group affects all children", "[osc_semantic]") {
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 1002));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("setting non-existent control does not crash", "[osc_semantic]") {
@@ -294,7 +269,6 @@ TEST_CASE("setting non-existent control does not crash", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Set a control that does not exist on the synthdef
     {
@@ -303,7 +277,6 @@ TEST_CASE("setting non-existent control does not crash", "[osc_semantic]") {
         s << (int32_t)1000 << "nonexistent_xyz" << 999.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify synth still exists
     fx.send(osc_test::message("/status"));
@@ -312,7 +285,6 @@ TEST_CASE("setting non-existent control does not crash", "[osc_semantic]") {
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -324,7 +296,6 @@ TEST_CASE("/n_setn sets sequential controls", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Set 3 controls starting at index 0
     {
@@ -334,7 +305,6 @@ TEST_CASE("/n_setn sets sequential controls", "[osc_semantic]") {
           << 0.111f << 0.222f << 0.333f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Query them back with /s_getn
     {
@@ -352,7 +322,6 @@ TEST_CASE("/n_setn sets sequential controls", "[osc_semantic]") {
     CHECK(p.argFloat(5) == Catch::Approx(0.333f).margin(0.01f));
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -364,7 +333,6 @@ TEST_CASE("/n_fill fills range of controls", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Fill controls 0..2 with 0.5
     {
@@ -373,7 +341,6 @@ TEST_CASE("/n_fill fills range of controls", "[osc_semantic]") {
         s << (int32_t)1000 << (int32_t)0 << (int32_t)3 << 0.5f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify synth still running after /n_fill
     fx.send(osc_test::message("/status"));
@@ -382,7 +349,6 @@ TEST_CASE("/n_fill fills range of controls", "[osc_semantic]") {
     CHECK(st.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -400,10 +366,8 @@ TEST_CASE("mapped control reads from bus", "[osc_semantic]") {
         s << (int32_t)0 << 72.0f;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     // Map note to control bus 0
     {
@@ -412,7 +376,6 @@ TEST_CASE("mapped control reads from bus", "[osc_semantic]") {
         s << (int32_t)1000 << "note" << (int32_t)0;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify synth is still in the graph
     fx.send(osc_test::message("/status"));
@@ -421,7 +384,6 @@ TEST_CASE("mapped control reads from bus", "[osc_semantic]") {
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("unmap with bus index -1", "[osc_semantic]") {
@@ -429,7 +391,6 @@ TEST_CASE("unmap with bus index -1", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     // Map note to bus 0
     {
@@ -438,7 +399,6 @@ TEST_CASE("unmap with bus index -1", "[osc_semantic]") {
         s << (int32_t)1000 << "note" << (int32_t)0;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // Unmap with -1
     {
@@ -447,7 +407,6 @@ TEST_CASE("unmap with bus index -1", "[osc_semantic]") {
         s << (int32_t)1000 << "note" << (int32_t)-1;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // Set note directly to 84
     {
@@ -456,7 +415,6 @@ TEST_CASE("unmap with bus index -1", "[osc_semantic]") {
         s << (int32_t)1000 << "note" << 84.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify synth still running after unmap
     fx.send(osc_test::message("/status"));
@@ -465,7 +423,6 @@ TEST_CASE("unmap with bus index -1", "[osc_semantic]") {
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("maps multiple controls in single command", "[osc_semantic]") {
@@ -479,10 +436,8 @@ TEST_CASE("maps multiple controls in single command", "[osc_semantic]") {
         s << (int32_t)0 << 72.0f << (int32_t)1 << 0.5f;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     // Map two controls
     {
@@ -491,7 +446,6 @@ TEST_CASE("maps multiple controls in single command", "[osc_semantic]") {
         s << (int32_t)1000 << "note" << (int32_t)0 << "amp" << (int32_t)1;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify synth still running after multi-map
     fx.send(osc_test::message("/status"));
@@ -500,7 +454,6 @@ TEST_CASE("maps multiple controls in single command", "[osc_semantic]") {
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -512,7 +465,6 @@ TEST_CASE("creates synth with specified ID", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1234, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/g_queryTree", 0, 0));
     OscReply r;
@@ -521,7 +473,6 @@ TEST_CASE("creates synth with specified ID", "[osc_semantic]") {
     CHECK(p.argInt(2) >= 1);  // root has children
 
     fx.send(osc_test::message("/n_free", 1234));
-    fx.pump(4);
 }
 
 TEST_CASE("add action 0 - head", "[osc_semantic]") {
@@ -529,14 +480,11 @@ TEST_CASE("add action 0 - head", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 1));
-    fx.pump(4);
 
     // Add synth 1000 to tail of group 100
     fx.send(sNew("sonic-pi-beep", 1000, 1, 100));
-    fx.pump(4);
     // Add synth 1001 to head of group 100
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
-    fx.pump(8);
 
     // Query group 100
     fx.send(osc_test::message("/g_queryTree", 100, 0));
@@ -547,7 +495,6 @@ TEST_CASE("add action 0 - head", "[osc_semantic]") {
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("add action 1 - tail", "[osc_semantic]") {
@@ -555,12 +502,10 @@ TEST_CASE("add action 1 - tail", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 1));
-    fx.pump(4);
 
     fx.send(sNew("sonic-pi-beep", 1000, 1, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 1, 100));
     fx.send(sNew("sonic-pi-beep", 1002, 1, 100));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -571,7 +516,6 @@ TEST_CASE("add action 1 - tail", "[osc_semantic]") {
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 1002));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("add action 2 - before target", "[osc_semantic]") {
@@ -579,11 +523,9 @@ TEST_CASE("add action 2 - before target", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     // Add synth 1001 before synth 1000 (action 2, target 1000)
     fx.send(sNew("sonic-pi-beep", 1001, 2, 1000));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -592,7 +534,6 @@ TEST_CASE("add action 2 - before target", "[osc_semantic]") {
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
-    fx.pump(4);
 }
 
 TEST_CASE("add action 3 - after target", "[osc_semantic]") {
@@ -600,11 +541,9 @@ TEST_CASE("add action 3 - after target", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(4);
 
     // Add synth 1001 after synth 1000 (action 3, target 1000)
     fx.send(sNew("sonic-pi-beep", 1001, 3, 1000));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -613,7 +552,6 @@ TEST_CASE("add action 3 - after target", "[osc_semantic]") {
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
-    fx.pump(4);
 }
 
 TEST_CASE("add action 4 - replaces target", "[osc_semantic]") {
@@ -621,7 +559,6 @@ TEST_CASE("add action 4 - replaces target", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply before;
@@ -632,7 +569,6 @@ TEST_CASE("add action 4 - replaces target", "[osc_semantic]") {
 
     // Replace synth 1000 with synth 1001 (action 4, target 1000)
     fx.send(sNew("sonic-pi-beep", 1001, 4, 1000));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply after;
@@ -642,7 +578,6 @@ TEST_CASE("add action 4 - replaces target", "[osc_semantic]") {
     CHECK(synthsAfter == synthsBefore);
 
     fx.send(osc_test::message("/n_free", 1001));
-    fx.pump(4);
 }
 
 TEST_CASE("sets controls at creation time", "[osc_semantic]") {
@@ -657,7 +592,6 @@ TEST_CASE("sets controls at creation time", "[osc_semantic]") {
           << "note" << 72.0f << "amp" << 0.25f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify with /s_get if available
     {
@@ -672,7 +606,6 @@ TEST_CASE("sets controls at creation time", "[osc_semantic]") {
     CHECK(r.parsed().argFloat(2) == 72.0f);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("non-existent synthdef fails gracefully", "[osc_semantic]") {
@@ -680,7 +613,6 @@ TEST_CASE("non-existent synthdef fails gracefully", "[osc_semantic]") {
 
     // Attempt to create a synth with a synthdef that does not exist
     fx.send(sNew("nonexistent_xyz", 1000, 0, 1));
-    fx.pump(8);
 
     // Engine should still be alive
     fx.send(osc_test::message("/status"));
@@ -690,7 +622,6 @@ TEST_CASE("non-existent synthdef fails gracefully", "[osc_semantic]") {
 
     // Cleanup (may be a no-op)
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -701,7 +632,6 @@ TEST_CASE("creates group with specified ID", "[osc_semantic]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(8);
 
     fx.send(osc_test::message("/g_queryTree", 0, 0));
     OscReply r;
@@ -709,18 +639,14 @@ TEST_CASE("creates group with specified ID", "[osc_semantic]") {
     CHECK(r.parsed().argInt(2) >= 1);  // root has children
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("creates multiple groups", "[osc_semantic]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 101, 0, 100));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 102, 1, 100));
-    fx.pump(4);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -729,20 +655,15 @@ TEST_CASE("creates multiple groups", "[osc_semantic]") {
     CHECK(r.parsed().argInt(3) >= 5);
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("nested groups create proper hierarchy", "[osc_semantic]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 101, 0, 100));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 102, 0, 101));
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 103, 0, 102));
-    fx.pump(4);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -751,22 +672,16 @@ TEST_CASE("nested groups create proper hierarchy", "[osc_semantic]") {
     CHECK(r.parsed().argInt(3) >= 6);
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("all add actions work for groups", "[osc_semantic]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));      // head of root
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 101, 0, 100));    // head of 100
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 102, 1, 100));    // tail of 100
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 103, 2, 102));    // before 102
-    fx.pump(4);
     fx.send(osc_test::message("/g_new", 104, 3, 101));    // after 101
-    fx.pump(4);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -775,7 +690,6 @@ TEST_CASE("all add actions work for groups", "[osc_semantic]") {
     CHECK(r.parsed().argInt(3) >= 7);
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -800,7 +714,6 @@ TEST_CASE("allocates mono buffer with correct params", "[osc_semantic]") {
     CHECK(p.argInt(2) == 1);       // channels
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("allocates stereo buffer", "[osc_semantic]") {
@@ -821,7 +734,6 @@ TEST_CASE("allocates stereo buffer", "[osc_semantic]") {
     CHECK(p.argInt(2) == 2);
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("re-allocating buffer replaces previous", "[osc_semantic]") {
@@ -854,7 +766,6 @@ TEST_CASE("re-allocating buffer replaces previous", "[osc_semantic]") {
     CHECK(r2.parsed().argInt(2) == 2);
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("multiple buffers are independent", "[osc_semantic]") {
@@ -897,7 +808,6 @@ TEST_CASE("multiple buffers are independent", "[osc_semantic]") {
     fx.send(osc_test::message("/b_free", 0));
     fx.send(osc_test::message("/b_free", 1));
     fx.send(osc_test::message("/b_free", 2));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -909,15 +819,12 @@ TEST_CASE("pauses synth with flag 0", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Pause synth
     fx.send(osc_test::message("/n_run", 1000, 0));
-    fx.pump(8);
 
     // Engine still works
     fx.send(osc_test::message("/status"));
@@ -925,7 +832,6 @@ TEST_CASE("pauses synth with flag 0", "[osc_semantic]") {
     REQUIRE(fx.waitForReply("/status.reply", r));
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("resumes synth with flag 1", "[osc_semantic]") {
@@ -933,15 +839,12 @@ TEST_CASE("resumes synth with flag 1", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Pause
     fx.send(osc_test::message("/n_run", 1000, 0));
-    fx.pump(4);
 
     // Resume
     fx.send(osc_test::message("/n_run", 1000, 1));
-    fx.pump(8);
 
     // Verify synth still alive after pause/resume
     fx.send(osc_test::message("/status"));
@@ -951,7 +854,6 @@ TEST_CASE("resumes synth with flag 1", "[osc_semantic]") {
     fx.clearReplies();
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("pauses and resumes multiple nodes", "[osc_semantic]") {
@@ -961,7 +863,6 @@ TEST_CASE("pauses and resumes multiple nodes", "[osc_semantic]") {
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 1));
     fx.send(sNew("sonic-pi-beep", 1002, 0, 1));
-    fx.pump(8);
 
     // Pause all three in one command
     {
@@ -972,7 +873,6 @@ TEST_CASE("pauses and resumes multiple nodes", "[osc_semantic]") {
           << (int32_t)1002 << (int32_t)0;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Resume all three
     {
@@ -983,7 +883,6 @@ TEST_CASE("pauses and resumes multiple nodes", "[osc_semantic]") {
           << (int32_t)1002 << (int32_t)1;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify all synths still alive after pause/resume
     fx.send(osc_test::message("/status"));
@@ -995,7 +894,6 @@ TEST_CASE("pauses and resumes multiple nodes", "[osc_semantic]") {
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 1002));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -1007,11 +905,9 @@ TEST_CASE("reorders nodes to head", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 1));
-    fx.pump(4);
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1002, 0, 100));
-    fx.pump(8);
 
     // Reorder: move 1002, 1001 to head of group 100
     {
@@ -1020,7 +916,6 @@ TEST_CASE("reorders nodes to head", "[osc_semantic]") {
         s << (int32_t)0 << (int32_t)100 << (int32_t)1002 << (int32_t)1001;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify all synths still alive after reorder
     fx.send(osc_test::message("/status"));
@@ -1033,7 +928,6 @@ TEST_CASE("reorders nodes to head", "[osc_semantic]") {
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 1002));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("reorders nodes to tail", "[osc_semantic]") {
@@ -1041,11 +935,9 @@ TEST_CASE("reorders nodes to tail", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 1));
-    fx.pump(4);
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1001, 0, 100));
     fx.send(sNew("sonic-pi-beep", 1002, 0, 100));
-    fx.pump(8);
 
     // Reorder: move 1000, 1001 to tail of group 100
     {
@@ -1054,7 +946,6 @@ TEST_CASE("reorders nodes to tail", "[osc_semantic]") {
         s << (int32_t)1 << (int32_t)100 << (int32_t)1000 << (int32_t)1001;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Verify all synths still alive after reorder
     fx.send(osc_test::message("/status"));
@@ -1067,7 +958,6 @@ TEST_CASE("reorders nodes to tail", "[osc_semantic]") {
     fx.send(osc_test::message("/n_free", 1001));
     fx.send(osc_test::message("/n_free", 1002));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -1109,7 +999,6 @@ TEST_CASE("sine1 generates waveform", "[osc_semantic]") {
     CHECK(val > 0.5f);
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("cheby generates transfer function", "[osc_semantic]") {
@@ -1131,7 +1020,6 @@ TEST_CASE("cheby generates transfer function", "[osc_semantic]") {
     REQUIRE(fx.waitForReply("/done", genDone));
 
     fx.send(osc_test::message("/b_free", 0));
-    fx.pump(4);
 }
 
 TEST_CASE("copy transfers samples", "[osc_semantic]") {
@@ -1155,7 +1043,6 @@ TEST_CASE("copy transfers samples", "[osc_semantic]") {
         s << (int32_t)0 << (int32_t)0 << (int32_t)256 << 0.5f;
         fx.send(b.end());
     }
-    fx.pump(8);
     fx.clearReplies();
 
     // Copy buffer 0 into buffer 1
@@ -1171,7 +1058,6 @@ TEST_CASE("copy transfers samples", "[osc_semantic]") {
 
     fx.send(osc_test::message("/b_free", 0));
     fx.send(osc_test::message("/b_free", 1));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -1188,7 +1074,6 @@ TEST_CASE("/c_set and /c_get", "[osc_semantic]") {
         s << (int32_t)0 << 440.0f;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // Get control bus 0
     fx.send(osc_test::message("/c_get", 0));
@@ -1210,7 +1095,6 @@ TEST_CASE("/c_setn and /c_getn", "[osc_semantic]") {
           << 100.0f << 200.0f << 300.0f << 400.0f;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // Get 4 sequential buses starting at 0
     {
@@ -1239,7 +1123,6 @@ TEST_CASE("/c_fill fills buses", "[osc_semantic]") {
         s << (int32_t)0 << (int32_t)10 << 0.5f;
         fx.send(b.end());
     }
-    fx.pump(4);
 
     // Read bus 5 to verify
     fx.send(osc_test::message("/c_get", 5));
@@ -1266,7 +1149,6 @@ TEST_CASE("frees all loaded synthdefs", "[osc_semantic]") {
 
     // Free all synthdefs
     fx.send(osc_test::message("/d_freeAll"));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply after;
@@ -1289,7 +1171,6 @@ TEST_CASE("creates parallel group", "[osc_semantic]") {
         s << (int32_t)100 << (int32_t)0 << (int32_t)0;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     fx.send(osc_test::message("/g_queryTree", 0, 0));
     OscReply r;
@@ -1297,7 +1178,6 @@ TEST_CASE("creates parallel group", "[osc_semantic]") {
     CHECK(r.parsed().argInt(2) >= 1);  // root has children
 
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -1309,12 +1189,9 @@ TEST_CASE("dumps tree without crash", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 1));
-    fx.pump(4);
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
-    fx.pump(8);
 
     fx.send(osc_test::message("/g_dumpTree", 0, 0));
-    fx.pump(8);
 
     // Verify engine state intact after dump
     fx.send(osc_test::message("/status"));
@@ -1324,7 +1201,6 @@ TEST_CASE("dumps tree without crash", "[osc_semantic]") {
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("dumps tree with controls", "[osc_semantic]") {
@@ -1332,12 +1208,9 @@ TEST_CASE("dumps tree with controls", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 1));
-    fx.pump(4);
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
-    fx.pump(8);
 
     fx.send(osc_test::message("/g_dumpTree", 0, 1));
-    fx.pump(8);
 
     // Verify engine state intact after dump
     fx.send(osc_test::message("/status"));
@@ -1347,7 +1220,6 @@ TEST_CASE("dumps tree with controls", "[osc_semantic]") {
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -1359,10 +1231,8 @@ TEST_CASE("traces synth execution", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/n_trace", 1000));
-    fx.pump(8);
 
     // Verify synth still exists after trace
     fx.send(osc_test::message("/status"));
@@ -1371,7 +1241,6 @@ TEST_CASE("traces synth execution", "[osc_semantic]") {
     CHECK(st.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -1383,7 +1252,6 @@ TEST_CASE("/s_noid removes synth ID", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     // Remove the ID from the synth
     {
@@ -1392,7 +1260,6 @@ TEST_CASE("/s_noid removes synth ID", "[osc_semantic]") {
         s << (int32_t)1000;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Engine still alive
     fx.send(osc_test::message("/status"));
@@ -1410,7 +1277,6 @@ TEST_CASE("/n_mapa maps to audio bus", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     {
         osc_test::Builder b;
@@ -1418,10 +1284,8 @@ TEST_CASE("/n_mapa maps to audio bus", "[osc_semantic]") {
         s << (int32_t)1000 << "note" << (int32_t)0;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -1430,7 +1294,6 @@ TEST_CASE("/n_mapan maps sequential to audio buses", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     {
         osc_test::Builder b;
@@ -1438,10 +1301,8 @@ TEST_CASE("/n_mapan maps sequential to audio buses", "[osc_semantic]") {
         s << (int32_t)1000 << "note" << (int32_t)0 << (int32_t)1;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -1450,7 +1311,6 @@ TEST_CASE("/n_mapn maps sequential to control buses", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     {
         osc_test::Builder b;
@@ -1458,10 +1318,8 @@ TEST_CASE("/n_mapn maps sequential to control buses", "[osc_semantic]") {
         s << (int32_t)1000 << "note" << (int32_t)0 << (int32_t)1;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
     SUCCEED();
 }
 
@@ -1474,9 +1332,7 @@ TEST_CASE("returns correct tree structure", "[osc_semantic]") {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     fx.send(osc_test::message("/g_new", 100, 0, 1));
-    fx.pump(4);
     fx.send(sNew("sonic-pi-beep", 1000, 0, 100));
-    fx.pump(8);
 
     fx.send(osc_test::message("/g_queryTree", 0, 0));
     OscReply r;
@@ -1488,7 +1344,6 @@ TEST_CASE("returns correct tree structure", "[osc_semantic]") {
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 100));
-    fx.pump(4);
 }
 
 TEST_CASE("returns control values with flag 1", "[osc_semantic]") {
@@ -1503,7 +1358,6 @@ TEST_CASE("returns control values with flag 1", "[osc_semantic]") {
           << "note" << 72.0f;
         fx.send(b.end());
     }
-    fx.pump(8);
 
     // Query without controls (flag=0)
     fx.send(osc_test::message("/g_queryTree", 0, 0));
@@ -1522,7 +1376,6 @@ TEST_CASE("returns control values with flag 1", "[osc_semantic]") {
     CHECK(countWith > countWithout);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // ===========================================================================
@@ -1535,12 +1388,10 @@ TEST_CASE("/n_go notification on synth creation", "[osc_semantic]") {
 
     // Enable notifications
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
     fx.clearReplies();
 
     // Create synth
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(16);
 
     OscReply r;
     if (fx.waitForReply("/n_go", r)) {
@@ -1551,7 +1402,6 @@ TEST_CASE("/n_go notification on synth creation", "[osc_semantic]") {
     }
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("/n_end notification on node free", "[osc_semantic]") {
@@ -1560,15 +1410,12 @@ TEST_CASE("/n_end notification on node free", "[osc_semantic]") {
 
     // Enable notifications
     fx.send(osc_test::message("/notify", 1));
-    fx.pump(4);
 
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
     fx.clearReplies();
 
     // Free the synth
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(16);
 
     OscReply r;
     if (fx.waitForReply("/n_end", r)) {

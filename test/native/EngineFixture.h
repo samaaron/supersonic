@@ -50,12 +50,8 @@ public:
 
     // ── Debug output ───────────────────────────────────────────────────
     std::vector<std::string> debugMessages() const;
+    void clearDebugMessages();
 
-    // ── Audio pump (manual mode) ──────────────────────────────────────
-    // Synchronously calls process_audio() numBlocks times with wall clock
-    // NTP time, then wakes worker threads. Used when the HeadlessDriver
-    // is stopped for deterministic testing.
-    void pump(int numBlocks = 8);
 
     // ── Synthdef helpers ───────────────────────────────────────────────
     // Load a .scsyndef file by name (e.g. "sonic-pi-beep")

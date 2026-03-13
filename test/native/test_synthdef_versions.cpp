@@ -79,7 +79,6 @@ TEST_CASE("synth creation with v1 synthdef", "[synthdef_version]") {
     REQUIRE(loadTestSynthDef(fx, "test_simple_v1"));
 
     fx.send(sNew("test_simple", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -87,7 +86,6 @@ TEST_CASE("synth creation with v1 synthdef", "[synthdef_version]") {
     CHECK(r.parsed().argInt(2) >= 1);  // numSynths
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("synth creation with v2 synthdef", "[synthdef_version]") {
@@ -95,7 +93,6 @@ TEST_CASE("synth creation with v2 synthdef", "[synthdef_version]") {
     REQUIRE(loadTestSynthDef(fx, "test_simple_v2"));
 
     fx.send(sNew("test_simple", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -103,7 +100,6 @@ TEST_CASE("synth creation with v2 synthdef", "[synthdef_version]") {
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("synth creation with v3 synthdef", "[synthdef_version]") {
@@ -111,7 +107,6 @@ TEST_CASE("synth creation with v3 synthdef", "[synthdef_version]") {
     REQUIRE(loadTestSynthDef(fx, "test_simple_v3"));
 
     fx.send(sNew("test_simple", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -119,7 +114,6 @@ TEST_CASE("synth creation with v3 synthdef", "[synthdef_version]") {
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -131,7 +125,6 @@ TEST_CASE("loads v1 multi-output synthdef", "[synthdef_version]") {
     REQUIRE(loadTestSynthDef(fx, "test_multi_v1"));
 
     fx.send(sNew("test_multi", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -139,7 +132,6 @@ TEST_CASE("loads v1 multi-output synthdef", "[synthdef_version]") {
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("loads v2 multi-output synthdef", "[synthdef_version]") {
@@ -147,7 +139,6 @@ TEST_CASE("loads v2 multi-output synthdef", "[synthdef_version]") {
     REQUIRE(loadTestSynthDef(fx, "test_multi_v2"));
 
     fx.send(sNew("test_multi", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -155,7 +146,6 @@ TEST_CASE("loads v2 multi-output synthdef", "[synthdef_version]") {
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("loads v3 multi-output synthdef", "[synthdef_version]") {
@@ -163,7 +153,6 @@ TEST_CASE("loads v3 multi-output synthdef", "[synthdef_version]") {
     REQUIRE(loadTestSynthDef(fx, "test_multi_v3"));
 
     fx.send(sNew("test_multi", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -171,7 +160,6 @@ TEST_CASE("loads v3 multi-output synthdef", "[synthdef_version]") {
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 // =============================================================================
@@ -229,7 +217,6 @@ TEST_CASE("corrupted synthdef does not crash engine", "[synthdef_version]") {
     std::vector<uint8_t> garbage(256, 0xAB);
     auto pkt = osc_test::messageWithBlob("/d_recv", garbage.data(), garbage.size());
     fx.send(pkt);
-    fx.pump(16);
 
     // Engine should still work
     fx.send(osc_test::message("/status"));
@@ -244,14 +231,12 @@ TEST_CASE("valid synthdef loads after corrupted attempt", "[synthdef_version]") 
     std::vector<uint8_t> garbage(128, 0xFF);
     auto bad = osc_test::messageWithBlob("/d_recv", garbage.data(), garbage.size());
     fx.send(bad);
-    fx.pump(16);
 
     // Now load a valid synthdef
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
     // Create a synth with it
     fx.send(sNew("sonic-pi-beep", 1000, 0, 1));
-    fx.pump(8);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -259,7 +244,6 @@ TEST_CASE("valid synthdef loads after corrupted attempt", "[synthdef_version]") 
     CHECK(r.parsed().argInt(2) >= 1);
 
     fx.send(osc_test::message("/n_free", 1000));
-    fx.pump(4);
 }
 
 TEST_CASE("truncated synthdef header does not crash", "[synthdef_version]") {
@@ -269,7 +253,6 @@ TEST_CASE("truncated synthdef header does not crash", "[synthdef_version]") {
     std::vector<uint8_t> truncated = {'S', 'C', 'g', 'f', 0, 0, 0, 2};
     auto pkt = osc_test::messageWithBlob("/d_recv", truncated.data(), truncated.size());
     fx.send(pkt);
-    fx.pump(16);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
@@ -282,7 +265,6 @@ TEST_CASE("empty blob d_recv does not crash", "[synthdef_version]") {
     std::vector<uint8_t> empty;
     auto pkt = osc_test::messageWithBlob("/d_recv", empty.data(), 0);
     fx.send(pkt);
-    fx.pump(16);
 
     fx.send(osc_test::message("/status"));
     OscReply r;
