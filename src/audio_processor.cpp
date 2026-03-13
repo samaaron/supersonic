@@ -1155,7 +1155,20 @@ bool ring_buffer_write(
     std::memcpy(buffer_start + buffer_start_offset + current_head + sizeof(Message), data, data_size);
 
     // Update head pointer with release semantics (publish message)
-    head->store((current_head + header.length) % buffer_size, std::memory_order_release);
+    int32_t new_head = (current_head + header.length) % buffer_size;
+    head->store(new_head, std::memory_order_release);
+
+    // Track peak buffer usage at write time — the reader may drain the
+    // buffer before the periodic metrics sampling sees the fill level.
+    if (metrics && buffer_start_offset == OUT_BUFFER_START) {
+        uint32_t used = (new_head - current_tail + buffer_size) % buffer_size;
+        uint32_t prev = metrics->out_buffer_peak_bytes.load(std::memory_order_relaxed);
+        while (used > prev) {
+            if (metrics->out_buffer_peak_bytes.compare_exchange_weak(
+                    prev, used, std::memory_order_relaxed))
+                break;
+        }
+    }
 
     return true;
 }

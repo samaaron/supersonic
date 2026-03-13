@@ -104,40 +104,26 @@ jobs:
           - os: ubuntu-latest
             name: linux-x64
             ext: so
-            headless: ""
-            audio: |
-              sudo apt-get install -y pulseaudio
-              pulseaudio --start --exit-idle-time=-1
-              pactl load-module module-null-sink sink_name=virtual sink_properties=device.description=Virtual
-              pactl set-default-sink virtual
+            headless: "1"
           - os: ubuntu-24.04-arm
             name: linux-arm64
             ext: so
-            headless: ""
-            audio: |
-              sudo apt-get install -y pulseaudio
-              pulseaudio --start --exit-idle-time=-1
-              pactl load-module module-null-sink sink_name=virtual sink_properties=device.description=Virtual
-              pactl set-default-sink virtual
+            headless: "1"
           - os: macos-latest
             name: macos-arm64
             ext: so
-            headless: ""
-            audio: ""
+            headless: "1"
           - os: macos-15-intel
             name: macos-x64
             ext: so
-            headless: ""
-            audio: ""
+            headless: "1"
           - os: windows-latest
             name: windows-x64
             ext: dll
-            audio: ""
             headless: "1"
           - os: windows-arm64
             name: windows-arm64
             ext: dll
-            audio: ""
             headless: "1"
 
     runs-on: ${{ matrix.os }}
@@ -160,10 +146,6 @@ jobs:
         with:
           otp-version: '27'
           elixir-version: '1.18'
-
-      - name: Start virtual audio device
-        if: matrix.audio != ''
-        run: ${{ matrix.audio }}
 
       - name: Configure
         run: cmake -B build/nif -DBUILD_NIF=ON -DCMAKE_BUILD_TYPE=Release
