@@ -41,6 +41,9 @@ jobs:
           - os: windows-latest
             name: windows-x64
             deps: ""
+          - os: windows-arm64
+            name: windows-arm64
+            deps: ""
 
     runs-on: ${{ matrix.os }}
     name: native-${{ matrix.name }}
@@ -128,6 +131,11 @@ jobs:
             audio: ""
           - os: windows-latest
             name: windows-x64
+            ext: dll
+            audio: ""
+            headless: "1"
+          - os: windows-arm64
+            name: windows-arm64
             ext: dll
             audio: ""
             headless: "1"
