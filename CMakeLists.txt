@@ -395,6 +395,14 @@ if(BUILD_NIF)
     set_target_properties(supersonic_nif PROPERTIES
         PREFIX ""
         OUTPUT_NAME "supersonic"
+        # Put the NIF in the build root on all platforms (not Release/ or Debug/)
+        # so erlang:load_nif finds it at a consistent path.
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
     )
     target_include_directories(supersonic_nif PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}/erlang_generated   # generated erl_int_sizes_config.h

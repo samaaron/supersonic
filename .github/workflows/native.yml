@@ -43,7 +43,7 @@ jobs:
             deps: ""
 
     runs-on: ${{ matrix.os }}
-    name: juce-${{ matrix.name }}
+    name: native-${{ matrix.name }}
 
     steps:
       - name: Checkout
@@ -160,12 +160,7 @@ jobs:
 
       - name: Verify NIF binary
         shell: bash
-        run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            test -f build/nif/Release/supersonic.dll || test -f build/nif/supersonic.dll
-          else
-            test -f build/nif/supersonic.${{ matrix.ext }}
-          fi
+        run: test -f build/nif/supersonic.${{ matrix.ext }}
 
       - name: Run Elixir tests
         working-directory: test/nif
@@ -180,13 +175,7 @@ jobs:
       - name: Prepare release artifact
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
-        run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            NIF=$(find build/nif -name "supersonic.dll" | head -1)
-          else
-            NIF=build/nif/supersonic.${{ matrix.ext }}
-          fi
-          cp "$NIF" "supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}"
+        run: cp build/nif/supersonic.${{ matrix.ext }} "supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}"
 
       - name: Upload release artifact
         if: startsWith(github.ref, 'refs/tags/')
