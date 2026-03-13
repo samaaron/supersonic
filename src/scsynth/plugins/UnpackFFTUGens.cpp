@@ -57,7 +57,7 @@ void PackFFT_Dtor(PackFFT* unit);
 void PackFFT_next(PackFFT* unit, int inNumSamples);
 }
 
-InterfaceTable* ft;
+// InterfaceTable* ft; — defined in FFTInterfaceTable.cpp (shared via extern in FFT_UGens.h)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 

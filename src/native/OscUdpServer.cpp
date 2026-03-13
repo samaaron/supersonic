@@ -1,0 +1,485 @@
+/*
+ * OscUdpServer.cpp
+ */
+#include "OscUdpServer.h"
+#include "SupersonicEngine.h"
+#include "Prescheduler.h"
+#include "osc/OscOutboundPacketStream.h"
+#include "osc/OscReceivedElements.h"
+#include <cstring>
+
+OscUdpServer::OscUdpServer()
+    : juce::Thread("SuperSonic-OscUdpServer")
+{
+    mRecvBuf.resize(65536);
+}
+
+OscUdpServer::~OscUdpServer() {
+    signalThreadShouldExit();
+    if (mSocket) mSocket->shutdown();
+    stopThread(2000);
+}
+
+void OscUdpServer::initialise(int                   port,
+                               NTPClock*             clock,
+                               Prescheduler*         prescheduler,
+                               uint8_t*              inBufferStart,
+                               uint32_t              inBufferSize,
+                               std::atomic<int32_t>* inHead,
+                               std::atomic<int32_t>* inTail,
+                               std::atomic<int32_t>* inSequence,
+                               std::atomic<int32_t>* inWriteLock,
+                               PerformanceMetrics*   metrics,
+                               double lookaheadS,
+                               const std::string& bindAddress)
+{
+    mPort          = port;
+    mBindAddress   = bindAddress;
+    mClock         = clock;
+    mPrescheduler  = prescheduler;
+    mInBufferStart = inBufferStart;
+    mInBufferSize  = inBufferSize;
+    mInHead        = inHead;
+    mInTail        = inTail;
+    mInSequence    = inSequence;
+    mInWriteLock   = inWriteLock;
+    mMetrics       = metrics;
+    mClassifier.setLookahead(lookaheadS);
+}
+
+void OscUdpServer::sendInProcess(const uint8_t* data, uint32_t size) {
+    handlePacket(data, size, "127.0.0.1", 0);
+}
+
+void OscUdpServer::sendReply(const uint8_t* data, uint32_t size) {
+    juce::String ip;
+    int port;
+    {
+        juce::ScopedLock sl(mSenderLock);
+        ip   = mLastSenderIP;
+        port = mLastSenderPort;
+    }
+    if (mSocket && ip.isNotEmpty() && port > 0)
+        mSocket->write(ip, port, data, static_cast<int>(size));
+}
+
+void OscUdpServer::addListener(const juce::String& ip, int port) {
+    juce::ScopedLock sl(mSenderLock);
+    mLastSenderIP   = ip;
+    mLastSenderPort = port;
+}
+
+void OscUdpServer::setNotifyTarget(const juce::String& ip, int port) {
+    juce::ScopedLock sl(mSenderLock);
+    mNotifyIP   = ip;
+    mNotifyPort = port;
+}
+
+void OscUdpServer::sendDeviceReport() {
+    int port;
+    juce::String ip;
+    {
+        juce::ScopedLock sl(mSenderLock);
+        port = mNotifyPort;
+        ip   = mNotifyIP;
+    }
+    if (port <= 0 || ip.isEmpty() || !mEngine || !mSocket) return;
+
+    auto devices = mEngine->listDevices();
+    auto current = mEngine->currentDevice();
+    auto mode    = mEngine->deviceMode();
+
+    // Send device list for dropdown
+    // Format: mode(str), current(str), device1(str), ..., deviceN(str),
+    //         sampleRate(int32), compat1(int32), ..., compatN(int32)
+    // compat flags: 1 = device supports current rate, 0 = needs restart
+    {
+        char buf[8192];
+        osc::OutboundPacketStream s(buf, sizeof(buf));
+        s << osc::BeginMessage("/scsynth/devices")
+          << (mode.empty() ? "system" : mode.c_str())
+          << current.name.c_str();
+        for (auto& dev : devices)
+            s << dev.name.c_str();
+        s << static_cast<osc::int32>(current.activeSampleRate);
+        int curRate = static_cast<int>(current.activeSampleRate);
+        for (auto& dev : devices) {
+            bool compat = false;
+            for (auto r : dev.availableSampleRates)
+                if (static_cast<int>(r) == curRate)
+                    compat = true;
+            s << static_cast<osc::int32>(compat ? 1 : 0);
+        }
+        s << osc::EndMessage;
+        mSocket->write(ip, port, s.Data(), static_cast<int>(s.Size()));
+    }
+
+    // Send hardware info for the info pane
+    {
+        double sr = current.activeSampleRate;
+        double outLatMs = sr > 0 ? (current.outputLatencySamples / sr) * 1000.0 : 0.0;
+        double inLatMs  = sr > 0 ? (current.inputLatencySamples  / sr) * 1000.0 : 0.0;
+
+        char info[1024];
+        snprintf(info, sizeof(info),
+                 "Device:      %s\n"
+                 "Driver:      %s\n"
+                 "Sample Rate: %.0f Hz\n"
+                 "Buffer Size: %d samples\n"
+                 "Channels:    %d out / %d in\n"
+                 "Latency:     %.1f / %.1f ms (out/in)",
+                 current.name.c_str(),
+                 current.typeName.c_str(),
+                 sr,
+                 current.activeBufferSize,
+                 current.activeOutputChannels,
+                 current.activeInputChannels,
+                 outLatMs, inLatMs);
+
+        char buf[2048];
+        osc::OutboundPacketStream s(buf, sizeof(buf));
+        s << osc::BeginMessage("/scsynth/info")
+          << info
+          << osc::EndMessage;
+        mSocket->write(ip, port, s.Data(), static_cast<int>(s.Size()));
+    }
+}
+
+bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
+    if (!mEngine || size < 20) return false;
+
+    // Fast prefix check
+    if (std::memcmp(data, "/supersonic/", 12) != 0) return false;
+
+    try {
+        osc::ReceivedPacket pkt(reinterpret_cast<const char*>(data),
+                                static_cast<osc::osc_bundle_element_size_t>(size));
+        osc::ReceivedMessage msg(pkt);
+        const char* addr = msg.AddressPattern();
+
+        if (std::strcmp(addr, "/supersonic/devices/list") == 0) {
+            auto devices = mEngine->listDevices();
+            for (auto& dev : devices) {
+                char buf[4096];
+                osc::OutboundPacketStream s(buf, sizeof(buf));
+                s << osc::BeginMessage("/supersonic/devices/list.reply")
+                  << dev.name.c_str()
+                  << dev.typeName.c_str()
+                  << static_cast<osc::int32>(dev.maxOutputChannels)
+                  << static_cast<osc::int32>(dev.maxInputChannels);
+                for (auto r : dev.availableSampleRates)
+                    s << static_cast<float>(r);
+                s << osc::EndMessage;
+                sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                          static_cast<uint32_t>(s.Size()));
+            }
+            // Done marker
+            char buf[256];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/supersonic/devices/list.done") << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/devices/current") == 0) {
+            auto dev = mEngine->currentDevice();
+            char buf[1024];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/supersonic/devices/current.reply")
+              << dev.name.c_str()
+              << dev.typeName.c_str()
+              << static_cast<float>(dev.activeSampleRate)
+              << static_cast<osc::int32>(dev.activeBufferSize)
+              << static_cast<osc::int32>(dev.activeOutputChannels)
+              << static_cast<osc::int32>(dev.activeInputChannels)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/devices/switch") == 0) {
+            auto it = msg.ArgumentsBegin();
+            std::string devName;
+            double sr = 0;
+            int bufSz = 0;
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                devName = it->AsStringUnchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsFloat()) {
+                sr = it->AsFloatUnchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsInt32()) {
+                bufSz = it->AsInt32Unchecked();
+            }
+
+            auto result = mEngine->switchDevice(devName, sr, bufSz);
+            char buf[1024];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/supersonic/devices/switch.reply");
+            if (result.success) {
+                s << static_cast<osc::int32>(1);
+            } else {
+                s << static_cast<osc::int32>(0) << result.error.c_str();
+            }
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/devices/report") == 0) {
+            // GUI sends this with a reply port; engine sends /scsynth/devices to that port
+            auto it = msg.ArgumentsBegin();
+            int replyPort = 0;
+            if (it != msg.ArgumentsEnd() && it->IsInt32()) {
+                replyPort = it->AsInt32Unchecked();
+            }
+            if (replyPort > 0) {
+                setNotifyTarget("127.0.0.1", replyPort);
+            }
+            sendDeviceReport();
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/devices/mode") == 0) {
+            auto it = msg.ArgumentsBegin();
+            std::string mode;
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                mode = it->AsStringUnchecked();
+            }
+
+            auto error = mEngine->setDeviceMode(mode);
+            char buf[1024];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/supersonic/devices/mode.reply")
+              << mEngine->deviceMode().c_str()
+              << static_cast<osc::int32>(error.empty() ? 1 : 0);
+            if (!error.empty())
+                s << error.c_str();
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/drivers/list") == 0) {
+            auto drivers = mEngine->listDrivers();
+            auto current = mEngine->currentDriver();
+            char buf[4096];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/supersonic/drivers/list.reply");
+            s << current.c_str();
+            for (auto& d : drivers)
+                s << d.c_str();
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/drivers/switch") == 0) {
+            auto it = msg.ArgumentsBegin();
+            std::string driverName;
+            if (it != msg.ArgumentsEnd() && it->IsString())
+                driverName = it->AsStringUnchecked();
+
+            auto result = mEngine->switchDriver(driverName);
+            char buf[1024];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/supersonic/drivers/switch.reply");
+            if (result.success) {
+                s << static_cast<osc::int32>(1)
+                  << mEngine->currentDriver().c_str()
+                  << static_cast<float>(result.sampleRate)
+                  << static_cast<osc::int32>(result.bufferSize);
+            } else {
+                s << static_cast<osc::int32>(0) << result.error.c_str();
+            }
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/record/start") == 0) {
+            auto it = msg.ArgumentsBegin();
+            std::string path, format = "wav";
+            int bitDepth = 24;
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                path = it->AsStringUnchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                format = it->AsStringUnchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsInt32()) {
+                bitDepth = it->AsInt32Unchecked();
+            }
+
+            auto result = mEngine->startRecording(path, format, bitDepth);
+            char buf[1024];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/supersonic/record/start.reply");
+            if (result.success) {
+                s << static_cast<osc::int32>(1) << result.path.c_str();
+            } else {
+                s << static_cast<osc::int32>(0) << result.error.c_str();
+            }
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/record/stop") == 0) {
+            auto result = mEngine->stopRecording();
+            char buf[1024];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/supersonic/record/stop.reply");
+            if (result.success) {
+                s << static_cast<osc::int32>(1) << result.path.c_str();
+            } else {
+                s << static_cast<osc::int32>(0) << result.error.c_str();
+            }
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/clock/offset") == 0) {
+            auto it = msg.ArgumentsBegin();
+            if (it != msg.ArgumentsEnd() && it->IsFloat()) {
+                mEngine->setClockOffset(it->AsFloatUnchecked());
+            }
+            return true;
+        }
+    } catch (...) {
+        // Don't let parsing errors crash the server
+    }
+
+    return false;
+}
+
+void OscUdpServer::handlePacket(const uint8_t* data, uint32_t size,
+                                 const juce::String& senderIP, int senderPort)
+{
+    if (size == 0) return;
+
+    // Intercept /supersonic/* commands before ring buffer routing.
+    // These are handled directly — reply to the actual sender without
+    // clobbering the ring buffer reply target (mLastSenderIP/Port).
+    if (size >= 20 && data[0] == '/' && std::memcmp(data, "/supersonic/", 12) == 0) {
+        // Temporarily point sendReply() at the current sender so the
+        // command handler's direct replies reach the right client.
+        juce::String savedIP;
+        int savedPort;
+        {
+            juce::ScopedLock sl(mSenderLock);
+            savedIP  = mLastSenderIP;
+            savedPort = mLastSenderPort;
+            mLastSenderIP   = senderIP;
+            mLastSenderPort = senderPort;
+        }
+
+        bool handled = handleSupersonicCommand(data, size);
+
+        // Restore so async ring-buffer replies still go to the correct client
+        {
+            juce::ScopedLock sl(mSenderLock);
+            mLastSenderIP   = savedIP;
+            mLastSenderPort = savedPort;
+        }
+
+        if (handled) return;
+    }
+
+    // /status flows through the ring buffer like upstream scsynth — meth_status
+    // in SC_MiscCmds.cpp handles it via the sequenced command infrastructure,
+    // returning real values for unit count, synth count, CPU, and sample rate.
+
+    // This message will be routed through the ring buffer.
+    // Update reply target so async replies from ReplyReader go back to this sender.
+    if (senderPort > 0) {
+        juce::ScopedLock sl(mSenderLock);
+        mLastSenderIP   = senderIP;
+        mLastSenderPort = senderPort;
+    }
+
+    if (mMetrics) {
+        mMetrics->osc_out_messages_sent.fetch_add(1, std::memory_order_relaxed);
+        mMetrics->osc_out_bytes_sent.fetch_add(size, std::memory_order_relaxed);
+    }
+
+    double wallNow = mClock ? mClock->wallNTP() : 0.0;
+    OscCategory cat = mClassifier.classify(data, size, wallNow);
+
+    switch (cat) {
+    case OscCategory::FAR_FUTURE:
+        if (mPrescheduler) {
+            double tagSec = OscClassifier::bundleTimeSec(data, size);
+            mPrescheduler->schedule(data, size, tagSec);
+            if (mMetrics)
+                mMetrics->prescheduler_bypassed.fetch_add(1, std::memory_order_relaxed);
+        }
+        break;
+
+    case OscCategory::IMMEDIATE:
+        if (mMetrics)
+            mMetrics->bypass_immediate.fetch_add(1, std::memory_order_relaxed);
+        [[fallthrough]];
+    case OscCategory::NEAR_FUTURE:
+        if (cat == OscCategory::NEAR_FUTURE && mMetrics)
+            mMetrics->bypass_near_future.fetch_add(1, std::memory_order_relaxed);
+        [[fallthrough]];
+    case OscCategory::LATE:
+        if (cat == OscCategory::LATE && mMetrics)
+            mMetrics->bypass_late.fetch_add(1, std::memory_order_relaxed);
+
+        if (mInBufferStart) {
+            RingBufferWriter::write(
+                mInBufferStart,
+                mInBufferSize,
+                mInHead,
+                mInTail,
+                mInSequence,
+                mInWriteLock,
+                data,
+                size
+            );
+        }
+        break;
+    }
+}
+
+void OscUdpServer::run() {
+    mSocket = std::make_unique<juce::DatagramSocket>();
+
+    if (!mSocket->bindToPort(mPort, mBindAddress.empty() ? juce::String() : juce::String(mBindAddress))) {
+        fprintf(stderr, "[osc] failed to bind to port %d\n", mPort);
+        return;
+    }
+
+    while (!threadShouldExit()) {
+        juce::String senderIP;
+        int senderPort = 0;
+
+        int bytesRead = mSocket->read(mRecvBuf.data(),
+                                       static_cast<int>(mRecvBuf.size()),
+                                       false, senderIP, senderPort);
+
+        if (bytesRead > 0) {
+            // Sender tracking is handled inside handlePacket():
+            // - Ring-buffer-bound messages update mLastSenderIP/Port
+            //   so async replies from ReplyReader go to the right client.
+            // - Directly-handled commands (/supersonic/*, /status) reply
+            //   to the actual sender without clobbering the reply target.
+            try {
+                handlePacket(mRecvBuf.data(),
+                             static_cast<uint32_t>(bytesRead),
+                             senderIP, senderPort);
+            } catch (const std::exception& e) {
+                fprintf(stderr, "[osc] exception in handlePacket: %s\n", e.what());
+            } catch (...) {
+                fprintf(stderr, "[osc] unknown exception in handlePacket\n");
+            }
+        } else if (bytesRead < 0) {
+            if (threadShouldExit()) break;
+            juce::Thread::sleep(1);
+        }
+    }
+
+    mSocket.reset();
+}

@@ -42,13 +42,22 @@ source ~/path/to/emsdk_env.sh
 Then run the build script:
 
 ```bash
-scripts/build.sh
+scripts/build-web.sh
 ```
 
 This will:
 1. Compile the SuperCollider engine to WebAssembly
 2. Bundle the JavaScript files with esbuild
 3. Copy workers, WASM, synthdefs, and samples to `dist/`
+
+### Native (JUCE) backend
+
+```bash
+scripts/build-native.sh            # Release build
+scripts/build-native.sh --debug    # Debug build
+scripts/build-native.sh --clean    # Clean rebuild
+scripts/build-native.bat           # Windows
+```
 
 ## Output
 

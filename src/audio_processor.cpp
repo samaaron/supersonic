@@ -72,6 +72,7 @@ extern "C" void InitializeFFTTables();
 // Custom errno implementation for single-threaded AudioWorklet
 // This bypasses libc's __errno_location which isn't compiled with atomics support
 // AudioWorklet is single-threaded so a simple global is sufficient
+#ifdef __EMSCRIPTEN__
 extern "C" {
     static int global_errno = 0;
 
@@ -79,6 +80,7 @@ extern "C" {
         return &global_errno;
     }
 }
+#endif
 
 // Include SuperCollider version info
 #include "scsynth/common/SC_Version.hpp"
@@ -137,10 +139,12 @@ extern "C" {
 
     // Return the base address of the ring buffer
     // JavaScript will use this to calculate all buffer positions
+#ifdef __EMSCRIPTEN__
     EMSCRIPTEN_KEEPALIVE
     int get_ring_buffer_base() {
         return reinterpret_cast<int>(ring_buffer_storage);
     }
+#endif
 
     // Return the buffer layout configuration
     // JavaScript calls this once at initialization to get all buffer constants
@@ -353,6 +357,9 @@ extern "C" {
             : (uint32_t)sample_rate;                                // From JS or AudioContext
         // worldOptionsPtr[15] = verbosity
         options.mVerbosity = worldOptionsPtr[15];                   // From JS
+#ifndef __EMSCRIPTEN__
+        options.mSharedMemoryID = worldOptionsPtr[17];              // UDP port for boost shm (native only)
+#endif
 
         // Create World
         try {
@@ -426,6 +433,7 @@ extern "C" {
         }
 
 
+#ifdef __EMSCRIPTEN__
         // Transport mode: 0 = SAB, 1 = postMessage
         const char* transport_mode = worldOptionsPtr[16] ? "PM" : "SAB";
 
@@ -440,7 +448,28 @@ extern "C" {
                      sample_rate / 1000, options.mNumOutputBusChannels, transport_mode);
         worklet_debug("");
         worklet_debug("> scsynth ready...");
+#endif
     }
+
+#ifndef __EMSCRIPTEN__
+    // destroy_world / rebuild_world — for native cold swap (device sample rate change).
+    // Tears down the World (keeping UGen plugins loaded) and rebuilds with new sample rate.
+    void destroy_world() {
+        if (g_world) {
+            World_Cleanup(g_world, false);  // false = keep UGen plugins loaded
+            g_world = nullptr;
+        }
+        g_scheduler.Clear();
+        update_scheduler_depth_metric(0);
+        last_in_sequence = -1;
+    }
+
+    void rebuild_world(double sample_rate) {
+        // Re-read worldOptions from ring_buffer_storage + 65536
+        // (caller must update opts[14] = sampleRate before calling)
+        init_memory(sample_rate);
+    }
+#endif
 
     // Main audio processing function - called every audio frame (128 samples)
     // current_time: AudioContext.currentTime
@@ -606,7 +635,11 @@ extern "C" {
                 // RT-SAFE message processing - no malloc!
                 // Setup reply address - zero-initialize for consistent comparison in /notify
                 ReplyAddress reply_addr = {};
+#ifdef __EMSCRIPTEN__
                 reply_addr.mProtocol = kWeb;
+#else
+                reply_addr.mProtocol = kUDP;
+#endif
                 reply_addr.mReplyFunc = osc_reply_to_ring_buffer;
                 reply_addr.mReplyData = nullptr;
 

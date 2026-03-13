@@ -42,13 +42,21 @@ Both modes are first class citizens and are fully supported and tested. SAB mode
 
 ## Building
 
-You can build SuperSonic with:
+Build the web (WASM + JS) distribution:
 
 ```bash
-scripts/build.sh
+scripts/build-web.sh
 ```
 
-This compiles all the assets and places the results in the dist dir.
+Build the native (JUCE) backend:
+
+```bash
+scripts/build-native.sh          # Release
+scripts/build-native.sh --debug  # Debug
+scripts/build-native.sh --clean  # Clean rebuild
+```
+
+On Windows use `scripts\build-native.bat` with the same flags.
 
 ## Testing
 

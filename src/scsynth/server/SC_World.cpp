@@ -648,11 +648,7 @@ void World_NonRealTimeSynthesis(struct World* world, WorldOptions* inOptions) {
 
         inputFileBuf = (float*)calloc(1, inputFileInfo.channels * fileBufFrames * sizeof(float));
 
-        if (world->mNumInputs != (uint32)inputFileInfo.channels)
-
         numInputChannels = world->mNumInputs = inputFileInfo.channels; // force it.
-
-        if (inputFileInfo.samplerate != (int)inOptions->mPreferredSampleRate)
 
     } else {
         world->hw->mNRTInputFile = nullptr;
@@ -1207,9 +1203,14 @@ void NodeReplyMsg::Perform() {
         SendReply(&addr, packet.data(), packet.size());
 
     // Free memory in realtime thread
-    FifoMsg msg;
-    msg.Set(mWorld, NodeReplyMsg_RTFree, nullptr, mRTMemory);
-    AudioDriver(mWorld)->SendMsgToEngine(msg);
+    if (AudioDriver(mWorld)) {
+        FifoMsg msg;
+        msg.Set(mWorld, NodeReplyMsg_RTFree, nullptr, mRTMemory);
+        AudioDriver(mWorld)->SendMsgToEngine(msg);
+    } else {
+        // No audio driver (SAB/NRT mode) — free directly
+        World_Free(mWorld, mRTMemory);
+    }
 }
 
 
@@ -1283,8 +1284,14 @@ void NotifyNoArgs(World* inWorld, char* inString) {
 }
 
 
-SCBool SendMsgToEngine(World* inWorld, FifoMsg* inMsg) { return inWorld->hw->mAudioDriver->SendMsgToEngine(*inMsg); }
+SCBool SendMsgToEngine(World* inWorld, FifoMsg* inMsg) {
+    if (!inWorld->hw->mAudioDriver) return false;
+    return inWorld->hw->mAudioDriver->SendMsgToEngine(*inMsg);
+}
 
-SCBool SendMsgFromEngine(World* inWorld, FifoMsg* inMsg) { return inWorld->hw->mAudioDriver->SendMsgFromEngine(*inMsg); }
+SCBool SendMsgFromEngine(World* inWorld, FifoMsg* inMsg) {
+    if (!inWorld->hw->mAudioDriver) return false;
+    return inWorld->hw->mAudioDriver->SendMsgFromEngine(*inMsg);
+}
 
 void SetPrintFunc(PrintFunc func) { gPrint = func; }

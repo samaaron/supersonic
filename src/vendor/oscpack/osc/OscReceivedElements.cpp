@@ -690,13 +690,13 @@ void ReceivedMessage::Init( const char *message, osc_bundle_element_size_t size 
                     case BLOB_TYPE_TAG:
                         {
                             if( argument + osc::OSC_SIZEOF_INT32 > end )
-                                MalformedMessageException( "arguments exceed message size" );
-                                
+                                throw MalformedMessageException( "arguments exceed message size" );
+
                             // treat blob size as an unsigned int for the purposes of this calculation
                             uint32 blobSize = ToUInt32( argument );
                             argument = argument + osc::OSC_SIZEOF_INT32 + RoundUp4( blobSize );
                             if( argument > end )
-                                MalformedMessageException( "arguments exceed message size" );
+                                throw MalformedMessageException( "arguments exceed message size" );
                         }
                         break;
                         

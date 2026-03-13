@@ -1,0 +1,212 @@
+name: Native Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: "native-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  # ── JUCE native executable ──────────────────────────────────────────────────
+  juce:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x64
+            deps: |
+              sudo apt-get update
+              sudo apt-get install -y build-essential cmake libasound2-dev
+          - os: ubuntu-24.04-arm
+            name: linux-arm64
+            deps: |
+              sudo apt-get update
+              sudo apt-get install -y build-essential cmake libasound2-dev
+          - os: macos-latest
+            name: macos-arm64
+            deps: ""
+          - os: macos-13
+            name: macos-x64
+            deps: ""
+          - os: windows-latest
+            name: windows-x64
+            deps: ""
+
+    runs-on: ${{ matrix.os }}
+    name: juce-${{ matrix.name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        if: matrix.deps != ''
+        run: ${{ matrix.deps }}
+
+      - name: Configure
+        run: cmake -B build/native -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build/native --config Release --parallel
+
+      - name: Run tests
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./build/native/test/native/Release/SuperSonicNativeTests.exe
+          else
+            ./build/native/test/native/SuperSonicNativeTests
+          fi
+        shell: bash
+
+      - name: Locate binary
+        id: binary
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo "path=build/native/SuperSonic_artefacts/Release/SuperSonic.exe" >> "$GITHUB_OUTPUT"
+            echo "artifact=supersonic-${{ matrix.name }}.exe" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=build/native/SuperSonic_artefacts/Release/SuperSonic" >> "$GITHUB_OUTPUT"
+            echo "artifact=supersonic-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare release artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: cp "${{ steps.binary.outputs.path }}" "${{ steps.binary.outputs.artifact }}"
+
+      - name: Upload release artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.binary.outputs.artifact }}
+          path: ${{ steps.binary.outputs.artifact }}
+
+  # ── BEAM NIF shared library ─────────────────────────────────────────────────
+  nif:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x64
+            ext: so
+            audio: |
+              sudo apt-get install -y pulseaudio
+              pulseaudio --start --exit-idle-time=-1
+              pactl load-module module-null-sink sink_name=virtual sink_properties=device.description=Virtual
+              pactl set-default-sink virtual
+          - os: ubuntu-24.04-arm
+            name: linux-arm64
+            ext: so
+            audio: |
+              sudo apt-get install -y pulseaudio
+              pulseaudio --start --exit-idle-time=-1
+              pactl load-module module-null-sink sink_name=virtual sink_properties=device.description=Virtual
+              pactl set-default-sink virtual
+          - os: macos-latest
+            name: macos-arm64
+            ext: dylib
+            audio: ""
+          - os: macos-13
+            name: macos-x64
+            ext: dylib
+            audio: ""
+          - os: windows-latest
+            name: windows-x64
+            ext: dll
+            audio: ""
+
+    runs-on: ${{ matrix.os }}
+    name: nif-${{ matrix.name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libasound2-dev
+
+      - name: Setup Erlang/Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27'
+          elixir-version: '1.18'
+
+      - name: Start virtual audio device
+        if: matrix.audio != ''
+        run: ${{ matrix.audio }}
+
+      - name: Configure
+        run: cmake -B build/nif -DBUILD_NIF=ON -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/nif --target supersonic_nif --config Release --parallel
+
+      - name: Verify NIF binary
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            test -f build/nif/Release/supersonic.dll || test -f build/nif/supersonic.dll
+          else
+            test -f build/nif/supersonic.${{ matrix.ext }}
+          fi
+
+      - name: Run Elixir tests
+        working-directory: test/nif
+        env:
+          SUPERSONIC_NIF_PATH: ${{ github.workspace }}/build/nif
+        shell: bash
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix test
+
+      - name: Prepare release artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            NIF=$(find build/nif -name "supersonic.dll" | head -1)
+          else
+            NIF=build/nif/supersonic.${{ matrix.ext }}
+          fi
+          cp "$NIF" "supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}"
+
+      - name: Upload release artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}
+          path: supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}
+
+  # ── Attach artifacts to GitHub Release ──────────────────────────────────────
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [juce, nif]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: List assets
+        run: find release-assets -type f
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/**/*

@@ -148,11 +148,31 @@ SCErr meth_b_close(World* inWorld, int inSize, char* inData, ReplyAddress* inRep
 }
 
 SCErr meth_b_allocRead(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
-SCErr meth_b_allocRead(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
-    CallSequencedCommand(BufAllocReadCmd, inWorld, inSize, inData, inReply);
+#ifndef __EMSCRIPTEN__
+// Native backend: async sample loader hook (defined in native/SampleLoader.cpp)
+extern bool native_sample_load(World*, int, const char*, int, int);
 
+SCErr meth_b_allocRead(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
+    // Route to background I/O thread if available (avoids disk I/O on audio thread)
+    sc_msg_iter msg(inSize, inData);
+    int         bufnum     = msg.geti();
+    const char* path       = msg.gets();
+    int         startFrame = msg.geti(0);
+    int         numFrames  = msg.geti(0);
+
+    if (native_sample_load(inWorld, bufnum, path, startFrame, numFrames))
+        return kSCErr_None;
+
+    // Fallback: synchronous scsynth path
+    CallSequencedCommand(BufAllocReadCmd, inWorld, inSize, inData, inReply);
     return kSCErr_None;
 }
+#else
+SCErr meth_b_allocRead(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
+    CallSequencedCommand(BufAllocReadCmd, inWorld, inSize, inData, inReply);
+    return kSCErr_None;
+}
+#endif
 
 SCErr meth_b_read(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_b_read(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {

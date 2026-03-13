@@ -233,18 +233,22 @@ void SC_SequencedCommand::CallNextStage() {
         // send this to next time.
         if (isRealTime) {
             // send to NRT
-            driver->SendMsgFromEngine(msg);
+            if (driver) driver->SendMsgFromEngine(msg);
         } else {
             // send to RT
-            driver->SendMsgToEngine(msg);
+            if (driver) driver->SendMsgToEngine(msg);
         }
     } else {
         if (isRealTime) {
             Delete();
         } else {
             // can only be freed from RT.
-            msg.Set(mWorld, FreeSequencedCommand, nullptr, (void*)this);
-            driver->SendMsgToEngine(msg);
+            if (driver) {
+                msg.Set(mWorld, FreeSequencedCommand, nullptr, (void*)this);
+                driver->SendMsgToEngine(msg);
+            } else {
+                Delete(); // In SAB/NRT mode without driver, free directly
+            }
         }
     }
 }
@@ -1204,11 +1208,12 @@ bool AudioStatusCmd::Stage2() {
     packet.addi(mWorld->mNumGroups);
     packet.addi(mWorld->hw->mGraphDefLib->NumItems());
 
+    // In SAB/NRT mode mAudioDriver may be null — return sensible defaults
     SC_AudioDriver* driver = mWorld->hw->mAudioDriver;
-    packet.addf(driver->GetAvgCPU());
-    packet.addf(driver->GetPeakCPU());
-    packet.addd(driver->GetSampleRate());
-    packet.addd(driver->GetActualSampleRate());
+    packet.addf(driver ? driver->GetAvgCPU() : 0.f);
+    packet.addf(driver ? driver->GetPeakCPU() : 0.f);
+    packet.addd(driver ? driver->GetSampleRate() : (double)mWorld->mSampleRate);
+    packet.addd(driver ? driver->GetActualSampleRate() : (double)mWorld->mSampleRate);
 
     SendReply(&mReplyAddress, packet.data(), packet.size());
 

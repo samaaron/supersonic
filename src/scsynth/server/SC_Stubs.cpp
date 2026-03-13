@@ -41,24 +41,8 @@ int64 oscTimeNow() {
 }
 
 // ============================================================================
-// Memory allocator stubs (DEAD CODE in NRT mode)
+// Memory allocator — real TLSF library linked (needed for scope buffer pool)
 // ============================================================================
-// These are referenced in realtime code paths that never execute in NRT
-// Leaving as extern "C" declarations so other code can reference them
-
-extern "C" {
-    void* malloc_ex(size_t size, void* mem_pool) {
-        return nullptr;  // Never called in NRT
-    }
-
-    void free_ex(void* ptr, void* mem_pool) {
-        // Never called in NRT
-    }
-
-    size_t init_memory_pool(size_t mem_pool_size, void* mem_pool) {
-        return 0;  // Never called in NRT
-    }
-}
 
 // ============================================================================
 // OSC processing - based on SC_CoreAudio.cpp reference implementation
@@ -67,6 +51,7 @@ extern "C" {
 // From audio_processor.cpp
 extern "C" {
     int worklet_debug(const char* fmt, ...);
+    int worklet_debug_va(const char* fmt, va_list args);
     int worklet_debug_raw(const char* msg, uint32_t len);
 }
 
@@ -372,6 +357,37 @@ PacketStatus PerformCompletionMsg(World* inWorld, const OSC_Packet& inPacket) {
 
     return PacketPerformed;
 }
+
+// ============================================================================
+// Native-only stubs — not needed when building for WASM (Emscripten)
+// ============================================================================
+#ifndef __EMSCRIPTEN__
+
+// scprintf — used by filesystem paths in #ifndef __EMSCRIPTEN__ blocks
+// Forward to worklet_debug which routes to our debug output
+int scprintf(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int ret = worklet_debug_va(fmt, args);
+    va_end(args);
+    return ret;
+}
+
+// ASIO thread stubs — v0.61 added startAsioThread/stopAsioThread for network
+// OSC. Our native backend uses OscUdpServer instead, so these are no-ops.
+namespace scsynth {
+void startAsioThread() {}
+void stopAsioThread() {}
+bool asioThreadStarted() { return false; }
+}
+
+// DiskIO + UIUGens stubs — not built for SuperSonic native backend.
+#include "SC_InterfaceTable.h"
+extern "C" void DiskIO_Load(InterfaceTable*) {}
+void DiskIO_Unload() {}
+void UIUGens_Unload() {}
+
+#endif // !__EMSCRIPTEN__
 
 // ============================================================================
 // Audio driver stubs (DEAD CODE in NRT mode)

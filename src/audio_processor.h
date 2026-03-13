@@ -47,6 +47,12 @@ extern "C" {
     // Scheduler control
     EMSCRIPTEN_KEEPALIVE void clear_scheduler();
 
+#ifndef __EMSCRIPTEN__
+    // Native-only: world teardown/rebuild for cold swap
+    void destroy_world();
+    void rebuild_world(double sample_rate);
+#endif
+
     // scsynth audio bus functions
     EMSCRIPTEN_KEEPALIVE uintptr_t get_audio_output_bus();
     EMSCRIPTEN_KEEPALIVE uintptr_t get_audio_input_bus();

@@ -105,7 +105,7 @@ public:
     OutboundPacketStream& operator<<( const InfinitumType& rhs );
     OutboundPacketStream& operator<<( int32 rhs );
 
-#if !(defined(__x86_64__) || defined(_M_X64))
+#if !(defined(__x86_64__) || defined(_M_X64) || defined(__aarch64__) || defined(__LP64__))
     OutboundPacketStream& operator<<( int rhs )
             { *this << (int32)rhs; return *this; }
 #endif
@@ -120,6 +120,7 @@ public:
     OutboundPacketStream& operator<<( const char* rhs );
     OutboundPacketStream& operator<<( const Symbol& rhs );
     OutboundPacketStream& operator<<( const Blob& rhs );
+    OutboundPacketStream& operator<<( const Uuid& rhs );  // SuperSonic extension: UUID
 
     OutboundPacketStream& operator<<( const ArrayInitiator& rhs );
     OutboundPacketStream& operator<<( const ArrayTerminator& rhs );

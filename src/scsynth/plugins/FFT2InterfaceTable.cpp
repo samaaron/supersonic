@@ -22,7 +22,7 @@
 
 #include "FFT_UGens.h"
 
-InterfaceTable* ft;
+// InterfaceTable* ft; — defined in FFTInterfaceTable.cpp (shared via extern in FFT_UGens.h)
 
 // these are defined in the relevant files
 extern void initConvolution(InterfaceTable*);

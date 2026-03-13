@@ -327,8 +327,14 @@ void Node_End(Node* inNode) { inNode->mCalcFunc = (NodeCalcFunc)&Node_Delete; }
 // actually does the sending.
 void Node_SendTrigger(Node* inNode, int triggerID, float value) {
     World* world = inNode->mWorld;
-    if (!world->mRealTime)
-        return;
+    // =========================================================================
+    // SUPERSONIC MODIFICATION - Removed NRT check for WebAudio/WASM mode
+    // Original code:
+    //     if (!world->mRealTime)
+    //         return;
+    // SuperSonic runs in NRT mode (externally driven), but still needs
+    // trigger messages routed through the FIFO to the OUT ring buffer.
+    // =========================================================================
 
     TriggerMsg msg;
     msg.mWorld = world;
@@ -346,8 +352,15 @@ void Node_SendTrigger(Node* inNode, int triggerID, float value) {
 // NOTE: Only to be called from the realtime thread.
 void Node_SendReply(Node* inNode, int replyID, const char* cmdName, int numArgs, const float* values) {
     World* world = inNode->mWorld;
-    if (!world->mRealTime)
-        return;
+    // =========================================================================
+    // SUPERSONIC MODIFICATION - Removed NRT check for WebAudio/WASM mode
+    // Original code:
+    //     if (!world->mRealTime)
+    //         return;
+    // SuperSonic runs in NRT mode (externally driven), but still needs
+    // SendReply UGen messages routed through the FIFO to the OUT ring buffer.
+    // This is required for Sonic Pi's sonic-pi-server-info synth and /tr replies.
+    // =========================================================================
 
     const int cmdNameSize = strlen(cmdName);
     void* mem = World_Alloc(world, cmdNameSize + numArgs * sizeof(float));

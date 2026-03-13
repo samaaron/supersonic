@@ -7,6 +7,7 @@
 
 #include "SC_Endian.h"
 #include "SC_HiddenWorld.h"
+#include "SC_Prototypes.h"
 #include "OSC_Packet.h"
 #include "sc_msg_iter.h"
 #include <cstring>

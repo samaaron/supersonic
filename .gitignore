@@ -13,3 +13,12 @@ test/assets/fast-check.bundle.js
 
 # Generated npm README
 README.npm.md
+
+# CMake build artefacts
+build/
+build-*/
+
+# Elixir/Mix build artefacts
+_build/
+deps/
+*.ez

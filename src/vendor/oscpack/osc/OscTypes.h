@@ -61,7 +61,7 @@ typedef unsigned long long uint64;
 
 
 
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__x86_64__) || defined(_M_X64) || defined(__aarch64__) || defined(__LP64__)
 
 typedef signed int int32;
 typedef unsigned int uint32;
@@ -127,7 +127,8 @@ enum TypeTagValues {
     SYMBOL_TYPE_TAG = 'S',
     BLOB_TYPE_TAG = 'b',
     ARRAY_BEGIN_TYPE_TAG = '[',
-    ARRAY_END_TYPE_TAG = ']'
+    ARRAY_END_TYPE_TAG = ']',
+    UUID_TYPE_TAG = 'u'       // SuperSonic extension: 16-byte UUID (for tau-state node IDs)
 };
 
 
@@ -222,6 +223,14 @@ struct Blob{
             : data( data_ ), size( size_ ) {}
     const void* data;
     osc_bundle_element_size_t size;
+};
+
+// SuperSonic extension: UUID type for tau-state 16-byte node IDs.
+// Wire format: type tag 'u', 16 bytes big-endian (matching uuid_rewriter.cpp).
+struct Uuid{
+    Uuid() {}
+    explicit Uuid( const void* data_ ) : data( data_ ) {}
+    const void* data;  // must point to exactly 16 bytes (big-endian)
 };
 
 struct ArrayInitiator{
