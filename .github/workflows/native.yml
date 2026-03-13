@@ -41,9 +41,9 @@ jobs:
           - os: windows-latest
             name: windows-x64
             deps: ""
-          - os: windows-arm64
-            name: windows-arm64
-            deps: ""
+          # - os: windows-arm64        # temporarily disabled — runner queue too slow
+          #   name: windows-arm64
+          #   deps: ""
 
     runs-on: ${{ matrix.os }}
     name: native-${{ matrix.name }}
@@ -121,10 +121,10 @@ jobs:
             name: windows-x64
             ext: dll
             headless: "1"
-          - os: windows-arm64
-            name: windows-arm64
-            ext: dll
-            headless: "1"
+          # - os: windows-arm64        # temporarily disabled — runner queue too slow
+          #   name: windows-arm64
+          #   ext: dll
+          #   headless: "1"
 
     runs-on: ${{ matrix.os }}
     name: nif-${{ matrix.name }}
