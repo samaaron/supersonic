@@ -253,6 +253,13 @@ void SupersonicEngine::initialise(const Config& cfg) {
         // -- Register audio callback (triggers audioDeviceAboutToStart) ----
         mDeviceManager->addAudioCallback(&mAudioCallback);
         mDeviceManager->addChangeListener(this);
+    } else {
+        // -- Headless: start a timer thread to drive process_audio() ------
+        mHeadlessDriver.configure(&mAudioCallback, &mSampleLoader,
+                                   mCurrentConfig.sampleRate,
+                                   mCurrentConfig.numOutputChannels,
+                                   mCurrentConfig.numInputChannels);
+        mHeadlessDriver.startThread(juce::Thread::Priority::highest);
     }
 
     // -- SampleLoader (background file I/O for /b_allocRead) ----------------
@@ -279,6 +286,7 @@ void SupersonicEngine::shutdown() {
     if (isRecording())
         stopRecording();
 
+    mHeadlessDriver.signalThreadShouldExit();
     mUdpServer.signalThreadShouldExit();
     mPrescheduler.signalThreadShouldExit();
     mReplyReader.signalThreadShouldExit();
@@ -300,6 +308,7 @@ void SupersonicEngine::shutdown() {
         mDeviceManager.reset();
     }
 
+    mHeadlessDriver.stopThread(2000);
     mSampleLoader.stopThread(2000);
     mUdpServer.stopThread(2000);
     mPrescheduler.stopThread(2000);

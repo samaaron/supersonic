@@ -20,8 +20,7 @@
     stop/0,
     send_osc/1,
     set_notification_pid/0,
-    clear_notification_pid/0,
-    tick/0  % headless testing only — not needed with a real audio device
+    clear_notification_pid/0
 ]).
 
 -on_load(init/0).
@@ -83,10 +82,3 @@ set_notification_pid() -> erlang:nif_error(nif_not_loaded).
 -spec clear_notification_pid() -> ok.
 clear_notification_pid() -> erlang:nif_error(nif_not_loaded).
 
-%% @doc Manually run one 128-sample audio processing cycle.
-%%
-%% Only allowed in headless mode (returns `{error, not_headless}' otherwise).
-%% When a real audio device is active, JUCE drives process_audio() on its
-%% own thread — calling tick() concurrently would race on scsynth internals.
--spec tick() -> ok | {error, term()}.
-tick() -> erlang:nif_error(nif_not_loaded).

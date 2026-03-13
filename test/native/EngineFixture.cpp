@@ -9,12 +9,12 @@
 #include <thread>
 #include <filesystem>
 
-// Access process_audio and friends from JuceAudioCallback.h externs
 extern "C" {
     bool process_audio(double current_time, uint32_t active_output_channels,
                        uint32_t active_input_channels);
-    void set_time_offset(double offset);
 }
+
+static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
 
 EngineFixture::EngineFixture() {
     // Wire reply/debug callbacks before initialising
@@ -42,12 +42,14 @@ EngineFixture::EngineFixture() {
     cfg.maxNodes      = 1024;
     cfg.maxGraphDefs  = 512;
     cfg.maxWireBufs   = 64;
-    cfg.headless      = true;  // no audio device — tests pump manually
+    cfg.headless      = true;
     mEngine.initialise(cfg);
 
-    // Give worker threads a moment to start, then pump a few blocks
-    // so the engine is ready to process commands.
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Stop the HeadlessDriver — tests use manual pump() for deterministic control
+    mEngine.mHeadlessDriver.signalThreadShouldExit();
+    mEngine.mHeadlessDriver.stopThread(1000);
+
+    // Pump a few blocks so the engine is ready to process commands
     pump(16);
 
     // Create default group (1) — scsynth only creates root group (0).
@@ -148,21 +150,16 @@ std::vector<std::string> EngineFixture::debugMessages() const {
 // ── Audio pump ───────────────────────────────────────────────────────────────
 
 void EngineFixture::pump(int numBlocks) {
-    static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
     for (int i = 0; i < numBlocks; i++) {
-        // Install any completed sample loads (mirrors audio callback behaviour)
         mEngine.mSampleLoader.installPendingBuffers();
-        // Native timing: pass wall clock NTP time (ntp_start=0, drift=0)
         double wallNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
                          + NTP_EPOCH_OFFSET;
-        process_audio(wallNTP, 2, 2);
-        mPumpTime += 128.0 / 48000.0;
+        process_audio(wallNTP,
+                      static_cast<uint32_t>(mEngine.mCurrentConfig.numOutputChannels),
+                      static_cast<uint32_t>(mEngine.mCurrentConfig.numInputChannels));
     }
-    // Wake the ReplyReader/DebugReader threads
     mEngine.mAudioCallback.processCount.fetch_add(1, std::memory_order_release);
     mEngine.mAudioCallback.processCount.notify_all();
-    // Brief yield so worker threads can drain their buffers
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
 }
 
 // ── Synthdef helpers ─────────────────────────────────────────────────────────

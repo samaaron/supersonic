@@ -20,6 +20,7 @@
 #include "DeviceInfo.h"
 #include "StateCache.h"
 #include "OscBuilder.h"
+#include "HeadlessDriver.h"
 
 class SupersonicEngine : private juce::ChangeListener {
     friend class EngineFixture;  // test fixture needs access to mAudioCallback
@@ -126,6 +127,7 @@ private:
     SampleLoader      mSampleLoader;
     StateCache        mStateCache;
 
+    HeadlessDriver               mHeadlessDriver;
     std::unique_ptr<juce::AudioDeviceManager> mDeviceManager;
     std::atomic<bool>        mRunning{false};
     bool                     mHeadless{false};

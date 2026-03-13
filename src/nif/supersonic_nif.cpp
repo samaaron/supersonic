@@ -18,7 +18,6 @@
 #include <juce_core/juce_core.h>
 
 #include <atomic>
-#include <chrono>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -28,8 +27,6 @@
 
 static std::mutex g_engine_mutex;
 static std::unique_ptr<SupersonicEngine> g_engine;
-static bool g_headless = false;  // true when started without audio device
-
 // JUCE runtime — initialised on first start() call (dirty scheduler)
 static std::atomic<bool> g_juce_initialised{false};
 
@@ -178,7 +175,6 @@ static ERL_NIF_TERM nif_start(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
         g_engine->onReply = on_osc_reply;
         g_engine->onDebug = on_debug;
         g_engine->initialise(cfg);
-        g_headless = cfg.headless;
     } catch (const std::exception& e) {
         g_engine.reset();
         return enif_make_tuple2(env,
@@ -244,35 +240,6 @@ static ERL_NIF_TERM nif_clear_notification_pid(ErlNifEnv* env, int, const ERL_NI
     return enif_make_atom(env, "ok");
 }
 
-static ERL_NIF_TERM nif_tick(ErlNifEnv* env, int, const ERL_NIF_TERM[]) {
-    std::lock_guard<std::mutex> lock(g_engine_mutex);
-    if (!g_engine || !g_engine->isRunning()) {
-        return enif_make_tuple2(env,
-            enif_make_atom(env, "error"),
-            enif_make_atom(env, "not_running"));
-    }
-
-    // Only allowed in headless mode — when a real audio device is active,
-    // JUCE's audio callback drives process_audio() and calling it from a
-    // second thread would race on scsynth's internal state.
-    if (!g_headless) {
-        return enif_make_tuple2(env,
-            enif_make_atom(env, "error"),
-            enif_make_atom(env, "not_headless"));
-    }
-
-    // Manually run one 128-sample audio processing cycle.
-    double now = std::chrono::duration<double>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-    process_audio(now, 2, 0);
-
-    // Wake the ReplyReader so it drains any replies produced
-    g_engine->audioCallback().processCount.fetch_add(1, std::memory_order_release);
-    g_engine->audioCallback().processCount.notify_all();
-
-    return enif_make_atom(env, "ok");
-}
-
 // ─── NIF lifecycle ─────────────────────────────────────────────────────────
 
 static int on_load(ErlNifEnv*, void**, ERL_NIF_TERM) {
@@ -314,7 +281,6 @@ static ErlNifFunc nif_funcs[] = {
     {"send_osc",               1, nif_send_osc,               0},
     {"set_notification_pid",   0, nif_set_notification_pid,   0},
     {"clear_notification_pid", 0, nif_clear_notification_pid, 0},
-    {"tick",                   0, nif_tick,                   0},
 };
 
 ERL_NIF_INIT(supersonic, nif_funcs, on_load, NULL, NULL, on_unload)

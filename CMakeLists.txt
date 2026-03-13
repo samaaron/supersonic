@@ -129,6 +129,7 @@ set(WORKERS_SRC     "${CMAKE_CURRENT_SOURCE_DIR}/src/workers")
 
 # Engine sources (everything except Main.cpp — shared between exe and tests)
 set(ENGINE_SOURCES
+    ${NATIVE_SRC}/HeadlessDriver.cpp
     ${NATIVE_SRC}/JuceAudioCallback.cpp
     ${NATIVE_SRC}/OscUdpServer.cpp
     ${NATIVE_SRC}/SampleLoader.cpp

@@ -51,8 +51,10 @@ public:
     // ── Debug output ───────────────────────────────────────────────────
     std::vector<std::string> debugMessages() const;
 
-    // ── Audio pump (for headless / CI) ─────────────────────────────────
-    // Manually calls process_audio() and wakes worker threads.
+    // ── Audio pump (manual mode) ──────────────────────────────────────
+    // Synchronously calls process_audio() numBlocks times with wall clock
+    // NTP time, then wakes worker threads. Used when the HeadlessDriver
+    // is stopped for deterministic testing.
     void pump(int numBlocks = 8);
 
     // ── Synthdef helpers ───────────────────────────────────────────────
@@ -71,6 +73,4 @@ private:
 
     mutable std::mutex       mDebugMutex;
     std::vector<std::string> mDebugMessages;
-
-    double mPumpTime = 0.0;
 };

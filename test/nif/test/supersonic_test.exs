@@ -2,8 +2,8 @@ defmodule SupersonicTest do
   use ExUnit.Case
 
   # When SUPERSONIC_HEADLESS=1 is set (e.g. Windows CI with no audio device),
-  # tests use headless mode + tick() to drive audio processing manually.
-  # Otherwise tests boot with a real audio device.
+  # tests boot in headless mode. The HeadlessDriver inside the engine handles
+  # audio processing automatically — no manual ticking needed.
   @headless System.get_env("SUPERSONIC_HEADLESS") == "1"
 
   # Tests share a single global NIF engine — ensure clean state between tests
@@ -21,11 +21,6 @@ defmodule SupersonicTest do
     else
       overrides
     end
-  end
-
-  defp ensure_processing do
-    if @headless, do: :supersonic.tick()
-    :ok
   end
 
   # Build a minimal OSC message from an address string.
@@ -105,7 +100,6 @@ defmodule SupersonicTest do
     :ok = :supersonic.start(start_config())
     :ok = :supersonic.set_notification_pid()
     :ok = :supersonic.send_osc(osc_message("/version"))
-    ensure_processing()
 
     assert {:ok, reply} = wait_for_reply()
     assert is_binary(reply)
@@ -116,7 +110,6 @@ defmodule SupersonicTest do
     :ok = :supersonic.start(start_config())
     :ok = :supersonic.set_notification_pid()
     :ok = :supersonic.send_osc(osc_message("/g_queryTree", 0))
-    ensure_processing()
 
     assert {:ok, reply} = wait_for_reply()
     assert is_binary(reply)
