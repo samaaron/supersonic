@@ -5,7 +5,7 @@
 
     IMPORTANT: Changing these values requires a rebuild:
         1. Edit this file
-        2. Run: scripts/build.sh
+        2. Run: scripts/build-web.sh
         3. Restart your application
 
     The memory layout cannot be changed at runtime - it's baked into the WASM binary

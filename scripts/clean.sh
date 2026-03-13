@@ -26,4 +26,4 @@ fi
 
 echo "Clean complete!"
 echo ""
-echo "To rebuild, run: scripts/build.sh"
+echo "To rebuild, run: scripts/build-web.sh"

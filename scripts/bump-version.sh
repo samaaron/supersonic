@@ -156,7 +156,7 @@ echo "Step 6: Rebuilding distribution..."
 echo "-----------------------------------"
 
 # Run build with --release flag
-"$PROJECT_ROOT/scripts/build.sh" --release
+"$PROJECT_ROOT/scripts/build-web.sh" --release
 echo "✓ Build complete"
 
 echo ""
