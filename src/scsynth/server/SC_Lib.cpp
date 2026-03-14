@@ -29,7 +29,7 @@
 #include "SC_Str4.h"
 #include "SC_WorldOptions.h"
 
-#ifdef __EMSCRIPTEN__
+#ifdef SUPERSONIC
 extern "C" {
     int worklet_debug(const char* fmt, ...);
 }
@@ -198,16 +198,13 @@ SCErr SC_LibCmd::Perform(struct World* inWorld, int inSize, char* inData, ReplyA
     } catch (std::exception& exc) {
         worklet_debug("ERROR: %s threw std::exception: %s", (char*)Name(), exc.what());
         if (inWorld->mLocalErrorNotification <= 0 && inWorld->mErrorNotification) {
-#ifdef __EMSCRIPTEN__
-            // WASM: direct synchronous error reporting (no RT pool allocation)
+#ifdef SUPERSONIC
+            // Direct synchronous error reporting — SuperSonic runs NRT (single-threaded)
             SendFailure(inReply, (char*)Name(), exc.what());
-            char debugMsg[256];
-            snprintf(debugMsg, sizeof(debugMsg), "FAILURE IN SERVER %s %s", (char*)Name(), exc.what());
-            worklet_debug(debugMsg);
+            worklet_debug("FAILURE IN SERVER %s %s", (char*)Name(), exc.what());
 #else
-            // Standard scsynth: staged error reporting for RT mode
             CallSendFailureCommand(inWorld, (char*)Name(), exc.what(), inReply);
-            worklet_debug("FAILURE IN SERVER %s %s\n", (char*)Name(), exc.what());
+            scprintf("FAILURE IN SERVER %s %s\n", (char*)Name(), exc.what());
 #endif
         }
         return kSCErr_Failed;
@@ -215,16 +212,12 @@ SCErr SC_LibCmd::Perform(struct World* inWorld, int inSize, char* inData, ReplyA
     if (err && (inWorld->mLocalErrorNotification <= 0 && inWorld->mErrorNotification)) {
         char errstr[128];
         SC_ErrorString(err, errstr);
-#ifdef __EMSCRIPTEN__
-        // WASM: direct synchronous error reporting (no RT pool allocation)
+#ifdef SUPERSONIC
         SendFailure(inReply, (char*)Name(), errstr);
-        char debugMsg[256];
-        snprintf(debugMsg, sizeof(debugMsg), "FAILURE IN SERVER %s %s", (char*)Name(), errstr);
-        worklet_debug(debugMsg);
+        worklet_debug("FAILURE IN SERVER %s %s", (char*)Name(), errstr);
 #else
-        // Standard scsynth: staged error reporting for RT mode
         CallSendFailureCommand(inWorld, (char*)Name(), errstr, inReply);
-        worklet_debug("FAILURE IN SERVER %s %s\n", (char*)Name(), errstr);
+        scprintf("FAILURE IN SERVER %s %s\n", (char*)Name(), errstr);
 #endif
     }
     return err;

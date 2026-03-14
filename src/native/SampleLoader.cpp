@@ -20,6 +20,7 @@
 #include "scsynth/include/plugin_interface/SC_World.h"
 #include "scsynth/include/plugin_interface/SC_SndBuf.h"
 #include "scsynth/include/common/clz.h"
+#include "src/buffer_commands.h"
 
 // Shared memory layout + ring buffer types
 #include "src/shared_memory.h"
@@ -59,13 +60,6 @@ bool native_sample_load(World* world, int bufnum, const char* path,
                         int startFrame, int numFrames) {
     if (!g_instance) return false;
     return g_instance->load(world, bufnum, path, startFrame, numFrames);
-}
-
-// ── BUFMASK (same as scsynth / buffer_commands.cpp) ─────────────────────────
-
-static inline int32_t BUFMASK(int32_t x) {
-    if (x <= 0) return 0;
-    return (1 << (31 - CLZ(x))) - 1;
 }
 
 // ── Platform-aware sf_open (UTF-8 path → wchar on Windows) ──────────────────
@@ -266,29 +260,15 @@ void SampleLoader::installPendingBuffers() {
 
 void SampleLoader::installBuffer(const CompletedLoad& load) {
     World* world = load.world;
-    int actualSamples = load.numFrames * load.numChannels;
 
-    // Set up NRT buffer (mirrors BufAllocReadCmd Stage2 + Stage3)
+    // Free previous buffer data before overwriting
     SndBuf* nrtBuf = World_GetNRTBuf(world, load.bufnum);
     float* oldData = nrtBuf->data;
 
-    nrtBuf->data       = load.data;
-    nrtBuf->channels   = load.numChannels;
-    nrtBuf->frames     = load.numFrames;
-    nrtBuf->samples    = actualSamples;
-    nrtBuf->mask       = BUFMASK(actualSamples);
-    nrtBuf->mask1      = nrtBuf->mask - 1;
-    nrtBuf->samplerate = load.sampleRate;
-    nrtBuf->sampledur  = 1.0 / load.sampleRate;
-    nrtBuf->coord      = 0;
-    nrtBuf->sndfile    = nullptr;
+    // Use unified buffer_set_data (no guard samples — native allocates exact size)
+    buffer_set_data(world, load.bufnum, load.data, load.numFrames,
+                    load.numChannels, load.sampleRate, false);
 
-    // Copy to RT buffer (same as BufAllocReadCmd::Stage3)
-    SndBuf* rtBuf = World_GetBuf(world, load.bufnum);
-    *rtBuf = *nrtBuf;
-    world->mSndBufUpdates[load.bufnum].writes++;
-
-    // Free previous buffer data
     zfree(oldData);
 
     worklet_debug("[SampleLoader] installed buf %d (%d frames, %d ch, %d Hz)",

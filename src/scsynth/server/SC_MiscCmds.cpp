@@ -208,22 +208,18 @@ SCErr meth_b_zero(World* inWorld, int inSize, char* inData, ReplyAddress* inRepl
     return kSCErr_None;
 }
 
-#ifdef __EMSCRIPTEN__
-// WebAssembly-specific buffer commands that use pre-allocated memory pointers
+// /b_allocPtr bufnum dataPtr numFrames numChannels sampleRate uuid [completion]
+// Set buffer to point to host-allocated memory.
+// On WASM: dataPtr is an offset into SharedArrayBuffer (with guard samples).
+// On native: not typically sent via OSC — SampleLoader calls buffer_set_data() directly.
 #include "buffer_commands.h"
 
-extern "C" {
-    int worklet_debug(const char* fmt, ...);
-}
-
-// /b_allocPtr bufnum dataPtr numFrames numChannels sampleRate uuid [completion]
-// Set buffer to point to pre-allocated memory (includes guard samples)
 SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
     sc_msg_iter msg(inSize, inData);
 
     int bufnum = msg.geti();
-    int dataPtr = msg.geti();  // Offset into SharedArrayBuffer
+    int dataPtr = msg.geti();  // WASM: offset into SharedArrayBuffer
     int numFrames = msg.geti();
     int numChannels = msg.geti();
     float sampleRate = msg.getf();
@@ -232,13 +228,13 @@ SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* in
     // Convert offset to pointer
     float* data = (float*)dataPtr;
 
-    // Call buffer_set_data to configure the buffer
-    int result = buffer_set_data(inWorld, bufnum, data, numFrames, numChannels, sampleRate);
+    // Call buffer_set_data to configure the buffer (with guard samples)
+    int result = buffer_set_data(inWorld, bufnum, data, numFrames, numChannels, sampleRate, true);
 
     if (result == 0) {
         SendDoneWithIntValue(inReply, "/b_allocPtr", bufnum);
 
-        // Send internal message for JavaScript to track buffer allocation
+        // Send internal message for host to track buffer allocation
         small_scpacket packet;
         packet.adds("/supersonic/buffer/allocated");
         packet.maketags(3);
@@ -248,7 +244,6 @@ SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* in
         packet.adds(uuid);
         packet.addi(bufnum);
 
-        // Send to the internal reply mechanism
         SendReply(inReply, packet.data(), packet.size());
     } else {
         SendFailureWithIntValue(inReply, "/b_allocPtr", "Buffer allocation failed", bufnum);
@@ -256,7 +251,6 @@ SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* in
 
     return kSCErr_None;
 }
-#endif
 
 SCErr meth_u_cmd(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_u_cmd(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
@@ -2049,10 +2043,7 @@ void initMiscCommands() {
     NEW_COMMAND(b_fill);
     NEW_COMMAND(b_gen);
 
-#ifdef __EMSCRIPTEN__
-    // WebAssembly-specific buffer commands
     NEW_COMMAND(b_allocPtr);
-#endif
 
     NEW_COMMAND(c_set);
     NEW_COMMAND(c_setn);

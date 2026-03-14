@@ -117,6 +117,7 @@ public:
 private:
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
     void interceptForCache(const uint8_t* data, uint32_t size);
+    bool interceptBufferFreed(const uint8_t* data, uint32_t size);
 
     NTPClock          mClock;
     JuceAudioCallback mAudioCallback;

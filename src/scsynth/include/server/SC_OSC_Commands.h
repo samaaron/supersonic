@@ -117,8 +117,7 @@ enum {
 
     cmd_rtMemoryStatus = 65,
 
-#ifdef __EMSCRIPTEN__
-    // WebAssembly-specific buffer commands
+#ifdef SUPERSONIC
     cmd_b_allocPtr = 66,
 
     NUMBER_OF_COMMANDS = 67

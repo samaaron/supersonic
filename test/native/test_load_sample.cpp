@@ -6,7 +6,9 @@
  * the tests detect this and skip gracefully.
  */
 #include "EngineFixture.h"
+#include <chrono>
 #include <filesystem>
+#include <thread>
 
 #ifndef SUPERSONIC_SAMPLES_DIR
 #define SUPERSONIC_SAMPLES_DIR ""
@@ -247,4 +249,257 @@ TEST_CASE("/b_allocRead with startFrame offset loads partial sample",
     CHECK(partialFrames < totalFrames);
 
     fx.send(osc_test::message("/b_free", 1));
+}
+
+// =============================================================================
+// 9. /b_free returns memory — SndBuf has frames=0, channels=0 after free
+// =============================================================================
+
+TEST_CASE("/b_free returns memory and clears buffer metadata",
+          "[load_sample]") {
+    if (!sampleExists("bd_haus.flac")) { SKIP("Sample not found"); }
+    EngineFixture fx;
+    if (!tryAllocRead(fx, 0, "bd_haus.flac")) { SKIP("/b_allocRead not supported"); }
+    fx.clearReplies();
+
+    // Confirm the buffer is loaded with non-zero frames and channels
+    fx.send(osc_test::message("/b_query", 0));
+    OscReply infoBefore;
+    REQUIRE(fx.waitForReply("/b_info", infoBefore));
+    CHECK(infoBefore.parsed().argInt(1) > 0);   // frames > 0
+    CHECK(infoBefore.parsed().argInt(2) >= 1);   // channels >= 1
+    fx.clearReplies();
+
+    // Free the buffer
+    fx.send(osc_test::message("/b_free", 0));
+    OscReply freeDone;
+    REQUIRE(fx.waitForReply("/done", freeDone));
+    fx.clearReplies();
+
+    // After freeing, frames and channels should both be 0
+    fx.send(osc_test::message("/b_query", 0));
+    OscReply infoAfter;
+    REQUIRE(fx.waitForReply("/b_info", infoAfter));
+    CHECK(infoAfter.parsed().argInt(0) == 0);    // bufnum
+    CHECK(infoAfter.parsed().argInt(1) == 0);    // frames == 0
+    CHECK(infoAfter.parsed().argInt(2) == 0);    // channels == 0
+}
+
+// =============================================================================
+// 10. Buffer replacement — load a different sample into the same buffer
+// =============================================================================
+
+TEST_CASE("/b_allocRead replaces existing buffer with different sample",
+          "[load_sample]") {
+    if (!sampleExists("bd_haus.flac") || !sampleExists("drum_snare_hard.flac")) {
+        SKIP("Samples not found");
+    }
+    EngineFixture fx;
+
+    // Load first sample into buffer 0
+    if (!tryAllocRead(fx, 0, "bd_haus.flac")) { SKIP("/b_allocRead not supported"); }
+    fx.clearReplies();
+
+    fx.send(osc_test::message("/b_query", 0));
+    OscReply info1;
+    REQUIRE(fx.waitForReply("/b_info", info1));
+    int32_t frames1 = info1.parsed().argInt(1);
+    CHECK(frames1 > 0);
+    fx.clearReplies();
+
+    // Load a DIFFERENT sample into the same buffer 0 (replacement)
+    if (!tryAllocRead(fx, 0, "drum_snare_hard.flac")) {
+        SKIP("/b_allocRead replacement failed");
+    }
+    fx.clearReplies();
+
+    // Query again — frame count should reflect the new sample
+    fx.send(osc_test::message("/b_query", 0));
+    OscReply info2;
+    REQUIRE(fx.waitForReply("/b_info", info2));
+    int32_t frames2 = info2.parsed().argInt(1);
+    CHECK(frames2 > 0);
+
+    // The two samples should have different frame counts, confirming replacement
+    CHECK(frames1 != frames2);
+
+    fx.send(osc_test::message("/b_free", 0));
+}
+
+// =============================================================================
+// 11. Load, play, free cycle — load sample, create synth, free both
+// =============================================================================
+
+TEST_CASE("load sample, play via synth, free both", "[load_sample]") {
+    if (!sampleExists("bd_haus.flac")) { SKIP("Sample not found"); }
+    EngineFixture fx;
+    if (!tryAllocRead(fx, 0, "bd_haus.flac")) { SKIP("/b_allocRead not supported"); }
+    fx.clearReplies();
+
+    // Load a synthdef that reads from a buffer
+    const char* playerDef = nullptr;
+    if (fx.loadSynthDef("sonic-pi-basic_mono_player")) {
+        playerDef = "sonic-pi-basic_mono_player";
+    } else if (fx.loadSynthDef("sonic-pi-mono_player")) {
+        playerDef = "sonic-pi-mono_player";
+    }
+    fx.clearReplies();
+
+    if (playerDef) {
+        // Create a synth that reads from buffer 0
+        {
+            osc_test::Builder b;
+            auto& s = b.begin("/s_new");
+            s << playerDef << (int32_t)1000
+              << (int32_t)0 << (int32_t)1
+              << "buf" << 0.0f;
+            fx.send(b.end());
+        }
+
+        // Let it run briefly (a few audio blocks)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        // Free the synth
+        fx.send(osc_test::message("/n_free", 1000));
+    } else {
+        // If no buffer-playing synthdef is available, just use sonic-pi-beep
+        // alongside the loaded buffer to verify they coexist without issues
+        REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
+        fx.clearReplies();
+
+        osc_test::Builder b;
+        auto& s = b.begin("/s_new");
+        s << "sonic-pi-beep" << (int32_t)1000
+          << (int32_t)0 << (int32_t)1;
+        fx.send(b.end());
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        fx.send(osc_test::message("/n_free", 1000));
+    }
+    fx.clearReplies();
+
+    // Free the buffer
+    fx.send(osc_test::message("/b_free", 0));
+    OscReply freeDone;
+    REQUIRE(fx.waitForReply("/done", freeDone));
+    fx.clearReplies();
+
+    // Engine should still be healthy after the full cycle
+    fx.send(osc_test::message("/status"));
+    OscReply status;
+    REQUIRE(fx.waitForReply("/status.reply", status));
+    CHECK(status.parsed().argInt(2) == 0);  // numSynths == 0
+}
+
+// =============================================================================
+// 12. Multiple alloc/free cycles — same buffer number, 10 times
+// =============================================================================
+
+TEST_CASE("/b_allocRead and /b_free 10 times on same buffer", "[load_sample]") {
+    if (!sampleExists("bd_haus.flac")) { SKIP("Sample not found"); }
+    EngineFixture fx;
+
+    // First attempt to verify /b_allocRead is supported
+    if (!tryAllocRead(fx, 0, "bd_haus.flac")) { SKIP("/b_allocRead not supported"); }
+    fx.send(osc_test::message("/b_free", 0));
+    OscReply d;
+    fx.waitForReply("/done", d);
+    fx.clearReplies();
+
+    // Now cycle 10 times
+    for (int i = 0; i < 10; i++) {
+        REQUIRE(tryAllocRead(fx, 0, "bd_haus.flac"));
+        fx.clearReplies();
+
+        // Verify loaded each time
+        fx.send(osc_test::message("/b_query", 0));
+        OscReply info;
+        REQUIRE(fx.waitForReply("/b_info", info));
+        CHECK(info.parsed().argInt(1) > 0);  // frames > 0
+        fx.clearReplies();
+
+        // Free
+        fx.send(osc_test::message("/b_free", 0));
+        OscReply freeDone;
+        REQUIRE(fx.waitForReply("/done", freeDone));
+        fx.clearReplies();
+    }
+
+    // Engine should still be healthy after 10 alloc/free cycles
+    fx.send(osc_test::message("/status"));
+    OscReply status;
+    REQUIRE(fx.waitForReply("/status.reply", status));
+}
+
+// =============================================================================
+// 13. Free already-free buffer — doesn't crash
+// =============================================================================
+
+TEST_CASE("/b_free on never-allocated buffer does not crash", "[load_sample]") {
+    EngineFixture fx;
+
+    // Free a buffer that was never allocated (buffer 999)
+    fx.send(osc_test::message("/b_free", 999));
+
+    // Give it a moment to process
+    fx.clearReplies();
+
+    // Engine should still be responsive
+    fx.send(osc_test::message("/status"));
+    OscReply status;
+    REQUIRE(fx.waitForReply("/status.reply", status));
+    CHECK(status.parsed().argCount() >= 5);
+}
+
+TEST_CASE("/b_free on already-freed buffer does not crash", "[load_sample]") {
+    if (!sampleExists("bd_haus.flac")) { SKIP("Sample not found"); }
+    EngineFixture fx;
+    if (!tryAllocRead(fx, 0, "bd_haus.flac")) { SKIP("/b_allocRead not supported"); }
+    fx.clearReplies();
+
+    // Free the buffer once
+    fx.send(osc_test::message("/b_free", 0));
+    OscReply freeDone1;
+    fx.waitForReply("/done", freeDone1);
+    fx.clearReplies();
+
+    // Free the same buffer again (double-free)
+    fx.send(osc_test::message("/b_free", 0));
+
+    // Give it a moment to process
+    fx.clearReplies();
+
+    // Engine should still be responsive
+    fx.send(osc_test::message("/status"));
+    OscReply status;
+    REQUIRE(fx.waitForReply("/status.reply", status));
+    CHECK(status.parsed().argCount() >= 5);
+}
+
+// =============================================================================
+// 14. Shutdown race — /b_free then immediate engine destroy
+// Exercises the race between BufFreeCmd::Stage4's /supersonic/buffer/freed
+// notification (async via ring buffer) and World_Cleanup's free_alig().
+// If there's a double-free, this will SIGSEGV.
+// =============================================================================
+
+TEST_CASE("/b_free then immediate shutdown does not crash", "[load_sample]") {
+    if (!sampleExists("bd_haus.flac")) { SKIP("Sample not found"); }
+
+    // Scope the fixture so its destructor (engine shutdown) runs immediately
+    // after /b_free, without waiting for the reply.
+    {
+        EngineFixture fx;
+        if (!tryAllocRead(fx, 0, "bd_haus.flac")) { SKIP("/b_allocRead not supported"); }
+        fx.clearReplies();
+
+        // Send /b_free but do NOT wait for /done — destroy engine immediately
+        fx.send(osc_test::message("/b_free", 0));
+        // EngineFixture destructor runs here — tears down engine while
+        // /supersonic/buffer/freed may still be in the OUT ring buffer
+    }
+
+    // If we got here without SIGSEGV, the shutdown race is safe
+    SUCCEED();
 }

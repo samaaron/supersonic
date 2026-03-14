@@ -440,26 +440,22 @@ bool BufFreeCmd::Stage3() {
 }
 
 void BufFreeCmd::Stage4() {
-#ifdef __EMSCRIPTEN__
-    // In WebAssembly, buffers are managed by JavaScript
-    // Send /supersonic/buffer/freed message so JavaScript can free from the buffer pool
+    // Notify host to free the buffer memory.
+    // WASM: JS returns memory to the SAB pool.
+    // Native: SupersonicEngine intercepts and calls zfree().
     if (mFreeData) {
         small_scpacket packet;
         packet.adds("/supersonic/buffer/freed");
         packet.maketags(3);
         packet.addtag(',');
         packet.addtag('i');  // buffer number
-        packet.addtag('i');  // offset as integer
+        packet.addtag('h');  // data pointer as int64 (safe on both 32-bit WASM and 64-bit native)
         packet.addi(mBufIndex);
-        packet.addi((uintptr_t)mFreeData);
+        packet.addii(static_cast<int64>(reinterpret_cast<uintptr_t>(mFreeData)));
 
         ReplyAddress reply = mReplyAddress;
         SendReply(&reply, packet.data(), packet.size());
     }
-#else
-    // Native SuperCollider: use regular free
-    zfree(mFreeData);
-#endif
     SendDoneWithIntValue("/b_free", mBufIndex);
 }
 

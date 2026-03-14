@@ -28,9 +28,8 @@
 enum Protocol {
     kUDP,
     kTCP
-#ifdef __EMSCRIPTEN__
-    ,
-    kWeb
+#ifdef SUPERSONIC
+    , kWeb
 #endif
 };
 

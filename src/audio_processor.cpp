@@ -43,6 +43,10 @@
 // UUID ↔ int32 rewriter for tau-state UUID node IDs
 #include "uuid_rewriter.h"
 
+// Pre-allocated heap for RT-safe allocations
+#include "supersonic_heap.h"
+#include "supersonic_config.h"
+
 // Forward declarations
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
@@ -361,6 +365,9 @@ extern "C" {
         options.mSharedMemoryID = worldOptionsPtr[17];              // UDP port for boost shm (native only)
 #endif
 
+        // Initialize pre-allocated heap (no-op on WASM, creates AllocPool on native)
+        supersonic_heap_init(SUPERSONIC_HEAP_SIZE);
+
         // Create World
         try {
             g_world = World_New(&options);
@@ -433,10 +440,6 @@ extern "C" {
         }
 
 
-#ifdef __EMSCRIPTEN__
-        // Transport mode: 0 = SAB, 1 = postMessage
-        const char* transport_mode = worldOptionsPtr[16] ? "PM" : "SAB";
-
         worklet_debug(R"(
 ░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀
 ░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░
@@ -444,11 +447,18 @@ extern "C" {
         worklet_debug("v%d.%d.%d (scsynth %d.%d.%d)",
                      SUPERSONIC_VERSION_MAJOR, SUPERSONIC_VERSION_MINOR, SUPERSONIC_VERSION_PATCH,
                      SC_VersionMajor, SC_VersionMinor, SC_VersionPatch);
-        worklet_debug("%.0fkHz %dch [%s]",
-                     sample_rate / 1000, options.mNumOutputBusChannels, transport_mode);
+#ifdef __EMSCRIPTEN__
+        {
+            const char* transport_mode = worldOptionsPtr[16] ? "PM" : "SAB";
+            worklet_debug("%.0fkHz %dch [%s]",
+                         sample_rate / 1000, options.mNumOutputBusChannels, transport_mode);
+        }
+#else
+        worklet_debug("%.0fkHz %dch",
+                     sample_rate / 1000, options.mNumOutputBusChannels);
+#endif
         worklet_debug("");
         worklet_debug("> scsynth ready...");
-#endif
     }
 
 #ifndef __EMSCRIPTEN__
@@ -459,6 +469,7 @@ extern "C" {
             World_Cleanup(g_world, false);  // false = keep UGen plugins loaded
             g_world = nullptr;
         }
+        supersonic_heap_destroy();
         g_scheduler.Clear();
         update_scheduler_depth_metric(0);
         last_in_sequence = -1;
@@ -635,11 +646,7 @@ extern "C" {
                 // RT-SAFE message processing - no malloc!
                 // Setup reply address - zero-initialize for consistent comparison in /notify
                 ReplyAddress reply_addr = {};
-#ifdef __EMSCRIPTEN__
                 reply_addr.mProtocol = kWeb;
-#else
-                reply_addr.mProtocol = kUDP;
-#endif
                 reply_addr.mReplyFunc = osc_reply_to_ring_buffer;
                 reply_addr.mReplyData = nullptr;
 

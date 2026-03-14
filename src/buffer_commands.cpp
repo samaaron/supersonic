@@ -6,8 +6,6 @@
     GPL v3 or later
 */
 
-#ifdef __EMSCRIPTEN__
-
 #include "buffer_commands.h"
 #include "scsynth/include/plugin_interface/SC_World.h"
 #include "scsynth/include/plugin_interface/SC_SndBuf.h"
@@ -36,7 +34,8 @@ int buffer_set_data(
     float* data,
     int numFrames,
     int numChannels,
-    double sampleRate
+    double sampleRate,
+    bool hasGuardSamples
 ) {
     // Validate parameters
     if (!world || !data) {
@@ -66,10 +65,14 @@ int buffer_set_data(
     // Calculate total samples
     int32_t numSamples = numFrames * numChannels;
 
-    // IMPORTANT: The data pointer includes guard samples
-    // Layout: [GUARD_BEFORE samples] [actual audio data] [GUARD_AFTER samples]
-    // We point buf->data at the start of the actual audio data (after guard samples)
-    nrtBuf->data = data + (GUARD_BEFORE * numChannels);
+    // Set data pointer — if guard samples are present, skip past them
+    if (hasGuardSamples) {
+        // Layout: [GUARD_BEFORE * ch] [actual audio] [GUARD_AFTER * ch]
+        nrtBuf->data = data + (GUARD_BEFORE * numChannels);
+    } else {
+        nrtBuf->data = data;
+    }
+
     nrtBuf->channels = numChannels;
     nrtBuf->frames = numFrames;
     nrtBuf->samples = numSamples;
@@ -82,7 +85,7 @@ int buffer_set_data(
     nrtBuf->samplerate = sampleRate;
     nrtBuf->sampledur = 1.0 / sampleRate;
 
-    // Clear coord and sndfile (not used in WebAssembly context)
+    // Clear coord and sndfile (not used in SuperSonic)
     nrtBuf->coord = 0;
     nrtBuf->sndfile = nullptr;
 
@@ -195,5 +198,3 @@ int buffer_get_info(
 
     return 0;
 }
-
-#endif // __EMSCRIPTEN__

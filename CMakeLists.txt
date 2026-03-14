@@ -146,6 +146,7 @@ set(SUPERSONIC_CORE_SOURCES
     ${SUPERSONIC_SRC}/buffer_commands.cpp
     ${SUPERSONIC_SRC}/node_tree.cpp
     ${SUPERSONIC_SRC}/uuid_rewriter.cpp
+    ${SUPERSONIC_SRC}/supersonic_heap.cpp
 )
 
 # scsynth server (excludes WASM-only and platform-specific driver files)
@@ -277,6 +278,7 @@ set(SUPERSONIC_INCLUDE_DIRS
 
 # ─── Common compile definitions ──────────────────────────────────────────────
 set(SUPERSONIC_COMPILE_DEFS
+    SUPERSONIC=1
     STATIC_PLUGINS=1
     NOVA_SIMD=1
     SC_FFT_GREEN=1

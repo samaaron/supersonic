@@ -20,9 +20,7 @@
 
 #include "Samp.hpp"
 #include "SC_Constants.h"
-
-#ifdef __EMSCRIPTEN__
-#endif
+#include <cmath>
 
 float32 gSine[kSineSize + 1];
 float32 gPMSine[kSineSize + 1];
@@ -61,13 +59,21 @@ public:
     SynthLibInit() { FillTables(); }
 
     static void FillTables() {
-        // CRITICAL FIX: In --no-entry WASM builds, const globals may not be initialized
-        // Compute pi and twopi at runtime instead of using static const values
-        const double runtime_pi = std::acos(-1.0);
-        const double runtime_twopi = runtime_pi * 2.0;
+#ifdef SUPERSONIC
+        // Idempotency guard — safe to call when static constructor already ran
+        static bool initialized = false;
+        if (initialized) return;
+        initialized = true;
 
-        double sineIndexToPhase = runtime_twopi / kSineSize;
-        double pmf = (1L << 29) / runtime_twopi;
+        // Compute pi/twopi at runtime — constexpr globals may not be
+        // initialised yet depending on constructor ordering.
+        const double local_twopi = std::acos(-1.0) * 2.0;
+#else
+        const double local_twopi = twopi;
+#endif
+
+        double sineIndexToPhase = local_twopi / kSineSize;
+        double pmf = (1L << 29) / local_twopi;
         for (int i = 0; i <= kSineSize; ++i) {
             double phase = i * sineIndexToPhase;
             float32 d = sin(phase);
@@ -94,9 +100,9 @@ public:
 
 static SynthLibInit gSynthLibInit;
 
-// Public C-linkage function to manually initialize sine tables
-// In standalone WASM builds with --no-entry, static constructors don't run
-// Call this before World_New() to ensure wave tables are populated
+#ifdef SUPERSONIC
+// Explicit entry point for builds where static constructors may not run.
 extern "C" void InitializeSynthTables() {
     SynthLibInit::FillTables();
 }
+#endif // SUPERSONIC

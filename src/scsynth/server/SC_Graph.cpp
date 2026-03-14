@@ -46,7 +46,7 @@
 // 3. Graph_New error logging: Added worklet_debug call on error
 // =============================================================================
 
-#ifdef __EMSCRIPTEN__
+#ifdef SUPERSONIC
 extern "C" {
     int worklet_debug(const char* fmt, ...);
 }

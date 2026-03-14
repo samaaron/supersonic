@@ -8,8 +8,6 @@
 
 #pragma once
 
-#ifdef __EMSCRIPTEN__
-
 #include "scsynth/include/plugin_interface/SC_SndBuf.h"
 
 struct World;
@@ -23,16 +21,20 @@ typedef struct {
     double samplerate;
 } buffer_info_t;
 
-// Set buffer data from pre-allocated memory
-// The data pointer points to interleaved audio already in SharedArrayBuffer
+// Set buffer data from pre-allocated memory.
+// When hasGuardSamples is true (WASM/JS path), the data pointer includes
+// guard samples: [GUARD_BEFORE * ch] [audio] [GUARD_AFTER * ch]
+// and buf->data is advanced past the guard prefix.
+// When false (native SampleLoader path), data points directly at audio.
 // Returns 0 on success, -1 on error
 int buffer_set_data(
     World* world,
     int bufnum,
-    float* data,        // Pointer to interleaved audio in SharedArrayBuffer
+    float* data,
     int numFrames,
     int numChannels,
-    double sampleRate
+    double sampleRate,
+    bool hasGuardSamples = true
 );
 
 // Read data into existing buffer (for /b_readPtr)
@@ -55,5 +57,3 @@ int buffer_get_info(
     int bufnum,
     buffer_info_t* info
 );
-
-#endif // __EMSCRIPTEN__

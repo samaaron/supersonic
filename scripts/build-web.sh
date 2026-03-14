@@ -107,6 +107,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -I"$SRC_DIR/scsynth/external_libraries/nova-simd" \
     -I"$SRC_DIR/vendor/oscpack" \
     -DNO_LIBSNDFILE \
+    -DSUPERSONIC \
     -DNDEBUG \
     -DSCHEDULER_SLOT_SIZE=$SCHEDULER_SLOT_SIZE \
     -DSCHEDULER_SLOT_COUNT=$SCHEDULER_SLOT_COUNT \

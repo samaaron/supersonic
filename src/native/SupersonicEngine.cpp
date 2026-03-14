@@ -6,6 +6,7 @@
 #include "src/shared_memory.h"
 #include "osc/OscReceivedElements.h"
 #include "RingBufferWriter.h"
+#include "scsynth/server/SC_Prototypes.h"  // zfree
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <chrono>
 #include <cstring>
@@ -34,6 +35,10 @@ void SupersonicEngine::initialise(const Config& cfg) {
     // read them via captured `this` pointer without synchronisation.
     // Setting them after initialise() is a data race.
     mReplyReader.onReply = [this](const uint8_t* d, uint32_t s) {
+        // Intercept /supersonic/buffer/freed — free the buffer memory
+        // and don't forward this internal message to external listeners.
+        if (interceptBufferFreed(d, s)) return;
+
         if (mDeviceManager) mUdpServer.sendReply(d, s);
         if (onReply) onReply(d, s);
     };
@@ -337,6 +342,30 @@ void SupersonicEngine::sendOsc(const uint8_t* data, uint32_t size) {
         interceptForCache(data, size);
     }
     mUdpServer.sendInProcess(data, size);
+}
+
+bool SupersonicEngine::interceptBufferFreed(const uint8_t* data, uint32_t size) {
+    // Quick prefix check — "/supersonic/buffer/freed" starts with '/'
+    if (size < 28 || data[0] != '/') return false;
+    try {
+        osc::ReceivedPacket pkt(reinterpret_cast<const char*>(data),
+                                static_cast<osc::osc_bundle_element_size_t>(size));
+        osc::ReceivedMessage msg(pkt);
+        if (std::strcmp(msg.AddressPattern(), "/supersonic/buffer/freed") != 0)
+            return false;
+
+        auto it = msg.ArgumentsBegin();
+        int bufnum = 0;
+        uintptr_t ptr = 0;
+        if (it != msg.ArgumentsEnd()) { bufnum = it->AsInt32Unchecked(); ++it; }
+        if (it != msg.ArgumentsEnd()) { ptr = static_cast<uintptr_t>(it->AsInt64Unchecked()); }
+
+        if (ptr) zfree(reinterpret_cast<void*>(ptr));
+        mStateCache.uncacheBuffer(bufnum);
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 void SupersonicEngine::interceptForCache(const uint8_t* data, uint32_t size) {

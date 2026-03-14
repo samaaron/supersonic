@@ -177,7 +177,7 @@ typedef struct SndBufUpdates SndBufUpdates;
 
 enum { coord_None, coord_Complex, coord_Polar };
 
-#ifdef __EMSCRIPTEN__
+#ifdef SUPERSONIC
 extern "C" int worklet_debug(const char* fmt, ...);
 #endif
 

@@ -209,51 +209,38 @@ When cherry-pick isn't feasible:
 
 ---
 
-## WASM Adaptations
+## Adapting Upstream Changes
 
-Supersonic runs in a WASM AudioWorklet - some changes are needed:
+SuperSonic has three build targets (WASM, native, NIF) with a shared engine. Use the ifdef conventions above to mark adaptations clearly.
 
-### 1. Replace Print Functions
+### 1. Print Functions — use `#ifdef SUPERSONIC`
 
 ```cpp
-// ❌ Upstream uses
-scprintf("debug message\n");
-
-// ✅ Supersonic uses
-worklet_debug("debug message\n");
+#ifdef SUPERSONIC
+    worklet_debug("debug message\n");
+#else
+    scprintf("debug message\n");
+#endif
 ```
 
-### 2. Remove Thread-Related Code
+### 2. Platform-unavailable APIs — use `#ifndef __EMSCRIPTEN__`
+
+For filesystem, boost headers, shared memory IPC — keep the upstream code in the `#ifndef` block exactly as-is.
+
+### 3. Verify Memory Allocations
 
 ```cpp
-// ❌ Skip any code with these:
-pthread_*
-std::thread
-std::mutex
-std::lock_guard
-std::atomic
-```
-
-### 3. Check for Platform-Specific Code
-
-```cpp
-// ❌ Skip platform-specific networking
-#ifdef _WIN32
-#ifdef __APPLE__
-
-// ✅ Keep cross-platform audio/DSP code
-```
-
-### 4. Verify Memory Allocations
-
-```cpp
-// ✅ These are fine in supersonic
+// ✅ These are fine in supersonic (pre-allocated pool)
 RTAlloc(world, size);
 RTFree(world, ptr);
 World_Alloc(world, size);
 
-// ❌ Avoid direct malloc/free in RT context
+// ❌ Avoid direct malloc/free in audio thread
 ```
+
+### 4. Thread-Related Code
+
+Guard with `#ifndef __EMSCRIPTEN__` if the code requires threading APIs. WASM AudioWorklet is single-threaded. Native SuperSonic also runs NRT (single-threaded) but can link threading libraries.
 
 ---
 
@@ -358,12 +345,14 @@ instead of scprintf for WASM AudioWorklet compatibility.
 
 After applying changes:
 
-- [ ] Code compiles (if you have build system set up)
-- [ ] No `scprintf` - replaced with `worklet_debug`
-- [ ] No thread/mutex code introduced
-- [ ] No print statements for debugging
+- [ ] Code compiles on all targets (`scripts/build-web.sh`, `scripts/build-native.sh`)
+- [ ] SuperSonic-specific changes wrapped in `#ifdef SUPERSONIC` with upstream code in `#else`
+- [ ] Platform guards use `#ifndef __EMSCRIPTEN__` (not `#ifdef SUPERSONIC`)
+- [ ] No bare `scprintf` in shared code — use `worklet_debug` inside `#ifdef SUPERSONIC`
+- [ ] No malloc/free on audio thread paths
 - [ ] Git commit includes upstream hash and link
-- [ ] Commit message explains WASM adaptations (if any)
+- [ ] Commit message explains adaptations (if any)
+- [ ] Tests pass: `scripts/test-native.sh`, `npx playwright test`, `scripts/test-nif.sh`
 - [ ] Updated LAST_SYNC date at top of this file
 
 ---
@@ -806,14 +795,57 @@ Some upstream features are excluded due to AudioWorklet constraints:
 - ❌ **Disk I/O UGens** (DiskIn, DiskOut, VDiskIn) - no filesystem access
 - ❌ **OSC Network UGens** (SendReply via UDP) - no network sockets
 
-## `#ifndef __EMSCRIPTEN__` Guarded Code
+## Preprocessor Conventions for Upstream Files
 
-The following upstream code is wrapped in `#ifndef __EMSCRIPTEN__` guards because it requires filesystem access not available in WASM. The code inside the guards **matches upstream exactly** (uses `scprintf`, not `worklet_debug`) so that future syncs can be applied mechanically. During syncs, update the guarded code to match upstream — don't skip it.
+SuperSonic uses two preprocessor guards in upstream scsynth files. Each serves a distinct purpose for upstream sync.
+
+### `#ifdef SUPERSONIC` — Fork Divergence
+
+Marks where SuperSonic intentionally diverges from upstream scsynth. The original upstream code is preserved in the `#else` branch for merge reference.
+
+```bash
+# Find all fork divergence points
+grep -rn "ifdef SUPERSONIC\|ifndef SUPERSONIC" src/scsynth/
+```
+
+**During upstream syncs:** Update the `#else` branch to match upstream. Then check whether the `SUPERSONIC` branch needs corresponding changes.
+
+Current `SUPERSONIC` sites in upstream files:
+
+- **SC_Constants.h**: `constexpr` constants (upstream uses runtime `const` with `std::acos` etc.)
+- **SC_World.cpp**: `worklet_debug` declaration, `fPrint` assignment, `InitializeSynthTables`/`InitializeFFTTables` declarations and calls
+- **SC_fftlib.cpp**: `worklet_debug` declaration, idempotency guard in `scfft_global_initialization`, `InitializeFFTTables` entry point
+- **Samp.cpp**: Idempotency guard in `FillTables`, `InitializeSynthTables` entry point
+- **SC_InterfaceTable.h**: `worklet_debug` declaration, `DefineSimpleUnit` macro (without trailing semicolon)
+- **SC_SndBuf.h**: `worklet_debug` declaration
+- **SC_Graph.cpp**: `worklet_debug` declaration
+- **SC_Lib.cpp**: `worklet_debug` declaration, direct `SendFailure` error reporting (upstream uses staged `CallSendFailureCommand`)
+- **SC_ReplyImpl.hpp**: `kWeb` protocol enum value
+- **SC_OSC_Commands.h**: `cmd_b_allocPtr` command number
+- **SC_World.cpp**: `supersonic_heap_alloc`/`supersonic_heap_free` for `sc_malloc`/`sc_free` (uses `SUPERSONIC` not `__EMSCRIPTEN__`)
+
+### `#ifndef __EMSCRIPTEN__` — Platform Capability
+
+Guards upstream code that requires APIs unavailable in WASM (filesystem, boost headers, shared memory IPC, threading primitives). These are NOT SuperSonic-specific changes — they're platform exclusions.
+
+```bash
+# Find all platform guards
+grep -rn "ifdef __EMSCRIPTEN__\|ifndef __EMSCRIPTEN__" src/scsynth/
+```
+
+**During upstream syncs:** Update the guarded code to match upstream exactly (uses `scprintf`, not `worklet_debug`). Don't skip these blocks — they contain the upstream code that native builds use.
+
+Current `__EMSCRIPTEN__` sites in upstream files:
 
 - **SC_GraphDef.cpp/.h**: `load_file()`, `GraphDef_Load()`, `GraphDef_LoadDir()`, `GraphDef_LoadGlob()`
 - **SC_SequencedCommand.h/.cpp**: `LoadSynthDefCmd` class, `LoadSynthDefDirCmd` class
-- **SC_MiscCmds.cpp**: `meth_d_load()`, `meth_d_loadDir()`, and their `NEW_COMMAND` registrations
-- **SC_World.cpp**: `World_LoadGraphDefs()` body
+- **SC_MiscCmds.cpp**: `meth_d_load()`, `meth_d_loadDir()`, `meth_b_allocRead` (native sample loader hook), and their `NEW_COMMAND` registrations
+- **SC_World.cpp**: `server_shm.hpp` include, `mQuitProgram` semaphore, shared memory init/cleanup, `World_LoadGraphDefs()` body
+- **SC_HiddenWorld.h**: `boost/sync/semaphore.hpp` and `server_shm.hpp` includes, `mQuitProgram` and `mShmem` struct fields
+- **SC_ReplyImpl.hpp**: `boost::asio::ip::address` vs `uint32_t[4]` placeholder in `ReplyAddress`
+- **SC_Reply.cpp**: `operator==` and `operator<` using `memcmp` vs boost address comparison
+- **audio_processor.h**: `destroy_world()`/`rebuild_world()` (native-only device hot-swap)
+- **audio_processor.cpp**: `__errno_location` override, `EMSCRIPTEN_KEEPALIVE` exports, `mSharedMemoryID`, `destroy_world`/`rebuild_world` implementations
 
 ---
 

@@ -213,7 +213,7 @@ typedef struct InterfaceTable InterfaceTable;
 
 #define DoAsyncUnitCommand (*ft->fDoAsyncUnitCommand)
 
-#ifdef __EMSCRIPTEN__
+#ifdef SUPERSONIC
 #    ifdef __cplusplus
 extern "C" int worklet_debug(const char* fmt, ...);
 #    endif

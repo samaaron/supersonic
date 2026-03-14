@@ -637,8 +637,9 @@ export class BufferManager {
      * @param {Array} args - [bufnum, freedPtr]
      */
     handleBufferFreed(args) {
-        const bufnum = args[0];
-        const freedPtr = args[1];
+        // args may contain BigInt (OSC 'h' type) — coerce to Number for pointer comparison
+        const bufnum = typeof args[0] === 'bigint' ? Number(args[0]) : args[0];
+        const freedPtr = typeof args[1] === 'bigint' ? Number(args[1]) : args[1];
 
         const bufferInfo = this.#allocatedBuffers.get(bufnum);
 

@@ -49,8 +49,9 @@
 #include "../../common/SC_fftlib.hpp"
 #include "SC_StringParser.h"
 
-#ifdef __EMSCRIPTEN__
-// Forward declare table initialization functions for WASM builds
+#ifdef SUPERSONIC
+// Called explicitly in World_New to guarantee tables are populated
+// regardless of static constructor ordering.
 extern "C" {
     void InitializeSynthTables();
     void InitializeFFTTables();
@@ -101,8 +102,7 @@ extern HashTable<PlugInCmd, Malloc>* gPlugInCmds;
 
 extern "C" {
 
-#ifdef __EMSCRIPTEN__
-// Forward declare worklet_debug for UGen Print() debugging
+#ifdef SUPERSONIC
 int worklet_debug(const char* fmt, ...);
 #endif
 
@@ -113,21 +113,16 @@ struct SF_INFO {};
 SCBool SendMsgToEngine(World* inWorld, FifoMsg* inMsg);
 SCBool SendMsgFromEngine(World* inWorld, FifoMsg* inMsg);
 
-// WASM-safe debug logging (defined in audio_processor.cpp)
-extern "C" {
-
-// WASM variadic stub for fPrint - variadic functions cannot be called through
-// function pointers in WASM. This stub logs that a Print() was attempted.
-// TODO: Implement proper UGen Print() support to capture the actual message
-static int ugen_print_stub(const char* fmt, ...) {
-    return 0;
-}
-}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
+#ifdef SUPERSONIC
+#include "supersonic_heap.h"
+inline void* sc_malloc(size_t size) { return supersonic_heap_alloc(size); }
+#else
 inline void* sc_malloc(size_t size) { return nova::malloc_aligned(size); }
+#endif
 
 void* sc_dbg_malloc(size_t size, const char* tag, int line) {
     void* ptr = sc_malloc(size);
@@ -141,7 +136,11 @@ void* sc_dbg_malloc(size_t size, const char* tag, int line) {
     return ptr;
 }
 
+#ifdef SUPERSONIC
+inline void sc_free(void* ptr) { return supersonic_heap_free(ptr); }
+#else
 inline void sc_free(void* ptr) { return nova::free_aligned(ptr); }
+#endif
 
 void sc_dbg_free(void* ptr, const char* tag, int line) {
     fprintf(stderr, "sc_dbg_free [%s:%d]: %p\n", tag, line, ptr);
@@ -223,12 +222,10 @@ void InterfaceTable_Init() {
     ft->mSineSize = kSineSize;
     ft->mSineWavetable = gSineWavetable;
 
-    // Enable Print() debugging for UGens via worklet_debug
-    // This writes to the debug ring buffer that JavaScript can read
-#ifdef __EMSCRIPTEN__
+#ifdef SUPERSONIC
     ft->fPrint = &worklet_debug;
 #else
-    ft->fPrint = nullptr;
+    ft->fPrint = &scprintf;
 #endif
 
     ft->fRanSeed = &server_timeseed;
@@ -347,9 +344,7 @@ World* World_New(WorldOptions* inOptions) {
     try {
         static bool gLibInitted = false;
         if (!gLibInitted) {
-#ifdef __EMSCRIPTEN__
-            // Initialize sine tables BEFORE InterfaceTable_Init
-            // Static constructors don't run in --no-entry WASM builds
+#ifdef SUPERSONIC
             InitializeSynthTables();
             InitializeFFTTables();
 #endif
@@ -510,13 +505,9 @@ World* World_New(WorldOptions* inOptions) {
             hw->mAudioDriver = nullptr;
         }
 
-#ifndef __EMSCRIPTEN__
-        // ASIO thread is for UDP/TCP network OSC
-        // In Emscripten/AudioWorklet builds, OSC comes from ring buffer, not network
         if (!scsynth::asioThreadStarted()) {
             scsynth::startAsioThread();
         }
-#endif
 
     } catch (std::exception& exc) {
         World_Cleanup(world, true);
@@ -994,11 +985,9 @@ void World_Cleanup(World* world, bool unload_plugins) {
     if (!world)
         return;
 
-#ifndef __EMSCRIPTEN__
     if (scsynth::asioThreadStarted()) {
         scsynth::stopAsioThread();
     }
-#endif
 
     HiddenWorld* hw = world->hw;
 

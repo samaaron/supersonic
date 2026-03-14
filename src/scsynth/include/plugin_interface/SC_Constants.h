@@ -22,13 +22,10 @@
 
 #include <cmath>
 
-// CRITICAL FIX for --no-entry WASM builds:
-// In standalone WASM builds without an entry point, static constructors don't run.
-// This means const globals that depend on function calls like std::acos(), std::log(), etc.
-// remain zero instead of being initialized. We must use constexpr or #define for constants.
+#ifdef SUPERSONIC
+// Compile-time constants — replaces upstream SC's runtime-computed const globals.
+// constexpr avoids dependence on static constructor ordering.
 
-#ifdef __EMSCRIPTEN__
-// For WASM builds, use compile-time constexpr values
 #ifndef __FP__
 constexpr double pi = 3.141592653589793238462643383279502884;
 #else
@@ -88,8 +85,7 @@ constexpr float rsqrt2_f = 0.707106781186547524400844362104849039f;
 constexpr float truncFloat = 12582912.0f;  // 3 * 2^22
 constexpr double truncDouble = 6755399441055744.0;  // 3 * 2^51
 
-#else
-// For native builds, use runtime computation (original code)
+#else // !SUPERSONIC — upstream SuperCollider
 #ifndef __FP__
 const double pi = std::acos(-1.);
 #else
@@ -149,7 +145,7 @@ const float rsqrt2_f = 1.f / std::sqrt(2.f);
 const float truncFloat = (float)(3. * std::pow(2.0, 22));
 const double truncDouble = 3. * std::pow(2.0, 51);
 
-#endif // __EMSCRIPTEN__
+#endif // SUPERSONIC
 
 /// used in the secant table for values very close to 1/0
 const float kBadValue = 1e20f;

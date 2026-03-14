@@ -358,27 +358,26 @@ PacketStatus PerformCompletionMsg(World* inWorld, const OSC_Packet& inPacket) {
     return PacketPerformed;
 }
 
+// ASIO thread stubs — SuperSonic uses ring buffer (WASM) or OscUdpServer
+// (native) instead of boost::asio for OSC transport. Always no-ops.
+namespace scsynth {
+void startAsioThread() {}
+void stopAsioThread() {}
+bool asioThreadStarted() { return false; }
+}
+
 // ============================================================================
-// Native-only stubs — not needed when building for WASM (Emscripten)
+// Native-only stubs
 // ============================================================================
 #ifndef __EMSCRIPTEN__
 
-// scprintf — used by filesystem paths in #ifndef __EMSCRIPTEN__ blocks
-// Forward to worklet_debug which routes to our debug output
+// scprintf — used by upstream SC filesystem code paths
 int scprintf(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     int ret = worklet_debug_va(fmt, args);
     va_end(args);
     return ret;
-}
-
-// ASIO thread stubs — v0.61 added startAsioThread/stopAsioThread for network
-// OSC. Our native backend uses OscUdpServer instead, so these are no-ops.
-namespace scsynth {
-void startAsioThread() {}
-void stopAsioThread() {}
-bool asioThreadStarted() { return false; }
 }
 
 // DiskIO + UIUGens stubs — not built for SuperSonic native backend.

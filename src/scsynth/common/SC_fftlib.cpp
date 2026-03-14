@@ -35,7 +35,7 @@ For speed we keep this global, although this makes the code non-thread-safe.
 #include "SC_fftlib.hpp"
 #include "malloc_aligned.hpp"
 
-#ifdef __EMSCRIPTEN__
+#ifdef SUPERSONIC
 extern "C" int worklet_debug(const char* fmt, ...);
 #endif
 
@@ -172,6 +172,13 @@ static inline float* scfft_create_fftwindow(int wintype, int log2n) {
 static void scfft_ensurewindow(unsigned short log2_fullsize, unsigned short log2_winsize, short wintype);
 
 static bool scfft_global_initialization(void) {
+#ifdef SUPERSONIC
+    // Idempotency guard — safe to call when static constructor already ran
+    static bool initialized = false;
+    if (initialized) return false;
+    initialized = true;
+#endif
+
     for (int wintype = 0; wintype < 2; ++wintype) {
         for (int i = 0; i < SC_FFT_LOG2_ABSOLUTE_MAXSIZE_PLUS1; ++i) {
             fftWindow[wintype][i] = 0;
@@ -228,11 +235,12 @@ static bool scfft_global_initialization(void) {
 
 static bool dummy = scfft_global_initialization();
 
-// Public C-linkage function to manually initialize FFT tables
-// In standalone WASM builds with --no-entry, static constructors don't run
+#ifdef SUPERSONIC
+// Explicit entry point for builds where static constructors may not run.
 extern "C" void InitializeFFTTables() {
     scfft_global_initialization();
 }
+#endif // SUPERSONIC
 
 // You need to provide an intermediate "transform buffer". Size will depend on which underlying lib is being used.
 // "fullsize" is the number of samples in the input buffer (inc any padding), aka the number of "points" in the FFT.
