@@ -9,6 +9,21 @@
 
 #pragma once
 
+// ─── Version ─────────────────────────────────────────────────────────────────
+// Single source of truth for all builds (WASM, native exe, NIF).
+// Updated by scripts/bump-version.sh.
+#define SUPERSONIC_VERSION_MAJOR 0
+#define SUPERSONIC_VERSION_MINOR 64
+#define SUPERSONIC_VERSION_PATCH 0
+
+// String form for CLI / banners (e.g. "0.64.0")
+#define SUPERSONIC_STRINGIFY2(x) #x
+#define SUPERSONIC_STRINGIFY(x) SUPERSONIC_STRINGIFY2(x)
+#define SUPERSONIC_VERSION_STRING \
+    SUPERSONIC_STRINGIFY(SUPERSONIC_VERSION_MAJOR) "." \
+    SUPERSONIC_STRINGIFY(SUPERSONIC_VERSION_MINOR) "." \
+    SUPERSONIC_STRINGIFY(SUPERSONIC_VERSION_PATCH)
+
 // Pre-allocated heap size for RT-safe allocations (used by supersonic_heap).
 // 64MB matches the WASM linear memory buffer pool region.
 #ifndef SUPERSONIC_HEAP_SIZE

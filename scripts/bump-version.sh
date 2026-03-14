@@ -27,7 +27,7 @@ set -e
 #  11. docs/INSTALLATION.md - pinned version example
 #
 # C++ version constants (1):
-#  12. src/audio_processor.cpp - SUPERSONIC_VERSION_MINOR constant
+#  12. src/supersonic_config.h - SUPERSONIC_VERSION_{MAJOR,MINOR,PATCH} macros
 #
 # Note: READMEs and error messages use @latest and don't need version updates
 
@@ -133,16 +133,16 @@ echo "------------------------------------------"
 # Parse new version into components
 IFS='.' read -r NEW_MAJOR NEW_MINOR NEW_PATCH <<< "$NEW_VERSION"
 
-# Get current C++ version components
-CURRENT_CPP_MAJOR=$(grep "SUPERSONIC_VERSION_MAJOR" "$PROJECT_ROOT/src/audio_processor.cpp" | grep -o '[0-9]\+')
-CURRENT_CPP_MINOR=$(grep "SUPERSONIC_VERSION_MINOR" "$PROJECT_ROOT/src/audio_processor.cpp" | grep -o '[0-9]\+')
-CURRENT_CPP_PATCH=$(grep "SUPERSONIC_VERSION_PATCH" "$PROJECT_ROOT/src/audio_processor.cpp" | grep -o '[0-9]\+')
+# Get current C++ version components from supersonic_config.h
+CURRENT_CPP_MAJOR=$(grep "SUPERSONIC_VERSION_MAJOR" "$PROJECT_ROOT/src/supersonic_config.h" | head -1 | grep -o '[0-9]\+')
+CURRENT_CPP_MINOR=$(grep "SUPERSONIC_VERSION_MINOR" "$PROJECT_ROOT/src/supersonic_config.h" | head -1 | grep -o '[0-9]\+')
+CURRENT_CPP_PATCH=$(grep "SUPERSONIC_VERSION_PATCH" "$PROJECT_ROOT/src/supersonic_config.h" | head -1 | grep -o '[0-9]\+')
 
-# Update C++ version (all three components)
-sed -i "s/static const int SUPERSONIC_VERSION_MAJOR = $CURRENT_CPP_MAJOR;/static const int SUPERSONIC_VERSION_MAJOR = $NEW_MAJOR;/" "$PROJECT_ROOT/src/audio_processor.cpp"
-sed -i "s/static const int SUPERSONIC_VERSION_MINOR = $CURRENT_CPP_MINOR;/static const int SUPERSONIC_VERSION_MINOR = $NEW_MINOR;/" "$PROJECT_ROOT/src/audio_processor.cpp"
-sed -i "s/static const int SUPERSONIC_VERSION_PATCH = $CURRENT_CPP_PATCH;/static const int SUPERSONIC_VERSION_PATCH = $NEW_PATCH;/" "$PROJECT_ROOT/src/audio_processor.cpp"
-echo "✓ Updated src/audio_processor.cpp ($CURRENT_CPP_MAJOR.$CURRENT_CPP_MINOR.$CURRENT_CPP_PATCH → $NEW_VERSION)"
+# Update C++ version macros (all three components)
+sed -i "s/#define SUPERSONIC_VERSION_MAJOR $CURRENT_CPP_MAJOR/#define SUPERSONIC_VERSION_MAJOR $NEW_MAJOR/" "$PROJECT_ROOT/src/supersonic_config.h"
+sed -i "s/#define SUPERSONIC_VERSION_MINOR $CURRENT_CPP_MINOR/#define SUPERSONIC_VERSION_MINOR $NEW_MINOR/" "$PROJECT_ROOT/src/supersonic_config.h"
+sed -i "s/#define SUPERSONIC_VERSION_PATCH $CURRENT_CPP_PATCH/#define SUPERSONIC_VERSION_PATCH $NEW_PATCH/" "$PROJECT_ROOT/src/supersonic_config.h"
+echo "✓ Updated src/supersonic_config.h ($CURRENT_CPP_MAJOR.$CURRENT_CPP_MINOR.$CURRENT_CPP_PATCH → $NEW_VERSION)"
 
 echo ""
 echo "Step 5: Regenerating manifests..."

@@ -89,10 +89,7 @@ extern "C" {
 // Include SuperCollider version info
 #include "scsynth/common/SC_Version.hpp"
 
-// Supersonic version - appended to SC version
-static const int SUPERSONIC_VERSION_MAJOR = 0;
-static const int SUPERSONIC_VERSION_MINOR = 64;
-static const int SUPERSONIC_VERSION_PATCH = 0;
+// Supersonic version — defined in supersonic_config.h (single source of truth)
 
 // Global pointers
 extern "C" {
@@ -440,6 +437,7 @@ extern "C" {
         }
 
 
+#ifdef __EMSCRIPTEN__
         worklet_debug(R"(
 ░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀
 ░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░
@@ -447,18 +445,14 @@ extern "C" {
         worklet_debug("v%d.%d.%d (scsynth %d.%d.%d)",
                      SUPERSONIC_VERSION_MAJOR, SUPERSONIC_VERSION_MINOR, SUPERSONIC_VERSION_PATCH,
                      SC_VersionMajor, SC_VersionMinor, SC_VersionPatch);
-#ifdef __EMSCRIPTEN__
         {
             const char* transport_mode = worldOptionsPtr[16] ? "PM" : "SAB";
             worklet_debug("%.0fkHz %dch [%s]",
                          sample_rate / 1000, options.mNumOutputBusChannels, transport_mode);
         }
-#else
-        worklet_debug("%.0fkHz %dch",
-                     sample_rate / 1000, options.mNumOutputBusChannels);
-#endif
         worklet_debug("");
         worklet_debug("> scsynth ready...");
+#endif
     }
 
 #ifndef __EMSCRIPTEN__

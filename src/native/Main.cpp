@@ -10,13 +10,17 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_core/juce_core.h>
 #include "SupersonicEngine.h"
+#include "supersonic_config.h"
 
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
-static constexpr const char* VERSION = "0.61.0";
+static constexpr const char* VERSION = SUPERSONIC_VERSION_STRING;
 
 static juce::WaitableEvent gShutdownEvent;
 
@@ -99,6 +103,9 @@ static void printDeviceList(SupersonicEngine& engine) {
 }
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+#endif
     // ── Version flag — must exit before JUCE init (no COM, no audio) ─────────
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-v") == 0 || std::strcmp(argv[i], "-V") == 0) {
