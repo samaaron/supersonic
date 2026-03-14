@@ -98,20 +98,25 @@ SuperSonic is brought to you by Sam Aaron. Please consider joining the community
 
 See [LICENSE](LICENSE) for details.
 
-SuperSonic is structured to cleanly separate and isolate the GPL-licensed code (SuperCollider's scsynth WASM engine and its AudioWorklet) from the MIT-licensed code (everything else). This separation consists of:
+SuperSonic's GPL-licensed audio engine (derived from SuperCollider's scsynth) is cleanly separated from MIT-licensed client code on every platform. All communication crosses an OSC protocol boundary — no engine types, data structures, or function calls leak into client code.
 
-- **Separate packages** — GPL code is distributed independently in `supersonic-scsynth-core`
-- **Separate execution contexts** — the GPL code runs in a restricted and highly-isolated AudioWorklet thread
-- **Protocol boundary** — all communication uses the OSC protocol; there is no linking and no function calls across the boundary
-- **Transport only** — in SharedArrayBuffer mode, the shared memory is used purely as a transport layer (ring buffers for OSC messages, a memory region for audio sample data, flat arrays for metrics). In postMessage mode, all data crosses via `postMessage`
+| Platform | GPL engine | MIT client | Boundary |
+| -------- | ---------- | ---------- | -------- |
+| **Web** | WASM + AudioWorklet (`supersonic-scsynth-core`) | JS API (`supersonic-scsynth`) | postMessage / SharedArrayBuffer ring buffers |
+| **Native** | Standalone executable | N/A (UDP OSC) | Network socket |
+| **NIF** | Shared library | Erlang module (`src/nif/supersonic.erl`) | NIF call passing opaque OSC binaries |
 
-Your application code interacts only with the MIT-licensed client API and is not intended to be a derivative work of the GPL components.
+Your application code interacts only with the MIT-licensed client APIs and is not intended to be a derivative work of the GPL components.
 
-**Bundler note:** This isolation depends on the GPL code remaining a separate package loaded at runtime. If `supersonic-scsynth-core` is bundled into your application by a JavaScript bundler (webpack, Rollup, esbuild, etc.), the result is a single combined work and the GPL applies to the entire bundle.
+**Native server note:** The native executable and NIF shared library contain both SuperCollider-derived code (GPL) and JUCE (GPL). The resulting binaries are GPL-3.0-or-later and any application that embeds or links them is also subject to the GPL.
+
+**Web bundler note:** This isolation depends on the GPL code remaining a separate package loaded at runtime. If `supersonic-scsynth-core` is bundled into your application by a JavaScript bundler (webpack, Rollup, esbuild, etc.), the result is a single combined work and the GPL applies to the entire bundle.
+
+**npm packages:**
 
 | Package                        | License          | Contains                  |
 | ------------------------------ | ---------------- | ------------------------- |
-| `supersonic-scsynth`           | MIT              | Client API + workers      |
+| `supersonic-scsynth`           | MIT              | JS client API + workers   |
 | `supersonic-scsynth-core`      | GPL-3.0-or-later | WASM engine + AudioWorklet|
 | `supersonic-scsynth-synthdefs` | MIT              | Synth definitions         |
 | `supersonic-scsynth-samples`   | CC0              | Audio samples             |
