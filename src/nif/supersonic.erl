@@ -1,5 +1,7 @@
 %% @doc SuperSonic NIF — audio engine interface for BEAM languages.
 %%
+%% Copyright (c) 2025 Sam Aaron. Licensed under MIT — see LICENSE.
+%%
 %% Wraps the SuperSonic scsynth audio engine as a NIF.  OSC messages
 %% go in via {@link send_osc/1}, replies come back as Erlang messages
 %% to a registered process (see {@link set_notification_pid/0}).

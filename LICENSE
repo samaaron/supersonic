@@ -1,30 +1,45 @@
-SuperSonic - WebAssembly Audio Synthesis Engine
+SuperSonic - Audio Synthesis Engine
 Copyright (c) 2025 Sam Aaron
 
 This project is dual-licensed depending on the component:
 
 ================================================================================
-JavaScript Client Library (MIT OR GPL-3.0-or-later)
+Client Libraries (MIT OR GPL-3.0-or-later)
 ================================================================================
 
-The following JavaScript files are dual-licensed under your choice of MIT or
-GPL-3.0-or-later:
+The following client API files are dual-licensed under your choice of MIT or
+GPL-3.0-or-later. These communicate with the engine exclusively via serialised
+Open Sound Control (OSC) messages and contain no GPL-derived code.
 
-  js/supersonic.js
-  js/lib/
-  js/workers/debug_worker.js
-  js/workers/osc_in_worker.js
-  js/workers/osc_out_log_sab_worker.js
-  js/workers/osc_out_prescheduler_worker.js
+  JavaScript client:
+    js/supersonic.js
+    js/lib/
+    js/workers/debug_worker.js
+    js/workers/osc_in_worker.js
+    js/workers/osc_out_log_sab_worker.js
+    js/workers/osc_out_prescheduler_worker.js
+
+  Erlang/BEAM client:
+    src/nif/supersonic.erl
 
 ================================================================================
-Audio Engine and AudioWorklet (GPL-3.0-or-later)
+Audio Engine (GPL-3.0-or-later)
 ================================================================================
 
 The following components are licensed under GPL-3.0-or-later only:
 
-  src/                                  (C++/WASM audio engine)
+  src/                                  (C++ audio engine — shared across all
+                                         build targets: WASM, native, NIF)
+  src/native/                           (Native JUCE host wrapper)
   js/workers/scsynth_audio_worklet.js   (AudioWorklet that executes WASM)
+
+The engine compiles to three targets:
+  - WebAssembly (AudioWorklet)          — for browsers
+  - Native executable (JUCE)            — for desktop use and Sonic Pi
+  - NIF shared library (BEAM)           — for Erlang/Elixir applications
+
+All three targets link the same GPL-licensed engine code derived from
+SuperCollider's scsynth.
 
 Based on SuperCollider's scsynth
 Copyright (c) 2002-2023 James McCartney and SuperCollider contributors
@@ -76,33 +91,42 @@ It is provided for clarification and guidance only and does not modify,
 supersede, or reinterpret the terms of the GPL.
 
 SuperSonic is deliberately designed with a strict execution boundary between
-the GPL-licensed audio engine and application-level code:
+the GPL-licensed audio engine and application-level code. All communication
+crosses this boundary via serialised OSC messages — a language-neutral,
+protocol-level messaging system comparable to network or IPC-based
+communication between independent software components.
 
-  - The GPL-licensed engine runs inside an AudioWorklet, providing strong
-    execution isolation within the browser. Code outside the AudioWorklet
-    cannot directly access engine internals, shared closures, object
-    references, or function calls.
+The boundary is enforced by architecture on each platform:
 
-  - The MIT-licensed JavaScript client library and supporting workers
-    communicate with the engine exclusively using serialized Open Sound
-    Control (OSC) messages. These messages are transported using explicit
-    inter-context communication mechanisms such as postMessage or
-    shared-memory transport used only for serialized message exchange.
+  - Web (WASM): The engine runs inside an AudioWorklet, providing strong
+    execution isolation. Code outside the AudioWorklet cannot directly access
+    engine internals, shared closures, object references, or function calls.
+    The MIT-licensed JavaScript client communicates exclusively via
+    postMessage or shared-memory transport used only for serialised OSC
+    message exchange.
 
-OSC is a language-neutral, protocol-level messaging system comparable to
-network or IPC-based communication between independent software components.
+  - Native (JUCE): The engine runs as a standalone process or within a host
+    application. External code communicates via UDP OSC messages over a
+    network socket — a clear process boundary.
+
+  - NIF (BEAM): The engine is loaded as a NIF shared library. The
+    MIT-licensed Erlang module (src/nif/supersonic.erl) exposes five
+    functions: start, stop, send_osc, set_notification_pid, and
+    clear_notification_pid. All data crossing the NIF boundary consists of
+    raw OSC binary blobs and Erlang messages — no engine types, data
+    structures, or callbacks leak into the Erlang API. This is functionally
+    equivalent to communication over a network socket.
 
 It is the project author's good-faith interpretation that application code
-which uses the MIT-licensed client library solely to send and receive OSC
+which uses the MIT-licensed client libraries solely to send and receive OSC
 messages with the engine would generally not constitute a derivative work of
 the GPL-licensed audio engine, provided that:
 
-  1. The GPL-licensed components (src/ and
-     js/workers/scsynth_audio_worklet.js) are not modified. Any
-     modifications to these components remain subject to the GPL.
+  1. The GPL-licensed components are not modified. Any modifications to these
+     components remain subject to the GPL.
 
   2. Application code interacts with the engine exclusively through the
-     documented OSC message interface via the MIT-licensed client library.
+     documented OSC message interface via the MIT-licensed client libraries.
 
   3. Distribution of the GPL-licensed engine components remains compliant
      with the GPL, including providing access to corresponding source code
