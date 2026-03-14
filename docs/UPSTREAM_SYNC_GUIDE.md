@@ -573,6 +573,7 @@ server/scsynth/SC_BufGen.cpp      # Buffer generation
 server/scsynth/SC_MiscCmds.cpp    # OSC commands
 server/scsynth/SC_Unit.cpp        # UGen base
 include/plugin_interface/*.h      # Plugin API
+include/common/*.h                # clz, SC_Types, fftlib headers
 ```
 
 ### Low Priority
@@ -585,6 +586,19 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 ---
 
 ## Reference: Previous Sync Summary
+
+### ISPOWEROFTWO fix for zero (2026-03-14)
+
+Applied SuperCollider PR #7409 (commit d991af0b8).
+
+**Applied:**
+- **clz.h**: `ISPOWEROFTWO(0)` now correctly returns false. The previous implementation `(x & (x-1)) == 0` returned true for 0, which is not a power of two.
+
+**Upstream:**
+- https://github.com/supercollider/supercollider/commit/d991af0b8642eab4ca3e114b5e2d2c7ccfbe86d3
+- https://github.com/supercollider/supercollider/pull/7409
+
+---
 
 ### Plugin command and unit command extensions (2026-03-12)
 
