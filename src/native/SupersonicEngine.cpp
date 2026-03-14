@@ -480,8 +480,8 @@ CurrentDeviceInfo SupersonicEngine::currentDevice() const {
     info.typeName = dev->getTypeName().toStdString();
     info.activeSampleRate    = dev->getCurrentSampleRate();
     info.activeBufferSize    = dev->getCurrentBufferSizeSamples();
-    info.activeOutputChannels = dev->getOutputChannelNames().size();
-    info.activeInputChannels  = dev->getInputChannelNames().size();
+    info.activeOutputChannels = dev->getActiveOutputChannels().countNumberOfSetBits();
+    info.activeInputChannels  = dev->getActiveInputChannels().countNumberOfSetBits();
     info.outputLatencySamples = dev->getOutputLatencyInSamples();
     info.inputLatencySamples  = dev->getInputLatencyInSamples();
 
