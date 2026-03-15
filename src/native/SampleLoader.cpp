@@ -183,7 +183,7 @@ void SampleLoader::processRequest(const Request& req) {
     float* data = static_cast<float*>(zalloc(numSamples, sizeof(float)));
     if (!data) {
         sf_close(sf);
-        worklet_debug("[SampleLoader] calloc failed for %d samples", numSamples);
+        worklet_debug("[SampleLoader] zalloc failed for %d samples", numSamples);
         enqueueCompleted({ req.world, req.bufnum, nullptr, 0, 0, 0, false, req.generation });
         return;
     }

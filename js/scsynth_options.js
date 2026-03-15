@@ -43,7 +43,7 @@ const defaultWorldOptions = {
   /**
    * Maximum wire buffers for internal audio routing
    * Wire buffers: temporary buffers for UGen connections
-   * Each: bufLength * 8 bytes (128 samples * 8 = 1024 bytes)
+   * Each: bufLength * sizeof(float) bytes (128 samples * 4 = 512 bytes)
    * Default: 64 (matching SuperCollider default)
    */
   maxWireBufs: 64,
@@ -140,7 +140,7 @@ const defaultWorldOptions = {
 
   /**
    * Debug verbosity level
-   * 0 = quiet, 1 = errors, 2 = warnings, 3 = info, 4 = debug
+   * 0 = normal (default), 1+ = increasingly verbose. SC uses negative values for quieter modes but SuperSonic clamps to 0-4.
    * Default: 0
    */
   verbosity: 0,

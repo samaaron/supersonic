@@ -19,7 +19,7 @@
  *       std::atomic<int32_t> debug_sequence; // offset 32
  *       std::atomic<uint32_t> status_flags;  // offset 36
  *       std::atomic<int32_t> in_write_lock;  // offset 40
- *       std::atomic<int32_t> in_log_tail;    // offset 44
+ *       int32_t _padding;              // offset 44  (repurposed as IN_LOG_TAIL by JS workers)
  *   };
  */
 

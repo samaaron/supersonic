@@ -549,9 +549,9 @@ export class OscChannel {
      * @param {Object} config
      * @param {MessagePort} config.port - MessagePort connected to the worklet
      * @param {MessagePort} config.preschedulerPort - MessagePort to prescheduler
-     * @param {number} [config.bypassLookaheadS=0.2] - Threshold for bypass routing (seconds)
+     * @param {number} [config.bypassLookaheadS=0.5] - Threshold for bypass routing (seconds)
      * @param {number} [config.sourceId=0] - Source ID (0 = main, 1+ = workers)
-     * @param {boolean} [config.blocking] - Whether to use Atomics.wait() (default: true for sourceId !== 0)
+     * @param {boolean} [config.blocking] - Unused in postMessage mode (only applies to SAB transport)
      * @returns {OscChannel}
      */
     static createPostMessage(config) {
@@ -571,7 +571,7 @@ export class OscChannel {
      * @param {Object} config.bufferConstants
      * @param {Object} [config.controlIndices] - If not provided, will be calculated
      * @param {MessagePort} config.preschedulerPort - MessagePort to prescheduler
-     * @param {number} [config.bypassLookaheadS=0.2] - Threshold for bypass routing (seconds)
+     * @param {number} [config.bypassLookaheadS=0.5] - Threshold for bypass routing (seconds)
      * @param {number} [config.sourceId=0] - Source ID (0 = main, 1+ = workers)
      * @param {boolean} [config.blocking] - Whether to use Atomics.wait() (default: true for sourceId !== 0)
      * @returns {OscChannel}

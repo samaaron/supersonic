@@ -13,9 +13,9 @@ import { calculateInControlIndices } from '../control_offsets.js';
  * OSC message passing. Requires crossOriginIsolated context.
  *
  * Architecture:
- * - OSC OUT: DirectWriter for immediate messages, prescheduler worker for future bundles
- * - OSC IN: Worker polls OUT ring buffer, forwards to callbacks
- * - DEBUG: Worker polls DEBUG ring buffer, forwards to callbacks
+ * - OSC OUT: Prescheduler worker for both immediate messages and future bundles
+ * - OSC IN: Worker waits on OUT ring buffer (Atomics.wait), forwards to callbacks
+ * - DEBUG: Worker waits on DEBUG ring buffer (Atomics.wait), forwards to callbacks
  */
 export class SABTransport extends Transport {
     #sharedBuffer;

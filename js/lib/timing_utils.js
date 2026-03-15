@@ -13,8 +13,8 @@
  * Where:
  * - contextTime: AudioContext.currentTime (seconds since context created)
  * - ntpStartTime: NTP time when AudioContext started (calculated at init)
- * - drift: Clock skew correction (measured periodically, in milliseconds)
- * - clockOffset: User-supplied offset for multi-system sync (milliseconds)
+ * - drift: Clock skew correction (measured periodically, in seconds)
+ * - clockOffset: User-supplied offset for multi-system sync (seconds)
  *
  * Drift is positive when AudioContext runs slow (behind wall clock),
  * negative when AudioContext runs fast (ahead of wall clock).

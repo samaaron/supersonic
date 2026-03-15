@@ -1,5 +1,5 @@
 // Sonic Pi SynthDefs for SuperSonic
-// All 120 binary synthdef files from Sonic Pi
+// All 130 binary synthdef files (Sonic Pi synths plus test/utility synthdefs)
 
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';

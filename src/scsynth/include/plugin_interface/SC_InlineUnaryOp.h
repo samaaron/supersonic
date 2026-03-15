@@ -51,7 +51,7 @@ inline bool sc_isfinite(double x) { return std::isfinite(x); }
 
 // versions provided for float32 and float64
 // did not supply template because do not want to instantiate for integers.
-// all constants explicitly cast to prevent PowerPC frsp instruction generation.
+// all constants explicitly cast to float32 for consistent precision across platforms.
 
 ///////////////////////////////////////////////////////////////////////////////////////
 

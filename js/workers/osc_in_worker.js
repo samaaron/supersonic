@@ -171,7 +171,7 @@ const waitLoop = () => {
             });
 
             // Brief pause on error before retrying (use existing atomicView)
-            // Wait on a value that won't change for 10ms as a simple delay
+            // Atomics.wait with 10ms timeout as a brief delay before retrying
             Atomics.wait(atomicView, 0, atomicView[0], 10);
         }
     }

@@ -65,8 +65,8 @@ public:
         if (initialized) return;
         initialized = true;
 
-        // Compute pi/twopi at runtime — constexpr globals may not be
-        // initialised yet depending on constructor ordering.
+        // Compute pi/twopi at runtime for extra safety, matching
+        // upstream's runtime computation approach.
         const double local_twopi = std::acos(-1.0) * 2.0;
 #else
         const double local_twopi = twopi;
@@ -91,7 +91,6 @@ public:
             gInvSine[sz2 - i] = gInvSine[sz2 + i] = kBadValue;
         }
 
-        // NOTE: Removed diagnostic writes that were corrupting the wavetable
         // Indices 16382-16383 are accessed during normal playback at phase wraparound
         // and must contain valid interpolated sine wave data, not constants
 

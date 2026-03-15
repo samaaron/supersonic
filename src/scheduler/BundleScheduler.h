@@ -7,7 +7,7 @@
     Priority queue only stores small indices.
 
     Slot size and count are configurable via compile-time flags:
-      -DSCHEDULER_SLOT_SIZE=512  (default: 512 bytes)
+      -DSCHEDULER_SLOT_SIZE=1024  (default: 1024 bytes)
       -DSCHEDULER_SLOT_COUNT=512 (default: 512 slots)
 */
 

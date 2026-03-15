@@ -30,7 +30,7 @@
  * @property {number} scsynthSequenceGaps - Sequence gaps detected (indicates lost messages)
  * @property {number} scsynthSchedulerLates - Bundles executed after their scheduled time
  *
- * --- Prescheduler (written by osc_out_prescheduler_worker.js, offsets 9-22) ---
+ * --- Prescheduler (written by osc_out_prescheduler_worker.js, offsets 9-23) ---
  * @property {number} preschedulerPending - Events waiting in prescheduler queue
  * @property {number} preschedulerPendingPeak - Peak prescheduler queue depth
  * @property {number} preschedulerDispatched - Bundles successfully written to IN buffer
@@ -51,20 +51,20 @@
  * @property {number} preschedulerMinHeadroomMs - All-time minimum headroom before execution
  * @property {number} preschedulerLates - Bundles dispatched after their scheduled execution time
  *
- * --- OSC In Worker (written by osc_in_worker.js, offsets 25-28) ---
+ * --- OSC In Worker (written by osc_in_worker.js, offsets 26-29) ---
  * @property {number} oscInMessagesReceived - OSC replies received from scsynth (OUT buffer → JS)
  * @property {number} oscInMessagesDropped - OSC replies lost, detected via sequence gaps or corruption
  * @property {number} oscInBytesReceived - Total bytes received from scsynth (OUT buffer → JS)
  *
- * --- Debug Worker (written by debug_worker.js, offsets 29-30) ---
+ * --- Debug Worker (written by debug_worker.js, offsets 30-31) ---
  * @property {number} debugMessagesReceived - Debug messages received from scsynth
  * @property {number} debugBytesReceived - Total bytes received from scsynth (DEBUG buffer → JS)
  *
- * --- Main Thread (written by supersonic.js, offsets 23-24) ---
+ * --- Main Thread (written by supersonic.js, offsets 24-25) ---
  * @property {number} oscOutMessagesSent - OSC messages sent to scsynth (JS → IN buffer)
  * @property {number} oscOutBytesSent - Total bytes sent to scsynth (JS → IN buffer)
  *
- * --- Ring Buffer Usage (written by WASM during process(), offsets 31-33) ---
+ * --- Ring Buffer Usage (written by WASM during process(), offsets 32-34) ---
  * @property {number} inBufferUsedBytes - Raw bytes used in IN buffer (JS → scsynth)
  * @property {number} outBufferUsedBytes - Raw bytes used in OUT buffer (scsynth → JS)
  * @property {number} debugBufferUsedBytes - Raw bytes used in DEBUG buffer (scsynth → JS)

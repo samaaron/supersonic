@@ -1,9 +1,8 @@
 /*
- * SC_Stubs.cpp - Minimal stub implementations for scsynth NRT mode
+ * SC_Stubs.cpp - Supersonic implementations of scsynth functions
  *
- * These functions are referenced by scsynth code but never executed
- * when running in NRT (non-realtime) mode with mRealTime = false.
- * They exist purely to satisfy the linker.
+ * Contains both active runtime code (OSC processing, debug output, timing)
+ * and minimal linker stubs for unused subsystems (audio driver, TCP/IP).
  */
 
 #include "SC_CoreAudio.h"
@@ -41,14 +40,10 @@ int64 oscTimeNow() {
 }
 
 // ============================================================================
-// Memory allocator — real TLSF library linked (needed for scope buffer pool)
-// ============================================================================
-
-// ============================================================================
 // OSC processing - based on SC_CoreAudio.cpp reference implementation
 // ============================================================================
 
-// From audio_processor.cpp
+// From audio_processor.cpp (WASM) or native layer
 extern "C" {
     int worklet_debug(const char* fmt, ...);
     int worklet_debug_va(const char* fmt, va_list args);
@@ -315,7 +310,7 @@ bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket) {
     // In NRT mode, directly call PerformOSCMessage (no FIFO/threading needed)
     int err = PerformOSCMessage(inWorld, inPacket->mSize, inPacket->mData, &inPacket->mReplyAddr);
 
-    // NOTE: Do NOT free inPacket->mData here - the caller (audio_processor.cpp) handles that
+    // NOTE: Do NOT free inPacket->mData here - the caller (SC_OscUnroll.cpp) handles that
 
     if (err != kSCErr_None) {
         char msg[128];
@@ -371,7 +366,7 @@ bool asioThreadStarted() { return false; }
 // ============================================================================
 #ifndef __EMSCRIPTEN__
 
-// scprintf — used by upstream SC filesystem code paths
+// scprintf — used by various upstream SC code paths (GraphDef loading, SequencedCommand, etc.)
 int scprintf(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);

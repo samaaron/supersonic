@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Sam Aaron
 //
-// Fast OSC encoder/decoder with zero-allocation design.
+// Fast OSC encoder/decoder with low-allocation design.
 // Based on Sonic Pi's Ruby/Erlang OSC implementations.
 // See https://opensoundcontrol.stanford.edu/ for OSC spec.
 
@@ -151,7 +151,7 @@ export function encodeMessage(address, args = []) {
  * Returns a view into the shared encode buffer.
  *
  * @param {number} timeTag - NTP timestamp (seconds since 1900) or 1 for immediate
- * @param {Array} packets - Array of {address, args} objects or nested bundles
+ * @param {Array} packets - Array of [address, ...args] arrays, {address, args} objects, or nested bundles
  * @returns {Uint8Array} - Encoded bundle (view into shared buffer)
  */
 export function encodeBundle(timeTag, packets) {
@@ -548,7 +548,7 @@ function writeTimeTag(time, pos) {
  * Decode an OSC packet (message or bundle).
  *
  * @param {Uint8Array|ArrayBuffer} data - Raw OSC data
- * @returns {Object} - Decoded packet
+ * @returns {Array|Object} - Decoded message as [address, ...args] array, or bundle as {timeTag, packets}
  */
 export function decodePacket(data) {
   if (!(data instanceof Uint8Array)) {
@@ -727,8 +727,8 @@ export function copyEncoded(encoded) {
 }
 
 /**
- * Encode directly into a target buffer (for ring buffer writing).
- * Avoids the copy when you're going to copy anyway.
+ * Encode into internal buffer then copy to a target buffer (for ring buffer writing).
+ * Consolidates encode + copy into a single call.
  *
  * @param {string} address - OSC address
  * @param {Array} args - Arguments

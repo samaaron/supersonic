@@ -265,9 +265,9 @@ test.describe('Recovery and Caching', () => {
       // Force full reload by calling internal #reload via recover
       // First, simulate worklet death by checking process count doesn't advance
       // We can't easily kill the worklet, so we test the reload path directly
-      // by emitting recover:start which indicates reload path was taken
+      // by emitting reload:start which indicates reload path was taken
       let reloadPathTaken = false;
-      sonic.on('recover:start', () => { reloadPathTaken = true; });
+      sonic.on('reload:start', () => { reloadPathTaken = true; });
 
       // Call recover - in normal operation this would try resume first
       await sonic.recover();

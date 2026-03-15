@@ -59,7 +59,7 @@ void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
     opts[13] = 1;      // loadGraphDefs
     opts[14] = static_cast<uint32_t>(sampleRate);
     opts[15] = 0;      // verbosity
-    opts[16] = 0;      // mode: 0 = SAB
+    opts[16] = 0;      // mode: 0 = direct memory access (SAB path in web, direct pointers in native)
     opts[17] = static_cast<uint32_t>(sharedMemoryID);  // mSharedMemoryID (UDP port for boost shm)
 
     init_memory(static_cast<double>(sampleRate));
@@ -72,8 +72,8 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
     mBaseNTP        = wallClockNTP();
     std::fill(mPrefetchBuf.begin(), mPrefetchBuf.end(), 0.0f);
 
-    // Native timing: set ntp_start and drift to 0. We pass wall clock NTP
-    // directly as current_time to process_audio(), so these offsets are unused.
+    // Native timing: set ntp_start and drift to 0. NTP is derived from sample
+    // position with slow drift correction (see run loop), so these offsets are unused.
     if (mRingBufferStorage) {
         double* ntpStartPtr = reinterpret_cast<double*>(
             mRingBufferStorage + NTP_START_TIME_START);

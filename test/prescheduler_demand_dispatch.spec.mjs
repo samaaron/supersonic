@@ -3,7 +3,7 @@ import { test, expect, skipIfPostMessage } from "./fixtures.mjs";
 /**
  * Demand-Driven Prescheduler Dispatch Tests
  *
- * Tests verify the demand-driven timer logic that replaced fixed 50ms polling:
+ * Tests verify the demand-driven timer logic that replaced fixed-interval polling:
  * 1. Timer preemption: sooner events preempt later timers
  * 2. Idle-to-active: events dispatch correctly after idle period
  * 3. Cancel-to-idle-to-active: system recovers after cancelAll empties the heap

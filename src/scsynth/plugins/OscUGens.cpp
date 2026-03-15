@@ -2251,7 +2251,7 @@ void Blip_next(Blip* unit, int inNumSamples) {
     if (numharm != unit->m_numharm || freqin != unit->m_freqin) {
         N = numharm;
         int32 maxN = (int32)((SAMPLERATE * 0.5) / freqin);
-        // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist/2
+        // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist
         // This prevents division by zero in scale calculation (0.5 / N)
         maxN = sc_max(1, maxN);
         if (N > maxN) {
@@ -2372,7 +2372,7 @@ void Saw_Ctor(Saw* unit) {
 
     unit->m_cpstoinc = ft->mSineSize * SAMPLEDUR * 65536. * 0.5;
     int32 N = (int32)((SAMPLERATE * 0.5) / unit->m_freqin);
-    // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist/2
+    // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist
     if (N < 1)
         N = 1;
     unit->m_N = N;
@@ -2401,7 +2401,7 @@ void Saw_next(Saw* unit, int inNumSamples) {
     bool crossfade;
     if (freqin != unit->m_freqin) {
         N = (int32)((SAMPLERATE * 0.5) / freqin);
-        // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist/2
+        // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist
         // This prevents division by zero in scale calculation (0.5 / N)
         N = sc_max(1, N);
         if (N != unit->m_N) {
@@ -2521,7 +2521,7 @@ void Pulse_Ctor(Pulse* unit) {
 
     unit->m_cpstoinc = ft->mSineSize * SAMPLEDUR * 65536. * 0.5;
     int32 N = (int32)((SAMPLERATE * 0.5) / unit->m_freqin);
-    // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist/2
+    // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist
     if (N < 1)
         N = 1;
     unit->m_N = N;
@@ -2549,7 +2549,7 @@ void Pulse_next(Pulse* unit, int inNumSamples) {
 
     if (freqin != unit->m_freqin) {
         N = (int32)((SAMPLERATE * 0.5) / freqin);
-        // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist/2
+        // [SUPERSONIC] Guard against N=0 when frequency exceeds Nyquist
         // This prevents division by zero in scale calculation (0.5 / N)
         N = sc_max(1, N);
         if (N != unit->m_N) {

@@ -468,7 +468,7 @@ void OscUdpServer::run() {
             // Sender tracking is handled inside handlePacket():
             // - Ring-buffer-bound messages update mLastSenderIP/Port
             //   so async replies from ReplyReader go to the right client.
-            // - Directly-handled commands (/supersonic/*, /status) reply
+            // - Directly-handled commands (/supersonic/*) reply
             //   to the actual sender without clobbering the reply target.
             try {
                 handlePacket(mRecvBuf.data(),

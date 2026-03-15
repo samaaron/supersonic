@@ -78,7 +78,7 @@ test.describe("Ring Buffer Stress Test", () => {
             const nodeId = 10000 + messagesSent;
             // Alternate between different message types to stress different paths
             if (i % 3 === 0) {
-              // s_new - create synth (goes through prescheduler for timing)
+              // s_new - create synth (sent directly to ring buffer, not via prescheduler)
               promises.push(
                 sonic.send("/s_new", "sonic-pi-beep", nodeId, 0, 0,
                   "note", 60 + (i % 12), "amp", 0.1, "release", 0.01)

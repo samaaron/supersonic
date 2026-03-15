@@ -32,9 +32,9 @@ void HeadlessDriver::configure(JuceAudioCallback* callback,
 }
 
 // Each platform implements run() using its highest-resolution timer.
-// The loop body is identical: install pending buffers, compute wall-clock
-// NTP time, call process_audio(), wake worker threads, then sleep until
-// the next block boundary.
+// The loop body is identical: install pending buffers, derive NTP from
+// sample position, call process_audio(), wake worker threads, then sleep
+// until the next block boundary.
 
 #if defined(__linux__)
 

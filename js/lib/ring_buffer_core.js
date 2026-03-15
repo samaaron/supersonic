@@ -136,6 +136,7 @@ export function writeMessageToBuffer({
  * @param {Function} params.onMessage - Callback: (payloadOffset: number, payloadLength: number, sequence: number, sourceId: number) => void
  *   payloadOffset is absolute byte offset into uint8View where payload starts
  *   Caller reads directly: uint8View[payloadOffset + i] for i in 0..payloadLength-1
+ *   Note: for OUT/DEBUG buffers (C++ writer), payloads never wrap — padding markers are used at buffer boundaries.
  * @param {Function} [params.onCorruption] - Optional callback for corrupted messages: (position: number) => void
  * @returns {{ newTail: number, messagesRead: number }} new tail position and count
  */

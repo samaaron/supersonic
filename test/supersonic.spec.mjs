@@ -1,6 +1,6 @@
 import { test, expect, skipIfPostMessage, WAIT_FOR_TREE_HELPER } from "./fixtures.mjs";
 
-// Helper to wait for tree updates in postMessage mode
+// Helper to wait for tree updates (works in both SAB and postMessage modes)
 const WAIT_FOR_TREE = `
   async function waitForTree(sonic, condition, timeoutMs = 2000) {
     const start = Date.now();

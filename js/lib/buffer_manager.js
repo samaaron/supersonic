@@ -12,7 +12,7 @@
  *
  * Supports two modes:
  * - 'sab': Direct SharedArrayBuffer access (default)
- * - 'postMessage': Buffer loading via worklet (NOT YET IMPLEMENTED)
+ * - 'postMessage': Buffer loading via worklet postMessage transfers
  */
 
 import { MemPool } from '@thi.ng/malloc';
@@ -122,7 +122,7 @@ export class BufferManager {
         this.#bufferLocks = new Map();       // bufnum -> promise chain tail
 
         // Guard samples prevent interpolation artifacts at buffer boundaries.
-        // SuperCollider uses 3 samples before and 1 sample after for cubic interpolation.
+        // SuperCollider uses 3 guard samples before (for cubic interpolation) and 1 after (for linear interpolation).
         this.GUARD_BEFORE = 3;
         this.GUARD_AFTER = 1;
 

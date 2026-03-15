@@ -736,7 +736,7 @@ extern "C" {
                 else if (g_world->mSampleOffset >= g_world->mBufLength)
                     g_world->mSampleOffset = g_world->mBufLength - 1;
 
-                // Get pointer to bundle in pool (no 8KB copy!)
+                // Get pointer to bundle in pool (no 1KB copy!)
                 ScheduledBundle* bundle = g_scheduler.Remove();
                 update_scheduler_depth_metric(g_scheduler.Size());
 
@@ -824,8 +824,7 @@ extern "C" {
 
 #ifdef __wasm_simd128__
             // SIMD-optimized copy: process 4 floats at a time
-            // Each channel has 128 samples, we have 2 channels = 256 total floats
-            // 256 / 4 = 64 SIMD operations
+            // Each channel has 128 samples, total = numOutputs * 128 floats
             const int total_samples = g_world->mNumOutputs * QUANTUM_SIZE;
             const int simd_iterations = total_samples / 4;
 
@@ -834,7 +833,7 @@ extern "C" {
                 wasm_v128_store(dst + i * 4, vec);
             }
 
-            // Handle any remaining samples (shouldn't be any with 256 samples)
+            // Handle any remaining samples not divisible by 4
             const int remaining = total_samples % 4;
             if (remaining > 0) {
                 memcpy(dst + simd_iterations * 4, src + simd_iterations * 4, remaining * sizeof(float));
@@ -982,7 +981,7 @@ extern "C" {
     }
 
     // scsynth audio output accessors
-    // Returns the accumulated audio buffer (128 samples per channel from double-loop)
+    // Returns the accumulated audio buffer (128 samples per channel)
     EMSCRIPTEN_KEEPALIVE
     uintptr_t get_audio_output_bus() {
         if (!memory_initialized) {

@@ -1176,7 +1176,7 @@ export class SuperSonic {
    * 1 is the default group, and 2–999 are left free for manual use.
    *
    * SAB mode uses a single atomic increment per call. PM mode uses
-   * range-based allocation with async pre-fetching from the main thread.
+   * range-based allocation (async pre-fetching is used by worker OscChannels, not the main thread).
    *
    * Also available on OscChannel for use in Web Workers.
    *

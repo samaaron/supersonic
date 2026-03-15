@@ -711,8 +711,8 @@ SCErr meth_n_fill(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRe
             // value after the bus mapping check. But per the OSC spec, /n_fill only takes
             // [controlIndex, numControls, value] - there's no second value to read.
             // The else block would read garbage/undefined data and overwrite the correct
-            // values that were just set. This was likely a copy-paste error from /n_setn
-            // which DOES take multiple values.
+            // values that were just set. This was likely a copy-paste error from /n_set
+            // which has a similar bus-mapping else pattern.
             // Test: test/osc_semantic.spec.mjs "/n_fill semantic tests"
             // =============================================================================
             if (msg.nextTag('f') == 's') {
@@ -2035,10 +2035,9 @@ void initMiscCommands() {
     NEW_COMMAND(b_setn);
     // =============================================================================
     // SUPERSONIC: /b_setSampleRate intentionally not implemented
-    // In WebAudio, the browser's decodeAudioData() resamples audio files to match
-    // the AudioContext's sample rate BEFORE the data reaches our buffers.
-    // The buffer's sample rate is set correctly by buffer_set_data() when loading.
-    // This command would have no useful effect in our context.
+    // In WebAudio, the sample rate is fixed by the AudioContext, so all buffers
+    // already have the correct sample rate. Setting buffer sample rate metadata
+    // would have no useful effect in our context.
     // =============================================================================
     NEW_COMMAND(b_fill);
     NEW_COMMAND(b_gen);

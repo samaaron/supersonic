@@ -35,7 +35,7 @@ TEST_CASE("/g_new nested groups", "[group]") {
     fx.send(osc_test::message("/g_new", 200, 0, 100));
     fx.send(osc_test::message("/g_new", 300, 0, 200));
 
-    // Status should show 4 groups: root(0) + default(1) + 100 + 200 + 300
+    // Status should show 5 groups: root(0) + default(1) + 100 + 200 + 300
     // Actually root(0) and default group(1) may vary, just check >= 3 new ones
     fx.send(osc_test::message("/status"));
     OscReply r;

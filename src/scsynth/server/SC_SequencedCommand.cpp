@@ -43,11 +43,11 @@
 //
 // 1. worklet_debug: All scprintf calls replaced with worklet_debug for WASM
 // 2. GET_COMPLETION_MSG: Removed optional integer skip (upstream commit b06dc8b4f)
-//    - The upstream version skips an optional integer after completion message
-//    - This was added to support the optional sampleRate parameter in /b_alloc
-//    - Not needed in WebAudio where sample rate is fixed by AudioContext
+//    - The upstream version skips an optional integer-tagged value after the completion message
+//    - This affects all commands using GET_COMPLETION_MSG, not just /b_alloc
+//    - Not needed in SuperSonic where these optional parameters are not used
 // 3. BufAllocCmd::Init: Removed optional sampleRate parameter (upstream b06dc8b4f)
-//    - WebAudio's decodeAudioData() handles sample rate conversion
+//    - In SuperSonic, the sample rate is fixed by the AudioContext
 //    - We always use mWorld->mSampleRate for allocated buffers
 // 4. BufFreeCmd::Stage4: Sends /supersonic/buffer/freed for JS buffer pool
 // 5. AudioQuitCmd: Excludes mShmem and mQuitProgram (no SHM/semaphores in WASM)

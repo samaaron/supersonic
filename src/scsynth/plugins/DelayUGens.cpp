@@ -223,7 +223,7 @@ extern "C" {
 
 // SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
 // These Info UGens had the same signature mismatch as BufInfo UGens (fixed in bf8aa70).
-// The parameter was never used in any of these constructors. See docs/wasm-function-signature-fix.md
+// The parameter was never used in any of these constructors.
 void SampleRate_Ctor(Unit* unit);
 void ControlRate_Ctor(Unit* unit);
 void SampleDur_Ctor(Unit* unit);
@@ -241,7 +241,6 @@ void NumRunningSynths_next(Unit* unit, int inNumSamples);
 
 void BufSampleRate_next(BufInfoUnit* unit, int inNumSamples);
 // SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
-// See docs/wasm-function-signature-fix.md for details.
 void BufSampleRate_Ctor(BufInfoUnit* unit);
 
 void BufFrames_next(BufInfoUnit* unit, int inNumSamples);
@@ -522,7 +521,7 @@ void BufSampleRate_next(BufInfoUnit* unit, int inNumSamples) {
 // Original SuperCollider has this parameter but never uses it. In native builds, the unused
 // parameter gets garbage from a register but causes no harm. In WebAssembly, the signature
 // mismatch with UnitCtorFunc typedef causes function table corruption, resulting in infinite
-// recursion. See docs/wasm-function-signature-fix.md for full analysis.
+// recursion.
 void BufSampleRate_Ctor(BufInfoUnit* unit) {
     SETCALC(BufSampleRate_next);
     CTOR_GET_BUF
@@ -538,7 +537,6 @@ void BufFrames_next(BufInfoUnit* unit, int inNumSamples) {
 }
 
 // SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
-// See docs/wasm-function-signature-fix.md for details.
 void BufFrames_Ctor(BufInfoUnit* unit) {
     SETCALC(BufFrames_next);
     CTOR_GET_BUF
@@ -554,8 +552,8 @@ void BufDur_next(BufInfoUnit* unit, int inNumSamples) {
 }
 
 // SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
-// This was the primary constructor that triggered infinite recursion due to WASM function table
-// corruption caused by signature mismatch. See docs/wasm-function-signature-fix.md for details.
+// This constructor had the same signature mismatch that triggered infinite recursion due to WASM
+// function table corruption in BufInfo UGen constructors.
 void BufDur_Ctor(BufInfoUnit* unit) {
     SETCALC(BufDur_next);
     CTOR_GET_BUF
@@ -571,7 +569,6 @@ void BufChannels_next(BufInfoUnit* unit, int inNumSamples) {
 }
 
 // SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
-// See docs/wasm-function-signature-fix.md for details.
 void BufChannels_Ctor(BufInfoUnit* unit) {
     SETCALC(BufChannels_next);
     CTOR_GET_BUF
@@ -587,7 +584,6 @@ void BufSamples_next(BufInfoUnit* unit, int inNumSamples) {
 }
 
 // SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
-// See docs/wasm-function-signature-fix.md for details.
 void BufSamples_Ctor(BufInfoUnit* unit) {
     SETCALC(BufSamples_next);
     CTOR_GET_BUF
@@ -603,7 +599,6 @@ void BufRateScale_next(BufInfoUnit* unit, int inNumSamples) {
 }
 
 // SUPERSONIC WASM FIX: Removed unused 'int inNumSamples' parameter to match UnitCtorFunc signature.
-// See docs/wasm-function-signature-fix.md for details.
 void BufRateScale_Ctor(BufInfoUnit* unit) {
     SETCALC(BufRateScale_next);
     CTOR_GET_BUF

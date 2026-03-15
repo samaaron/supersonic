@@ -4,7 +4,7 @@
 /**
  * @typedef {Object} TransportConfig
  * @property {string} mode - 'sab' or 'postMessage'
- * @property {MessagePort} [workletPort] - Port for worklet communication
+ * @property {MessagePort} [workletPort] - Port for worklet communication (passed to initialize(), not constructor)
  * @property {SharedArrayBuffer} [sharedBuffer] - Shared memory (SAB mode only)
  * @property {WebAssembly.Memory} [wasmMemory] - WASM memory (SAB mode only)
  * @property {number} [ringBufferBase] - Ring buffer base offset (SAB mode only)

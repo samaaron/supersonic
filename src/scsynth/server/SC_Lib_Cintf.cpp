@@ -36,7 +36,7 @@
 //   - checkAPIVersion() / checkServerVersion() — runtime API version checks
 //   - Directory scanning for .scx plugin files
 //   - Apple mach-o section preloading to avoid page-fault glitches
-// None of this applies to WASM AudioWorklet builds.
+// None of this applies to SuperSonic builds (both WASM and native use STATIC_PLUGINS).
 // See upstream: server/scsynth/SC_Lib_Cintf.cpp
 
 // From audio_processor.cpp

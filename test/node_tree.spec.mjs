@@ -1,13 +1,13 @@
 /**
- * Node Tree (getTree) Test Suite
+ * Node Tree (getRawTree) Test Suite
  *
- * Comprehensive tests for the getTree() SharedArrayBuffer API,
+ * Comprehensive tests for the getRawTree() SharedArrayBuffer API,
  * validating it against the standard SuperCollider OSC node tree commands:
  * - /g_queryTree for structure verification
  * - /n_query for individual node info
  * - Node notifications (/n_go, /n_end, /n_move) for lifecycle events
  *
- * These tests ensure getTree() provides an accurate, low-latency view
+ * These tests ensure getRawTree() provides an accurate, low-latency view
  * of the scsynth node tree for visualization purposes.
  */
 

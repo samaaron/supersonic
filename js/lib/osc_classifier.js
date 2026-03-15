@@ -5,7 +5,7 @@
  * OSC Message Classification
  *
  * Shared utility for classifying OSC messages into bypass categories.
- * Used by DirectWriter, SuperSonic, and OscChannel to determine routing.
+ * Used by SuperSonic and OscChannel to determine routing.
  *
  * Bypass categories:
  * - 'nonBundle'   - Plain OSC messages (not bundles)
@@ -74,7 +74,7 @@ export function getCurrentNTPFromPerformance() {
  * @param {Object} [options] - Classification options
  * @param {Function} [options.getCurrentNTP] - Function returning current NTP time in seconds.
  *                                              Defaults to performance-based calculation.
- * @param {number} [options.bypassLookaheadS=0.2] - Threshold for bypass routing (seconds)
+ * @param {number} [options.bypassLookaheadS=0.5] - Threshold for bypass routing (seconds)
  * @returns {'nonBundle' | 'immediate' | 'nearFuture' | 'late' | 'farFuture'}
  */
 export function classifyOscMessage(oscData, options = {}) {

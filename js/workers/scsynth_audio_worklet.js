@@ -202,7 +202,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             scheduler_slot_size: uint32View[34],
             scheduler_slot_count: uint32View[35],
             DEBUG_PADDING_MARKER: uint8View[144],  // After 36 uint32s = 144 bytes
-            MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, padding)
+            MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, sourceId)
         };
 
         // Validate
@@ -663,7 +663,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
     // Record OSC message received (for postMessage mode metrics)
     // In PM mode, we track what the worklet receives since there's no shared memory
-    // bypassCategory is only provided in PM mode when sent via OscChannel
+    // bypassCategory is provided in PM mode by OscChannel and PostMessageTransport.sendImmediate()
     recordOscReceived(byteLength, bypassCategory = null) {
         if (!this.metricsView) return;
 
@@ -1295,7 +1295,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 }
 
                 // CRITICAL: Access AudioContext currentTime correctly
-                // In AudioWorkletGlobalScope, currentTime is a bare global variable (not on globalThis)
+                // In AudioWorkletGlobalScope, currentTime is an attribute of the global scope
                 // We use a different variable name to avoid shadowing
                 const audioContextTime = currentTime;  // Access the global currentTime directly
 

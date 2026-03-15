@@ -14,7 +14,7 @@ import { getCurrentNTPFromPerformance } from '../osc_classifier.js';
  * Requires larger scheduling lookahead to absorb message passing latency.
  *
  * Architecture:
- * - OSC OUT: Prescheduler worker dispatches via postMessage, we forward to worklet
+ * - OSC OUT: Prescheduler worker dispatches via direct MessageChannel to worklet
  * - OSC IN: Worklet sends replies via MessagePort
  * - DEBUG: Worklet sends debug messages via MessagePort
  * - Reuses existing prescheduler worker with mode='postMessage'
@@ -338,7 +338,7 @@ export class PostMessageTransport extends Transport {
      */
     handleDebugRaw(data) {
         // Decode debug messages inline using TextDecoder
-        // (TextDecoder not available in AudioWorklet, so decoding happens here)
+        // (decoding happens here to avoid allocations on the real-time audio thread)
         if (data.messages && data.count > 0 && data.buffer) {
             // New packed buffer format
             const textDecoder = new TextDecoder('utf-8');

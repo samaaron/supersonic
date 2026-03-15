@@ -61,7 +61,7 @@ private:
     struct CompletedLoad {
         World*   world       = nullptr;
         int      bufnum      = 0;
-        float*   data        = nullptr;  // heap-allocated PCM (calloc'd), or nullptr on failure
+        float*   data        = nullptr;  // heap-allocated PCM (zalloc'd), or nullptr on failure
         int      numFrames   = 0;
         int      numChannels = 0;
         int      sampleRate  = 0;

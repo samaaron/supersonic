@@ -1842,7 +1842,13 @@ export class SuperSonic {
   startCapture(): void;
 
   /** Stop capturing and return the captured audio data. */
-  stopCapture(): Float32Array;
+  stopCapture(): {
+    sampleRate: number;
+    channels: number;
+    frames: number;
+    left: Float32Array;
+    right: Float32Array | null;
+  };
 
   /** Check if audio capture is currently enabled. */
   isCaptureEnabled(): boolean;

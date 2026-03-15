@@ -25,7 +25,7 @@
     The node tree lives in SharedArrayBuffer at NODE_TREE_START offset:
 
     +---------------------+
-    | NodeTreeHeader      |  12 bytes
+    | NodeTreeHeader      |  16 bytes
     | - node_count (4)    |  Number of active nodes in mirror
     | - version (4)       |  Change counter (for dirty checking)
     | - dropped_count (4) |  Nodes not mirrored due to overflow
@@ -36,7 +36,7 @@
     | NodeEntry[1023]     |  Up to NODE_TREE_MIRROR_MAX_NODES entries
     +---------------------+
 
-    Total size: ~57KB (12 + 1024 * 56 bytes)
+    Total size: ~57KB (16 + 1024 * 56 bytes)
 
 
     NODE ENTRY STRUCTURE (56 bytes)

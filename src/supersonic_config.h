@@ -25,7 +25,7 @@
     SUPERSONIC_STRINGIFY(SUPERSONIC_VERSION_PATCH)
 
 // Pre-allocated heap size for RT-safe allocations (used by supersonic_heap).
-// 64MB matches the WASM linear memory buffer pool region.
+// 64MB heap for native builds (unused in WASM where emscripten manages memory).
 #ifndef SUPERSONIC_HEAP_SIZE
 #define SUPERSONIC_HEAP_SIZE (64 * 1024 * 1024)
 #endif

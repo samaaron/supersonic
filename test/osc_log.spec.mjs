@@ -69,7 +69,7 @@ test.describe("Centralized OSC Out Logging", () => {
         await sonic.send("/status");
       }
 
-      // Wait for OSC log to be collected and sent (snapshot interval is typically 50ms)
+      // Wait for OSC log to be collected and sent (snapshot interval defaults to 150ms, tests use 25ms)
       await new Promise(r => setTimeout(r, 200));
 
       // Get some debug info
@@ -294,7 +294,7 @@ test.describe("Centralized OSC Out Logging", () => {
       await sendFromWorker(worker3, 3);
 
       // Wait for OSC log - need enough time for multiple snapshot intervals
-      // Snapshot interval is typically 50ms, so 500ms should be plenty
+      // Snapshot interval defaults to 150ms (25ms in tests), so 500ms should be plenty
       await new Promise(r => setTimeout(r, 500));
 
       worker1.terminate();
@@ -1192,5 +1192,5 @@ test.describe("HTML Log Events (in:html / out:html)", () => {
   });
 });
 
-// Define MAIN_COUNT and WORKER_COUNT as constants for reference in expects
+// Define MAIN_COUNT as a constant for reference in expects
 const MAIN_COUNT = 5;

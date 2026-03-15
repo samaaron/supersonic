@@ -1,9 +1,9 @@
 /*
  * EngineFixture.h — Boots a SupersonicEngine for in-process testing.
  *
- * Each test constructs an EngineFixture, which initialises the engine with a
- * real audio device (when available) or falls back to manual audio pumping
- * for headless CI. Replies and debug messages are collected for assertions.
+ * Each test constructs an EngineFixture, which initialises the engine in
+ * headless mode with manual audio pumping via the HeadlessDriver.
+ * Replies and debug messages are collected for assertions.
  */
 #pragma once
 

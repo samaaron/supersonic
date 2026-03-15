@@ -557,7 +557,11 @@ expectType<void>(sonic.setClockOffset(0.001));
 
 // Capture
 expectType<void>(sonic.startCapture());
-expectType<Float32Array>(sonic.stopCapture());
+const capture = sonic.stopCapture();
+expectType<number>(capture.sampleRate);
+expectType<number>(capture.channels);
+expectType<number>(capture.frames);
+expectType<Float32Array>(capture.left);
 expectType<boolean>(sonic.isCaptureEnabled());
 expectType<number>(sonic.getCaptureFrames());
 expectType<number>(sonic.getMaxCaptureDuration());

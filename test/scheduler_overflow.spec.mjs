@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures.mjs";
 /**
  * Scheduler Queue Overflow Test
  *
- * The scheduler has a fixed capacity of 128 events. When we send more than 128
+ * The scheduler has a fixed capacity of 512 events. When we send more than 512
  * timed bundles rapidly, the queue overflows and messages are dropped.
  *
  * This test sends SCHEDULER_CAPACITY + 200 messages to prove the issue.
@@ -13,7 +13,7 @@ import { test, expect } from "./fixtures.mjs";
  * scheduler is full), this test should PASS.
  */
 
-const SCHEDULER_CAPACITY = 128;
+const SCHEDULER_CAPACITY = 512;
 const OVERFLOW_AMOUNT = 200; // Much more aggressive - send 3x+ capacity
 const TOTAL_MESSAGES = SCHEDULER_CAPACITY + OVERFLOW_AMOUNT;
 
@@ -253,7 +253,7 @@ test.describe("Scheduler Queue Overflow", () => {
           schedulerMax,
           polledPeakDepth: peakDepth,
           polledPeakMax: peakMax,
-          schedulerCapacity: 64, // hardcoded for reference
+          schedulerCapacity: 512, // matches SCHEDULER_SLOT_COUNT in BundleScheduler.h
           overflowErrors,
           // SAB metrics for debugging
           processCountBefore,
@@ -353,7 +353,7 @@ test.describe("Scheduler Queue Overflow", () => {
     expect(result.success).toBe(true);
 
     // 2. NO messages should be dropped (this is the main assertion)
-    // Currently this WILL FAIL because scheduler overflows at 64
+    // Currently this WILL FAIL because scheduler overflows at 512
     // After implementing backpressure, this should PASS
     expect(result.droppedCount).toBe(0);
 

@@ -144,7 +144,7 @@ inline void shm_remove(const string& name) {
 //
 // Segment layout:
 //
-//   scope_shm_header                         (32 bytes, 16-aligned)
+//   scope_shm_header                         (16 bytes, 16-aligned)
 //   scope_buffer[MAX_SCOPE_BUFFERS]           (128 scope slots)
 //   float[control_bus_count]                  (control bus values)
 //   char[remaining]                           (TLSF pool for scope data)
