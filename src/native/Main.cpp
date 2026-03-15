@@ -68,8 +68,8 @@ static void printDeviceList(SupersonicEngine& engine) {
 
     for (auto& dev : devices) {
         bool isCurrent = (dev.name == current.name && dev.typeName == current.typeName);
-        fprintf(stdout, "  %s %s\n", isCurrent ? "▸" : " ", dev.name.c_str());
-        fprintf(stdout, "      driver:  %s\n", dev.typeName.c_str());
+        fprintf(stdout, "  %s %s : %s\n", isCurrent ? "▸" : " ",
+                dev.typeName.c_str(), dev.name.c_str());
 
         if (dev.maxOutputChannels > 0 || dev.maxInputChannels > 0)
             fprintf(stdout, "      channels: %d out, %d in\n",
@@ -128,10 +128,9 @@ int main(int argc, char* argv[]) {
                 "  -m <size>    Real-time memory in KB (default: 8192)\n"
                 "  -w <num>     Max wire buffers (default: 64)\n"
                 "  -B <addr>    Bind address (default: all interfaces)\n"
-                "  -H <name>    Audio device name\n"
+                "  -H <words>   Audio device (fuzzy match on 'Driver : Device')\n"
                 "  -v           Print version and exit\n"
-                "  --list-devices     List audio devices and exit\n"
-                "  --audio-driver <name>  Audio driver type\n\n"
+                "  --list-devices     List audio devices and exit\n\n"
             );
             return 0;
         }
@@ -169,12 +168,6 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         const char* arg = argv[i];
         const char* val = nextArg(i, argc, argv);
-
-        if (std::strcmp(arg, "--audio-driver") == 0 && val) {
-            cfg.audioDriver = val;
-            ++i;
-            continue;
-        }
 
         if (arg[0] == '-' && arg[1] != '\0' && arg[2] == '\0' && val) {
             switch (arg[1]) {

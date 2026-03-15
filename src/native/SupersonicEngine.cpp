@@ -8,6 +8,7 @@
 #include "RingBufferWriter.h"
 #include "scsynth/server/SC_Prototypes.h"  // zfree
 #include <juce_audio_formats/juce_audio_formats.h>
+#include "FuzzyMatch.h"
 #include <chrono>
 #include <cstring>
 #include <thread>
@@ -50,7 +51,6 @@ void SupersonicEngine::initialise(const Config& cfg) {
         mDeviceManager = std::make_unique<juce::AudioDeviceManager>();
 
         // -- Select audio driver --------------------------------------------------
-        // Log available driver types
         {
             auto& types = mDeviceManager->getAvailableDeviceTypes();
             fprintf(stderr, "  Available drivers:");
@@ -60,16 +60,12 @@ void SupersonicEngine::initialise(const Config& cfg) {
             fflush(stderr);
         }
 
-        if (!cfg.audioDriver.empty()) {
-            mDeviceManager->setCurrentAudioDeviceType(
-                juce::String(cfg.audioDriver), true);
-        }
 #ifdef _WIN32
-        else {
-            // Default to DirectSound on Windows.  WASAPI shared mode batches
-            // event callbacks in ~10ms bursts, causing audible crackles even
-            // though our processing completes well within budget.  DirectSound
-            // uses polling-based buffer management that avoids this entirely.
+        // Default to DirectSound on Windows.  WASAPI shared mode batches
+        // event callbacks in ~10ms bursts, causing audible crackles even
+        // though our processing completes well within budget.  DirectSound
+        // uses polling-based buffer management that avoids this entirely.
+        {
             auto& types = mDeviceManager->getAvailableDeviceTypes();
             for (auto* t : types) {
                 if (t->getTypeName() == "DirectSound") {
@@ -100,26 +96,70 @@ void SupersonicEngine::initialise(const Config& cfg) {
                     initError.toRawUTF8());
         }
 
-        // If -H was specified (via audio-settings.toml), switch to that device
-        // and lock device mode so the GUI doesn't override it.
+        // If -H was specified, fuzzy-match against combined "Driver : Device"
+        // strings — matching scsynth's PortAudio convention.  Each word in
+        // the pattern is an independent substring filter, so:
+        //   -H "speakers"           → any device with Speakers
+        //   -H "direct"             → any DirectSound device
+        //   -H "direct headphones"  → DirectSound + Headphones
         if (!cfg.hardwareDevice.empty()) {
-            juce::AudioDeviceManager::AudioDeviceSetup setup;
-            mDeviceManager->getAudioDeviceSetup(setup);
-            setup.outputDeviceName = juce::String(cfg.hardwareDevice);
-            setup.useDefaultOutputChannels = true;
-            setup.useDefaultInputChannels = true;
-            if (cfg.sampleRate > 0) setup.sampleRate = cfg.sampleRate;
-            juce::String hwErr = mDeviceManager->setAudioDeviceSetup(setup, true);
-            if (hwErr.isNotEmpty()) {
-                fprintf(stderr, "[audio-device] -H device '%s' not available, using default\n",
+            struct DevEntry { std::string combined, typeName, devName; };
+            std::vector<DevEntry> entries;
+            std::vector<std::string> combinedNames;
+
+            auto& types = mDeviceManager->getAvailableDeviceTypes();
+            for (auto* type : types) {
+                type->scanForDevices();
+                for (auto& name : type->getDeviceNames(false)) {
+                    DevEntry e;
+                    e.typeName = type->getTypeName().toStdString();
+                    e.devName  = name.toStdString();
+                    e.combined = e.typeName + " : " + e.devName;
+                    entries.push_back(e);
+                    combinedNames.push_back(e.combined);
+                }
+            }
+
+            std::string matched = fuzzyMatch(cfg.hardwareDevice, combinedNames);
+            if (matched.empty()) {
+                fprintf(stderr, "[audio-device] -H '%s' not found, available:\n",
                         cfg.hardwareDevice.c_str());
-                // setAudioDeviceSetup may have closed the previous device — reopen defaults
-                mDeviceManager->initialiseWithDefaultDevices(
-                    cfg.numInputChannels, cfg.numOutputChannels);
+                for (auto& e : entries)
+                    fprintf(stderr, "    %s\n", e.combined.c_str());
             } else {
-                fprintf(stderr, "[audio-device] -H selected device: %s\n",
-                        cfg.hardwareDevice.c_str());
-                mDeviceMode = cfg.hardwareDevice;  // lock mode so GUI knows TOML set it
+                // Find the matching entry
+                for (auto& e : entries) {
+                    if (e.combined != matched) continue;
+
+                    // Switch driver if needed
+                    auto* curType = mDeviceManager->getCurrentDeviceTypeObject();
+                    if (!curType || curType->getTypeName().toStdString() != e.typeName) {
+                        mDeviceManager->setCurrentAudioDeviceType(
+                            juce::String(e.typeName), true);
+                        mDeviceManager->initialiseWithDefaultDevices(
+                            cfg.numInputChannels, cfg.numOutputChannels);
+                    }
+
+                    juce::AudioDeviceManager::AudioDeviceSetup setup;
+                    mDeviceManager->getAudioDeviceSetup(setup);
+                    setup.outputDeviceName = juce::String(e.devName);
+                    setup.useDefaultOutputChannels = true;
+                    setup.useDefaultInputChannels = true;
+                    if (cfg.sampleRate > 0) setup.sampleRate = cfg.sampleRate;
+                    juce::String hwErr = mDeviceManager->setAudioDeviceSetup(setup, true);
+                    if (hwErr.isNotEmpty()) {
+                        fprintf(stderr, "[audio-device] -H '%s' matched '%s' but failed: %s\n",
+                                cfg.hardwareDevice.c_str(), e.combined.c_str(),
+                                hwErr.toRawUTF8());
+                        mDeviceManager->initialiseWithDefaultDevices(
+                            cfg.numInputChannels, cfg.numOutputChannels);
+                    } else {
+                        fprintf(stderr, "  -H '%s' -> %s\n",
+                                cfg.hardwareDevice.c_str(), e.combined.c_str());
+                        mDeviceMode = e.devName;
+                    }
+                    break;
+                }
             }
         }
 

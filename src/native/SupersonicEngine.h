@@ -42,8 +42,7 @@ public:
         int    numRGens                 = 64;
         bool   headless                 = false;   // skip audio device (for tests)
         std::string bindAddress;                   // empty = all interfaces
-        std::string audioDriver;                   // empty = auto-select; e.g. "DirectSound", "Windows Audio"
-        std::string hardwareDevice;                // empty = system default; set by -H flag (audio-settings.toml)
+        std::string hardwareDevice;                // -H flag: fuzzy match on "Driver : Device"
     };
 
     SupersonicEngine();
