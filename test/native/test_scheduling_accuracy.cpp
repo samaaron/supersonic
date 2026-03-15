@@ -32,6 +32,7 @@ static int findOnsetFrame(const float* interleaved, uint32_t numFrames,
 
 TEST_CASE("scheduled bundle executes within 3ms of timetag",
           "[scheduling][accuracy]") {
+    if (std::getenv("CI")) { SKIP("Scheduling accuracy requires real audio hardware — skipped on CI"); }
     EngineFixture fx;
     if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
     fx.clearReplies();
@@ -104,6 +105,7 @@ TEST_CASE("scheduled bundle executes within 3ms of timetag",
 
 TEST_CASE("two bundles execute in correct order with accurate spacing",
           "[scheduling][accuracy]") {
+    if (std::getenv("CI")) { SKIP("Scheduling accuracy requires real audio hardware — skipped on CI"); }
     EngineFixture fx;
     if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
     fx.clearReplies();
@@ -188,10 +190,9 @@ TEST_CASE("two bundles execute in correct order with accurate spacing",
     INFO("Spacing: " << spacingMs << " ms (expected 200ms)");
     INFO("Spacing error: " << spacingErrorMs << " ms");
 
-    // Relative spacing should be accurate within 3ms
+    // Relative spacing is the real accuracy proof — within one block (~2.67ms)
     CHECK(spacingErrorMs < 3.0);
 
-    // Both absolute onsets should be roughly correct too (wider tolerance — 5ms)
     CHECK(std::fabs(onset1Ms - 100.0) < 5.0);
     CHECK(std::fabs(onset2Ms - 300.0) < 5.0);
 }
