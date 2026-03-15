@@ -156,7 +156,18 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     // ── Timing measurement ────────────────────────────────────────────────────
     auto cbStart = std::chrono::high_resolution_clock::now();
 
-    // Record callback timestamp (used by sleep/wake recovery in patch 4)
+    // Sleep/wake recovery: if gap > 2 seconds, re-anchor NTP timing
+    // and purge stale messages so the engine doesn't try to catch up
+    if (mLastCbTime.time_since_epoch().count() != 0) {
+        double gapUs = std::chrono::duration<double, std::micro>(cbStart - mLastCbTime).count();
+        if (gapUs > 2'000'000.0) {
+            fprintf(stderr, "  [wake] gap=%.0fs — re-anchoring NTP, purging stale messages\n",
+                    gapUs / 1e6);
+            fflush(stderr);
+            mBaseNTP = wallClockNTP() - mSamplePosition / mSampleRate;
+            if (onWake) onWake();
+        }
+    }
     mLastCbTime = cbStart;
 
     // ── 0. Install any buffers decoded by the SampleLoader I/O thread ─────────

@@ -302,6 +302,7 @@ void SupersonicEngine::initialise(const Config& cfg) {
     // Replies go through the OUT ring buffer -> ReplyReader (matching WASM arch).
     mSampleLoader.initialise();
     mAudioCallback.setSampleLoader(&mSampleLoader);
+    mAudioCallback.onWake = [this]() { purge(); };
 
     // -- Start worker threads ----------------------------------------------
     mPrescheduler.startThread(juce::Thread::Priority::normal);

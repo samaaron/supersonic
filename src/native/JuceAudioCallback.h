@@ -78,6 +78,11 @@ public:
     // wallMs: wall clock time in milliseconds
     std::function<void(double samplePosition, double wallMs)> preTick;
 
+    // --- Wake hook ---
+    // Called when a sleep/wake cycle is detected (callback gap > 2 seconds).
+    // Used to purge stale messages from the ring buffer and scheduler.
+    std::function<void()> onWake;
+
     // --- Recording ---
     // Atomic void* — audio thread casts to juce::AudioFormatWriter::ThreadedWriter*.
     // Non-audio thread stores/clears. Lock-free FIFO push in write().
