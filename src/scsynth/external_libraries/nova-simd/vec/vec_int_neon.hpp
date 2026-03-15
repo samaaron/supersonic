@@ -33,9 +33,14 @@ struct int_vec_neon
         data_(vdupq_n_u32(arg))
     {}
 
+#if !defined(_MSC_VER)
+    // On MSVC ARM64, float32x4_t and uint32x4_t are the same type (__n128),
+    // so these two constructors would have identical signatures.
+    // On GCC/Clang they are distinct types and both are needed.
     int_vec_neon(float32x4_t arg):
         data_(vreinterpretq_u32_f32(arg))
     {}
+#endif
 
     int_vec_neon(uint32x4_t arg):
         data_(arg)

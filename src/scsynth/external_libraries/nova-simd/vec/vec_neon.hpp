@@ -47,7 +47,7 @@ private:
 
     static float32x4_t set_vector(float f0, float f1, float f2, float f3)
     {
-        float32x4_t ret;
+        float32x4_t ret = vdupq_n_f32(0);
         ret = vsetq_lane_f32(f0, ret, 0);
         ret = vsetq_lane_f32(f1, ret, 1);
         ret = vsetq_lane_f32(f2, ret, 2);
@@ -245,12 +245,22 @@ public:
     /* @{ */
 
 private:
-    static float32x4_t vdivq_f32(float32x4_t lhs, float32x4_t rhs)
+    // On AArch64, vdivq_f32 is a real intrinsic (hardware fdiv instruction).
+    // On 32-bit ARM it doesn't exist, so we provide a software approximation.
+#if defined(__aarch64__) || defined(_M_ARM64)
+    // Use hardware vdivq_f32 intrinsic — nothing to define here.
+    static float32x4_t nova_vdivq_f32(float32x4_t lhs, float32x4_t rhs)
+    {
+        return vdivq_f32(lhs, rhs);
+    }
+#else
+    static float32x4_t nova_vdivq_f32(float32x4_t lhs, float32x4_t rhs)
     {
         float32x4_t reciprocal = vrecpeq_f32(rhs);
         reciprocal = vmulq_f32(reciprocal, vrecpsq_f32(rhs, reciprocal));
         return vmulq_f32(lhs, reciprocal);
     }
+#endif
 
 public:
     friend vec fast_reciprocal(vec const & arg)
@@ -277,7 +287,7 @@ public:
     OPERATOR_ASSIGNMENT(+=, vaddq_f32)
     OPERATOR_ASSIGNMENT(-=, vsubq_f32)
     OPERATOR_ASSIGNMENT(*=, vmulq_f32)
-    OPERATOR_ASSIGNMENT(/=, vdivq_f32)
+    OPERATOR_ASSIGNMENT(/=, nova_vdivq_f32)
 
 #undef OPERATOR_ASSIGNMENT
 
@@ -290,7 +300,7 @@ public:
     ARITHMETIC_OPERATOR(+, vaddq_f32)
     ARITHMETIC_OPERATOR(-, vsubq_f32)
     ARITHMETIC_OPERATOR(*, vmulq_f32)
-    ARITHMETIC_OPERATOR(/, vdivq_f32)
+    ARITHMETIC_OPERATOR(/, nova_vdivq_f32)
 
 #undef ARITHMETIC_OPERATOR
 
@@ -456,20 +466,17 @@ public:
 
     NOVA_SIMD_DELEGATE_UNARY_TO_BASE(tanh)
 
-private:
-    static float32x4_t vsqrtq_f32(float32x4_t arg)
-    {
-        float32x4_t reciprocal = vrsqrteq_f32(arg);
-
-        // TODO: maybe we should do another newton-raphson iteration (see: qvrsqrtsq_f32)?
-        return vmulq_f32(arg, reciprocal);
-    }
-
-
 public:
     friend vec sqrt(vec const & arg)
     {
-        return vsqrtq_f32(arg);
+#if defined(__aarch64__) || defined(_M_ARM64)
+        // AArch64 has hardware vsqrtq_f32 (fsqrt instruction)
+        return vsqrtq_f32(arg.data_);
+#else
+        // 32-bit ARM: approximate via reciprocal square root estimate
+        float32x4_t reciprocal = vrsqrteq_f32(arg.data_);
+        return vmulq_f32(arg.data_, reciprocal);
+#endif
     }
 
     friend inline vec signed_sqrt(vec const & arg)
