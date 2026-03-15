@@ -36,6 +36,7 @@ add_executable(SuperSonicNativeTests
     test_device_management.cpp
     test_send_reply.cpp
     test_multichannel.cpp
+    test_audio_resume.cpp
     OscTestUtils.cpp
     EngineFixture.cpp
 )

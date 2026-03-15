@@ -13,7 +13,8 @@
   #include <windows.h>
 #endif
 
-static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
+// Use the shared implementation from JuceAudioCallback (avoids duplication).
+static double wallClockNTP() { return JuceAudioCallback::wallClockNTP(); }
 
 HeadlessDriver::HeadlessDriver()
     : juce::Thread("SuperSonic-Headless") {}
@@ -43,16 +44,23 @@ void HeadlessDriver::run() {
     struct timespec next;
     clock_gettime(CLOCK_MONOTONIC, &next);
 
+    double baseNTP = wallClockNTP();
+    double samplePos = 0.0;
+
     while (!threadShouldExit()) {
         if (mSampleLoader)
             mSampleLoader->installPendingBuffers();
 
-        double wallNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                         + NTP_EPOCH_OFFSET;
+        // Derive NTP from sample position (jitter-free) with slow drift correction
+        double wallNow = wallClockNTP();
+        double sampleNTP = baseNTP + samplePos / mSampleRate;
+        baseNTP += (wallNow - sampleNTP) * 0.01;
+        double wallNTP = baseNTP + samplePos / mSampleRate;
 
         process_audio(wallNTP,
                       static_cast<uint32_t>(mNumOutputChannels),
                       static_cast<uint32_t>(mNumInputChannels));
+        samplePos += kBlockSize;
 
         mCallback->processCount.fetch_add(1, std::memory_order_release);
         mCallback->processCount.notify_all();
@@ -79,16 +87,23 @@ void HeadlessDriver::run() {
 
     uint64_t nextWake = mach_absolute_time();
 
+    double baseNTP = wallClockNTP();
+    double samplePos = 0.0;
+
     while (!threadShouldExit()) {
         if (mSampleLoader)
             mSampleLoader->installPendingBuffers();
 
-        double wallNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                         + NTP_EPOCH_OFFSET;
+        // Derive NTP from sample position (jitter-free) with slow drift correction
+        double wallNow = wallClockNTP();
+        double sampleNTP = baseNTP + samplePos / mSampleRate;
+        baseNTP += (wallNow - sampleNTP) * 0.01;
+        double wallNTP = baseNTP + samplePos / mSampleRate;
 
         process_audio(wallNTP,
                       static_cast<uint32_t>(mNumOutputChannels),
                       static_cast<uint32_t>(mNumInputChannels));
+        samplePos += kBlockSize;
 
         mCallback->processCount.fetch_add(1, std::memory_order_release);
         mCallback->processCount.notify_all();
@@ -113,16 +128,23 @@ void HeadlessDriver::run() {
     // Block duration in 100ns units (negative = relative interval)
     const LONGLONG blockHns = 10'000'000LL * kBlockSize / mSampleRate;
 
+    double baseNTP = wallClockNTP();
+    double samplePos = 0.0;
+
     while (!threadShouldExit()) {
         if (mSampleLoader)
             mSampleLoader->installPendingBuffers();
 
-        double wallNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                         + NTP_EPOCH_OFFSET;
+        // Derive NTP from sample position (jitter-free) with slow drift correction
+        double wallNow = wallClockNTP();
+        double sampleNTP = baseNTP + samplePos / mSampleRate;
+        baseNTP += (wallNow - sampleNTP) * 0.01;
+        double wallNTP = baseNTP + samplePos / mSampleRate;
 
         process_audio(wallNTP,
                       static_cast<uint32_t>(mNumOutputChannels),
                       static_cast<uint32_t>(mNumInputChannels));
+        samplePos += kBlockSize;
 
         mCallback->processCount.fetch_add(1, std::memory_order_release);
         mCallback->processCount.notify_all();

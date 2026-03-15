@@ -224,6 +224,8 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
             s << osc::EndMessage;
             sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
+            if (result.success)
+                sendDeviceReport();
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/devices/report") == 0) {
@@ -294,6 +296,8 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
             s << osc::EndMessage;
             sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
+            if (result.success)
+                sendDeviceReport();
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/record/start") == 0) {

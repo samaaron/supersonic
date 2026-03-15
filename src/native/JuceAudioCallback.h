@@ -5,6 +5,7 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -60,6 +61,17 @@ public:
     void resume();
     bool isPaused() const;
 
+    // --- Gap detector state (for testing) ---
+    // Returns true if the inter-callback gap detector has a baseline timestamp,
+    // meaning the next callback will measure the gap since that timestamp.
+    bool gapDetectorArmed() const { return mLastCbTime.time_since_epoch().count() != 0; }
+    // Arm the gap detector by recording the current time as baseline.
+    void armGapDetector() { mLastCbTime = std::chrono::high_resolution_clock::now(); }
+
+    // Read wall clock as NTP seconds (sub-millisecond precision).
+    // Public + static so HeadlessDriver can reuse the same implementation.
+    static double wallClockNTP();
+
     // --- Pre-tick hook (for tau integration) ---
     // Called before process_audio() each 128-sample block.
     // samplePosition: cumulative samples processed (for beat calculation)
@@ -92,10 +104,20 @@ private:
 
     std::atomic<bool> mPaused{false};
 
+    // Sample-position-based NTP clock.
+    // We capture a high-resolution wall-clock baseline at device start, then
+    // derive NTP purely from sample counting: ntp = mBaseNTP + samples/rate.
+    // This eliminates jitter from OS scheduling and millisecond-precision clocks.
+    // A slow drift correction keeps long-term sync with wall clock.
+    double mBaseNTP = 0.0;   // NTP time corresponding to mSamplePosition == 0
+
     // Audio thread timing stats (accessed only from audio thread, no atomics needed)
-    int    mCallbackCount = 0;
-    int    mOverrunCount  = 0;
-    double mTotalUs       = 0.0;
-    double mMaxUs         = 0.0;
+    uint32_t mCallbackCount = 0;
+    uint32_t mOverrunCount  = 0;
+    double   mTotalUs       = 0.0;
+    double   mMaxUs         = 0.0;
+
+    // Inter-callback gap detector baseline (used by sleep/wake recovery)
+    std::chrono::high_resolution_clock::time_point mLastCbTime{};
 
 };

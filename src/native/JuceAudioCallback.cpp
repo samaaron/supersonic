@@ -10,6 +10,13 @@
 
 static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
 
+double JuceAudioCallback::wallClockNTP() {
+    auto now = std::chrono::system_clock::now();
+    double secsSinceEpoch = std::chrono::duration<double>(
+        now.time_since_epoch()).count();
+    return secsSinceEpoch + NTP_EPOCH_OFFSET;
+}
+
 JuceAudioCallback::JuceAudioCallback() = default;
 
 void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
@@ -62,6 +69,7 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
     mSampleRate     = static_cast<int>(device->getCurrentSampleRate());
     mSamplePosition = 0.0;
     mPrefetchCount  = 0;
+    mBaseNTP        = wallClockNTP();
     std::fill(mPrefetchBuf.begin(), mPrefetchBuf.end(), 0.0f);
 
     // Native timing: set ntp_start and drift to 0. We pass wall clock NTP
@@ -92,6 +100,12 @@ void JuceAudioCallback::pause() {
 void JuceAudioCallback::resume() {
     mSamplePosition = 0.0;
     mPrefetchCount  = 0;
+    mBaseNTP        = wallClockNTP();
+    mCallbackCount  = 0;       // re-arm warmup for new device
+    mLastCbTime     = {};      // clear gap detector baseline
+    mOverrunCount   = 0;
+    mTotalUs        = 0.0;
+    mMaxUs          = 0.0;
     mPaused.store(false, std::memory_order_release);
 }
 
@@ -116,6 +130,18 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
             std::memset(outputChannelData[ch], 0,
                         static_cast<size_t>(numSamples) * sizeof(float));
 
+    // ── Warmup: output silence for the first few callbacks to absorb page faults
+    if (mCallbackCount < 4) {
+        for (int ch = 0; ch < nOut; ++ch)
+            if (outputChannelData[ch])
+                std::memset(outputChannelData[ch], 0,
+                            static_cast<size_t>(numSamples) * sizeof(float));
+        mCallbackCount++;
+        processCount.fetch_add(1, std::memory_order_release);
+        processCount.notify_all();
+        return;
+    }
+
     // ── If paused, output silence but keep worker threads alive ───────────
     if (mPaused.load(std::memory_order_acquire)) {
         for (int ch = 0; ch < nOut; ++ch)
@@ -129,6 +155,9 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
 
     // ── Timing measurement ────────────────────────────────────────────────────
     auto cbStart = std::chrono::high_resolution_clock::now();
+
+    // Record callback timestamp (used by sleep/wake recovery in patch 4)
+    mLastCbTime = cbStart;
 
     // ── 0. Install any buffers decoded by the SampleLoader I/O thread ─────────
     // Mirrors the WASM architecture: buffer installation + /done reply happen
@@ -161,11 +190,19 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     }
 
     // ── 2. Generate 128-sample scsynth blocks until the JUCE buffer is full ──
-    // Read wall clock once per callback, advance synthetically per sub-block.
-    // Native has direct wall-clock access — no drift correction needed (unlike
-    // WASM which only gets the audio hardware clock via AudioContext.currentTime).
-    double wallNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                     + NTP_EPOCH_OFFSET;
+    // Derive NTP from sample position for jitter-free timing.  The sample
+    // counter advances by exactly kBufLen per block, so NTP progresses
+    // perfectly smoothly — immune to OS scheduling jitter and clock
+    // quantisation (juce::Time::currentTimeMillis() is only 1ms precision).
+    //
+    // A slow drift correction (~1% per callback) keeps long-term sync with
+    // the wall clock, compensating for sample-rate/wall-clock drift (ppm-level).
+    double wallNow = wallClockNTP();
+    double sampleNTP = mBaseNTP + mSamplePosition / mSampleRate;
+    double drift = wallNow - sampleNTP;
+    mBaseNTP += drift * 0.01;  // low-pass filter: converge ~1% per callback
+
+    double wallNTP = mBaseNTP + mSamplePosition / mSampleRate;
 
     while (outputFilled < numSamples) {
         // Copy JUCE input into scsynth's input bus (channel-major, kBufLen per ch).

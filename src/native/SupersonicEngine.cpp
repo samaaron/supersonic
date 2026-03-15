@@ -50,10 +50,35 @@ void SupersonicEngine::initialise(const Config& cfg) {
         mDeviceManager = std::make_unique<juce::AudioDeviceManager>();
 
         // -- Select audio driver --------------------------------------------------
+        // Log available driver types
+        {
+            auto& types = mDeviceManager->getAvailableDeviceTypes();
+            fprintf(stderr, "  Available drivers:");
+            for (auto* t : types)
+                fprintf(stderr, " [%s]", t->getTypeName().toRawUTF8());
+            fprintf(stderr, "\n");
+            fflush(stderr);
+        }
+
         if (!cfg.audioDriver.empty()) {
             mDeviceManager->setCurrentAudioDeviceType(
                 juce::String(cfg.audioDriver), true);
         }
+#ifdef _WIN32
+        else {
+            // Default to DirectSound on Windows.  WASAPI shared mode batches
+            // event callbacks in ~10ms bursts, causing audible crackles even
+            // though our processing completes well within budget.  DirectSound
+            // uses polling-based buffer management that avoids this entirely.
+            auto& types = mDeviceManager->getAvailableDeviceTypes();
+            for (auto* t : types) {
+                if (t->getTypeName() == "DirectSound") {
+                    mDeviceManager->setCurrentAudioDeviceType("DirectSound", true);
+                    break;
+                }
+            }
+        }
+#endif
 
         // Open with requested channel counts; if that fails (e.g. device has
         // fewer channels), fall back to stereo out / no in, then zero/zero.
@@ -130,13 +155,16 @@ void SupersonicEngine::initialise(const Config& cfg) {
                 // User explicitly requested a buffer size — honour it
                 setup.bufferSize = cfg.bufferSize;
                 changed = true;
-            } else {
-                // Auto: pick the smallest available buffer that is a multiple of 128
+            } else if (dev->getTypeName() != "DirectSound") {
+                // Auto: pick the smallest available buffer that is a multiple of 128.
+                // DirectSound manages its own large circular buffer internally —
+                // overriding its default causes distortion, so we leave it alone.
                 constexpr int kBlockSize = 128;
+                int minBuf = kBlockSize;
                 auto sizes = dev->getAvailableBufferSizes();
                 int best = 0;
                 for (auto s : sizes) {
-                    if (s >= kBlockSize && s % kBlockSize == 0) {
+                    if (s >= minBuf && s % kBlockSize == 0) {
                         best = s;
                         break;  // sizes are sorted ascending — first match is smallest
                     }
@@ -711,16 +739,20 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
     mDeviceManager->addAudioCallback(&mAudioCallback);
     mAudioCallback.resume();
 
-    // Fill result
+    // Fill result and output device info in banner format so daemon.rb
+    // can detect the change and forward updated info to the GUI.
     auto* finalDev = mDeviceManager->getCurrentAudioDevice();
     if (finalDev) {
         result.sampleRate = finalDev->getCurrentSampleRate();
         result.bufferSize = finalDev->getCurrentBufferSizeSamples();
+        mCurrentConfig.numOutputChannels = finalDev->getActiveOutputChannels().countNumberOfSetBits();
+        mCurrentConfig.numInputChannels = finalDev->getActiveInputChannels().countNumberOfSetBits();
 
-        fprintf(stderr, "[audio-device] switched to %s: %s %.0fHz buf=%d\n",
+        fprintf(stderr, "[audio-device] switched to %s: %s %.0fHz buf=%d %dch\n",
                 finalDev->getTypeName().toRawUTF8(),
                 finalDev->getName().toRawUTF8(),
-                result.sampleRate, result.bufferSize);
+                result.sampleRate, result.bufferSize,
+                mCurrentConfig.numOutputChannels);
     }
     result.success = true;
     if (onSwapEvent) onSwapEvent("swap:complete", result);
