@@ -61,7 +61,7 @@ typedef unsigned long long uint64;
 
 
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__aarch64__) || defined(__LP64__)
+#if defined(__x86_64__) || defined(_M_X64) || defined(__aarch64__) || defined(_M_ARM64) || defined(__LP64__)
 
 typedef signed int int32;
 typedef unsigned int uint32;

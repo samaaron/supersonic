@@ -71,6 +71,8 @@ extern "C" {
 
 #if BOOST_HW_SIMD_X86 >= BOOST_HW_SIMD_X86_SSE_VERSION
 #    include <xmmintrin.h>
+#elif defined(_M_ARM64) && defined(_MSC_VER)
+#    include <intrin.h>
 #endif
 
 // undefine the shadowed scfft functions
@@ -183,16 +185,29 @@ void zfree(void* ptr) { return free_alig(ptr); }
 ////////////////////////////////////////////////////////////////////////////////
 
 // Set denormal FTZ mode on CPUs that need/support it.
+// Without this, denormal floats in audio DSP (common as synths decay to
+// silence) incur ~100x slowdown on many cores, causing audio glitches.
 void sc_SetDenormalFlags() {
 #if BOOST_HW_SIMD_X86 >= BOOST_HW_SIMD_X86_SSE_VERSION
     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
     _mm_setcsr(_mm_getcsr() | 0x40); // DAZ
+#elif defined(_M_ARM64) && defined(_MSC_VER)
+    // AArch64 Windows: set FZ (Flush-to-Zero) bit 24 in FPCR.
+    // 0x5A20 is the AArch64 system register encoding for FPCR
+    // (op0=3, op1=3, CRn=4, CRm=4, op2=0) per ARM Architecture Reference Manual.
+    // Verified empirically: denormal * 0.5 yields 0.0 after this call.
+    unsigned __int64 fpcr = _ReadStatusReg(0x5A20);
+    fpcr |= (1ULL << 24);  // FZ bit
+    _WriteStatusReg(0x5A20, fpcr);
+#elif defined(__aarch64__)
+    // AArch64 GCC/Clang: set FZ bit in FPCR via inline asm
+    uint64_t fpcr;
+    __asm__ __volatile__("mrs %0, fpcr" : "=r"(fpcr));
+    fpcr |= (1ULL << 24);  // FZ bit
+    __asm__ __volatile__("msr fpcr, %0" :: "r"(fpcr));
 #elif defined(__VFP_FP__)
-    // the Cortex A8, along with the SIMD Neon unit.
-    // This function turns on "fast mode" by enabling
-    // flushing denormals to zero on the VFP.
-    // The NEON already flushe to zero, so it requires
-    // no specific settings.
+    // 32-bit ARM Cortex A8 with VFP: enable flush-to-zero on VFP unit.
+    // NEON already flushes denormals, so no NEON-specific settings needed.
     /* This code is from math-neon/math_runfast.c
     Copyright (c) 2015 Lachlan Tychsen-Smith (lachlan.ts@gmail.com)
     MIT License
