@@ -1,5 +1,25 @@
 /*
  * OscUdpServer.h — UDP OSC listener on port 57110
+ *
+ * Handles incoming OSC over UDP, routing messages to either the ring
+ * buffer (for scsynth) or handling /supersonic/* commands directly.
+ *
+ * ## Notify targets (multi-notify)
+ *
+ * Multiple clients can register for proactive push notifications by
+ * sending /supersonic/notify.  Each sender's IP:port is added to a
+ * deduped list; all registered targets receive:
+ *
+ *   /scsynth/devices        — device list + compatibility flags
+ *   /scsynth/info           — hardware info + available rates/buffer sizes
+ *   /supersonic/statechange — engine lifecycle transitions (state, reason)
+ *   /supersonic/setup       — world ready (sampleRate, bufferSize)
+ *
+ * On registration the new target immediately receives a device report
+ * so it starts with an accurate picture (important after client restart).
+ *
+ * The older /supersonic/devices/report command (with explicit reply port)
+ * still works and also registers a notify target.
  */
 #pragma once
 
@@ -43,11 +63,20 @@ public:
     // Register a persistent listener (e.g. from /notify) for unsolicited messages
     void addListener(const juce::String& ip, int port);
 
-    // Set the target for device change notifications
+    // Register a notify target (deduped by ip:port)
     void setNotifyTarget(const juce::String& ip, int port);
 
-    // Send a /scsynth/devices report to the registered notify target
+    // Send /scsynth/devices + /scsynth/info to all notify targets
     void sendDeviceReport();
+
+    // Send raw OSC data to all registered notify targets
+    void broadcastToTargets(const uint8_t* data, uint32_t size);
+
+    // Broadcast /supersonic/statechange to all notify targets
+    void sendStateChange(const char* state, const char* reason);
+
+    // Broadcast /supersonic/setup to all notify targets (world is ready)
+    void sendSetup(int sampleRate, int bufferSize);
 
     // Set engine pointer for /supersonic/* command interception
     void setEngine(SupersonicEngine* engine) { mEngine = engine; }
@@ -82,7 +111,10 @@ private:
     juce::String          mLastSenderIP;
     int                   mLastSenderPort = 0;
 
-    // Notification target for proactive device change pushes
-    juce::String          mNotifyIP;
-    int                   mNotifyPort = 0;
+    // Notification targets for proactive device change pushes
+    struct NotifyTarget {
+        juce::String ip;
+        int port;
+    };
+    std::vector<NotifyTarget> mNotifyTargets;
 };

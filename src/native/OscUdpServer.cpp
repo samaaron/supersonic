@@ -71,78 +71,146 @@ void OscUdpServer::addListener(const juce::String& ip, int port) {
 
 void OscUdpServer::setNotifyTarget(const juce::String& ip, int port) {
     juce::ScopedLock sl(mSenderLock);
-    mNotifyIP   = ip;
-    mNotifyPort = port;
+    // Add to list if not already registered
+    for (auto& t : mNotifyTargets)
+        if (t.ip == ip && t.port == port) return;
+    mNotifyTargets.push_back({ip, port});
 }
 
 void OscUdpServer::sendDeviceReport() {
-    int port;
-    juce::String ip;
+    std::vector<NotifyTarget> targets;
     {
         juce::ScopedLock sl(mSenderLock);
-        port = mNotifyPort;
-        ip   = mNotifyIP;
+        targets = mNotifyTargets;
     }
-    if (port <= 0 || ip.isEmpty() || !mEngine || !mSocket) return;
+    if (targets.empty() || !mEngine || !mSocket) return;
 
-    auto devices = mEngine->listDevices();
+    auto allDevices = mEngine->listDevices();
     auto current = mEngine->currentDevice();
     auto mode    = mEngine->deviceMode();
 
-    // Send device list for dropdown
+    // Filter out devices with no output channels (unusable)
+    std::vector<decltype(allDevices)::value_type> devices;
+    for (auto& dev : allDevices) {
+        if (dev.maxOutputChannels > 0)
+            devices.push_back(dev);
+    }
+
+    // Build device list message
     // Format: mode(str), current(str), device1(str), ..., deviceN(str),
     //         sampleRate(int32), compat1(int32), ..., compatN(int32)
     // compat flags: 1 = device supports current rate, 0 = needs restart
-    {
-        char buf[8192];
-        osc::OutboundPacketStream s(buf, sizeof(buf));
-        s << osc::BeginMessage("/scsynth/devices")
-          << (mode.empty() ? "system" : mode.c_str())
-          << current.name.c_str();
-        for (auto& dev : devices)
-            s << dev.name.c_str();
-        s << static_cast<osc::int32>(current.activeSampleRate);
-        int curRate = static_cast<int>(current.activeSampleRate);
-        for (auto& dev : devices) {
-            bool compat = false;
-            for (auto r : dev.availableSampleRates)
-                if (static_cast<int>(r) == curRate)
-                    compat = true;
-            s << static_cast<osc::int32>(compat ? 1 : 0);
-        }
-        s << osc::EndMessage;
-        mSocket->write(ip, port, s.Data(), static_cast<int>(s.Size()));
+    char devBuf[8192];
+    osc::OutboundPacketStream devMsg(devBuf, sizeof(devBuf));
+    devMsg << osc::BeginMessage("/scsynth/devices")
+           << (mode.empty() ? "system" : mode.c_str())
+           << current.name.c_str();
+    for (auto& dev : devices)
+        devMsg << dev.name.c_str();
+    devMsg << static_cast<osc::int32>(current.activeSampleRate);
+    int curRate = static_cast<int>(current.activeSampleRate);
+    for (auto& dev : devices) {
+        bool compat = false;
+        for (auto r : dev.availableSampleRates)
+            if (static_cast<int>(r) == curRate)
+                compat = true;
+        devMsg << static_cast<osc::int32>(compat ? 1 : 0);
     }
+    devMsg << osc::EndMessage;
 
-    // Send hardware info for the info pane
-    {
-        double sr = current.activeSampleRate;
-        double outLatMs = sr > 0 ? (current.outputLatencySamples / sr) * 1000.0 : 0.0;
-        double inLatMs  = sr > 0 ? (current.inputLatencySamples  / sr) * 1000.0 : 0.0;
+    // Build hardware info message
+    double sr = current.activeSampleRate;
+    double outLatMs = sr > 0 ? (current.outputLatencySamples / sr) * 1000.0 : 0.0;
+    double inLatMs  = sr > 0 ? (current.inputLatencySamples  / sr) * 1000.0 : 0.0;
 
-        char info[1024];
-        snprintf(info, sizeof(info),
-                 "Device:      %s\n"
-                 "Driver:      %s\n"
-                 "Sample Rate: %.0f Hz\n"
-                 "Buffer Size: %d samples\n"
-                 "Channels:    %d out / %d in\n"
-                 "Latency:     %.1f / %.1f ms (out/in)",
-                 current.name.c_str(),
-                 current.typeName.c_str(),
-                 sr,
-                 current.activeBufferSize,
-                 current.activeOutputChannels,
-                 current.activeInputChannels,
-                 outLatMs, inLatMs);
+    char info[1024];
+    snprintf(info, sizeof(info),
+             "Device:      %s\n"
+             "Driver:      %s\n"
+             "Sample Rate: %.0f Hz\n"
+             "Buffer Size: %d samples\n"
+             "Channels:    %d out / %d in\n"
+             "Latency:     %.1f / %.1f ms (out/in)",
+             current.name.c_str(),
+             current.typeName.c_str(),
+             sr,
+             current.activeBufferSize,
+             current.activeOutputChannels,
+             current.activeInputChannels,
+             outLatMs, inLatMs);
 
-        char buf[2048];
-        osc::OutboundPacketStream s(buf, sizeof(buf));
-        s << osc::BeginMessage("/scsynth/info")
-          << info
-          << osc::EndMessage;
-        mSocket->write(ip, port, s.Data(), static_cast<int>(s.Size()));
+    // Info message with config data appended
+    // Format: info_string, sampleRate(int32), bufferSize(int32),
+    //         numRates(int32), rate1..rateN, numBufs(int32), buf1..bufN
+    char infoBuf[4096];
+    osc::OutboundPacketStream infoMsg(infoBuf, sizeof(infoBuf));
+    infoMsg << osc::BeginMessage("/scsynth/info")
+            << info
+            << static_cast<osc::int32>(current.activeSampleRate)
+            << static_cast<osc::int32>(current.activeBufferSize)
+            << static_cast<osc::int32>(current.availableSampleRates.size());
+    for (auto r : current.availableSampleRates)
+        infoMsg << static_cast<osc::int32>(r);
+    infoMsg << static_cast<osc::int32>(current.availableBufferSizes.size());
+    for (auto b : current.availableBufferSizes)
+        infoMsg << static_cast<osc::int32>(b);
+    infoMsg << osc::EndMessage;
+
+    // Send to all registered targets
+    for (auto& t : targets) {
+        mSocket->write(t.ip, t.port, devMsg.Data(), static_cast<int>(devMsg.Size()));
+        mSocket->write(t.ip, t.port, infoMsg.Data(), static_cast<int>(infoMsg.Size()));
     }
+}
+
+void OscUdpServer::broadcastToTargets(const uint8_t* data, uint32_t size) {
+    std::vector<NotifyTarget> targets;
+    {
+        juce::ScopedLock sl(mSenderLock);
+        targets = mNotifyTargets;
+    }
+    if (targets.empty() || !mSocket) return;
+
+    for (auto& t : targets)
+        mSocket->write(t.ip, t.port, data, static_cast<int>(size));
+}
+
+void OscUdpServer::sendStateChange(const char* state, const char* reason) {
+    std::vector<NotifyTarget> targets;
+    {
+        juce::ScopedLock sl(mSenderLock);
+        targets = mNotifyTargets;
+    }
+    if (targets.empty() || !mSocket) return;
+
+    char buf[512];
+    osc::OutboundPacketStream s(buf, sizeof(buf));
+    s << osc::BeginMessage("/supersonic/statechange")
+      << state
+      << reason
+      << osc::EndMessage;
+
+    for (auto& t : targets)
+        mSocket->write(t.ip, t.port, s.Data(), static_cast<int>(s.Size()));
+}
+
+void OscUdpServer::sendSetup(int sampleRate, int bufferSize) {
+    std::vector<NotifyTarget> targets;
+    {
+        juce::ScopedLock sl(mSenderLock);
+        targets = mNotifyTargets;
+    }
+    if (targets.empty() || !mSocket) return;
+
+    char buf[256];
+    osc::OutboundPacketStream s(buf, sizeof(buf));
+    s << osc::BeginMessage("/supersonic/setup")
+      << static_cast<osc::int32>(sampleRate)
+      << static_cast<osc::int32>(bufferSize)
+      << osc::EndMessage;
+
+    for (auto& t : targets)
+        mSocket->write(t.ip, t.port, s.Data(), static_cast<int>(s.Size()));
 }
 
 bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
@@ -157,7 +225,32 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
         osc::ReceivedMessage msg(pkt);
         const char* addr = msg.AddressPattern();
 
-        if (std::strcmp(addr, "/supersonic/devices/list") == 0) {
+        if (std::strcmp(addr, "/supersonic/notify") == 0) {
+            // Register the sender as a notify target for lifecycle events.
+            // mLastSenderIP/Port are set to the current sender by
+            // handlePacket's save/restore logic for /supersonic/* commands.
+            juce::String senderIP;
+            int senderPort;
+            {
+                juce::ScopedLock sl(mSenderLock);
+                senderIP = mLastSenderIP;
+                senderPort = mLastSenderPort;
+            }
+            setNotifyTarget(senderIP, senderPort);
+            char buf[128];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/supersonic/notify.reply")
+              << static_cast<osc::int32>(1)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+
+            // Send current device state so the new target starts
+            // with an accurate picture (important after client restart).
+            sendDeviceReport();
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/devices/list") == 0) {
             auto devices = mEngine->listDevices();
             for (auto& dev : devices) {
                 char buf[4096];
