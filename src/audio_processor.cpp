@@ -360,6 +360,11 @@ extern "C" {
         options.mVerbosity = worldOptionsPtr[15];                   // From JS
 #ifndef __EMSCRIPTEN__
         options.mSharedMemoryID = worldOptionsPtr[17];              // UDP port for boost shm (native only)
+        extern void* g_external_shared_memory;
+        if (g_external_shared_memory) {
+            options.mExternalSharedMemory = g_external_shared_memory;
+            options.mSharedMemoryID = 0;  // don't create new — reuse external
+        }
 #endif
 
         // Initialize pre-allocated heap (no-op on WASM, creates AllocPool on native)

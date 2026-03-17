@@ -40,6 +40,9 @@ add_executable(SuperSonicNativeTests
     test_fuzzy_match.cpp
     test_scheduling_accuracy.cpp
     test_engine_state.cpp
+    test_cold_swap.cpp
+    test_cold_swap_recovery.cpp
+    test_rapid_switching.cpp
     OscTestUtils.cpp
     EngineFixture.cpp
 )

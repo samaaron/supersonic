@@ -13,6 +13,9 @@
 #include <cstring>
 #include <thread>
 
+// Global used by init_memory() to pass external shared memory to World_New
+void* g_external_shared_memory = nullptr;
+
 extern "C" {
     void destroy_world();
     void rebuild_world(double sample_rate);
@@ -24,10 +27,21 @@ void SupersonicEngine::setEngineState(EngineState state, const std::string& reas
     EngineState prev = mEngineState.exchange(state);
     if (prev == state) return;  // no transition
 
+    const char* stateStr = engineStateToString(state);
     fprintf(stderr, "[supersonic] state: %s -> %s (%s)\n",
-            engineStateToString(prev), engineStateToString(state),
+            engineStateToString(prev), stateStr,
             reason.empty() ? "-" : reason.c_str());
     fflush(stderr);
+
+    mUdpServer.sendStateChange(stateStr, reason.c_str());
+
+    // /supersonic/setup fires on transitions to Running (world is ready)
+    if (state == EngineState::Running) {
+        auto* dev = mDeviceManager ? mDeviceManager->getCurrentAudioDevice() : nullptr;
+        int sr  = dev ? static_cast<int>(dev->getCurrentSampleRate()) : mCurrentConfig.sampleRate;
+        int buf = dev ? dev->getCurrentBufferSizeSamples() : mCurrentConfig.bufferSize;
+        mUdpServer.sendSetup(sr, buf);
+    }
 }
 
 SupersonicEngine::~SupersonicEngine() {
@@ -51,7 +65,10 @@ void SupersonicEngine::initialise(const Config& cfg) {
         // and don't forward this internal message to external listeners.
         if (interceptBufferFreed(d, s)) return;
 
-        if (mDeviceManager) mUdpServer.sendReply(d, s);
+        // Send to all registered notify targets (registered via /supersonic/notify).
+        // This replaces the single-target sendReply() so that all clients
+        // (Spider, GUI, etc.) receive scsynth replies reliably.
+        if (mDeviceManager) mUdpServer.broadcastToTargets(d, s);
         if (onReply) onReply(d, s);
     };
     mDebugReader.onDebug = [this](const std::string& s) {
@@ -260,6 +277,21 @@ void SupersonicEngine::initialise(const Config& cfg) {
         fflush(stderr);
     }
 
+    // -- Create shared memory (owned by engine, survives cold swaps) --------
+    if (cfg.udpPort > 0) {
+        server_shared_memory_creator::cleanup(cfg.udpPort);
+        try {
+            mShmemCreator = new server_shared_memory_creator(
+                cfg.udpPort, cfg.numControlBusChannels);
+            // Tell init_memory()/World_New to reuse this instead of creating its own
+            g_external_shared_memory = mShmemCreator;
+        } catch (const std::exception& e) {
+            fprintf(stderr, "[supersonic] shared memory creation failed: %s\n", e.what());
+            fflush(stderr);
+            mShmemCreator = nullptr;
+        }
+    }
+
     // -- Initialise scsynth World ------------------------------------------
     // Use actual device sample rate and channel counts (may differ from requested)
     mAudioCallback.initialiseWorld(
@@ -415,6 +447,11 @@ void SupersonicEngine::shutdown() {
     mPrescheduler.stopThread(2000);
     mReplyReader.stopThread(2000);
     mDebugReader.stopThread(2000);
+
+    // Destroy engine-owned shared memory (after World is gone)
+    g_external_shared_memory = nullptr;
+    delete mShmemCreator;
+    mShmemCreator = nullptr;
 }
 
 // --- OSC send with cache interception ---
@@ -567,7 +604,46 @@ CurrentDeviceInfo SupersonicEngine::currentDevice() const {
     info.outputLatencySamples = dev->getOutputLatencyInSamples();
     info.inputLatencySamples  = dev->getInputLatencyInSamples();
 
+    for (auto r : dev->getAvailableSampleRates())
+        info.availableSampleRates.push_back(r);
+    for (auto b : dev->getAvailableBufferSizes())
+        info.availableBufferSizes.push_back(b);
+
     return info;
+}
+
+void SupersonicEngine::restartHeadlessDriver(double sampleRate) {
+    mHeadlessDriver.configure(&mAudioCallback, &mSampleLoader,
+                               static_cast<int>(sampleRate),
+                               mCurrentConfig.numOutputChannels,
+                               mCurrentConfig.numInputChannels);
+    mHeadlessDriver.startThread(juce::Thread::Priority::highest);
+    // Wait for first audio tick after restart
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    uint32_t snapshot = mAudioCallback.processCount.load(std::memory_order_acquire);
+    while (mAudioCallback.processCount.load(std::memory_order_acquire) == snapshot
+           && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
+    int prevRate = mCurrentConfig.sampleRate;
+    auto prevSetup = mDeviceManager->getAudioDeviceSetup();
+    int prevBufSize = prevSetup.bufferSize;
+
+    auto err = mDeviceManager->initialiseWithDefaultDevices(0, 2);
+    if (err.isNotEmpty()) {
+        err = mDeviceManager->initialiseWithDefaultDevices(0, 0);
+    }
+    if (err.isNotEmpty()) return err;
+
+    // Re-apply the previous sample rate and buffer size
+    auto setup = mDeviceManager->getAudioDeviceSetup();
+    setup.sampleRate = static_cast<double>(prevRate);
+    setup.bufferSize = prevBufSize;
+    mDeviceManager->setAudioDeviceSetup(setup, true);
+    return {};
 }
 
 SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
@@ -575,11 +651,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                                            int bufferSize) {
     SwapResult result;
     result.deviceName = deviceName;
-
-    if (!mDeviceManager) {
-        result.error = "no audio device in headless mode";
-        return result;
-    }
+    bool recovered = false;
 
     // Try to acquire swap mutex (non-blocking)
     if (!mSwapMutex.try_lock()) {
@@ -588,14 +660,19 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     }
     std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
 
-    // Determine swap type
-    auto* currentDev = mDeviceManager->getCurrentAudioDevice();
-    double currentRate = currentDev ? currentDev->getCurrentSampleRate() : 0.0;
+    // Determine current rate — from device if available, else from config
+    double currentRate = 0.0;
+    if (mDeviceManager) {
+        auto* currentDev = mDeviceManager->getCurrentAudioDevice();
+        currentRate = currentDev ? currentDev->getCurrentSampleRate() : 0.0;
+    } else {
+        currentRate = static_cast<double>(mCurrentConfig.sampleRate);
+    }
 
     // When no explicit sample rate requested, probe the target device to see
     // if the current rate is supported.  If not, auto-select the first available
     // rate — this makes the swap a cold swap (world rebuild).
-    if (sampleRate == 0 && currentRate > 0) {
+    if (sampleRate == 0 && currentRate > 0 && mDeviceManager) {
         bool found = false;
         auto& types = mDeviceManager->getAvailableDeviceTypes();
         for (auto* type : types) {
@@ -630,6 +707,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     bool isCold = (sampleRate > 0 && sampleRate != currentRate);
     result.type = isCold ? SwapType::Cold : SwapType::Hot;
 
+    if (isCold) setEngineState(EngineState::Restarting, "rate-change");
     if (onSwapEvent) onSwapEvent("swap:start", result);
 
     // --- Pause and optionally capture state ---
@@ -639,84 +717,149 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     }
     mAudioCallback.pause();
     if (isCold) mStateCache.captureAll();
-    mDeviceManager->removeAudioCallback(&mAudioCallback);
+
+    // --- Stop audio ---
+    if (mDeviceManager) {
+        mDeviceManager->removeAudioCallback(&mAudioCallback);
+    } else {
+        mHeadlessDriver.signalThreadShouldExit();
+        mHeadlessDriver.stopThread(2000);
+    }
+
     if (isCold) destroy_world();
 
-    // Configure new device
-    juce::AudioDeviceManager::AudioDeviceSetup setup;
-    mDeviceManager->getAudioDeviceSetup(setup);
-    setup.outputDeviceName = juce::String(deviceName);
-    setup.useDefaultInputChannels = true;
-    setup.useDefaultOutputChannels = true;
-    if (sampleRate > 0) setup.sampleRate = sampleRate;
-    if (bufferSize > 0) setup.bufferSize = bufferSize;
+    // --- Apply new device configuration ---
+    std::string errStr;
+    if (mDeviceManager) {
+        juce::AudioDeviceManager::AudioDeviceSetup setup;
+        mDeviceManager->getAudioDeviceSetup(setup);
+        if (!deviceName.empty())
+            setup.outputDeviceName = juce::String(deviceName);
+        setup.useDefaultInputChannels = true;
+        setup.useDefaultOutputChannels = true;
+        if (sampleRate > 0) setup.sampleRate = sampleRate;
+        if (bufferSize > 0) setup.bufferSize = bufferSize;
 
-    juce::String err = mDeviceManager->setAudioDeviceSetup(setup, true);
-    if (err.isNotEmpty()) {
+        juce::String err = mDeviceManager->setAudioDeviceSetup(setup, true);
+        if (err.isNotEmpty()) errStr = err.toStdString();
+    } else {
+        // Headless: no real device to configure; use failure hook for testing
+        if (testSwapFailure) errStr = testSwapFailure();
+    }
+
+    if (!errStr.empty()) {
         if (isCold) rebuild_world(currentRate);
-        mDeviceManager->addAudioCallback(&mAudioCallback);
+        // --- Restart audio (failure path) ---
+        if (mDeviceManager) {
+            mDeviceManager->addAudioCallback(&mAudioCallback);
+        } else {
+            restartHeadlessDriver(currentRate);
+        }
         mAudioCallback.resume();
         if (isCold) mSampleLoader.resumeLoading();
-        result.error = err.toStdString();
+        result.error = errStr;
+        if (isCold) setEngineState(EngineState::Running, "swap-failed-rollback");
         if (onSwapEvent) onSwapEvent("swap:failed", result);
         return result;
     }
 
     if (isCold) {
-        auto* newDev = mDeviceManager->getCurrentAudioDevice();
-        double newRate = newDev ? newDev->getCurrentSampleRate() : sampleRate;
+        double newRate = sampleRate;
+        if (mDeviceManager) {
+            auto* newDev = mDeviceManager->getCurrentAudioDevice();
+            newRate = newDev ? newDev->getCurrentSampleRate() : sampleRate;
+        }
         mCurrentConfig.sampleRate = static_cast<int>(newRate);
 
         uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + 65536);
         opts[14] = static_cast<uint32_t>(newRate);
-        rebuild_world(newRate);
+
+        try {
+            if (testRebuildFailure) {
+                std::string failMsg = testRebuildFailure();
+                if (!failMsg.empty())
+                    throw std::runtime_error(failMsg);
+            }
+            rebuild_world(newRate);
+        } catch (const std::exception& e) {
+            fprintf(stderr, "[supersonic] rebuild_world failed: %s — recovering with safe defaults\n",
+                    e.what());
+            fflush(stderr);
+
+            double safeRate = currentRate;
+            int safeBuffer = 128;
+            opts[14] = static_cast<uint32_t>(safeRate);
+            mCurrentConfig.sampleRate = static_cast<int>(safeRate);
+            mCurrentConfig.bufferSize = safeBuffer;
+
+            try {
+                rebuild_world(safeRate);
+                recovered = true;
+                result.error = std::string("rebuild failed (") + e.what()
+                             + "), recovered at safe defaults";
+                result.sampleRate = safeRate;
+                result.bufferSize = safeBuffer;
+            } catch (const std::exception& e2) {
+                fprintf(stderr, "[supersonic] rebuild recovery ALSO failed: %s\n", e2.what());
+                fflush(stderr);
+                result.error = std::string("rebuild failed and recovery failed: ") + e2.what();
+                setEngineState(EngineState::Error, "rebuild-failed");
+                if (onSwapEvent) onSwapEvent("swap:failed", result);
+                return result;
+            }
+        }
     }
 
-    mDeviceManager->addAudioCallback(&mAudioCallback);
+    // --- Restart audio (success path) ---
+    if (mDeviceManager) {
+        mDeviceManager->addAudioCallback(&mAudioCallback);
+    } else {
+        restartHeadlessDriver(isCold ? sampleRate : currentRate);
+    }
     mAudioCallback.resume();
 
     if (isCold) {
-        // Restore synthdefs
-        uint8_t* base = ring_buffer_storage;
-        ControlPointers* ctrl = reinterpret_cast<ControlPointers*>(base + CONTROL_START);
-        for (auto& [name, defData] : mStateCache.synthDefs()) {
-            auto pkt = OscBuilder::message("/d_recv",
-                OscBuilder::Blob{defData.data(), defData.size()});
-            RingBufferWriter::write(
-                base + IN_BUFFER_START, IN_BUFFER_SIZE,
-                &ctrl->in_head, &ctrl->in_tail,
-                &ctrl->in_sequence, &ctrl->in_write_lock,
-                pkt.ptr(), pkt.size());
-        }
-
-        // Restore buffers
-        extern World* g_world;
-        for (auto& buf : mStateCache.buffers()) {
-            if (!buf.path.empty()) {
-                mSampleLoader.load(g_world, buf.bufnum, buf.path.c_str(),
-                                   buf.startFrame, buf.numFrames);
-            }
-        }
+        // Don't restore synthdefs, buffers, or module state here.
+        // The client (Spider) receives /supersonic/setup and handles
+        // all reinitialisation — reloading synthdefs, clearing sample
+        // caches, recreating groups/mixer/scope.  Restoring from the
+        // StateCache would create duplicate state and cause distortion.
         mSampleLoader.resumeLoading();
-        mStateCache.restoreAll();
     }
 
-    auto* finalDev = mDeviceManager->getCurrentAudioDevice();
-    if (finalDev) {
-        result.sampleRate = finalDev->getCurrentSampleRate();
-        result.bufferSize = finalDev->getCurrentBufferSizeSamples();
-        mCurrentConfig.sampleRate = static_cast<int>(result.sampleRate);
-        mCurrentConfig.numOutputChannels = finalDev->getActiveOutputChannels().countNumberOfSetBits();
-        mCurrentConfig.numInputChannels = finalDev->getActiveInputChannels().countNumberOfSetBits();
+    if (mDeviceManager) {
+        auto* finalDev = mDeviceManager->getCurrentAudioDevice();
+        if (finalDev) {
+            result.sampleRate = finalDev->getCurrentSampleRate();
+            result.bufferSize = finalDev->getCurrentBufferSizeSamples();
+            mCurrentConfig.sampleRate = static_cast<int>(result.sampleRate);
+            mCurrentConfig.numOutputChannels = finalDev->getActiveOutputChannels().countNumberOfSetBits();
+            mCurrentConfig.numInputChannels = finalDev->getActiveInputChannels().countNumberOfSetBits();
 
-        fprintf(stderr, "[audio-device] switched to %s: %s %.0fHz buf=%d %dch\n",
-                finalDev->getTypeName().toRawUTF8(),
-                finalDev->getName().toRawUTF8(),
-                result.sampleRate, result.bufferSize,
-                mCurrentConfig.numOutputChannels);
+            fprintf(stderr, "[audio-device] switched to %s: %s %.0fHz buf=%d %dch\n",
+                    finalDev->getTypeName().toRawUTF8(),
+                    finalDev->getName().toRawUTF8(),
+                    result.sampleRate, result.bufferSize,
+                    mCurrentConfig.numOutputChannels);
+        }
+    } else {
+        if (!recovered) {
+            result.sampleRate = isCold ? sampleRate : currentRate;
+        }
+        result.bufferSize = mCurrentConfig.bufferSize;
     }
     result.success = true;
-    if (onSwapEvent) onSwapEvent("swap:complete", result);
+    if (isCold) {
+        if (recovered) {
+            setEngineState(EngineState::Running, "swap-recovered");
+            if (onSwapEvent) onSwapEvent("swap:recovered", result);
+        } else {
+            setEngineState(EngineState::Running, "rate-change");
+            if (onSwapEvent) onSwapEvent("swap:complete", result);
+        }
+    } else {
+        if (onSwapEvent) onSwapEvent("swap:complete", result);
+    }
     printDeviceList();
     return result;
 }
@@ -821,33 +964,47 @@ void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
 
     // Don't fight with an in-progress device swap
     if (!mSwapMutex.try_lock()) return;
-    std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
 
-    if (mDeviceMode.empty()) {
-        // System mode: reinitialise with default devices
-        fprintf(stderr, "[audio-device] device change detected (system mode) — reinitialising\n");
-        auto err = mDeviceManager->initialiseWithDefaultDevices(0, 2);
-        if (err.isNotEmpty()) {
-            mDeviceManager->initialiseWithDefaultDevices(0, 0);
+    bool needsColdSwap = false;
+    std::string coldSwapDevice;
+    double coldSwapRate = 0;
+
+    {
+        std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
+
+        if (mDeviceMode.empty()) {
+            // System mode: reinitialise with default device, preserving sample rate and buffer
+            fprintf(stderr, "[audio-device] device change detected (system mode) — reinitialising\n");
+            reinitialiseWithDefaultsPreservingConfig();
+
+            auto* dev = mDeviceManager->getCurrentAudioDevice();
+            if (dev) {
+                int newRate = static_cast<int>(dev->getCurrentSampleRate());
+                if (newRate > 0 && newRate != mCurrentConfig.sampleRate) {
+                    fprintf(stderr, "[audio-device] system device sample rate changed "
+                            "(%d -> %d Hz) — will perform cold swap\n",
+                            mCurrentConfig.sampleRate, newRate);
+                    needsColdSwap = true;
+                    coldSwapDevice = dev->getName().toStdString();
+                    coldSwapRate = static_cast<double>(newRate);
+                } else {
+                    mCurrentConfig.numOutputChannels =
+                        dev->getActiveOutputChannels().countNumberOfSetBits();
+                    mCurrentConfig.numInputChannels =
+                        dev->getActiveInputChannels().countNumberOfSetBits();
+                }
+            }
         }
 
-        auto* dev = mDeviceManager->getCurrentAudioDevice();
-        if (dev) {
-            int newRate = static_cast<int>(dev->getCurrentSampleRate());
-            if (newRate > 0 && newRate != mCurrentConfig.sampleRate) {
-                fprintf(stderr, "[audio-device] WARNING: system device changed to "
-                        "different sample rate (%d -> %d Hz) — restart required\n",
-                        mCurrentConfig.sampleRate, newRate);
-            }
-
-            mCurrentConfig.numOutputChannels =
-                dev->getActiveOutputChannels().countNumberOfSetBits();
-            mCurrentConfig.numInputChannels =
-                dev->getActiveInputChannels().countNumberOfSetBits();
+        if (!needsColdSwap) {
+            printDeviceList();
         }
     }
 
-    printDeviceList();
+    // Cold swap outside the lock — switchDevice acquires the mutex itself
+    if (needsColdSwap) {
+        switchDevice(coldSwapDevice, coldSwapRate, 0);
+    }
 }
 
 std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
@@ -862,21 +1019,18 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
     if (!mRunning.load()) return "";
 
     if (mDeviceMode.empty()) {
-        // System mode — only reinitialise if we were previously in manual mode.
+        // System mode — switch to system default device while preserving
+        // sample rate, buffer size, and channel count.
         if (!previousMode.empty() && mDeviceManager) {
             fprintf(stderr, "[audio-device] switching to system default\n");
-            auto err = mDeviceManager->initialiseWithDefaultDevices(0, 2);
-            if (err.isNotEmpty()) {
-                err = mDeviceManager->initialiseWithDefaultDevices(0, 0);
-            }
+            auto err = reinitialiseWithDefaultsPreservingConfig();
             if (err.isNotEmpty()) {
                 fprintf(stderr, "[audio-device] system mode init failed: %s\n",
                         err.toRawUTF8());
                 return err.toStdString();
             }
-            // Update config from actual device
+
             if (auto* dev = mDeviceManager->getCurrentAudioDevice()) {
-                mCurrentConfig.sampleRate = static_cast<int>(dev->getCurrentSampleRate());
                 mCurrentConfig.numOutputChannels = dev->getActiveOutputChannels().countNumberOfSetBits();
                 mCurrentConfig.numInputChannels = dev->getActiveInputChannels().countNumberOfSetBits();
             }

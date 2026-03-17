@@ -22,6 +22,7 @@
 #include "OscBuilder.h"
 #include "HeadlessDriver.h"
 #include "src/engine_state.h"
+#include "scsynth/common/server_shm.hpp"
 
 class SupersonicEngine : private juce::ChangeListener {
     friend class EngineFixture;  // test fixture needs access to mAudioCallback
@@ -99,6 +100,14 @@ public:
     // Device swap event callback
     std::function<void(const std::string& event, const SwapResult& result)> onSwapEvent;
 
+    // Injectable hook for testing: if set and returns non-empty string,
+    // the device configuration step is treated as failed with that error.
+    std::function<std::string()> testSwapFailure;
+
+    // Injectable hook for testing: if set and returns non-empty string,
+    // rebuild_world() is skipped and the error triggers recovery to safe defaults.
+    std::function<std::string()> testRebuildFailure;
+
     // --- State cache ---
     StateCache& stateCache() { return mStateCache; }
     const StateCache& stateCache() const { return mStateCache; }
@@ -122,6 +131,8 @@ private:
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
     void interceptForCache(const uint8_t* data, uint32_t size);
     bool interceptBufferFreed(const uint8_t* data, uint32_t size);
+    void restartHeadlessDriver(double sampleRate);
+    juce::String reinitialiseWithDefaultsPreservingConfig();
 
     NTPClock          mClock;
     JuceAudioCallback mAudioCallback;
@@ -140,6 +151,9 @@ private:
     Config                   mCurrentConfig;
     std::mutex               mSwapMutex;
     std::string              mDeviceMode;   // empty = system/auto, non-empty = manual device name
+
+    // Shared memory — owned by the engine, survives across cold swaps.
+    server_shared_memory_creator* mShmemCreator = nullptr;
 
     // Recording
     juce::TimeSliceThread    mRecordThread{"SuperSonic-RecordIO"};

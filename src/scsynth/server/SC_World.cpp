@@ -409,10 +409,16 @@ World* World_New(WorldOptions* inOptions) {
         world->mLocalErrorNotification = 0;
 
 #ifndef __EMSCRIPTEN__
-        if (inOptions->mSharedMemoryID) {
+        if (inOptions->mExternalSharedMemory) {
+            // Reuse caller-owned shared memory (survives cold swaps)
+            hw->mShmem = static_cast<server_shared_memory_creator*>(inOptions->mExternalSharedMemory);
+            hw->mOwnsShmem = false;
+            world->mControlBus = hw->mShmem->get_control_busses();
+        } else if (inOptions->mSharedMemoryID) {
             server_shared_memory_creator::cleanup(inOptions->mSharedMemoryID);
             hw->mShmem =
                 new server_shared_memory_creator(inOptions->mSharedMemoryID, inOptions->mNumControlBusChannels);
+            hw->mOwnsShmem = true;
             world->mControlBus = hw->mShmem->get_control_busses();
         } else {
             hw->mShmem = nullptr;
@@ -1054,7 +1060,9 @@ void World_Cleanup(World* world, bool unload_plugins) {
     free_alig(world->mAudioBusTouched);
 #ifndef __EMSCRIPTEN__
     if (hw->mShmem) {
-        delete hw->mShmem;
+        if (hw->mOwnsShmem)
+            delete hw->mShmem;
+        // else: caller owns it — don't delete (survives cold swap)
     } else
 #endif
         free_alig(world->mControlBus);

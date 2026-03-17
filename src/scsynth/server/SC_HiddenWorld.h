@@ -156,6 +156,7 @@ struct HiddenWorld {
     const char* mOutDeviceName;
 #ifndef __EMSCRIPTEN__
     class server_shared_memory_creator* mShmem;
+    bool mOwnsShmem = true;  // false when external shared memory was provided
 #endif
 };
 

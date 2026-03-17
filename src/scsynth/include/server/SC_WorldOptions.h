@@ -85,6 +85,12 @@ struct WorldOptions {
 
     int mSharedMemoryID = 0;
 
+    // If non-null, World_New uses this pre-existing shared memory creator
+    // instead of creating a new one.  World_Cleanup will NOT delete it
+    // (the caller retains ownership).  This allows shared memory to survive
+    // across cold swaps (destroy_world / rebuild_world).
+    void* mExternalSharedMemory = nullptr;
+
 #ifdef SC_BELA
     uint32 mBelaAnalogInputChannels;
     uint32 mBelaAnalogOutputChannels;

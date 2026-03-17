@@ -25,12 +25,13 @@ TEST_CASE("DeviceManagement: currentDevice returns zeroed in headless mode",
 
 // ── Device swap (headless) ──────────────────────────────────────────────────
 
-TEST_CASE("DeviceManagement: switchDevice fails in headless mode",
+TEST_CASE("DeviceManagement: switchDevice works in headless mode (hot swap)",
           "[DeviceManagement]") {
     EngineFixture fix;
-    auto result = fix.engine().switchDevice("nonexistent");
-    REQUIRE_FALSE(result.success);
-    REQUIRE(result.error == "no audio device in headless mode");
+    // Same rate = hot swap, should succeed in headless mode
+    auto result = fix.engine().switchDevice("", 48000);
+    REQUIRE(result.success);
+    REQUIRE(result.type == SwapType::Hot);
 }
 
 TEST_CASE("DeviceManagement: onSwapEvent callback fires", "[DeviceManagement]") {
@@ -41,12 +42,12 @@ TEST_CASE("DeviceManagement: onSwapEvent callback fires", "[DeviceManagement]") 
         events.push_back(event);
     };
 
-    // This will fail (headless) but should still not fire events since
-    // we return early before emitting
-    auto result = fix.engine().switchDevice("test-device");
-    REQUIRE_FALSE(result.success);
-    // In headless mode, we return before emitting any events
-    REQUIRE(events.empty());
+    // Hot swap in headless mode should fire events
+    auto result = fix.engine().switchDevice("", 48000);
+    REQUIRE(result.success);
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0] == "swap:start");
+    REQUIRE(events[1] == "swap:complete");
 }
 
 // ── State cache interception ─────────────────────────────────────────────────
