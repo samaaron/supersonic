@@ -39,6 +39,7 @@ add_executable(SuperSonicNativeTests
     test_audio_resume.cpp
     test_fuzzy_match.cpp
     test_scheduling_accuracy.cpp
+    test_engine_state.cpp
     OscTestUtils.cpp
     EngineFixture.cpp
 )

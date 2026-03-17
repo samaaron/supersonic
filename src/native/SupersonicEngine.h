@@ -21,6 +21,7 @@
 #include "StateCache.h"
 #include "OscBuilder.h"
 #include "HeadlessDriver.h"
+#include "src/engine_state.h"
 
 class SupersonicEngine : private juce::ChangeListener {
     friend class EngineFixture;  // test fixture needs access to mAudioCallback
@@ -56,6 +57,10 @@ public:
 
     void sendOsc(const uint8_t* data, uint32_t size);
     bool isRunning() const { return mRunning.load(); }
+
+    // --- Engine lifecycle state ---
+    EngineState engineState() const { return mEngineState.load(); }
+    void        setEngineState(EngineState state, const std::string& reason = "");
 
     // --- Variadic OSC send (builds message + dispatches through sendOsc) ---
     template<typename... Args>
@@ -130,6 +135,7 @@ private:
     HeadlessDriver               mHeadlessDriver;
     std::unique_ptr<juce::AudioDeviceManager> mDeviceManager;
     std::atomic<bool>        mRunning{false};
+    std::atomic<EngineState> mEngineState{EngineState::Stopped};
     bool                     mHeadless{false};
     Config                   mCurrentConfig;
     std::mutex               mSwapMutex;

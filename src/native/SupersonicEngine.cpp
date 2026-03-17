@@ -20,6 +20,16 @@ extern "C" {
 
 SupersonicEngine::SupersonicEngine() = default;
 
+void SupersonicEngine::setEngineState(EngineState state, const std::string& reason) {
+    EngineState prev = mEngineState.exchange(state);
+    if (prev == state) return;  // no transition
+
+    fprintf(stderr, "[supersonic] state: %s -> %s (%s)\n",
+            engineStateToString(prev), engineStateToString(state),
+            reason.empty() ? "-" : reason.c_str());
+    fflush(stderr);
+}
+
 SupersonicEngine::~SupersonicEngine() {
     shutdown();
 }
@@ -27,6 +37,7 @@ SupersonicEngine::~SupersonicEngine() {
 
 void SupersonicEngine::initialise(const Config& cfg) {
     if (mRunning.load()) return;
+    setEngineState(EngineState::Booting, "init");
 
     mHeadless = cfg.headless;
     mCurrentConfig = cfg;
@@ -365,10 +376,12 @@ void SupersonicEngine::initialise(const Config& cfg) {
     }
 
     mRunning.store(true);
+    setEngineState(EngineState::Running, "boot");
 }
 
 void SupersonicEngine::shutdown() {
     if (!mRunning.exchange(false)) return;
+    setEngineState(EngineState::Stopped, "shutdown");
 
     // Stop recording if active
     if (isRecording())
