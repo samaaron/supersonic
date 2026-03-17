@@ -14,7 +14,8 @@
 #include <thread>
 
 // Global used by init_memory() to pass external shared memory to World_New
-void* g_external_shared_memory = nullptr;
+// extern "C" because init_memory() declares it inside an extern "C" block
+extern "C" void* g_external_shared_memory = nullptr;
 
 extern "C" {
     void destroy_world();
