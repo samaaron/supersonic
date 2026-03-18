@@ -13,11 +13,11 @@
 #include <cstring>
 #include <thread>
 
-// Global used by init_memory() to pass external shared memory to World_New
-// extern "C" because init_memory() declares it inside an extern "C" block
-extern "C" void* g_external_shared_memory = nullptr;
-
 extern "C" {
+    // Global used by init_memory() to pass external shared memory to World_New.
+    // Declared extern "C" because init_memory() references it from an extern "C" block.
+    void* g_external_shared_memory = nullptr;
+
     void destroy_world();
     void rebuild_world(double sample_rate);
 }
