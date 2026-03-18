@@ -1,9 +1,9 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2026-03-12
-**Last Sync Commit**: 613f26f9
-**Upstream Branch**: supercollider/develop (tracked to 2026-03-12)
-**Verified Against**: SuperCollider 3.15.0-dev + PR #7405 (Plugin/Unit command extensions)
+**Last Updated**: 2026-03-18
+**Last Sync Commit**: b365366bc
+**Upstream Branch**: supercollider/develop (tracked to 2026-03-18)
+**Verified Against**: SuperCollider 3.15.0-dev + PR #7418 (Convolution UGen fixes)
 
 ---
 
@@ -586,6 +586,22 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 ---
 
 ## Reference: Previous Sync Summary
+
+### Convolution UGen fixes (2026-03-18)
+
+Applied SuperCollider PR #7418 (commit b365366bc).
+
+**Applied:**
+- **Convolution.cpp**: `ConvGetBuffer()` changed `uint32 bufnum` parameter to `int32` — negative buffer numbers (invalid) previously wrapped to huge positive values and indexed out of bounds. Added explicit negative check. Also changed `uint32` to `int32` for buffer number variables throughout Convolution2, Convolution2L, StereoConvolution2L, and Convolution3 constructors and next functions. Added missing null check after `ConvGetBuffer()` in `Convolution3_next_a`.
+
+**Skipped:**
+- Test file changes (`testsuite/classlibrary/TestUGen_RTAlloc.sc`) — not applicable
+
+**Upstream:**
+- https://github.com/supercollider/supercollider/commit/b365366bc
+- https://github.com/supercollider/supercollider/pull/7418
+
+---
 
 ### ISPOWEROFTWO fix for zero (2026-03-14)
 
