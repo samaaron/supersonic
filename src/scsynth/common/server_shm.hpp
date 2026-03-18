@@ -39,7 +39,7 @@ static constexpr int    MAX_SCOPE_BUFFERS = 128;
 static constexpr size_t SEGMENT_SIZE      = 8192 * 1024;  // 8 MB
 
 static inline string make_shmem_name(unsigned int port_number) {
-    return string("SuperColliderServer_") + std::to_string(port_number);
+    return string("SuperSonic_") + std::to_string(port_number);
 }
 
 // ──── Platform shared memory primitives ─────────────────────────────────
