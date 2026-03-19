@@ -14,7 +14,28 @@
 #include <thread>
 #include <filesystem>
 
+static SupersonicEngine::Config defaultConfig() {
+    SupersonicEngine::Config cfg;
+    cfg.sampleRate    = 48000;
+    cfg.bufferSize    = 128;
+    cfg.udpPort       = 0;
+    cfg.numBuffers    = 1024;
+    cfg.maxNodes      = 1024;
+    cfg.maxGraphDefs  = 512;
+    cfg.maxWireBufs   = 64;
+    cfg.headless      = true;
+    return cfg;
+}
+
 EngineFixture::EngineFixture() {
+    init(defaultConfig());
+}
+
+EngineFixture::EngineFixture(const SupersonicEngine::Config& cfg) {
+    init(cfg);
+}
+
+void EngineFixture::init(const SupersonicEngine::Config& cfg) {
     // Wire reply/debug callbacks before initialising
     mEngine.onReply = [this](const uint8_t* data, uint32_t size) {
         OscReply r;
@@ -32,15 +53,6 @@ EngineFixture::EngineFixture() {
         mDebugMessages.push_back(msg);
     };
 
-    SupersonicEngine::Config cfg;
-    cfg.sampleRate    = 48000;
-    cfg.bufferSize    = 128;
-    cfg.udpPort       = 0;
-    cfg.numBuffers    = 1024;
-    cfg.maxNodes      = 1024;
-    cfg.maxGraphDefs  = 512;
-    cfg.maxWireBufs   = 64;
-    cfg.headless      = true;
     mEngine.initialise(cfg);
 
     // HeadlessDriver is now ticking — wait for the engine to be ready

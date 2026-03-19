@@ -28,6 +28,7 @@ struct OscReply {
 class EngineFixture {
 public:
     EngineFixture();
+    explicit EngineFixture(const SupersonicEngine::Config& cfg);
     ~EngineFixture();
 
     // ── OSC send (in-process, no UDP) ──────────────────────────────────
@@ -61,6 +62,7 @@ public:
     SupersonicEngine& engine() { return mEngine; }
 
 private:
+    void init(const SupersonicEngine::Config& cfg);
     SupersonicEngine mEngine;
 
     mutable std::mutex       mReplyMutex;
