@@ -40,8 +40,12 @@ function formatUUID(bytes) {
     HEX[bytes[12]] + HEX[bytes[13]] + HEX[bytes[14]] + HEX[bytes[15]];
 }
 
+function formatUUIDShort(bytes) {
+  return '\u2026' + HEX[bytes[13]] + HEX[bytes[14]] + HEX[bytes[15]];
+}
+
 function formatOscArg(a, maxLen) {
-  if (a && a.type === 'uuid' && a.value) return formatUUID(a.value);
+  if (a && a.type === 'uuid' && a.value) return formatUUIDShort(a.value);
   if (a instanceof Uint8Array || a instanceof ArrayBuffer) return `<${a.byteLength || a.length} bytes>`;
   const str = JSON.stringify(a);
   return maxLen && str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
@@ -53,7 +57,7 @@ function escapeHtml(s) {
 
 function formatOscArgHtml(arg, address, argIndex) {
   if (arg && arg.type === 'uuid' && arg.value) {
-    return `<span class="supersonic-scsynth-string">${formatUUID(arg.value)}</span>`;
+    return `<span class="supersonic-scsynth-string" title="${formatUUID(arg.value)}">${formatUUIDShort(arg.value)}</span>`;
   }
   let value = arg, type = null;
   if (typeof arg === 'object' && arg !== null && arg.value !== undefined) {
