@@ -245,8 +245,10 @@ void SampleLoader::installPendingBuffers() {
         const CompletedLoad& load = mCompleted[t];
 
         if (load.generation != currentGen) {
-            // Stale load from a previous generation — discard
-            if (load.data) zfree(load.data);
+            // Stale load from a previous generation — discard without freeing.
+            // The data was allocated from the supersonic heap which has been
+            // reset by FreeAllInternal() during the cold swap. Calling zfree()
+            // on abandoned pool memory would corrupt the allocator.
         } else if (load.success) {
             installBuffer(load);
             writeDoneReply(load.bufnum);

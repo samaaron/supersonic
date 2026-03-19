@@ -201,8 +201,11 @@ public:
     float* get_control_busses() { return control_busses_; }
 
     scope_buffer* get_scope_buffer(unsigned int index) {
-        if (index < MAX_SCOPE_BUFFERS)
+        if (index < MAX_SCOPE_BUFFERS) {
+            if (!scope_buffers_)
+                return nullptr;
             return &scope_buffers_[index];
+        }
         return nullptr;
     }
 
@@ -252,6 +255,8 @@ public:
 
     scope_buffer_writer get_scope_buffer_writer(
             unsigned int index, unsigned int channels, unsigned int size) {
+        if (!shm)
+            return scope_buffer_writer();
         scope_buffer* buf = shm->get_scope_buffer(index);
         if (buf)
             return scope_buffer_writer(buf, scope_pool, channels, size);

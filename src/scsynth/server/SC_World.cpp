@@ -1025,15 +1025,20 @@ void World_Cleanup(World* world, bool unload_plugins) {
     if (unload_plugins)
         deinitialize_library();
 
-    reinterpret_cast<SC_Lock*>(world->mDriverLock)->lock();
+    // Guard against partially-constructed World (e.g. World_New catch block)
+    if (world->mDriverLock)
+        reinterpret_cast<SC_Lock*>(world->mDriverLock)->lock();
     if (hw) {
         sc_free(hw->mWireBufSpace);
         delete hw->mAudioDriver;
         hw->mAudioDriver = nullptr;
     }
-    delete reinterpret_cast<SC_Lock*>(world->mNRTLock);
-    reinterpret_cast<SC_Lock*>(world->mDriverLock)->unlock();
-    delete reinterpret_cast<SC_Lock*>(world->mDriverLock);
+    if (world->mNRTLock)
+        delete reinterpret_cast<SC_Lock*>(world->mNRTLock);
+    if (world->mDriverLock) {
+        reinterpret_cast<SC_Lock*>(world->mDriverLock)->unlock();
+        delete reinterpret_cast<SC_Lock*>(world->mDriverLock);
+    }
     World_Free(world, world->mTopGroup);
 
     for (uint32 i = 0; i < world->mNumSndBufs; ++i) {
@@ -1100,6 +1105,16 @@ void World_NRTUnlock(World* world) { reinterpret_cast<SC_Lock*>(world->mNRTLock)
 
 SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, ScopeBufferHnd* hnd) {
 #ifndef __EMSCRIPTEN__
+    if (!inWorld) {
+        fprintf(stderr, "  [scope] getScopeBuffer: inWorld is NULL!\n"); fflush(stderr);
+        hnd->internalData = nullptr;
+        return kSCFalse;
+    }
+    if (!inWorld->hw) {
+        fprintf(stderr, "  [scope] getScopeBuffer: inWorld->hw is NULL!\n"); fflush(stderr);
+        hnd->internalData = nullptr;
+        return kSCFalse;
+    }
     server_shared_memory_creator* shm = inWorld->hw->mShmem;
 
     if (!shm) {
