@@ -43,7 +43,7 @@ public:
         int    realTimeMemorySize       = 8192;    // KB — World_New multiplies by 1024
         int    numRGens                 = 64;
         bool   headless                 = false;   // skip audio device (for tests)
-        std::string bindAddress;                   // empty = all interfaces
+        std::string bindAddress       = "127.0.0.1"; // localhost only; use -B to override
         std::string hardwareDevice;                // -H flag: fuzzy match on "Driver : Device"
     };
 
