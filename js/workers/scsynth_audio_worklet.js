@@ -157,9 +157,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             throw new Error('WASM memory not available');
         }
 
-        // Read the struct (36 uint32_t fields + 1 uint8_t + 3 padding bytes = 148 bytes)
-        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 36);
-        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 148);
+        // Read the struct (38 uint32_t fields + 1 uint8_t + 3 padding bytes = 156 bytes)
+        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 38);
+        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 156);
 
         // Extract constants (order matches BufferLayout struct in shared_memory.h)
         // NOTE: NODE_TREE is now contiguous with METRICS for efficient postMessage copying
@@ -195,13 +195,15 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             AUDIO_CAPTURE_SAMPLE_RATE: uint32View[27],
             NODE_ID_COUNTER_START: uint32View[28],
             NODE_ID_COUNTER_SIZE: uint32View[29],
-            TOTAL_BUFFER_SIZE: uint32View[30],
-            MAX_MESSAGE_SIZE: uint32View[31],
-            MESSAGE_MAGIC: uint32View[32],
-            PADDING_MAGIC: uint32View[33],
-            scheduler_slot_size: uint32View[34],
-            scheduler_slot_count: uint32View[35],
-            DEBUG_PADDING_MARKER: uint8View[144],  // After 36 uint32s = 144 bytes
+            WORLD_OPTIONS_START: uint32View[30],
+            WORLD_OPTIONS_SIZE: uint32View[31],
+            TOTAL_BUFFER_SIZE: uint32View[32],
+            MAX_MESSAGE_SIZE: uint32View[33],
+            MESSAGE_MAGIC: uint32View[34],
+            PADDING_MAGIC: uint32View[35],
+            scheduler_slot_size: uint32View[36],
+            scheduler_slot_count: uint32View[37],
+            DEBUG_PADDING_MARKER: uint8View[152],  // After 38 uint32s = 152 bytes
             MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, sourceId)
         };
 
@@ -280,14 +282,20 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     }
 
     // Write worldOptions to SharedArrayBuffer for C++ to read
-    // WorldOptions are written after ring buffer storage (65536 bytes)
+    // WorldOptions are at WORLD_OPTIONS_START (outside ring buffers, safe from OSC traffic)
     writeWorldOptionsToMemory() {
         if (!this.worldOptions || !this.wasmMemory) {
             return;
         }
 
-        // WorldOptions location: ringBufferBase + 65536 (after ring_buffer_storage)
-        const WORLD_OPTIONS_OFFSET = this.ringBufferBase + 65536;
+        // Use WORLD_OPTIONS_START from buffer constants (loaded from C++ BufferLayout)
+        const worldOptionsStart = this.bufferConstants?.WORLD_OPTIONS_START;
+        if (worldOptionsStart === undefined) {
+            // Fallback should never happen — bufferConstants is loaded before this runs
+            console.error('WORLD_OPTIONS_START not available in bufferConstants');
+            return;
+        }
+        const WORLD_OPTIONS_OFFSET = this.ringBufferBase + worldOptionsStart;
         const uint32View = new Uint32Array(this.wasmMemory.buffer, WORLD_OPTIONS_OFFSET, 32);
         const float32View = new Float32Array(this.wasmMemory.buffer, WORLD_OPTIONS_OFFSET, 32);
 

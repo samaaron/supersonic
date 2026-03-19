@@ -330,9 +330,9 @@ extern "C" {
 
         // Boot message shown after ASCII art below
 
-        // Read worldOptions from SharedArrayBuffer (written by JS)
-        // WorldOptions location: ringBufferBase + 65536 (after ring_buffer_storage)
-        uint32_t* worldOptionsPtr = (uint32_t*)((uint8_t*)ring_buffer_storage + 65536);
+        // Read worldOptions from ring_buffer_storage at WORLD_OPTIONS_START.
+        // This offset is outside the ring buffers, so OSC traffic cannot overwrite it.
+        uint32_t* worldOptionsPtr = (uint32_t*)((uint8_t*)ring_buffer_storage + WORLD_OPTIONS_START);
 
         // Configure World for NRT mode (externally driven by AudioWorklet)
         // Values come from JS (scsynth_options.js) via SharedArrayBuffer
@@ -475,7 +475,7 @@ extern "C" {
     }
 
     void rebuild_world(double sample_rate) {
-        // Re-read worldOptions from ring_buffer_storage + 65536
+        // Re-read worldOptions from ring_buffer_storage + WORLD_OPTIONS_START
         // (caller must update opts[14] = sampleRate before calling)
         init_memory(sample_rate);
     }

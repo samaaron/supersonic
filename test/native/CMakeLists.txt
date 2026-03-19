@@ -42,6 +42,7 @@ add_executable(SuperSonicNativeTests
     test_engine_state.cpp
     test_cold_swap.cpp
     test_cold_swap_recovery.cpp
+    test_world_options_layout.cpp
     test_rapid_switching.cpp
     OscTestUtils.cpp
     EngineFixture.cpp

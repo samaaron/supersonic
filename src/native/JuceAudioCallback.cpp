@@ -41,8 +41,8 @@ void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
     // Allocate prefetch buffer for the configured output channel count
     mPrefetchBuf.assign(static_cast<size_t>(numOutputChannels) * kBufLen, 0.0f);
 
-    // Write WorldOptions at fixed offset +65536 (mirrors JS layout)
-    uint32_t* opts = reinterpret_cast<uint32_t*>(ringBufferStorage + 65536);
+    // Write WorldOptions at WORLD_OPTIONS_START (safe offset outside ring buffers)
+    uint32_t* opts = reinterpret_cast<uint32_t*>(ringBufferStorage + WORLD_OPTIONS_START);
     opts[0]  = static_cast<uint32_t>(numBuffers);
     opts[1]  = static_cast<uint32_t>(maxNodes);
     opts[2]  = static_cast<uint32_t>(maxGraphDefs);

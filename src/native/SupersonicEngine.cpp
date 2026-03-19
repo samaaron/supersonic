@@ -772,7 +772,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         }
         mCurrentConfig.sampleRate = static_cast<int>(newRate);
 
-        uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + 65536);
+        uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
         opts[14] = static_cast<uint32_t>(newRate);
 
         try {
