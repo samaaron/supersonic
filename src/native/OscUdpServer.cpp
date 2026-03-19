@@ -141,7 +141,11 @@ void OscUdpServer::sendDeviceReport() {
 
     // Info message with config data appended
     // Format: info_string, sampleRate(int32), bufferSize(int32),
-    //         numRates(int32), rate1..rateN, numBufs(int32), buf1..bufN
+    //         numRates(int32), rate1..rateN, numBufs(int32), buf1..bufN,
+    //         numDrivers(int32), driver1..driverN, currentDriver(str)
+    auto drivers = mEngine->listDrivers();
+    auto curDriver = mEngine->currentDriver();
+
     char infoBuf[4096];
     osc::OutboundPacketStream infoMsg(infoBuf, sizeof(infoBuf));
     infoMsg << osc::BeginMessage("/scsynth/info")
@@ -154,6 +158,10 @@ void OscUdpServer::sendDeviceReport() {
     infoMsg << static_cast<osc::int32>(current.availableBufferSizes.size());
     for (auto b : current.availableBufferSizes)
         infoMsg << static_cast<osc::int32>(b);
+    infoMsg << static_cast<osc::int32>(drivers.size());
+    for (auto& d : drivers)
+        infoMsg << d.c_str();
+    infoMsg << curDriver.c_str();
     infoMsg << osc::EndMessage;
 
     // Send to all registered targets

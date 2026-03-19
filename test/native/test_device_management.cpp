@@ -23,6 +23,20 @@ TEST_CASE("DeviceManagement: currentDevice returns zeroed in headless mode",
     REQUIRE(dev.activeBufferSize == 0);
 }
 
+TEST_CASE("DeviceManagement: listDrivers returns empty in headless mode",
+          "[DeviceManagement]") {
+    EngineFixture fix;
+    auto drivers = fix.engine().listDrivers();
+    REQUIRE(drivers.empty());
+}
+
+TEST_CASE("DeviceManagement: currentDriver returns empty in headless mode",
+          "[DeviceManagement]") {
+    EngineFixture fix;
+    auto driver = fix.engine().currentDriver();
+    REQUIRE(driver.empty());
+}
+
 // ── Device swap (headless) ──────────────────────────────────────────────────
 
 TEST_CASE("DeviceManagement: switchDevice works in headless mode (hot swap)",
