@@ -102,7 +102,7 @@ void OscUdpServer::sendDeviceReport() {
     // compat flags: 1 = device supports current rate, 0 = needs restart
     char devBuf[8192];
     osc::OutboundPacketStream devMsg(devBuf, sizeof(devBuf));
-    devMsg << osc::BeginMessage("/scsynth/devices")
+    devMsg << osc::BeginMessage("/supersonic/devices")
            << (mode.empty() ? "system" : mode.c_str())
            << current.name.c_str();
     for (auto& dev : devices)
@@ -148,7 +148,7 @@ void OscUdpServer::sendDeviceReport() {
 
     char infoBuf[4096];
     osc::OutboundPacketStream infoMsg(infoBuf, sizeof(infoBuf));
-    infoMsg << osc::BeginMessage("/scsynth/info")
+    infoMsg << osc::BeginMessage("/supersonic/info")
             << info
             << static_cast<osc::int32>(current.activeSampleRate)
             << static_cast<osc::int32>(current.activeBufferSize)
@@ -330,7 +330,7 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/devices/report") == 0) {
-            // GUI sends this with a reply port; engine sends /scsynth/devices to that port
+            // GUI sends this with a reply port; engine sends /supersonic/devices to that port
             auto it = msg.ArgumentsBegin();
             int replyPort = 0;
             if (it != msg.ArgumentsEnd() && it->IsInt32()) {

@@ -10,8 +10,8 @@
  * sending /supersonic/notify.  Each sender's IP:port is added to a
  * deduped list; all registered targets receive:
  *
- *   /scsynth/devices        — device list + compatibility flags
- *   /scsynth/info           — hardware info + available rates/buffer sizes
+ *   /supersonic/devices     — device list + compatibility flags
+ *   /supersonic/info        — hardware info + available rates/buffer sizes
  *   /supersonic/statechange — engine lifecycle transitions (state, reason)
  *   /supersonic/setup       — world ready (sampleRate, bufferSize)
  *
@@ -66,7 +66,7 @@ public:
     // Register a notify target (deduped by ip:port)
     void setNotifyTarget(const juce::String& ip, int port);
 
-    // Send /scsynth/devices + /scsynth/info to all notify targets
+    // Send /supersonic/devices + /supersonic/info to all notify targets
     void sendDeviceReport();
 
     // Send raw OSC data to all registered notify targets
