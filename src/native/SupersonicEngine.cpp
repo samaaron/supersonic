@@ -927,73 +927,114 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
     SwapResult result;
     result.deviceName = driverName;
 
+    // ── Headless mode ───────────────────────────────────────────────────
+    // No real audio driver to switch.  If the test hook is set, simulate
+    // the rate the new driver's default device would report.
     if (!mDeviceManager) {
-        result.error = "no audio device in headless mode";
-        return result;
+        if (!testDriverSwitchRate) {
+            result.error = "no audio device in headless mode";
+            return result;
+        }
+        double newRate = testDriverSwitchRate();
+        if (static_cast<int>(newRate) == mCurrentConfig.sampleRate) {
+            // Same rate — hot swap, no world rebuild needed
+            result.success    = true;
+            result.type       = SwapType::Hot;
+            result.sampleRate = newRate;
+            result.bufferSize = mCurrentConfig.bufferSize;
+            if (onSwapEvent) onSwapEvent("swap:start", result);
+            if (onSwapEvent) onSwapEvent("swap:complete", result);
+            return result;
+        }
+        // Different rate — delegate to switchDevice for a cold swap.
+        // Mutex is not held here so switchDevice can acquire it.
+        return switchDevice("", newRate);
     }
 
-    // Try to acquire swap mutex (non-blocking)
-    if (!mSwapMutex.try_lock()) {
-        result.error = "swap already in progress";
-        return result;
-    }
-    std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
+    // ── Real driver switch ──────────────────────────────────────────────
+    double coldSwapRate = 0;
 
-    result.type = SwapType::Hot;
-    if (onSwapEvent) onSwapEvent("swap:start", result);
+    {   // Mutex scope — released before any cold swap delegation
+        if (!mSwapMutex.try_lock()) {
+            result.error = "swap already in progress";
+            return result;
+        }
+        std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
 
-    // Pause audio and remove callback
-    mAudioCallback.pause();
-    mDeviceManager->removeAudioCallback(&mAudioCallback);
+        // Pause audio and remove callback
+        mAudioCallback.pause();
+        mDeviceManager->removeAudioCallback(&mAudioCallback);
 
-    // Switch driver type
-    mDeviceManager->setCurrentAudioDeviceType(juce::String(driverName), true);
-    juce::String err = mDeviceManager->initialiseWithDefaultDevices(0, 2);
-    if (err.isNotEmpty()) {
-        err = mDeviceManager->initialiseWithDefaultDevices(0, 0);
-    }
+        // Switch driver type
+        mDeviceManager->setCurrentAudioDeviceType(juce::String(driverName), true);
+        juce::String err = mDeviceManager->initialiseWithDefaultDevices(
+            mCurrentConfig.numInputChannels, mCurrentConfig.numOutputChannels);
+        if (err.isNotEmpty()) {
+            err = mDeviceManager->initialiseWithDefaultDevices(0, mCurrentConfig.numOutputChannels);
+        }
+        if (err.isNotEmpty()) {
+            err = mDeviceManager->initialiseWithDefaultDevices(0, 0);
+        }
 
-    if (err.isNotEmpty()) {
-        // Fallback: try to restore previous driver
+        if (err.isNotEmpty()) {
+            // Fallback: try to restore previous driver
+            mDeviceManager->addAudioCallback(&mAudioCallback);
+            mAudioCallback.resume();
+            result.error = err.toStdString();
+            if (onSwapEvent) onSwapEvent("swap:failed", result);
+            return result;
+        }
+
+        // Try to match sample rate (let driver pick its own buffer size)
+        if (auto* dev = mDeviceManager->getCurrentAudioDevice()) {
+            juce::AudioDeviceManager::AudioDeviceSetup setup;
+            mDeviceManager->getAudioDeviceSetup(setup);
+            if (static_cast<int>(setup.sampleRate) != mCurrentConfig.sampleRate) {
+                setup.sampleRate = mCurrentConfig.sampleRate;
+                mDeviceManager->setAudioDeviceSetup(setup, true);
+            }
+        }
+
+        // Re-add callback and resume
         mDeviceManager->addAudioCallback(&mAudioCallback);
         mAudioCallback.resume();
-        result.error = err.toStdString();
-        if (onSwapEvent) onSwapEvent("swap:failed", result);
-        return result;
-    }
 
-    // Ensure sample rate matches (let driver pick its own buffer size)
-    if (auto* dev = mDeviceManager->getCurrentAudioDevice()) {
-        juce::AudioDeviceManager::AudioDeviceSetup setup;
-        mDeviceManager->getAudioDeviceSetup(setup);
-        if (static_cast<int>(setup.sampleRate) != mCurrentConfig.sampleRate) {
-            setup.sampleRate = mCurrentConfig.sampleRate;
-            mDeviceManager->setAudioDeviceSetup(setup, true);
+        // Read actual device state after switch
+        auto* finalDev = mDeviceManager->getCurrentAudioDevice();
+        if (finalDev) {
+            result.sampleRate = finalDev->getCurrentSampleRate();
+            result.bufferSize = finalDev->getCurrentBufferSizeSamples();
+            mCurrentConfig.numOutputChannels = finalDev->getActiveOutputChannels().countNumberOfSetBits();
+            mCurrentConfig.numInputChannels  = finalDev->getActiveInputChannels().countNumberOfSetBits();
+
+            fprintf(stderr, "[audio-device] switched to %s: %s %.0fHz buf=%d %dch\n",
+                    finalDev->getTypeName().toRawUTF8(),
+                    finalDev->getName().toRawUTF8(),
+                    result.sampleRate, result.bufferSize,
+                    mCurrentConfig.numOutputChannels);
+
+            // Check for rate mismatch — if the new driver can't match the
+            // World's rate, we need a cold swap to rebuild at the actual rate.
+            if (static_cast<int>(result.sampleRate) != mCurrentConfig.sampleRate) {
+                coldSwapRate = result.sampleRate;
+            }
         }
-    }
 
-    // Re-add callback and resume
-    mDeviceManager->addAudioCallback(&mAudioCallback);
-    mAudioCallback.resume();
+        if (coldSwapRate == 0) {
+            // No rate mismatch — complete as a hot swap
+            result.success = true;
+            result.type    = SwapType::Hot;
+            if (onSwapEvent) onSwapEvent("swap:start", result);
+            if (onSwapEvent) onSwapEvent("swap:complete", result);
+            return result;
+        }
+    } // mutex released
 
-    // Fill result and output device info in banner format so daemon.rb
-    // can detect the change and forward updated info to the GUI.
-    auto* finalDev = mDeviceManager->getCurrentAudioDevice();
-    if (finalDev) {
-        result.sampleRate = finalDev->getCurrentSampleRate();
-        result.bufferSize = finalDev->getCurrentBufferSizeSamples();
-        mCurrentConfig.numOutputChannels = finalDev->getActiveOutputChannels().countNumberOfSetBits();
-        mCurrentConfig.numInputChannels = finalDev->getActiveInputChannels().countNumberOfSetBits();
-
-        fprintf(stderr, "[audio-device] switched to %s: %s %.0fHz buf=%d %dch\n",
-                finalDev->getTypeName().toRawUTF8(),
-                finalDev->getName().toRawUTF8(),
-                result.sampleRate, result.bufferSize,
-                mCurrentConfig.numOutputChannels);
-    }
-    result.success = true;
-    if (onSwapEvent) onSwapEvent("swap:complete", result);
-    return result;
+    // Rate mismatch detected — cold swap to rebuild World at the new rate.
+    // Mutex is released so switchDevice can acquire it.
+    fprintf(stderr, "[audio-device] driver rate mismatch (world=%d, device=%.0f) — cold swap\n",
+            mCurrentConfig.sampleRate, coldSwapRate);
+    return switchDevice("", coldSwapRate);
 }
 
 // --- Device change detection ---
