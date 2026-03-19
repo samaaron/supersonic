@@ -78,7 +78,20 @@ public:
     CurrentDeviceInfo        currentDevice() const;
     SwapResult               switchDevice(const std::string& deviceName,
                                           double sampleRate = 0,
-                                          int bufferSize = 0);
+                                          int bufferSize = 0,
+                                          bool forceCold = false);
+
+    // --- Input channel management ---
+    // Enable/disable audio input. Triggers a cold swap (world rebuild).
+    // numChannels=0 disables input, >0 enables that many input channels,
+    // -1 re-enables with the configured input channel count.
+    // On macOS, enabling input triggers the OS microphone permission dialog.
+    SwapResult               enableInputChannels(int numChannels);
+
+    // Set the configured input channel count (used when re-enabling via -1).
+    // Does NOT trigger a swap — call enableInputChannels() afterward if needed.
+    void setConfiguredInputChannels(int numChannels) { mBootInputChannels = numChannels; }
+    int  configuredInputChannels() const { return mBootInputChannels; }
 
     // --- Audio driver management ---
     std::vector<std::string> listDrivers() const;
@@ -107,6 +120,11 @@ public:
     // Injectable hook for testing: if set and returns non-empty string,
     // rebuild_world() is skipped and the error triggers recovery to safe defaults.
     std::function<std::string()> testRebuildFailure;
+
+    // Injectable hook for testing: if set, switchDriver() in headless mode
+    // simulates a successful driver switch where the new driver's default
+    // device reports this sample rate. Allows testing rate-mismatch cold swaps.
+    std::function<double()> testDriverSwitchRate;
 
     // --- State cache ---
     StateCache& stateCache() { return mStateCache; }
@@ -149,6 +167,7 @@ private:
     std::atomic<EngineState> mEngineState{EngineState::Stopped};
     bool                     mHeadless{false};
     Config                   mCurrentConfig;
+    int                      mBootInputChannels = 2;  // original -i value, for re-enabling inputs
     std::mutex               mSwapMutex;
     std::string              mDeviceMode;   // empty = system/auto, non-empty = manual device name
 

@@ -56,6 +56,7 @@ void SupersonicEngine::initialise(const Config& cfg) {
 
     mHeadless = cfg.headless;
     mCurrentConfig = cfg;
+    mBootInputChannels = cfg.numInputChannels;
 
     // -- Wire callbacks ---------------------------------------------------
     // onReply/onDebug should be set before initialise() — worker threads
@@ -649,7 +650,8 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
 
 SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                                            double sampleRate,
-                                           int bufferSize) {
+                                           int bufferSize,
+                                           bool forceCold) {
     SwapResult result;
     result.deviceName = deviceName;
     bool recovered = false;
@@ -705,7 +707,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         }
     }
 
-    bool isCold = (sampleRate > 0 && sampleRate != currentRate);
+    bool isCold = forceCold || (sampleRate > 0 && sampleRate != currentRate);
     result.type = isCold ? SwapType::Cold : SwapType::Hot;
 
     if (isCold) setEngineState(EngineState::Restarting, "rate-change");
@@ -736,7 +738,18 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         mDeviceManager->getAudioDeviceSetup(setup);
         if (!deviceName.empty())
             setup.outputDeviceName = juce::String(deviceName);
-        setup.useDefaultInputChannels = true;
+        if (mCurrentConfig.numInputChannels > 0) {
+            // Explicitly request input channels — can't rely on
+            // useDefaultInputChannels since output-only devices default to 0.
+            setup.useDefaultInputChannels = false;
+            juce::BigInteger inputBits;
+            for (int i = 0; i < mCurrentConfig.numInputChannels; ++i)
+                inputBits.setBit(i);
+            setup.inputChannels = inputBits;
+        } else {
+            setup.useDefaultInputChannels = false;
+            setup.inputChannels.clear();
+        }
         setup.useDefaultOutputChannels = true;
         if (sampleRate > 0) setup.sampleRate = sampleRate;
         if (bufferSize > 0) setup.bufferSize = bufferSize;
@@ -863,6 +876,32 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     }
     printDeviceList();
     return result;
+}
+
+// --- Input channel management ---
+
+SwapResult SupersonicEngine::enableInputChannels(int numChannels) {
+    // -1 means "re-enable with the boot-time input channel count"
+    // (the value originally passed via CLI flags like -i 2).
+    if (numChannels < 0) numChannels = mBootInputChannels;
+
+    // Check if this is actually a change
+    if (numChannels == mCurrentConfig.numInputChannels) {
+        SwapResult result;
+        result.success = true;
+        result.type = SwapType::Hot;  // no-op
+        result.sampleRate = mCurrentConfig.sampleRate;
+        result.bufferSize = mCurrentConfig.bufferSize;
+        return result;
+    }
+
+    // Update config and worldOptions before the cold swap
+    mCurrentConfig.numInputChannels = numChannels;
+    uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
+    opts[5] = static_cast<uint32_t>(numChannels);
+
+    // Cold swap to rebuild the World with the new input channel count
+    return switchDevice("", 0, 0, true);
 }
 
 // --- Audio driver management ---

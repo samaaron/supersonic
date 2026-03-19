@@ -401,6 +401,31 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
                 sendDeviceReport();
             return true;
 
+        } else if (std::strcmp(addr, "/supersonic/inputs/enable") == 0) {
+            // Enable/disable audio input channels.
+            // Args: numChannels(int32) — 0 to disable, >0 to enable that many channels
+            auto it = msg.ArgumentsBegin();
+            int numChannels = 0;
+            if (it != msg.ArgumentsEnd() && it->IsInt32())
+                numChannels = it->AsInt32Unchecked();
+
+            auto result = mEngine->enableInputChannels(numChannels);
+            char buf[1024];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/supersonic/inputs/enable.reply");
+            if (result.success) {
+                s << static_cast<osc::int32>(1)
+                  << static_cast<osc::int32>(numChannels);
+            } else {
+                s << static_cast<osc::int32>(0) << result.error.c_str();
+            }
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            if (result.success)
+                sendDeviceReport();
+            return true;
+
         } else if (std::strcmp(addr, "/supersonic/record/start") == 0) {
             auto it = msg.ArgumentsBegin();
             std::string path, format = "wav";
