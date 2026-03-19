@@ -125,8 +125,15 @@ void HeadlessDriver::run() {
     if (!timer)
         timer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
 
-    // Block duration in 100ns units (negative = relative interval)
-    const LONGLONG blockHns = 10'000'000LL * kBlockSize / mSampleRate;
+    // Use QPC absolute deadlines to avoid accumulated drift from relative sleeps
+    LARGE_INTEGER freq;
+    QueryPerformanceFrequency(&freq);
+
+    const LONGLONG blockTicks = freq.QuadPart * kBlockSize / mSampleRate;
+
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    LONGLONG nextWake = now.QuadPart;
 
     double baseNTP = wallClockNTP();
     double samplePos = 0.0;
@@ -149,10 +156,20 @@ void HeadlessDriver::run() {
         mCallback->processCount.fetch_add(1, std::memory_order_release);
         mCallback->processCount.notify_all();
 
-        LARGE_INTEGER due;
-        due.QuadPart = -blockHns;
-        SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
-        WaitForSingleObject(timer, INFINITE);
+        // Advance absolute deadline by one block
+        nextWake += blockTicks;
+
+        QueryPerformanceCounter(&now);
+        LONGLONG remaining = nextWake - now.QuadPart;
+
+        if (remaining > 0) {
+            // Convert QPC ticks to 100ns units for SetWaitableTimer (negative = relative)
+            LARGE_INTEGER due;
+            due.QuadPart = -(remaining * 10'000'000LL / freq.QuadPart);
+            SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
+            WaitForSingleObject(timer, INFINITE);
+        }
+        // If remaining <= 0 we're behind schedule — skip sleep to catch up
     }
 
     if (timer)

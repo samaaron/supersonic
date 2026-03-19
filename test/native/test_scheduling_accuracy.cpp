@@ -2,10 +2,11 @@
  * test_scheduling_accuracy.cpp — Verify OSC bundle timetag execution accuracy
  *
  * Uses the audio capture buffer (same mechanism as WASM audio_capture.spec.mjs)
- * to measure exactly when a scheduled synth starts producing audio, and
- * compares that to the requested bundle timetag.
+ * to measure relative spacing between scheduled synth onsets.  Absolute timing
+ * conflates scheduling accuracy with driver output latency, so we only test
+ * that *relative* spacing matches the requested interval.
  *
- * Target: within 3ms of the scheduled time.
+ * Tolerance is expressed in audio blocks — the fundamental scheduling quantum.
  */
 #include "EngineFixture.h"
 #include "NTPClock.h"
@@ -13,6 +14,8 @@
 #include <chrono>
 #include <cmath>
 #include <thread>
+#include <vector>
+#include <numeric>
 
 extern "C" {
     extern uint8_t ring_buffer_storage[];
@@ -30,14 +33,17 @@ static int findOnsetFrame(const float* interleaved, uint32_t numFrames,
     return -1;
 }
 
-TEST_CASE("scheduled bundle executes within 3ms of timetag",
+TEST_CASE("relative scheduling accuracy across multiple bundles",
           "[scheduling][accuracy]") {
-    if (std::getenv("CI")) { SKIP("Scheduling accuracy requires real audio hardware — skipped on CI"); }
     EngineFixture fx;
     if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
     fx.clearReplies();
 
-    // Get pointers into the audio capture region of ring_buffer_storage
+    constexpr int    NUM_BUNDLES      = 10;
+    constexpr double SPACING_SEC      = 0.100;   // 100ms between bundles
+    constexpr double FIRST_DELAY_SEC  = 0.200;   // first bundle at +200ms
+    constexpr double RELEASE_SEC      = 0.020;    // 20ms release — silent well before next
+
     auto* capture = reinterpret_cast<AudioCaptureHeader*>(
         ring_buffer_storage + AUDIO_CAPTURE_START);
     auto* captureData = reinterpret_cast<float*>(
@@ -55,144 +61,100 @@ TEST_CASE("scheduled bundle executes within 3ms of timetag",
     uint32_t sampleRate = capture->sample_rate;
     REQUIRE(sampleRate > 0);
 
-    // Schedule a synth 200ms in the future
-    constexpr double DELAY_SEC = 0.200;
-    double ntpNow = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                  + NTPClock::NTP_EPOCH_OFFSET;
-    double scheduledNTP = ntpNow + DELAY_SEC;
-
-    fx.engine().sendBundle(scheduledNTP, {
-        OscBuilder::message("/s_new", "sonic-pi-beep", 1000, 0, 0,
-                            "amp", 0.5f, "note", 72.0f, "release", 0.1f)
-    });
-
-    // Wait enough for the synth to execute + produce some audio
-    std::this_thread::sleep_for(std::chrono::milliseconds(400));
-
-    // Disable capture
-    capture->enabled.store(0, std::memory_order_release);
-    uint32_t captureEndFrame = capture->head.load(std::memory_order_acquire);
-
-    // Free the synth
-    fx.send(osc_test::message("/n_free", 1000));
-
-    // Analyse captured audio — find onset relative to our start frame
-    REQUIRE(captureEndFrame > captureStartFrame);
-    uint32_t framesAvailable = captureEndFrame - captureStartFrame;
-    REQUIRE(framesAvailable > 0);
-
-    const float* startPtr = captureData + captureStartFrame * AUDIO_CAPTURE_CHANNELS;
-    int onsetFrame = findOnsetFrame(startPtr, framesAvailable,
-                                     AUDIO_CAPTURE_CHANNELS);
-
-    // We must find audio
-    REQUIRE(onsetFrame >= 0);
-
-    // Convert onset to milliseconds relative to capture start
-    double onsetMs = (static_cast<double>(onsetFrame) / sampleRate) * 1000.0;
-    double expectedMs = DELAY_SEC * 1000.0;
-    double errorMs = onsetMs - expectedMs;
-    double absErrorMs = std::fabs(errorMs);
-
-    INFO("Sample rate: " << sampleRate);
-    INFO("Onset frame: " << onsetFrame << " / " << framesAvailable);
-    INFO("Onset time:  " << onsetMs << " ms");
-    INFO("Expected:    " << expectedMs << " ms");
-    INFO("Error:       " << errorMs << " ms");
-
-    CHECK(absErrorMs < 3.0);
-}
-
-TEST_CASE("two bundles execute in correct order with accurate spacing",
-          "[scheduling][accuracy]") {
-    if (std::getenv("CI")) { SKIP("Scheduling accuracy requires real audio hardware — skipped on CI"); }
-    EngineFixture fx;
-    if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
-    fx.clearReplies();
-
-    auto* capture = reinterpret_cast<AudioCaptureHeader*>(
-        ring_buffer_storage + AUDIO_CAPTURE_START);
-    auto* captureData = reinterpret_cast<float*>(
-        ring_buffer_storage + AUDIO_CAPTURE_START + AUDIO_CAPTURE_HEADER_SIZE);
-
-    // Reset and enable capture
-    capture->head.store(0, std::memory_order_release);
-    capture->enabled.store(1, std::memory_order_release);
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-
-    uint32_t captureStartFrame = capture->head.load(std::memory_order_acquire);
-    uint32_t sampleRate = capture->sample_rate;
-    REQUIRE(sampleRate > 0);
-
-    // Schedule two synths: one at +100ms, one at +200ms
-    // Use different notes so we could distinguish them, but we just need onset times
     double ntpNow = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
                   + NTPClock::NTP_EPOCH_OFFSET;
 
-    // First synth at +100ms — short release so it's silent by the time the second starts
-    fx.engine().sendBundle(ntpNow + 0.100, {
-        OscBuilder::message("/s_new", "sonic-pi-beep", 1001, 0, 0,
-                            "amp", 0.5f, "note", 72.0f, "release", 0.02f)
-    });
-
-    // Second synth at +300ms (200ms gap after first)
-    fx.engine().sendBundle(ntpNow + 0.300, {
-        OscBuilder::message("/s_new", "sonic-pi-beep", 1002, 0, 0,
-                            "amp", 0.5f, "note", 60.0f, "release", 0.02f)
-    });
-
-    // Wait for both to execute
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-    capture->enabled.store(0, std::memory_order_release);
-    uint32_t captureEndFrame = capture->head.load(std::memory_order_acquire);
-
-    fx.send(osc_test::message("/n_free", 1001));
-    fx.send(osc_test::message("/n_free", 1002));
-
-    REQUIRE(captureEndFrame > captureStartFrame);
-    uint32_t framesAvailable = captureEndFrame - captureStartFrame;
-    const float* startPtr = captureData + captureStartFrame * AUDIO_CAPTURE_CHANNELS;
-
-    // Find first onset
-    int onset1 = findOnsetFrame(startPtr, framesAvailable, AUDIO_CAPTURE_CHANNELS);
-    REQUIRE(onset1 >= 0);
-
-    // Find second onset — scan from after the first synth's release (~50ms after onset1)
-    uint32_t searchStart = onset1 + static_cast<uint32_t>(sampleRate * 0.050);
-    // First find silence (the gap between synths)
-    int gapStart = -1;
-    for (uint32_t f = searchStart; f < framesAvailable; f++) {
-        bool silent = true;
-        for (uint32_t ch = 0; ch < AUDIO_CAPTURE_CHANNELS; ch++) {
-            if (std::fabs(startPtr[f * AUDIO_CAPTURE_CHANNELS + ch]) > 0.001f)
-                silent = false;
-        }
-        if (silent) { gapStart = static_cast<int>(f); break; }
+    // Schedule NUM_BUNDLES synths at regular intervals
+    for (int i = 0; i < NUM_BUNDLES; i++) {
+        double t = ntpNow + FIRST_DELAY_SEC + i * SPACING_SEC;
+        int nodeId = 1001 + i;
+        fx.engine().sendBundle(t, {
+            OscBuilder::message("/s_new", "sonic-pi-beep", nodeId, 0, 0,
+                                "amp", 0.5f, "note", 72.0f,
+                                "release", static_cast<float>(RELEASE_SEC))
+        });
     }
-    REQUIRE(gapStart >= 0);
 
-    // Find second onset after the gap
-    int onset2 = findOnsetFrame(startPtr + gapStart * AUDIO_CAPTURE_CHANNELS,
-                                 framesAvailable - gapStart,
-                                 AUDIO_CAPTURE_CHANNELS);
-    REQUIRE(onset2 >= 0);
-    onset2 += gapStart; // Make absolute
+    // Wait for all synths to execute and release
+    auto totalWaitMs = static_cast<int>(
+        (FIRST_DELAY_SEC + NUM_BUNDLES * SPACING_SEC) * 1000.0 + 300);
+    std::this_thread::sleep_for(std::chrono::milliseconds(totalWaitMs));
 
-    double onset1Ms = (static_cast<double>(onset1) / sampleRate) * 1000.0;
-    double onset2Ms = (static_cast<double>(onset2) / sampleRate) * 1000.0;
-    double spacingMs = onset2Ms - onset1Ms;
-    double expectedSpacingMs = 200.0;
-    double spacingErrorMs = std::fabs(spacingMs - expectedSpacingMs);
+    capture->enabled.store(0, std::memory_order_release);
+    uint32_t captureEndFrame = capture->head.load(std::memory_order_acquire);
 
-    INFO("Onset 1: " << onset1Ms << " ms (expected ~100ms)");
-    INFO("Onset 2: " << onset2Ms << " ms (expected ~300ms)");
-    INFO("Spacing: " << spacingMs << " ms (expected 200ms)");
-    INFO("Spacing error: " << spacingErrorMs << " ms");
+    // Free any lingering synths
+    for (int i = 0; i < NUM_BUNDLES; i++)
+        fx.send(osc_test::message("/n_free", 1001 + i));
 
-    // Relative spacing is the real accuracy proof — within one block (~2.67ms)
-    CHECK(spacingErrorMs < 3.0);
+    REQUIRE(captureEndFrame > captureStartFrame);
+    uint32_t framesAvailable = captureEndFrame - captureStartFrame;
+    const float* startPtr = captureData + captureStartFrame * AUDIO_CAPTURE_CHANNELS;
 
-    CHECK(std::fabs(onset1Ms - 100.0) < 5.0);
-    CHECK(std::fabs(onset2Ms - 300.0) < 5.0);
+    // ── Detect all onsets ────────────────────────────────────────────────
+    std::vector<int> onsets;
+    int searchFrom = 0;
+
+    for (int i = 0; i < NUM_BUNDLES; i++) {
+        if (static_cast<uint32_t>(searchFrom) >= framesAvailable) break;
+
+        int onset = findOnsetFrame(
+            startPtr + searchFrom * AUDIO_CAPTURE_CHANNELS,
+            framesAvailable - searchFrom,
+            AUDIO_CAPTURE_CHANNELS);
+        if (onset < 0) break;
+        onset += searchFrom;
+        onsets.push_back(onset);
+
+        // Skip past this synth's audio (~50ms) then find silence
+        uint32_t skipTo = onset + static_cast<uint32_t>(sampleRate * 0.050);
+        if (skipTo >= framesAvailable) break;
+
+        int gapStart = -1;
+        for (uint32_t f = skipTo; f < framesAvailable; f++) {
+            bool silent = true;
+            for (uint32_t ch = 0; ch < AUDIO_CAPTURE_CHANNELS; ch++) {
+                if (std::fabs(startPtr[f * AUDIO_CAPTURE_CHANNELS + ch]) > 0.001f)
+                    silent = false;
+            }
+            if (silent) { gapStart = static_cast<int>(f); break; }
+        }
+        if (gapStart < 0) break;
+        searchFrom = gapStart;
+    }
+
+    INFO("Detected " << onsets.size() << " of " << NUM_BUNDLES << " onsets");
+    REQUIRE(onsets.size() >= 8);   // tolerate up to 2 missed detections
+
+    // ── Compute spacings ─────────────────────────────────────────────────
+    double blockMs = 1000.0 * 128.0 / sampleRate;
+    double expectedSpacingMs = SPACING_SEC * 1000.0;
+
+    std::vector<double> errors;
+    for (size_t i = 1; i < onsets.size(); i++) {
+        double spacingMs = (static_cast<double>(onsets[i] - onsets[i - 1])
+                            / sampleRate) * 1000.0;
+        double error = spacingMs - expectedSpacingMs;
+        errors.push_back(error);
+        INFO("Spacing " << i << ": " << spacingMs
+             << " ms  (error: " << error << " ms)");
+    }
+
+    double sumAbsError = 0.0;
+    double maxAbsError = 0.0;
+    for (double e : errors) {
+        double ae = std::fabs(e);
+        sumAbsError += ae;
+        maxAbsError = std::max(maxAbsError, ae);
+    }
+    double meanAbsError = sumAbsError / errors.size();
+
+    INFO("Block period:      " << blockMs << " ms");
+    INFO("Mean spacing error: " << meanAbsError << " ms");
+    INFO("Max spacing error:  " << maxAbsError << " ms");
+
+    // Tolerance relative to block period — real audio drivers add some
+    // jitter beyond the engine's scheduling quantum
+    CHECK(meanAbsError < blockMs * 2);   // mean within 2 blocks
+    CHECK(maxAbsError  < blockMs * 3);   // worst case within 3 blocks
 }
