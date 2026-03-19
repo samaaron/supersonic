@@ -2360,13 +2360,21 @@ Start capturing audio output to a buffer. SAB mode only.
 
 ##### stopCapture()
 
-> **stopCapture**(): `Float32Array`
+> **stopCapture**(): `object`
 
 Stop capturing and return the captured audio data.
 
 ###### Returns
 
-`Float32Array`
+`object`
+
+| Name         | Type                              |
+| ------------ | --------------------------------- |
+| `channels`   | `number`                          |
+| `frames`     | `number`                          |
+| `left`       | `Float32Array`                    |
+| `right`      | `Float32Array`<`ArrayBufferLike`> |
+| `sampleRate` | `number`                          |
 
 ##### suspend()
 
