@@ -13,6 +13,7 @@
 #include "src/shared_memory.h"
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <thread>
 #include <vector>
 #include <numeric>
@@ -35,7 +36,24 @@ static int findOnsetFrame(const float* interleaved, uint32_t numFrames,
 
 TEST_CASE("relative scheduling accuracy across multiple bundles",
           "[scheduling][accuracy]") {
-    EngineFixture fx;
+    // Default to headless.  Set SUPERSONIC_TEST_DEVICE to a driver name
+    // (e.g. "Windows Audio") to test against real hardware.
+    SupersonicEngine::Config cfg;
+    cfg.sampleRate   = 48000;
+    cfg.bufferSize   = 128;
+    cfg.udpPort      = 0;
+    cfg.numBuffers   = 1024;
+    cfg.maxNodes     = 1024;
+    cfg.maxGraphDefs = 512;
+    cfg.maxWireBufs  = 64;
+    const char* device = std::getenv("SUPERSONIC_TEST_DEVICE");
+    if (device && device[0] != '\0') {
+        cfg.headless = false;
+        cfg.hardwareDevice = device;
+    } else {
+        cfg.headless = true;
+    }
+    EngineFixture fx(cfg);
     if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
     fx.clearReplies();
 
