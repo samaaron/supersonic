@@ -778,10 +778,10 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     }
 
     if (isCold) {
-        double newRate = sampleRate;
+        double newRate = (sampleRate > 0) ? sampleRate : currentRate;
         if (mDeviceManager) {
             auto* newDev = mDeviceManager->getCurrentAudioDevice();
-            newRate = newDev ? newDev->getCurrentSampleRate() : sampleRate;
+            newRate = newDev ? newDev->getCurrentSampleRate() : newRate;
         }
         mCurrentConfig.sampleRate = static_cast<int>(newRate);
 
@@ -828,7 +828,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     if (mDeviceManager) {
         mDeviceManager->addAudioCallback(&mAudioCallback);
     } else {
-        restartHeadlessDriver(isCold ? sampleRate : currentRate);
+        restartHeadlessDriver(mCurrentConfig.sampleRate);
     }
     mAudioCallback.resume();
 
