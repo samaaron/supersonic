@@ -26,7 +26,7 @@ void HeadlessDriver::configure(JuceAudioCallback* callback,
                                 int numInputChannels) {
     mCallback          = callback;
     mSampleLoader      = sampleLoader;
-    mSampleRate        = sampleRate;
+    mSampleRate        = (sampleRate > 0) ? sampleRate : 48000;
     mNumOutputChannels = numOutputChannels;
     mNumInputChannels  = numInputChannels;
 }
