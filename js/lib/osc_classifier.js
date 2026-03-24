@@ -4,10 +4,10 @@
 /**
  * OSC Message Classification
  *
- * Shared utility for classifying OSC messages into bypass categories.
- * Used by SuperSonic and OscChannel to determine routing.
+ * Classifies OSC messages into routing categories for OscChannel.
+ * Mirrors OscClassifier.h in C++ (native backend).
  *
- * Bypass categories:
+ * Categories:
  * - 'nonBundle'   - Plain OSC messages (not bundles)
  * - 'immediate'   - Bundles with timetag 0 or 1
  * - 'nearFuture'  - Bundles within bypass threshold of current time
@@ -15,42 +15,20 @@
  * - 'farFuture'   - Bundles beyond bypass threshold (needs prescheduler)
  */
 
-/**
- * Default bypass lookahead threshold in seconds.
- * Bundles within this window go direct, beyond go to prescheduler.
- */
+import { NTP_EPOCH_OFFSET, isBundle } from './osc_fast.js';
+
+export { NTP_EPOCH_OFFSET, isBundle };
+
+/** Default bypass lookahead threshold in seconds. */
 export const DEFAULT_BYPASS_LOOKAHEAD_S = 0.5;
 
 /**
- * NTP epoch offset: seconds between Unix epoch (1970) and NTP epoch (1900)
- */
-export const NTP_EPOCH_OFFSET = 2208988800;
-
-/**
- * Check if OSC data is a bundle (starts with #bundle\0)
- * @param {Uint8Array} oscData
- * @returns {boolean}
- */
-export function isBundle(oscData) {
-    return oscData.length >= 8 &&
-        oscData[0] === 0x23 &&  // #
-        oscData[1] === 0x62 &&  // b
-        oscData[2] === 0x75 &&  // u
-        oscData[3] === 0x6e &&  // n
-        oscData[4] === 0x64 &&  // d
-        oscData[5] === 0x6c &&  // l
-        oscData[6] === 0x65 &&  // e
-        oscData[7] === 0x00;    // \0
-}
-
-/**
- * Read NTP timetag from bundle header
+ * Read NTP timetag from bundle header as separate uint32 components.
  * @param {Uint8Array} oscData - Bundle data (must be at least 16 bytes)
  * @returns {{ ntpSeconds: number, ntpFraction: number } | null}
  */
 export function readTimetag(oscData) {
     if (oscData.length < 16) return null;
-
     const view = new DataView(oscData.buffer, oscData.byteOffset, oscData.byteLength);
     return {
         ntpSeconds: view.getUint32(8, false),
