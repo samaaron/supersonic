@@ -2187,19 +2187,6 @@ export class SuperSonic {
     }
   }
 
-  #incrementBypassCategoryMetric(category) {
-    const metricMap = {
-      nonBundle: 'bypassNonBundle',
-      immediate: 'bypassImmediate',
-      nearFuture: 'bypassNearFuture',
-      late: 'bypassLate',
-    };
-    const metric = metricMap[category];
-    if (metric) {
-      this.#metricsReader.addMetric(metric);
-    }
-  }
-
   #looksLikePathOrURL(str) {
     return str.includes("/") || str.includes("://");
   }

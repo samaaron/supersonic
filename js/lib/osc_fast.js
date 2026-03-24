@@ -727,41 +727,6 @@ export function copyEncoded(encoded) {
 }
 
 /**
- * Encode into internal buffer then copy to a target buffer (for ring buffer writing).
- * Consolidates encode + copy into a single call.
- *
- * @param {string} address - OSC address
- * @param {Array} args - Arguments
- * @param {Uint8Array} target - Target buffer
- * @param {number} offset - Offset in target buffer
- * @returns {number} - Bytes written
- */
-export function encodeMessageIntoBuffer(address, args, target, offset) {
-  // Encode to our buffer first
-  const encoded = encodeMessage(address, args);
-
-  // Copy to target
-  target.set(encoded, offset);
-
-  return encoded.length;
-}
-
-/**
- * Encode bundle directly into a target buffer.
- *
- * @param {number} timeTag - NTP timestamp
- * @param {Array} packets - Packets
- * @param {Uint8Array} target - Target buffer
- * @param {number} offset - Offset in target buffer
- * @returns {number} - Bytes written
- */
-export function encodeBundleIntoBuffer(timeTag, packets, target, offset) {
-  const encoded = encodeBundle(timeTag, packets);
-  target.set(encoded, offset);
-  return encoded.length;
-}
-
-/**
  * Clear the string cache (if memory is a concern).
  */
 export function clearCache() {

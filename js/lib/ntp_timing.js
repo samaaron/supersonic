@@ -110,12 +110,6 @@ export class NTPTiming {
 
   /**
    * Set worklet port (for postMessage mode)
-   * @param {MessagePort} port
-   */
-  setWorkletPort(port) {
-    this.#workletPort = port;
-  }
-
   /**
    * Update audio context reference (for recovery)
    * @param {AudioContext} audioContext
@@ -344,53 +338,6 @@ export class NTPTiming {
     if (__DEV__) {
       console.log(`[Dbg-NTPTiming] Clock offset set: ${offsetMs}ms (${offsetS}s)`);
     }
-  }
-
-  /**
-   * Calculate bundle timing for scheduling
-   * @param {Uint8Array} uint8Data - OSC bundle data
-   * @returns {Object|null} {audioTimeS, currentTimeS} or null for immediate
-   */
-  calculateBundleWait(uint8Data) {
-    if (uint8Data.length < 16) {
-      return null;
-    }
-
-    const header = String.fromCharCode.apply(null, uint8Data.slice(0, 8));
-    if (header !== '#bundle\0') {
-      return null;
-    }
-
-    const ntpStartTime = this.getNTPStartTime();
-    if (ntpStartTime === 0) {
-      console.warn('[NTPTiming] NTP start time not yet initialized');
-      return null;
-    }
-
-    // Read current drift offset
-    const driftMs = this.getDriftOffset();
-    const driftSeconds = driftMs / 1000.0;
-
-    // Read clock offset (for multi-system sync)
-    const clockMs = this.getClockOffset();
-    const clockSeconds = clockMs / 1000.0;
-
-    const totalOffset = ntpStartTime + driftSeconds + clockSeconds;
-
-    const view = new DataView(uint8Data.buffer, uint8Data.byteOffset);
-    const ntpSeconds = view.getUint32(8, false);
-    const ntpFraction = view.getUint32(12, false);
-
-    // Immediate bundle (timetag 0 or 1)
-    if (ntpSeconds === 0 && (ntpFraction === 0 || ntpFraction === 1)) {
-      return null;
-    }
-
-    const ntpTimeS = ntpSeconds + ntpFraction / 0x100000000;
-    const audioTimeS = ntpTimeS - totalOffset;
-    const currentTimeS = this.#audioContext?.currentTime ?? 0;
-
-    return { audioTimeS, currentTimeS };
   }
 
   /**

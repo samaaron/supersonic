@@ -90,30 +90,9 @@ const metricsAdd = (offset, value) => {
     }
 };
 
-/**
- * Set a value at a metrics offset (for gauges)
- * Uses Atomics in SAB mode, direct access in postMessage mode
- */
-const metricsSet = (offset, value) => {
-    if (!metricsView) return;
-    if (mode === 'sab') {
-        Atomics.store(metricsView, offset, value);
-    } else {
-        metricsView[offset] = value;
-    }
-};
-
-/**
- * Get a value at a metrics offset
- */
-const metricsGet = (offset) => {
-    if (!metricsView) return 0;
-    if (mode === 'sab') {
-        return Atomics.load(metricsView, offset);
-    } else {
-        return metricsView[offset];
-    }
-};
+// metricsSet/metricsGet are aliases for metricsStore/metricsLoad
+const metricsSet = metricsStore;
+const metricsGet = metricsLoad;
 
 /**
  * Start periodic sending of metrics buffer to main thread (postMessage mode only)

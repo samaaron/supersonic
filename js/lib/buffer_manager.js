@@ -810,38 +810,6 @@ export class BufferManager {
     }
 
     /**
-     * Get buffer diagnostics
-     * @returns {Object} Buffer state and pool statistics
-     */
-    getDiagnostics() {
-        const poolStats = this.#bufferPool.stats();
-        let bytesActive = 0;
-        let pendingCount = 0;
-
-        for (const entry of this.#allocatedBuffers.values()) {
-            if (!entry) continue;
-            bytesActive += entry.size || 0;
-            if (entry.pendingToken) {
-                pendingCount++;
-            }
-        }
-
-        return {
-            active: this.#allocatedBuffers.size,
-            pending: pendingCount,
-            bytesActive,
-            pool: {
-                total: this.#bufferPool.totalCapacity,
-                available: poolStats.available || 0,
-                freeBytes: poolStats.free?.size || 0,
-                freeBlocks: poolStats.free?.count || 0,
-                usedBytes: poolStats.used?.size || 0,
-                usedBlocks: poolStats.used?.count || 0
-            }
-        };
-    }
-
-    /**
      * Clean up resources
      */
     destroy() {
