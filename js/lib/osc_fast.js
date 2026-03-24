@@ -51,13 +51,14 @@ const TAG_UUID = 0x75;    // 'u'
  * Estimate the encoded size of a message (conservative upper bound).
  * @private
  */
-function estimateMessageSize(address, args) {
+function estimateMessageSize(address, args, argsStart = 0) {
   // Address: length + null + padding (up to 3)
   let size = address.length + 4;
   // Type tags: comma + tags + null + padding
-  size += args.length + 4;
+  size += (args.length - argsStart) + 4;
   // Arguments
-  for (const arg of args) {
+  for (let ai = argsStart; ai < args.length; ai++) {
+    const arg = args[ai];
     if (arg instanceof Uint8Array) {
       size += 4 + arg.length + 3; // size + data + padding
     } else if (arg instanceof ArrayBuffer) {
@@ -89,7 +90,7 @@ function estimateBundleSize(packets) {
   for (const packet of packets) {
     size += 4; // size prefix
     if (Array.isArray(packet)) {
-      size += estimateMessageSize(packet[0], packet.slice(1));
+      size += estimateMessageSize(packet[0], packet, 1);
     } else if (packet.packets !== undefined) {
       size += estimateBundleSize(packet.packets);
     } else {
@@ -179,7 +180,7 @@ export function encodeBundle(timeTag, packets) {
 
     if (Array.isArray(packet)) {
       // Message as [address, ...args]
-      pos = encodeMessageInto(packet[0], packet.slice(1), pos);
+      pos = encodeMessageInto(packet[0], packet, pos, 1);
     } else if (packet.packets !== undefined) {
       // Nested bundle
       pos = encodeBundleInto(packet.timeTag, packet.packets, pos);
@@ -240,10 +241,10 @@ export function encodeSingleBundle(timeTag, address, args = []) {
  * Encode message directly into buffer at offset (for bundle building).
  * @private
  */
-function encodeMessageInto(address, args, pos) {
+function encodeMessageInto(address, args, pos, argsStart = 0) {
   pos = writeStringCached(address, pos);
-  pos = writeTypeTags(args, pos);
-  for (let i = 0; i < args.length; i++) {
+  pos = writeTypeTags(args, pos, argsStart);
+  for (let i = argsStart; i < args.length; i++) {
     pos = writeArg(args[i], pos);
   }
   return pos;
@@ -265,7 +266,7 @@ function encodeBundleInto(timeTag, packets, pos) {
     const packetStart = pos;
 
     if (Array.isArray(packet)) {
-      pos = encodeMessageInto(packet[0], packet.slice(1), pos);
+      pos = encodeMessageInto(packet[0], packet, pos, 1);
     } else if (packet.packets !== undefined) {
       pos = encodeBundleInto(packet.timeTag, packet.packets, pos);
     } else {
@@ -343,10 +344,10 @@ function writeString(str, pos) {
  * Write type tags for arguments.
  * @private
  */
-function writeTypeTags(args, pos) {
+function writeTypeTags(args, pos, argsStart = 0) {
   encodeBuffer[pos++] = TAG_COMMA;
 
-  for (let i = 0; i < args.length; i++) {
+  for (let i = argsStart; i < args.length; i++) {
     const arg = args[i];
     const type = typeof arg;
 

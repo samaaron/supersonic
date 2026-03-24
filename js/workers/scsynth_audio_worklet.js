@@ -54,6 +54,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         this.isInitialized = false;
         this.processCallCount = 0;
         this.lastStatusCheck = 0;
+        this.lastInTail = 0;
         this.ringBufferBase = null;
         this.pendingClearSched = false;
 
@@ -1509,8 +1510,12 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         if (debugHead !== debugTail) {
                             Atomics.notify(this.atomicView, this.CONTROL_INDICES.DEBUG_HEAD, 1);
                         }
-                        // Notify prescheduler if waiting for buffer space
-                        Atomics.notify(this.atomicView, this.CONTROL_INDICES.IN_TAIL, 1);
+                        // Notify prescheduler only if C++ consumed messages (tail moved = space freed)
+                        const inTail = this.atomicLoad(this.CONTROL_INDICES.IN_TAIL);
+                        if (inTail !== this.lastInTail) {
+                            Atomics.notify(this.atomicView, this.CONTROL_INDICES.IN_TAIL, 1);
+                            this.lastInTail = inTail;
+                        }
                     }
                     // SAB mode: OSC logging is handled by osc_out_log_sab_worker
                 }
