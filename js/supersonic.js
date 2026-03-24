@@ -233,6 +233,12 @@ export class SuperSonic {
         audioHealthPct:               { offset: 63, type: 'gauge',    unit: '%',     description: 'Cross-browser: fraction of expected audio frames delivered (100% = no issues)' },
         totalFramesDurationMs:        { offset: 64, type: 'counter',  unit: 'ms',    description: 'Chrome only: total audio rendered duration' },
         hasPlaybackStats:             { offset: 65, type: 'gauge',    unit: 'bool',  description: '1 if Chrome playbackStats API is available, 0 otherwise' },
+
+        // Buffer pool growth metrics [66-69] (main thread)
+        bufferPoolTotalCapacity:      { offset: 66, type: 'gauge',    unit: 'bytes', description: 'Buffer pool committed capacity (grows on demand)' },
+        bufferPoolMaxCapacity:        { offset: 67, type: 'gauge',    unit: 'bytes', description: 'Buffer pool hard ceiling' },
+        bufferPoolGrowthCount:        { offset: 68, type: 'counter',  unit: 'count', description: 'Number of buffer pool growth events' },
+        bufferPoolPoolCount:          { offset: 69, type: 'gauge',    unit: 'count', description: 'Number of buffer pool segments' },
       },
 
       layout: {
@@ -514,6 +520,16 @@ export class SuperSonic {
     validateNumber('verbosity', opts.verbosity, { min: 0, max: 4 });
   }
 
+  /** Build memory config, preserving computed getters after user overrides */
+  #buildMemoryConfig(overrides) {
+    const mem = overrides ? { ...MemoryLayout, ...overrides } : { ...MemoryLayout };
+    // Re-derive computed values since spread loses getters
+    mem.totalMemory = mem.bufferPoolOffset + mem.bufferPoolSize;
+    mem.maxTotalMemory = mem.bufferPoolOffset + mem.maxBufferPoolSize;
+    mem.wasmHeapSize = mem.bufferPoolOffset - mem.ringBufferReserved;
+    return mem;
+  }
+
   constructor(options = {}) {
     this.#initialized = false;
     this.#initializing = false;
@@ -576,7 +592,7 @@ export class SuperSonic {
         sampleRate: 48000,
         ...options.audioContextOptions,
       },
-      memory: options.memory ? { ...MemoryLayout, ...options.memory } : MemoryLayout,
+      memory: this.#buildMemoryConfig(options.memory),
       worldOptions: worldOptions,
       preschedulerCapacity: options.preschedulerCapacity || 65536,
       bypassLookaheadMs: options.bypassLookaheadMs ?? 500,
@@ -590,7 +606,14 @@ export class SuperSonic {
       debugScsynth: options.debugScsynth ?? false,
       debugOscIn: options.debugOscIn ?? false,
       debugOscOut: options.debugOscOut ?? false,
+      bufferGrowIncrement: options.bufferGrowIncrement ?? (32 * 1024 * 1024),
     };
+
+    // Compute effective max buffer memory once (used by memory init, buffer manager, PM mode).
+    // Fallback: user option → memory layout default → initial pool size (no growth).
+    this.#config.effectiveMaxBufferMemory = options.maxBufferMemory
+        || this.#config.memory.maxBufferPoolSize
+        || this.#config.memory.bufferPoolSize;
 
     this.#sampleBaseURL = options.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null);
     this.#synthdefBaseURL = options.synthdefBaseURL || (baseURL ? `${baseURL}synthdefs/` : null);
@@ -1605,10 +1628,15 @@ export class SuperSonic {
     const mode = this.#config.mode;
 
     if (mode === 'sab') {
-      const totalPages = Math.ceil(memConfig.totalMemory / 65536);
+      // Initial pages must be at least the compile-time minimum (WASM binary constraint).
+      // User overrides that increase bufferPoolSize will increase initial; decreases are clamped.
+      const minPages = MemoryLayout.totalPages;
+      const totalPages = Math.max(Math.ceil(memConfig.totalMemory / 65536), minPages);
+      // For shared WASM memory, maximum must match the compile-time cap.
+      const maxPages = Math.ceil(memConfig.maxTotalMemory / 65536);
       this.#wasmMemory = new WebAssembly.Memory({
         initial: totalPages,
-        maximum: totalPages,
+        maximum: maxPages,
         shared: true,
       });
     } else {
@@ -1660,10 +1688,19 @@ export class SuperSonic {
       bufferPoolConfig: {
         start: this.#config.memory.bufferPoolOffset,
         size: this.#config.memory.bufferPoolSize,
+        maxSize: this.#config.effectiveMaxBufferMemory,
       },
       sampleBaseURL: this.#sampleBaseURL,
       maxBuffers: this.#config.worldOptions.numBuffers,
       assetLoader: this.#assetLoader,
+      wasmMemory: this.#wasmMemory,
+      maxBufferMemory: this.#config.effectiveMaxBufferMemory,
+      bufferGrowIncrement: this.#config.bufferGrowIncrement,
+      growFn: this.#config.mode === 'postMessage' ? (pages) => this.#growWorkletMemory(pages) : null,
+      onBufferPoolGrowth: (info) => {
+        if (__DEV__) console.log(`[Dbg-SuperSonic] Buffer pool grew: pool #${info.poolIndex}, +${(info.newBytes / (1024 * 1024)).toFixed(0)}MB, total ${(info.totalCapacity / (1024 * 1024)).toFixed(0)}MB`);
+        this.#eventEmitter.emit('buffer:pool:grown', info);
+      },
     });
   }
 
@@ -1736,7 +1773,9 @@ export class SuperSonic {
     if (mode === 'sab') {
       loadWasmMsg.wasmMemory = this.#wasmMemory;
     } else {
-      loadWasmMsg.memoryPages = this.#config.memoryPages || 1280;
+      const minPages = MemoryLayout.totalPages;
+      loadWasmMsg.memoryPages = Math.max(Math.ceil(this.#config.memory.totalMemory / 65536), minPages);
+      loadWasmMsg.maxMemoryPages = Math.ceil(this.#config.memory.maxTotalMemory / 65536);
     }
 
     this.#workletNode.port.postMessage(loadWasmMsg);
@@ -2044,6 +2083,21 @@ export class SuperSonic {
     });
   }
 
+  /** Ask the worklet to grow its WASM memory (postMessage mode only) */
+  #growWorkletMemory(pages) {
+    return new Promise((resolve) => {
+      const growId = crypto.randomUUID();
+      const handler = (event) => {
+        if (event.data.type === 'memoryGrown' && event.data.growId === growId) {
+          this.#workletNode.port.removeEventListener('message', handler);
+          resolve(event.data.success);
+        }
+      };
+      this.#workletNode.port.addEventListener('message', handler);
+      this.#workletNode.port.postMessage({ type: 'growMemory', growId, pages });
+    });
+  }
+
   #setupMessageHandlers() {
     this.#workletNode.port.addEventListener('message', (event) => {
       const { data } = event;
@@ -2097,6 +2151,7 @@ export class SuperSonic {
       clockOffsetMs: this.#ntpTiming?.getClockOffset() ?? 0,
       audioContextState: this.#audioContext?.state || "unknown",
       bufferPoolStats: this.#bufferManager?.getStats(),
+      bufferPoolGrowthStats: this.#bufferManager?.getGrowthStats(),
       loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,
       preschedulerCapacity: this.#config.preschedulerCapacity,
       audioHealthPct: this.#audioHealthMonitor?.update() ?? 100,

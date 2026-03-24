@@ -239,6 +239,12 @@ export class MetricsReader {
       metrics.bufferPoolAvailableBytes = context.bufferPoolStats.available;
       metrics.bufferPoolAllocations = context.bufferPoolStats.used.count;
     }
+    if (context.bufferPoolGrowthStats) {
+      metrics.bufferPoolTotalCapacity = context.bufferPoolGrowthStats.totalCapacity;
+      metrics.bufferPoolMaxCapacity = context.bufferPoolGrowthStats.maxCapacity;
+      metrics.bufferPoolGrowthCount = context.bufferPoolGrowthStats.growthCount;
+      metrics.bufferPoolPoolCount = context.bufferPoolGrowthStats.poolCount;
+    }
     if (context.loadedSynthDefsCount !== undefined) metrics.loadedSynthDefs = context.loadedSynthDefsCount;
     if (context.preschedulerCapacity !== undefined) metrics.preschedulerCapacity = context.preschedulerCapacity;
 
@@ -352,6 +358,14 @@ export class MetricsReader {
       arr[MetricsOffsets.CTX_TOTAL_FRAMES_DURATION_MS] = Math.round((context.playbackStats.totalFramesDuration ?? 0) * 1000);
     }
     arr[MetricsOffsets.CTX_AUDIO_HEALTH_PCT] = context.audioHealthPct ?? 100;
+
+    // Buffer pool growth metrics [66-69]
+    if (context.bufferPoolGrowthStats) {
+      arr[MetricsOffsets.CTX_BUFFER_POOL_TOTAL_CAPACITY] = context.bufferPoolGrowthStats.totalCapacity ?? 0;
+      arr[MetricsOffsets.CTX_BUFFER_POOL_MAX_CAPACITY] = context.bufferPoolGrowthStats.maxCapacity ?? 0;
+      arr[MetricsOffsets.CTX_BUFFER_POOL_GROWTH_COUNT] = context.bufferPoolGrowthStats.growthCount ?? 0;
+      arr[MetricsOffsets.CTX_BUFFER_POOL_POOL_COUNT] = context.bufferPoolGrowthStats.poolCount ?? 0;
+    }
   }
 
   /**

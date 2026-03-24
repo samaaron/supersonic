@@ -1,22 +1,19 @@
 /*
-    SuperSonic Memory Layout (COMPILE-TIME Configuration)
+    SuperSonic Memory Layout
 
-    This file defines the WebAssembly memory layout that is fixed at build time.
+    Defines the WASM memory regions. The initial committed memory is small
+    (heap + ring buffers + default buffer pool). The buffer pool grows on
+    demand up to maxBufferPoolSize by extending WASM memory.
 
-    IMPORTANT: Changing these values requires a rebuild:
-        1. Edit this file
-        2. Run: scripts/build-web.sh
-        3. Restart your application
-
-    The memory layout cannot be changed at runtime - it's baked into the WASM binary
-    and the SharedArrayBuffer created at initialisation.
+    Both bufferPoolSize and maxBufferPoolSize can be overridden at runtime
+    via SuperSonic constructor options:
+      memory: { bufferPoolSize: 32 * 1024 * 1024 }  // 32MB initial pool
+      maxBufferMemory: 128 * 1024 * 1024             // 128MB ceiling
 
     Memory Layout:
       0-16MB:   WASM Heap (scsynth C++ allocations)
-      16-17MB:  Ring Buffers (OSC communication, 1MB)
-      17-80MB:  Buffer Pool (audio sample storage)
-
-    Total: 80MB (1280 WebAssembly pages x 64KB)
+      16-19MB:  Ring Buffers (OSC, metrics, node tree, audio capture)
+      19MB+:    Buffer Pool (audio samples, grows on demand)
 */
 
 /**
@@ -28,12 +25,13 @@
 export const MemoryLayout = {
     /**
      * Total WebAssembly memory in pages (1 page = 64KB)
-     * Current: 1280 pages = 80MB
+     * Current: 368 pages = 23MB (19MB heap/ring + 4MB default pool)
      *
-     * This value is used by build.sh to set -sINITIAL_MEMORY
-     * Must match: totalPages * 65536 = bufferPoolOffset + bufferPoolSize
+     * This value is used by build.sh to set -sINITIAL_MEMORY.
+     * Must match: totalPages * 65536 = bufferPoolOffset + bufferPoolSize.
+     * Can be overridden at runtime — buffer pool grows on demand.
      */
-    totalPages: 1280,
+    totalPages: 368,
 
     /**
      * WASM heap size (implicit, first section of memory)
@@ -63,18 +61,38 @@ export const MemoryLayout = {
     bufferPoolOffset: 19 * 1024 * 1024,  // 19922944 bytes
 
     /**
-     * Buffer pool size in bytes
-     * Used for audio sample storage (loaded files + allocated buffers)
-     * Current: 61MB (enough for ~3.4 minutes of stereo at 48kHz uncompressed)
+     * Buffer pool size in bytes (initial committed allocation)
+     * Audio samples are allocated from this pool. When exhausted, the pool
+     * grows automatically up to maxBufferPoolSize.
+     * Default: 4MB. Override at runtime: memory: { bufferPoolSize: N }
      */
-    bufferPoolSize: 61 * 1024 * 1024,  // 63963136 bytes
+    bufferPoolSize: 4 * 1024 * 1024,  // 4194304 bytes
+
+    /**
+     * Maximum buffer pool size in bytes (hard ceiling for growth)
+     * The pool starts at bufferPoolSize and can grow on demand up to this limit.
+     * WASM memory is reserved (virtual address space) up to bufferPoolOffset + maxBufferPoolSize
+     * but only committed as needed.
+     * Current: 256MB max (overridable at runtime via maxBufferMemory option,
+     * but cannot exceed this build-time cap)
+     */
+    maxBufferPoolSize: 256 * 1024 * 1024,  // 268435456 bytes
 
     /**
      * Total memory calculation (should equal totalPages * 65536)
-     * wasmHeap (16MB) + ringReserve (3MB) + bufferPool (61MB) = 80MB
+     * wasmHeap (16MB) + ringReserve (3MB) + bufferPool (4MB) = 23MB
      */
     get totalMemory() {
         return this.bufferPoolOffset + this.bufferPoolSize;
+    },
+
+    /**
+     * Maximum total memory (bufferPoolOffset + maxBufferPoolSize)
+     * Used by build.sh for -sMAXIMUM_MEMORY flag.
+     * Must be a multiple of 65536 (WebAssembly page size).
+     */
+    get maxTotalMemory() {
+        return this.bufferPoolOffset + this.maxBufferPoolSize;
     },
 
     /**

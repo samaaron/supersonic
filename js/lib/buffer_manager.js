@@ -15,10 +15,8 @@
  * - 'postMessage': Buffer loading via worklet postMessage transfers
  */
 
-import { MemPool } from '@thi.ng/malloc';
+import { GrowableBufferPool } from './growable_buffer_pool.js';
 import { isAiff, aiffToWav } from './aiff_converter.js';
-
-const BUFFER_POOL_ALIGNMENT = 8;  // Float64 alignment
 
 export class BufferManager {
     // Private configuration
@@ -29,9 +27,8 @@ export class BufferManager {
     // Private implementation
     #audioContext;
     #sharedBuffer;
+    #wasmMemory;
     #bufferPool;
-    #bufferPoolSize;
-    #bufferPoolStart;
     #allocatedBuffers;
     #pendingBufferOps;
     #bufferLocks;
@@ -48,7 +45,12 @@ export class BufferManager {
             sampleBaseURL,
             maxBuffers = 1024,
             assetLoader = null,
-            workletPort = null
+            workletPort = null,
+            wasmMemory = null,
+            maxBufferMemory = null,
+            bufferGrowIncrement = 32 * 1024 * 1024,
+            onBufferPoolGrowth = null,
+            growFn = null,
         } = options;
 
         this.#mode = mode;
@@ -88,33 +90,28 @@ export class BufferManager {
 
         this.#audioContext = audioContext;
         this.#sharedBuffer = sharedBuffer;
+        this.#wasmMemory = wasmMemory;
         this.#sampleBaseURL = sampleBaseURL;
         this.#assetLoader = assetLoader;
         this.#workletPort = workletPort;
 
-        if (mode === 'sab') {
-            // Create and own buffer pool (SAB mode only)
-            this.#bufferPool = new MemPool({
-                buf: sharedBuffer,
-                start: bufferPoolConfig.start,
-                size: bufferPoolConfig.size,
-                align: BUFFER_POOL_ALIGNMENT
-            });
-            this.#bufferPoolSize = bufferPoolConfig.size;
-            this.#bufferPoolStart = bufferPoolConfig.start;
-        } else {
-            // postMessage mode: create a local ArrayBuffer for MemPool bookkeeping
-            // The actual data lives in the worklet's WASM memory, but we track allocations here
-            const localBuffer = new ArrayBuffer(bufferPoolConfig.start + bufferPoolConfig.size);
-            this.#bufferPool = new MemPool({
-                buf: localBuffer,
-                start: bufferPoolConfig.start,
-                size: bufferPoolConfig.size,
-                align: BUFFER_POOL_ALIGNMENT
-            });
-            this.#bufferPoolSize = bufferPoolConfig.size;
-            this.#bufferPoolStart = bufferPoolConfig.start;
-        }
+        // Determine max pool size (user config → memory layout default → initial size)
+        const effectiveMaxSize = maxBufferMemory || bufferPoolConfig.maxSize || bufferPoolConfig.size;
+
+        const buf = (mode === 'sab')
+            ? sharedBuffer
+            : new ArrayBuffer(bufferPoolConfig.start + bufferPoolConfig.size);
+
+        this.#bufferPool = new GrowableBufferPool({
+            buf,
+            start: bufferPoolConfig.start,
+            size: bufferPoolConfig.size,
+            wasmMemory: (mode === 'sab') ? wasmMemory : null,
+            maxSize: effectiveMaxSize,
+            growIncrement: bufferGrowIncrement,
+            growFn: (mode === 'postMessage') ? growFn : null,
+            onGrowth: onBufferPoolGrowth,
+        });
 
         // Create and own buffer state
         this.#allocatedBuffers = new Map();  // bufnum -> { ptr, size, pendingToken, ... }
@@ -200,7 +197,7 @@ export class BufferManager {
      * @returns {Promise<number>} pointer
      */
     async #allocAndWrite(interleaved) {
-        const ptr = this.#malloc(interleaved.length);
+        const ptr = await this.#malloc(interleaved.length);
         await this.#writeBufferData(ptr, interleaved);
         return ptr;
     }
@@ -441,18 +438,30 @@ export class BufferManager {
         return requestedChannels;
     }
 
-    #malloc(totalSamples) {
+    /** Try malloc, grow if needed, return pointer or 0 */
+    async #mallocWithGrow(sizeBytes) {
+        let ptr = this.#bufferPool.malloc(sizeBytes);
+        if (ptr === 0 && this.#bufferPool.canGrow()) {
+            if (await this.#bufferPool.grow(sizeBytes)) {
+                ptr = this.#bufferPool.malloc(sizeBytes);
+            }
+        }
+        return ptr;
+    }
+
+    async #malloc(totalSamples) {
         const bytesNeeded = totalSamples * 4;
-        const ptr = this.#bufferPool.malloc(bytesNeeded);
+        const ptr = await this.#mallocWithGrow(bytesNeeded);
 
         if (ptr === 0) {
             const stats = this.#bufferPool.stats();
             const availableMB = ((stats.available || 0) / (1024 * 1024)).toFixed(2);
             const totalMB = ((stats.total || 0) / (1024 * 1024)).toFixed(2);
+            const maxMB = ((this.#bufferPool.maxCapacity || 0) / (1024 * 1024)).toFixed(2);
             const requestedMB = (bytesNeeded / (1024 * 1024)).toFixed(2);
             throw new Error(
                 `Buffer pool allocation failed: requested ${requestedMB}MB, ` +
-                `available ${availableMB}MB of ${totalMB}MB total`
+                `available ${availableMB}MB of ${totalMB}MB total (max ${maxMB}MB)`
             );
         }
 
@@ -466,8 +475,9 @@ export class BufferManager {
      */
     async #writeBufferData(ptr, data) {
         if (this.#mode === 'sab') {
-            // SAB mode: direct write to SharedArrayBuffer
-            const heap = new Float32Array(this.#sharedBuffer, ptr, data.length);
+            // SAB mode: direct write — use wasmMemory.buffer (may have grown since init)
+            const buf = this.#wasmMemory?.buffer || this.#sharedBuffer;
+            const heap = new Float32Array(buf, ptr, data.length);
             heap.set(data);
         } else {
             // postMessage mode: send data to worklet for copying to WASM memory
@@ -692,24 +702,10 @@ export class BufferManager {
     /**
      * Allocate raw buffer memory
      * @param {number} numSamples - Number of Float32 samples
-     * @returns {number} Byte offset, or 0 if failed
+     * @returns {Promise<number>} Byte offset, or 0 if failed
      */
-    allocate(numSamples) {
-        const sizeBytes = numSamples * 4;
-        const addr = this.#bufferPool.malloc(sizeBytes);
-
-        if (addr === 0) {
-            const stats = this.#bufferPool.stats();
-            const availableMB = ((stats.available || 0) / (1024 * 1024)).toFixed(2);
-            const totalMB = ((stats.total || 0) / (1024 * 1024)).toFixed(2);
-            const requestedMB = (sizeBytes / (1024 * 1024)).toFixed(2);
-            console.error(
-                `[BufferManager] Allocation failed: requested ${requestedMB}MB, ` +
-                `available ${availableMB}MB of ${totalMB}MB total`
-            );
-        }
-
-        return addr;
+    async allocate(numSamples) {
+        return this.#mallocWithGrow(numSamples * 4);
     }
 
     /**
@@ -728,7 +724,8 @@ export class BufferManager {
      * @returns {Float32Array} Typed array view
      */
     getView(addr, numSamples) {
-        return new Float32Array(this.#sharedBuffer, addr, numSamples);
+        const buf = this.#wasmMemory?.buffer || this.#sharedBuffer;
+        return new Float32Array(buf, addr, numSamples);
     }
 
     /**
@@ -740,6 +737,22 @@ export class BufferManager {
             return { total: 0, available: 0, used: 0, allocations: 0 };
         }
         return this.#bufferPool.stats();
+    }
+
+    /**
+     * Get buffer pool growth statistics
+     * @returns {Object} Growth-specific stats
+     */
+    getGrowthStats() {
+        if (!this.#bufferPool) {
+            return { totalCapacity: 0, maxCapacity: 0, growthCount: 0, poolCount: 0 };
+        }
+        return {
+            totalCapacity: this.#bufferPool.totalCapacity,
+            maxCapacity: this.#bufferPool.maxCapacity,
+            growthCount: this.#bufferPool.growthCount,
+            poolCount: this.#bufferPool.poolCount,
+        };
     }
 
     /**
@@ -818,7 +831,7 @@ export class BufferManager {
             pending: pendingCount,
             bytesActive,
             pool: {
-                total: this.#bufferPoolSize,  // Use configured size, not stats().total (which returns full buffer size)
+                total: this.#bufferPool.totalCapacity,
                 available: poolStats.available || 0,
                 freeBytes: poolStats.free?.size || 0,
                 freeBlocks: poolStats.free?.count || 0,

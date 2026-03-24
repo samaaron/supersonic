@@ -1,9 +1,12 @@
 /*
- * supersonic_heap.cpp — Native pre-allocated heap using AllocPool
+ * supersonic_heap.cpp — Native growable heap using AllocPool
  *
- * Creates a single fixed-size AllocPool from a system-malloc'd block at init
- * time. All subsequent allocations via supersonic_heap_alloc/free use this pool
- * instead of system malloc, making them RT-safe.
+ * Creates an AllocPool from a system-malloc'd block at init time. When the
+ * initial block is exhausted, AllocPool automatically requests more memory
+ * via the heap_new_area callback (growth increments of HEAP_GROWTH_SIZE).
+ *
+ * All allocations via supersonic_heap_alloc/free use this pool instead of
+ * system malloc, making them RT-safe once allocated.
  *
  * Thread safety: a std::atomic_flag spinlock protects AllocPool operations.
  * Contention is minimal — only buffer commands (/b_alloc, /b_allocRead) and
@@ -15,26 +18,59 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstdio>
+#include <vector>
+
+// Growth increment when the pool is exhausted (16MB)
+static constexpr size_t HEAP_GROWTH_SIZE = 16 * 1024 * 1024;
 
 static AllocPool* g_heap_pool = nullptr;
 static void*      g_heap_backing = nullptr;
 static std::atomic_flag g_heap_lock = ATOMIC_FLAG_INIT;
 
+// Track dynamically allocated growth areas for cleanup
+static std::vector<void*> g_extra_areas;
+static size_t g_initial_size = 0;
+static size_t g_total_allocated = 0;
+static size_t g_growth_count = 0;
+
 // AllocPool callbacks — NewAreaFunc / FreeAreaFunc
-// The pool is fixed-size (areaMoreSize=0), so these are only called once at init
-// and once at destroy. The NewAreaFunc receives the backing block we already allocated.
+// First call returns the pre-allocated backing block. Subsequent calls (when
+// areaMoreSize > 0 and the pool is exhausted) malloc new areas on demand.
 
 static void* g_pending_area = nullptr;
 
 static void* heap_new_area(size_t size) {
-    // Return the pre-allocated backing block (only called once during AllocPool init)
-    void* ptr = g_pending_area;
-    g_pending_area = nullptr;
+    if (g_pending_area) {
+        // Initial allocation — return the pre-allocated backing block
+        void* ptr = g_pending_area;
+        g_pending_area = nullptr;
+        return ptr;
+    }
+
+    // Growth allocation — malloc a new area
+    void* ptr = std::malloc(size);
+    if (ptr) {
+        g_extra_areas.push_back(ptr);
+        g_total_allocated += size;
+        g_growth_count++;
+    }
     return ptr;
 }
 
 static void heap_free_area(void* ptr) {
-    // No-op — we free the backing block in supersonic_heap_destroy()
+    // AllocPool calls this when an entire area becomes empty.
+    // Don't free the initial backing block (freed in supersonic_heap_destroy).
+    if (ptr == g_heap_backing)
+        return;
+
+    // Free growth areas and remove from tracking
+    for (auto it = g_extra_areas.begin(); it != g_extra_areas.end(); ++it) {
+        if (*it == ptr) {
+            std::free(ptr);
+            g_extra_areas.erase(it);
+            return;
+        }
+    }
 }
 
 void supersonic_heap_init(size_t bytes) {
@@ -54,11 +90,15 @@ void supersonic_heap_init(size_t bytes) {
         return;
     }
 
+    g_initial_size = total;
+    g_total_allocated = total;
+    g_growth_count = 0;
+
     // AllocPool::NewArea will call heap_new_area, which returns this block
     g_pending_area = g_heap_backing;
 
-    // areaMoreSize=0 means fixed-size, non-growable pool
-    g_heap_pool = new AllocPool(heap_new_area, heap_free_area, bytes, 0);
+    // areaMoreSize > 0 enables automatic growth when the pool is exhausted
+    g_heap_pool = new AllocPool(heap_new_area, heap_free_area, bytes, HEAP_GROWTH_SIZE);
 }
 
 void* supersonic_heap_alloc(size_t bytes) {
@@ -95,8 +135,24 @@ void supersonic_heap_destroy() {
         delete g_heap_pool;
         g_heap_pool = nullptr;
     }
+    // Free growth areas
+    for (void* area : g_extra_areas) {
+        std::free(area);
+    }
+    g_extra_areas.clear();
+    // Free initial backing block
     if (g_heap_backing) {
         std::free(g_heap_backing);
         g_heap_backing = nullptr;
     }
+    g_total_allocated = 0;
+    g_growth_count = 0;
+}
+
+size_t supersonic_heap_total_allocated() {
+    return g_total_allocated;
+}
+
+size_t supersonic_heap_growth_count() {
+    return g_growth_count;
 }

@@ -144,5 +144,13 @@ export const CTX_AUDIO_HEALTH_PCT = 63;      // Cross-browser: audio health perc
 export const CTX_TOTAL_FRAMES_DURATION_MS = 64; // Chrome only: playbackStats.totalFramesDuration * 1000 (ms int)
 export const CTX_HAS_PLAYBACK_STATS = 65;    // 1 if Chrome playbackStats available, 0 otherwise
 
-// Merged array size (slots 0-45 from SAB/snapshot, 46-58 context, 59-65 audio diagnostics)
-export const MERGED_ARRAY_SIZE = 66;
+// =============================================================================
+// Buffer pool growth metrics [66-69] (written by main thread into merged array only)
+// =============================================================================
+export const CTX_BUFFER_POOL_TOTAL_CAPACITY = 66;  // Current committed capacity across all pools (bytes)
+export const CTX_BUFFER_POOL_MAX_CAPACITY = 67;    // Hard ceiling from maxBufferMemory config (bytes)
+export const CTX_BUFFER_POOL_GROWTH_COUNT = 68;    // Number of times the pool has grown (counter)
+export const CTX_BUFFER_POOL_POOL_COUNT = 69;      // Number of pool segments (1 = no growth yet)
+
+// Merged array size (slots 0-45 from SAB/snapshot, 46-58 context, 59-65 audio, 66-69 buffer growth)
+export const MERGED_ARRAY_SIZE = 70;

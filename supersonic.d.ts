@@ -262,6 +262,11 @@ export interface SuperSonicOptions {
   /** Line length limits for activity events emitted to listeners. */
   activityEvent?: ActivityLineConfig;
 
+  /** Maximum buffer pool capacity in bytes. Pool grows on demand up to this limit. Default: 256MB. */
+  maxBufferMemory?: number;
+  /** Bytes to grow the buffer pool per growth event. Default: 32MB. */
+  bufferGrowIncrement?: number;
+
   /** Max fetch retries when loading assets. Default: 3. */
   fetchMaxRetries?: number;
   /** Base delay between retries in ms (exponential backoff). Default: 1000. */
@@ -402,6 +407,14 @@ export interface SuperSonicMetrics {
   bufferPoolAvailableBytes: number;
   /** Total buffer pool allocations. */
   bufferPoolAllocations: number;
+  /** Buffer pool committed capacity in bytes (grows on demand). */
+  bufferPoolTotalCapacity: number;
+  /** Buffer pool hard ceiling in bytes. */
+  bufferPoolMaxCapacity: number;
+  /** Number of buffer pool growth events. */
+  bufferPoolGrowthCount: number;
+  /** Number of buffer pool segments (1 = no growth yet). */
+  bufferPoolPoolCount: number;
   /** Number of loaded synthdefs. */
   loadedSynthDefs: number;
   /** Maximum scsynth scheduler queue size (compile-time constant). */
@@ -813,6 +826,9 @@ export interface SuperSonicEventMap {
 
   /** An asset finished loading. Size is in bytes. */
   'loading:complete': (data: { type: string; name: string; size: number }) => void;
+
+  /** Buffer pool grew on demand. Fired when the initial pool was exhausted and a new segment was added. */
+  'buffer:pool:grown': (data: { poolIndex: number; newBytes: number; totalCapacity: number }) => void;
 }
 
 /** Union of all event names. */

@@ -1016,9 +1016,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         // Note: WASM was compiled with --shared-memory, so we must use shared: true
                         // The memory just isn't shared with the main thread in this mode
                         const memoryPages = data.memoryPages || 1280;  // 80MB default
+                        const maxMemoryPages = data.maxMemoryPages || memoryPages;
                         memory = new WebAssembly.Memory({
                             initial: memoryPages,
-                            maximum: memoryPages,
+                            maximum: maxMemoryPages,
                             shared: true
                         });
                     }
@@ -1050,7 +1051,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                             emscripten_check_blocking_allowed: () => {},
                             _emscripten_thread_cleanup: () => {},
                             emscripten_num_logical_cores: () => 1,  // Report 1 core
-                            _emscripten_notify_mailbox_postmessage: () => {}
+                            _emscripten_notify_mailbox_postmessage: () => {},
+                            emscripten_notify_memory_growth: () => {}  // Called on memory.grow() — no-op (we manage views ourselves)
                         },
                         wasi_snapshot_preview1: {
                             clock_time_get: (clockid, precision, timestamp_ptr) => {
@@ -1270,6 +1272,35 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                         copyId: data.copyId,
                         success: false,
                         error: copyError.message
+                    });
+                }
+            }
+
+            if (data.type === 'growMemory') {
+                try {
+                    const { growId, pages } = data;
+                    if (!this.wasmMemory) {
+                        throw new Error('WASM memory not initialized');
+                    }
+                    const result = this.wasmMemory.grow(pages);
+                    const success = result !== -1;
+                    if (__DEV__ && success) {
+                        const newSize = this.wasmMemory.buffer.byteLength;
+                        console.log(`[AudioWorklet] Memory grown by ${pages} pages, new size: ${(newSize / (1024 * 1024)).toFixed(0)}MB`);
+                    }
+                    this.port.postMessage({
+                        type: 'memoryGrown',
+                        growId,
+                        success,
+                        newBufferSize: this.wasmMemory.buffer.byteLength,
+                    });
+                } catch (growError) {
+                    console.error('[AudioWorklet] Memory grow failed:', growError);
+                    this.port.postMessage({
+                        type: 'memoryGrown',
+                        growId: data.growId,
+                        success: false,
+                        error: growError.message,
                     });
                 }
             }

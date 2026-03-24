@@ -44,15 +44,22 @@ emcc --version | head -1
 # Build standalone WASM with shared memory import and scsynth
 echo "Compiling C++ to WASM with scsynth..."
 
-# Calculate FIXED_MEMORY from memory_layout.js (ensures build/runtime sync)
-# Memory is fixed (not growable) because we use SharedArrayBuffer for WASM/JS communication
+# Calculate memory from memory_layout.js (ensures build/runtime sync)
+# Initial memory is committed at startup. Maximum memory is the growth ceiling
+# (virtual address space is reserved but not committed until memory.grow() is called).
 echo "Reading memory configuration..."
-FIXED_MEMORY=$(node scripts/get_memory_config.js)
+FIXED_MEMORY=$(node scripts/get_memory_config.js initial)
 if [ $? -ne 0 ]; then
-    echo "Error: Failed to read memory configuration from js/memory_layout.js"
+    echo "Error: Failed to read initial memory configuration from js/memory_layout.js"
     exit 1
 fi
-echo "FIXED_MEMORY: $FIXED_MEMORY bytes ($((FIXED_MEMORY / 1024 / 1024))MB)"
+MAX_MEMORY=$(node scripts/get_memory_config.js max)
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to read max memory configuration from js/memory_layout.js"
+    exit 1
+fi
+echo "INITIAL_MEMORY: $FIXED_MEMORY bytes ($((FIXED_MEMORY / 1024 / 1024))MB)"
+echo "MAXIMUM_MEMORY: $MAX_MEMORY bytes ($((MAX_MEMORY / 1024 / 1024))MB)"
 
 # Scheduler configuration (override with environment variables if needed)
 SCHEDULER_SLOT_SIZE=${SCHEDULER_SLOT_SIZE:-1024}
@@ -84,7 +91,7 @@ SCSYNTH_COMMON_C_SOURCES=$(find "$SRC_DIR/scsynth/common" -name "*.c" 2>/dev/nul
 SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" ! -name "MdaUGens.cpp" 2>/dev/null | tr '\n' ' ')
 
 # Compile audio processor with all scsynth sources and oscpack (standalone WASM for AudioWorklet)
-# Note: Memory is fixed (ALLOW_MEMORY_GROWTH=0) because SharedArrayBuffer cannot be resized
+# Memory can grow on demand from INITIAL_MEMORY up to MAXIMUM_MEMORY (for buffer pool expansion)
 emcc "$SRC_DIR/audio_processor.cpp" \
     "$SRC_DIR/buffer_commands.cpp" \
     "$SRC_DIR/node_tree.cpp" \
@@ -120,8 +127,9 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -sNO_FILESYSTEM=1 \
     -sENVIRONMENT=worker \
     -pthread \
-    -sALLOW_MEMORY_GROWTH=0 \
+    -sALLOW_MEMORY_GROWTH=1 \
     -sINITIAL_MEMORY=$FIXED_MEMORY \
+    -sMAXIMUM_MEMORY=$MAX_MEMORY \
     -sSTACK_SIZE=$WASM_STACK_SIZE \
     -sEXPORTED_FUNCTIONS="['___wasm_call_ctors','_get_ring_buffer_base','_get_buffer_layout','_init_memory','_process_audio','_get_audio_output_bus','_get_audio_buffer_samples','_get_supersonic_version_string','_set_time_offset','_get_time_offset','_worklet_debug','_worklet_debug_va','_get_process_count','_get_messages_processed','_get_messages_dropped','_get_status_flags','_get_uuid_map_count','_get_uuid_map_capacity']" \
     --no-entry \

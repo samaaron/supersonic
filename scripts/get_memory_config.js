@@ -2,11 +2,13 @@
 /**
  * Get memory configuration for build.sh
  *
- * Reads js/memory_layout.js and calculates INITIAL_MEMORY for emscripten.
- * This ensures build-time and runtime memory configs stay synchronized.
+ * Reads js/memory_layout.js and calculates INITIAL_MEMORY and MAXIMUM_MEMORY
+ * for emscripten. This ensures build-time and runtime memory configs stay synchronized.
  *
- * Usage: node scripts/get_memory_config.js
- * Output: Single integer (bytes) suitable for -sINITIAL_MEMORY flag
+ * Usage: node scripts/get_memory_config.js [initial|max]
+ *   no args  → outputs INITIAL_MEMORY (bytes)
+ *   initial  → outputs INITIAL_MEMORY (bytes)
+ *   max      → outputs MAXIMUM_MEMORY (bytes)
  */
 
 import { MemoryLayout } from '../js/memory_layout.js';
@@ -138,8 +140,32 @@ try {
         }
     }
 
-    // Output just the number (for use in build.sh)
-    console.log(totalMemory);
+    // Validate maxBufferPoolSize if present
+    if (typeof memory.maxBufferPoolSize === 'number') {
+        if (memory.maxBufferPoolSize < memory.bufferPoolSize) {
+            console.error(`Error: maxBufferPoolSize (${memory.maxBufferPoolSize}) must be >= bufferPoolSize (${memory.bufferPoolSize})`);
+            process.exit(1);
+        }
+        const maxTotalMemory = memory.maxTotalMemory || (memory.bufferPoolOffset + memory.maxBufferPoolSize);
+        if (maxTotalMemory % 65536 !== 0) {
+            console.error(`Error: maxTotalMemory (${maxTotalMemory}) must be a multiple of 65536 (WebAssembly page size)`);
+            process.exit(1);
+        }
+        if (maxTotalMemory > MAX_MEMORY) {
+            console.error(`Error: maxTotalMemory (${maxTotalMemory}) exceeds maximum (${MAX_MEMORY})`);
+            process.exit(1);
+        }
+    }
+
+    // Output based on argument
+    const arg = process.argv[2];
+    if (arg === 'max') {
+        const maxTotalMemory = memory.maxTotalMemory || totalMemory;
+        console.log(maxTotalMemory);
+    } else {
+        // Default: output initial memory
+        console.log(totalMemory);
+    }
 
 } catch (error) {
     console.error('Error reading memory configuration:', error.message);
