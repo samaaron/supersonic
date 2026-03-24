@@ -365,20 +365,21 @@ const awaitBufferSpace = () => {
 const processRetryQueue = () => {
     if (retryQueue.length === 0) return;
 
-    let i = 0;
-    while (i < retryQueue.length) {
+    let consumed = 0;
+    for (let i = 0; i < retryQueue.length; i++) {
         const item = retryQueue[i];
         const success = dispatchOSCMessage(item.oscData, true, item.sourceId, true);
-
         if (success) {
-            retryQueue.splice(i, 1);
+            consumed++;
             metricsAdd(MetricsOffsets.PRESCHEDULER_RETRIES_SUCCEEDED, 1);
-            metricsStore(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE, retryQueue.length);
-            // Don't increment i — we removed an item
         } else {
             // Buffer still full — stop processing, wait for more space
             break;
         }
+    }
+    if (consumed > 0) {
+        retryQueue.splice(0, consumed);
+        metricsStore(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE, retryQueue.length);
     }
 };
 
