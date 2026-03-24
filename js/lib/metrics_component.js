@@ -39,13 +39,27 @@ function formatSigned(val) {
   return String(val | 0);
 }
 
-function makeFormatter(cell, metricDef) {
+function formatLatencyUs(val) {
+  return (val / 1000).toFixed(1);
+}
+
+function makeFormatter(cell, metricDef, metrics) {
   if (cell.format === 'bytes') return (v) => formatBytes(v);
   if (cell.format === 'headroom') return (v) => formatHeadroom(v);
   if (cell.format === 'signed') return (v) => formatSigned(v);
+  if (cell.format === 'percent') return (v) => String(v);
+  if (cell.format === 'latencyUs') return (v) => formatLatencyUs(v);
   if (cell.format === 'enum' && metricDef?.values) {
     const values = metricDef.values;
     return (v) => formatEnum(v, values);
+  }
+  // Chrome-only formatters: show '-' when playbackStats unavailable
+  const hpsOffset = metrics.hasPlaybackStats?.offset;
+  if (cell.format === 'chromeOnly') {
+    return (v, arr) => (hpsOffset !== undefined && arr && !arr[hpsOffset]) ? '-' : String(v);
+  }
+  if (cell.format === 'chromeLatencyUs') {
+    return (v, arr) => (hpsOffset !== undefined && arr && !arr[hpsOffset]) ? '-' : formatLatencyUs(v);
   }
   return (v) => String(v);
 }
@@ -132,11 +146,15 @@ class SupersonicMetrics extends HTMLElement {
     const rowEl = document.createElement('div');
     rowEl.className = 'ssm-row';
 
-    // Add tooltip from first metric key in the row
-    const firstMetricCell = row.cells?.find(c => c.key);
-    if (firstMetricCell) {
-      const def = metrics[firstMetricCell.key];
-      if (def?.description) rowEl.title = def.description;
+    // Add tooltip: explicit row.tooltip, or fall back to first metric's description
+    if (row.tooltip) {
+      rowEl.title = row.tooltip;
+    } else {
+      const firstMetricCell = row.cells?.find(c => c.key);
+      if (firstMetricCell) {
+        const def = metrics[firstMetricCell.key];
+        if (def?.description) rowEl.title = def.description;
+      }
     }
 
     const labelEl = document.createElement('span');
@@ -173,7 +191,7 @@ class SupersonicMetrics extends HTMLElement {
 
         this.#cells.push({
           offset: def.offset,
-          format: makeFormatter(cell, def),
+          format: makeFormatter(cell, def, metrics),
           el,
           prev: -1, // force first update
         });
@@ -242,7 +260,7 @@ class SupersonicMetrics extends HTMLElement {
       const c = this.#cells[i];
       const v = arr[c.offset];
       if (v !== c.prev) {
-        c.el.textContent = c.format(v);
+        c.el.textContent = c.format(v, arr);
         c.prev = v;
       }
     }

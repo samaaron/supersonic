@@ -88,8 +88,8 @@ test.describe('Schema Validation', () => {
           outOfBounds.push(`Duplicate offset ${def.offset}: ${offsets.get(def.offset)} and ${key}`);
         }
         offsets.set(def.offset, key);
-        if (def.offset < 0 || def.offset >= 64) {
-          outOfBounds.push(`${key}: offset ${def.offset} out of bounds [0, 63]`);
+        if (def.offset < 0 || def.offset >= 66) {
+          outOfBounds.push(`${key}: offset ${def.offset} out of bounds [0, 65]`);
         }
       }
 

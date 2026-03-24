@@ -416,6 +416,18 @@ export interface SuperSonicMetrics {
   debugBufferCapacity: number;
   /** Transport mode as enum index: 0=sab, 1=postMessage. */
   mode: number;
+
+  // Audio diagnostics (main thread only)
+  /** Audio underrun/glitch events (Chrome playbackStats, 0 on other browsers). */
+  glitchCount: number;
+  /** Total silence from audio underruns in ms (Chrome playbackStats, 0 on other browsers). */
+  glitchDurationMs: number;
+  /** Average audio output latency in microseconds (Chrome playbackStats, 0 on other browsers). */
+  averageLatencyUs: number;
+  /** Maximum audio output latency in microseconds (Chrome playbackStats, 0 on other browsers). */
+  maxLatencyUs: number;
+  /** Audio health: fraction of expected audio frames delivered, 0-100 (cross-browser). */
+  audioHealthPct: number;
 }
 
 /** Schema entry describing a single metric field. */
@@ -571,6 +583,7 @@ export interface SuperSonicInfo {
     crossOriginIsolated: boolean;
     atomics: boolean;
     webWorker: boolean;
+    playbackStats: boolean;
   };
   /** scsynth WASM version string, or null if not yet initialised. */
   version: string | null;
@@ -595,6 +608,56 @@ export interface Snapshot {
     totalJSHeapSize: number;
     jsHeapSizeLimit: number;
   } | null;
+}
+
+/**
+ * System performance report returned by {@link SuperSonic.getSystemReport}.
+ *
+ * Includes hardware info, audio configuration, Chrome playbackStats (if available),
+ * a cross-browser audio health percentage, and a human-readable health assessment.
+ * Useful for diagnosing audio crackling on constrained hardware.
+ */
+export interface SystemReport {
+  /** ISO 8601 timestamp when the report was generated. */
+  timestamp: string;
+  /** Hardware and browser info. */
+  system: {
+    userAgent: string;
+    hardwareConcurrency: number | null;
+    deviceMemory: number | null;
+    platform: string;
+  };
+  /** AudioContext configuration and state. */
+  audio: {
+    sampleRate: number;
+    baseLatency: number | null;
+    outputLatency: number | null;
+    state: string;
+    channelCount: number;
+  };
+  /** Chrome playbackStats (null on browsers without support). */
+  playbackStats: {
+    glitchCount: number;
+    glitchDurationS: number;
+    totalDurationS: number;
+    averageLatencyS: number;
+    minimumLatencyS: number;
+    maximumLatencyS: number;
+  } | null;
+  /** Engine configuration. */
+  engine: {
+    mode: TransportMode;
+    version: string | null;
+    bootTimeMs: number | null;
+  };
+  /** Health assessment with issues and human-readable summary. */
+  health: {
+    audioHealthPct: number;
+    issues: Array<{ severity: 'warning' | 'error' | 'critical'; message: string }>;
+    summary: string;
+  };
+  /** Full metrics snapshot at time of report. */
+  metrics: SuperSonicMetrics;
 }
 
 /**
@@ -1789,6 +1852,22 @@ export class SuperSonic {
    * Useful for capturing state for bug reports or debugging timing issues.
    */
   getSnapshot(): Snapshot;
+
+  /**
+   * Get a comprehensive system performance report.
+   *
+   * Includes hardware info, audio configuration, Chrome playbackStats (if available),
+   * a cross-browser audio health percentage, and a human-readable health assessment.
+   * Useful for diagnosing audio crackling on constrained hardware.
+   *
+   * @example
+   * const report = sonic.getSystemReport();
+   * console.log(report.health.summary);
+   * if (report.health.audioHealthPct < 95) {
+   *   console.warn('Audio thread struggling:', report.health.issues);
+   * }
+   */
+  getSystemReport(): SystemReport;
 
   // ──────────────────────────────────────────────────────────────────────────
   // Node Tree

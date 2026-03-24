@@ -287,11 +287,6 @@ export class OSCRewriter {
     return this.#require(args, index, v => v instanceof Uint8Array || v instanceof ArrayBuffer, errorMessage);
   }
 
-  #isNumericArg(arg) {
-    const v = this.#val([arg], 0);
-    return Number.isFinite(v);
-  }
-
   #detachAllocationPromise(promise, context) {
     if (!promise || typeof promise.catch !== "function") {
       return;

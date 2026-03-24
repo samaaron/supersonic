@@ -44,21 +44,6 @@ function calculateDriftMs(expectedContextTime, actualContextTime) {
 }
 
 /**
- * Convert NTP timetag to AudioContext time
- * @param {number} ntpSeconds
- * @param {number} ntpFraction
- * @param {number} ntpStartTime
- * @param {number} driftSeconds
- * @param {number} clockOffsetSeconds
- * @returns {number} Target AudioContext time in seconds
- */
-export function ntpToAudioTime(ntpSeconds, ntpFraction, ntpStartTime, driftSeconds = 0, clockOffsetSeconds = 0) {
-  const totalOffset = ntpStartTime + driftSeconds + clockOffsetSeconds;
-  const ntpTimeS = ntpSeconds + ntpFraction / 0x100000000;
-  return ntpTimeS - totalOffset;
-}
-
-/**
  * Manages NTP timing synchronization between AudioContext and wall clock.
  * Measures drift periodically and applies correction for accurate bundle scheduling.
  */

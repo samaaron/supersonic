@@ -122,7 +122,7 @@ export class MetricsReader {
 
     const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, MetricsOffsets.SAB_METRICS_COUNT);
 
-    // Copy prescheduler metrics (offsets 9-20), excluding BYPASSED (22) and MAX_LATE_MS (23).
+    // Copy prescheduler metrics (offsets 9-21), excluding BYPASSED (22) and MAX_LATE_MS (23).
     // The worklet is source of truth for PRESCHEDULER_BYPASSED.
     const start = MetricsOffsets.PRESCHEDULER_START;
     const count = MetricsOffsets.PRESCHEDULER_COUNT - 2;
@@ -244,16 +244,19 @@ export class MetricsReader {
 
     // Audio diagnostics from merged array context slots
     metrics.audioHealthPct = context.audioHealthPct ?? 100;
+    metrics.hasPlaybackStats = !!context.playbackStats;
     if (context.playbackStats) {
       metrics.glitchCount = context.playbackStats.fallbackFramesEvents ?? 0;
       metrics.glitchDurationMs = Math.round((context.playbackStats.fallbackFramesDuration ?? 0) * 1000);
       metrics.averageLatencyUs = Math.round((context.playbackStats.averageLatency ?? 0) * 1_000_000);
       metrics.maxLatencyUs = Math.round((context.playbackStats.maximumLatency ?? 0) * 1_000_000);
+      metrics.totalFramesDurationMs = Math.round((context.playbackStats.totalFramesDuration ?? 0) * 1000);
     } else {
       metrics.glitchCount = 0;
       metrics.glitchDurationMs = 0;
       metrics.averageLatencyUs = 0;
       metrics.maxLatencyUs = 0;
+      metrics.totalFramesDurationMs = 0;
     }
 
     if (this.#mode === 'postMessage' && context.transportMetrics) {
@@ -338,6 +341,17 @@ export class MetricsReader {
 
     // Mode enum: 0=sab, 1=postMessage
     arr[MetricsOffsets.CTX_MODE] = this.#mode === 'sab' ? 0 : 1;
+
+    // Audio diagnostics [59-66]
+    arr[MetricsOffsets.CTX_HAS_PLAYBACK_STATS] = context.playbackStats ? 1 : 0;
+    if (context.playbackStats) {
+      arr[MetricsOffsets.CTX_GLITCH_COUNT] = context.playbackStats.fallbackFramesEvents ?? 0;
+      arr[MetricsOffsets.CTX_GLITCH_DURATION_MS] = Math.round((context.playbackStats.fallbackFramesDuration ?? 0) * 1000);
+      arr[MetricsOffsets.CTX_AVERAGE_LATENCY_US] = Math.round((context.playbackStats.averageLatency ?? 0) * 1_000_000);
+      arr[MetricsOffsets.CTX_MAX_LATENCY_US] = Math.round((context.playbackStats.maximumLatency ?? 0) * 1_000_000);
+      arr[MetricsOffsets.CTX_TOTAL_FRAMES_DURATION_MS] = Math.round((context.playbackStats.totalFramesDuration ?? 0) * 1000);
+    }
+    arr[MetricsOffsets.CTX_AUDIO_HEALTH_PCT] = context.audioHealthPct ?? 100;
   }
 
   /**

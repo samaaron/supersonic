@@ -133,5 +133,16 @@ export const CTX_OUT_BUFFER_CAPACITY = 56;          // Static from bufferConstan
 export const CTX_DEBUG_BUFFER_CAPACITY = 57;        // Static from bufferConstants
 export const CTX_MODE = 58;                         // Enum: 0=sab, 1=postMessage
 
-// Merged array size (slots 0-45 from SAB/snapshot, 46-58 context, 59-63 reserved)
-export const MERGED_ARRAY_SIZE = 64;
+// =============================================================================
+// Audio diagnostics [59-63] (written by main thread into merged array only)
+// =============================================================================
+export const CTX_GLITCH_COUNT = 59;          // Chrome only: playbackStats.fallbackFramesEvents
+export const CTX_GLITCH_DURATION_MS = 60;    // Chrome only: playbackStats.fallbackFramesDuration * 1000 (ms int)
+export const CTX_AVERAGE_LATENCY_US = 61;    // Chrome only: playbackStats.averageLatency * 1_000_000 (us int)
+export const CTX_MAX_LATENCY_US = 62;        // Chrome only: playbackStats.maximumLatency * 1_000_000 (us int)
+export const CTX_AUDIO_HEALTH_PCT = 63;      // Cross-browser: audio health percentage 0-100
+export const CTX_TOTAL_FRAMES_DURATION_MS = 64; // Chrome only: playbackStats.totalFramesDuration * 1000 (ms int)
+export const CTX_HAS_PLAYBACK_STATS = 65;    // 1 if Chrome playbackStats available, 0 otherwise
+
+// Merged array size (slots 0-45 from SAB/snapshot, 46-58 context, 59-65 audio diagnostics)
+export const MERGED_ARRAY_SIZE = 66;

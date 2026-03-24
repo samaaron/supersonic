@@ -18,6 +18,7 @@ import { extractSynthDefName } from "./lib/synthdef_parser.js";
 import { EventEmitter } from "./lib/event_emitter.js";
 import { MetricsReader } from "./lib/metrics_reader.js";
 import { NTPTiming } from "./lib/ntp_timing.js";
+import { AudioHealthMonitor } from "./lib/audio_health_monitor.js";
 import { AudioCapture } from "./lib/audio_capture.js";
 import { parseNodeTree } from "./lib/node_tree_parser.js";
 import * as oscFast from "./lib/osc_fast.js";
@@ -223,6 +224,15 @@ export class SuperSonic {
         outBufferCapacity:            { offset: 56, type: 'constant', unit: 'bytes', description: 'OUT ring buffer capacity' },
         debugBufferCapacity:          { offset: 57, type: 'constant', unit: 'bytes', description: 'DEBUG ring buffer capacity' },
         mode:                         { offset: 58, type: 'enum',     values: ['sab', 'postMessage'], description: 'Transport mode' },
+
+        // Audio diagnostics [59-66] (main thread, Chrome playbackStats + cross-browser health)
+        glitchCount:                  { offset: 59, type: 'counter',  unit: 'count', description: 'Chrome only: audio underrun/glitch events' },
+        glitchDurationMs:             { offset: 60, type: 'gauge',    unit: 'ms',    description: 'Chrome only: total silence from audio underruns' },
+        averageLatencyUs:             { offset: 61, type: 'gauge',    unit: 'us',    description: 'Chrome only: average audio output latency' },
+        maxLatencyUs:                 { offset: 62, type: 'gauge',    unit: 'us',    description: 'Chrome only: maximum audio output latency' },
+        audioHealthPct:               { offset: 63, type: 'gauge',    unit: '%',     description: 'Cross-browser: fraction of expected audio frames delivered (100% = no issues)' },
+        totalFramesDurationMs:        { offset: 64, type: 'counter',  unit: 'ms',    description: 'Chrome only: total audio rendered duration' },
+        hasPlaybackStats:             { offset: 65, type: 'gauge',    unit: 'bool',  description: '1 if Chrome playbackStats API is available, 0 otherwise' },
       },
 
       layout: {
@@ -257,7 +267,7 @@ export class SuperSonic {
           {
             title: 'Presched Flow',
             rows: [
-              { label: 'pending',    cells: [{ key: 'preschedulerPending' }, { sep: ' | ' }, { key: 'preschedulerPendingPeak', kind: 'muted' }] },
+              { label: 'pending',    tooltip: 'Current pending events | peak pending events', cells: [{ key: 'preschedulerPending' }, { sep: ' | ' }, { key: 'preschedulerPendingPeak', kind: 'muted' }] },
               { label: 'scheduled',  cells: [{ key: 'preschedulerBundlesScheduled' }] },
               { label: 'dispatched', cells: [{ key: 'preschedulerDispatched', kind: 'dim' }] },
               { label: 'min slack',  cells: [{ key: 'preschedulerMinHeadroomMs', kind: 'dim', format: 'headroom' }, { text: ' ms', kind: 'muted' }] },
@@ -266,28 +276,28 @@ export class SuperSonic {
           {
             title: 'Presched Health',
             rows: [
-              { label: 'lates',       cells: [{ key: 'preschedulerLates', kind: 'error' }, { sep: ' (' }, { key: 'preschedulerMaxLateMs', kind: 'dim' }, { text: 'ms max)', kind: 'muted' }] },
+              { label: 'lates',       tooltip: 'Bundles dispatched after their scheduled time (count and max lateness in ms)', cells: [{ key: 'preschedulerLates', kind: 'error' }, { sep: ' (' }, { key: 'preschedulerMaxLateMs', kind: 'dim' }, { text: ' ms max)', kind: 'muted' }] },
               { label: 'cancelled',   cells: [{ key: 'preschedulerEventsCancelled', kind: 'error' }] },
-              { label: 'retried',     cells: [{ key: 'preschedulerMessagesRetried', kind: 'dim' }, { sep: ' | ' }, { key: 'preschedulerRetriesSucceeded', kind: 'green' }, { sep: ' | ' }, { key: 'preschedulerRetriesFailed', kind: 'error' }] },
-              { label: 'retry queue', cells: [{ key: 'preschedulerRetryQueueSize' }, { sep: ' | ' }, { key: 'preschedulerRetryQueuePeak', kind: 'muted' }] },
+              { label: 'retried',     tooltip: 'Messages retried | succeeded | failed', cells: [{ key: 'preschedulerMessagesRetried', kind: 'dim' }, { sep: ' | ' }, { key: 'preschedulerRetriesSucceeded', kind: 'green' }, { sep: ' | ' }, { key: 'preschedulerRetriesFailed', kind: 'error' }] },
+              { label: 'retry queue', tooltip: 'Current retry queue size | peak size', cells: [{ key: 'preschedulerRetryQueueSize' }, { sep: ' | ' }, { key: 'preschedulerRetryQueuePeak', kind: 'muted' }] },
             ]
           },
           {
             title: 'scsynth Scheduler',
             rows: [
-              { label: 'queue',   cells: [{ key: 'scsynthSchedulerDepth' }, { sep: ' | ' }, { key: 'scsynthSchedulerPeakDepth', kind: 'muted' }] },
+              { label: 'queue',   tooltip: 'Current scheduler queue depth | peak depth', cells: [{ key: 'scsynthSchedulerDepth' }, { sep: ' | ' }, { key: 'scsynthSchedulerPeakDepth', kind: 'muted' }] },
               { label: 'dropped', cells: [{ key: 'scsynthSchedulerDropped', kind: 'error' }] },
               { label: 'lates',   cells: [{ key: 'scsynthSchedulerLates', kind: 'error' }] },
-              { label: 'max | last', cells: [{ key: 'scsynthSchedulerMaxLateMs', kind: 'error' }, { sep: ' | ' }, { key: 'scsynthSchedulerLastLateMs', kind: 'dim' }, { text: ' ms', kind: 'muted' }] },
+              { label: 'max | last', tooltip: 'Maximum lateness observed | most recent late magnitude (ms)', cells: [{ key: 'scsynthSchedulerMaxLateMs', kind: 'error' }, { sep: ' | ' }, { key: 'scsynthSchedulerLastLateMs', kind: 'dim' }, { text: ' ms', kind: 'muted' }] },
             ]
           },
           {
             title: 'scsynth',
             rows: [
-              { label: 'processed',   cells: [{ key: 'scsynthMessagesProcessed' }] },
+              { label: 'ticks',       tooltip: 'Audio process() callback count and OSC messages processed', cells: [{ key: 'scsynthProcessCount', kind: 'dim' }, { sep: ' | ' }, { key: 'scsynthMessagesProcessed', kind: 'muted' }, { text: ' msgs', kind: 'muted' }] },
               { label: 'dropped',     cells: [{ key: 'scsynthMessagesDropped', kind: 'error' }] },
-              { label: 'synthdefs',   cells: [{ key: 'loadedSynthDefs' }] },
-              { label: 'clock drift', cells: [{ key: 'driftOffsetMs', format: 'signed' }, { text: 'ms', kind: 'muted' }] },
+              { label: 'drift',       cells: [{ key: 'driftOffsetMs', format: 'signed' }, { text: ' ms', kind: 'muted' }] },
+              { label: 'debug',       tooltip: 'Debug messages from scsynth (count and bytes)', cells: [{ key: 'debugMessagesReceived', kind: 'muted' }, { text: ' (' }, { key: 'debugBytesReceived', kind: 'muted', format: 'bytes' }, { text: ')' }] },
             ]
           },
           {
@@ -301,20 +311,21 @@ export class SuperSonic {
             ]
           },
           {
-            title: 'AudioWorklet',
+            title: 'Buffers & SynthDefs',
             rows: [
-              { label: 'audio',       cells: [{ key: 'audioContextState', kind: 'green', format: 'enum' }] },
-              { label: 'ticks',       cells: [{ key: 'scsynthProcessCount', kind: 'dim' }] },
-              { label: 'WASM errors', cells: [{ key: 'scsynthWasmErrors', kind: 'error' }] },
-              { label: 'debug',       cells: [{ key: 'debugMessagesReceived', kind: 'muted' }, { text: ' (' }, { key: 'debugBytesReceived', kind: 'muted', format: 'bytes' }, { text: ')' }] },
+              { label: 'buf used',  cells: [{ key: 'bufferPoolUsedBytes', format: 'bytes' }] },
+              { label: 'buf free',  cells: [{ key: 'bufferPoolAvailableBytes', kind: 'green', format: 'bytes' }] },
+              { label: 'buf allocs', cells: [{ key: 'bufferPoolAllocations', kind: 'dim' }] },
+              { label: 'synthdefs', cells: [{ key: 'loadedSynthDefs' }] },
             ]
           },
           {
-            title: 'Audio Buffers',
+            title: 'AudioWorklet',
             rows: [
-              { label: 'used',   cells: [{ key: 'bufferPoolUsedBytes', format: 'bytes' }] },
-              { label: 'free',   cells: [{ key: 'bufferPoolAvailableBytes', kind: 'green', format: 'bytes' }] },
-              { label: 'allocs', cells: [{ key: 'bufferPoolAllocations', kind: 'dim' }] },
+              { label: 'health',      tooltip: 'AudioContext state and audio health percentage (fraction of expected frames delivered)', cells: [{ key: 'audioContextState', kind: 'green', format: 'enum' }, { sep: ' | ' }, { key: 'audioHealthPct', kind: 'green', format: 'percent' }, { text: ' %', kind: 'muted' }] },
+              { label: 'glitches',    tooltip: 'Chrome only: audio underrun/glitch events and total silence duration', cells: [{ key: 'glitchCount', kind: 'error', format: 'chromeOnly' }, { sep: ' (' }, { key: 'glitchDurationMs', kind: 'error', format: 'chromeOnly' }, { text: ' ms)', kind: 'muted' }] },
+              { label: 'latency',     tooltip: 'Chrome only: avg | max audio output latency in ms', cells: [{ key: 'averageLatencyUs', kind: 'dim', format: 'chromeLatencyUs' }, { sep: ' | ' }, { key: 'maxLatencyUs', kind: 'dim', format: 'chromeLatencyUs' }, { text: ' ms', kind: 'muted' }] },
+              { label: 'WASM errors', cells: [{ key: 'scsynthWasmErrors', kind: 'error' }] },
             ]
           },
         ]
@@ -395,6 +406,7 @@ export class SuperSonic {
   #metricsReader;
   #ntpTiming;
   #audioCapture;
+  #audioHealthMonitor;
 
   // Main thread OscChannel for sending OSC
   #oscChannel;
@@ -564,7 +576,7 @@ export class SuperSonic {
         sampleRate: 48000,
         ...options.audioContextOptions,
       },
-      memory: MemoryLayout,
+      memory: options.memory ? { ...MemoryLayout, ...options.memory } : MemoryLayout,
       worldOptions: worldOptions,
       preschedulerCapacity: options.preschedulerCapacity || 65536,
       bypassLookaheadMs: options.bypassLookaheadMs ?? 500,
@@ -720,6 +732,104 @@ export class SuperSonic {
       metrics: metricsWithDescriptions,
       nodeTree: this.getRawTree(),
       memory,
+    };
+  }
+
+  /**
+   * Get a comprehensive system performance report.
+   *
+   * Includes hardware info, audio configuration, Chrome playbackStats (if available),
+   * a cross-browser audio health percentage, and a human-readable health assessment.
+   * Useful for diagnosing audio crackling on constrained hardware.
+   * @returns {Object} SystemReport
+   */
+  getSystemReport() {
+    this.#ensureInitialized('get system report');
+
+    const metrics = this.#gatherMetrics();
+    const issues = [];
+
+    // System info
+    const system = {
+      userAgent: navigator.userAgent,
+      hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+      deviceMemory: navigator.deviceMemory ?? null,
+      platform: navigator.platform,
+    };
+
+    // Audio config
+    const audio = {
+      sampleRate: this.#audioContext.sampleRate,
+      baseLatency: this.#audioContext.baseLatency ?? null,
+      outputLatency: this.#audioContext.outputLatency ?? null,
+      state: this.#audioContext.state,
+      channelCount: this.#config.worldOptions.numOutputBusChannels,
+    };
+
+    // Playback stats (Chrome 146+)
+    const pbStats = this.#capabilities.playbackStats ? this.#audioContext.playbackStats : null;
+    const playbackStats = pbStats ? {
+      glitchCount: pbStats.fallbackFramesEvents,
+      glitchDurationS: pbStats.fallbackFramesDuration,
+      totalDurationS: pbStats.totalFramesDuration,
+      averageLatencyS: pbStats.averageLatency,
+      maximumLatencyS: pbStats.maximumLatency,
+    } : null;
+
+    // Health assessment
+    const healthPct = this.#audioHealthMonitor?.getHealth()?.healthPct ?? 100;
+
+    if (healthPct < 95) {
+      issues.push({
+        severity: healthPct < 80 ? 'critical' : 'warning',
+        message: `Audio health at ${healthPct}% — audio thread may be falling behind`,
+      });
+    }
+    if (metrics.scsynthSchedulerLates > 0) {
+      issues.push({
+        severity: 'warning',
+        message: `${metrics.scsynthSchedulerLates} late bundles in scsynth scheduler`,
+      });
+    }
+    if (metrics.scsynthWasmErrors > 0) {
+      issues.push({
+        severity: 'error',
+        message: `${metrics.scsynthWasmErrors} WASM errors detected`,
+      });
+    }
+    if (pbStats?.fallbackFramesEvents > 0) {
+      issues.push({
+        severity: 'warning',
+        message: `${pbStats.fallbackFramesEvents} audio glitch events (${(pbStats.fallbackFramesDuration * 1000).toFixed(1)}ms total silence)`,
+      });
+    }
+    if (metrics.driftOffsetMs !== undefined && Math.abs(metrics.driftOffsetMs) > 10) {
+      issues.push({
+        severity: 'warning',
+        message: `Clock drift: ${metrics.driftOffsetMs}ms between AudioContext and wall clock`,
+      });
+    }
+
+    const summary = issues.length === 0
+      ? `Audio health: ${healthPct}% — no issues detected`
+      : `Audio health: ${healthPct}% — ${issues.length} issue(s): ${issues.map(i => i.message).join('; ')}`;
+
+    return {
+      timestamp: new Date().toISOString(),
+      system,
+      audio,
+      playbackStats,
+      engine: {
+        mode: this.mode,
+        version: this.#version,
+        bootTimeMs: this.bootStats.initDuration,
+      },
+      health: {
+        audioHealthPct: healthPct,
+        issues,
+        summary,
+      },
+      metrics,
     };
   }
 
@@ -897,6 +1007,7 @@ export class SuperSonic {
     this.#initPromise = null;
     this.#oscChannel = null;
     this.#ntpTiming?.reset();
+    this.#audioHealthMonitor?.reset();
   }
 
   async #partialInit() {
@@ -1403,6 +1514,8 @@ export class SuperSonic {
 
     this.#eventEmitter.emit("shutdown");
     this.#ntpTiming?.stopDriftTimer();
+    this.#audioHealthMonitor?.reset();
+    this.#audioHealthMonitor = null;
     this.#syncListeners?.clear();
     this.#syncListeners = null;
 
@@ -1435,6 +1548,7 @@ export class SuperSonic {
     this.#initPromise = null;
     this.#wasmMemory = null;
     this.#ntpTiming?.reset();
+    this.#audioHealthMonitor?.reset();
     this.bootStats = { initStartTime: null, initDuration: null };
   }
 
@@ -1461,6 +1575,7 @@ export class SuperSonic {
       crossOriginIsolated: window.crossOriginIsolated === true,
       atomics: typeof Atomics !== "undefined",
       webWorker: typeof Worker !== "undefined",
+      playbackStats: typeof AudioContext !== "undefined" && 'playbackStats' in AudioContext.prototype,
     };
 
     const mode = this.#config.mode;
@@ -1490,9 +1605,10 @@ export class SuperSonic {
     const mode = this.#config.mode;
 
     if (mode === 'sab') {
+      const totalPages = Math.ceil(memConfig.totalMemory / 65536);
       this.#wasmMemory = new WebAssembly.Memory({
-        initial: memConfig.totalPages,
-        maximum: memConfig.totalPages,
+        initial: totalPages,
+        maximum: totalPages,
         shared: true,
       });
     } else {
@@ -1519,10 +1635,19 @@ export class SuperSonic {
       }
 
       this.#eventEmitter.emit('audiocontext:statechange', { state });
-      if (state === 'suspended') this.#eventEmitter.emit('audiocontext:suspended');
-      else if (state === 'running') this.#eventEmitter.emit('audiocontext:resumed');
-      else if (state === 'interrupted') this.#eventEmitter.emit('audiocontext:interrupted');
+      if (state === 'suspended') {
+        this.#eventEmitter.emit('audiocontext:suspended');
+        this.#audioHealthMonitor?.reset();
+      } else if (state === 'running') {
+        this.#eventEmitter.emit('audiocontext:resumed');
+        this.#audioHealthMonitor?.reset();
+      } else if (state === 'interrupted') {
+        this.#eventEmitter.emit('audiocontext:interrupted');
+        this.#audioHealthMonitor?.reset();
+      }
     });
+
+    this.#audioHealthMonitor = new AudioHealthMonitor({ audioContext: this.#audioContext });
   }
 
   #initializeBufferManager() {
@@ -1974,6 +2099,8 @@ export class SuperSonic {
       bufferPoolStats: this.#bufferManager?.getStats(),
       loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,
       preschedulerCapacity: this.#config.preschedulerCapacity,
+      audioHealthPct: this.#audioHealthMonitor?.update() ?? 100,
+      playbackStats: this.#capabilities.playbackStats ? this.#audioContext?.playbackStats : null,
     };
   }
 

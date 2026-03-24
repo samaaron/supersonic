@@ -8,7 +8,7 @@
 
 * [osc](#osc)
 
-* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [SendOSCOptions](#sendoscoptions) · [Snapshot](#snapshot) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [Tree](#tree) · [TreeNode](#treenode)
+* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [SendOSCOptions](#sendoscoptions) · [Snapshot](#snapshot) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
 
 * **Type Aliases** — [AddAction](#addaction) · [BlockedCommand](#blockedcommand) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscCategory](#osccategory) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
 
@@ -108,6 +108,7 @@ scsynth with low latency inside a web page.
 | [`ringBufferBase`](#ringbufferbase)       | Ring buffer base offset in SharedArrayBuffer.                |
 | [`sharedBuffer`](#sharedbuffer)           | The SharedArrayBuffer (SAB mode) or null (postMessage mode). |
 | [`getLoadedBuffers()`](#getloadedbuffers) | Get info about all loaded audio buffers.                     |
+| [`getSystemReport()`](#getsystemreport)   | Get a comprehensive system performance report.               |
 | [`nextNodeId()`](#nextnodeid)             | Get the next unique node ID.                                 |
 | [`getRawTreeSchema()`](#getrawtreeschema) | Get schema describing the raw flat node tree structure.      |
 | [`getTreeSchema()`](#gettreeschema)       | Get schema describing the hierarchical node tree structure.  |
@@ -635,6 +636,30 @@ Useful for capturing state for bug reports or debugging timing issues.
 ###### Returns
 
 [`Snapshot`](#snapshot)
+
+##### getSystemReport()
+
+> **getSystemReport**(): [`SystemReport`](#systemreport)
+
+Get a comprehensive system performance report.
+
+Includes hardware info, audio configuration, Chrome playbackStats (if available),
+a cross-browser audio health percentage, and a human-readable health assessment.
+Useful for diagnosing audio crackling on constrained hardware.
+
+###### Returns
+
+[`SystemReport`](#systemreport)
+
+###### Example
+
+```ts
+const report = sonic.getSystemReport();
+console.log(report.health.summary);
+if (report.health.audioHealthPct < 95) {
+  console.warn('Audio thread struggling:', report.health.issues);
+}
+```
 
 ##### getTree()
 
@@ -3078,6 +3103,7 @@ Engine info returned by [SuperSonic.getInfo](#getinfo).
 | `capabilities.atomics`                       | `boolean` | -                                                            |
 | `capabilities.audioWorklet`                  | `boolean` | -                                                            |
 | `capabilities.crossOriginIsolated`           | `boolean` | -                                                            |
+| `capabilities.playbackStats`                 | `boolean` | -                                                            |
 | `capabilities.sharedArrayBuffer`             | `boolean` | -                                                            |
 | `capabilities.webWorker`                     | `boolean` | -                                                            |
 | <a id="numbuffers-1"></a> `numBuffers`       | `number`  | Max audio buffers configured.                                |
@@ -3101,6 +3127,8 @@ descriptions, units, and UI layout metadata.
 | Property                                                                 | Type     | Description                                                                                   |
 | ------------------------------------------------------------------------ | -------- | --------------------------------------------------------------------------------------------- |
 | <a id="audiocontextstate"></a> `audioContextState`                       | `number` | AudioContext state as enum index: 0=unknown, 1=running, 2=suspended, 3=closed, 4=interrupted. |
+| <a id="audiohealthpct"></a> `audioHealthPct`                             | `number` | Audio health: fraction of expected audio frames delivered, 0-100 (cross-browser).             |
+| <a id="averagelatencyus"></a> `averageLatencyUs`                         | `number` | Average audio output latency in microseconds (Chrome playbackStats, 0 on other browsers).     |
 | <a id="bufferpoolallocations"></a> `bufferPoolAllocations`               | `number` | Total buffer pool allocations.                                                                |
 | <a id="bufferpoolavailablebytes"></a> `bufferPoolAvailableBytes`         | `number` | Buffer pool bytes available.                                                                  |
 | <a id="bufferpoolusedbytes"></a> `bufferPoolUsedBytes`                   | `number` | Buffer pool bytes currently in use.                                                           |
@@ -3115,10 +3143,13 @@ descriptions, units, and UI layout metadata.
 | <a id="debugbytesreceived"></a> `debugBytesReceived`                     | `number` | Debug bytes received from scsynth.                                                            |
 | <a id="debugmessagesreceived"></a> `debugMessagesReceived`               | `number` | Debug messages received from scsynth.                                                         |
 | <a id="driftoffsetms"></a> `driftOffsetMs`                               | `number` | Clock drift between AudioContext and wall clock (ms, signed).                                 |
+| <a id="glitchcount"></a> `glitchCount`                                   | `number` | Audio underrun/glitch events (Chrome playbackStats, 0 on other browsers).                     |
+| <a id="glitchdurationms"></a> `glitchDurationMs`                         | `number` | Total silence from audio underruns in ms (Chrome playbackStats, 0 on other browsers).         |
 | <a id="inbuffercapacity"></a> `inBufferCapacity`                         | `number` | IN ring buffer capacity (bytes).                                                              |
 | <a id="inbufferpeakbytes"></a> `inBufferPeakBytes`                       | `number` | Peak bytes used in IN ring buffer.                                                            |
 | <a id="inbufferusedbytes"></a> `inBufferUsedBytes`                       | `number` | Bytes used in IN ring buffer (JS → scsynth).                                                  |
 | <a id="loadedsynthdefs-1"></a> `loadedSynthDefs`                         | `number` | Number of loaded synthdefs.                                                                   |
+| <a id="maxlatencyus"></a> `maxLatencyUs`                                 | `number` | Maximum audio output latency in microseconds (Chrome playbackStats, 0 on other browsers).     |
 | <a id="mode-4"></a> `mode`                                               | `number` | Transport mode as enum index: 0=sab, 1=postMessage.                                           |
 | <a id="oscinbytesreceived"></a> `oscInBytesReceived`                     | `number` | Total bytes received from scsynth.                                                            |
 | <a id="oscincorrupted"></a> `oscInCorrupted`                             | `number` | Corrupted messages detected from scsynth.                                                     |
@@ -3159,6 +3190,49 @@ descriptions, units, and UI layout metadata.
 | <a id="scsynthschedulerpeakdepth"></a> `scsynthSchedulerPeakDepth`       | `number` | Peak scsynth scheduler queue depth (high water mark).                                         |
 | <a id="scsynthsequencegaps"></a> `scsynthSequenceGaps`                   | `number` | Messages lost in transit from JS to scsynth.                                                  |
 | <a id="scsynthwasmerrors"></a> `scsynthWasmErrors`                       | `number` | WASM execution errors in audio worklet.                                                       |
+
+### SystemReport
+
+System performance report returned by [SuperSonic.getSystemReport](#getsystemreport).
+
+Includes hardware info, audio configuration, Chrome playbackStats (if available),
+a cross-browser audio health percentage, and a human-readable health assessment.
+Useful for diagnosing audio crackling on constrained hardware.
+
+#### Properties
+
+| Property                                   | Type                                      | Description                                               |
+| ------------------------------------------ | ----------------------------------------- | --------------------------------------------------------- |
+| <a id="audio"></a> `audio`                 | `object`                                  | AudioContext configuration and state.                     |
+| `audio.baseLatency`                        | `number`                                  | -                                                         |
+| `audio.channelCount`                       | `number`                                  | -                                                         |
+| `audio.outputLatency`                      | `number`                                  | -                                                         |
+| `audio.sampleRate`                         | `number`                                  | -                                                         |
+| `audio.state`                              | `string`                                  | -                                                         |
+| <a id="engine"></a> `engine`               | `object`                                  | Engine configuration.                                     |
+| `engine.bootTimeMs`                        | `number`                                  | -                                                         |
+| `engine.mode`                              | [`TransportMode`](#transportmode)         | -                                                         |
+| `engine.version`                           | `string`                                  | -                                                         |
+| <a id="health"></a> `health`               | `object`                                  | Health assessment with issues and human-readable summary. |
+| `health.audioHealthPct`                    | `number`                                  | -                                                         |
+| `health.issues`                            | `object`\[]                               | -                                                         |
+| `health.summary`                           | `string`                                  | -                                                         |
+| <a id="metrics-2"></a> `metrics`           | [`SuperSonicMetrics`](#supersonicmetrics) | Full metrics snapshot at time of report.                  |
+| <a id="playbackstats"></a> `playbackStats` | `object`                                  | Chrome playbackStats (null on browsers without support).  |
+| `playbackStats.averageLatencyS`            | `number`                                  | -                                                         |
+| `playbackStats.glitchCount`                | `number`                                  | -                                                         |
+| `playbackStats.glitchDurationS`            | `number`                                  | -                                                         |
+| `playbackStats.maximumLatencyS`            | `number`                                  | -                                                         |
+| `playbackStats.minimumLatencyS`            | `number`                                  | -                                                         |
+| `playbackStats.totalDurationS`             | `number`                                  | -                                                         |
+| <a id="system"></a> `system`               | `object`                                  | Hardware and browser info.                                |
+| `system.deviceMemory`                      | `number`                                  | -                                                         |
+| `system.hardwareConcurrency`               | `number`                                  | -                                                         |
+| `system.platform`                          | `string`                                  | -                                                         |
+| `system.userAgent`                         | `string`                                  | -                                                         |
+| <a id="timestamp-1"></a> `timestamp`       | `string`                                  | ISO 8601 timestamp when the report was generated.         |
+
+***
 
 ### Tree
 
