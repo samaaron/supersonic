@@ -1,12 +1,62 @@
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 // Copyright (c) 2025 Sam Aaron
 
-import {
-  calculateCurrentNTP,
-  calculateNTPStartTime,
-  calculateDriftMs,
-} from './timing_utils.js';
-import { DRIFT_UPDATE_INTERVAL_MS, INITIAL_DRIFT_DELAY_MS } from '../timing_constants.js';
+// NTP epoch offset: seconds between 1900-01-01 (NTP epoch) and 1970-01-01 (Unix epoch)
+const NTP_EPOCH_OFFSET = 2208988800;
+
+// Drift offset update interval in milliseconds.
+// At 100 ppm crystal drift, this keeps error within ~0.1ms.
+const DRIFT_UPDATE_INTERVAL_MS = 1000;
+
+// Delay before calculating initial drift at boot (ms).
+// Allows enough contextTime to elapse for accurate measurement.
+const INITIAL_DRIFT_DELAY_MS = 500;
+
+/**
+ * Calculate current NTP time from performance timestamp
+ * @param {number} performanceTimeMs - performance.timeOrigin + timestamp.performanceTime
+ * @returns {number} Current NTP time in seconds
+ */
+function calculateCurrentNTP(performanceTimeMs) {
+  return performanceTimeMs / 1000 + NTP_EPOCH_OFFSET;
+}
+
+/**
+ * Calculate NTP time when AudioContext started
+ * @param {number} currentNTP - Current NTP time in seconds
+ * @param {number} contextTime - Current AudioContext.currentTime
+ * @returns {number} NTP time at AudioContext start
+ */
+function calculateNTPStartTime(currentNTP, contextTime) {
+  return currentNTP - contextTime;
+}
+
+/**
+ * Calculate drift between expected and actual AudioContext time
+ * Positive = AudioContext running slow, Negative = running fast
+ * @param {number} expectedContextTime
+ * @param {number} actualContextTime
+ * @returns {number} Drift in milliseconds (rounded to integer)
+ */
+function calculateDriftMs(expectedContextTime, actualContextTime) {
+  const driftSeconds = expectedContextTime - actualContextTime;
+  return Math.round(driftSeconds * 1000);
+}
+
+/**
+ * Convert NTP timetag to AudioContext time
+ * @param {number} ntpSeconds
+ * @param {number} ntpFraction
+ * @param {number} ntpStartTime
+ * @param {number} driftSeconds
+ * @param {number} clockOffsetSeconds
+ * @returns {number} Target AudioContext time in seconds
+ */
+export function ntpToAudioTime(ntpSeconds, ntpFraction, ntpStartTime, driftSeconds = 0, clockOffsetSeconds = 0) {
+  const totalOffset = ntpStartTime + driftSeconds + clockOffsetSeconds;
+  const ntpTimeS = ntpSeconds + ntpFraction / 0x100000000;
+  return ntpTimeS - totalOffset;
+}
 
 /**
  * Manages NTP timing synchronization between AudioContext and wall clock.

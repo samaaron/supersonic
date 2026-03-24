@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 // Copyright (c) 2025 Sam Aaron
 
-import { writeToRingBuffer } from './ring_buffer_writer.js';
+import { writeToRingBuffer } from './ring_buffer_core.js';
 import * as MetricsOffsets from './metrics_offsets.js';
 import { calculateInControlIndices } from './control_offsets.js';
 import {

@@ -114,14 +114,38 @@ export class MetricsReader {
   }
 
   /**
-   * Parse metrics from a Uint32Array buffer
-   * Layout defined in src/shared_memory.h and js/lib/metrics_offsets.js
-   * @param {Uint32Array} m - Metrics buffer
-   * @returns {Object} Metrics object
+   * Overlay prescheduler metrics into the snapshot buffer
+   * @param {Uint32Array} preschedulerMetrics - Metrics from prescheduler
    */
-  parseMetricsBuffer(m) {
-    return {
-      // scsynth metrics (written by WASM)
+  overlayPreschedulerMetrics(preschedulerMetrics) {
+    if (!this.#cachedSnapshotBuffer || !preschedulerMetrics) return;
+
+    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, MetricsOffsets.SAB_METRICS_COUNT);
+
+    // Copy prescheduler metrics (offsets 9-20), excluding BYPASSED (22) and MAX_LATE_MS (23).
+    // The worklet is source of truth for PRESCHEDULER_BYPASSED.
+    const start = MetricsOffsets.PRESCHEDULER_START;
+    const count = MetricsOffsets.PRESCHEDULER_COUNT - 2;
+    metricsView.set(preschedulerMetrics.subarray(start, start + count), start);
+
+    // Copy PRESCHEDULER_MAX_LATE_MS (tracked by prescheduler worker)
+    metricsView[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS] =
+      preschedulerMetrics[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS];
+  }
+
+  /**
+   * Gather all metrics as a named object.
+   * Uses updateMergedArray() as the single read path, then builds named properties.
+   * @param {Object} context - Context with additional metric sources
+   * @returns {Object} Combined metrics
+   */
+  gatherMetrics(context = {}) {
+    // Single read path: populate the flat merged array from SAB/snapshot + context
+    this.updateMergedArray(context);
+    const m = this.#mergedArray;
+
+    const metrics = {
+      // scsynth metrics
       scsynthProcessCount: m[MetricsOffsets.SCSYNTH_PROCESS_COUNT],
       scsynthMessagesProcessed: m[MetricsOffsets.SCSYNTH_MESSAGES_PROCESSED],
       scsynthMessagesDropped: m[MetricsOffsets.SCSYNTH_MESSAGES_DROPPED],
@@ -130,14 +154,11 @@ export class MetricsReader {
       scsynthSchedulerDropped: m[MetricsOffsets.SCSYNTH_SCHEDULER_DROPPED],
       scsynthSequenceGaps: m[MetricsOffsets.SCSYNTH_SEQUENCE_GAPS],
       scsynthSchedulerLates: m[MetricsOffsets.SCSYNTH_SCHEDULER_LATES],
-      // scsynthSchedulerCapacity is added in gatherMetrics() from bufferConstants
-
-      // scsynth late timing diagnostics (written by WASM during process())
       scsynthSchedulerMaxLateMs: m[MetricsOffsets.SCSYNTH_SCHEDULER_MAX_LATE_MS],
       scsynthSchedulerLastLateMs: m[MetricsOffsets.SCSYNTH_SCHEDULER_LAST_LATE_MS],
       scsynthSchedulerLastLateTick: m[MetricsOffsets.SCSYNTH_SCHEDULER_LAST_LATE_TICK],
 
-      // Prescheduler metrics (written by osc_out_prescheduler_worker.js)
+      // Prescheduler metrics
       preschedulerPending: m[MetricsOffsets.PRESCHEDULER_PENDING],
       preschedulerPendingPeak: m[MetricsOffsets.PRESCHEDULER_PENDING_PEAK],
       preschedulerDispatched: m[MetricsOffsets.PRESCHEDULER_DISPATCHED],
@@ -150,226 +171,91 @@ export class MetricsReader {
       preschedulerRetryQueueSize: m[MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE],
       preschedulerRetryQueuePeak: m[MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_PEAK],
       preschedulerBypassed: m[MetricsOffsets.PRESCHEDULER_BYPASSED],
-
-      // OSC In metrics (written by osc_in_worker.js)
-      oscInMessagesReceived: m[MetricsOffsets.OSC_IN_MESSAGES_RECEIVED],
-      oscInMessagesDropped: m[MetricsOffsets.OSC_IN_DROPPED_MESSAGES],
-      oscInBytesReceived: m[MetricsOffsets.OSC_IN_BYTES_RECEIVED],
-
-      // Debug metrics (written by debug_worker.js)
-      debugMessagesReceived: m[MetricsOffsets.DEBUG_MESSAGES_RECEIVED],
-      debugBytesReceived: m[MetricsOffsets.DEBUG_BYTES_RECEIVED],
-
-      // OSC Out metrics (written by supersonic.js main thread)
-      oscOutMessagesSent: m[MetricsOffsets.OSC_OUT_MESSAGES_SENT],
-      oscOutBytesSent: m[MetricsOffsets.OSC_OUT_BYTES_SENT],
-
-      // Prescheduler timing metrics (written by osc_out_prescheduler_worker.js)
       preschedulerMinHeadroomMs: m[MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS],
       preschedulerLates: m[MetricsOffsets.PRESCHEDULER_LATES],
       preschedulerMaxLateMs: m[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS],
+
+      // OSC In/Out metrics
+      oscInMessagesReceived: m[MetricsOffsets.OSC_IN_MESSAGES_RECEIVED],
+      oscInMessagesDropped: m[MetricsOffsets.OSC_IN_DROPPED_MESSAGES],
+      oscInBytesReceived: m[MetricsOffsets.OSC_IN_BYTES_RECEIVED],
+      debugMessagesReceived: m[MetricsOffsets.DEBUG_MESSAGES_RECEIVED],
+      debugBytesReceived: m[MetricsOffsets.DEBUG_BYTES_RECEIVED],
+      oscOutMessagesSent: m[MetricsOffsets.OSC_OUT_MESSAGES_SENT],
+      oscOutBytesSent: m[MetricsOffsets.OSC_OUT_BYTES_SENT],
 
       // Error metrics
       scsynthWasmErrors: m[MetricsOffsets.SCSYNTH_WASM_ERRORS],
       oscInCorrupted: m[MetricsOffsets.OSC_IN_CORRUPTED],
       ringBufferDirectWriteFails: m[MetricsOffsets.RING_BUFFER_DIRECT_WRITE_FAILS],
 
-      // Ring buffer usage (written by WASM during process())
-      inBufferUsedBytes: m[MetricsOffsets.IN_BUFFER_USED_BYTES],
-      outBufferUsedBytes: m[MetricsOffsets.OUT_BUFFER_USED_BYTES],
-      debugBufferUsedBytes: m[MetricsOffsets.DEBUG_BUFFER_USED_BYTES],
-
-      // Ring buffer peak usage (written by WASM during process())
-      inBufferPeakBytes: m[MetricsOffsets.IN_BUFFER_PEAK_BYTES],
-      outBufferPeakBytes: m[MetricsOffsets.OUT_BUFFER_PEAK_BYTES],
-      debugBufferPeakBytes: m[MetricsOffsets.DEBUG_BUFFER_PEAK_BYTES],
-
-      // Bypass category metrics (written by JS main thread / PM transport)
+      // Bypass categories
       bypassNonBundle: m[MetricsOffsets.BYPASS_NON_BUNDLE],
       bypassImmediate: m[MetricsOffsets.BYPASS_IMMEDIATE],
       bypassNearFuture: m[MetricsOffsets.BYPASS_NEAR_FUTURE],
       bypassLate: m[MetricsOffsets.BYPASS_LATE],
+
+      // Mode
+      mode: this.#mode,
     };
-  }
 
-  /**
-   * Get metrics from SharedArrayBuffer (SAB mode)
-   * @returns {Object|null}
-   */
-  getSABMetrics() {
-    if (!this.#metricsView) {
-      return null;
-    }
-    return this.parseMetricsBuffer(this.#metricsView);
-  }
-
-  /**
-   * Get buffer usage statistics from SAB head/tail pointers
-   * @returns {Object|null}
-   */
-  getBufferUsage() {
-    if (!this.#atomicView || !this.#bufferConstants || !this.#controlIndices) {
-      return null;
-    }
-
+    // Build buffer usage objects from raw metrics
     const bc = this.#bufferConstants;
-    const idx = this.#controlIndices;
-
-    // Read head/tail pointers
-    const view = this.#atomicView;
-    const inHead = Atomics.load(view, idx.IN_HEAD);
-    const inTail = Atomics.load(view, idx.IN_TAIL);
-    const outHead = Atomics.load(view, idx.OUT_HEAD);
-    const outTail = Atomics.load(view, idx.OUT_TAIL);
-    const debugHead = Atomics.load(view, idx.DEBUG_HEAD);
-    const debugTail = Atomics.load(view, idx.DEBUG_TAIL);
-
-    // Calculate bytes used (accounting for wrap-around)
-    const inUsed = (inHead - inTail + bc.IN_BUFFER_SIZE) % bc.IN_BUFFER_SIZE;
-    const outUsed = (outHead - outTail + bc.OUT_BUFFER_SIZE) % bc.OUT_BUFFER_SIZE;
-    const debugUsed = (debugHead - debugTail + bc.DEBUG_BUFFER_SIZE) % bc.DEBUG_BUFFER_SIZE;
-
-    return {
-      inBufferUsed: {
-        bytes: inUsed,
-        percentage: (inUsed / bc.IN_BUFFER_SIZE) * 100,
-        capacity: bc.IN_BUFFER_SIZE,
-      },
-      outBufferUsed: {
-        bytes: outUsed,
-        percentage: (outUsed / bc.OUT_BUFFER_SIZE) * 100,
-        capacity: bc.OUT_BUFFER_SIZE,
-      },
-      debugBufferUsed: {
-        bytes: debugUsed,
-        percentage: (debugUsed / bc.DEBUG_BUFFER_SIZE) * 100,
-        capacity: bc.DEBUG_BUFFER_SIZE,
-      },
-    };
-  }
-
-  /**
-   * Overlay prescheduler metrics into the snapshot buffer
-   * @param {Uint32Array} preschedulerMetrics - Metrics from prescheduler
-   */
-  overlayPreschedulerMetrics(preschedulerMetrics) {
-    if (!this.#cachedSnapshotBuffer || !preschedulerMetrics) return;
-
-    // Get a view into the metrics portion of the snapshot buffer
-    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, MetricsOffsets.SAB_METRICS_COUNT);
-
-    // Copy prescheduler metrics (offsets 9-22), but NOT offset 22 (PRESCHEDULER_BYPASSED)
-    // or offset 23 (PRESCHEDULER_MAX_LATE_MS).
-    // The worklet tracks PRESCHEDULER_BYPASSED as it receives all bypassed messages
-    // (from main thread + OscChannel workers), so it's the source of truth for this metric.
-    // PRESCHEDULER_MAX_LATE_MS is copied separately to include it.
-    const start = MetricsOffsets.PRESCHEDULER_START;
-    const count = MetricsOffsets.PRESCHEDULER_COUNT - 2;  // Exclude BYPASSED (22) and MAX_LATE_MS (23)
-    metricsView.set(preschedulerMetrics.subarray(start, start + count), start);
-
-    // Copy PRESCHEDULER_MAX_LATE_MS (offset 23) - this is tracked by prescheduler worker
-    metricsView[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS] =
-      preschedulerMetrics[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS];
-  }
-
-  /**
-   * Gather all metrics from appropriate source based on mode
-   * @param {Object} context - Context with additional metric sources
-   * @returns {Object} Combined metrics
-   */
-  gatherMetrics(context = {}) {
-    let metrics;
-
-    if (this.#mode === 'postMessage') {
-      // Overlay prescheduler metrics if available
-      if (context.preschedulerMetrics) {
-        this.overlayPreschedulerMetrics(context.preschedulerMetrics);
-      }
-
-      // Read metrics from snapshot buffer
-      if (this.#cachedSnapshotBuffer) {
-        const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, MetricsOffsets.SAB_METRICS_COUNT);
-        metrics = this.parseMetricsBuffer(metricsView);
-      } else {
-        metrics = {};
-      }
-    } else {
-      // SAB mode: read directly from SharedArrayBuffer
-      metrics = this.getSABMetrics() || {};
-    }
-
-    // Build buffer usage objects from raw metrics (works in both modes)
-    // WASM calculates and writes these during process()
-    if (metrics.inBufferUsedBytes !== undefined && this.#bufferConstants) {
-      const bc = this.#bufferConstants;
+    if (m[MetricsOffsets.IN_BUFFER_USED_BYTES] !== undefined && bc) {
       metrics.inBufferUsed = {
-        bytes: metrics.inBufferUsedBytes,
-        percentage: (metrics.inBufferUsedBytes / bc.IN_BUFFER_SIZE) * 100,
-        peakBytes: metrics.inBufferPeakBytes,
-        peakPercentage: (metrics.inBufferPeakBytes / bc.IN_BUFFER_SIZE) * 100,
+        bytes: m[MetricsOffsets.IN_BUFFER_USED_BYTES],
+        percentage: (m[MetricsOffsets.IN_BUFFER_USED_BYTES] / bc.IN_BUFFER_SIZE) * 100,
+        peakBytes: m[MetricsOffsets.IN_BUFFER_PEAK_BYTES],
+        peakPercentage: (m[MetricsOffsets.IN_BUFFER_PEAK_BYTES] / bc.IN_BUFFER_SIZE) * 100,
         capacity: bc.IN_BUFFER_SIZE,
       };
       metrics.outBufferUsed = {
-        bytes: metrics.outBufferUsedBytes,
-        percentage: (metrics.outBufferUsedBytes / bc.OUT_BUFFER_SIZE) * 100,
-        peakBytes: metrics.outBufferPeakBytes,
-        peakPercentage: (metrics.outBufferPeakBytes / bc.OUT_BUFFER_SIZE) * 100,
+        bytes: m[MetricsOffsets.OUT_BUFFER_USED_BYTES],
+        percentage: (m[MetricsOffsets.OUT_BUFFER_USED_BYTES] / bc.OUT_BUFFER_SIZE) * 100,
+        peakBytes: m[MetricsOffsets.OUT_BUFFER_PEAK_BYTES],
+        peakPercentage: (m[MetricsOffsets.OUT_BUFFER_PEAK_BYTES] / bc.OUT_BUFFER_SIZE) * 100,
         capacity: bc.OUT_BUFFER_SIZE,
       };
       metrics.debugBufferUsed = {
-        bytes: metrics.debugBufferUsedBytes,
-        percentage: (metrics.debugBufferUsedBytes / bc.DEBUG_BUFFER_SIZE) * 100,
-        peakBytes: metrics.debugBufferPeakBytes,
-        peakPercentage: (metrics.debugBufferPeakBytes / bc.DEBUG_BUFFER_SIZE) * 100,
+        bytes: m[MetricsOffsets.DEBUG_BUFFER_USED_BYTES],
+        percentage: (m[MetricsOffsets.DEBUG_BUFFER_USED_BYTES] / bc.DEBUG_BUFFER_SIZE) * 100,
+        peakBytes: m[MetricsOffsets.DEBUG_BUFFER_PEAK_BYTES],
+        peakPercentage: (m[MetricsOffsets.DEBUG_BUFFER_PEAK_BYTES] / bc.DEBUG_BUFFER_SIZE) * 100,
         capacity: bc.DEBUG_BUFFER_SIZE,
       };
-
-      // Remove raw byte values (now captured in derived objects above)
-      delete metrics.inBufferUsedBytes;
-      delete metrics.outBufferUsedBytes;
-      delete metrics.debugBufferUsedBytes;
-      delete metrics.inBufferPeakBytes;
-      delete metrics.outBufferPeakBytes;
-      delete metrics.debugBufferPeakBytes;
     }
 
-    // Add mode so clients know what metrics are available
-    metrics.mode = this.#mode;
-
-    // Add scheduler capacity from buffer constants (compile-time value)
-    // Note: worklet exports as lowercase 'scheduler_slot_count'
-    if (this.#bufferConstants?.scheduler_slot_count !== undefined) {
-      metrics.scsynthSchedulerCapacity = this.#bufferConstants.scheduler_slot_count;
+    if (bc?.scheduler_slot_count !== undefined) {
+      metrics.scsynthSchedulerCapacity = bc.scheduler_slot_count;
     }
 
-    // Add context-provided metrics
-    if (context.driftOffsetMs !== undefined) {
-      metrics.driftOffsetMs = context.driftOffsetMs;
-    }
-    if (context.ntpStartTime !== undefined) {
-      metrics.ntpStartTime = context.ntpStartTime;
-    }
-    if (context.clockOffsetMs !== undefined) {
-      metrics.clockOffsetMs = context.clockOffsetMs;
-    }
-    if (context.audioContextState) {
-      metrics.audioContextState = context.audioContextState;
-    }
+    // Context-provided metrics
+    if (context.driftOffsetMs !== undefined) metrics.driftOffsetMs = context.driftOffsetMs;
+    if (context.ntpStartTime !== undefined) metrics.ntpStartTime = context.ntpStartTime;
+    if (context.clockOffsetMs !== undefined) metrics.clockOffsetMs = context.clockOffsetMs;
+    if (context.audioContextState) metrics.audioContextState = context.audioContextState;
     if (context.bufferPoolStats) {
       metrics.bufferPoolUsedBytes = context.bufferPoolStats.used.size;
       metrics.bufferPoolAvailableBytes = context.bufferPoolStats.available;
       metrics.bufferPoolAllocations = context.bufferPoolStats.used.count;
     }
-    if (context.loadedSynthDefsCount !== undefined) {
-      metrics.loadedSynthDefs = context.loadedSynthDefsCount;
-    }
-    if (context.preschedulerCapacity !== undefined) {
-      metrics.preschedulerCapacity = context.preschedulerCapacity;
+    if (context.loadedSynthDefsCount !== undefined) metrics.loadedSynthDefs = context.loadedSynthDefsCount;
+    if (context.preschedulerCapacity !== undefined) metrics.preschedulerCapacity = context.preschedulerCapacity;
+
+    // Audio diagnostics from merged array context slots
+    metrics.audioHealthPct = context.audioHealthPct ?? 100;
+    if (context.playbackStats) {
+      metrics.glitchCount = context.playbackStats.fallbackFramesEvents ?? 0;
+      metrics.glitchDurationMs = Math.round((context.playbackStats.fallbackFramesDuration ?? 0) * 1000);
+      metrics.averageLatencyUs = Math.round((context.playbackStats.averageLatency ?? 0) * 1_000_000);
+      metrics.maxLatencyUs = Math.round((context.playbackStats.maximumLatency ?? 0) * 1_000_000);
+    } else {
+      metrics.glitchCount = 0;
+      metrics.glitchDurationMs = 0;
+      metrics.averageLatencyUs = 0;
+      metrics.maxLatencyUs = 0;
     }
 
-    // In postMessage mode, merge transport metrics (sent/received counters)
-    // These aren't in the snapshot buffer since they're tracked on the main thread
-    // Transport now uses canonical metric names, so we can merge directly
     if (this.#mode === 'postMessage' && context.transportMetrics) {
       Object.assign(metrics, context.transportMetrics);
     }

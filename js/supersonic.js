@@ -21,7 +21,12 @@ import { NTPTiming } from "./lib/ntp_timing.js";
 import { AudioCapture } from "./lib/audio_capture.js";
 import { parseNodeTree } from "./lib/node_tree_parser.js";
 import * as oscFast from "./lib/osc_fast.js";
-import { SYNC_TIMEOUT_MS, WORKLET_INIT_TIMEOUT_MS, SNAPSHOT_INTERVAL_MS } from "./timing_constants.js";
+// Timeout waiting for /synced response from scsynth
+const SYNC_TIMEOUT_MS = 10000;
+// Timeout waiting for AudioWorklet initialization
+const WORKLET_INIT_TIMEOUT_MS = 5000;
+// Interval for metrics/tree snapshots in postMessage mode (ms)
+const SNAPSHOT_INTERVAL_MS = 150;
 import { MemoryLayout } from "./memory_layout.js";
 import { defaultWorldOptions } from "./scsynth_options.js";
 import { addWorkletModule } from "./lib/worker_loader.js";
@@ -112,10 +117,6 @@ function formatBundleHtml(decoded, sequence, timestamp, initTime, sourceId) {
   }
   return html;
 }
-
-/**
- * @typedef {import('./lib/metrics_types.js').SuperSonicMetrics} SuperSonicMetrics
- */
 
 export class SuperSonic {
   // Expose OSC utilities as static methods (uses plain args, not typed {type, value} format)

@@ -227,3 +227,107 @@ export function readMessagesFromBuffer({
 
     return { newTail: currentTail, messagesRead };
 }
+
+// =========================================================================
+// Locked ring buffer write (SAB mode)
+// =========================================================================
+
+/**
+ * Try to acquire the write lock.
+ * @param {Int32Array} atomicView
+ * @param {number} lockIndex
+ * @param {number} maxSpins - Maximum spin attempts (0 = try once)
+ * @param {boolean} useWait - If true, use Atomics.wait() for guaranteed acquisition (workers only)
+ * @returns {boolean} true if lock acquired
+ */
+function tryAcquireLock(atomicView, lockIndex, maxSpins = 0, useWait = false) {
+    for (let i = 0; i <= maxSpins; i++) {
+        const oldValue = Atomics.compareExchange(atomicView, lockIndex, 0, 1);
+        if (oldValue === 0) {
+            return true;
+        }
+    }
+
+    if (useWait) {
+        const MAX_WAIT_ATTEMPTS = 100;
+        for (let attempt = 0; attempt < MAX_WAIT_ATTEMPTS; attempt++) {
+            Atomics.wait(atomicView, lockIndex, 1, 100);
+            const oldValue = Atomics.compareExchange(atomicView, lockIndex, 0, 1);
+            if (oldValue === 0) {
+                return true;
+            }
+        }
+        console.error('[RingBuffer] Lock acquisition timeout after 10s - possible deadlock');
+        return false;
+    }
+
+    return false;
+}
+
+function releaseLock(atomicView, lockIndex) {
+    Atomics.store(atomicView, lockIndex, 0);
+    Atomics.notify(atomicView, lockIndex, 1);
+}
+
+/**
+ * Write an OSC message to the IN ring buffer with lock acquisition.
+ * @param {Object} params
+ * @param {Int32Array} params.atomicView
+ * @param {DataView} params.dataView
+ * @param {Uint8Array} params.uint8View
+ * @param {Object} params.bufferConstants
+ * @param {number} params.ringBufferBase
+ * @param {Object} params.controlIndices
+ * @param {Uint8Array} params.oscMessage
+ * @param {number} [params.sourceId=0]
+ * @param {number} [params.maxSpins=0]
+ * @param {boolean} [params.useWait=false]
+ * @returns {boolean} true if write succeeded
+ */
+export function writeToRingBuffer({
+    atomicView, dataView, uint8View,
+    bufferConstants, ringBufferBase, controlIndices,
+    oscMessage, sourceId = 0, maxSpins = 0, useWait = false
+}) {
+    const payloadSize = oscMessage.length;
+    const totalSize = bufferConstants.MESSAGE_HEADER_SIZE + payloadSize;
+
+    if (totalSize > bufferConstants.IN_BUFFER_SIZE - bufferConstants.MESSAGE_HEADER_SIZE) {
+        return false;
+    }
+
+    if (!tryAcquireLock(atomicView, controlIndices.IN_WRITE_LOCK, maxSpins, useWait)) {
+        return false;
+    }
+
+    try {
+        const head = Atomics.load(atomicView, controlIndices.IN_HEAD);
+        const tail = Atomics.load(atomicView, controlIndices.IN_TAIL);
+        const alignedSize = (totalSize + 3) & ~3;
+        const available = calculateAvailableSpace(head, tail, bufferConstants.IN_BUFFER_SIZE);
+
+        if (available < alignedSize) {
+            return false;
+        }
+
+        const messageSeq = Atomics.add(atomicView, controlIndices.IN_SEQUENCE, 1);
+
+        const newHead = writeMessageToBuffer({
+            uint8View, dataView,
+            bufferStart: ringBufferBase + bufferConstants.IN_BUFFER_START,
+            bufferSize: bufferConstants.IN_BUFFER_SIZE,
+            head, payload: oscMessage, sequence: messageSeq,
+            messageMagic: bufferConstants.MESSAGE_MAGIC,
+            headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
+            sourceId
+        });
+
+        Atomics.load(atomicView, controlIndices.IN_HEAD);
+        Atomics.store(atomicView, controlIndices.IN_HEAD, newHead);
+        Atomics.notify(atomicView, controlIndices.IN_HEAD, 1);
+
+        return true;
+    } finally {
+        releaseLock(atomicView, controlIndices.IN_WRITE_LOCK);
+    }
+}

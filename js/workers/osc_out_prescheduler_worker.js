@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Sam Aaron
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
-import { writeToRingBuffer } from '../lib/ring_buffer_writer.js';
+import { writeToRingBuffer } from '../lib/ring_buffer_core.js';
 import { calculateInControlIndices } from '../lib/control_offsets.js';
 
 // Transport mode: 'sab' or 'postMessage'

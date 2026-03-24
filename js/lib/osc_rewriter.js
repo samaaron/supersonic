@@ -112,21 +112,19 @@ export class OSCRewriter {
     let numChannels = 1;
     let sampleRate = this.#getDefaultSampleRate();
 
-    if (this.#isNumericArg(this.#argAt(args, argIndex))) {
-      numChannels = Math.max(
-        1,
-        this.#optionalIntArg(args, argIndex, 1)
-      );
+    if (Number.isFinite(this.#val(args, argIndex))) {
+      numChannels = Math.max(1, this.#optionalIntArg(args, argIndex, 1));
       argIndex++;
     }
 
-    if (this.#argAt(args, argIndex)?.type === "b") {
+    if ((Array.isArray(args) ? args[argIndex] : undefined)?.type === "b") {
       if (__DEV__) console.warn('[OSCRewriter] /b_alloc completion message detected but not supported — it will be dropped. Buffer allocation is async via the buffer pipeline.');
       argIndex++;
     }
 
-    if (this.#isNumericArg(this.#argAt(args, argIndex))) {
-      sampleRate = this.#getArgValue(this.#argAt(args, argIndex));
+    const srVal = this.#val(args, argIndex);
+    if (Number.isFinite(srVal)) {
+      sampleRate = srVal;
     }
 
     const bufferInfo = await this.#bufferManager.prepareEmpty({
@@ -187,10 +185,9 @@ export class OSCRewriter {
 
     const channels = [];
     for (let i = 4; i < (args?.length || 0); i++) {
-      if (!this.#isNumericArg(args[i])) {
-        break;
-      }
-      channels.push(Math.floor(this.#getArgValue(args[i])));
+      const v = this.#val(args, i);
+      if (!Number.isFinite(v)) break;
+      channels.push(Math.floor(v));
     }
 
     const bufferInfo = await this.#bufferManager.prepareFromFile({
@@ -255,65 +252,44 @@ export class OSCRewriter {
   }
 
   // ============================================================================
-  // ARGUMENT HELPERS (plain values - osc_fast infers types)
+  // ARGUMENT HELPERS
   // ============================================================================
 
-  #argAt(args, index) {
-    if (!Array.isArray(args)) {
-      return undefined;
-    }
-    return args[index];
+  /** Get the raw value of an arg (supports plain values and legacy {type, value} format) */
+  #val(args, index) {
+    const arg = Array.isArray(args) ? args[index] : undefined;
+    if (arg === undefined || arg === null) return undefined;
+    return typeof arg === "object" && Object.prototype.hasOwnProperty.call(arg, "value")
+      ? arg.value : arg;
   }
 
-  #getArgValue(arg) {
-    if (arg === undefined || arg === null) {
-      return undefined;
-    }
-    // Support both plain values and legacy {type, value} format for compatibility
-    return typeof arg === "object" &&
-      Object.prototype.hasOwnProperty.call(arg, "value")
-      ? arg.value
-      : arg;
+  /** Require an arg of a given type, throwing errorMessage if missing/wrong */
+  #require(args, index, check, errorMessage) {
+    const v = this.#val(args, index);
+    if (!check(v)) throw new Error(errorMessage);
+    return v;
   }
 
   #requireIntArg(args, index, errorMessage) {
-    const value = this.#getArgValue(this.#argAt(args, index));
-    if (!Number.isFinite(value)) {
-      throw new Error(errorMessage);
-    }
-    return Math.floor(value);
+    return Math.floor(this.#require(args, index, Number.isFinite, errorMessage));
   }
 
   #optionalIntArg(args, index, defaultValue = 0) {
-    const value = this.#getArgValue(this.#argAt(args, index));
-    if (!Number.isFinite(value)) {
-      return defaultValue;
-    }
-    return Math.floor(value);
+    const v = this.#val(args, index);
+    return Number.isFinite(v) ? Math.floor(v) : defaultValue;
   }
 
   #requireStringArg(args, index, errorMessage) {
-    const value = this.#getArgValue(this.#argAt(args, index));
-    if (typeof value !== "string") {
-      throw new Error(errorMessage);
-    }
-    return value;
+    return this.#require(args, index, v => typeof v === "string", errorMessage);
   }
 
   #requireBlobArg(args, index, errorMessage) {
-    const value = this.#getArgValue(this.#argAt(args, index));
-    if (!(value instanceof Uint8Array || value instanceof ArrayBuffer)) {
-      throw new Error(errorMessage);
-    }
-    return value;
+    return this.#require(args, index, v => v instanceof Uint8Array || v instanceof ArrayBuffer, errorMessage);
   }
 
   #isNumericArg(arg) {
-    if (!arg) {
-      return false;
-    }
-    const value = this.#getArgValue(arg);
-    return Number.isFinite(value);
+    const v = this.#val([arg], 0);
+    return Number.isFinite(v);
   }
 
   #detachAllocationPromise(promise, context) {
