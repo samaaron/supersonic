@@ -130,6 +130,16 @@ extern "C" {
     // Ring buffer sequence tracking — reset on drain to suppress spurious gap warnings
     int32_t last_in_sequence = -1;
 
+    // Process-audio state that must be reset on cold swap
+    uint32_t local_in_peak = 0;
+    uint32_t local_out_peak = 0;
+    uint32_t local_debug_peak = 0;
+    uint32_t metrics_cycle = 0;
+    uint32_t corruption_count = 0;
+    uint32_t gap_log_count = 0;
+    int late_count = 0;
+    bool logged_buffer_full = false;
+
     // Time conversion constants - Based on SC_CoreAudio.cpp
     double g_osc_increment_numerator = 0.0;  // Buffer length in NTP units
     int64_t g_osc_increment = 0;             // NTP units per buffer
@@ -216,6 +226,16 @@ extern "C" {
         // Reset sequence tracking so the next message after the ring buffer
         // drain doesn't trigger a spurious gap warning.
         last_in_sequence = -1;
+        // Reset process-audio state that would otherwise carry stale values
+        // across cold swaps (e.g. logged_buffer_full would suppress all future logs)
+        local_in_peak = 0;
+        local_out_peak = 0;
+        local_debug_peak = 0;
+        metrics_cycle = 0;
+        corruption_count = 0;
+        gap_log_count = 0;
+        late_count = 0;
+        logged_buffer_full = false;
     }
 
     // RT-safe bundle scheduling - no malloc!
@@ -499,11 +519,6 @@ extern "C" {
         // Calculate and write ring buffer usage to metrics BEFORE consuming messages
         // so the metric reflects actual queue depth as seen by the audio thread
         {
-            static uint32_t local_in_peak = 0;
-            static uint32_t local_out_peak = 0;
-            static uint32_t local_debug_peak = 0;
-            static uint32_t metrics_cycle = 0;
-
             int32_t in_head = control->in_head.load(std::memory_order_relaxed);
             int32_t in_tail = control->in_tail.load(std::memory_order_relaxed);
             uint32_t in_used = (in_head - in_tail + IN_BUFFER_SIZE) % IN_BUFFER_SIZE;
@@ -559,8 +574,6 @@ extern "C" {
 
                 // Validate message
                 if (header.magic != MESSAGE_MAGIC) {
-                    // Log first few corruption events for diagnostics
-                    static uint32_t corruption_count = 0;
                     if (corruption_count < 5) {
                         worklet_debug("ERROR: Invalid magic at tail=%d head=%d: got 0x%08X expected 0x%08X (len=%u seq=%u)",
                                      in_tail, in_head, header.magic, MESSAGE_MAGIC, header.length, header.sequence);
@@ -600,7 +613,6 @@ extern "C" {
                         int32_t gap_size = ((int32_t)header.sequence - expected + 0x80000000) & 0x7FFFFFFF;
                         if (gap_size > 0 && gap_size < 1000) {  // Sanity check - ignore huge gaps (likely reset)
                             metrics->messages_sequence_gaps.fetch_add(gap_size, std::memory_order_relaxed);
-                            static uint32_t gap_log_count = 0;
                             if (gap_log_count < 5) {
                                 worklet_debug("WARNING: Sequence gap detected: expected %d, got %u (gap of %d)",
                                              expected, header.sequence, gap_size);
@@ -745,7 +757,6 @@ extern "C" {
                 // Track late bundles (any amount past due) in metrics
                 // This matches JS classification which also uses 0ms threshold
                 // Rate-limit logging: only log first late bundle, then every 100th
-                static int late_count = 0;
                 if (time_diff_ms < 0) {
                     // Cap late_ms to prevent overflow from timing sync issues
                     // Values over 10 seconds indicate a systemic problem, not individual lateness
@@ -857,7 +868,6 @@ extern "C" {
                     audio_capture->head.store(head + frames_to_copy, std::memory_order_release);
                 } else {
                     // Buffer full - log once and stop capturing
-                    static bool logged_buffer_full = false;
                     if (!logged_buffer_full) {
                         worklet_debug("[AudioCapture] Buffer full (%u frames), capture stopped", AUDIO_CAPTURE_FRAMES);
                         logged_buffer_full = true;
