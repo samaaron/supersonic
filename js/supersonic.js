@@ -2092,13 +2092,8 @@ export class SuperSonic {
           }
           break;
 
-        case "oscLog":
-          // Centralized OSC out logging from worklet (postMessage mode)
-          // Forward to transport's handleOscLog which triggers the onOscLog callback
-          if (data.entries && this.#osc?.handleOscLog) {
-            this.#osc.handleOscLog(data.entries);
-          }
-          break;
+        // Note: oscLog is handled directly by the PM transport's #handleWorkletMessage
+        // and by the SAB transport's osc_out_log_sab_worker — no forwarding needed here.
       }
     });
   }
