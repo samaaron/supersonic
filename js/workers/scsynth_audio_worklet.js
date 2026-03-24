@@ -10,6 +10,18 @@ import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { writeMessageToBuffer, calculateAvailableSpace, readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
 import { calculateAllControlIndices } from '../lib/control_offsets.js';
 
+// Lazy-initialized TextEncoder for js_debug() — can't construct at module scope
+// in AudioWorkletGlobalScope, but cached after first use to avoid per-call allocation
+let TEXT_ENCODER = null;
+
+// Static bypass category → metrics offset map (avoid allocation in recordOscReceived)
+const BYPASS_CATEGORY_OFFSETS = {
+    nonBundle: MetricsOffsets.BYPASS_NON_BUNDLE,
+    immediate: MetricsOffsets.BYPASS_IMMEDIATE,
+    nearFuture: MetricsOffsets.BYPASS_NEAR_FUTURE,
+    late: MetricsOffsets.BYPASS_LATE,
+};
+
 // PM Mode Pool Configuration - pre-allocated buffers for allocation-free process()
 const PM_POOL_CONFIG = {
     // Outgoing pools
@@ -333,8 +345,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             const DEBUG_PADDING_MARKER = this.bufferConstants.DEBUG_PADDING_MARKER;
 
             const prefixedMessage = '[JS] ' + message + '\n';
-            const encoder = new TextEncoder();
-            const bytes = encoder.encode(prefixedMessage);
+            if (!TEXT_ENCODER) TEXT_ENCODER = new TextEncoder();
+            const bytes = TEXT_ENCODER.encode(prefixedMessage);
 
             // Drop message if too large for buffer
             if (bytes.length > DEBUG_BUFFER_SIZE) {
@@ -687,13 +699,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             // Track bypass category if provided (from OscChannel workers)
             if (bypassCategory) {
                 this.metricsView[MetricsOffsets.PRESCHEDULER_BYPASSED]++;
-                const categoryOffsets = {
-                    nonBundle: MetricsOffsets.BYPASS_NON_BUNDLE,
-                    immediate: MetricsOffsets.BYPASS_IMMEDIATE,
-                    nearFuture: MetricsOffsets.BYPASS_NEAR_FUTURE,
-                    late: MetricsOffsets.BYPASS_LATE,
-                };
-                const offset = categoryOffsets[bypassCategory];
+                const offset = BYPASS_CATEGORY_OFFSETS[bypassCategory];
                 if (offset !== undefined) {
                     this.metricsView[offset]++;
                 }

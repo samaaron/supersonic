@@ -11,6 +11,14 @@ import {
     DEFAULT_BYPASS_LOOKAHEAD_S,
 } from './osc_classifier.js';
 
+// Static bypass category → metrics offset map (avoid allocation per send)
+const BYPASS_CATEGORY_OFFSETS = {
+    nonBundle: MetricsOffsets.BYPASS_NON_BUNDLE,
+    immediate: MetricsOffsets.BYPASS_IMMEDIATE,
+    nearFuture: MetricsOffsets.BYPASS_NEAR_FUTURE,
+    late: MetricsOffsets.BYPASS_LATE,
+};
+
 /**
  * OscChannel - Unified dispatch for sending OSC to the audio worklet
  *
@@ -169,13 +177,7 @@ export class OscChannel {
 
             // Also record category if this was a bypass send
             if (category) {
-                const offsetMap = {
-                    nonBundle: MetricsOffsets.BYPASS_NON_BUNDLE,
-                    immediate: MetricsOffsets.BYPASS_IMMEDIATE,
-                    nearFuture: MetricsOffsets.BYPASS_NEAR_FUTURE,
-                    late: MetricsOffsets.BYPASS_LATE,
-                };
-                const offset = offsetMap[category];
+                const offset = BYPASS_CATEGORY_OFFSETS[category];
                 if (offset !== undefined) {
                     Atomics.add(this.#metricsView, offset, 1);
                     Atomics.add(this.#metricsView, MetricsOffsets.PRESCHEDULER_BYPASSED, 1);
