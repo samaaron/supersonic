@@ -15,9 +15,24 @@
  * - 'farFuture'   - Bundles beyond bypass threshold (needs prescheduler)
  */
 
-import { NTP_EPOCH_OFFSET, isBundle } from './osc_fast.js';
+// NTP_EPOCH_OFFSET and isBundle are intentionally duplicated here (not imported
+// from osc_fast.js) because osc_classifier is imported into AudioWorkletGlobalScope
+// via osc_channel.js. Importing osc_fast.js would pull in TextDecoder at module
+// scope, which is not available in all AudioWorklet contexts.
 
-export { NTP_EPOCH_OFFSET, isBundle };
+export const NTP_EPOCH_OFFSET = 2208988800;
+
+export function isBundle(oscData) {
+    return oscData.length >= 8 &&
+        oscData[0] === 0x23 &&  // #
+        oscData[1] === 0x62 &&  // b
+        oscData[2] === 0x75 &&  // u
+        oscData[3] === 0x6e &&  // n
+        oscData[4] === 0x64 &&  // d
+        oscData[5] === 0x6c &&  // l
+        oscData[6] === 0x65 &&  // e
+        oscData[7] === 0x00;    // \0
+}
 
 /** Default bypass lookahead threshold in seconds. */
 export const DEFAULT_BYPASS_LOOKAHEAD_S = 0.5;
