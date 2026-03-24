@@ -141,6 +141,14 @@ void EngineFixture::clearDebugMessages() {
     mDebugMessages.clear();
 }
 
+// ── HeadlessDriver control ───────────────────────────────────────────────────
+
+void EngineFixture::stopHeadlessDriver() {
+    mEngine.mHeadlessDriver.signalThreadShouldExit();
+    mEngine.mHeadlessDriver.stopThread(2000);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+}
+
 // ── Synthdef helpers ─────────────────────────────────────────────────────────
 
 bool EngineFixture::loadSynthDef(const std::string& name) {

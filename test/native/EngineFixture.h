@@ -61,6 +61,9 @@ public:
     // ── Engine access ──────────────────────────────────────────────────
     SupersonicEngine& engine() { return mEngine; }
 
+    // Stop the HeadlessDriver so callers can own process_audio exclusively
+    void stopHeadlessDriver();
+
 private:
     void init(const SupersonicEngine::Config& cfg);
     SupersonicEngine mEngine;
