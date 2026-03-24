@@ -22,7 +22,7 @@
 
 #include "vec/vec_generic.hpp"
 
-#if defined(__ARM_NEON__) || defined(_M_ARM64)
+#if defined(__ARM_NEON__) || defined(__ARM_NEON) || defined(_M_ARM64)
 #  include "vec/vec_neon.hpp"
 #endif
 
