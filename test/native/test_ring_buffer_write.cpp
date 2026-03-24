@@ -29,7 +29,7 @@ static bool ring_buffer_write_standalone(
     header.magic = MESSAGE_MAGIC;
     header.length = sizeof(Message) + data_size;
     header.sequence = static_cast<uint32_t>(sequence->fetch_add(1, std::memory_order_relaxed));
-    header._padding = 0;
+    header.sourceId = 0;
 
     int32_t current_head = head->load(std::memory_order_acquire);
     int32_t current_tail = tail->load(std::memory_order_acquire);
@@ -52,7 +52,7 @@ static bool ring_buffer_write_standalone(
             padding.magic = PADDING_MAGIC;
             padding.length = 0;
             padding.sequence = 0;
-            padding._padding = 0;
+            padding.sourceId = 0;
             std::memcpy(buffer_start + current_head, &padding, sizeof(Message));
         } else if (space_to_end > 0) {
             std::memset(buffer_start + current_head, 0, space_to_end);

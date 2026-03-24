@@ -72,7 +72,7 @@ public:
         hdr.magic    = MESSAGE_MAGIC;
         hdr.length   = total_size;
         hdr.sequence = seq;
-        hdr._padding = 0;
+        hdr.sourceId = 0;
 
         writeWrapped(buffer_start, buffer_size, uh, &hdr, sizeof(Message));
         uh = (uh + sizeof(Message)) % buffer_size;

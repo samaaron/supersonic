@@ -85,7 +85,7 @@ struct alignas(4) Message {
     uint32_t magic;       // 0xDEADBEEF for validation
     uint32_t length;      // Total message size including header
     uint32_t sequence;    // Sequence number for ordering
-    uint32_t _padding;    // Padding to maintain 16-byte size for now
+    uint32_t sourceId;    // Writer identity (0 = main thread, 1+ = workers). Matches JS ring_buffer_core.js header layout.
     // payload follows (binary data - OSC or text depending on buffer)
 };
 
