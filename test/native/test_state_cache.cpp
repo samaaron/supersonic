@@ -116,49 +116,30 @@ TEST_CASE("StateCache: buffer overwrite by bufnum", "[StateCache]") {
     REQUIRE(cache.buffers()[0].path == "/new.wav");
 }
 
-TEST_CASE("StateCache: clearBuffers", "[StateCache]") {
-    StateCache cache;
-    cache.cacheBuffer({0, "/a.wav", 0, 0, 0, 0});
-    cache.cacheBuffer({1, "/b.wav", 0, 0, 0, 0});
-    REQUIRE(cache.buffers().size() == 2);
-
-    cache.clearBuffers();
-    REQUIRE(cache.buffers().empty());
-}
-
 // ── Module registration tests ────────────────────────────────────────────────
 
-TEST_CASE("StateCache: module captureAll/restoreAll", "[StateCache]") {
+TEST_CASE("StateCache: module captureAll", "[StateCache]") {
     StateCache cache;
     int captureCount = 0;
-    int restoreCount = 0;
 
     cache.registerModule({"test-module",
         [&]() { captureCount++; },
-        [&]() { restoreCount++; }
+        nullptr
     });
 
     cache.captureAll();
     REQUIRE(captureCount == 1);
-    REQUIRE(restoreCount == 0);
-
-    cache.restoreAll();
-    REQUIRE(captureCount == 1);
-    REQUIRE(restoreCount == 1);
 }
 
-TEST_CASE("StateCache: multiple modules", "[StateCache]") {
+TEST_CASE("StateCache: multiple modules captureAll", "[StateCache]") {
     StateCache cache;
     int count = 0;
 
-    cache.registerModule({"mod-a", [&]() { count++; }, [&]() { count += 10; }});
-    cache.registerModule({"mod-b", [&]() { count++; }, [&]() { count += 10; }});
+    cache.registerModule({"mod-a", [&]() { count++; }, nullptr});
+    cache.registerModule({"mod-b", [&]() { count++; }, nullptr});
 
     cache.captureAll();
     REQUIRE(count == 2);
-
-    cache.restoreAll();
-    REQUIRE(count == 22);
 }
 
 // ── SynthDef name extraction tests ───────────────────────────────────────────

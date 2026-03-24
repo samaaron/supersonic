@@ -1108,9 +1108,32 @@ bool ring_buffer_write(
         return false;
     }
 
-    // Check if message fits contiguously, otherwise write padding (if possible) and wrap
+    // Check if message fits contiguously, otherwise write padding and wrap to 0.
+    //
+    // Design note: OUT/DEBUG buffers use contiguous-only writes (with padding markers)
+    // rather than split writes that wrap around the boundary. This keeps the C++ writer
+    // simple (one memcpy per message on the audio thread) and the JS reader simple
+    // (contiguous reads, no wrap-around logic for payloads). The IN buffer uses a
+    // different design (split writes via RingBufferWriter.h) because it's written from
+    // JS where the complexity tradeoff is different.
+    //
+    // After wrapping, we must re-check that there's enough space between position 0
+    // and tail — the initial available-space check included bytes that will be wasted
+    // as padding, so it can overestimate the usable space at the front.
     uint32_t space_to_end = buffer_size - current_head;
     if (header.length > space_to_end) {
+        // Verify space at front after wrap (tail-1 to avoid head==tail ambiguity)
+        uint32_t space_at_front = (current_tail > 0) ? (current_tail - 1) : 0;
+        if (space_at_front < header.length) {
+            if (metrics) {
+                metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
+            }
+            if (control) {
+                control->status_flags.fetch_or(STATUS_BUFFER_FULL, std::memory_order_relaxed);
+            }
+            return false;
+        }
+
         if (space_to_end >= sizeof(Message)) {
             // Write padding marker to fill remaining space
             Message padding;

@@ -50,6 +50,7 @@ add_executable(SuperSonicNativeTests
     test_rapid_switching.cpp
     test_heap_growth.cpp
     test_priority_queue.cpp
+    test_ring_buffer_write.cpp
     OscTestUtils.cpp
     EngineFixture.cpp
 )

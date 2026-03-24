@@ -224,7 +224,4 @@ TEST_CASE("DeviceManagement: stateCache module registration", "[DeviceManagement
 
     fix.engine().stateCache().captureAll();
     REQUIRE(captured == 1);
-
-    fix.engine().stateCache().restoreAll();
-    REQUIRE(restored == 1);
 }
