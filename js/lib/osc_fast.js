@@ -23,6 +23,10 @@ const STRING_CACHE_MAX = 1000;
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
 
+// Reusable pair for readString — avoids array allocation per string read.
+// Safe because callers destructure immediately before the next readString call.
+const _strPair = [null, 0];
+
 // NTP epoch offset (seconds from 1900 to 1970)
 export const NTP_EPOCH_OFFSET = 2208988800;
 export const TWO_POW_32 = 4294967296;
@@ -709,7 +713,9 @@ function readString(data, pos) {
   end++;
   end = (end + 3) & ~3;
 
-  return [str, end];
+  _strPair[0] = str;
+  _strPair[1] = end;
+  return _strPair;
 }
 
 // ============================================================================
