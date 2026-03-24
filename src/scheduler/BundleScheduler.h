@@ -167,22 +167,19 @@ public:
         entry.stabilityCount = mPool[slot].mStabilityCount;
         entry.poolIndex = static_cast<int16_t>(slot);
 
-        // Insert into sorted queue (binary search insertion point)
-        int insertPos = mQueueSize;
-        for (int i = 0; i < mQueueSize; ++i) {
-            if (entry < mQueue[i]) {
-                insertPos = i;
+        // Percolate up the min-heap
+        int me = mQueueSize++;
+        int mom;
+        while (me > 0) {
+            mom = (me - 1) >> 1;
+            if (entry < mQueue[mom]) {
+                mQueue[me] = mQueue[mom];
+                me = mom;
+            } else {
                 break;
             }
         }
-
-        // Shift entries to make room (only ~20 bytes each!)
-        for (int i = mQueueSize; i > insertPos; --i) {
-            mQueue[i] = mQueue[i - 1];
-        }
-
-        mQueue[insertPos] = entry;
-        mQueueSize++;
+        mQueue[me] = entry;
 
         return true;
     }
@@ -204,10 +201,24 @@ public:
         // Get the pool slot for the first entry
         int slot = mQueue[0].poolIndex;
 
-        // Shift queue entries (small copies, ~20 bytes each)
+        // Demote last element down the heap
         mQueueSize--;
-        for (int i = 0; i < mQueueSize; ++i) {
-            mQueue[i] = mQueue[i + 1];
+        if (mQueueSize > 0) {
+            QueueEntry temp = mQueue[mQueueSize];
+            int mom = 0;
+            int me = 1;
+            while (me < mQueueSize) {
+                if (me + 1 < mQueueSize && mQueue[me] > mQueue[me + 1])
+                    me++;
+                if (temp > mQueue[me]) {
+                    mQueue[mom] = mQueue[me];
+                    mom = me;
+                    me = (me << 1) + 1;
+                } else {
+                    break;
+                }
+            }
+            mQueue[mom] = temp;
         }
 
         // Return pointer to bundle (caller must call Release when done)

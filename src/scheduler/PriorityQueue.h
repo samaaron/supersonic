@@ -19,7 +19,7 @@
 
 // Priority queue for OSC bundle scheduling
 // Based on SC_CoreAudio.h:159 PriorityQueueT
-// Uses a static array for RT-safety (no malloc in audio thread)
+// Binary min-heap for O(log n) insert/remove. RT-safe (no malloc).
 template <class Event, int N>
 class PriorityQueueT {
 private:
@@ -33,23 +33,19 @@ public:
         if (mSize >= N)
             return false;
 
-        // Find insertion point (maintain sorted order by time)
-        int insertIndex = mSize;
-        for (int i = 0; i < mSize; ++i) {
-            if (inEvent.key() < mEvents[i].key()) {
-                insertIndex = i;
+        // Percolate up
+        int me = mSize++;
+        int mom;
+        while (me > 0) {
+            mom = (me - 1) >> 1;
+            if (inEvent.key() < mEvents[mom].key()) {
+                mEvents[me] = mEvents[mom];
+                me = mom;
+            } else {
                 break;
             }
         }
-
-        // Shift elements to make room
-        for (int i = mSize; i > insertIndex; --i) {
-            mEvents[i] = mEvents[i - 1];
-        }
-
-        // Insert event
-        mEvents[insertIndex] = inEvent;
-        mSize++;
+        mEvents[me] = inEvent;
 
         return true;
     }
@@ -60,10 +56,26 @@ public:
             return empty;
         }
         Event event = mEvents[0];
-        mSize--;
-        for (int i = 0; i < mSize; ++i) {
-            mEvents[i] = mEvents[i + 1];
+        if (--mSize == 0)
+            return event;
+
+        // Demote last element down the heap
+        Event temp = mEvents[mSize];
+        int mom = 0;
+        int me = 1;
+        while (me < mSize) {
+            if (me + 1 < mSize && mEvents[me].key() > mEvents[me + 1].key())
+                me++;
+            if (temp.key() > mEvents[me].key()) {
+                mEvents[mom] = mEvents[me];
+                mom = me;
+                me = (me << 1) + 1;
+            } else {
+                break;
+            }
         }
+        mEvents[mom] = temp;
+
         return event;
     }
 
