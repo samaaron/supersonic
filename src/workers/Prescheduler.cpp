@@ -57,7 +57,7 @@ void Prescheduler::schedule(const uint8_t* data, uint32_t size, double ntpTimeSe
 void Prescheduler::cancelAll() {
     juce::ScopedLock sl(mLock);
     uint32_t cancelled = static_cast<uint32_t>(mHeap.size());
-    mHeap = MinHeap{};  // priority_queue has no clear() — swap with empty
+    mHeap.clear();
 
     if (mMetrics) {
         mMetrics->prescheduler_pending.store(0, std::memory_order_relaxed);
@@ -75,8 +75,7 @@ void Prescheduler::checkAndDispatch() {
             if (mHeap.empty()) break;
             double dispatchTime = mHeap.top().ntpTimeSec - mLookaheadS;
             if (mClock->wallNTP() < dispatchTime) break;
-            event = std::move(const_cast<Event&>(mHeap.top()));
-            mHeap.pop();
+            event = mHeap.pop_move();
 
             if (mMetrics) {
                 mMetrics->prescheduler_pending.store(

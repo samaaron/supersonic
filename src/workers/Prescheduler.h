@@ -45,7 +45,24 @@ private:
         bool operator>(const Event& rhs) const { return ntpTimeSec > rhs.ntpTimeSec; }
     };
 
-    using MinHeap = std::priority_queue<Event, std::vector<Event>, std::greater<Event>>;
+    // Min-heap that supports move-pop (avoids copying Event's vector data)
+    struct MinHeap {
+        std::vector<Event> c;
+        bool empty() const { return c.empty(); }
+        size_t size() const { return c.size(); }
+        const Event& top() const { return c.front(); }
+        void push(Event e) {
+            c.push_back(std::move(e));
+            std::push_heap(c.begin(), c.end(), std::greater<Event>());
+        }
+        Event pop_move() {
+            std::pop_heap(c.begin(), c.end(), std::greater<Event>());
+            Event e = std::move(c.back());
+            c.pop_back();
+            return e;
+        }
+        void clear() { c.clear(); }
+    };
 
     NTPClock*             mClock         = nullptr;
     uint8_t*              mInBufferStart = nullptr;
