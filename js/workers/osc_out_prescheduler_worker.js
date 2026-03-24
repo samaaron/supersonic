@@ -4,6 +4,8 @@
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { writeToRingBuffer } from '../lib/ring_buffer_core.js';
 import { calculateInControlIndices } from '../lib/control_offsets.js';
+import { getCurrentNTPFromPerformance, isBundle as isBundleCheck } from '../lib/osc_classifier.js';
+import { getBundleTimeTag } from '../lib/osc_fast.js';
 
 // Transport mode: 'sab' or 'postMessage'
 let mode = 'sab';
@@ -145,7 +147,6 @@ let waitingForBufferSpace = false;
 let maxPendingMessages = 65536;
 
 // Timing constants
-const NTP_EPOCH_OFFSET = 2208988800;  // Seconds from 1900-01-01 to 1970-01-01
 let lookaheadS = 0.500;                // Lookahead window (configurable via init)
 
 const schedulerLog = (...args) => {
@@ -167,25 +168,10 @@ const schedulerLog = (...args) => {
  * AudioContext timing, drift correction, etc. are handled by the C++ side.
  * The prescheduler only needs to know "what time is it now in NTP?"
  */
-const getCurrentNTP = () => {
-    // Convert current system time to NTP
-    const perfTimeMs = performance.timeOrigin + performance.now();
-    return (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
-};
+const getCurrentNTP = getCurrentNTPFromPerformance;
 
-/**
- * Extract NTP timestamp from OSC bundle
- * Returns NTP time in seconds (double), or null if not a bundle
- */
-const extractNTPFromBundle = (oscData) => {
-    if (oscData.length >= 16 && oscData[0] === 0x23) {  // '#bundle'
-        const view = new DataView(oscData.buffer, oscData.byteOffset);
-        const ntpSeconds = view.getUint32(8, false);
-        const ntpFraction = view.getUint32(12, false);
-        return ntpSeconds + ntpFraction / 0x100000000;
-    }
-    return null;
-};
+/** Extract NTP timestamp from OSC bundle as seconds (double), or null */
+const extractNTPFromBundle = (oscData) => getBundleTimeTag(oscData);
 
 // ============================================================================
 // SHARED ARRAY BUFFER ACCESS
@@ -715,13 +701,7 @@ const cancelAllTags = () => {
 };
 
 // Helpers reused from legacy worker for immediate send
-const isBundle = (data) => {
-    if (!data || data.length < 8) {
-        return false;
-    }
-    return data[0] === 0x23 && data[1] === 0x62 && data[2] === 0x75 && data[3] === 0x6e &&
-        data[4] === 0x64 && data[5] === 0x6c && data[6] === 0x65 && data[7] === 0x00;
-};
+const isBundle = isBundleCheck;
 
 const extractMessagesFromBundle = (data) => {
     const messages = [];
