@@ -173,6 +173,13 @@ extern "C" {
         worklet_debug("Time offset set from JavaScript: %.6f", offset);
     }
 
+    // Convert NTP double (seconds since 1900) to OSC timetag (int64)
+    inline int64_t ntp_to_osc_timetag(double ntp) {
+        uint32_t s = static_cast<uint32_t>(ntp);
+        uint32_t f = static_cast<uint32_t>((ntp - s) * 4294967296.0);
+        return static_cast<int64_t>((static_cast<uint64_t>(s) << 32) | f);
+    }
+
     // Helper: Check if OSC data is a bundle
     bool is_bundle(const char* data, uint32_t size) {
         if (size < 16) return false;  // Minimum bundle size
@@ -678,11 +685,7 @@ extern "C" {
                         }
 
                         // Future bundle - schedule it (RT-safe, no malloc!)
-                        // Convert current NTP time to OSC timetag format (int64)
-                        uint32_t seconds = (uint32_t)current_ntp;
-                        uint32_t fraction = (uint32_t)((current_ntp - seconds) * 4294967296.0);
-                        uint64_t current_osc_time_u = ((uint64_t)seconds << 32) | fraction;
-                        int64_t current_osc_time = (int64_t)current_osc_time_u;
+                        int64_t current_osc_time = ntp_to_osc_timetag(current_ntp);
 
                         if (!schedule_bundle(g_world, (int64_t)timetag, current_osc_time, osc_buffer, payload_size, reply_addr)) {
                             // This shouldn't happen now since we check IsFull() first
@@ -720,11 +723,7 @@ extern "C" {
             g_world->mBufCounter++;
 
             // EXECUTE SCHEDULED BUNDLES (from SC_CoreAudio.cpp:1388-1401)
-            // Convert current NTP time to OSC timetag format
-            uint32_t seconds = (uint32_t)current_ntp;
-            uint32_t fraction = (uint32_t)((current_ntp - seconds) * 4294967296.0);
-            uint64_t currentOscTime_u = ((uint64_t)seconds << 32) | fraction;
-            int64_t currentOscTime = (int64_t)currentOscTime_u;
+            int64_t currentOscTime = ntp_to_osc_timetag(current_ntp);
             int64_t nextOscTime = currentOscTime + g_osc_increment;
 
             // Execute all bundles that are due within this buffer
