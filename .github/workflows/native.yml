@@ -60,8 +60,11 @@ jobs:
       - name: Configure
         run: cmake -B build/native -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
 
-      - name: Build
-        run: cmake --build build/native --config Release --parallel
+      - name: Build main binary
+        run: cmake --build build/native --config Release --parallel --target SuperSonic
+
+      - name: Build tests
+        run: cmake --build build/native --config Release --parallel --target SuperSonicNativeTests
 
       - name: Run tests
         run: |
