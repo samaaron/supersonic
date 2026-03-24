@@ -63,12 +63,6 @@ void OscUdpServer::sendReply(const uint8_t* data, uint32_t size) {
         mSocket->write(ip, port, data, static_cast<int>(size));
 }
 
-void OscUdpServer::addListener(const juce::String& ip, int port) {
-    juce::ScopedLock sl(mSenderLock);
-    mLastSenderIP   = ip;
-    mLastSenderPort = port;
-}
-
 void OscUdpServer::setNotifyTarget(const juce::String& ip, int port) {
     juce::ScopedLock sl(mSenderLock);
     // Add to list if not already registered

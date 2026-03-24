@@ -29,7 +29,6 @@ public:
     };
     void cacheBuffer(BufferMeta meta);
     void uncacheBuffer(int bufnum);
-    void clearBuffers();
     std::vector<BufferMeta> buffers() const;
 
     // --- Extensible modules (tau hooks in here later) ---
@@ -40,7 +39,6 @@ public:
     };
     void registerModule(Module module);
     void captureAll();   // calls capture() on each registered module
-    void restoreAll();   // calls restore() on each registered module
 
     // --- SynthDef name extraction from SCgf binary ---
     static std::string extractSynthDefName(const uint8_t* data, size_t size);

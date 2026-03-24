@@ -50,11 +50,6 @@ void StateCache::uncacheBuffer(int bufnum) {
     }
 }
 
-void StateCache::clearBuffers() {
-    std::lock_guard<std::mutex> lk(mMutex);
-    mBuffers.clear();
-}
-
 std::vector<StateCache::BufferMeta> StateCache::buffers() const {
     std::lock_guard<std::mutex> lk(mMutex);
     return mBuffers;
@@ -71,13 +66,6 @@ void StateCache::captureAll() {
     std::lock_guard<std::mutex> lk(mMutex);
     for (auto& m : mModules) {
         if (m.capture) m.capture();
-    }
-}
-
-void StateCache::restoreAll() {
-    std::lock_guard<std::mutex> lk(mMutex);
-    for (auto& m : mModules) {
-        if (m.restore) m.restore();
     }
 }
 

@@ -13,7 +13,6 @@ struct DeviceInfo {
     std::vector<int>    availableBufferSizes;
     int  maxOutputChannels = 0;
     int  maxInputChannels  = 0;
-    bool isDefault = false;
 };
 
 struct CurrentDeviceInfo : DeviceInfo {

@@ -60,11 +60,6 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE double get_time_offset();
 }
 
-// Helper functions
-inline uint32_t next_index(uint32_t idx, uint32_t buffer_size);
-inline uint32_t available_space(uint32_t head, uint32_t tail, uint32_t buffer_size);
-inline bool is_buffer_full(uint32_t head, uint32_t tail, uint32_t buffer_size);
-
 // OSC reply callback for scsynth (C++ linkage, outside extern "C")
 extern "C++" void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size);
 

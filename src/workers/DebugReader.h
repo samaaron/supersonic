@@ -37,7 +37,5 @@ private:
     std::atomic<uint32_t>* mAudioProcessCount = nullptr;
 
     uint32_t               mLastProcessCount  = 0;
-    int                    mEventsPerDrain    = 8;
-    int                    mEventCount        = 0;
     std::vector<uint8_t>   mMsgBuf;
 };

@@ -60,9 +60,6 @@ public:
     // Send a reply back to the most recently registered client
     void sendReply(const uint8_t* data, uint32_t size);
 
-    // Register a persistent listener (e.g. from /notify) for unsolicited messages
-    void addListener(const juce::String& ip, int port);
-
     // Register a notify target (deduped by ip:port)
     void setNotifyTarget(const juce::String& ip, int port);
 
@@ -80,8 +77,6 @@ public:
 
     // Set engine pointer for /supersonic/* command interception
     void setEngine(SupersonicEngine* engine) { mEngine = engine; }
-
-    std::function<void(const uint8_t*, uint32_t)> onIncomingMessage;
 
 private:
     void run() override;

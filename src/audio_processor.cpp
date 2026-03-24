@@ -131,7 +131,6 @@ extern "C" {
     int32_t last_in_sequence = -1;
 
     // Time conversion constants - Based on SC_CoreAudio.cpp
-    const uint64_t SECONDS_1900_TO_1970 = 2208988800ULL;
     double g_osc_increment_numerator = 0.0;  // Buffer length in NTP units
     int64_t g_osc_increment = 0;             // NTP units per buffer
     double g_osc_to_samples = 0.0;           // NTP units -> samples conversion
@@ -217,16 +216,6 @@ extern "C" {
         // Reset sequence tracking so the next message after the ring buffer
         // drain doesn't trigger a spurious gap warning.
         last_in_sequence = -1;
-    }
-
-    // Convert AudioContext time (double) to OSC/NTP time (int64)
-    int64_t audio_to_osc_time(double audio_time) {
-        double osc_seconds = audio_time + g_time_zero_osc;
-        uint32_t seconds = (uint32_t)osc_seconds;
-        uint32_t fraction = (uint32_t)((osc_seconds - seconds) * 4294967296.0);
-        // Use unsigned arithmetic to avoid sign extension, then cast to signed
-        uint64_t result = ((uint64_t)seconds << 32) | fraction;
-        return (int64_t)result;
     }
 
     // RT-safe bundle scheduling - no malloc!
@@ -1037,35 +1026,11 @@ extern "C" {
         return g_time_zero_osc;
     }
 
-    // Test function to check wave table values
-    EMSCRIPTEN_KEEPALIVE
-    float get_sine_wavetable_value(int index) {
-        if (index < 0 || index >= 2 * 8192) {
-            return -999.0f;  // Error value
-        }
-        return gSineWavetable[index];
-    }
-
 } // namespace scsynth
 
 // ============================================================================
 // RING BUFFER HELPER FUNCTIONS (outside namespace for C++ linkage)
 // ============================================================================
-
-// Ring buffer helper: get next index with wrap
-inline uint32_t next_index(uint32_t idx, uint32_t buffer_size) {
-    return (idx + 1) % buffer_size;
-}
-
-// Ring buffer helper: calculate available space
-inline uint32_t available_space(uint32_t head, uint32_t tail, uint32_t buffer_size) {
-    return (buffer_size - 1 - head + tail) % buffer_size;
-}
-
-// Ring buffer helper: check if buffer is full
-inline bool is_buffer_full(uint32_t head, uint32_t tail, uint32_t buffer_size) {
-    return next_index(head, buffer_size) == tail;
-}
 
 /**
  * Unified ring buffer write function with full corruption protection.
