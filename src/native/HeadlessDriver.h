@@ -33,6 +33,10 @@ public:
     void run() override;
 
 private:
+    // Shared loop body: install buffers, derive NTP, process audio, wake workers.
+    // Called once per block from the platform-specific run() loop.
+    void processBlock(double& baseNTP, double& samplePos);
+
     static constexpr int kBlockSize = 128;
 
     JuceAudioCallback* mCallback         = nullptr;
