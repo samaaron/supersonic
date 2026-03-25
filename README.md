@@ -24,33 +24,32 @@ This is SuperSonic. All the synthesis power of **scsynth** - rearchitected to re
 
 ### Core
 
-- **scsynth compatible** - full OSC command compatibility with SuperCollider's scsynth for synthesis, scheduling, buffers, groups and nodes. A small number of commands are unavailable or replaced — see the [command reference](docs/SCSYNTH_COMMAND_REFERENCE.md) for details.
-- **Malloc-free audio path** - zero memory allocation or blocking on the audio thread. All AudioWorklet memory is pre-allocated and managed.
-- **Pre-scheduler** - dynamically growing holding bay for future OSC bundles with support for cancellation. Keeps the engine's fixed-size internal scheduler from overflowing.
-- **Cold-swap recovery** - multiple levels of restart from quick resume to full engine rebuild, all with automatic state restoration. Synthdefs, buffers and custom module state are captured and restored transparently.
-- **Upstream compatible** - structurally independent but kept in sync with the official SuperCollider scsynth server. All upstream changes cleanly applied.
-- **Tested** - 1400+ tests across web, native and NIF targets run on every release.
+- **scsynth compatible** - *full OSC command compatibility with SuperCollider's scsynth. See the [command reference](docs/SCSYNTH_COMMAND_REFERENCE.md).*
+- **Malloc-free audio path** - *zero allocation or blocking on the audio thread.*
+- **Pre-scheduler** - *dynamically growing holding bay for future OSC bundles with cancellation support.*
+- **Cold-swap recovery** - *multiple restart levels with automatic synthdef and buffer restoration.*
+- **Upstream compatible** - *kept in sync with the official SuperCollider scsynth server.*
+- **Tested** - *1400+ tests across web, native and NIF targets.*
 
 ### Web
 
-- **Dual transport** - SharedArrayBuffer mode for low-latency performance, postMessage mode for zero-config CDN deployment. Both are first-class and fully tested.
-- **Mobile resilient** - suspend, resume and worklet death detection. Survives phone focus loss, tab backgrounding and browser worklet eviction with automatic state restoration.
-- **Observable** - real-time telemetry across the full pipeline: ring buffer usage, scheduler depth, late bundles, audio health and glitch detection.
-- **Multiple clients** - give any Web Worker its own OscChannel to the AudioWorklet with automatic pre-scheduler routing for far-future events. Each channel carries a source ID visible in the aggregated OSC log.
-- **Zero config via CDN** - postMessage mode requires no special server headers. Works directly from CDNs such as unpkg.
-- **Hosted on npm** - available as `supersonic-scsynth` with separate packages for the WASM core, synthdefs and samples.
+- **Dual transport** - *SharedArrayBuffer for performance, postMessage for zero-config CDN deployment.*
+- **Mobile resilient** - *suspend, resume and worklet death detection with automatic state restoration.*
+- **Observable** - *real-time telemetry: ring buffer usage, scheduler depth, audio health and glitch detection.*
+- **Multiple clients** - *give any Web Worker its own OscChannel to the AudioWorklet with automatic pre-scheduler routing for far-future events. Each channel carries a source ID visible in the aggregated OSC log.*
+- **Hosted on npm** - *available as `supersonic-scsynth` with separate packages for core, synthdefs and samples.*
 
 ### Native
 
-- **Live device and driver switching** - hot-swap audio devices and drivers at runtime. Rate mismatches automatically escalate to cold swap with full state recovery.
-- **Headless mode** - timer-driven audio processing without audio hardware. Platform-native high-resolution timers for CI and container deployments.
-- **UDP OSC server** - drop-in scsynth replacement with device, driver, input and recording control via `/supersonic/*` commands.
+- **Live device and driver switching** - *hot-swap at runtime with automatic cold swap on rate mismatch.*
+- **Headless mode** - *high-resolution timer-driven processing for CI and containers.*
+- **UDP OSC server** - *drop-in scsynth replacement with `/supersonic/*` device and recording commands.*
 
 ### NIF
 
-- **BEAM embedded** - scsynth as an Erlang/Elixir NIF with a clean OSC binary interface. Same protocol boundary as web and native.
-- **Dirty scheduler aware** - engine initialisation runs on a dirty IO scheduler so it never blocks normal BEAM schedulers.
-- **PID-based notifications** - register an Erlang process to receive OSC replies and debug output asynchronously via `enif_send()`.
+- **BEAM embedded** - *clean OSC binary interface. Same protocol boundary as web and native.*
+- **Dirty scheduler aware** - *engine init never blocks normal BEAM schedulers.*
+- **PID-based notifications** - *receive OSC replies and debug output asynchronously via `enif_send()`.*
 
 ## Demo
 
