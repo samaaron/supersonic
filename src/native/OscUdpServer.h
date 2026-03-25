@@ -29,7 +29,7 @@
 #include <functional>
 #include <memory>
 #include <vector>
-#include "NTPClock.h"
+#include "WallClock.h"
 #include "OscClassifier.h"
 #include "RingBufferWriter.h"
 #include "src/shared_memory.h"
@@ -43,7 +43,6 @@ public:
     ~OscUdpServer() override;
 
     void initialise(int                   port,
-                    NTPClock*             clock,
                     Prescheduler*         prescheduler,
                     uint8_t*              inBufferStart,
                     uint32_t              inBufferSize,
@@ -86,7 +85,6 @@ private:
 
     int                   mPort          = 57110;
     std::string           mBindAddress;
-    NTPClock*             mClock         = nullptr;
     Prescheduler*         mPrescheduler  = nullptr;
     SupersonicEngine*     mEngine        = nullptr;
     uint8_t*              mInBufferStart = nullptr;

@@ -12,8 +12,7 @@ Prescheduler::~Prescheduler() {
     stopThread(2000);
 }
 
-void Prescheduler::initialise(NTPClock* clock,
-                               uint8_t*              inBufferStart,
+void Prescheduler::initialise(uint8_t*              inBufferStart,
                                uint32_t              inBufferSize,
                                std::atomic<int32_t>* inHead,
                                std::atomic<int32_t>* inTail,
@@ -22,7 +21,6 @@ void Prescheduler::initialise(NTPClock* clock,
                                PerformanceMetrics*   metrics,
                                double lookaheadS)
 {
-    mClock         = clock;
     mInBufferStart = inBufferStart;
     mInBufferSize  = inBufferSize;
     mInHead        = inHead;
@@ -66,7 +64,7 @@ void Prescheduler::cancelAll() {
 }
 
 void Prescheduler::checkAndDispatch() {
-    if (!mClock || !mInBufferStart) return;
+    if (!mInBufferStart) return;
 
     while (true) {
         Event event;
@@ -74,7 +72,7 @@ void Prescheduler::checkAndDispatch() {
             juce::ScopedLock sl(mLock);
             if (mHeap.empty()) break;
             double dispatchTime = mHeap.top().ntpTimeSec - mLookaheadS;
-            if (mClock->wallNTP() < dispatchTime) break;
+            if (wallClockNTP() < dispatchTime) break;
             event = mHeap.pop_move();
 
             if (mMetrics) {
@@ -111,9 +109,9 @@ void Prescheduler::run() {
 
         {
             juce::ScopedLock sl(mLock);
-            if (!mHeap.empty() && mClock) {
+            if (!mHeap.empty()) {
                 double dispatchTime = mHeap.top().ntpTimeSec - mLookaheadS;
-                double diff = dispatchTime - mClock->wallNTP();
+                double diff = dispatchTime - wallClockNTP();
                 if (diff > 0.0) {
                     sleepMs = juce::jmin(diff * 1000.0, 50.0);
                 } else {

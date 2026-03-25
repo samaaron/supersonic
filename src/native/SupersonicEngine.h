@@ -10,7 +10,6 @@
 #include <mutex>
 #include <string>
 
-#include "NTPClock.h"
 #include "Prescheduler.h"
 #include "ReplyReader.h"
 #include "DebugReader.h"
@@ -152,7 +151,6 @@ private:
     void restartHeadlessDriver(double sampleRate);
     juce::String reinitialiseWithDefaultsPreservingConfig();
 
-    NTPClock          mClock;
     JuceAudioCallback mAudioCallback;
     Prescheduler      mPrescheduler;
     ReplyReader       mReplyReader;

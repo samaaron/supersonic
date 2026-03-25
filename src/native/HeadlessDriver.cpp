@@ -13,8 +13,7 @@
   #include <windows.h>
 #endif
 
-// Use the shared implementation from JuceAudioCallback (avoids duplication).
-static double wallClockNTP() { return JuceAudioCallback::wallClockNTP(); }
+// wallClockNTP() comes from WallClock.h (included via JuceAudioCallback.h)
 
 HeadlessDriver::HeadlessDriver()
     : juce::Thread("SuperSonic-Headless") {}

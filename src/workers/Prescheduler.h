@@ -10,7 +10,7 @@
 #include <vector>
 #include <queue>
 
-#include "NTPClock.h"
+#include "src/native/WallClock.h"
 #include "RingBufferWriter.h"
 #include "src/shared_memory.h"
 
@@ -19,8 +19,7 @@ public:
     void schedule(const uint8_t* data, uint32_t size, double ntpTimeSec);
     void cancelAll();
 
-    void initialise(NTPClock* clock,
-                    uint8_t*              inBufferStart,
+    void initialise(uint8_t*              inBufferStart,
                     uint32_t              inBufferSize,
                     std::atomic<int32_t>* inHead,
                     std::atomic<int32_t>* inTail,
@@ -64,7 +63,6 @@ private:
         void clear() { c.clear(); }
     };
 
-    NTPClock*             mClock         = nullptr;
     uint8_t*              mInBufferStart = nullptr;
     uint32_t              mInBufferSize  = 0;
     std::atomic<int32_t>* mInHead        = nullptr;

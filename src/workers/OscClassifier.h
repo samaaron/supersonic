@@ -29,7 +29,7 @@ public:
     double getLookahead() const { return lookahead.load(std::memory_order_relaxed); }
 
     // Classify a raw OSC packet given the current NTP wall-clock time.
-    // wallNtpNow: result of NTPClock::wallNTP()
+    // wallNtpNow: result of wallClockNTP()
     OscCategory classify(const uint8_t* data, uint32_t size, double wallNtpNow) const {
         if (size < 8) return OscCategory::IMMEDIATE;
 

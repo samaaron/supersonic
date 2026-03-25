@@ -2,20 +2,11 @@
  * JuceAudioCallback.cpp
  */
 #include "JuceAudioCallback.h"
+#include "WallClock.h"
 #include "SampleLoader.h"
 #include "src/shared_memory.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <cstring>
-#include <chrono>
-
-static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
-
-double JuceAudioCallback::wallClockNTP() {
-    auto now = std::chrono::system_clock::now();
-    double secsSinceEpoch = std::chrono::duration<double>(
-        now.time_since_epoch()).count();
-    return secsSinceEpoch + NTP_EPOCH_OFFSET;
-}
 
 JuceAudioCallback::JuceAudioCallback() = default;
 

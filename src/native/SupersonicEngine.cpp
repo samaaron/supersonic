@@ -319,7 +319,6 @@ void SupersonicEngine::initialise(const Config& cfg) {
 
     // -- Prescheduler -------------------------------------------------------
     mPrescheduler.initialise(
-        &mClock,
         base + IN_BUFFER_START,
         IN_BUFFER_SIZE,
         &ctrl->in_head,
@@ -353,7 +352,6 @@ void SupersonicEngine::initialise(const Config& cfg) {
     // -- UDP OSC Server -----------------------------------------------------
     mUdpServer.initialise(
         cfg.udpPort,
-        &mClock,
         &mPrescheduler,
         base + IN_BUFFER_START,
         IN_BUFFER_SIZE,

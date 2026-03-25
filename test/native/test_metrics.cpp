@@ -3,7 +3,7 @@
  */
 #include "EngineFixture.h"
 #include "OscBuilder.h"
-#include "NTPClock.h"
+#include "WallClock.h"
 #include "src/shared_memory.h"
 
 extern "C" uint8_t ring_buffer_storage[];
@@ -158,7 +158,7 @@ TEST_CASE("prescheduler_bypassed increments for FAR_FUTURE bundles", "[metrics]"
     uint32_t before = metrics->prescheduler_bypassed.load(std::memory_order_relaxed);
 
     // Send a bundle with timetag far in the future (wall + 60s, well beyond 0.5s lookahead)
-    double futureNTP = NTPClock::NTP_EPOCH_OFFSET
+    double futureNTP = NTP_EPOCH_OFFSET
                      + static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
                      + 60.0;
     fx.engine().sendBundle(futureNTP, { OscBuilder::message("/status") });

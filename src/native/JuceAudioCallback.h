@@ -4,6 +4,7 @@
 #pragma once
 
 #include <juce_audio_devices/juce_audio_devices.h>
+#include "WallClock.h"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -70,7 +71,7 @@ public:
 
     // Read wall clock as NTP seconds (sub-millisecond precision).
     // Public + static so HeadlessDriver can reuse the same implementation.
-    static double wallClockNTP();
+    static double wallClockNTP() { return ::wallClockNTP(); }
 
     // --- Pre-tick hook (for tau integration) ---
     // Called before process_audio() each 128-sample block.

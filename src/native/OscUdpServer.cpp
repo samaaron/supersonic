@@ -21,7 +21,6 @@ OscUdpServer::~OscUdpServer() {
 }
 
 void OscUdpServer::initialise(int                   port,
-                               NTPClock*             clock,
                                Prescheduler*         prescheduler,
                                uint8_t*              inBufferStart,
                                uint32_t              inBufferSize,
@@ -35,7 +34,6 @@ void OscUdpServer::initialise(int                   port,
 {
     mPort          = port;
     mBindAddress   = bindAddress;
-    mClock         = clock;
     mPrescheduler  = prescheduler;
     mInBufferStart = inBufferStart;
     mInBufferSize  = inBufferSize;
@@ -527,7 +525,7 @@ void OscUdpServer::handlePacket(const uint8_t* data, uint32_t size,
         mMetrics->osc_out_bytes_sent.fetch_add(size, std::memory_order_relaxed);
     }
 
-    double wallNow = mClock ? mClock->wallNTP() : 0.0;
+    double wallNow = wallClockNTP();
     OscCategory cat = mClassifier.classify(data, size, wallNow);
 
     switch (cat) {

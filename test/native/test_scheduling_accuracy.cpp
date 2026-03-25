@@ -9,7 +9,7 @@
  * Tolerance is expressed in audio blocks — the fundamental scheduling quantum.
  */
 #include "EngineFixture.h"
-#include "NTPClock.h"
+#include "WallClock.h"
 #include "src/shared_memory.h"
 #include <chrono>
 #include <cmath>
@@ -80,7 +80,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     REQUIRE(sampleRate > 0);
 
     double ntpNow = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                  + NTPClock::NTP_EPOCH_OFFSET;
+                  + NTP_EPOCH_OFFSET;
 
     // Schedule NUM_BUNDLES synths at regular intervals
     for (int i = 0; i < NUM_BUNDLES; i++) {
