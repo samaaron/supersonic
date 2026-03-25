@@ -22,17 +22,35 @@ This is SuperSonic. All the synthesis power of **scsynth** - rearchitected to re
 
 **SuperSonic** is a reworking of [SuperCollider](https://supercollider.github.io/)'s audio synthesis engine **scsynth** designed to run wherever you need it - in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), as a standalone native backend, or embedded directly into the [BEAM](https://www.erlang.org/) via a NIF.
 
-Highlights:
+### Core
 
-- **AudioWorklet** - runs in a dedicated high priority audio thread in the browser
-- **WebAssembly** - scsynth's original C++ code compiled for the web
-- **Native Backend** - standalone JUCE-based executable for desktop integration
-- **BEAM NIF** - embed scsynth directly in Erlang/Elixir applications
-- **OSC API** - the same OSC protocol across all targets
-- **Tested** - 1400+ tests across web, native and NIF targets run on every release
-- **Zero Config via CDN** - no installation necessary - works directly from CDNs such as unpkg.
-- **Performance Mode (SAB)** - can use a SharedArrayBuffer (SAB) for lower latency and reduced jitter with internal comms. This mode is optional and requires COOP/COEP headers.
-- **Upstream Compatible** - SuperSonic is kept in sync with the development of the official native SuperCollider scsynth server.
+- **scsynth compatible** - full OSC command compatibility with SuperCollider's scsynth for synthesis, scheduling, buffers, groups and nodes. A small number of commands are unavailable or replaced — see the [command reference](docs/SCSYNTH_COMMAND_REFERENCE.md) for details.
+- **Malloc-free audio path** - zero memory allocation or blocking on the audio thread. All AudioWorklet memory is pre-allocated and managed.
+- **Pre-scheduler** - dynamically growing holding bay for future OSC bundles with support for cancellation. Keeps the engine's fixed-size internal scheduler from overflowing.
+- **Cold-swap recovery** - multiple levels of restart from quick resume to full engine rebuild, all with automatic state restoration. Synthdefs, buffers and custom module state are captured and restored transparently.
+- **Upstream compatible** - structurally independent but kept in sync with the official SuperCollider scsynth server. All upstream changes cleanly applied.
+- **Tested** - 1400+ tests across web, native and NIF targets run on every release.
+
+### Web
+
+- **Dual transport** - SharedArrayBuffer mode for low-latency performance, postMessage mode for zero-config CDN deployment. Both are first-class and fully tested.
+- **Mobile resilient** - suspend, resume and worklet death detection. Survives phone focus loss, tab backgrounding and browser worklet eviction with automatic state restoration.
+- **Observable** - real-time telemetry across the full pipeline: ring buffer usage, scheduler depth, late bundles, audio health and glitch detection.
+- **Multiple clients** - give any Web Worker its own OscChannel to the AudioWorklet with automatic pre-scheduler routing for far-future events. Each channel carries a source ID visible in the aggregated OSC log.
+- **Zero config via CDN** - postMessage mode requires no special server headers. Works directly from CDNs such as unpkg.
+- **Hosted on npm** - available as `supersonic-scsynth` with separate packages for the WASM core, synthdefs and samples.
+
+### Native
+
+- **Live device and driver switching** - hot-swap audio devices and drivers at runtime. Rate mismatches automatically escalate to cold swap with full state recovery.
+- **Headless mode** - timer-driven audio processing without audio hardware. Platform-native high-resolution timers for CI and container deployments.
+- **UDP OSC server** - drop-in scsynth replacement with device, driver, input and recording control via `/supersonic/*` commands.
+
+### NIF
+
+- **BEAM embedded** - scsynth as an Erlang/Elixir NIF with a clean OSC binary interface. Same protocol boundary as web and native.
+- **Dirty scheduler aware** - engine initialisation runs on a dirty IO scheduler so it never blocks normal BEAM schedulers.
+- **PID-based notifications** - register an Erlang process to receive OSC replies and debug output asynchronously via `enif_send()`.
 
 ## Demo
 
