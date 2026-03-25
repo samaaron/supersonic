@@ -6,14 +6,21 @@ set -e
 # Creates a standalone zip of the demo that can be deployed to any web server
 # Includes all necessary files: HTML, JS, WASM, samples, and synthdefs
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKING_DIR="$(pwd)"
+PROJECT_ROOT="${SCRIPT_DIR}/.."
+
+cleanup_function() {
+    cd "${WORKING_DIR}"
+}
+trap cleanup_function EXIT
+
 # Color output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;36m'
 NC='\033[0m' # No Color
-
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION=$(node -p "require('./package.json').version")
 OUTPUT_NAME="supersonic-demo-v${VERSION}"
 TEMP_DIR="${PROJECT_ROOT}/tmp/${OUTPUT_NAME}"
