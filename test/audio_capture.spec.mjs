@@ -619,8 +619,8 @@ test.describe("OSC Bundle Timing", () => {
           1
         );
         const ntpStartTime = ntpStartView[0];
-        const driftMs = Atomics.load(driftView, 0);
-        const driftSeconds = driftMs / 1000;
+        const driftUs = Atomics.load(driftView, 0);
+        const driftSeconds = driftUs / 1000000;
 
         // Start capture and record AudioContext time at that moment
         sonic.startCapture();
@@ -822,8 +822,8 @@ test.describe("OSC Bundle Timing", () => {
           ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
           1
         );
-        const driftMs = Atomics.load(driftView, 0);
-        const driftSeconds = driftMs / 1000;
+        const driftUs = Atomics.load(driftView, 0);
+        const driftSeconds = driftUs / 1000000;
 
         // Start capture
         sonic.startCapture();
@@ -967,8 +967,8 @@ test.describe("OSC Bundle Timing", () => {
           ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
           1
         );
-        const driftMs = Atomics.load(driftView, 0);
-        const driftSeconds = driftMs / 1000;
+        const driftUs = Atomics.load(driftView, 0);
+        const driftSeconds = driftUs / 1000000;
 
         // Start capture and record precise time
         sonic.startCapture();
@@ -1083,8 +1083,8 @@ test.describe("OSC Bundle Timing", () => {
           ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
           1
         );
-        const driftMs = Atomics.load(driftView, 0);
-        const driftSeconds = driftMs / 1000;
+        const driftUs = Atomics.load(driftView, 0);
+        const driftSeconds = driftUs / 1000000;
 
         // Start capture and record precise time
         sonic.startCapture();

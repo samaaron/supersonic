@@ -1221,11 +1221,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             }
 
             if (data.type === 'setDriftOffset') {
-                // Write drift offset to WASM memory (Int32, milliseconds)
+                // Write drift offset to WASM memory (Int32, microseconds)
                 if (this.wasmMemory && this.ringBufferBase !== null && this.bufferConstants) {
                     const offset = this.ringBufferBase + this.bufferConstants.DRIFT_OFFSET_START;
                     const view = new Int32Array(this.wasmMemory.buffer, offset, 1);
-                    view[0] = data.driftOffsetMs;
+                    view[0] = data.driftOffsetUs;
                 }
             }
 
@@ -1385,7 +1385,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                 // C++ process_audio() now calculates NTP time internally from:
                 // - NTP_START_TIME (write-once, set during initialization)
-                // - DRIFT_OFFSET (updated every 15s by main thread)
+                // - DRIFT_OFFSET (microseconds, updated every 1s by main thread)
                 // - GLOBAL_OFFSET (for future multi-system sync)
 
                 const keepAlive = this.wasmInstance.exports.process_audio(

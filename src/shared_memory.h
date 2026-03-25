@@ -33,7 +33,7 @@ constexpr uint32_t DEBUG_BUFFER_SIZE  = 65536;  // 64KB - Debug messages from sc
 constexpr uint32_t CONTROL_SIZE       = 48;    // Atomic control pointers & flags (11 fields × 4 bytes + 4 padding for 8-byte alignment)
 constexpr uint32_t METRICS_SIZE       = 184;   // Performance metrics: 46 fields * 4 bytes = 184 bytes
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
-constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in milliseconds (int32, atomic)
+constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in microseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
 
 // Node tree mirror configuration (for observing synth/group hierarchy via polling)

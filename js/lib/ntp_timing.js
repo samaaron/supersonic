@@ -36,11 +36,11 @@ function calculateNTPStartTime(currentNTP, contextTime) {
  * Positive = AudioContext running slow, Negative = running fast
  * @param {number} expectedContextTime
  * @param {number} actualContextTime
- * @returns {number} Drift in milliseconds (rounded to integer)
+ * @returns {number} Drift in microseconds (rounded to integer)
  */
-function calculateDriftMs(expectedContextTime, actualContextTime) {
+function calculateDriftUs(expectedContextTime, actualContextTime) {
   const driftSeconds = expectedContextTime - actualContextTime;
-  return Math.round(driftSeconds * 1000);
+  return Math.round(driftSeconds * 1000000);
 }
 
 /**
@@ -197,24 +197,24 @@ export class NTPTiming {
     const expectedContextTime = currentNTP - this.#initialNTPStartTime;
 
     // Compare to actual contextTime to get drift
-    const driftMs = calculateDriftMs(expectedContextTime, timestamp.contextTime);
+    const driftUs = calculateDriftUs(expectedContextTime, timestamp.contextTime);
 
     // Store locally
-    this.#localDriftMs = driftMs;
+    this.#localDriftMs = Math.round(driftUs / 1000);
 
     // Write to memory (SAB directly, or via postMessage to worklet which writes to WASM memory)
     if (this.#mode === 'sab' && this.#driftView) {
-      Atomics.store(this.#driftView, 0, driftMs);
+      Atomics.store(this.#driftView, 0, driftUs);
     } else if (this.#workletPort) {
       this.#workletPort.postMessage({
         type: 'setDriftOffset',
-        driftOffsetMs: driftMs
+        driftOffsetUs: driftUs
       });
     }
 
     if (__DEV__) {
       console.log(
-        `[Dbg-NTPTiming] Drift: ${driftMs}ms ` +
+        `[Dbg-NTPTiming] Drift: ${(driftUs / 1000).toFixed(1)}ms ` +
         `(expected=${expectedContextTime.toFixed(3)}s, actual=${timestamp.contextTime.toFixed(3)}s)`
       );
     }
@@ -289,7 +289,8 @@ export class NTPTiming {
    */
   getDriftOffset() {
     if (this.#driftView) {
-      return Atomics.load(this.#driftView, 0);
+      // SAB stores microseconds; return milliseconds for API consumers
+      return Math.round(Atomics.load(this.#driftView, 0) / 1000);
     }
     return this.#localDriftMs;
   }
