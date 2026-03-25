@@ -69,9 +69,9 @@ jobs:
       - name: Run tests
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            ./build/native/test/native/Release/SuperSonicNativeTests.exe
+            ./build/native/test/native/Release/SuperSonicNativeTests.exe "~[benchmark]"
           else
-            ./build/native/test/native/SuperSonicNativeTests
+            ./build/native/test/native/SuperSonicNativeTests "~[benchmark]"
           fi
         shell: bash
 
