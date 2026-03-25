@@ -13,7 +13,7 @@
 // Single source of truth for all builds (WASM, native exe, NIF).
 // Updated by scripts/bump-version.sh.
 #define SUPERSONIC_VERSION_MAJOR 0
-#define SUPERSONIC_VERSION_MINOR 65
+#define SUPERSONIC_VERSION_MINOR 66
 #define SUPERSONIC_VERSION_PATCH 0
 
 // String form for CLI / banners (e.g. "0.64.0")
