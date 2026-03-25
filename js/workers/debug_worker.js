@@ -10,68 +10,32 @@
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
 import { calculateDebugControlIndices } from '../lib/control_offsets.js';
+import { runSabWorker } from '../lib/sab_worker_loop.js';
 
-// Transport mode: 'sab' or 'postMessage'
-let mode = 'sab';
-
-// Ring buffer configuration (SAB mode only)
-let sharedBuffer = null;
-let ringBufferBase = null;
-let atomicView = null;
-let dataView = null;
-let uint8View = null;
-
-// Ring buffer layout constants (loaded from WASM at initialization)
-let bufferConstants = null;
-
-// Control indices (calculated after init)
-let CONTROL_INDICES = {};
-
-// Metrics view (for writing stats to SAB)
-let metricsView = null;
-
-// Worker state
-let running = false;
-
-// Reusable TextDecoder for debug message parsing
 const textDecoder = new TextDecoder('utf-8');
 
-const debugWorkerLog = (...args) => {
-    if (__DEV__) {
-        console.log(...args);
+/**
+ * Decode a debug payload from the ring buffer into text
+ */
+function decodeDebugPayload(uint8View, payloadOffset, payloadLength) {
+    // Must copy to a regular buffer since TextDecoder cannot decode SharedArrayBuffer views
+    const payload = new Uint8Array(payloadLength);
+    for (let i = 0; i < payloadLength; i++) {
+        payload[i] = uint8View[payloadOffset + i];
     }
-};
+    let text = textDecoder.decode(payload);
+    if (text.endsWith('\n')) text = text.slice(0, -1);
+    return text;
+}
 
 /**
- * Initialize ring buffer access
+ * Read debug messages from the DEBUG ring buffer
  */
-const initRingBuffer = (buffer, base, constants) => {
-    sharedBuffer = buffer;
-    ringBufferBase = base;
-    bufferConstants = constants;
-    atomicView = new Int32Array(sharedBuffer);
-    dataView = new DataView(sharedBuffer);
-    uint8View = new Uint8Array(sharedBuffer);
-
-    // Calculate control indices using constants from WASM
-    CONTROL_INDICES = calculateDebugControlIndices(ringBufferBase, bufferConstants.CONTROL_START);
-
-    // Initialize metrics view
-    const metricsBase = ringBufferBase + bufferConstants.METRICS_START;
-    metricsView = new Uint32Array(sharedBuffer, metricsBase, bufferConstants.METRICS_SIZE / 4);
-};
-
-/**
- * Read debug messages from buffer
- * Uses shared ring_buffer_core for read logic
- */
-const readDebugMessages = () => {
+function readDebugMessages(ctx) {
+    const { atomicView, uint8View, dataView, ringBufferBase, bufferConstants, metricsView, CONTROL_INDICES } = ctx;
     const head = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_HEAD);
     const tail = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_TAIL);
-
-    if (head === tail) {
-        return null; // No messages
-    }
+    if (head === tail) return [];
 
     const messages = [];
 
@@ -86,29 +50,12 @@ const readDebugMessages = () => {
         paddingMagic: bufferConstants.PADDING_MAGIC,
         headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
         maxMessages: 1000,
-        onMessage: (payloadOffset, payloadLength, sequence, sourceId) => {
-            // Worker can allocate - it's not in the audio thread
-            // Must copy to a regular buffer since TextDecoder cannot decode SharedArrayBuffer views
-            const payload = new Uint8Array(payloadLength);
-            for (let i = 0; i < payloadLength; i++) {
-                payload[i] = uint8View[payloadOffset + i];
-            }
-
-            // Convert bytes to string using TextDecoder for proper UTF-8 handling
-            let messageText = textDecoder.decode(payload);
-
-            // Remove trailing newline if present
-            if (messageText.endsWith('\n')) {
-                messageText = messageText.slice(0, -1);
-            }
-
+        onMessage: (payloadOffset, payloadLength, sequence) => {
             messages.push({
-                text: messageText,
+                text: decodeDebugPayload(uint8View, payloadOffset, payloadLength),
                 timestamp: performance.now(),
                 sequence
             });
-
-            // Update metrics
             if (metricsView) {
                 Atomics.add(metricsView, MetricsOffsets.DEBUG_MESSAGES_RECEIVED, 1);
                 Atomics.add(metricsView, MetricsOffsets.DEBUG_BYTES_RECEIVED, payloadLength);
@@ -119,175 +66,46 @@ const readDebugMessages = () => {
         }
     });
 
-    // Update tail pointer (consume messages)
     if (messagesRead > 0) {
         Atomics.store(atomicView, CONTROL_INDICES.DEBUG_TAIL, newTail);
     }
-
-    return messages.length > 0 ? messages : null;
-};
-
-/**
- * Main wait loop using Atomics.wait for instant wake
- */
-const waitLoop = () => {
-    while (running) {
-        try {
-            // Get current DEBUG_HEAD value
-            const currentHead = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_HEAD);
-            const currentTail = Atomics.load(atomicView, CONTROL_INDICES.DEBUG_TAIL);
-
-            // If buffer is empty, wait for AudioWorklet to notify us
-            if (currentHead === currentTail) {
-                Atomics.wait(atomicView, CONTROL_INDICES.DEBUG_HEAD, currentHead);
-            }
-
-            // Read all available debug messages
-            const messages = readDebugMessages();
-
-            if (messages && messages.length > 0) {
-                // Send to main thread
-                self.postMessage({
-                    type: 'debug',
-                    messages
-                });
-            }
-
-        } catch (error) {
-            console.error('[DebugWorker] Error in wait loop:', error);
-            self.postMessage({
-                type: 'error',
-                error: error.message
-            });
-
-            // Brief pause on error before retrying (use existing atomicView)
-            // Atomics.wait with 10ms timeout as a brief delay before retrying
-            Atomics.wait(atomicView, 0, atomicView[0], 10);
-        }
-    }
-};
+    return messages;
+}
 
 /**
- * Start the wait loop
+ * Decode raw debug bytes from postMessage mode
  */
-const start = () => {
-    if (!sharedBuffer) {
-        console.error('[DebugWorker] Cannot start - not initialized');
-        return;
-    }
-
-    if (running) {
-        if (__DEV__) console.warn('[DebugWorker] Already running');
-        return;
-    }
-
-    running = true;
-    waitLoop();
-};
-
-/**
- * Stop the wait loop
- */
-const stop = () => {
-    running = false;
-};
-
-/**
- * Clear debug buffer
- */
-const clear = () => {
-    if (!sharedBuffer) return;
-
-    // Reset head and tail to 0
-    Atomics.store(atomicView, CONTROL_INDICES.DEBUG_HEAD, 0);
-    Atomics.store(atomicView, CONTROL_INDICES.DEBUG_TAIL, 0);
-};
-
-/**
- * Decode raw bytes from postMessage mode
- * Called when main thread forwards debugRaw messages
- */
-const decodeRawMessages = (rawMessages) => {
+function decodeRawMessages(rawMessages) {
     const messages = [];
-
     for (const raw of rawMessages) {
         try {
-            const bytes = new Uint8Array(raw.bytes);
-            let text = textDecoder.decode(bytes);
-
-            // Remove trailing newline if present
-            if (text.endsWith('\n')) {
-                text = text.slice(0, -1);
-            }
-
-            messages.push({
-                text: text,
-                timestamp: performance.now(),
-                sequence: raw.sequence
-            });
+            let text = textDecoder.decode(new Uint8Array(raw.bytes));
+            if (text.endsWith('\n')) text = text.slice(0, -1);
+            messages.push({ text, timestamp: performance.now(), sequence: raw.sequence });
         } catch (err) {
             console.error('[DebugWorker] Failed to decode message:', err);
         }
     }
-
     if (messages.length > 0) {
-        self.postMessage({
-            type: 'debug',
-            messages
-        });
+        self.postMessage({ type: 'debug', messages });
     }
-};
+}
 
-/**
- * Handle messages from main thread
- */
-self.addEventListener('message', (event) => {
-    const { data } = event;
-
-    try {
-        switch (data.type) {
-            case 'init':
-                mode = data.mode || 'sab';
-                if (mode === 'sab') {
-                    initRingBuffer(data.sharedBuffer, data.ringBufferBase, data.bufferConstants);
-                }
-                self.postMessage({ type: 'initialized' });
-                break;
-
-            case 'start':
-                if (mode === 'sab') {
-                    start();
-                }
-                // In postMessage mode, we just wait for debugRaw messages
-                break;
-
-            case 'stop':
-                stop();
-                break;
-
-            case 'clear':
-                if (mode === 'sab') {
-                    clear();
-                }
-                break;
-
-            case 'debugRaw':
-                // PostMessage mode: decode raw bytes from AudioWorklet
-                if (data.messages) {
-                    decodeRawMessages(data.messages);
-                }
-                break;
-
-            default:
-                if (__DEV__) console.warn('[DebugWorker] Unknown message type:', data.type);
-        }
-    } catch (error) {
-        console.error('[DebugWorker] Error:', error);
-        self.postMessage({
-            type: 'error',
-            error: error.message
-        });
-    }
+runSabWorker({
+    name: 'DebugWorker',
+    calculateControlIndices: calculateDebugControlIndices,
+    headIndex: (idx) => idx.DEBUG_HEAD,
+    tailIndex: (idx) => idx.DEBUG_TAIL,
+    readMessages: readDebugMessages,
+    postResults: (messages) => self.postMessage({ type: 'debug', messages }),
+    extraHandlers: {
+        clear: (_data, ctx) => {
+            if (!ctx.sharedBuffer) return;
+            Atomics.store(ctx.atomicView, ctx.CONTROL_INDICES.DEBUG_HEAD, 0);
+            Atomics.store(ctx.atomicView, ctx.CONTROL_INDICES.DEBUG_TAIL, 0);
+        },
+        debugRaw: (data) => {
+            if (data.messages) decodeRawMessages(data.messages);
+        },
+    },
 });
-
-debugWorkerLog('[DebugWorker] Script loaded');
