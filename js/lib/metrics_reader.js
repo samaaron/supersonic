@@ -4,6 +4,16 @@
 import * as MetricsOffsets from './metrics_offsets.js';
 import { calculateAllControlIndices } from './control_offsets.js';
 
+const ADD_METRIC_OFFSETS = {
+  oscOutMessagesSent: MetricsOffsets.OSC_OUT_MESSAGES_SENT,
+  oscOutBytesSent: MetricsOffsets.OSC_OUT_BYTES_SENT,
+  preschedulerBypassed: MetricsOffsets.PRESCHEDULER_BYPASSED,
+  bypassNonBundle: MetricsOffsets.BYPASS_NON_BUNDLE,
+  bypassImmediate: MetricsOffsets.BYPASS_IMMEDIATE,
+  bypassNearFuture: MetricsOffsets.BYPASS_NEAR_FUTURE,
+  bypassLate: MetricsOffsets.BYPASS_LATE,
+};
+
 /**
  * Reads and aggregates metrics from SharedArrayBuffer or snapshot buffers
  */
@@ -97,17 +107,7 @@ export class MetricsReader {
       return;
     }
 
-    const offsets = {
-      oscOutMessagesSent: MetricsOffsets.OSC_OUT_MESSAGES_SENT,
-      oscOutBytesSent: MetricsOffsets.OSC_OUT_BYTES_SENT,
-      preschedulerBypassed: MetricsOffsets.PRESCHEDULER_BYPASSED,
-      bypassNonBundle: MetricsOffsets.BYPASS_NON_BUNDLE,
-      bypassImmediate: MetricsOffsets.BYPASS_IMMEDIATE,
-      bypassNearFuture: MetricsOffsets.BYPASS_NEAR_FUTURE,
-      bypassLate: MetricsOffsets.BYPASS_LATE,
-    };
-
-    const offset = offsets[metric];
+    const offset = ADD_METRIC_OFFSETS[metric];
     if (offset !== undefined) {
       Atomics.add(this.#metricsView, offset, amount);
     }

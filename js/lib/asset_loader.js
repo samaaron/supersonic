@@ -115,8 +115,8 @@ export class AssetLoader {
       } catch (error) {
         lastError = error;
 
-        // Don't retry if it's a 4xx error (already thrown above)
-        if (error.message.includes('Failed to fetch') && error.message.includes('4')) {
+        // Don't retry 4xx errors (already thrown above with specific status)
+        if (error.message.match(/Failed to fetch .+: 4\d{2} /)) {
           throw error;
         }
 

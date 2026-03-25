@@ -131,40 +131,10 @@ export function aiffToWav(aiffBuffer) {
         }
     }
 
-    // Find SSND chunk (required)
-    const ssndChunk = findChunk(view, 'SSND');
-    if (!ssndChunk) {
-        throw new Error('AIFF file missing SSND chunk');
-    }
+    const { wavBuffer, wavBytes, srcBytes, audioDataSize, bytesPerSample, wavHeaderSize } =
+        prepareWavFromAiff(aiffBuffer, numChannels, numSampleFrames, bitsPerSample, sampleRate);
 
-    // SSND has 8 bytes of offset/blockSize before audio data
-    const ssndOffset = view.getUint32(ssndChunk.offset, false);
-    const audioDataStart = ssndChunk.offset + 8 + ssndOffset;
-    const bytesPerSample = bitsPerSample / 8;
-    const audioDataSize = numSampleFrames * numChannels * bytesPerSample;
-
-    // Validate we have enough data
-    if (audioDataStart + audioDataSize > aiffBuffer.byteLength) {
-        throw new Error('AIFF file truncated: not enough audio data');
-    }
-
-    // Create WAV file
-    const wavHeaderSize = 44;
-    const wavBuffer = new ArrayBuffer(wavHeaderSize + audioDataSize);
-    const wavView = new DataView(wavBuffer);
-    const wavBytes = new Uint8Array(wavBuffer);
-
-    // Write WAV header
-    writeWavHeader(wavView, {
-        numChannels,
-        sampleRate: Math.round(sampleRate),
-        bitsPerSample,
-        dataSize: audioDataSize
-    });
-
-    // Copy and byte-swap PCM data
-    const srcBytes = new Uint8Array(aiffBuffer, audioDataStart, audioDataSize);
-
+    // Copy and byte-swap PCM data (big-endian to little-endian)
     if (bytesPerSample === 1) {
         // 8-bit: no swap needed, but AIFF uses signed, WAV uses unsigned
         for (let i = 0; i < audioDataSize; i++) {
@@ -199,10 +169,10 @@ export function aiffToWav(aiffBuffer) {
 }
 
 /**
- * Convert AIFC 'sowt' (little-endian) audio data to WAV format
- * No byte swapping needed since sowt is already little-endian
+ * Locate SSND audio data and create a WAV buffer with header already written.
+ * Returns { wavBuffer, wavBytes, srcBytes, audioDataSize, bytesPerSample }.
  */
-function aiffSowtToWav(aiffBuffer, numChannels, numSampleFrames, bitsPerSample, sampleRate) {
+function prepareWavFromAiff(aiffBuffer, numChannels, numSampleFrames, bitsPerSample, sampleRate) {
     const view = new DataView(aiffBuffer);
 
     const ssndChunk = findChunk(view, 'SSND');
@@ -231,8 +201,17 @@ function aiffSowtToWav(aiffBuffer, numChannels, numSampleFrames, bitsPerSample, 
         dataSize: audioDataSize
     });
 
-    // sowt is little-endian, just copy directly
     const srcBytes = new Uint8Array(aiffBuffer, audioDataStart, audioDataSize);
+    return { wavBuffer, wavBytes, srcBytes, audioDataSize, bytesPerSample, wavHeaderSize };
+}
+
+/**
+ * Convert AIFC 'sowt' (little-endian) audio data to WAV format
+ * No byte swapping needed since sowt is already little-endian
+ */
+function aiffSowtToWav(aiffBuffer, numChannels, numSampleFrames, bitsPerSample, sampleRate) {
+    const { wavBuffer, wavBytes, srcBytes, audioDataSize, bytesPerSample, wavHeaderSize } =
+        prepareWavFromAiff(aiffBuffer, numChannels, numSampleFrames, bitsPerSample, sampleRate);
 
     if (bytesPerSample === 1) {
         // 8-bit: AIFF uses signed, WAV uses unsigned

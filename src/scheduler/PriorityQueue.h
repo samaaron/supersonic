@@ -89,7 +89,7 @@ public:
 
     bool IsFull() const { return mSize >= N; }
 
-    void Empty() { mSize = 0; }
+    void Clear() { mSize = 0; }
 
     int Size() const { return mSize; }
 

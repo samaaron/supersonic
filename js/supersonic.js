@@ -88,7 +88,7 @@ function formatOscArgHtml(arg, address, argIndex) {
 function formatOscLineHtml(msg, sequence, timestamp, initTime, sourceId) {
   const address = msg[0];
   const args = msg.slice(1);
-  const relTime = initTime && timestamp ? ((timestamp - initTime)).toFixed(2) : '';
+  const relTime = initTime && timestamp ? (timestamp - initTime).toFixed(2) : '';
   let html = `<span class="supersonic-scsynth-seq">[${sequence}]</span>`;
   if (relTime) html += ` <span class="supersonic-scsynth-time">${relTime}</span>`;
   if (sourceId !== undefined) html += ` <span class="supersonic-scsynth-source">ch${sourceId}</span>`;
@@ -103,7 +103,7 @@ function formatOscLineHtml(msg, sequence, timestamp, initTime, sourceId) {
 function formatBundleHtml(decoded, sequence, timestamp, initTime, sourceId) {
   if (!decoded.packets) return formatOscLineHtml(decoded, sequence, timestamp, initTime, sourceId);
   if (decoded.packets.length === 1) return formatOscLineHtml(decoded.packets[0], sequence, timestamp, initTime, sourceId);
-  const relTime = initTime && timestamp ? ((timestamp - initTime)).toFixed(2) : '';
+  const relTime = initTime && timestamp ? (timestamp - initTime).toFixed(2) : '';
   let html = `<span class="supersonic-scsynth-seq">[${sequence}]</span>`;
   if (relTime) html += ` <span class="supersonic-scsynth-time">${relTime}</span>`;
   if (sourceId !== undefined) html += ` <span class="supersonic-scsynth-source">ch${sourceId}</span>`;
@@ -1536,7 +1536,6 @@ export class SuperSonic {
     this.#initPromise = null;
     this.#wasmMemory = null;
     this.#ntpTiming?.reset();
-    this.#audioHealthMonitor?.reset();
     this.bootStats = { initStartTime: null, initDuration: null };
   }
 
@@ -1544,7 +1543,7 @@ export class SuperSonic {
     this.#eventEmitter.emit("destroy");
     await this.shutdown();
     this.#cachedWasmBytes = null;
-    this.#eventEmitter.clearAllListeners();
+    this.#eventEmitter.removeAllListeners();
   }
 
   async reset() {

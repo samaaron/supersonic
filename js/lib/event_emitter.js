@@ -113,10 +113,4 @@ export class EventEmitter {
     }
   }
 
-  /**
-   * Clear all listeners (for cleanup)
-   */
-  clearAllListeners() {
-    this.#listeners.clear();
-  }
 }
