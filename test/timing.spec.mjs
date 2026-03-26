@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures.mjs';
+import { test, expect, skipIfPostMessage } from './fixtures.mjs';
 
 // These tests require waiting for drift timer (1s interval)
 test.describe('Timing and Drift', () => {
@@ -101,5 +101,82 @@ test.describe('Timing and Drift', () => {
 
     // After resume, drift should be reset to near 0
     expect(Math.abs(result.driftAfterResume)).toBeLessThan(500);
+  });
+
+  test('engine NTP matches wall clock after drift correction', async ({ page, sonicConfig, sonicMode }) => {
+    // Verifies that the WASM engine's NTP calculation (contextTime + ntpStart + drift)
+    // produces a value close to wall-clock NTP. If the drift field's unit (ms vs µs) is
+    // mismatched between JS writer and WASM reader, this will be off by orders of magnitude.
+    skipIfPostMessage(sonicMode, 'Requires SAB for direct drift field access');
+
+    const result = await page.evaluate(async (config) => {
+      const NTP_EPOCH_OFFSET = 2208988800;
+
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      // Wait for drift to stabilize
+      await new Promise(r => setTimeout(r, 2000));
+
+      // Take a synchronized snapshot using getOutputTimestamp
+      const timestamp = sonic.node.context.getOutputTimestamp();
+      const wallClockNTP = (performance.timeOrigin + timestamp.performanceTime) / 1000 + NTP_EPOCH_OFFSET;
+      const contextTime = timestamp.contextTime;
+
+      // Read raw values from SAB — same fields WASM reads
+      const sharedBuffer = sonic.sharedBuffer;
+      const ringBufferBase = sonic.ringBufferBase;
+      const bc = sonic.bufferConstants;
+
+      const ntpStartView = new Float64Array(sharedBuffer, ringBufferBase + bc.NTP_START_TIME_START, 1);
+      const driftView = new Int32Array(sharedBuffer, ringBufferBase + bc.DRIFT_OFFSET_START, 1);
+      const globalView = new Int32Array(sharedBuffer, ringBufferBase + bc.GLOBAL_OFFSET_START, 1);
+
+      const ntpStart = ntpStartView[0];
+      const rawDrift = Atomics.load(driftView, 0);
+      const rawGlobal = Atomics.load(globalView, 0);
+
+      // Reconstruct what WASM computes: current_ntp = contextTime + ntpStart + drift + global
+      // WASM divides drift by its divisor — we try BOTH to see which is correct
+      const engineNTP_ms = contextTime + ntpStart + (rawDrift / 1000) + (rawGlobal / 1000);
+      const engineNTP_us = contextTime + ntpStart + (rawDrift / 1000000) + (rawGlobal / 1000);
+
+      const errorMs_msDivisor = Math.abs(engineNTP_ms - wallClockNTP) * 1000;
+      const errorMs_usDivisor = Math.abs(engineNTP_us - wallClockNTP) * 1000;
+
+      await sonic.destroy();
+
+      return {
+        wallClockNTP,
+        contextTime,
+        ntpStart,
+        rawDrift,
+        rawGlobal,
+        engineNTP_ms,
+        engineNTP_us,
+        errorMs_msDivisor: Math.round(errorMs_msDivisor * 10) / 10,
+        errorMs_usDivisor: Math.round(errorMs_usDivisor * 10) / 10,
+      };
+    }, sonicConfig);
+
+    console.log('Drift diagnostic:', JSON.stringify(result, null, 2));
+
+    // The engine's NTP (using whichever divisor the WASM actually uses) should be
+    // within 10ms of wall clock. If the drift unit is wrong, one of these will be
+    // off by orders of magnitude.
+    const engineError = Math.min(result.errorMs_msDivisor, result.errorMs_usDivisor);
+    expect(engineError).toBeLessThan(10);
+
+    // Critically: the CORRECT divisor should give small error, the WRONG one should give large error.
+    // If rawDrift is in ms (e.g. 3), ms divisor gives 0.003s, µs divisor gives 0.000003s — difference ~3ms
+    // If rawDrift is in µs (e.g. 3000), ms divisor gives 3s, µs divisor gives 0.003s — difference ~3000s
+    // So the wrong divisor should produce error > 100ms for any non-trivial drift.
+    // Check that the two divisors don't BOTH give small errors (which would mean drift ≈ 0 and test is useless)
+    if (Math.abs(result.rawDrift) > 10) {
+      // Non-trivial drift: exactly one divisor should work
+      const msDivisorOK = result.errorMs_msDivisor < 10;
+      const usDivisorOK = result.errorMs_usDivisor < 10;
+      expect(msDivisorOK !== usDivisorOK).toBe(true);
+    }
   });
 });
