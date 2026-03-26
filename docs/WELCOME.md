@@ -47,11 +47,11 @@ await supersonic.loadSynthDef('sonic-pi-prophet');
 supersonic.send('/s_new', 'sonic-pi-prophet', -1, 0, 0, 'note', 60);
 ```
 
-For other installation options including npm and self-hosting, see the [Installation Guide](INSTALLATION.md).
+For other installation options including npm and self-hosting, see the [Installation Guide](INSTALLATION_WEB.md).
 
 ## Documentation
 
-- **[Installation](INSTALLATION.md)** - CDN, npm, self-hosting options
+- **[Installation](INSTALLATION_WEB.md)** - CDN, npm, self-hosting options
 - **[Quick Start](QUICKSTART.md)** - Boot and play your first synth
 - **[Guide](GUIDE.md)** - Practical patterns and worked examples
 - **[API Reference](API.md)** - The SuperSonic JavaScript API for initialising, controlling, and communicating with the scsynth Audioworklet

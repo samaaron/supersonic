@@ -20,7 +20,7 @@ This is SuperSonic. All the synthesis power of **scsynth** - rearchitected to re
 
 # Welcome to SuperSonic
 
-**SuperSonic** is a reworking of [SuperCollider](https://supercollider.github.io/)'s audio synthesis engine **scsynth** designed to run wherever you need it - in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), as a standalone native backend, or embedded directly into the [BEAM](https://www.erlang.org/) via a NIF.
+**SuperSonic** is a reworking of [SuperCollider](https://supercollider.github.io/)'s audio synthesis engine **scsynth** designed to run in new places - in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), as a standalone native backend using [JUCE](https://juce.com), or embedded directly into the [BEAM](https://www.erlang.org/) via a NIF. Currently it has the following features:
 
 ### Core
 
@@ -57,45 +57,24 @@ Try the live demo: [**sonic-pi.net/supersonic/demo.html**](https://sonic-pi.net/
 
 ## Getting Started
 
-SuperSonic can be fetched remotely via CDN, locally via npm or self-built.
+### Web
 
-### CDN
+SuperSonic can be fetched remotely via CDN, locally via npm or self-built — see [Installation](docs/INSTALLATION_WEB.md).
 
-```html
-<script type="module">
-  import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
+### Native
 
-  const sonic = new SuperSonic({
-    baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
-    coreBaseURL: "https://unpkg.com/supersonic-scsynth-core@latest/",
-    sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/",
-    synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
-  });
-  await sonic.init();
-  await sonic.loadSynthDef("sonic-pi-prophet");
-  sonic.send("/s_new", "sonic-pi-prophet", -1, 0, 0, "note", 60);
-</script>
-```
+Build the standalone backend with `scripts/build-native.sh` — see [Building from Source](docs/BUILDING.md).
 
-### npm / Bundler
+### NIF
 
-```javascript
-import { SuperSonic } from "supersonic-scsynth";
+Build the BEAM NIF with `scripts/build-nif.sh` — see [Building from Source](docs/BUILDING.md).
 
-const sonic = new SuperSonic({
-  baseURL: "/assets/supersonic/", // Where you serve the WASM/workers
-});
-await sonic.init();
-await sonic.loadSynthDef("sonic-pi-prophet");
-sonic.send("/s_new", "sonic-pi-prophet", -1, 0, 0, "note", 60);
-```
-
-For the full list of configuration options, see the [API Reference](docs/API.md#constructor-options). For installation options see the [Installation Guide](docs/INSTALLATION.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
+For the full list of configuration options, see the [API Reference](docs/API.md#constructor-options). For installation options see the [Installation Guide](docs/INSTALLATION_WEB.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
 
 
 ## Documentation
 
-- [Installation](docs/INSTALLATION.md) - CDN, npm, self-hosting, browser requirements
+- [Installation](docs/INSTALLATION_WEB.md) - CDN, npm, self-hosting, browser requirements
 - [Quick Start](docs/QUICKSTART.md) - Boot and play your first synth
 - [API Reference](docs/API.md) - Methods, callbacks, and configuration
 - [Communication Modes](docs/MODES.md) - SAB vs postMessage, server configuration
@@ -115,7 +94,7 @@ SuperSonic is brought to you by Sam Aaron. Please consider joining the community
 
 See [LICENSE](LICENSE) for details.
 
-SuperSonic's GPL-licensed audio engine (derived from SuperCollider's scsynth) is cleanly separated from MIT-licensed client code on every platform. All communication crosses an OSC protocol boundary — no engine types, data structures, or function calls leak into client code.
+SuperSonic's GPL-licensed core audio engine (derived from SuperCollider's scsynth) is cleanly separated from MIT-licensed client code on every platform. All communication crosses an OSC protocol boundary — it’s the same protocol and the same message boundary as sending OSC over UDP. The two components are distinct and independent pieces of software that exchange messages through a well-defined protocol interface.
 
 | Platform | GPL engine | MIT client | Boundary |
 | -------- | ---------- | ---------- | -------- |
