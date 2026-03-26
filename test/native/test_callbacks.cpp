@@ -177,15 +177,14 @@ TEST_CASE("Sending invalid OSC command generates debug output", "[callback]") {
 TEST_CASE("clearReplies() actually clears collected replies", "[callback]") {
     EngineFixture fx;
 
-    // Generate replies without consuming them via waitForReply
+    // Send /status which generates a /status.reply — we DON'T consume it.
+    // Use /sync as a barrier to ensure the /status.reply has been collected.
+    fx.send(osc_test::message("/status"));
     fx.send(osc_test::message("/sync", 500));
-    fx.send(osc_test::message("/sync", 501));
-
-    // Wait for the last one to ensure both are in mReplies
     OscReply barrier;
     fx.waitForReply("/synced", barrier);
 
-    // Should have accumulated replies
+    // /status.reply should still be in the reply buffer (not consumed)
     CHECK(!fx.allReplies().empty());
 
     // Clear and verify
