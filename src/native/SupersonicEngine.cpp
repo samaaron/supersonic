@@ -778,9 +778,15 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                     inputBits.setBit(i);
                 setup.inputChannels = inputBits;
             } else {
-                // Re-enable inputs — restore the previously used input device,
-                // or discover the default if no previous device is known
-                setup.useDefaultInputChannels = true;
+                // Re-enable inputs — must explicitly set the input device name.
+                // useDefaultInputChannels won't auto-fill the device name when
+                // numInputChansNeeded was 0 at initialise() time (boot with -i 0).
+                setup.useDefaultInputChannels = false;
+                juce::BigInteger inputBits;
+                for (int i = 0; i < mCurrentConfig.numInputChannels; ++i)
+                    inputBits.setBit(i);
+                setup.inputChannels = inputBits;
+
                 if (setup.inputDeviceName.isEmpty()) {
                     if (!mLastInputDeviceName.empty()) {
                         setup.inputDeviceName = juce::String(mLastInputDeviceName);
