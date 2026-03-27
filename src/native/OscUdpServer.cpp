@@ -179,8 +179,26 @@ void OscUdpServer::sendDeviceReport() {
             << static_cast<osc::int32>(usableRates.size());
     for (auto r : usableRates)
         infoMsg << static_cast<osc::int32>(r);
-    infoMsg << static_cast<osc::int32>(current.availableBufferSizes.size());
-    for (auto b : current.availableBufferSizes)
+
+    // Same intersection for buffer sizes
+    std::vector<int> usableBufferSizes = current.availableBufferSizes;
+    if (!current.inputDeviceName.empty()) {
+        for (auto& dev : allDevices) {
+            if (dev.name == current.inputDeviceName) {
+                std::vector<int> intersection;
+                for (auto b : current.availableBufferSizes)
+                    for (auto ib : dev.availableBufferSizes)
+                        if (b == ib)
+                            intersection.push_back(b);
+                if (!intersection.empty())
+                    usableBufferSizes = intersection;
+                break;
+            }
+        }
+    }
+
+    infoMsg << static_cast<osc::int32>(usableBufferSizes.size());
+    for (auto b : usableBufferSizes)
         infoMsg << static_cast<osc::int32>(b);
     infoMsg << static_cast<osc::int32>(drivers.size());
     for (auto& d : drivers)
