@@ -113,11 +113,12 @@ void OscUdpServer::sendDeviceReport() {
     devMsg << osc::EndMessage;
 
     // Build input device list message
-    // Format: currentInput(str), device1(str), ..., deviceN(str)
-    char inDevBuf[8192];
+    // Format: currentInput(str), numDevices(int32), device1(str), ..., deviceN(str)
+    char inDevBuf[2048];
     osc::OutboundPacketStream inDevMsg(inDevBuf, sizeof(inDevBuf));
     inDevMsg << osc::BeginMessage("/supersonic/input-devices")
-             << current.inputDeviceName.c_str();
+             << current.inputDeviceName.c_str()
+             << static_cast<osc::int32>(inputDevices.size());
     for (auto& dev : inputDevices)
         inDevMsg << dev.name.c_str();
     inDevMsg << osc::EndMessage;

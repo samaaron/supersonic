@@ -167,6 +167,7 @@ private:
     bool                     mHeadless{false};
     Config                   mCurrentConfig;
     int                      mBootInputChannels = 2;  // original -i value, for re-enabling inputs
+    std::string              mLastInputDeviceName;    // saved on disable, restored on re-enable
     std::mutex               mSwapMutex;
     std::string              mDeviceMode;   // empty = system/auto, non-empty = manual device name
 

@@ -558,23 +558,28 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
     for (auto* type : types) {
         type->scanForDevices();
 
+        auto populateFromDevice = [](DeviceInfo& info, juce::AudioIODevice* dev) {
+            for (auto r : dev->getAvailableSampleRates())
+                info.availableSampleRates.push_back(r);
+            for (auto b : dev->getAvailableBufferSizes())
+                info.availableBufferSizes.push_back(b);
+            info.maxOutputChannels = dev->getOutputChannelNames().size();
+            info.maxInputChannels  = dev->getInputChannelNames().size();
+        };
+
+        std::string typeNameStr = type->getTypeName().toStdString();
+
         // Enumerate output devices
         auto outputNames = type->getDeviceNames(false);
         for (auto& devName : outputNames) {
             DeviceInfo info;
             info.name = devName.toStdString();
-            info.typeName = type->getTypeName().toStdString();
+            info.typeName = typeNameStr;
 
             std::unique_ptr<juce::AudioIODevice> tempDev(
                 type->createDevice(devName, juce::String()));
-            if (tempDev) {
-                for (auto r : tempDev->getAvailableSampleRates())
-                    info.availableSampleRates.push_back(r);
-                for (auto b : tempDev->getAvailableBufferSizes())
-                    info.availableBufferSizes.push_back(b);
-                info.maxOutputChannels = tempDev->getOutputChannelNames().size();
-                info.maxInputChannels  = tempDev->getInputChannelNames().size();
-            }
+            if (tempDev)
+                populateFromDevice(info, tempDev.get());
 
             result.push_back(std::move(info));
         }
@@ -582,27 +587,25 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
         // Enumerate input-only devices (e.g. macOS microphones)
         auto inputNames = type->getDeviceNames(true);
         for (auto& devName : inputNames) {
-            // Skip if already listed as an output device
+            std::string nameStr = devName.toStdString();
+
             bool alreadyListed = false;
-            for (auto& existing : result)
-                if (existing.name == devName.toStdString() && existing.typeName == type->getTypeName().toStdString())
+            for (auto& existing : result) {
+                if (existing.name == nameStr && existing.typeName == typeNameStr) {
                     alreadyListed = true;
+                    break;
+                }
+            }
             if (alreadyListed) continue;
 
             DeviceInfo info;
-            info.name = devName.toStdString();
-            info.typeName = type->getTypeName().toStdString();
+            info.name = std::move(nameStr);
+            info.typeName = typeNameStr;
 
             std::unique_ptr<juce::AudioIODevice> tempDev(
                 type->createDevice(juce::String(), devName));
-            if (tempDev) {
-                for (auto r : tempDev->getAvailableSampleRates())
-                    info.availableSampleRates.push_back(r);
-                for (auto b : tempDev->getAvailableBufferSizes())
-                    info.availableBufferSizes.push_back(b);
-                info.maxOutputChannels = tempDev->getOutputChannelNames().size();
-                info.maxInputChannels  = tempDev->getInputChannelNames().size();
-            }
+            if (tempDev)
+                populateFromDevice(info, tempDev.get());
 
             result.push_back(std::move(info));
         }
@@ -764,23 +767,37 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         mDeviceManager->getAudioDeviceSetup(setup);
         if (!deviceName.empty())
             setup.outputDeviceName = juce::String(deviceName);
-        if (!inputDeviceName.empty())
-            setup.inputDeviceName = juce::String(inputDeviceName);
         if (mCurrentConfig.numInputChannels > 0) {
             if (!inputDeviceName.empty()) {
-                // Explicit input device — set channel bits directly
+                // Explicit input device requested — save for future re-enable
                 setup.useDefaultInputChannels = false;
+                setup.inputDeviceName = juce::String(inputDeviceName);
+                mLastInputDeviceName = inputDeviceName;
                 juce::BigInteger inputBits;
                 for (int i = 0; i < mCurrentConfig.numInputChannels; ++i)
                     inputBits.setBit(i);
                 setup.inputChannels = inputBits;
             } else {
-                // No explicit input device — let the OS pick the default
-                // (required on macOS where input/output are separate devices)
+                // Re-enable inputs — restore the previously used input device,
+                // or discover the default if no previous device is known
                 setup.useDefaultInputChannels = true;
+                if (setup.inputDeviceName.isEmpty()) {
+                    if (!mLastInputDeviceName.empty()) {
+                        setup.inputDeviceName = juce::String(mLastInputDeviceName);
+                    } else {
+                        auto* currentType = mDeviceManager->getCurrentDeviceTypeObject();
+                        if (currentType) {
+                            auto inputNames = currentType->getDeviceNames(true);
+                            if (!inputNames.isEmpty())
+                                setup.inputDeviceName = inputNames[0];
+                        }
+                    }
+                }
             }
         } else {
-            // Fully release the input device (clears macOS mic indicator)
+            // Disable inputs — save the current input device name, then release
+            if (!setup.inputDeviceName.isEmpty())
+                mLastInputDeviceName = setup.inputDeviceName.toStdString();
             setup.useDefaultInputChannels = false;
             setup.inputChannels.clear();
             setup.inputDeviceName = "";
@@ -920,7 +937,8 @@ SwapResult SupersonicEngine::enableInputChannels(int numChannels) {
     // was non-zero, otherwise fall back to stereo. This handles the case
     // where the daemon booted with -i 0 but the user later enables inputs.
     if (numChannels < 0) {
-        numChannels = (mBootInputChannels > 0) ? mBootInputChannels : Config{}.numInputChannels;
+        static constexpr int kDefaultInputChannels = 2;
+        numChannels = (mBootInputChannels > 0) ? mBootInputChannels : kDefaultInputChannels;
     }
 
     // Check if this is actually a change
@@ -933,13 +951,23 @@ SwapResult SupersonicEngine::enableInputChannels(int numChannels) {
         return result;
     }
 
+    // Save old values for rollback on failure
+    int oldNumInputChannels = mCurrentConfig.numInputChannels;
+    uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
+    uint32_t oldOpts5 = opts[5];
+
     // Update config and worldOptions before the cold swap
     mCurrentConfig.numInputChannels = numChannels;
-    uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
     opts[5] = static_cast<uint32_t>(numChannels);
 
-    // Cold swap to rebuild the World with the new input channel count
-    return switchDevice("", 0, 0, true);
+    auto result = switchDevice("", 0, 0, true);
+
+    if (!result.success) {
+        mCurrentConfig.numInputChannels = oldNumInputChannels;
+        opts[5] = oldOpts5;
+    }
+
+    return result;
 }
 
 // --- Audio driver management ---
