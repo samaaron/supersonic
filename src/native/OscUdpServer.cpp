@@ -152,14 +152,32 @@ void OscUdpServer::sendDeviceReport() {
     auto drivers = mEngine->listDrivers();
     auto curDriver = mEngine->currentDriver();
 
+    // Compute usable sample rates: intersection of output and input device rates.
+    // If no input device is active, use the output device's rates.
+    std::vector<double> usableRates = current.availableSampleRates;
+    if (!current.inputDeviceName.empty()) {
+        for (auto& dev : allDevices) {
+            if (dev.name == current.inputDeviceName) {
+                std::vector<double> intersection;
+                for (auto r : current.availableSampleRates)
+                    for (auto ir : dev.availableSampleRates)
+                        if (static_cast<int>(r) == static_cast<int>(ir))
+                            intersection.push_back(r);
+                if (!intersection.empty())
+                    usableRates = intersection;
+                break;
+            }
+        }
+    }
+
     char infoBuf[4096];
     osc::OutboundPacketStream infoMsg(infoBuf, sizeof(infoBuf));
     infoMsg << osc::BeginMessage("/supersonic/info")
             << info
             << static_cast<osc::int32>(current.activeSampleRate)
             << static_cast<osc::int32>(current.activeBufferSize)
-            << static_cast<osc::int32>(current.availableSampleRates.size());
-    for (auto r : current.availableSampleRates)
+            << static_cast<osc::int32>(usableRates.size());
+    for (auto r : usableRates)
         infoMsg << static_cast<osc::int32>(r);
     infoMsg << static_cast<osc::int32>(current.availableBufferSizes.size());
     for (auto b : current.availableBufferSizes)

@@ -704,17 +704,18 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     // When no explicit sample rate requested, probe the target device to see
     // if the current rate is supported.  If not, auto-select the first available
     // rate — this makes the swap a cold swap (world rebuild).
-    if (sampleRate == 0 && currentRate > 0 && mDeviceManager) {
-        bool found = false;
+    auto probeDeviceRate = [&](const std::string& name, bool isInput) {
+        if (name.empty() || sampleRate > 0 || currentRate <= 0 || !mDeviceManager) return;
         auto& types = mDeviceManager->getAvailableDeviceTypes();
         for (auto* type : types) {
-            if (found) break;
             type->scanForDevices();
-            auto names = type->getDeviceNames(false);
-            for (auto& name : names) {
-                if (name.toStdString() == deviceName) {
+            auto names = type->getDeviceNames(isInput);
+            for (auto& n : names) {
+                if (n.toStdString() == name) {
+                    auto outArg = isInput ? juce::String() : n;
+                    auto inArg  = isInput ? n : juce::String();
                     std::unique_ptr<juce::AudioIODevice> tempDev(
-                        type->createDevice(name, juce::String()));
+                        type->createDevice(outArg, inArg));
                     if (tempDev) {
                         auto rates = tempDev->getAvailableSampleRates();
                         bool supported = false;
@@ -722,19 +723,25 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                             if (static_cast<int>(r) == static_cast<int>(currentRate))
                                 supported = true;
                         if (!supported && !rates.isEmpty()) {
-                            sampleRate = rates[0];
+                            double nearest = rates[0];
+                            for (auto r : rates)
+                                if (std::abs(r - currentRate) < std::abs(nearest - currentRate))
+                                    nearest = r;
+                            sampleRate = nearest;
                             fprintf(stderr,
                                 "[audio-device] current rate %.0f not supported "
                                 "by %s, will use %.0f (cold swap)\n",
-                                currentRate, deviceName.c_str(), sampleRate);
+                                currentRate, name.c_str(), sampleRate);
                         }
                     }
-                    found = true;
-                    break;
+                    return;
                 }
             }
         }
-    }
+    };
+
+    probeDeviceRate(deviceName, false);
+    probeDeviceRate(inputDeviceName, true);
 
     bool isCold = forceCold || (sampleRate > 0 && sampleRate != currentRate);
     result.type = isCold ? SwapType::Cold : SwapType::Hot;
