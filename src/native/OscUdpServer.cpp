@@ -134,7 +134,8 @@ void OscUdpServer::sendDeviceReport() {
     // Info message with config data appended
     // Format: info_string, sampleRate(int32), bufferSize(int32),
     //         numRates(int32), rate1..rateN, numBufs(int32), buf1..bufN,
-    //         numDrivers(int32), driver1..driverN, currentDriver(str)
+    //         numDrivers(int32), driver1..driverN, currentDriver(str),
+    //         outputChannels(int32), inputChannels(int32)
     auto drivers = mEngine->listDrivers();
     auto curDriver = mEngine->currentDriver();
 
@@ -154,6 +155,8 @@ void OscUdpServer::sendDeviceReport() {
     for (auto& d : drivers)
         infoMsg << d.c_str();
     infoMsg << curDriver.c_str();
+    infoMsg << static_cast<osc::int32>(current.activeOutputChannels);
+    infoMsg << static_cast<osc::int32>(current.activeInputChannels);
     infoMsg << osc::EndMessage;
 
     // Send to all registered targets
