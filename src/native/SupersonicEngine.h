@@ -78,7 +78,8 @@ public:
     SwapResult               switchDevice(const std::string& deviceName,
                                           double sampleRate = 0,
                                           int bufferSize = 0,
-                                          bool forceCold = false);
+                                          bool forceCold = false,
+                                          const std::string& inputDeviceName = "");
 
     // --- Input channel management ---
     // Enable/disable audio input. Triggers a cold swap (world rebuild).

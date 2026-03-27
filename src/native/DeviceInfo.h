@@ -22,6 +22,7 @@ struct CurrentDeviceInfo : DeviceInfo {
     int    activeInputChannels  = 0;
     int    outputLatencySamples = 0;
     int    inputLatencySamples  = 0;
+    std::string inputDeviceName;
 };
 
 enum class SwapType { Hot, Cold };

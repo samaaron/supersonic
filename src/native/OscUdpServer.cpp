@@ -81,27 +81,29 @@ void OscUdpServer::sendDeviceReport() {
     auto current = mEngine->currentDevice();
     auto mode    = mEngine->deviceMode();
 
-    // Filter out devices with no output channels (unusable)
-    std::vector<decltype(allDevices)::value_type> devices;
+    // Split devices into output-capable and input-capable lists
+    std::vector<decltype(allDevices)::value_type> outputDevices, inputDevices;
     for (auto& dev : allDevices) {
         if (dev.maxOutputChannels > 0)
-            devices.push_back(dev);
+            outputDevices.push_back(dev);
+        if (dev.maxInputChannels > 0)
+            inputDevices.push_back(dev);
     }
 
-    // Build device list message
+    // Build output device list message
     // Format: mode(str), current(str), device1(str), ..., deviceN(str),
     //         sampleRate(int32), compat1(int32), ..., compatN(int32)
-    // compat flags: 1 = device supports current rate, 0 = needs restart
+    //         (compat: 1 = device supports current rate, 0 = rate change needed)
     char devBuf[8192];
     osc::OutboundPacketStream devMsg(devBuf, sizeof(devBuf));
     devMsg << osc::BeginMessage("/supersonic/devices")
            << (mode.empty() ? "system" : mode.c_str())
            << current.name.c_str();
-    for (auto& dev : devices)
+    for (auto& dev : outputDevices)
         devMsg << dev.name.c_str();
     devMsg << static_cast<osc::int32>(current.activeSampleRate);
     int curRate = static_cast<int>(current.activeSampleRate);
-    for (auto& dev : devices) {
+    for (auto& dev : outputDevices) {
         bool compat = false;
         for (auto r : dev.availableSampleRates)
             if (static_cast<int>(r) == curRate)
@@ -109,6 +111,16 @@ void OscUdpServer::sendDeviceReport() {
         devMsg << static_cast<osc::int32>(compat ? 1 : 0);
     }
     devMsg << osc::EndMessage;
+
+    // Build input device list message
+    // Format: currentInput(str), device1(str), ..., deviceN(str)
+    char inDevBuf[8192];
+    osc::OutboundPacketStream inDevMsg(inDevBuf, sizeof(inDevBuf));
+    inDevMsg << osc::BeginMessage("/supersonic/input-devices")
+             << current.inputDeviceName.c_str();
+    for (auto& dev : inputDevices)
+        inDevMsg << dev.name.c_str();
+    inDevMsg << osc::EndMessage;
 
     // Build hardware info message
     double sr = current.activeSampleRate;
@@ -162,6 +174,7 @@ void OscUdpServer::sendDeviceReport() {
     // Send to all registered targets
     for (auto& t : targets) {
         mSocket->write(t.ip, t.port, devMsg.Data(), static_cast<int>(devMsg.Size()));
+        mSocket->write(t.ip, t.port, inDevMsg.Data(), static_cast<int>(inDevMsg.Size()));
         mSocket->write(t.ip, t.port, infoMsg.Data(), static_cast<int>(infoMsg.Size()));
     }
 }
@@ -294,8 +307,9 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/devices/switch") == 0) {
+            // Args: outputDevice(str), sampleRate(float), bufferSize(int32), [inputDevice(str)]
             auto it = msg.ArgumentsBegin();
-            std::string devName;
+            std::string devName, inputDevName;
             double sr = 0;
             int bufSz = 0;
             if (it != msg.ArgumentsEnd() && it->IsString()) {
@@ -305,10 +319,13 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
                 sr = it->AsFloatUnchecked(); ++it;
             }
             if (it != msg.ArgumentsEnd() && it->IsInt32()) {
-                bufSz = it->AsInt32Unchecked();
+                bufSz = it->AsInt32Unchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                inputDevName = it->AsStringUnchecked();
             }
 
-            auto result = mEngine->switchDevice(devName, sr, bufSz);
+            auto result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
             char buf[1024];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/supersonic/devices/switch.reply");

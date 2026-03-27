@@ -604,6 +604,10 @@ CurrentDeviceInfo SupersonicEngine::currentDevice() const {
     info.outputLatencySamples = dev->getOutputLatencyInSamples();
     info.inputLatencySamples  = dev->getInputLatencyInSamples();
 
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    mDeviceManager->getAudioDeviceSetup(setup);
+    info.inputDeviceName = setup.inputDeviceName.toStdString();
+
     for (auto r : dev->getAvailableSampleRates())
         info.availableSampleRates.push_back(r);
     for (auto b : dev->getAvailableBufferSizes())
@@ -649,7 +653,8 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
 SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                                            double sampleRate,
                                            int bufferSize,
-                                           bool forceCold) {
+                                           bool forceCold,
+                                           const std::string& inputDeviceName) {
     SwapResult result;
     result.deviceName = deviceName;
     bool recovered = false;
@@ -736,6 +741,8 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         mDeviceManager->getAudioDeviceSetup(setup);
         if (!deviceName.empty())
             setup.outputDeviceName = juce::String(deviceName);
+        if (!inputDeviceName.empty())
+            setup.inputDeviceName = juce::String(inputDeviceName);
         if (mCurrentConfig.numInputChannels > 0) {
             // Explicitly request input channels — can't rely on
             // useDefaultInputChannels since output-only devices default to 0.
@@ -879,9 +886,12 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
 // --- Input channel management ---
 
 SwapResult SupersonicEngine::enableInputChannels(int numChannels) {
-    // -1 means "re-enable with the boot-time input channel count"
-    // (the value originally passed via CLI flags like -i 2).
-    if (numChannels < 0) numChannels = mBootInputChannels;
+    // -1 means "re-enable inputs". Use the boot-time channel count if it
+    // was non-zero, otherwise fall back to stereo. This handles the case
+    // where the daemon booted with -i 0 but the user later enables inputs.
+    if (numChannels < 0) {
+        numChannels = (mBootInputChannels > 0) ? mBootInputChannels : Config{}.numInputChannels;
+    }
 
     // Check if this is actually a change
     if (numChannels == mCurrentConfig.numInputChannels) {
