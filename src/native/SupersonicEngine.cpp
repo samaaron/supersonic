@@ -752,8 +752,10 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                 inputBits.setBit(i);
             setup.inputChannels = inputBits;
         } else {
+            // Fully release the input device (clears macOS mic indicator)
             setup.useDefaultInputChannels = false;
             setup.inputChannels.clear();
+            setup.inputDeviceName = "";
         }
         setup.useDefaultOutputChannels = true;
         if (sampleRate > 0) setup.sampleRate = sampleRate;
