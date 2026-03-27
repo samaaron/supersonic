@@ -556,29 +556,52 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
 
     auto& types = mDeviceManager->getAvailableDeviceTypes();
     for (auto* type : types) {
-        // Scan output devices for each type
         type->scanForDevices();
-        auto outputNames = type->getDeviceNames(false);
 
+        // Enumerate output devices
+        auto outputNames = type->getDeviceNames(false);
         for (auto& devName : outputNames) {
             DeviceInfo info;
             info.name = devName.toStdString();
             info.typeName = type->getTypeName().toStdString();
 
-            // Create a temporary device to query capabilities
             std::unique_ptr<juce::AudioIODevice> tempDev(
                 type->createDevice(devName, juce::String()));
             if (tempDev) {
-                auto rates = tempDev->getAvailableSampleRates();
-                for (auto r : rates) info.availableSampleRates.push_back(r);
+                for (auto r : tempDev->getAvailableSampleRates())
+                    info.availableSampleRates.push_back(r);
+                for (auto b : tempDev->getAvailableBufferSizes())
+                    info.availableBufferSizes.push_back(b);
+                info.maxOutputChannels = tempDev->getOutputChannelNames().size();
+                info.maxInputChannels  = tempDev->getInputChannelNames().size();
+            }
 
-                auto bufs = tempDev->getAvailableBufferSizes();
-                for (auto b : bufs) info.availableBufferSizes.push_back(b);
+            result.push_back(std::move(info));
+        }
 
-                auto outNames = tempDev->getOutputChannelNames();
-                auto inNames  = tempDev->getInputChannelNames();
-                info.maxOutputChannels = outNames.size();
-                info.maxInputChannels  = inNames.size();
+        // Enumerate input-only devices (e.g. macOS microphones)
+        auto inputNames = type->getDeviceNames(true);
+        for (auto& devName : inputNames) {
+            // Skip if already listed as an output device
+            bool alreadyListed = false;
+            for (auto& existing : result)
+                if (existing.name == devName.toStdString() && existing.typeName == type->getTypeName().toStdString())
+                    alreadyListed = true;
+            if (alreadyListed) continue;
+
+            DeviceInfo info;
+            info.name = devName.toStdString();
+            info.typeName = type->getTypeName().toStdString();
+
+            std::unique_ptr<juce::AudioIODevice> tempDev(
+                type->createDevice(juce::String(), devName));
+            if (tempDev) {
+                for (auto r : tempDev->getAvailableSampleRates())
+                    info.availableSampleRates.push_back(r);
+                for (auto b : tempDev->getAvailableBufferSizes())
+                    info.availableBufferSizes.push_back(b);
+                info.maxOutputChannels = tempDev->getOutputChannelNames().size();
+                info.maxInputChannels  = tempDev->getInputChannelNames().size();
             }
 
             result.push_back(std::move(info));
@@ -744,13 +767,18 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         if (!inputDeviceName.empty())
             setup.inputDeviceName = juce::String(inputDeviceName);
         if (mCurrentConfig.numInputChannels > 0) {
-            // Explicitly request input channels — can't rely on
-            // useDefaultInputChannels since output-only devices default to 0.
-            setup.useDefaultInputChannels = false;
-            juce::BigInteger inputBits;
-            for (int i = 0; i < mCurrentConfig.numInputChannels; ++i)
-                inputBits.setBit(i);
-            setup.inputChannels = inputBits;
+            if (!inputDeviceName.empty()) {
+                // Explicit input device — set channel bits directly
+                setup.useDefaultInputChannels = false;
+                juce::BigInteger inputBits;
+                for (int i = 0; i < mCurrentConfig.numInputChannels; ++i)
+                    inputBits.setBit(i);
+                setup.inputChannels = inputBits;
+            } else {
+                // No explicit input device — let the OS pick the default
+                // (required on macOS where input/output are separate devices)
+                setup.useDefaultInputChannels = true;
+            }
         } else {
             // Fully release the input device (clears macOS mic indicator)
             setup.useDefaultInputChannels = false;
