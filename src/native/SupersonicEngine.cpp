@@ -2,6 +2,7 @@
  * SupersonicEngine.cpp
  */
 #include "SupersonicEngine.h"
+#include "AggregateDeviceHelper.h"
 #include "src/audio_processor.h"
 #include "src/shared_memory.h"
 #include "osc/OscReceivedElements.h"
@@ -441,6 +442,10 @@ void SupersonicEngine::shutdown() {
         mDeviceManager.reset();
     }
 
+#ifdef __APPLE__
+    AggregateDeviceHelper::destroy();
+#endif
+
     mHeadlessDriver.stopThread(2000);
     mSampleLoader.stopThread(2000);
     mUdpServer.stopThread(2000);
@@ -819,6 +824,30 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         if (sampleRate > 0) setup.sampleRate = sampleRate;
         if (bufferSize > 0) setup.bufferSize = bufferSize;
 
+#ifdef __APPLE__
+        // On macOS, if input and output are different devices, create an
+        // Aggregate Device with drift correction instead of relying on
+        // JUCE's AudioIODeviceCombiner (which has no drift correction).
+        if (!setup.outputDeviceName.isEmpty() && !setup.inputDeviceName.isEmpty()
+            && setup.outputDeviceName != setup.inputDeviceName) {
+            auto aggName = AggregateDeviceHelper::createOrUpdate(
+                setup.outputDeviceName.toStdString(),
+                setup.inputDeviceName.toStdString());
+            if (!aggName.empty()) {
+                // Use the aggregate as a single device for both I/O
+                setup.outputDeviceName = juce::String(aggName);
+                setup.inputDeviceName  = juce::String(aggName);
+
+                // Need to rescan so JUCE sees the new aggregate device
+                if (auto* type = mDeviceManager->getCurrentDeviceTypeObject())
+                    type->scanForDevices();
+            }
+        } else {
+            // Same device for both I/O, or no input — no aggregate needed
+            AggregateDeviceHelper::destroy();
+        }
+#endif
+
         juce::String err = mDeviceManager->setAudioDeviceSetup(setup, true);
         if (err.isNotEmpty()) errStr = err.toStdString();
     } else {
@@ -914,6 +943,10 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             mCurrentConfig.sampleRate = static_cast<int>(result.sampleRate);
             mCurrentConfig.numOutputChannels = finalDev->getActiveOutputChannels().countNumberOfSetBits();
             mCurrentConfig.numInputChannels = finalDev->getActiveInputChannels().countNumberOfSetBits();
+
+            juce::AudioDeviceManager::AudioDeviceSetup finalSetup;
+            mDeviceManager->getAudioDeviceSetup(finalSetup);
+            result.inputDeviceName = finalSetup.inputDeviceName.toStdString();
 
             fprintf(stderr, "[audio-device] switched to %s: %s %.0fHz buf=%d %dch\n",
                     finalDev->getTypeName().toRawUTF8(),
