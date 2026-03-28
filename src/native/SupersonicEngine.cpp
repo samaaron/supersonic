@@ -601,11 +601,29 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
                     UInt32 tSize = sizeof(transport);
                     AudioObjectGetPropertyData(id, &tAddr, 0, nullptr, &tSize, &transport);
 
-                    transportMap[buf] = transport;
+                    transportMap[std::string(buf)] = transport;
                 }
             }
         }
     }
+#endif
+
+    // JUCE appends " (N)" suffixes to disambiguate duplicate CoreAudio names.
+    // This lambda strips the suffix for fallback matching against CoreAudio names.
+#ifdef __APPLE__
+    auto lookupTransport = [&transportMap](const std::string& juceName) -> uint32_t {
+        auto it = transportMap.find(juceName);
+        if (it != transportMap.end()) return it->second;
+        // JUCE appends suffixes to disambiguate duplicates — match by prefix
+        for (auto& [caName, transport] : transportMap) {
+            if (juceName.size() > caName.size()
+                && juceName.compare(0, caName.size(), caName) == 0
+                && juceName[caName.size()] == ' ') {
+                return transport;
+            }
+        }
+        return 0;
+    };
 #endif
 
     auto& types = mDeviceManager->getAvailableDeviceTypes();
@@ -630,8 +648,7 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
             info.name = devName.toStdString();
             info.typeName = typeNameStr;
 #ifdef __APPLE__
-            auto it = transportMap.find(info.name);
-            if (it != transportMap.end()) info.transportType = it->second;
+            info.transportType = lookupTransport(info.name);
 #endif
 
             std::unique_ptr<juce::AudioIODevice> tempDev(
@@ -660,8 +677,7 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
             info.name = std::move(nameStr);
             info.typeName = typeNameStr;
 #ifdef __APPLE__
-            auto it = transportMap.find(info.name);
-            if (it != transportMap.end()) info.transportType = it->second;
+            info.transportType = lookupTransport(info.name);
 #endif
 
             std::unique_ptr<juce::AudioIODevice> tempDev(
@@ -1415,9 +1431,17 @@ void SupersonicEngine::printDeviceList() {
 
     fprintf(stderr, "[audio-devices-start]\n");
     for (auto& dev : devices) {
-        fprintf(stderr, "[audio-device-entry] %s|%s|%d|%d\n",
+        char tt[5] = {};
+        if (dev.transportType) {
+            tt[0] = (char)((dev.transportType >> 24) & 0xFF);
+            tt[1] = (char)((dev.transportType >> 16) & 0xFF);
+            tt[2] = (char)((dev.transportType >> 8) & 0xFF);
+            tt[3] = (char)(dev.transportType & 0xFF);
+        }
+        fprintf(stderr, "[audio-device-entry] %s|%s|%d|%d|%s\n",
                 dev.name.c_str(), dev.typeName.c_str(),
-                dev.maxOutputChannels, dev.maxInputChannels);
+                dev.maxOutputChannels, dev.maxInputChannels,
+                dev.transportType ? tt : "?");
     }
     fprintf(stderr, "[audio-device-current] %s|%s|%.0f|%d|%d|%d\n",
             current.name.c_str(), current.typeName.c_str(),
