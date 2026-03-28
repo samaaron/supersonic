@@ -26,7 +26,6 @@ This is SuperSonic. All the synthesis power of **scsynth** - rearchitected to re
 
 - **scsynth compatible** - *full OSC command compatibility with SuperCollider's scsynth. See the [command reference](docs/SCSYNTH_COMMAND_REFERENCE.md).*
 - **Malloc-free audio path** - *zero allocation or blocking on the audio thread.*
-- **Thread-safe node IDs** - *`nextNodeId()` allocates unique node IDs across any number of threads and workers - guaranteed unique with no clashes.*
 - **UUID node IDs** - *an OSC type extension that lets you send UUIDs instead of integer node IDs - they're transparently rewritten to i32s at the audio boundary and mapped back in replies. Concurrent clients can create and track synths without sharing a numbering system.*
 - **Pre-scheduler** - *dynamically growing holding bay for future OSC bundles with cancellation support.*
 - **Cold-swap recovery** - *multiple restart levels with automatic synthdef and buffer restoration.*
@@ -39,6 +38,7 @@ This is SuperSonic. All the synthesis power of **scsynth** - rearchitected to re
 - **Mobile resilient** - *suspend, resume and worklet death detection with automatic state restoration.*
 - **Observable** - *real-time telemetry: ring buffer usage, scheduler depth, audio health and glitch detection.*
 - **Multiple clients** - *give any Web Worker its own OscChannel to the AudioWorklet with automatic pre-scheduler routing for far-future events. Each channel carries a source ID visible in the aggregated OSC log.*
+- **Thread-safe node IDs** - *`nextNodeId()` allocates unique node IDs across any number of threads and workers - guaranteed unique with no clashes.*
 - **Hosted on npm** - *available as `supersonic-scsynth` with separate packages for core, synthdefs and samples.*
 
 ### Native
