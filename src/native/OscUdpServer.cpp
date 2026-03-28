@@ -154,8 +154,11 @@ void OscUdpServer::sendDeviceReport() {
 
     // Compute usable sample rates: intersection of output and input device rates.
     // If no input device is active, use the output device's rates.
+    // When an aggregate is active, the device rates already reflect the
+    // combined capabilities — skip intersection with standalone device info.
     std::vector<double> usableRates = current.availableSampleRates;
-    if (!current.inputDeviceName.empty()) {
+    bool onAggregate = !mEngine->realOutputDeviceName().empty();
+    if (!onAggregate && !current.inputDeviceName.empty()) {
         for (auto& dev : allDevices) {
             if (dev.name == current.inputDeviceName) {
                 std::vector<double> intersection;
@@ -180,9 +183,9 @@ void OscUdpServer::sendDeviceReport() {
     for (auto r : usableRates)
         infoMsg << static_cast<osc::int32>(r);
 
-    // Same intersection for buffer sizes
+    // Same intersection for buffer sizes (skip when on aggregate)
     std::vector<int> usableBufferSizes = current.availableBufferSizes;
-    if (!current.inputDeviceName.empty()) {
+    if (!onAggregate && !current.inputDeviceName.empty()) {
         for (auto& dev : allDevices) {
             if (dev.name == current.inputDeviceName) {
                 std::vector<int> intersection;

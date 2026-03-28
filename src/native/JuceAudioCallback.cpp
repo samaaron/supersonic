@@ -206,6 +206,21 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
 
     double wallNTP = mBaseNTP + mSamplePosition / mSampleRate;
 
+    // Periodic input level diagnostic (every ~2 seconds)
+    if (mCallbackCount > 4 && (mCallbackCount % (2 * mSampleRate / numSamples)) == 0) {
+        float peak = 0.0f;
+        for (int ch = 0; ch < numInputChannels; ++ch) {
+            if (inputChannelData[ch]) {
+                for (int i = 0; i < numSamples; ++i) {
+                    float v = std::abs(inputChannelData[ch][i]);
+                    if (v > peak) peak = v;
+                }
+            }
+        }
+        fprintf(stderr, "[audio-input] hwIn=%d worldIn=%d nIn=%d peak=%.6f\n",
+                numInputChannels, mNumInputChannels, nIn, peak);
+    }
+
     while (outputFilled < numSamples) {
         // Copy JUCE input into scsynth's input bus (channel-major, kBufLen per ch).
         // If we overshoot the available input (due to prefetch alignment), zero-pad.
