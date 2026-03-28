@@ -32,6 +32,7 @@ struct SwapResult {
     SwapType    type    = SwapType::Hot;
     std::string error;
     std::string deviceName;
+    std::string inputDeviceName;
     double      sampleRate  = 0.0;
     int         bufferSize  = 0;
 };
