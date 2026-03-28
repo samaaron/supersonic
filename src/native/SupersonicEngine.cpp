@@ -616,6 +616,17 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
         }
     }
 
+#ifdef __APPLE__
+    // Filter out our managed aggregate device — it's an implementation detail.
+    if (AggregateDeviceHelper::exists()) {
+        auto aggName = AggregateDeviceHelper::currentName();
+        result.erase(
+            std::remove_if(result.begin(), result.end(),
+                [&aggName](const DeviceInfo& d) { return d.name == aggName; }),
+            result.end());
+    }
+#endif
+
     return result;
 }
 
@@ -638,6 +649,13 @@ CurrentDeviceInfo SupersonicEngine::currentDevice() const {
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     mDeviceManager->getAudioDeviceSetup(setup);
     info.inputDeviceName = setup.inputDeviceName.toStdString();
+
+    // If running on an aggregate device, report the real underlying names
+    // so the GUI sees the actual hardware, not "SuperSonic".
+    if (!mRealOutputDeviceName.empty())
+        info.name = mRealOutputDeviceName;
+    if (!mRealInputDeviceName.empty())
+        info.inputDeviceName = mRealInputDeviceName;
 
     for (auto r : dev->getAvailableSampleRates())
         info.availableSampleRates.push_back(r);
@@ -777,6 +795,20 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     if (mDeviceManager) {
         juce::AudioDeviceManager::AudioDeviceSetup setup;
         mDeviceManager->getAudioDeviceSetup(setup);
+
+#ifdef __APPLE__
+        // If currently on an aggregate device, resolve back to real device names
+        // so we don't recursively wrap aggregates.
+        if (AggregateDeviceHelper::exists()) {
+            if (setup.outputDeviceName.toStdString() == AggregateDeviceHelper::currentName()) {
+                if (!mRealOutputDeviceName.empty())
+                    setup.outputDeviceName = juce::String(mRealOutputDeviceName);
+                if (!mRealInputDeviceName.empty())
+                    setup.inputDeviceName = juce::String(mRealInputDeviceName);
+            }
+        }
+#endif
+
         if (!deviceName.empty())
             setup.outputDeviceName = juce::String(deviceName);
         if (mCurrentConfig.numInputChannels > 0) {
@@ -830,9 +862,12 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         // JUCE's AudioIODeviceCombiner (which has no drift correction).
         if (!setup.outputDeviceName.isEmpty() && !setup.inputDeviceName.isEmpty()
             && setup.outputDeviceName != setup.inputDeviceName) {
+            // Remember the real device names before replacing with aggregate
+            mRealOutputDeviceName = setup.outputDeviceName.toStdString();
+            mRealInputDeviceName  = setup.inputDeviceName.toStdString();
+
             auto aggName = AggregateDeviceHelper::createOrUpdate(
-                setup.outputDeviceName.toStdString(),
-                setup.inputDeviceName.toStdString());
+                mRealOutputDeviceName, mRealInputDeviceName);
             if (!aggName.empty()) {
                 // Use the aggregate as a single device for both I/O
                 setup.outputDeviceName = juce::String(aggName);
@@ -844,6 +879,8 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             }
         } else {
             // Same device for both I/O, or no input — no aggregate needed
+            mRealOutputDeviceName.clear();
+            mRealInputDeviceName.clear();
             AggregateDeviceHelper::destroy();
         }
 #endif

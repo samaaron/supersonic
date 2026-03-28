@@ -74,7 +74,9 @@ public:
 
     // --- Device management ---
     std::vector<DeviceInfo>  listDevices() const;
-    CurrentDeviceInfo        currentDevice() const;
+    CurrentDeviceInfo        currentDevice() const;     // resolves aggregate to real names
+    std::string              realOutputDeviceName() const { return mRealOutputDeviceName; }
+    std::string              realInputDeviceName() const  { return mRealInputDeviceName; }
     SwapResult               switchDevice(const std::string& deviceName,
                                           double sampleRate = 0,
                                           int bufferSize = 0,
@@ -168,6 +170,8 @@ private:
     Config                   mCurrentConfig;
     int                      mBootInputChannels = 2;  // original -i value, for re-enabling inputs
     std::string              mLastInputDeviceName;    // saved on disable, restored on re-enable
+    std::string              mRealOutputDeviceName;   // actual output device behind aggregate
+    std::string              mRealInputDeviceName;    // actual input device behind aggregate
     std::mutex               mSwapMutex;
     std::string              mDeviceMode;   // empty = system/auto, non-empty = manual device name
 
