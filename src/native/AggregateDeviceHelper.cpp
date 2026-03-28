@@ -16,6 +16,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <cstdio>
 #include <mutex>
+#include <vector>
 
 namespace AggregateDeviceHelper {
 
