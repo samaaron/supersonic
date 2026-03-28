@@ -885,7 +885,12 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         }
 #endif
 
+        // Suppress change notifications from our own setup — we handle
+        // all post-change logic ourselves.  Same principle as the boot
+        // sequence (listener registered after all setup at line 374).
+        mDeviceManager->removeChangeListener(this);
         juce::String err = mDeviceManager->setAudioDeviceSetup(setup, true);
+        mDeviceManager->addChangeListener(this);
         if (err.isNotEmpty()) errStr = err.toStdString();
     } else {
         // Headless: no real device to configure; use failure hook for testing
