@@ -885,12 +885,11 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         }
 #endif
 
-        // Suppress change notifications from our own setup — we handle
-        // all post-change logic ourselves.  Same principle as the boot
-        // sequence (listener registered after all setup at line 374).
-        mDeviceManager->removeChangeListener(this);
+        // Flag so changeListenerCallback ignores the async notification
+        // triggered by our own setAudioDeviceSetup.  We handle all
+        // post-change logic ourselves.
+        mSelfTriggeredChange.store(true);
         juce::String err = mDeviceManager->setAudioDeviceSetup(setup, true);
-        mDeviceManager->addChangeListener(this);
         if (err.isNotEmpty()) errStr = err.toStdString();
     } else {
         // Headless: no real device to configure; use failure hook for testing
@@ -1196,6 +1195,9 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
 void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
     if (source != mDeviceManager.get()) return;
     if (!mRunning.load()) return;
+
+    // Ignore async notifications triggered by our own setAudioDeviceSetup
+    if (mSelfTriggeredChange.exchange(false)) return;
 
     // Don't fight with an in-progress device swap
     if (!mSwapMutex.try_lock()) return;
