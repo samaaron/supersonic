@@ -13,6 +13,9 @@
 #include <chrono>
 #include <cstring>
 #include <thread>
+#ifdef __APPLE__
+#include <CoreAudio/CoreAudio.h>
+#endif
 
 extern "C" {
     // Global used by init_memory() to pass external shared memory to World_New.
