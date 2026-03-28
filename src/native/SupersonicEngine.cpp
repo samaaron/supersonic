@@ -885,10 +885,10 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         }
 #endif
 
-        // Flag so changeListenerCallback ignores the async notification
-        // triggered by our own setAudioDeviceSetup.  We handle all
-        // post-change logic ourselves.
-        mSelfTriggeredChange.store(true);
+        // Timestamp so changeListenerCallback ignores ALL async notifications
+        // triggered by our device setup.  A single setup can generate multiple
+        // CoreAudio notifications (device change, rate change, aggregate events).
+        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
         juce::String err = mDeviceManager->setAudioDeviceSetup(setup, true);
         if (err.isNotEmpty()) errStr = err.toStdString();
     } else {
@@ -1196,8 +1196,11 @@ void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
     if (source != mDeviceManager.get()) return;
     if (!mRunning.load()) return;
 
-    // Ignore async notifications triggered by our own setAudioDeviceSetup
-    if (mSelfTriggeredChange.exchange(false)) return;
+    // Ignore async notifications triggered by our own setAudioDeviceSetup.
+    // A single device change can generate multiple CoreAudio notifications
+    // (especially with aggregate devices), so suppress for 1 second.
+    auto elapsed = std::chrono::steady_clock::now() - mLastSelfTriggeredChange;
+    if (elapsed < std::chrono::seconds(1)) return;
 
     // Don't fight with an in-progress device swap
     if (!mSwapMutex.try_lock()) return;

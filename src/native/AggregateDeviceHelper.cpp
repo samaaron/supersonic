@@ -7,6 +7,11 @@
  *
  * Instead, we create a macOS Aggregate Device with kernel-level drift
  * correction, and tell JUCE to use that single device for both I/O.
+ *
+ * CoreAudio provides no completion callback for aggregate device setup,
+ * so each configuration step (create, set sub-devices, set master,
+ * set drift comp) is followed by a 100ms RunLoop wait to let the HAL
+ * stabilise before the next step.
  */
 
 #ifdef __APPLE__
@@ -27,14 +32,19 @@ static AudioObjectID sAggregateID = kAudioObjectUnknown;
 static std::mutex sMutex;
 
 // ---------------------------------------------------------------------------
-// Helpers to get device UID from device name
+// Helpers
 // ---------------------------------------------------------------------------
 
+static void runLoopWait() {
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+}
+
 static AudioObjectID findDeviceByName(const std::string& name) {
-    AudioObjectPropertyAddress pa;
-    pa.mSelector = kAudioHardwarePropertyDevices;
-    pa.mScope    = kAudioObjectPropertyScopeGlobal;
-    pa.mElement  = kAudioObjectPropertyElementMain;
+    AudioObjectPropertyAddress pa = {
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
 
     UInt32 dataSize = 0;
     if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &pa, 0, nullptr, &dataSize) != noErr)
@@ -46,10 +56,11 @@ static AudioObjectID findDeviceByName(const std::string& name) {
         return kAudioObjectUnknown;
 
     for (auto id : ids) {
-        AudioObjectPropertyAddress nameAddr;
-        nameAddr.mSelector = kAudioDevicePropertyDeviceNameCFString;
-        nameAddr.mScope    = kAudioObjectPropertyScopeGlobal;
-        nameAddr.mElement  = kAudioObjectPropertyElementMain;
+        AudioObjectPropertyAddress nameAddr = {
+            kAudioDevicePropertyDeviceNameCFString,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
 
         CFStringRef cfName = nullptr;
         UInt32 nameSize = sizeof(cfName);
@@ -68,10 +79,11 @@ static AudioObjectID findDeviceByName(const std::string& name) {
 }
 
 static std::string getDeviceUID(AudioObjectID deviceID) {
-    AudioObjectPropertyAddress pa;
-    pa.mSelector = kAudioDevicePropertyDeviceUID;
-    pa.mScope    = kAudioObjectPropertyScopeGlobal;
-    pa.mElement  = kAudioObjectPropertyElementMain;
+    AudioObjectPropertyAddress pa = {
+        kAudioDevicePropertyDeviceUID,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
 
     CFStringRef uid = nullptr;
     UInt32 size = sizeof(uid);
@@ -84,15 +96,42 @@ static std::string getDeviceUID(AudioObjectID deviceID) {
     return buf;
 }
 
+static UInt32 getTransportType(AudioObjectID deviceID) {
+    AudioObjectPropertyAddress pa = {
+        kAudioDevicePropertyTransportType,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+
+    UInt32 transport = 0;
+    UInt32 size = sizeof(transport);
+    AudioObjectGetPropertyData(deviceID, &pa, 0, nullptr, &size, &transport);
+    return transport;
+}
+
+static std::string transportTypeString(UInt32 t) {
+    // FourCC to readable string
+    if (t == 0) return "unknown";
+    char cc[5] = {
+        (char)((t >> 24) & 0xFF),
+        (char)((t >> 16) & 0xFF),
+        (char)((t >> 8) & 0xFF),
+        (char)(t & 0xFF),
+        0
+    };
+    return cc;
+}
+
 // ---------------------------------------------------------------------------
 // Clean up any orphaned aggregate from a previous crash
 // ---------------------------------------------------------------------------
 
 static void cleanupOrphaned() {
-    AudioObjectPropertyAddress pa;
-    pa.mSelector = kAudioHardwarePropertyDevices;
-    pa.mScope    = kAudioObjectPropertyScopeGlobal;
-    pa.mElement  = kAudioObjectPropertyElementMain;
+    AudioObjectPropertyAddress pa = {
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
 
     UInt32 dataSize = 0;
     if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &pa, 0, nullptr, &dataSize) != noErr)
@@ -104,10 +143,11 @@ static void cleanupOrphaned() {
         return;
 
     for (auto id : ids) {
-        AudioObjectPropertyAddress uidAddr;
-        uidAddr.mSelector = kAudioDevicePropertyDeviceUID;
-        uidAddr.mScope    = kAudioObjectPropertyScopeGlobal;
-        uidAddr.mElement  = kAudioObjectPropertyElementMain;
+        AudioObjectPropertyAddress uidAddr = {
+            kAudioDevicePropertyDeviceUID,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
 
         CFStringRef uid = nullptr;
         UInt32 uidSize = sizeof(uid);
@@ -139,8 +179,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
             sAggregateID = kAudioObjectUnknown;
         }
     }
-    // Let CoreAudio process the destroy outside the lock
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+    runLoopWait();
 
     if (outputDeviceName.empty() || inputDeviceName.empty())
         return "";
@@ -167,6 +206,13 @@ std::string createOrUpdate(const std::string& outputDeviceName,
         return "";
     }
 
+    // Log transport types for diagnostics
+    UInt32 outTransport = getTransportType(outputID);
+    UInt32 inTransport  = getTransportType(inputID);
+    fprintf(stderr, "[audio-device] aggregate: out='%s' transport=%s, in='%s' transport=%s\n",
+            outputDeviceName.c_str(), transportTypeString(outTransport).c_str(),
+            inputDeviceName.c_str(), transportTypeString(inTransport).c_str());
+
     // Clean up any orphaned aggregate from a previous crash
     static bool cleaned = false;
     if (!cleaned) {
@@ -174,92 +220,146 @@ std::string createOrUpdate(const std::string& outputDeviceName,
         cleaned = true;
     }
 
-    // Build sub-device descriptions
-    // Output = clock source (no drift correction)
-    // Input  = drift correction enabled
-    CFStringRef outUIDRef = CFStringCreateWithCString(nullptr, outputUID.c_str(), kCFStringEncodingUTF8);
-    CFStringRef inUIDRef  = CFStringCreateWithCString(nullptr, inputUID.c_str(), kCFStringEncodingUTF8);
+    // ── Step 1: Create empty aggregate device ────────────────────────────
+    // Following Ardour's pattern: create first, then configure in steps
+    // with RunLoop waits between each to let CoreAudio stabilise.
 
-    const void* outSubKeys[] = {
-        CFSTR(kAudioSubDeviceUIDKey),
-        CFSTR(kAudioSubDeviceDriftCompensationKey)
-    };
-    const void* outSubVals[] = {
-        outUIDRef,
-        kCFBooleanFalse  // clock source — no drift correction
-    };
-    CFDictionaryRef outSubDict = CFDictionaryCreate(nullptr,
-        outSubKeys, outSubVals, 2,
-        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-
-    const void* inSubKeys[] = {
-        CFSTR(kAudioSubDeviceUIDKey),
-        CFSTR(kAudioSubDeviceDriftCompensationKey)
-    };
-    const void* inSubVals[] = {
-        inUIDRef,
-        kCFBooleanTrue   // non-clock device — enable drift correction
-    };
-    CFDictionaryRef inSubDict = CFDictionaryCreate(nullptr,
-        inSubKeys, inSubVals, 2,
-        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-
-    const void* subDevices[] = { outSubDict, inSubDict };
-    CFArrayRef subDeviceList = CFArrayCreate(nullptr, subDevices, 2,
-        &kCFTypeArrayCallBacks);
-
-    // Build aggregate description
     CFStringRef uidRef  = CFStringCreateWithCString(nullptr, kAggregateUID, kCFStringEncodingUTF8);
     CFStringRef nameRef = CFStringCreateWithCString(nullptr, kAggregateName, kCFStringEncodingUTF8);
+
+    int privateVal = 1;  // private — hidden from device lists (Ardour pattern)
+    CFNumberRef privateRef = CFNumberCreate(nullptr, kCFNumberIntType, &privateVal);
 
     const void* descKeys[] = {
         CFSTR(kAudioAggregateDeviceUIDKey),
         CFSTR(kAudioAggregateDeviceNameKey),
-        CFSTR(kAudioAggregateDeviceSubDeviceListKey),
-        CFSTR(kAudioAggregateDeviceMasterSubDeviceKey),
         CFSTR(kAudioAggregateDeviceIsPrivateKey),
     };
-    int privateVal = 0;  // public so JUCE can see it in device enumeration
-    CFNumberRef privateRef = CFNumberCreate(nullptr, kCFNumberIntType, &privateVal);
     const void* descVals[] = {
         uidRef,
         nameRef,
-        subDeviceList,
-        outUIDRef,       // output device is clock source
         privateRef,
     };
     CFDictionaryRef desc = CFDictionaryCreate(nullptr,
-        descKeys, descVals, 5,
+        descKeys, descVals, 3,
         &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
-    // Create the aggregate device
     AudioObjectID newID = kAudioObjectUnknown;
     OSStatus err = AudioHardwareCreateAggregateDevice(desc, &newID);
 
-    // Release CF objects
     CFRelease(desc);
     CFRelease(privateRef);
-    CFRelease(uidRef);
     CFRelease(nameRef);
-    CFRelease(subDeviceList);
-    CFRelease(outSubDict);
-    CFRelease(inSubDict);
-    CFRelease(outUIDRef);
-    CFRelease(inUIDRef);
+    CFRelease(uidRef);
 
     if (err != noErr) {
         fprintf(stderr, "[audio-device] aggregate: creation failed (err %d)\n", (int)err);
         return "";
     }
 
+    // Wait for CoreAudio to register the new device
+    runLoopWait();
+
+    // ── Step 2: Set sub-device list ──────────────────────────────────────
+
+    CFStringRef outUIDRef = CFStringCreateWithCString(nullptr, outputUID.c_str(), kCFStringEncodingUTF8);
+    CFStringRef inUIDRef  = CFStringCreateWithCString(nullptr, inputUID.c_str(), kCFStringEncodingUTF8);
+
+    CFMutableArrayRef subDevicesArray = CFArrayCreateMutable(nullptr, 0, &kCFTypeArrayCallBacks);
+    CFArrayAppendValue(subDevicesArray, outUIDRef);
+    CFArrayAppendValue(subDevicesArray, inUIDRef);
+
+    AudioObjectPropertyAddress subDevAddr = {
+        kAudioAggregateDevicePropertyFullSubDeviceList,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    UInt32 subDevSize = sizeof(CFArrayRef);
+    err = AudioObjectSetPropertyData(newID, &subDevAddr, 0, nullptr, subDevSize, &subDevicesArray);
+    CFRelease(subDevicesArray);
+
+    if (err != noErr) {
+        fprintf(stderr, "[audio-device] aggregate: failed to set sub-devices (err %d)\n", (int)err);
+        AudioHardwareDestroyAggregateDevice(newID);
+        CFRelease(outUIDRef);
+        CFRelease(inUIDRef);
+        return "";
+    }
+
+    // Wait for sub-device list to take effect
+    runLoopWait();
+
+    // ── Step 3: Set master (clock source) device ─────────────────────────
+    // Output device provides the clock — input device gets drift correction.
+
+    AudioObjectPropertyAddress masterAddr = {
+        kAudioAggregateDevicePropertyMasterSubDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    UInt32 masterSize = sizeof(CFStringRef);
+    err = AudioObjectSetPropertyData(newID, &masterAddr, 0, nullptr, masterSize, &outUIDRef);
+
+    if (err != noErr) {
+        fprintf(stderr, "[audio-device] aggregate: failed to set master device (err %d), "
+                "trying input as master\n", (int)err);
+        // Fall back to input as master (like Ardour)
+        err = AudioObjectSetPropertyData(newID, &masterAddr, 0, nullptr, masterSize, &inUIDRef);
+        if (err != noErr) {
+            fprintf(stderr, "[audio-device] aggregate: failed to set any master (err %d)\n", (int)err);
+            AudioHardwareDestroyAggregateDevice(newID);
+            CFRelease(outUIDRef);
+            CFRelease(inUIDRef);
+            return "";
+        }
+    }
+
+    // Wait for master assignment to take effect
+    runLoopWait();
+
+    // ── Step 4: Enable drift correction on non-master sub-devices ────────
+
+    AudioObjectPropertyAddress ownedAddr = {
+        kAudioObjectPropertyOwnedObjects,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    UInt32 ownedSize = 0;
+    err = AudioObjectGetPropertyDataSize(newID, &ownedAddr, 0, nullptr, &ownedSize);
+    if (err == noErr && ownedSize > 0) {
+        auto nSubDevices = ownedSize / sizeof(AudioObjectID);
+        std::vector<AudioObjectID> subDevices(nSubDevices);
+        err = AudioObjectGetPropertyData(newID, &ownedAddr, 0, nullptr, &ownedSize, subDevices.data());
+        if (err == noErr) {
+            AudioObjectPropertyAddress driftAddr = {
+                kAudioSubDevicePropertyDriftCompensation,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+            // Skip first sub-device (master/clock source), enable drift on rest
+            for (size_t i = 1; i < nSubDevices; ++i) {
+                UInt32 driftVal = 1;
+                OSStatus driftErr = AudioObjectSetPropertyData(
+                    subDevices[i], &driftAddr, 0, nullptr, sizeof(UInt32), &driftVal);
+                if (driftErr != noErr) {
+                    fprintf(stderr, "[audio-device] aggregate: drift comp failed on sub-device %zu (err %d)\n",
+                            i, (int)driftErr);
+                }
+            }
+        }
+    }
+
+    CFRelease(outUIDRef);
+    CFRelease(inUIDRef);
+
+    // Final wait for drift compensation to take effect
+    runLoopWait();
+
     // Store the ID under the lock
     {
         std::lock_guard<std::mutex> lock(sMutex);
         sAggregateID = newID;
     }
-
-    // Let CoreAudio stabilize outside the lock
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
 
     fprintf(stderr, "[audio-device] aggregate: created '%s' (out=%s, in=%s)\n",
             kAggregateName, outputDeviceName.c_str(), inputDeviceName.c_str());

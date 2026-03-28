@@ -173,7 +173,7 @@ private:
     std::string              mRealOutputDeviceName;   // actual output device behind aggregate
     std::string              mRealInputDeviceName;    // actual input device behind aggregate
     std::mutex               mSwapMutex;
-    std::atomic<bool>        mSelfTriggeredChange{false}; // suppress async change notifications from our own setAudioDeviceSetup
+    std::chrono::steady_clock::time_point mLastSelfTriggeredChange{}; // suppress async change notifications from our own setAudioDeviceSetup
     std::string              mDeviceMode;   // empty = system/auto, non-empty = manual device name
 
     // Shared memory — owned by the engine, survives across cold swaps.
