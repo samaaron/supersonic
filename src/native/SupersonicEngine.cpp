@@ -559,6 +559,52 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
     std::vector<DeviceInfo> result;
     if (!mDeviceManager) return result;
 
+#ifdef __APPLE__
+    // Build a name→transportType map from CoreAudio for all devices
+    std::map<std::string, uint32_t> transportMap;
+    {
+        AudioObjectPropertyAddress pa = {
+            kAudioHardwarePropertyDevices,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        UInt32 dataSize = 0;
+        if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &pa, 0, nullptr, &dataSize) == noErr) {
+            auto count = dataSize / sizeof(AudioObjectID);
+            std::vector<AudioObjectID> ids(count);
+            if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &pa, 0, nullptr, &dataSize, ids.data()) == noErr) {
+                for (auto id : ids) {
+                    // Get name
+                    AudioObjectPropertyAddress nameAddr = {
+                        kAudioDevicePropertyDeviceNameCFString,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+                    CFStringRef cfName = nullptr;
+                    UInt32 nameSize = sizeof(cfName);
+                    if (AudioObjectGetPropertyData(id, &nameAddr, 0, nullptr, &nameSize, &cfName) != noErr)
+                        continue;
+                    char buf[256];
+                    CFStringGetCString(cfName, buf, sizeof(buf), kCFStringEncodingUTF8);
+                    CFRelease(cfName);
+
+                    // Get transport type
+                    AudioObjectPropertyAddress tAddr = {
+                        kAudioDevicePropertyTransportType,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+                    UInt32 transport = 0;
+                    UInt32 tSize = sizeof(transport);
+                    AudioObjectGetPropertyData(id, &tAddr, 0, nullptr, &tSize, &transport);
+
+                    transportMap[buf] = transport;
+                }
+            }
+        }
+    }
+#endif
+
     auto& types = mDeviceManager->getAvailableDeviceTypes();
     for (auto* type : types) {
         type->scanForDevices();
@@ -580,6 +626,10 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
             DeviceInfo info;
             info.name = devName.toStdString();
             info.typeName = typeNameStr;
+#ifdef __APPLE__
+            auto it = transportMap.find(info.name);
+            if (it != transportMap.end()) info.transportType = it->second;
+#endif
 
             std::unique_ptr<juce::AudioIODevice> tempDev(
                 type->createDevice(devName, juce::String()));
@@ -606,6 +656,10 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
             DeviceInfo info;
             info.name = std::move(nameStr);
             info.typeName = typeNameStr;
+#ifdef __APPLE__
+            auto it = transportMap.find(info.name);
+            if (it != transportMap.end()) info.transportType = it->second;
+#endif
 
             std::unique_ptr<juce::AudioIODevice> tempDev(
                 type->createDevice(juce::String(), devName));
@@ -860,8 +914,27 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         // On macOS, if input and output are different devices, create an
         // Aggregate Device with drift correction instead of relying on
         // JUCE's AudioIODeviceCombiner (which has no drift correction).
-        if (!setup.outputDeviceName.isEmpty() && !setup.inputDeviceName.isEmpty()
-            && setup.outputDeviceName != setup.inputDeviceName) {
+        // Skip aggregation for Bluetooth/AirPlay inputs — they force
+        // low-quality codec modes and don't support drift correction.
+        bool needsAggregate = !setup.outputDeviceName.isEmpty()
+            && !setup.inputDeviceName.isEmpty()
+            && setup.outputDeviceName != setup.inputDeviceName;
+
+        if (needsAggregate) {
+            // Check input device transport type
+            auto devices = listDevices();
+            std::string inName = setup.inputDeviceName.toStdString();
+            for (auto& dev : devices) {
+                if (dev.name == inName && !dev.isSuitableForInput()) {
+                    needsAggregate = false;
+                    fprintf(stderr, "[audio-device] skipping aggregate — input '%s' is Bluetooth/AirPlay\n",
+                            inName.c_str());
+                    break;
+                }
+            }
+        }
+
+        if (needsAggregate) {
             // Remember the real device names before replacing with aggregate
             mRealOutputDeviceName = setup.outputDeviceName.toStdString();
             mRealInputDeviceName  = setup.inputDeviceName.toStdString();

@@ -81,12 +81,14 @@ void OscUdpServer::sendDeviceReport() {
     auto current = mEngine->currentDevice();
     auto mode    = mEngine->deviceMode();
 
-    // Split devices into output-capable and input-capable lists
+    // Split devices into output-capable and input-capable lists.
+    // Bluetooth and AirPlay devices are excluded from input — they force
+    // low-quality codec modes (HFP 16kHz mono) that break audio quality.
     std::vector<decltype(allDevices)::value_type> outputDevices, inputDevices;
     for (auto& dev : allDevices) {
         if (dev.maxOutputChannels > 0)
             outputDevices.push_back(dev);
-        if (dev.maxInputChannels > 0)
+        if (dev.maxInputChannels > 0 && dev.isSuitableForInput())
             inputDevices.push_back(dev);
     }
 
