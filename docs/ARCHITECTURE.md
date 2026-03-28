@@ -225,3 +225,14 @@ This means PM mode metrics can be up to one heartbeat interval stale.
 ## Multiple Writers
 
 Multiple `OSCChannel` instances can exist, each with its own direct line to the AudioWorklet. This supports scenarios like multiple instruments or control sources operating independently.
+
+## Node ID Allocation
+
+Every synth node in scsynth needs a unique integer ID. When you have multiple workers - a sequencer in one, a live keyboard in another, the main thread doing its own thing - those IDs must never collide. That's what `nextNodeId()` solves. It's available on both `SuperSonic` and `OscChannel`, so every context in the system can allocate IDs independently, guaranteed unique with no clashes.
+
+How it works depends on the transport mode:
+
+- **SAB mode**: a single `Atomics.add()` on a shared `Int32Array` in the SharedArrayBuffer. One atomic instruction, correct across all threads by hardware guarantee.
+- **PM mode**: range-based allocation. The main thread hands out non-overlapping ranges to each worker (e.g. 1000-1999 to worker A, 2000-2999 to worker B). Workers increment locally within their range and pre-fetch the next range at the halfway point, so there's no round-trip pause under normal use.
+
+IDs start at 1000. Below that: 0 is the root group, 1 is the default group, and 2-999 are reserved for manual use.

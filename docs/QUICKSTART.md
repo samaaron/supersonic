@@ -100,6 +100,18 @@ The arguments are:
 
 The synth parameters control the sound. Here we set `note` to 28 (a low E), `release` to 8 seconds, and `cutoff` to 70 (filter brightness). Each synthdef has its own parameters - see the synthdef documentation for available options.
 
+We used `-1` for the node ID here to let scsynth pick one for us. That's fine for fire-and-forget sounds, but if you need to control a synth after creating it - change its parameters, stop it, query it - you need to know its ID. That's where `nextNodeId()` comes in:
+
+```javascript
+const id = supersonic.nextNodeId();
+supersonic.send("/s_new", "sonic-pi-prophet", id, 0, 0, "note", 28, "release", 8, "cutoff", 70);
+
+// Later — change the cutoff while it's playing
+supersonic.send("/n_set", id, "cutoff", 100);
+```
+
+`nextNodeId()` is thread-safe - if you have multiple Web Workers sending OSC (see the [Workers Guide](WORKERS.md)), each one can allocate IDs independently, guaranteed unique with no clashes.
+
 
 ## Working Example
 

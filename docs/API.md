@@ -2674,6 +2674,13 @@ the root group, 1 is the default group, 2–999 are reserved for manual use).
 
 A unique node ID (>= 1000)
 
+###### Example
+
+```ts
+const id = channel.nextNodeId();
+channel.send(['/s_new', 'beep', id, 0, 1, 'freq', 440]);
+```
+
 ##### send()
 
 > **send**(`oscData`): `boolean`
