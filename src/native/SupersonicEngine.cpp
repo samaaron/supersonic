@@ -924,14 +924,17 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             && setup.outputDeviceName != setup.inputDeviceName;
 
         if (needsAggregate) {
-            // Check input device transport type
+            // Check transport types — skip aggregate for Bluetooth/AirPlay
+            // on either side (wireless codecs don't support drift correction)
             auto devices = listDevices();
-            std::string inName = setup.inputDeviceName.toStdString();
+            std::string outName = setup.outputDeviceName.toStdString();
+            std::string inName  = setup.inputDeviceName.toStdString();
             for (auto& dev : devices) {
-                if (dev.name == inName && !dev.isSuitableForInput()) {
+                if ((dev.name == outName || dev.name == inName)
+                    && !dev.isSuitableForAggregate()) {
                     needsAggregate = false;
-                    fprintf(stderr, "[audio-device] skipping aggregate — input '%s' is Bluetooth/AirPlay\n",
-                            inName.c_str());
+                    fprintf(stderr, "[audio-device] skipping aggregate — '%s' is Bluetooth/AirPlay\n",
+                            dev.name.c_str());
                     break;
                 }
             }

@@ -15,17 +15,22 @@ struct DeviceInfo {
     int  maxInputChannels  = 0;
     uint32_t transportType = 0;              // CoreAudio transport type (macOS only)
 
-    // Returns true if this device is suitable for use as an input device
-    // in combination with a different output device. Bluetooth and AirPlay
-    // inputs force low-quality codec modes that break audio quality.
-    bool isSuitableForInput() const {
+    // Bluetooth and AirPlay use wireless codecs that are unsuitable for
+    // low-latency audio aggregation (HFP 16kHz mono, AirPlay buffering).
+    bool isWirelessTransport() const {
         constexpr uint32_t kBluetooth   = 0x626C7565; // 'blue'
         constexpr uint32_t kBluetoothLE = 0x626C6561; // 'blea'
         constexpr uint32_t kAirPlay     = 0x61697270; // 'airp'
-        return transportType != kBluetooth
-            && transportType != kBluetoothLE
-            && transportType != kAirPlay;
+        return transportType == kBluetooth
+            || transportType == kBluetoothLE
+            || transportType == kAirPlay;
     }
+
+    // Suitable for input: exclude Bluetooth/AirPlay (force low-quality codecs)
+    bool isSuitableForInput() const { return !isWirelessTransport(); }
+
+    // Suitable for aggregation: exclude Bluetooth/AirPlay on either side
+    bool isSuitableForAggregate() const { return !isWirelessTransport(); }
 };
 
 struct CurrentDeviceInfo : DeviceInfo {

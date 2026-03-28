@@ -367,6 +367,21 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
                 inputDevName = it->AsStringUnchecked();
             }
 
+            // "__none__" sentinel from GUI means "disable audio inputs"
+            if (inputDevName == "__none__") {
+                auto result = mEngine->enableInputChannels(0);
+                char buf[1024];
+                osc::OutboundPacketStream s(buf, sizeof(buf));
+                s << osc::BeginMessage("/supersonic/devices/switch.reply")
+                  << static_cast<osc::int32>(result.success ? 1 : 0);
+                if (!result.success) s << result.error.c_str();
+                s << osc::EndMessage;
+                sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                          static_cast<uint32_t>(s.Size()));
+                if (result.success) sendDeviceReport();
+                return true;
+            }
+
             auto result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
             char buf[1024];
             osc::OutboundPacketStream s(buf, sizeof(buf));
