@@ -122,8 +122,9 @@ private:
     };
     PendingSwitch              mPendingSwitch;
     std::mutex                 mPendingSwitchMutex;
-    std::unique_ptr<std::thread> mDebounceSwitchThread;
+    std::thread                mDebounceSwitchThread;
     std::atomic<bool>          mDebounceSwitchRunning{false};
+    std::atomic<bool>          mDebounceSwitchStop{false};
 
     void executePendingSwitch();
 };

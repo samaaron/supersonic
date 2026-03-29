@@ -17,6 +17,11 @@ OscUdpServer::OscUdpServer()
 }
 
 OscUdpServer::~OscUdpServer() {
+    // Stop debounce thread before destroying the mutex it uses
+    mDebounceSwitchStop.store(true);
+    if (mDebounceSwitchThread.joinable())
+        mDebounceSwitchThread.join();
+
     signalThreadShouldExit();
     if (mSocket) mSocket->shutdown();
     stopThread(2000);
@@ -452,12 +457,11 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
 
             // Launch debounce thread if not already running
             if (!mDebounceSwitchRunning.load()) {
+                if (mDebounceSwitchThread.joinable())
+                    mDebounceSwitchThread.join();
                 mDebounceSwitchRunning.store(true);
-                if (mDebounceSwitchThread && mDebounceSwitchThread->joinable())
-                    mDebounceSwitchThread->join();
-                mDebounceSwitchThread = std::make_unique<std::thread>(
+                mDebounceSwitchThread = std::thread(
                     &OscUdpServer::executePendingSwitch, this);
-                mDebounceSwitchThread->detach();
             }
             return true;
 
@@ -624,8 +628,9 @@ void OscUdpServer::executePendingSwitch() {
     int bufSz = 0;
 
     // Poll until the pending switch has been quiet for 500ms
-    while (true) {
+    while (!mDebounceSwitchStop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (mDebounceSwitchStop.load()) break;
 
         std::lock_guard<std::mutex> lock(mPendingSwitchMutex);
         if (!mPendingSwitch.active) {
@@ -643,6 +648,11 @@ void OscUdpServer::executePendingSwitch() {
             mPendingSwitch.active = false;
             break;
         }
+    }
+
+    if (mDebounceSwitchStop.load()) {
+        mDebounceSwitchRunning.store(false);
+        return;
     }
 
     fprintf(stderr, "[audio-device] debounced switch: out='%s' in='%s' sr=%.0f buf=%d\n",

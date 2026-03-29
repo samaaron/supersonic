@@ -36,6 +36,10 @@ bool exists();
 // Returns the name of the current managed Aggregate Device, or ""
 std::string currentName();
 
+// Clean up any orphaned aggregate from a previous crash.
+// Should be called at boot before any audio device initialization.
+void cleanupOrphaned();
+
 } // namespace AggregateDeviceHelper
 
 #endif // __APPLE__

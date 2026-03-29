@@ -82,6 +82,11 @@ void SupersonicEngine::initialise(const Config& cfg) {
     };
 
     if (!cfg.headless) {
+#ifdef __APPLE__
+        // Clean up any orphaned aggregate device from a previous crash
+        // before initialising the audio device manager.
+        AggregateDeviceHelper::cleanupOrphaned();
+#endif
         mDeviceManager = std::make_unique<juce::AudioDeviceManager>();
 
         // -- Select audio driver --------------------------------------------------

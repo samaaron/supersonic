@@ -126,7 +126,7 @@ static std::string transportTypeString(UInt32 t) {
 // Clean up any orphaned aggregate from a previous crash
 // ---------------------------------------------------------------------------
 
-static void cleanupOrphaned() {
+void cleanupOrphaned() {
     AudioObjectPropertyAddress pa = {
         kAudioHardwarePropertyDevices,
         kAudioObjectPropertyScopeGlobal,
@@ -213,12 +213,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
             outputDeviceName.c_str(), transportTypeString(outTransport).c_str(),
             inputDeviceName.c_str(), transportTypeString(inTransport).c_str());
 
-    // Clean up any orphaned aggregate from a previous crash
-    static bool cleaned = false;
-    if (!cleaned) {
-        cleanupOrphaned();
-        cleaned = true;
-    }
+    // Orphan cleanup now runs at boot via SupersonicEngine::initialise()
 
     // ── Step 1: Create empty aggregate device ────────────────────────────
     // Following Ardour's pattern: create first, then configure in steps
