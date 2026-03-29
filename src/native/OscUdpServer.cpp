@@ -420,6 +420,10 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
 
             // "__none__" sentinel from GUI means "disable audio inputs"
             if (inputDevName == "__none__") {
+                // Lock device mode so changeListenerCallback doesn't interfere
+                auto curDev = mEngine->currentDevice();
+                if (!curDev.name.empty())
+                    mEngine->forceDeviceMode(curDev.name);
                 auto result = mEngine->enableInputChannels(0);
                 char buf[1024];
                 osc::OutboundPacketStream s(buf, sizeof(buf));
@@ -544,6 +548,11 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
             int numChannels = 0;
             if (it != msg.ArgumentsEnd() && it->IsInt32())
                 numChannels = it->AsInt32Unchecked();
+
+            // Lock device mode so changeListenerCallback doesn't interfere
+            auto curDev = mEngine->currentDevice();
+            if (!curDev.name.empty())
+                mEngine->forceDeviceMode(curDev.name);
 
             auto result = mEngine->enableInputChannels(numChannels);
             char buf[1024];
