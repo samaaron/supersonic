@@ -18,12 +18,14 @@ struct DeviceInfo {
     // Bluetooth and AirPlay use wireless codecs that are unsuitable for
     // low-latency audio aggregation (HFP 16kHz mono, AirPlay buffering).
     bool isWirelessTransport() const {
-        constexpr uint32_t kBluetooth   = 0x626C7565; // 'blue'
-        constexpr uint32_t kBluetoothLE = 0x626C6561; // 'blea'
-        constexpr uint32_t kAirPlay     = 0x61697270; // 'airp'
+        constexpr uint32_t kBluetooth      = 0x626C7565; // 'blue'
+        constexpr uint32_t kBluetoothLE    = 0x626C6561; // 'blea'
+        constexpr uint32_t kAirPlay        = 0x61697270; // 'airp'
+        constexpr uint32_t kContinuityCam  = 0x63637764; // 'ccwd'
         return transportType == kBluetooth
             || transportType == kBluetoothLE
-            || transportType == kAirPlay;
+            || transportType == kAirPlay
+            || transportType == kContinuityCam;
     }
 
     // Suitable for input: exclude Bluetooth/AirPlay (force low-quality codecs)

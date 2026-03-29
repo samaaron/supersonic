@@ -317,33 +317,65 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     // Wait for master assignment to take effect
     runLoopWait();
 
-    // ── Step 4: Enable drift correction on non-master sub-devices ────────
+    // ── Step 4: Enable drift correction if sub-devices use different clocks ──
+    // Check clock domains first (like Ardour) — devices on the same clock
+    // don't need drift compensation and may not support the property.
 
-    AudioObjectPropertyAddress ownedAddr = {
-        kAudioObjectPropertyOwnedObjects,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
-    UInt32 ownedSize = 0;
-    err = AudioObjectGetPropertyDataSize(newID, &ownedAddr, 0, nullptr, &ownedSize);
-    if (err == noErr && ownedSize > 0) {
-        auto nSubDevices = ownedSize / sizeof(AudioObjectID);
-        std::vector<AudioObjectID> subDevices(nSubDevices);
-        err = AudioObjectGetPropertyData(newID, &ownedAddr, 0, nullptr, &ownedSize, subDevices.data());
-        if (err == noErr) {
-            AudioObjectPropertyAddress driftAddr = {
-                kAudioSubDevicePropertyDriftCompensation,
-                kAudioObjectPropertyScopeGlobal,
-                kAudioObjectPropertyElementMain
-            };
-            // Skip first sub-device (master/clock source), enable drift on rest
-            for (size_t i = 1; i < nSubDevices; ++i) {
-                UInt32 driftVal = 1;
-                OSStatus driftErr = AudioObjectSetPropertyData(
-                    subDevices[i], &driftAddr, 0, nullptr, sizeof(UInt32), &driftVal);
-                if (driftErr != noErr) {
-                    fprintf(stderr, "[audio-device] aggregate: drift comp failed on sub-device %zu (err %d)\n",
-                            i, (int)driftErr);
+    bool needsDriftComp = false;
+    {
+        AudioObjectPropertyAddress clockAddr = {
+            kAudioDevicePropertyClockDomain,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        UInt32 outClock = 0, inClock = 0;
+        UInt32 clockSize = sizeof(UInt32);
+        OSStatus outErr = AudioObjectGetPropertyData(outputID, &clockAddr, 0, nullptr, &clockSize, &outClock);
+        clockSize = sizeof(UInt32);
+        OSStatus inErr  = AudioObjectGetPropertyData(inputID, &clockAddr, 0, nullptr, &clockSize, &inClock);
+
+        if (outErr != noErr || inErr != noErr) {
+            // Can't determine clock domains — assume drift comp needed
+            needsDriftComp = true;
+            fprintf(stderr, "[audio-device] aggregate: couldn't read clock domains, assuming drift comp needed\n");
+        } else if (outClock != inClock) {
+            needsDriftComp = true;
+            fprintf(stderr, "[audio-device] aggregate: different clock domains (%u vs %u), enabling drift comp\n",
+                    outClock, inClock);
+        } else {
+            fprintf(stderr, "[audio-device] aggregate: same clock domain (%u), skipping drift comp\n", outClock);
+        }
+    }
+
+    if (needsDriftComp) {
+        AudioObjectPropertyAddress ownedAddr = {
+            kAudioObjectPropertyOwnedObjects,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        UInt32 ownedSize = 0;
+        err = AudioObjectGetPropertyDataSize(newID, &ownedAddr, 0, nullptr, &ownedSize);
+        if (err == noErr && ownedSize > 0) {
+            auto nSubDevices = ownedSize / sizeof(AudioObjectID);
+            std::vector<AudioObjectID> subDevices(nSubDevices);
+            err = AudioObjectGetPropertyData(newID, &ownedAddr, 0, nullptr, &ownedSize, subDevices.data());
+            if (err == noErr) {
+                AudioObjectPropertyAddress driftAddr = {
+                    kAudioSubDevicePropertyDriftCompensation,
+                    kAudioObjectPropertyScopeGlobal,
+                    kAudioObjectPropertyElementMain
+                };
+                // Skip first sub-device (master/clock source), enable drift on rest
+                for (size_t i = 1; i < nSubDevices; ++i) {
+                    UInt32 driftVal = 1;
+                    OSStatus driftErr = AudioObjectSetPropertyData(
+                        subDevices[i], &driftAddr, 0, nullptr, sizeof(UInt32), &driftVal);
+                    if (driftErr != noErr) {
+                        fprintf(stderr, "[audio-device] aggregate: drift comp failed on sub-device %zu (err %d)\n",
+                                i, (int)driftErr);
+                    } else {
+                        fprintf(stderr, "[audio-device] aggregate: drift comp enabled on sub-device %zu\n", i);
+                    }
                 }
             }
         }
