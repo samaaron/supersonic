@@ -7,6 +7,8 @@
 #include "osc/OscOutboundPacketStream.h"
 #include "osc/OscReceivedElements.h"
 #include <cstring>
+#include <mutex>
+#include <thread>
 
 OscUdpServer::OscUdpServer()
     : juce::Thread("SuperSonic-OscUdpServer")
@@ -426,20 +428,37 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
                 return true;
             }
 
-            auto result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
-            char buf[1024];
-            osc::OutboundPacketStream s(buf, sizeof(buf));
-            s << osc::BeginMessage("/supersonic/devices/switch.reply");
-            if (result.success) {
-                s << static_cast<osc::int32>(1);
-            } else {
-                s << static_cast<osc::int32>(0) << result.error.c_str();
+            // Debounce: store the request and wait for a quiet period.
+            // Rapid clicks replace the pending switch; only the last one executes.
+            {
+                std::lock_guard<std::mutex> lock(mPendingSwitchMutex);
+                mPendingSwitch.devName = devName;
+                mPendingSwitch.inputDevName = inputDevName;
+                mPendingSwitch.sampleRate = sr;
+                mPendingSwitch.bufferSize = bufSz;
+                mPendingSwitch.timestamp = std::chrono::steady_clock::now();
+                mPendingSwitch.active = true;
             }
-            s << osc::EndMessage;
-            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
-                      static_cast<uint32_t>(s.Size()));
-            if (result.success)
-                sendDeviceReport();
+
+            // Ack immediately so the GUI knows we received it
+            {
+                char buf[128];
+                osc::OutboundPacketStream s(buf, sizeof(buf));
+                s << osc::BeginMessage("/supersonic/devices/switch.reply")
+                  << static_cast<osc::int32>(1) << osc::EndMessage;
+                sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                          static_cast<uint32_t>(s.Size()));
+            }
+
+            // Launch debounce thread if not already running
+            if (!mDebounceSwitchRunning.load()) {
+                mDebounceSwitchRunning.store(true);
+                if (mDebounceSwitchThread && mDebounceSwitchThread->joinable())
+                    mDebounceSwitchThread->join();
+                mDebounceSwitchThread = std::make_unique<std::thread>(
+                    &OscUdpServer::executePendingSwitch, this);
+                mDebounceSwitchThread->detach();
+            }
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/devices/report") == 0) {
@@ -594,6 +613,51 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
     }
 
     return false;
+}
+
+void OscUdpServer::executePendingSwitch() {
+    // Wait for rapid clicks to settle (500ms quiet period)
+    constexpr auto kDebounceMs = std::chrono::milliseconds(500);
+
+    std::string devName, inputDevName;
+    double sr = 0;
+    int bufSz = 0;
+
+    // Poll until the pending switch has been quiet for 500ms
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        std::lock_guard<std::mutex> lock(mPendingSwitchMutex);
+        if (!mPendingSwitch.active) {
+            mDebounceSwitchRunning.store(false);
+            return;
+        }
+
+        auto elapsed = std::chrono::steady_clock::now() - mPendingSwitch.timestamp;
+        if (elapsed >= kDebounceMs) {
+            // Settled — capture and clear
+            devName      = mPendingSwitch.devName;
+            inputDevName = mPendingSwitch.inputDevName;
+            sr           = mPendingSwitch.sampleRate;
+            bufSz        = mPendingSwitch.bufferSize;
+            mPendingSwitch.active = false;
+            break;
+        }
+    }
+
+    fprintf(stderr, "[audio-device] debounced switch: out='%s' in='%s' sr=%.0f buf=%d\n",
+            devName.c_str(), inputDevName.c_str(), sr, bufSz);
+    fflush(stderr);
+
+    if (mEngine) {
+        auto result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
+        if (result.success)
+            sendDeviceReport();
+        else
+            fprintf(stderr, "[audio-device] debounced switch failed: %s\n", result.error.c_str());
+    }
+
+    mDebounceSwitchRunning.store(false);
 }
 
 void OscUdpServer::handlePacket(const uint8_t* data, uint32_t size,

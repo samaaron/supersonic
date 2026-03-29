@@ -110,4 +110,20 @@ private:
         int port;
     };
     std::vector<NotifyTarget> mNotifyTargets;
+
+    // Debounced device switch — rapid clicks settle into one final switch
+    struct PendingSwitch {
+        std::string devName;
+        std::string inputDevName;
+        double sampleRate = 0;
+        int bufferSize = 0;
+        std::chrono::steady_clock::time_point timestamp;
+        bool active = false;
+    };
+    PendingSwitch              mPendingSwitch;
+    std::mutex                 mPendingSwitchMutex;
+    std::unique_ptr<std::thread> mDebounceSwitchThread;
+    std::atomic<bool>          mDebounceSwitchRunning{false};
+
+    void executePendingSwitch();
 };
