@@ -660,10 +660,11 @@ void OscUdpServer::executePendingSwitch() {
     fflush(stderr);
 
     if (mEngine) {
-        // Explicit GUI switch → set device mode so changeListenerCallback
+        // Explicit GUI switch → force device mode so changeListenerCallback
         // doesn't fight us by reinitialising to system defaults.
+        // Use forceDeviceMode (not setDeviceMode which rejects rate mismatches).
         if (!devName.empty())
-            mEngine->setDeviceMode(devName);
+            mEngine->forceDeviceMode(devName);
 
         auto result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
         if (result.success)

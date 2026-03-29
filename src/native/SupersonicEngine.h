@@ -141,6 +141,7 @@ public:
 
     // --- Device mode (system/auto vs manual device name) ---
     std::string setDeviceMode(const std::string& mode);
+    void forceDeviceMode(const std::string& mode) { mDeviceMode = mode; }
     std::string deviceMode() const { return mDeviceMode; }
     void printDeviceList();
 
