@@ -320,6 +320,38 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
             sendDeviceReport();
             return true;
 
+        } else if (std::strcmp(addr, "/supersonic/notify/unregister") == 0) {
+            // Remove the sender from notify targets (polite shutdown).
+            juce::String senderIP;
+            int senderPort;
+            {
+                juce::ScopedLock sl(mSenderLock);
+                senderIP = mLastSenderIP;
+                senderPort = mLastSenderPort;
+            }
+            {
+                juce::ScopedLock sl(mSenderLock);
+                mNotifyTargets.erase(
+                    std::remove_if(mNotifyTargets.begin(), mNotifyTargets.end(),
+                        [&](const NotifyTarget& t) { return t.ip == senderIP && t.port == senderPort; }),
+                    mNotifyTargets.end());
+            }
+            fprintf(stderr, "[osc-notify] unregistered %s:%d (targets: %zu)\n",
+                    senderIP.toRawUTF8(), senderPort, mNotifyTargets.size());
+            fflush(stderr);
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/notify/clear") == 0) {
+            // Remove all notify targets (used before Spider restart).
+            {
+                juce::ScopedLock sl(mSenderLock);
+                auto count = mNotifyTargets.size();
+                mNotifyTargets.clear();
+                fprintf(stderr, "[osc-notify] cleared all %zu targets\n", count);
+                fflush(stderr);
+            }
+            return true;
+
         } else if (std::strcmp(addr, "/supersonic/devices/list") == 0) {
             auto devices = mEngine->listDevices();
             for (auto& dev : devices) {
