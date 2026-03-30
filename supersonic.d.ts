@@ -957,6 +957,40 @@ export class OscChannel {
    */
   nextNodeId(): number;
 
+  /**
+   * Register a callback for OSC replies from scsynth.
+   *
+   * In Worker context the callback fires automatically from the event loop.
+   * In AudioWorklet context the callback fires during {@link pollReplies} calls.
+   *
+   * All registered channels receive all replies (broadcast). Filter locally
+   * if you only need specific addresses.
+   *
+   * @param callback - Called with raw OSC bytes and sequence number for each reply
+   *
+   * @example
+   * channel.onReply((oscData, sequence) => {
+   *   // oscData is a Uint8Array of raw OSC bytes
+   * });
+   */
+  onReply(callback: (oscData: Uint8Array, sequence: number) => void): void;
+
+  /**
+   * Unregister the reply callback and release the reply channel.
+   */
+  offReply(): void;
+
+  /**
+   * Poll for pending replies and fire the {@link onReply} callback for each.
+   *
+   * Call this from an AudioWorklet's `process()` method to receive replies
+   * synchronously on the audio thread. In Worker context replies are delivered
+   * automatically — calling this is optional but harmless.
+   *
+   * @returns Number of replies processed
+   */
+  pollReplies(): number;
+
   /** Close the channel and release its ports. */
   close(): void;
 

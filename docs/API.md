@@ -2505,6 +2505,9 @@ then transfer it to a Web Worker for direct communication with the AudioWorklet.
 | [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                           |
 | [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                   |
 | [`nextNodeId()`](#nextnodeid)                 | Get the next unique node ID.                                                    |
+| [`offReply()`](#offreply)                     | Unregister the reply callback and release the reply channel.                    |
+| [`onReply()`](#onreply)                       | Register a callback for OSC replies from scsynth.                               |
+| [`pollReplies()`](#pollreplies)               | Poll for pending replies and fire the onReply callback for each.                |
 | [`send()`](#send)                             | Send an OSC message with automatic routing.                                     |
 | [`sendDirect()`](#senddirect)                 | Send directly to worklet without classification or metrics tracking.            |
 | [`sendToPrescheduler()`](#sendtoprescheduler) | Send to prescheduler without classification.                                    |
@@ -2673,6 +2676,62 @@ the root group, 1 is the default group, 2–999 are reserved for manual use).
 `number`
 
 A unique node ID (>= 1000)
+
+##### offReply()
+
+> **offReply**(): `void`
+
+Unregister the reply callback and release the reply channel.
+
+###### Returns
+
+`void`
+
+##### onReply()
+
+> **onReply**(`callback`): `void`
+
+Register a callback for OSC replies from scsynth.
+
+In Worker context the callback fires automatically from the event loop.
+In AudioWorklet context the callback fires during [pollReplies](#pollreplies) calls.
+
+All registered channels receive all replies (broadcast). Filter locally
+if you only need specific addresses.
+
+###### Parameters
+
+| Parameter  | Type                              | Description                                                  |
+| ---------- | --------------------------------- | ------------------------------------------------------------ |
+| `callback` | (`oscData`, `sequence`) => `void` | Called with raw OSC bytes and sequence number for each reply |
+
+###### Returns
+
+`void`
+
+###### Example
+
+```ts
+channel.onReply((oscData, sequence) => {
+  // oscData is a Uint8Array of raw OSC bytes
+});
+```
+
+##### pollReplies()
+
+> **pollReplies**(): `number`
+
+Poll for pending replies and fire the [onReply](#onreply) callback for each.
+
+Call this from an AudioWorklet's `process()` method to receive replies
+synchronously on the audio thread. In Worker context replies are delivered
+automatically — calling this is optional but harmless.
+
+###### Returns
+
+`number`
+
+Number of replies processed
 
 ##### send()
 
