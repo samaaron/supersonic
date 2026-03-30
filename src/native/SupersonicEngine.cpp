@@ -812,7 +812,16 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             type->scanForDevices();
             auto names = type->getDeviceNames(isInput);
             for (auto& n : names) {
-                if (n.toStdString() == name) {
+                auto juceStr = n.toStdString();
+                // Match exact name or prefix (JUCE appends " (N)" suffixes
+                // to disambiguate duplicate CoreAudio device names).
+                bool match = (juceStr == name);
+                if (!match && juceStr.size() > name.size()
+                    && juceStr.compare(0, name.size(), name) == 0
+                    && juceStr[name.size()] == ' ') {
+                    match = true;
+                }
+                if (match) {
                     auto outArg = isInput ? juce::String() : n;
                     auto inArg  = isInput ? n : juce::String();
                     std::unique_ptr<juce::AudioIODevice> tempDev(

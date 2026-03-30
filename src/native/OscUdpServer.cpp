@@ -675,41 +675,6 @@ void OscUdpServer::executePendingSwitch() {
         if (!devName.empty())
             mEngine->forceDeviceMode(devName);
 
-        // For wireless/AirPlay devices that need a rate change: split into
-        // two steps. First do the cold swap (rate change) on the current
-        // device, then hot-swap to the target. This avoids simultaneous
-        // aggregate destruction + AirPlay setup which crashes CoreAudio.
-        bool needsTwoStep = false;
-        if (!devName.empty() && sr == 0) {
-            auto devices = mEngine->listDevices();
-            auto current = mEngine->currentDevice();
-            double currentRate = current.activeSampleRate;
-            for (auto& dev : devices) {
-                if (dev.name == devName && dev.isWirelessTransport()) {
-                    // Check if rate change is needed
-                    bool rateOk = false;
-                    for (auto r : dev.availableSampleRates)
-                        if (static_cast<int>(r) == static_cast<int>(currentRate))
-                            rateOk = true;
-                    if (!rateOk && !dev.availableSampleRates.empty()) {
-                        // Step 1: cold swap to target rate on current device
-                        double targetRate = dev.availableSampleRates[0];
-                        fprintf(stderr, "[audio-device] two-step switch: rate change %.0f→%.0f first\n",
-                                currentRate, targetRate);
-                        fflush(stderr);
-                        auto rateResult = mEngine->switchDevice("", targetRate, 0, false);
-                        if (!rateResult.success) {
-                            fprintf(stderr, "[audio-device] rate pre-switch failed: %s\n",
-                                    rateResult.error.c_str());
-                        }
-                        // Step 2: hot swap to AirPlay (rates now match)
-                        needsTwoStep = true;
-                    }
-                    break;
-                }
-            }
-        }
-
         auto result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
         if (result.success)
             sendDeviceReport();
