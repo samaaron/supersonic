@@ -8,13 +8,18 @@
  */
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
-import { readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
+import { readMessagesFromBuffer, writeMessageToBuffer, calculateAvailableSpace } from '../lib/ring_buffer_core.js';
 import { calculateOutControlIndices } from '../lib/control_offsets.js';
 import { getCurrentNTPFromPerformance as getCurrentNTP } from '../lib/osc_classifier.js';
 import { runSabWorker } from '../lib/sab_worker_loop.js';
 
 // Sequence tracking for dropped message detection
 let lastSequenceReceived = -1;
+
+// Per-channel reply buffer fan-out state (populated on init)
+let replyChannels = null;  // Array of { bufferStart, bufferSize, headIndex, tailIndex, activeIndex }
+let replyHeaderScratch = null;  // Pre-allocated scratch for wrap-around writes
+let replyHeaderScratchView = null;
 
 /**
  * Read all available OSC messages from the OUT ring buffer
@@ -64,6 +69,34 @@ function readOscMessages(ctx) {
                 timestamp: getCurrentNTP()
             });
 
+            // Fan out to active reply channel buffers
+            if (replyChannels) {
+                for (let ch = 0; ch < replyChannels.length; ch++) {
+                    const rc = replyChannels[ch];
+                    if (Atomics.load(atomicView, rc.activeIndex) !== 1) continue;
+
+                    const chHead = Atomics.load(atomicView, rc.headIndex);
+                    const chTail = Atomics.load(atomicView, rc.tailIndex);
+                    const available = calculateAvailableSpace(chHead, chTail, rc.bufferSize);
+                    const needed = ((bufferConstants.MESSAGE_HEADER_SIZE + payloadLength) + 3) & ~3;
+                    if (needed > available) continue;  // Channel buffer full — drop for this channel
+
+                    const newHead = writeMessageToBuffer({
+                        uint8View, dataView,
+                        bufferStart: rc.bufferStart,
+                        bufferSize: rc.bufferSize,
+                        head: chHead,
+                        payload: oscData,
+                        sequence,
+                        messageMagic: bufferConstants.MESSAGE_MAGIC,
+                        headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
+                        headerScratch: replyHeaderScratch,
+                        headerScratchView: replyHeaderScratchView,
+                    });
+                    Atomics.store(atomicView, rc.headIndex, newHead);
+                }
+            }
+
             if (metricsView) {
                 Atomics.add(metricsView, MetricsOffsets.OSC_IN_MESSAGES_RECEIVED, 1);
                 Atomics.add(metricsView, MetricsOffsets.OSC_IN_BYTES_RECEIVED, payloadLength);
@@ -91,4 +124,28 @@ runSabWorker({
     tailIndex: (idx) => idx.OUT_TAIL,
     readMessages: readOscMessages,
     postResults: (messages) => self.postMessage({ type: 'messages', messages }),
+    onInit: (ctx) => {
+        const bc = ctx.bufferConstants;
+        if (!bc.REPLY_CHANNEL_COUNT) return;  // Old WASM without reply channels
+
+        // Pre-allocate scratch buffers for wrap-around writes (avoids allocation per reply)
+        replyHeaderScratch = new Uint8Array(bc.MESSAGE_HEADER_SIZE);
+        replyHeaderScratchView = new DataView(replyHeaderScratch.buffer);
+
+        // Compute per-channel offsets.
+        // Control region: REPLY_CHANNELS_CONTROL_START + (i * 12) → [head(4), tail(4), active(4)]
+        // Buffer region:  REPLY_CHANNELS_BUFFER_START + (i * REPLY_CHANNEL_BUFFER_SIZE)
+        const base = ctx.ringBufferBase;
+        replyChannels = [];
+        for (let i = 0; i < bc.REPLY_CHANNEL_COUNT; i++) {
+            const controlBase = base + bc.REPLY_CHANNELS_CONTROL_START + (i * bc.REPLY_CHANNEL_CONTROL_SIZE);
+            replyChannels.push({
+                bufferStart: base + bc.REPLY_CHANNELS_BUFFER_START + (i * bc.REPLY_CHANNEL_BUFFER_SIZE),
+                bufferSize: bc.REPLY_CHANNEL_BUFFER_SIZE,
+                headIndex: controlBase / 4,       // Int32Array index
+                tailIndex: (controlBase + 4) / 4,
+                activeIndex: (controlBase + 8) / 4,
+            });
+        }
+    },
 });

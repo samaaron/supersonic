@@ -149,6 +149,29 @@ self.onmessage = (e) => {
       });
       break;
 
+    case "testReplies": {
+      if (!oscChannel) {
+        self.postMessage({ type: "error", error: "No channel" });
+        return;
+      }
+      const replyAddresses = [];
+      oscChannel.onReply((oscData) => {
+        let end = 0;
+        while (end < oscData.length && oscData[end] !== 0) end++;
+        replyAddresses.push(new TextDecoder().decode(oscData.subarray(0, end)));
+      });
+
+      // Send /status using the existing helper
+      oscChannel.send(encodeStatusMessage());
+
+      // Wait for replies to arrive, then report
+      setTimeout(() => {
+        oscChannel.offReply();
+        self.postMessage({ type: "replyResults", addresses: replyAddresses });
+      }, 1000);
+      break;
+    }
+
     case "generateNodeIds": {
       if (!oscChannel) {
         self.postMessage({ type: "error", error: "No channel" });

@@ -77,8 +77,20 @@ constexpr uint32_t NODE_ID_COUNTER_START = AUDIO_CAPTURE_START + AUDIO_CAPTURE_S
 constexpr uint32_t WORLD_OPTIONS_SIZE  = 18 * sizeof(uint32_t);  // 72 bytes
 constexpr uint32_t WORLD_OPTIONS_START = NODE_ID_COUNTER_START + NODE_ID_COUNTER_SIZE;
 
+// Reply channel buffers — per-OscChannel ring buffers for direct reply delivery.
+// Each channel gets a small ring buffer (16KB) with its own head/tail/active control words.
+// Active flag is set atomically by the OscChannel when onReply() is called.
+// The osc_in_worker (SAB) or AudioWorklet (PM) fans out replies to all active channels.
+constexpr uint32_t REPLY_CHANNEL_COUNT = 8;
+constexpr uint32_t REPLY_CHANNEL_BUFFER_SIZE = 16384;  // 16KB per channel
+constexpr uint32_t REPLY_CHANNEL_CONTROL_SIZE = 12;    // head(4) + tail(4) + active(4) per channel
+constexpr uint32_t REPLY_CHANNELS_CONTROL_START = WORLD_OPTIONS_START + WORLD_OPTIONS_SIZE;
+constexpr uint32_t REPLY_CHANNELS_CONTROL_SIZE = REPLY_CHANNEL_COUNT * REPLY_CHANNEL_CONTROL_SIZE;  // 96 bytes
+constexpr uint32_t REPLY_CHANNELS_BUFFER_START = REPLY_CHANNELS_CONTROL_START + REPLY_CHANNELS_CONTROL_SIZE;
+constexpr uint32_t REPLY_CHANNELS_BUFFER_SIZE = REPLY_CHANNEL_COUNT * REPLY_CHANNEL_BUFFER_SIZE;    // 128KB
+
 // Total buffer size (for validation)
-constexpr uint32_t TOTAL_BUFFER_SIZE  = WORLD_OPTIONS_START + WORLD_OPTIONS_SIZE;
+constexpr uint32_t TOTAL_BUFFER_SIZE  = REPLY_CHANNELS_BUFFER_START + REPLY_CHANNELS_BUFFER_SIZE;
 
 // Message structure
 struct alignas(4) Message {
@@ -283,6 +295,12 @@ struct BufferLayout {
     uint32_t node_id_counter_size;
     uint32_t world_options_start;
     uint32_t world_options_size;
+    uint32_t reply_channels_control_start;
+    uint32_t reply_channels_control_size;
+    uint32_t reply_channels_buffer_start;
+    uint32_t reply_channel_buffer_size;
+    uint32_t reply_channel_control_size;
+    uint32_t reply_channel_count;
     uint32_t total_buffer_size;
     uint32_t max_message_size;
     uint32_t message_magic;
@@ -328,6 +346,12 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     NODE_ID_COUNTER_SIZE,
     WORLD_OPTIONS_START,
     WORLD_OPTIONS_SIZE,
+    REPLY_CHANNELS_CONTROL_START,
+    REPLY_CHANNELS_CONTROL_SIZE,
+    REPLY_CHANNELS_BUFFER_START,
+    REPLY_CHANNEL_BUFFER_SIZE,
+    REPLY_CHANNEL_CONTROL_SIZE,
+    REPLY_CHANNEL_COUNT,
     TOTAL_BUFFER_SIZE,
     MAX_MESSAGE_SIZE,
     MESSAGE_MAGIC,

@@ -100,6 +100,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         // Map of port -> sourceId for worker ports (postMessage mode)
         this.portSourceIds = new Map();
 
+        // Reply fan-out ports (PM mode) — registered OscChannels that want replies
+        this.replyPorts = [];
+
         // Pre-allocated channel views to avoid per-frame subarray() allocations
         this.channelViews = null;
         this.lastNumSamples = 0;
@@ -170,9 +173,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             throw new Error('WASM memory not available');
         }
 
-        // Read the struct (38 uint32_t fields + 1 uint8_t + 3 padding bytes = 156 bytes)
-        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 38);
-        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 156);
+        // Read the struct (44 uint32_t fields + 1 uint8_t + 3 padding bytes = 180 bytes)
+        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 44);
+        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 180);
 
         // Extract constants (order matches BufferLayout struct in shared_memory.h)
         // NOTE: NODE_TREE is now contiguous with METRICS for efficient postMessage copying
@@ -210,13 +213,19 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             NODE_ID_COUNTER_SIZE: uint32View[29],
             WORLD_OPTIONS_START: uint32View[30],
             WORLD_OPTIONS_SIZE: uint32View[31],
-            TOTAL_BUFFER_SIZE: uint32View[32],
-            MAX_MESSAGE_SIZE: uint32View[33],
-            MESSAGE_MAGIC: uint32View[34],
-            PADDING_MAGIC: uint32View[35],
-            scheduler_slot_size: uint32View[36],
-            scheduler_slot_count: uint32View[37],
-            DEBUG_PADDING_MARKER: uint8View[152],  // After 38 uint32s = 152 bytes
+            REPLY_CHANNELS_CONTROL_START: uint32View[32],
+            REPLY_CHANNELS_CONTROL_SIZE: uint32View[33],
+            REPLY_CHANNELS_BUFFER_START: uint32View[34],
+            REPLY_CHANNEL_BUFFER_SIZE: uint32View[35],
+            REPLY_CHANNEL_CONTROL_SIZE: uint32View[36],
+            REPLY_CHANNEL_COUNT: uint32View[37],
+            TOTAL_BUFFER_SIZE: uint32View[38],
+            MAX_MESSAGE_SIZE: uint32View[39],
+            MESSAGE_MAGIC: uint32View[40],
+            PADDING_MAGIC: uint32View[41],
+            scheduler_slot_size: uint32View[42],
+            scheduler_slot_count: uint32View[43],
+            DEBUG_PADDING_MARKER: uint8View[176],  // After 44 uint32s = 176 bytes
             MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, sourceId)
         };
 
@@ -613,6 +622,11 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             pool.message.count = count;
             pool.message.buffer = pool.buffer;
             this.port.postMessage(pool.message);
+
+            // Fan out to registered reply ports (PM mode)
+            for (let i = 0; i < this.replyPorts.length; i++) {
+                this.replyPorts[i].port.postMessage(pool.message);
+            }
         }
     }
 
@@ -951,9 +965,44 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                                 console.log('[Worklet] OSC via addOscPort, bypassCategory:', e.data.bypassCategory);
                             }
                             this.recordOscReceived(e.data.oscData.byteLength, e.data.bypassCategory);
+                        } else if (e.data.type === 'addReplyPort') {
+                            // Worker-side reply port registration via its existing direct port
+                            const replyPort = e.ports[0];
+                            if (replyPort) {
+                                this.replyPorts.push({ port: replyPort, sourceId: e.data.sourceId ?? portSourceId });
+                            }
+                        } else if (e.data.type === 'removeReplyPort') {
+                            const sid = e.data.sourceId ?? portSourceId;
+                            const idx = this.replyPorts.findIndex(rp => rp.sourceId === sid);
+                            if (idx >= 0) {
+                                this.replyPorts[idx].port.close();
+                                this.replyPorts.splice(idx, 1);
+                            }
                         }
                     };
                     this.oscPorts.push(port);
+                }
+                return;
+            }
+
+            // Register a reply fan-out port (PM mode).
+            // The OscChannel sends one end of a MessageChannel here;
+            // replies are posted to this port alongside the main thread.
+            if (data.type === 'addReplyPort') {
+                const port = event.ports[0];
+                if (port) {
+                    this.replyPorts.push({ port, sourceId: data.sourceId ?? 0 });
+                }
+                return;
+            }
+
+            // Unregister a reply fan-out port by sourceId.
+            if (data.type === 'removeReplyPort') {
+                const sid = data.sourceId;
+                const idx = this.replyPorts.findIndex(rp => rp.sourceId === sid);
+                if (idx >= 0) {
+                    this.replyPorts[idx].port.close();
+                    this.replyPorts.splice(idx, 1);
                 }
                 return;
             }

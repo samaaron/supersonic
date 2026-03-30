@@ -1077,9 +1077,9 @@ test.describe("Node Tree Layout", () => {
 
     // Buffer constants should be consistent
     expect(result.bufferConstants.NODE_TREE_START).toBeGreaterThan(0);
-    expect(result.bufferConstants.NODE_TREE_SIZE).toBe(57360);
+    expect(result.bufferConstants.NODE_TREE_SIZE).toBe(73744);
     expect(result.bufferConstants.NODE_TREE_HEADER_SIZE).toBe(16);
-    expect(result.bufferConstants.NODE_TREE_ENTRY_SIZE).toBe(56);
+    expect(result.bufferConstants.NODE_TREE_ENTRY_SIZE).toBe(72);
     expect(result.bufferConstants.NODE_TREE_MIRROR_MAX_NODES).toBe(1024);
 
     // Initial tree should have just the root group

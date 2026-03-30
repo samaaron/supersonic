@@ -260,6 +260,7 @@ export class PostMessageTransport extends Transport {
             sourceId,
             blocking: options.blocking,
             nodeIdSource: this._config.nodeIdSource,
+            replyWorkletPort: this.#workletPort,
         });
     }
 

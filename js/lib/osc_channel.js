@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 // Copyright (c) 2025 Sam Aaron
 
-import { writeToRingBuffer } from './ring_buffer_core.js';
+import { writeToRingBuffer, readMessagesFromBuffer } from './ring_buffer_core.js';
 import * as MetricsOffsets from './metrics_offsets.js';
 import { calculateInControlIndices } from './control_offsets.js';
 import {
@@ -51,6 +51,15 @@ export class OscChannel {
     #nodeIdPort;         // PM mode (worker): MessagePort for requesting ranges from main thread
     #pendingNodeIdRange; // PM mode (worker): pre-fetched next range
     #transferNodeIdPort; // PM mode: port to include in transferList (created by transferable getter)
+
+    // Reply reception
+    #replyCallback;       // User's reply callback function
+    #replySlotIndex = -1; // SAB mode: assigned reply buffer slot (0..7), -1 = unassigned
+    #replyPollTimer;      // Worker auto-poll interval ID
+    #replyPort;           // PM mode: MessagePort receiving replies from worklet
+    #replyQueue = [];     // PM AudioWorklet mode: queued replies for pollReplies()
+    #replyWorkletPort;    // PM mode: port to worklet for register/unregister
+    #replyControlBase;    // SAB mode: byte offset base for this slot's control words
 
     // Local metrics counters
     // SAB mode: used for tracking, then written atomically to shared memory
@@ -117,6 +126,11 @@ export class OscChannel {
             this.#nodeIdFrom = config.nodeIdRange.from;
             this.#nodeIdTo = config.nodeIdRange.to;
             this.#nextNodeId = config.nodeIdRange.from;
+        }
+
+        // Reply infrastructure
+        if (config.replyWorkletPort) {
+            this.#replyWorkletPort = config.replyWorkletPort;
         }
 
         // PM mode (worker): MessagePort for requesting more ranges from main thread
@@ -527,10 +541,232 @@ export class OscChannel {
         return list;
     }
 
+    // =========================================================================
+    // Reply Reception
+    // =========================================================================
+
+    /**
+     * Register a callback for OSC replies from scsynth.
+     *
+     * In Worker context: callback fires automatically from the event loop.
+     * In AudioWorklet context: callback fires during pollReplies() calls.
+     *
+     * @param {Function} callback - (oscData: Uint8Array, sequence: number) => void
+     */
+    onReply(callback) {
+        this.#replyCallback = callback;
+
+        if (this.#mode === 'sab') {
+            this.#activateSabReply();
+        } else {
+            this.#activatePmReply();
+        }
+    }
+
+    /**
+     * Unregister the reply callback and release the reply channel.
+     */
+    offReply() {
+        if (!this.#replyCallback) return;
+        this.#replyCallback = null;
+
+        if (this.#mode === 'sab') {
+            this.#deactivateSabReply();
+        } else {
+            this.#deactivatePmReply();
+        }
+    }
+
+    /**
+     * Poll for pending replies and fire the callback for each.
+     * Call from AudioWorklet process() or anywhere you want synchronous delivery.
+     * No-op if no callback registered or no replies pending.
+     * @returns {number} Number of replies processed
+     */
+    pollReplies() {
+        if (!this.#replyCallback) return 0;
+
+        if (this.#mode === 'sab') {
+            return this.#pollRepliesSab();
+        } else {
+            return this.#pollRepliesPm();
+        }
+    }
+
+    #activateSabReply() {
+        if (this.#replySlotIndex >= 0) return;  // Already active
+
+        const bc = this.#sabConfig.bufferConstants;
+        if (!bc.REPLY_CHANNEL_COUNT) {
+            throw new Error('WASM does not support reply channels');
+        }
+        const atomicView = this.#views.atomicView;
+
+        // Atomically claim a slot via compareExchange on the active flag.
+        // This works from any thread without transport involvement.
+        // Head/tail are reset BEFORE setting active to avoid a race where
+        // the osc_in_worker sees active=1 and reads stale head/tail values.
+        let slot = -1;
+        for (let i = 0; i < bc.REPLY_CHANNEL_COUNT; i++) {
+            const controlBase = this.#sabConfig.ringBufferBase +
+                bc.REPLY_CHANNELS_CONTROL_START + (i * bc.REPLY_CHANNEL_CONTROL_SIZE);
+            const headIdx = controlBase / 4;
+            const tailIdx = (controlBase + 4) / 4;
+            const activeIdx = (controlBase + 8) / 4;
+            // Reset head/tail before claiming — safe because slot is inactive
+            Atomics.store(atomicView, headIdx, 0);
+            Atomics.store(atomicView, tailIdx, 0);
+            if (Atomics.compareExchange(atomicView, activeIdx, 0, 1) === 0) {
+                slot = i;
+                this.#replyControlBase = controlBase;
+                break;
+            }
+        }
+        if (slot < 0) {
+            throw new Error('All ' + bc.REPLY_CHANNEL_COUNT + ' reply channel slots are in use — cannot register for replies');
+        }
+        this.#replySlotIndex = slot;
+
+        // Auto-poll for Worker context (not AudioWorklet)
+        if (typeof AudioWorkletGlobalScope === 'undefined') {
+            this.#replyPollTimer = setInterval(() => this.pollReplies(), 5);
+        }
+    }
+
+    #deactivateSabReply() {
+        if (this.#replySlotIndex < 0) return;
+
+        // Deactivate — osc_in_worker stops writing
+        const atomicView = this.#views.atomicView;
+        Atomics.store(atomicView, (this.#replyControlBase + 8) / 4, 0); // active = 0
+
+        if (this.#replyPollTimer) {
+            clearInterval(this.#replyPollTimer);
+            this.#replyPollTimer = null;
+        }
+
+        this.#replySlotIndex = -1;
+    }
+
+    #pollRepliesSab() {
+        const atomicView = this.#views.atomicView;
+        const headIdx = this.#replyControlBase / 4;
+        const tailIdx = (this.#replyControlBase + 4) / 4;
+
+        const head = Atomics.load(atomicView, headIdx);
+        const tail = Atomics.load(atomicView, tailIdx);
+        if (head === tail) return 0;
+
+        const bc = this.#sabConfig.bufferConstants;
+        const bufferStart = this.#sabConfig.ringBufferBase +
+            bc.REPLY_CHANNELS_BUFFER_START +
+            (this.#replySlotIndex * bc.REPLY_CHANNEL_BUFFER_SIZE);
+        const bufferSize = bc.REPLY_CHANNEL_BUFFER_SIZE;
+
+        let count = 0;
+        const callback = this.#replyCallback;
+        const uint8View = this.#views.uint8View;
+
+        const { newTail, messagesRead } = readMessagesFromBuffer({
+            uint8View,
+            dataView: this.#views.dataView,
+            bufferStart, bufferSize,
+            head, tail,
+            messageMagic: bc.MESSAGE_MAGIC,
+            paddingMagic: bc.PADDING_MAGIC,
+            headerSize: bc.MESSAGE_HEADER_SIZE || 16,
+            maxMessages: 64,
+            onMessage: (payloadOffset, payloadLength, sequence) => {
+                const oscData = new Uint8Array(payloadLength);
+                for (let i = 0; i < payloadLength; i++) {
+                    oscData[i] = uint8View[payloadOffset + i];
+                }
+                callback(oscData, sequence);
+                count++;
+            },
+        });
+
+        if (messagesRead > 0) {
+            Atomics.store(atomicView, tailIdx, newTail);
+        }
+        return count;
+    }
+
+    #activatePmReply() {
+        if (this.#replyPort) return;  // Already active
+
+        // Use the worklet port (main thread) or direct port (worker) for registration
+        const registrationPort = this.#replyWorkletPort || this.#directPort;
+        if (!registrationPort) {
+            throw new Error('No port available for reply registration');
+        }
+
+        // Create a MessageChannel — send one end to the worklet
+        const channel = new MessageChannel();
+        registrationPort.postMessage(
+            { type: 'addReplyPort', sourceId: this.#sourceId },
+            [channel.port1]
+        );
+        this.#replyPort = channel.port2;
+
+        const isAudioWorklet = typeof AudioWorkletGlobalScope !== 'undefined';
+        this.#replyPort.onmessage = (e) => {
+            if (e.data.type !== 'oscReplies' || !e.data.count) return;
+            const { count, buffer, messages } = e.data;
+            if (!messages || !buffer) return;
+            const bufferView = new Uint8Array(buffer);
+
+            if (isAudioWorklet) {
+                // Queue for pollReplies()
+                for (let i = 0; i < count; i++) {
+                    const entry = messages[i];
+                    if (!entry) continue;
+                    const oscData = bufferView.slice(entry.offset, entry.offset + entry.length);
+                    this.#replyQueue.push({ oscData, sequence: entry.sequence });
+                }
+            } else {
+                // Worker: fire callback directly
+                const callback = this.#replyCallback;
+                if (!callback) return;
+                for (let i = 0; i < count; i++) {
+                    const entry = messages[i];
+                    if (!entry) continue;
+                    const oscData = bufferView.slice(entry.offset, entry.offset + entry.length);
+                    callback(oscData, entry.sequence);
+                }
+            }
+        };
+    }
+
+    #deactivatePmReply() {
+        if (this.#replyPort) {
+            const registrationPort = this.#replyWorkletPort || this.#directPort;
+            if (registrationPort) {
+                registrationPort.postMessage({ type: 'removeReplyPort', sourceId: this.#sourceId });
+            }
+            this.#replyPort.close();
+            this.#replyPort = null;
+        }
+        this.#replyQueue.length = 0;
+    }
+
+    #pollRepliesPm() {
+        const queue = this.#replyQueue;
+        if (queue.length === 0) return 0;
+        const count = queue.length;
+        const callback = this.#replyCallback;
+        for (let i = 0; i < count; i++) {
+            callback(queue[i].oscData, queue[i].sequence);
+        }
+        queue.length = 0;
+        return count;
+    }
+
     /**
      * Close the channel
      */
     close() {
+        this.offReply();
         if (this.#mode === 'postMessage' && this.#directPort) {
             this.#directPort.close();
             this.#directPort = null;
