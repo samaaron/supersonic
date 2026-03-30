@@ -9,6 +9,7 @@
  */
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_core/juce_core.h>
+#include <juce_events/juce_events.h>
 #include "SupersonicEngine.h"
 #include "supersonic_config.h"
 
@@ -22,11 +23,11 @@
 
 static constexpr const char* VERSION = SUPERSONIC_VERSION_STRING;
 
-static juce::WaitableEvent gShutdownEvent;
+static std::atomic<bool> gShutdownRequested{false};
 
 static void signalHandler(int sig) {
     (void)sig;
-    gShutdownEvent.signal();
+    gShutdownRequested.store(true);
 }
 
 // Helper: get next arg value or nullptr
@@ -223,8 +224,22 @@ int main(int argc, char* argv[]) {
     auto dev = engine.currentDevice();
     printBanner(VERSION, dev, cfg.udpPort);
 
-    // Block until Ctrl+C / SIGTERM
-    gShutdownEvent.wait(-1);
+    // Pump the JUCE message loop until Ctrl+C / SIGTERM.
+    // CoreAudio property listeners and AirPlay negotiation dispatch through
+    // CFRunLoop — if we just block with WaitableEvent::wait() the run loop
+    // never pumps and AirPlay device switches hang indefinitely.
+    //
+    // A timer checks the shutdown flag and calls stopDispatchLoop() from
+    // the message thread (signal handlers can't safely call JUCE methods).
+    struct ShutdownPoller : public juce::Timer {
+        void timerCallback() override {
+            if (gShutdownRequested.load())
+                juce::MessageManager::getInstance()->stopDispatchLoop();
+        }
+    } shutdownPoller;
+    shutdownPoller.startTimer(100);
+
+    juce::MessageManager::getInstance()->runDispatchLoop();
 
     fprintf(stderr, "\n  shutting down...\n");
     engine.shutdown();

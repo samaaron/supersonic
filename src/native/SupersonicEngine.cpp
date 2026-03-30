@@ -949,6 +949,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         // JUCE's AudioIODeviceCombiner (which has no drift correction).
         // Skip aggregation for Bluetooth/AirPlay inputs — they force
         // low-quality codec modes and don't support drift correction.
+        bool wasOnAggregate = AggregateDeviceHelper::exists();
         bool needsAggregate = !setup.outputDeviceName.isEmpty()
             && !setup.inputDeviceName.isEmpty()
             && setup.outputDeviceName != setup.inputDeviceName;
@@ -991,6 +992,11 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             mRealOutputDeviceName.clear();
             mRealInputDeviceName.clear();
             AggregateDeviceHelper::destroy();
+
+            // Let CoreAudio settle after aggregate teardown before opening
+            // a new device — Ardour uses similar pauses between aggregate steps.
+            if (wasOnAggregate)
+                juce::Thread::sleep(150);
         }
 #endif
 
