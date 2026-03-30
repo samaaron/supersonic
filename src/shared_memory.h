@@ -45,7 +45,7 @@ constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in millis
 #endif
 constexpr uint32_t NODE_TREE_HEADER_SIZE = 16; // node_count (4) + version (4) + dropped_count (4) + padding (4) for 8-byte alignment
 constexpr uint32_t NODE_TREE_DEF_NAME_SIZE = 32; // Max synthdef name length (including null terminator)
-constexpr uint32_t NODE_TREE_ENTRY_SIZE = 56;  // 6 x int32 (24) + def_name (32) = 56 bytes per entry
+constexpr uint32_t NODE_TREE_ENTRY_SIZE = 72;  // 6 x int32 (24) + def_name (32) + uuid_hi (8) + uuid_lo (8) = 72 bytes per entry
 constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MIRROR_MAX_NODES * NODE_TREE_ENTRY_SIZE); // ~57KB
 
 // Audio capture configuration (for testing - captures audio output to SharedArrayBuffer)
@@ -203,9 +203,9 @@ struct alignas(4) NodeTreeHeader {
     uint32_t _padding;                   // Padding for 8-byte alignment of subsequent Float64 fields
 };
 
-// Node entry in the tree (56 bytes = 6 x int32 + 32-byte def_name)
+// Node entry in the tree (72 bytes = 6 x int32 + 32-byte def_name + 2 x uint64 UUID)
 // Array follows NodeTreeHeader at NODE_TREE_START + NODE_TREE_HEADER_SIZE
-struct alignas(4) NodeEntry {
+struct alignas(8) NodeEntry {
     int32_t id;         // Node ID (-1 = empty slot)
     int32_t parent_id;  // Parent group ID (-1 for root)
     int32_t is_group;   // 1 = group, 0 = synth
@@ -213,6 +213,8 @@ struct alignas(4) NodeEntry {
     int32_t next_id;    // Next sibling (-1 if last)
     int32_t head_id;    // For groups: first child (-1 if empty or if synth)
     char def_name[NODE_TREE_DEF_NAME_SIZE]; // Synthdef name for synths, "group" for groups
+    uint64_t uuid_hi;   // Upper 8 bytes of UUID (0 if node was created with int32 ID)
+    uint64_t uuid_lo;   // Lower 8 bytes of UUID (0 if node was created with int32 ID)
 };
 
 // Audio capture header (at AUDIO_CAPTURE_START offset in ring_buffer_storage)

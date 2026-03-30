@@ -36,10 +36,10 @@
     | NodeEntry[1023]     |  Up to NODE_TREE_MIRROR_MAX_NODES entries
     +---------------------+
 
-    Total size: ~57KB (16 + 1024 * 56 bytes)
+    Total size: ~73KB (16 + 1024 * 72 bytes)
 
 
-    NODE ENTRY STRUCTURE (56 bytes)
+    NODE ENTRY STRUCTURE (72 bytes)
     -------------------------------
     Each NodeEntry contains:
     - id (int32):        Node ID, or -1 for empty slots
@@ -49,6 +49,8 @@
     - next_id (int32):   Next sibling ID, or -1 if last child
     - head_id (int32):   First child ID (groups only), or -1
     - def_name (32B):    Synthdef name for synths, "group" for groups
+    - uuid_hi (uint64):  Upper 8 bytes of UUID (0 if created with int32 ID)
+    - uuid_lo (uint64):  Lower 8 bytes of UUID (0 if created with int32 ID)
 
     The array is sparse - slots with id == -1 are empty and reusable.
     When a node is removed, its slot is marked empty (id = -1) rather

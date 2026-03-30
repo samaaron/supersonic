@@ -552,6 +552,8 @@ export interface RawTreeNode {
   headId: NodeID;
   /** SynthDef name (synths only, empty string for groups). */
   defName: string;
+  /** UUID if the node was created with a UUID node ID, null otherwise. */
+  uuid: UUID | null;
 }
 
 /**

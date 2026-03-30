@@ -211,7 +211,7 @@ Pre-allocated in WASM memory (no runtime allocation):
 - **DEBUG Buffer**: 64KB (debug messages)
 - **Control Region**: 48B (atomic pointers/flags)
 - **Metrics Region**: 168B (performance counters)
-- **Node Tree Mirror**: ~57KB (synth hierarchy for visualization)
+- **Node Tree Mirror**: ~73KB (synth hierarchy for visualization, includes UUIDs)
 
 ## Metrics Collection
 

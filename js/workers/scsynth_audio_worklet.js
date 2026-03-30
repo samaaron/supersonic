@@ -634,7 +634,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         // Read node entries
         const entriesBase = treeBase + bc.NODE_TREE_HEADER_SIZE;
         const maxNodes = bc.NODE_TREE_MIRROR_MAX_NODES;
-        const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 56 bytes
+        const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 72 bytes
         const defNameSize = bc.NODE_TREE_DEF_NAME_SIZE; // 32 bytes
 
         const dataView = new DataView(this.wasmMemory.buffer, entriesBase, maxNodes * entrySize);
@@ -657,6 +657,21 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 defName += String.fromCharCode(defNameBytes[j]);
             }
 
+            // Read UUID (two little-endian uint64s at offset 56 within entry).
+            // Swap each 8-byte half back to big-endian (network) order.
+            const uuidStart = entriesBase + byteOffset + 56;
+            const uuidRaw = new Uint8Array(this.wasmMemory.buffer, uuidStart, 16);
+            let hasUuid = false;
+            for (let j = 0; j < 16; j++) {
+                if (uuidRaw[j] !== 0) { hasUuid = true; break; }
+            }
+            let uuid = null;
+            if (hasUuid) {
+                uuid = new Uint8Array(16);
+                for (let j = 0; j < 8; j++) { uuid[j] = uuidRaw[7 - j]; }
+                for (let j = 0; j < 8; j++) { uuid[8 + j] = uuidRaw[15 - j]; }
+            }
+
             nodes.push({
                 id,
                 parentId: dataView.getInt32(byteOffset + 4, true),
@@ -664,7 +679,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 prevId: dataView.getInt32(byteOffset + 12, true),
                 nextId: dataView.getInt32(byteOffset + 16, true),
                 headId: dataView.getInt32(byteOffset + 20, true),
-                defName
+                defName,
+                uuid
             });
         }
 

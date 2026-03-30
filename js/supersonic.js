@@ -1060,7 +1060,7 @@ export class SuperSonic {
 
     // Build hierarchical tree from flat node list
     const buildNode = (rawNode) => ({
-      id: rawNode.id,
+      id: rawNode.uuid || rawNode.id,
       type: rawNode.isGroup ? 'group' : 'synth',
       defName: rawNode.defName,
       children: []

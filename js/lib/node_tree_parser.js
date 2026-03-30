@@ -19,10 +19,10 @@ export function parseNodeTree(buffer, treeOffset, bufferConstants) {
   const version = headerView[1];
   const droppedCount = headerView[2];
 
-  // Read entries - each entry is 56 bytes: 6 int32s (24 bytes) + def_name (32 bytes)
+  // Read entries - each entry is 72 bytes: 6 int32s (24) + def_name (32) + uuid (16)
   const entriesBase = treeOffset + bc.NODE_TREE_HEADER_SIZE;
   const maxNodes = bc.NODE_TREE_MIRROR_MAX_NODES;
-  const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 56 bytes
+  const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 72 bytes
   const defNameSize = bc.NODE_TREE_DEF_NAME_SIZE; // 32 bytes
 
   // Use DataView for mixed int32/string access
@@ -48,6 +48,24 @@ export function parseNodeTree(buffer, treeOffset, bufferConstants) {
     if (nullIndex === -1) nullIndex = defNameSize;
     const defName = textDecoder.decode(defNameBytes.subarray(0, nullIndex));
 
+    // Read UUID (two little-endian uint64s at offset 56 within entry).
+    // The C++ uuid_rewriter stores UUIDs as big-endian-packed uint64 halves,
+    // but WASM is little-endian, so the bytes within each half are reversed.
+    // Swap each 8-byte half back to big-endian (network) order.
+    const uuidStart = entriesBase + byteOffset + 56;
+    const uuidRaw = new Uint8Array(buffer, uuidStart, 16);
+    let hasUuid = false;
+    for (let j = 0; j < 16; j++) {
+      if (uuidRaw[j] !== 0) { hasUuid = true; break; }
+    }
+    let uuid = null;
+    if (hasUuid) {
+      uuid = new Uint8Array(16);
+      // Reverse bytes within each 8-byte half (LE uint64 → BE byte order)
+      for (let j = 0; j < 8; j++) { uuid[j] = uuidRaw[7 - j]; }
+      for (let j = 0; j < 8; j++) { uuid[8 + j] = uuidRaw[15 - j]; }
+    }
+
     nodes.push({
       id,
       parentId: dataView.getInt32(byteOffset + 4, true),
@@ -55,7 +73,8 @@ export function parseNodeTree(buffer, treeOffset, bufferConstants) {
       prevId: dataView.getInt32(byteOffset + 12, true),
       nextId: dataView.getInt32(byteOffset + 16, true),
       headId: dataView.getInt32(byteOffset + 20, true),
-      defName
+      defName,
+      uuid
     });
   }
 
