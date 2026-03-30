@@ -2674,13 +2674,6 @@ the root group, 1 is the default group, 2–999 are reserved for manual use).
 
 A unique node ID (>= 1000)
 
-###### Example
-
-```ts
-const id = channel.nextNodeId();
-channel.send(['/s_new', 'beep', id, 0, 1, 'freq', 440]);
-```
-
 ##### send()
 
 > **send**(`oscData`): `boolean`
@@ -3029,15 +3022,16 @@ A node in the flat (raw) tree representation with linkage pointers.
 
 #### Properties
 
-| Property                         | Type                | Description                                           |
-| -------------------------------- | ------------------- | ----------------------------------------------------- |
-| <a id="defname"></a> `defName`   | `string`            | SynthDef name (synths only, empty string for groups). |
-| <a id="headid"></a> `headId`     | [`NodeID`](#nodeid) | First child node ID (groups only, -1 if empty).       |
-| <a id="id"></a> `id`             | [`NodeID`](#nodeid) | Unique node ID.                                       |
-| <a id="isgroup"></a> `isGroup`   | `boolean`           | true if group, false if synth.                        |
-| <a id="nextid"></a> `nextId`     | [`NodeID`](#nodeid) | Next sibling node ID (-1 if none).                    |
-| <a id="parentid"></a> `parentId` | [`NodeID`](#nodeid) | Parent node ID (-1 for root).                         |
-| <a id="previd"></a> `prevId`     | [`NodeID`](#nodeid) | Previous sibling node ID (-1 if none).                |
+| Property                         | Type                | Description                                                       |
+| -------------------------------- | ------------------- | ----------------------------------------------------------------- |
+| <a id="defname"></a> `defName`   | `string`            | SynthDef name (synths only, empty string for groups).             |
+| <a id="headid"></a> `headId`     | [`NodeID`](#nodeid) | First child node ID (groups only, -1 if empty).                   |
+| <a id="id"></a> `id`             | [`NodeID`](#nodeid) | Unique node ID.                                                   |
+| <a id="isgroup"></a> `isGroup`   | `boolean`           | true if group, false if synth.                                    |
+| <a id="nextid"></a> `nextId`     | [`NodeID`](#nodeid) | Next sibling node ID (-1 if none).                                |
+| <a id="parentid"></a> `parentId` | [`NodeID`](#nodeid) | Parent node ID (-1 for root).                                     |
+| <a id="previd"></a> `prevId`     | [`NodeID`](#nodeid) | Previous sibling node ID (-1 if none).                            |
+| <a id="uuid"></a> `uuid`         | [`UUID`](#uuid-1)   | UUID if the node was created with a UUID node ID, null otherwise. |
 
 ***
 
@@ -3308,7 +3302,7 @@ Commands blocked at runtime — typed as compile-time errors
 
 ### NodeID
 
-> **NodeID** = `number` | [`UUID`](#uuid)
+> **NodeID** = `number` | [`UUID`](#uuid-1)
 
 A node identifier — either a classic i32 or a v7 UUID.
 

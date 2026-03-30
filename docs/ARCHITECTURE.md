@@ -145,9 +145,26 @@ Main Thread                          AudioWorklet
 │            ▼             │
 │  ┌────────────────────┐  │
 │  │ OUT/DEBUG buffers  │  │
-│  │ SAB: direct read   │  │
-│  │ PM: postMessage    │  │
-│  └────────────────────┘  │
+│  │   (ring buffers)   │  │
+│  └────────┬───────────┘  │
+│           │ PM: read     │
+│           │ here and     │
+│           │ postMessage  │
+│           │ to main      │
+└───────────┼──────────────┘
+            │ SAB: ring buffer
+            ▼
+┌──────────────────────────┐
+│   Reply Worker (SAB)     │
+│                          │
+│  Atomics.wait() on OUT   │
+│  head — wakes on reply,  │
+│  forwards to main thread │
+│  via postMessage.        │
+│                          │
+│  (Main thread can't use  │
+│   Atomics.wait itself —  │
+│   it would freeze the UI)│
 └──────────────────────────┘
 ```
 
@@ -173,11 +190,17 @@ Main Thread                          AudioWorklet
 
 ### Receiving OSC from scsynth
 
-1. **scsynth** generates reply (e.g., `/done`, `/n_go`)
-2. Reply written to OUT ring buffer (both modes - keeps WASM code identical)
-3. **SAB mode**: dedicated worker reads buffer via Atomics.wait, emits events
-4. **PM mode**: AudioWorklet reads buffer, sends via postMessage
-5. **SuperSonic** emits `onReply` event
+scsynth writes replies (e.g. `/done`, `/n_go`) to the OUT ring buffer. This happens in both modes — the C++ code is identical regardless of transport. The difference is how those replies reach JavaScript.
+
+**SAB mode — the reply worker (`osc_in_worker.js`)**
+
+The main thread needs to hear replies, but `Atomics.wait()` is forbidden on the main thread (it would freeze the UI). So a dedicated Web Worker — the reply worker — sits in a blocking `Atomics.wait()` loop on the OUT buffer's head pointer. When scsynth writes a reply and advances the head, the reply worker wakes up, reads the message, and forwards it to the main thread via postMessage. This is the only reason the reply worker exists: it bridges SAB replies to the main thread's event loop.
+
+**PM mode — no reply worker needed**
+
+The AudioWorklet reads the OUT ring buffer directly during `process()` and sends replies to the main thread via its MessagePort. There's no need for a separate worker because the AudioWorklet is already running on a dedicated thread.
+
+**Both modes converge** at the SuperSonic event emitter on the main thread, which decodes the reply and emits `in` and `in:osc` events.
 
 **Lapping detection**: In SAB mode, the log worker maintains its own read tail (`IN_LOG_TAIL`) independent of the C++ consumer's tail. If the writer wraps the ring buffer and overtakes the log reader, the log worker detects the invalid magic number at its read position, resyncs to head, and skips the corrupted batch rather than reading corrupt data.
 
@@ -195,6 +218,7 @@ Same pattern as OSC replies but via DEBUG buffer and `onDebug` event.
 | Ring buffer read/write | `js/lib/ring_buffer_core.js` |
 | SAB transport | `js/lib/transport/sab_transport.js` |
 | PM transport | `js/lib/transport/postmessage_transport.js` |
+| Reply worker (SAB only) | `js/workers/osc_in_worker.js` |
 | Prescheduler | `js/workers/osc_out_prescheduler_worker.js` |
 | AudioWorklet | `js/workers/scsynth_audio_worklet.js` |
 | NTP timing | `js/lib/ntp_timing.js` |
