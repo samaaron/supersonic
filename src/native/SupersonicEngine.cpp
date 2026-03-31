@@ -1004,7 +1004,12 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                     type->scanForDevices();
             }
         } else {
-            // Same device for both I/O, or no input — no aggregate needed
+            // Same device for both I/O, or no input — no aggregate needed.
+            // Save the real input device name before clearing — when switching
+            // to AirPlay (no aggregate), we want to restore the input device
+            // when switching back to local speakers.
+            if (!mRealInputDeviceName.empty())
+                mLastInputDeviceName = mRealInputDeviceName;
             mRealOutputDeviceName.clear();
             mRealInputDeviceName.clear();
             AggregateDeviceHelper::destroy();
