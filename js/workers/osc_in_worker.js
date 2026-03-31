@@ -94,6 +94,7 @@ function readOscMessages(ctx) {
                         headerScratchView: replyHeaderScratchView,
                     });
                     Atomics.store(atomicView, rc.headIndex, newHead);
+                    Atomics.notify(atomicView, rc.headIndex);
                 }
             }
 

@@ -37,6 +37,7 @@ export class SABTransport extends Transport {
 
     // Callbacks
     #onReplyCallback;
+    #replyListeners = [];
     #onDebugCallback;
     #onErrorCallback;
     #onOscLogCallback;
@@ -229,6 +230,7 @@ export class SABTransport extends Transport {
         );
 
         // Return OscChannel with both direct (SAB) and prescheduler paths
+        const listeners = this.#replyListeners;
         return OscChannel.createSAB({
             sharedBuffer: this.#sharedBuffer,
             ringBufferBase: this.#ringBufferBase,
@@ -238,6 +240,13 @@ export class SABTransport extends Transport {
             bypassLookaheadS: this._config.bypassLookaheadS,
             sourceId,
             blocking: options.blocking,
+            replyNotifier: {
+                subscribe(fn) { listeners.push(fn); },
+                unsubscribe(fn) {
+                    const idx = listeners.indexOf(fn);
+                    if (idx >= 0) listeners.splice(idx, 1);
+                },
+            },
         });
     }
 
@@ -404,12 +413,18 @@ export class SABTransport extends Transport {
         // OSC IN worker - receives replies from scsynth
         this.#oscInWorker.onmessage = (event) => {
             const data = event.data;
-            if (data.type === 'messages' && this.#onReplyCallback) {
-                data.messages.forEach(msg => {
-                    if (msg.oscData) {
-                        this.#onReplyCallback(msg.oscData, msg.sequence, msg.timestamp);
-                    }
-                });
+            if (data.type === 'messages') {
+                if (this.#onReplyCallback) {
+                    data.messages.forEach(msg => {
+                        if (msg.oscData) {
+                            this.#onReplyCallback(msg.oscData, msg.sequence, msg.timestamp);
+                        }
+                    });
+                }
+                // Notify SAB OscChannels that reply buffers may have data
+                for (let i = 0; i < this.#replyListeners.length; i++) {
+                    this.#replyListeners[i]();
+                }
             } else if (data.type === 'error') {
                 console.error('[SABTransport] OSC IN error:', data.error);
                 if (this.#onErrorCallback) {

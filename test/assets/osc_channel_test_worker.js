@@ -149,6 +149,51 @@ self.onmessage = (e) => {
       });
       break;
 
+    case "testRepliesNoPoll": {
+      // Same as testReplies but also checks no setInterval was used
+      if (!oscChannel) {
+        self.postMessage({ type: "error", error: "No channel" });
+        return;
+      }
+      const noPollAddresses = [];
+      const originalSetInterval = globalThis.setInterval;
+      let noPollTimerCreated = false;
+      globalThis.setInterval = function(...args) {
+        noPollTimerCreated = true;
+        return originalSetInterval.apply(this, args);
+      };
+
+      oscChannel.onReply((...args) => {
+        let data, dataOffset, dataLength;
+        if (args.length === 4) {
+          [data, dataOffset, dataLength] = args;
+        } else {
+          [data] = args;
+          dataOffset = 0;
+          dataLength = data.length;
+        }
+        let end = 0;
+        while (end < dataLength && data[dataOffset + end] !== 0) end++;
+        let addr = '';
+        for (let j = 0; j < end; j++) addr += String.fromCharCode(data[dataOffset + j]);
+        noPollAddresses.push(addr);
+      });
+
+      globalThis.setInterval = originalSetInterval;
+
+      oscChannel.send(encodeStatusMessage());
+
+      setTimeout(() => {
+        oscChannel.offReply();
+        self.postMessage({
+          type: "replyResults",
+          addresses: noPollAddresses,
+          pollTimerCreated: noPollTimerCreated,
+        });
+      }, 1000);
+      break;
+    }
+
     case "testReplies": {
       if (!oscChannel) {
         self.postMessage({ type: "error", error: "No channel" });

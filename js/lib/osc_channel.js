@@ -55,7 +55,10 @@ export class OscChannel {
     // Reply reception
     #replyCallback;       // User's reply callback function
     #replySlotIndex = -1; // SAB mode: assigned reply buffer slot (0..7), -1 = unassigned
-    #replyPollTimer;      // Worker auto-poll interval ID
+    #replyPollTimer;      // Legacy: setInterval ID (only if no better mechanism available)
+    #replyNotifier;       // SAB main thread: { subscribe, unsubscribe } from transport
+    #replyNotifyFn;       // SAB main thread: bound function for unsubscribe
+    #replyWaitLoopActive; // SAB worker: whether Atomics.waitAsync loop is running
     #replyPort;           // PM mode: MessagePort receiving replies from worklet
     #replyQueue = [];     // PM AudioWorklet mode: queued replies for pollReplies()
     #replyWorkletPort;    // PM mode: port to worklet for register/unregister
@@ -96,6 +99,7 @@ export class OscChannel {
                 controlIndices: config.controlIndices,
             };
             this.#initViews();
+            this.#replyNotifier = config.replyNotifier || null;
 
             // Create metrics view at correct offset within SharedArrayBuffer
             if (config.sharedBuffer && config.bufferConstants) {
@@ -634,8 +638,20 @@ export class OscChannel {
         }
         this.#replySlotIndex = slot;
 
-        // Auto-poll for Worker context (not AudioWorklet)
-        if (typeof AudioWorkletGlobalScope === 'undefined') {
+        const isAudioWorklet = typeof AudioWorkletGlobalScope !== 'undefined';
+        if (isAudioWorklet) {
+            // AudioWorklet: caller reads synchronously via pollReplies() in process().
+            // No auto-mechanism needed.
+        } else if (this.#replyNotifier) {
+            // Main thread (or any context with a notifier): event-driven via transport.
+            // The transport calls our function when the osc_in_worker posts new replies.
+            this.#replyNotifyFn = () => this.pollReplies();
+            this.#replyNotifier.subscribe(this.#replyNotifyFn);
+        } else if (typeof Atomics !== 'undefined' && typeof Atomics.waitAsync === 'function') {
+            // Worker: event-driven via Atomics.waitAsync on reply buffer head.
+            this.#startReplyWaitLoop();
+        } else {
+            // Fallback: setInterval polling (should not happen in modern browsers)
             this.#replyPollTimer = setInterval(() => this.pollReplies(), 5);
         }
     }
@@ -652,7 +668,53 @@ export class OscChannel {
             this.#replyPollTimer = null;
         }
 
+        if (this.#replyNotifyFn && this.#replyNotifier) {
+            this.#replyNotifier.unsubscribe(this.#replyNotifyFn);
+            this.#replyNotifyFn = null;
+        }
+
+        // Stop Atomics.waitAsync loop (callback check handles this)
+        this.#replyWaitLoopActive = false;
+
         this.#replySlotIndex = -1;
+    }
+
+    #startReplyWaitLoop() {
+        const atomicView = this.#views.atomicView;
+        const headIdx = this.#replyControlBase / 4;
+        this.#replyWaitLoopActive = true;
+
+        const waitAndPoll = () => {
+            if (!this.#replyWaitLoopActive || !this.#replyCallback) return;
+
+            const currentHead = Atomics.load(atomicView, headIdx);
+            const tailIdx = (this.#replyControlBase + 4) / 4;
+            const currentTail = Atomics.load(atomicView, tailIdx);
+
+            // If there's data, drain it first
+            if (currentHead !== currentTail) {
+                this.pollReplies();
+            }
+
+            if (!this.#replyWaitLoopActive) return;
+
+            // Wait for head to change (non-blocking, Promise-based)
+            const newHead = Atomics.load(atomicView, headIdx);
+            const result = Atomics.waitAsync(atomicView, headIdx, newHead);
+            if (result.async) {
+                result.value.then(() => {
+                    if (this.#replyWaitLoopActive) {
+                        this.pollReplies();
+                        waitAndPoll();
+                    }
+                });
+            } else {
+                // Value already changed, poll and continue
+                this.pollReplies();
+                setTimeout(waitAndPoll, 0);
+            }
+        };
+        waitAndPoll();
     }
 
     #pollRepliesSab() {
@@ -819,6 +881,7 @@ export class OscChannel {
      * @param {number} [config.bypassLookaheadS=0.5] - Threshold for bypass routing (seconds)
      * @param {number} [config.sourceId=0] - Source ID (0 = main, 1+ = workers)
      * @param {boolean} [config.blocking] - Whether to use Atomics.wait() (default: true for sourceId !== 0)
+     * @param {Object} [config.replyNotifier] - { subscribe(fn), unsubscribe(fn) } for event-driven reply notification
      * @returns {OscChannel}
      */
     static createSAB(config) {
@@ -840,6 +903,7 @@ export class OscChannel {
             bypassLookaheadS: config.bypassLookaheadS,
             sourceId: config.sourceId,
             blocking: config.blocking,
+            replyNotifier: config.replyNotifier,
         });
     }
 

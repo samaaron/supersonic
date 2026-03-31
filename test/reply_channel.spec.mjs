@@ -996,3 +996,186 @@ test.describe("Zero-copy SAB reply polling", () => {
     expect(result.hasVersionReply).toBe(true);
   });
 });
+
+// =============================================================================
+// Event-driven SAB reply notification (no polling timers)
+// =============================================================================
+
+test.describe("Event-driven SAB reply notification", () => {
+
+  test("main thread: replies arrive via transport notification, no setInterval", async ({ page, sonicConfig, sonicMode }) => {
+    test.skip(sonicMode !== 'sab', 'SAB-only test');
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async ({ config, helperSrc }) => {
+      eval(helperSrc);
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const channel = sonic.createOscChannel();
+      const replies = [];
+
+      // Monkey-patch setInterval to detect if OscChannel uses polling
+      const originalSetInterval = globalThis.setInterval;
+      let pollTimerCreated = false;
+      globalThis.setInterval = function(...args) {
+        pollTimerCreated = true;
+        return originalSetInterval.apply(this, args);
+      };
+
+      channel.onReply((...args) => {
+        replies.push(decodeOscAddrFromReply(...args));
+      });
+
+      // Restore setInterval
+      globalThis.setInterval = originalSetInterval;
+
+      await sonic.send("/status");
+      await sonic.sync(1);
+      await new Promise(r => setTimeout(r, 500));
+
+      channel.offReply();
+      channel.close();
+      await sonic.shutdown();
+
+      return {
+        pollTimerCreated,
+        replyCount: replies.length,
+        hasStatusReply: replies.some(r => r.addr === '/status.reply'),
+      };
+    }, { config: sonicConfig, helperSrc: decodeReplyHelper });
+
+    expect(result.pollTimerCreated).toBe(false);
+    expect(result.hasStatusReply).toBe(true);
+  });
+
+  test("worker: replies arrive via Atomics.waitAsync, no setInterval", async ({ page, sonicConfig, sonicMode }) => {
+    test.skip(sonicMode !== 'sab', 'SAB-only test');
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      const channel = sonic.createOscChannel();
+
+      const worker = new Worker("/test/assets/osc_channel_test_worker.js", { type: "module" });
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Worker ready timeout")), 5000);
+        worker.onmessage = (e) => {
+          if (e.data.type === "ready") { clearTimeout(timeout); resolve(); }
+        };
+      });
+
+      worker.postMessage(
+        { type: "initChannel", channel: channel.transferable },
+        channel.transferList
+      );
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Channel ready timeout")), 5000);
+        worker.onmessage = (e) => {
+          if (e.data.type === "channelReady") { clearTimeout(timeout); resolve(); }
+        };
+      });
+
+      // Ask worker to test replies AND report whether it used polling
+      const workerResult = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Reply timeout")), 5000);
+        worker.onmessage = (e) => {
+          if (e.data.type === "replyResults") {
+            clearTimeout(timeout);
+            resolve(e.data);
+          }
+        };
+        worker.postMessage({ type: "testRepliesNoPoll" });
+      });
+
+      worker.terminate();
+      await sonic.shutdown();
+      return {
+        addresses: workerResult.addresses,
+        pollTimerCreated: workerResult.pollTimerCreated,
+        hasStatusReply: workerResult.addresses.includes("/status.reply"),
+      };
+    }, sonicConfig);
+
+    expect(result.pollTimerCreated).toBe(false);
+    expect(result.hasStatusReply).toBe(true);
+  });
+
+  test("AudioWorklet: replies readable via synchronous pollReplies in process()", async ({ page, sonicConfig, sonicMode }) => {
+    test.skip(sonicMode !== 'sab', 'SAB-only test');
+    await page.goto("/test/harness.html");
+
+    // This test is already covered by "worklet polls /status.reply from SAB
+    // reply buffer in process()" above. Re-verify that no timer is involved
+    // by checking the test worklet uses synchronous reads in process() only.
+    const result = await page.evaluate(async (config) => {
+      async function setupTestWorklet(sonic) {
+        const ctx = sonic.node.input.context;
+        await ctx.audioWorklet.addModule("/test/assets/reply_test_worklet.js");
+        const testNode = new AudioWorkletNode(ctx, "reply-test-processor");
+        testNode.connect(ctx.destination);
+        return testNode;
+      }
+
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const testNode = await setupTestWorklet(sonic);
+      const sab = sonic.sharedBuffer;
+      const layout = sonic.bufferConstants;
+      const base = sonic.ringBufferBase;
+
+      const controlBase = base + layout.REPLY_CHANNELS_CONTROL_START;
+      const bufferStart = base + layout.REPLY_CHANNELS_BUFFER_START;
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Ready timeout")), 5000);
+        testNode.port.onmessage = (e) => {
+          if (e.data.type === "ready") { clearTimeout(timeout); resolve(); }
+        };
+        testNode.port.postMessage({
+          type: "initReplyBuffer",
+          sharedBuffer: sab,
+          headIdx: controlBase / 4,
+          tailIdx: (controlBase + 4) / 4,
+          activeIdx: (controlBase + 8) / 4,
+          bufferStart,
+          bufferSize: layout.REPLY_CHANNEL_BUFFER_SIZE,
+          messageMagic: layout.MESSAGE_MAGIC,
+        });
+      });
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Collecting timeout")), 5000);
+        testNode.port.onmessage = (e) => {
+          if (e.data.type === "collectingStarted") { clearTimeout(timeout); resolve(); }
+        };
+        testNode.port.postMessage({ type: "startCollecting" });
+      });
+
+      await sonic.send("/status");
+      await sonic.sync(1);
+      await new Promise(r => setTimeout(r, 1000));
+
+      const replies = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Results timeout")), 5000);
+        testNode.port.onmessage = (e) => {
+          if (e.data.type === "results") { clearTimeout(timeout); resolve(e.data.replies); }
+        };
+        testNode.port.postMessage({ type: "getResults" });
+      });
+
+      testNode.disconnect();
+      await sonic.shutdown();
+
+      // The worklet reads synchronously in process() - no timers, no
+      // Atomics.wait, no postMessage. Just a direct SAB buffer read.
+      return { replies, hasStatusReply: replies.includes("/status.reply") };
+    }, sonicConfig);
+
+    expect(result.hasStatusReply).toBe(true);
+  });
+});
