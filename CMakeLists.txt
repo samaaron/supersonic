@@ -27,6 +27,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
     GIT_TAG        8.0.4
     GIT_SHALLOW    TRUE
+    PATCH_COMMAND  git checkout -- . || true COMMAND git apply --whitespace=nowarn "${CMAKE_CURRENT_SOURCE_DIR}/patches/juce-auhal-coreaudio.patch"
 )
 FetchContent_MakeAvailable(JUCE)
 
