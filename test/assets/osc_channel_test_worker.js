@@ -155,10 +155,21 @@ self.onmessage = (e) => {
         return;
       }
       const replyAddresses = [];
-      oscChannel.onReply((oscData) => {
+      oscChannel.onReply((...args) => {
+        // Handle both SAB mode (view, offset, length, sequence) and PM mode (oscData, sequence)
+        let data, dataOffset, dataLength;
+        if (args.length === 4) {
+          [data, dataOffset, dataLength] = args;
+        } else {
+          [data] = args;
+          dataOffset = 0;
+          dataLength = data.length;
+        }
         let end = 0;
-        while (end < oscData.length && oscData[end] !== 0) end++;
-        replyAddresses.push(new TextDecoder().decode(oscData.subarray(0, end)));
+        while (end < dataLength && data[dataOffset + end] !== 0) end++;
+        let addr = '';
+        for (let j = 0; j < end; j++) addr += String.fromCharCode(data[dataOffset + j]);
+        replyAddresses.push(addr);
       });
 
       // Send /status using the existing helper

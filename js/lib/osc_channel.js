@@ -551,7 +551,14 @@ export class OscChannel {
      * In Worker context: callback fires automatically from the event loop.
      * In AudioWorklet context: callback fires during pollReplies() calls.
      *
-     * @param {Function} callback - (oscData: Uint8Array, sequence: number) => void
+     * SAB mode (zero-copy): callback receives (view: Uint8Array, offset: number, length: number, sequence: number).
+     *   The view is the shared buffer — read reply data from view[offset..offset+length].
+     *   Data is valid for the duration of the callback. No allocation, no copy.
+     *
+     * PM mode: callback receives (oscData: Uint8Array, sequence: number).
+     *   oscData is a copy of the reply data.
+     *
+     * @param {Function} callback - SAB: (view, offset, length, sequence) => void; PM: (oscData, sequence) => void
      */
     onReply(callback) {
         this.#replyCallback = callback;
@@ -677,11 +684,11 @@ export class OscChannel {
             headerSize: bc.MESSAGE_HEADER_SIZE || 16,
             maxMessages: 64,
             onMessage: (payloadOffset, payloadLength, sequence) => {
-                const oscData = new Uint8Array(payloadLength);
-                for (let i = 0; i < payloadLength; i++) {
-                    oscData[i] = uint8View[payloadOffset + i];
-                }
-                callback(oscData, sequence);
+                // Zero-copy: pass the shared buffer view, offset, and length
+                // directly to the callback. No allocation, no copy.
+                // Data is valid for the duration of the callback (tail not
+                // yet advanced). Caller reads from view[offset..offset+length].
+                callback(uint8View, payloadOffset, payloadLength, sequence);
                 count++;
             },
         });

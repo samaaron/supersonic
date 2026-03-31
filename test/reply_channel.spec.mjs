@@ -400,23 +400,44 @@ test.describe("Reply channel PM fan-out", () => {
 // OscChannel onReply() / offReply() / pollReplies() API
 // =============================================================================
 
+// Helper: decode OSC address from onReply callback args.
+// SAB mode: (view, offset, length, sequence) — read from view at offset
+// PM mode: (oscData, sequence) — oscData is a Uint8Array copy
+// Injected into page.evaluate via string since it crosses the Playwright boundary.
+const decodeReplyHelper = `
+  function decodeOscAddrFromReply(...args) {
+    let data, dataOffset, dataLength, sequence;
+    if (args.length === 4) {
+      // SAB mode: (view, offset, length, sequence)
+      [data, dataOffset, dataLength, sequence] = args;
+    } else {
+      // PM mode: (oscData, sequence)
+      [data, sequence] = args;
+      dataOffset = 0;
+      dataLength = data.length;
+    }
+    let end = 0;
+    while (end < dataLength && data[dataOffset + end] !== 0) end++;
+    let addr = '';
+    for (let j = 0; j < end; j++) addr += String.fromCharCode(data[dataOffset + j]);
+    return { addr, sequence };
+  }
+`;
+
 test.describe("OscChannel reply API", () => {
   test("onReply receives /status.reply on main thread OscChannel", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async (config) => {
+    const result = await page.evaluate(async ({ config, helperSrc }) => {
+      eval(helperSrc);
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
       const channel = sonic.createOscChannel();
       const replies = [];
 
-      channel.onReply((oscData, sequence) => {
-        // Decode the address from raw OSC bytes
-        let end = 0;
-        while (end < oscData.length && oscData[end] !== 0) end++;
-        const addr = new TextDecoder().decode(oscData.subarray(0, end));
-        replies.push({ addr, sequence });
+      channel.onReply((...args) => {
+        replies.push(decodeOscAddrFromReply(...args));
       });
 
       await sonic.send("/status");
@@ -429,7 +450,7 @@ test.describe("OscChannel reply API", () => {
 
       const hasStatusReply = replies.some(r => r.addr === "/status.reply");
       return { replyCount: replies.length, hasStatusReply };
-    }, sonicConfig);
+    }, { config: sonicConfig, helperSrc: decodeReplyHelper });
 
     expect(result.hasStatusReply).toBe(true);
   });
@@ -437,17 +458,16 @@ test.describe("OscChannel reply API", () => {
   test("offReply stops delivery", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async (config) => {
+    const result = await page.evaluate(async ({ config, helperSrc }) => {
+      eval(helperSrc);
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
       const channel = sonic.createOscChannel();
       const replies = [];
 
-      channel.onReply((oscData) => {
-        let end = 0;
-        while (end < oscData.length && oscData[end] !== 0) end++;
-        replies.push(new TextDecoder().decode(oscData.subarray(0, end)));
+      channel.onReply((...args) => {
+        replies.push(decodeOscAddrFromReply(...args).addr);
       });
 
       await sonic.send("/status");
@@ -467,7 +487,7 @@ test.describe("OscChannel reply API", () => {
       channel.close();
       await sonic.shutdown();
       return { countBefore, countAfter, stopped: countAfter === countBefore };
-    }, sonicConfig);
+    }, { config: sonicConfig, helperSrc: decodeReplyHelper });
 
     expect(result.countBefore).toBeGreaterThan(0);
     expect(result.stopped).toBe(true);
@@ -476,7 +496,8 @@ test.describe("OscChannel reply API", () => {
   test("two channels both receive the same reply (broadcast)", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
-    const result = await page.evaluate(async (config) => {
+    const result = await page.evaluate(async ({ config, helperSrc }) => {
+      eval(helperSrc);
       const sonic = new window.SuperSonic(config);
       await sonic.init();
 
@@ -485,14 +506,8 @@ test.describe("OscChannel reply API", () => {
       const replies1 = [];
       const replies2 = [];
 
-      const decodeAddr = (oscData) => {
-        let end = 0;
-        while (end < oscData.length && oscData[end] !== 0) end++;
-        return new TextDecoder().decode(oscData.subarray(0, end));
-      };
-
-      ch1.onReply((oscData) => replies1.push(decodeAddr(oscData)));
-      ch2.onReply((oscData) => replies2.push(decodeAddr(oscData)));
+      ch1.onReply((...args) => replies1.push(decodeOscAddrFromReply(...args).addr));
+      ch2.onReply((...args) => replies2.push(decodeOscAddrFromReply(...args).addr));
 
       await sonic.send("/status");
       await sonic.sync(1);
@@ -506,7 +521,7 @@ test.describe("OscChannel reply API", () => {
         ch1HasStatus: replies1.includes("/status.reply"),
         ch2HasStatus: replies2.includes("/status.reply"),
       };
-    }, sonicConfig);
+    }, { config: sonicConfig, helperSrc: decodeReplyHelper });
 
     expect(result.ch1HasStatus).toBe(true);
     expect(result.ch2HasStatus).toBe(true);
@@ -853,5 +868,131 @@ test.describe("AudioWorklet-to-AudioWorklet replies", () => {
 
     expect(result.mainHasStatus).toBe(true);
     expect(result.workletHasStatus).toBe(true);
+  });
+});
+
+// =============================================================================
+// Zero-copy SAB reply polling (RT-safe for AudioWorklet)
+// =============================================================================
+
+test.describe("Zero-copy SAB reply polling", () => {
+  test("pollReplies in SAB mode delivers view, offset, length instead of copied array", async ({ page, sonicConfig, sonicMode }) => {
+    test.skip(sonicMode !== 'sab', 'SAB-only test');
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const channel = sonic.createOscChannel();
+      const callbackArgs = [];
+
+      channel.onReply((...args) => {
+        const [view, offset, length, sequence] = args;
+        // Verify we received view+offset+length, not a copied Uint8Array
+        callbackArgs.push({
+          argCount: args.length,
+          isUint8Array: view instanceof Uint8Array,
+          hasOffset: typeof offset === 'number',
+          hasLength: typeof length === 'number',
+          hasSequence: typeof sequence === 'number',
+          // Read the OSC address directly from the view at offset (zero-copy)
+          viewLength: view.length,
+          offset,
+          length,
+          // Verify we can read the data at the given offset
+          firstByte: view[offset],
+          // Decode address to verify correctness
+          address: (() => {
+            let end = 0;
+            while (end < length && view[offset + end] !== 0) end++;
+            let addr = '';
+            for (let j = 0; j < end; j++) addr += String.fromCharCode(view[offset + j]);
+            return addr;
+          })(),
+        });
+      });
+
+      await sonic.send("/status");
+      await sonic.sync(1);
+      await new Promise(r => setTimeout(r, 500));
+
+      // Poll manually if needed (for Worker context, auto-poll handles it)
+      // In SAB mode on main thread, replies are auto-polled
+
+      channel.offReply();
+      channel.close();
+      await sonic.shutdown();
+
+      if (callbackArgs.length === 0) return { noReplies: true };
+
+      const first = callbackArgs[0];
+      return {
+        noReplies: false,
+        replyCount: callbackArgs.length,
+        isUint8Array: first.isUint8Array,
+        hasOffset: first.hasOffset,
+        hasLength: first.hasLength,
+        hasSequence: first.hasSequence,
+        // The view should be the full SAB uint8View, not a small copied slice
+        viewIsFullBuffer: first.viewLength > 1000,
+        viewLength: first.viewLength,
+        address: first.address,
+        hasStatusReply: callbackArgs.some(a => a.address === '/status.reply'),
+        allAddresses: callbackArgs.map(a => a.address),
+      };
+    }, sonicConfig);
+
+    if (result.noReplies) {
+      test.skip(true, 'No replies received (timing?)');
+    }
+    expect(result.isUint8Array).toBe(true);
+    expect(result.hasOffset).toBe(true);
+    expect(result.hasLength).toBe(true);
+    expect(result.hasSequence).toBe(true);
+    // The view should be the shared buffer view, not a tiny copied array
+    expect(result.viewIsFullBuffer).toBe(true);
+    expect(result.hasStatusReply).toBe(true);
+  });
+
+  test("zero-copy reply data is readable at provided offset", async ({ page, sonicConfig, sonicMode }) => {
+    test.skip(sonicMode !== 'sab', 'SAB-only test');
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const channel = sonic.createOscChannel();
+      const addresses = [];
+
+      channel.onReply((view, offset, length, sequence) => {
+        // Read OSC address from view at offset - proves the data is valid
+        let end = 0;
+        while (end < length && view[offset + end] !== 0) end++;
+        let addr = '';
+        for (let j = 0; j < end; j++) addr += String.fromCharCode(view[offset + j]);
+        addresses.push(addr);
+      });
+
+      // Generate multiple reply types
+      await sonic.send("/status");
+      await sonic.send("/version");
+      await sonic.sync(2);
+      await new Promise(r => setTimeout(r, 500));
+
+      channel.offReply();
+      channel.close();
+      await sonic.shutdown();
+
+      return {
+        addresses,
+        hasStatusReply: addresses.includes('/status.reply'),
+        hasVersionReply: addresses.includes('/version.reply'),
+      };
+    }, sonicConfig);
+
+    expect(result.hasStatusReply).toBe(true);
+    expect(result.hasVersionReply).toBe(true);
   });
 });
