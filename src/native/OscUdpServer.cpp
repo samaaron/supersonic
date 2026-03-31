@@ -236,15 +236,6 @@ void OscUdpServer::broadcastToTargets(const uint8_t* data, uint32_t size) {
     }
     if (targets.empty() || !mSocket) return;
 
-    // Log /done replies for diagnostics
-    if (size >= 8 && data[0] == '/' && std::memcmp(data, "/done", 5) == 0) {
-        fprintf(stderr, "[osc-reply] /done -> %zu targets:", targets.size());
-        for (auto& t : targets)
-            fprintf(stderr, " %s:%d", t.ip.toRawUTF8(), t.port);
-        fprintf(stderr, "\n");
-        fflush(stderr);
-    }
-
     for (auto& t : targets)
         mSocket->write(t.ip, t.port, data, static_cast<int>(size));
 }
