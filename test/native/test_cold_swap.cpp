@@ -332,6 +332,70 @@ TEST_CASE("ColdSwap: engine processes OSC after cold swap", "[ColdSwap]") {
     REQUIRE(fix.waitForReply("/status.reply", reply));
 }
 
+// ── Client re-registration after cold swap ───────────────────────────────────
+// After a cold swap the world is rebuilt from scratch. A client must be able to
+// re-register for notifications, clear the root group, and create new groups —
+// all getting correct replies from the new world.
+
+TEST_CASE("ColdSwap: notify + group clear + group create work after cold swap", "[ColdSwap]") {
+    EngineFixture fix;
+
+    // Cold swap 48000 -> 44100 (like switching to AirPlay)
+    auto result = fix.engine().switchDevice("", 44100);
+    REQUIRE(result.success);
+    REQUIRE(result.type == SwapType::Cold);
+    fix.clearReplies();
+
+    // Step 1: /notify 1 (Spider re-registers for notifications)
+    fix.send(osc_test::message("/notify", 1));
+    OscReply reply;
+    REQUIRE(fix.waitForReply("/done", reply, 5000));
+    fix.clearReplies();
+
+    // Step 2: /g_freeAll 0 + /sync (Spider clears root group)
+    fix.send(osc_test::message("/g_freeAll", 0));
+    auto syncPkt = osc_test::message("/sync", 42);
+    fix.engine().sendOsc(syncPkt.ptr(), syncPkt.size());
+    REQUIRE(fix.waitForReply("/synced", reply, 5000));
+    fix.clearReplies();
+
+    // Step 3: /g_new (Spider creates groups)
+    fix.send(osc_test::message("/g_new", 2, 0, 0));  // STUDIO-MIXER
+    REQUIRE(fix.waitForReply("/n_go", reply, 5000));
+    fix.clearReplies();
+
+    fix.send(osc_test::message("/g_new", 3, 2, 0));  // STUDIO-FX
+    REQUIRE(fix.waitForReply("/n_go", reply, 5000));
+    fix.clearReplies();
+
+    // Step 4: Verify engine is still alive
+    fix.send(osc_test::message("/status"));
+    REQUIRE(fix.waitForReply("/status.reply", reply, 5000));
+}
+
+TEST_CASE("ColdSwap: commands work after 1s delay post cold swap", "[ColdSwap]") {
+    EngineFixture fix;
+
+    // Cold swap
+    auto result = fix.engine().switchDevice("", 44100);
+    REQUIRE(result.success);
+    fix.clearReplies();
+
+    // Simulate Spider's 1-second debounce delay
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+    // Now send commands — they must still work
+    fix.send(osc_test::message("/notify", 1));
+    OscReply reply;
+    REQUIRE(fix.waitForReply("/done", reply, 5000));
+    fix.clearReplies();
+
+    fix.send(osc_test::message("/g_freeAll", 0));
+    auto syncPkt = osc_test::message("/sync", 99);
+    fix.engine().sendOsc(syncPkt.ptr(), syncPkt.size());
+    REQUIRE(fix.waitForReply("/synced", reply, 5000));
+}
+
 // ── Hot swap does NOT trigger state transitions ──────────────────────────────
 
 TEST_CASE("ColdSwap: hot swap does not transition to Restarting", "[ColdSwap]") {

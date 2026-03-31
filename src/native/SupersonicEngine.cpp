@@ -1129,12 +1129,17 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     mAudioCallback.resume();
 
     if (isCold) {
-        // Log ring buffer state after cold swap for diagnostics
+        // Log ring buffer and callback state after cold swap
         auto* ctrl = reinterpret_cast<ControlPointers*>(ring_buffer_storage + CONTROL_START);
-        fprintf(stderr, "[audio-device] post-swap ring buffer: in_head=%u in_tail=%u paused=%d\n",
+        uint32_t cbBefore = mAudioCallback.processCount.load(std::memory_order_relaxed);
+        juce::Thread::sleep(500);  // wait for a few audio callbacks
+        uint32_t cbAfter = mAudioCallback.processCount.load(std::memory_order_relaxed);
+        fprintf(stderr, "[audio-device] post-swap: in_head=%u in_tail=%u paused=%d "
+                "callbacks=%u (delta=%u in 500ms)\n",
                 ctrl->in_head.load(std::memory_order_relaxed),
                 ctrl->in_tail.load(std::memory_order_relaxed),
-                mAudioCallback.isPaused() ? 1 : 0);
+                mAudioCallback.isPaused() ? 1 : 0,
+                cbAfter, cbAfter - cbBefore);
         fflush(stderr);
     }
 
