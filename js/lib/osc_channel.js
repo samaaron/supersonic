@@ -155,10 +155,14 @@ export class OscChannel {
      */
     #initViews() {
         const sab = this.#sabConfig.sharedBuffer;
+        const headerSize = this.#sabConfig.bufferConstants.MESSAGE_HEADER_SIZE || 16;
+        const headerScratch = new Uint8Array(headerSize);
         this.#views = {
             atomicView: new Int32Array(sab),
             dataView: new DataView(sab),
             uint8View: new Uint8Array(sab),
+            headerScratch,
+            headerScratchView: new DataView(headerScratch.buffer),
         };
     }
 
@@ -285,6 +289,8 @@ export class OscChannel {
                 // Blocking: use Atomics.wait() for guaranteed delivery
                 maxSpins: canBlock ? 10 : 0,
                 useWait: canBlock,
+                headerScratch: this.#views.headerScratch,
+                headerScratchView: this.#views.headerScratchView,
             });
 
             if (!success) {

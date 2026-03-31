@@ -287,7 +287,8 @@ function releaseLock(atomicView, lockIndex) {
 export function writeToRingBuffer({
     atomicView, dataView, uint8View,
     bufferConstants, ringBufferBase, controlIndices,
-    oscMessage, sourceId = 0, maxSpins = 0, useWait = false
+    oscMessage, sourceId = 0, maxSpins = 0, useWait = false,
+    headerScratch = null, headerScratchView = null
 }) {
     const payloadSize = oscMessage.length;
     const totalSize = bufferConstants.MESSAGE_HEADER_SIZE + payloadSize;
@@ -319,7 +320,8 @@ export function writeToRingBuffer({
             head, payload: oscMessage, sequence: messageSeq,
             messageMagic: bufferConstants.MESSAGE_MAGIC,
             headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
-            sourceId
+            sourceId,
+            headerScratch, headerScratchView
         });
 
         Atomics.load(atomicView, controlIndices.IN_HEAD);

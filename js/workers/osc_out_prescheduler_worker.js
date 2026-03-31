@@ -35,6 +35,8 @@ let bufferConstants = null;
 let atomicView = null;
 let dataView = null;
 let uint8View = null;
+let headerScratch = null;
+let headerScratchView = null;
 
 // Ring buffer control indices (SAB mode only)
 let CONTROL_INDICES = {};
@@ -189,6 +191,9 @@ const initSharedBuffer = () => {
     atomicView = new Int32Array(sharedBuffer);
     dataView = new DataView(sharedBuffer);
     uint8View = new Uint8Array(sharedBuffer);
+    const hs = bufferConstants.MESSAGE_HEADER_SIZE || 16;
+    headerScratch = new Uint8Array(hs);
+    headerScratchView = new DataView(headerScratch.buffer);
 
     // Calculate control indices for ring buffer
     CONTROL_INDICES = calculateInControlIndices(ringBufferBase, bufferConstants.CONTROL_START);
@@ -272,6 +277,8 @@ const dispatchOSCMessage = (oscMessage, isRetry, sourceId = 0, useWait = false) 
         sourceId,
         maxSpins: 10,  // Spin briefly first
         useWait,       // If true, block until lock available (guaranteed delivery)
+        headerScratch,
+        headerScratchView,
     });
 
     if (!success) {
