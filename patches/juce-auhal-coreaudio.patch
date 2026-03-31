@@ -1,15 +1,17 @@
+--- a/modules/juce_audio_devices/juce_audio_devices.cpp	2026-04-01 00:17:34.122582046 +0100
++++ b/modules/juce_audio_devices/juce_audio_devices.cpp	2026-04-01 00:17:51.892006513 +0100
+@@ -75,7 +75,7 @@
+  #define Component CarbonDummyCompName
+  #import <CoreAudio/AudioHardware.h>
+  #import <CoreMIDI/MIDIServices.h>
+- #import <AudioToolbox/AudioServices.h>
++ #import <AudioToolbox/AudioToolbox.h>
+  #undef Point
+  #undef Component
+ 
 --- a/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-03-31 23:03:10.257004376 +0100
-+++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-04-01 00:08:50.247006255 +0100
-@@ -32,6 +32,8 @@
-   ==============================================================================
- */
- 
-+#include <AudioToolbox/AudioToolbox.h>
-+
- namespace juce
- {
- 
-@@ -699,36 +701,121 @@
++++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-04-01 00:17:23.829006500 +0100
+@@ -699,36 +699,121 @@
  
          owner.hadDiscontinuity = false;
  
@@ -20,8 +22,19 @@
 -                            &lock = callbackLock,
 -                            nextProcID = ScopedAudioDeviceIOProcID { *this, deviceID, audioIOProc },
 -                            dID = deviceID]() mutable -> ScopedAudioDeviceIOProcID
+-            {
+-                // It *looks* like AudioDeviceStart may start the audio callback running, and then
+-                // immediately lock an internal mutex.
+-                // The same mutex is locked before calling the audioIOProc.
+-                // If we get very unlucky, then we can end up with thread A taking the callbackLock
+-                // and calling AudioDeviceStart, followed by thread B taking the CoreAudio lock
+-                // and calling into audioIOProc, which waits on the callbackLock. When thread A
+-                // continues it attempts to take the CoreAudio lock, and the program deadlocks.
 +            const ScopedUnlock su (callbackLock);
-+
+ 
+-                if (auto* procID = nextProcID.get())
+-                {
+-                    const ScopedUnlock su (lock);
 +            // Create AUHAL AudioUnit — Apple's recommended way to talk to HAL devices.
 +            // Raw AudioDeviceCreateIOProcID + AudioDeviceStart doesn't work with
 +            // AirPlay/network devices (IOProc callbacks never fire).
@@ -32,21 +45,11 @@
 +
 +            AudioComponent comp = AudioComponentFindNext (nullptr, &desc);
 +            if (comp == nullptr)
-             {
--                // It *looks* like AudioDeviceStart may start the audio callback running, and then
--                // immediately lock an internal mutex.
--                // The same mutex is locked before calling the audioIOProc.
--                // If we get very unlucky, then we can end up with thread A taking the callbackLock
--                // and calling AudioDeviceStart, followed by thread B taking the CoreAudio lock
--                // and calling into audioIOProc, which waits on the callbackLock. When thread A
--                // continues it attempts to take the CoreAudio lock, and the program deadlocks.
++            {
 +                JUCE_COREAUDIOLOG ("Failed to find HALOutput AudioComponent");
 +                return false;
 +            }
- 
--                if (auto* procID = nextProcID.get())
--                {
--                    const ScopedUnlock su (lock);
++
 +            AudioUnit unit = nullptr;
 +            if (AudioComponentInstanceNew (comp, &unit) != noErr || unit == nullptr)
 +            {
@@ -153,7 +156,7 @@
      }
  
      AudioIODeviceCallback* stop (bool leaveInterruptRunning)
-@@ -737,21 +824,14 @@
+@@ -737,21 +822,14 @@
  
          auto result = std::exchange (callback, nullptr);
  
@@ -182,7 +185,7 @@
              playing = false;
          }
  
-@@ -761,87 +841,63 @@
+@@ -761,87 +839,63 @@
      double getSampleRate() const  { return sampleRate; }
      int getBufferSize() const     { return bufferSize; }
  
@@ -299,7 +302,7 @@
      }
  
      // called by callbacks (possibly off the main thread)
-@@ -1060,54 +1116,12 @@
+@@ -1060,54 +1114,12 @@
      AudioWorkgroup audioWorkgroup;
  
  private:
@@ -356,7 +359,7 @@
      std::atomic<bool> playing { false };
      double sampleRate = 0;
      int bufferSize = 0;
-@@ -1135,15 +1149,14 @@
+@@ -1135,15 +1147,14 @@
              owner.deviceType->audioDeviceListChanged();
      }
  
