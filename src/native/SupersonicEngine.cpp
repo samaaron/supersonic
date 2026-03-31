@@ -1129,6 +1129,16 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     mAudioCallback.resume();
 
     if (isCold) {
+        // Log ring buffer state after cold swap for diagnostics
+        auto* ctrl = reinterpret_cast<ControlPointers*>(ring_buffer_storage + CONTROL_START);
+        fprintf(stderr, "[audio-device] post-swap ring buffer: in_head=%u in_tail=%u paused=%d\n",
+                ctrl->in_head.load(std::memory_order_relaxed),
+                ctrl->in_tail.load(std::memory_order_relaxed),
+                mAudioCallback.isPaused() ? 1 : 0);
+        fflush(stderr);
+    }
+
+    if (isCold) {
         // Don't restore synthdefs, buffers, or module state here.
         // The client (Spider) receives /supersonic/setup and handles
         // all reinitialisation — reloading synthdefs, clearing sample
