@@ -10,7 +10,7 @@
   #undef Component
  
 --- a/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-03-31 23:03:10.257004376 +0100
-+++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-04-01 00:17:23.829006500 +0100
++++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-04-01 00:27:06.944006778 +0100
 @@ -699,36 +699,121 @@
  
          owner.hadDiscontinuity = false;
@@ -237,7 +237,7 @@
 +                auhalInputBufferList->mBuffers[i].mDataByteSize = inNumberFrames * sizeof (float);
 +                auhalInputBufferList->mBuffers[i].mData = inStream->tempBuffers[i];
              }
-+            AudioUnitRender (auhalUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, auhalInputBufferList);
++            AudioUnitRender (auhalUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, auhalInputBufferList.get());
 +        }
  
 +        if (callback != nullptr)
