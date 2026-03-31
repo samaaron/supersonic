@@ -22,13 +22,18 @@
 #include <execinfo.h>
 #include <unistd.h>
 #endif
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 
 static constexpr const char* VERSION = SUPERSONIC_VERSION_STRING;
 
 static juce::WaitableEvent gShutdownEvent;
+static std::atomic<bool> gShutdownRequested{false};
 
 static void signalHandler(int sig) {
     (void)sig;
+    gShutdownRequested.store(true);
     gShutdownEvent.signal();
 }
 
@@ -251,8 +256,17 @@ int main(int argc, char* argv[]) {
     auto dev = engine.currentDevice();
     printBanner(VERSION, dev, cfg.udpPort);
 
-    // Block until Ctrl+C / SIGTERM
+    // Wait for Ctrl+C / SIGTERM.
+    // On macOS, pump the CFRunLoop so CoreAudio property notifications
+    // and JUCE message callbacks are delivered.  Without this, AirPlay
+    // devices open successfully but never start delivering audio
+    // callbacks (the network negotiation needs run-loop cooperation).
+#ifdef __APPLE__
+    while (!gShutdownRequested.load())
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+#else
     gShutdownEvent.wait(-1);
+#endif
 
     fprintf(stderr, "\n  shutting down...\n");
     engine.shutdown();
