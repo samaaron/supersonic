@@ -18,6 +18,9 @@
 #include <cstring>
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <execinfo.h>
+#include <unistd.h>
 #endif
 
 static constexpr const char* VERSION = SUPERSONIC_VERSION_STRING;
@@ -27,6 +30,27 @@ static juce::WaitableEvent gShutdownEvent;
 static void signalHandler(int sig) {
     (void)sig;
     gShutdownEvent.signal();
+}
+
+static void crashHandler(int sig) {
+    const char* name = "UNKNOWN";
+    if (sig == SIGSEGV) name = "SIGSEGV";
+    else if (sig == SIGBUS)  name = "SIGBUS";
+    else if (sig == SIGABRT) name = "SIGABRT";
+    else if (sig == SIGFPE)  name = "SIGFPE";
+
+    fprintf(stderr, "\n[supersonic] FATAL: %s (signal %d)\n", name, sig);
+
+#ifndef _WIN32
+    void* frames[64];
+    int n = backtrace(frames, 64);
+    fprintf(stderr, "[supersonic] Backtrace (%d frames):\n", n);
+    backtrace_symbols_fd(frames, n, STDERR_FILENO);
+#endif
+
+    fprintf(stderr, "[supersonic] Exiting due to crash.\n");
+    fflush(stderr);
+    _exit(128 + sig);
 }
 
 // Helper: get next arg value or nullptr
@@ -200,6 +224,10 @@ int main(int argc, char* argv[]) {
 
     std::signal(SIGINT,  signalHandler);
     std::signal(SIGTERM, signalHandler);
+    std::signal(SIGSEGV, crashHandler);
+    std::signal(SIGBUS,  crashHandler);
+    std::signal(SIGABRT, crashHandler);
+    std::signal(SIGFPE,  crashHandler);
 
     // ── Engine ────────────────────────────────────────────────────────────────
     SupersonicEngine engine;

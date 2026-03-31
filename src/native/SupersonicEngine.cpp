@@ -1012,6 +1012,23 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                 mLastInputDeviceName = mRealInputDeviceName;
             mRealOutputDeviceName.clear();
             mRealInputDeviceName.clear();
+
+            // If we skipped aggregate because the output is wireless (AirPlay/
+            // Bluetooth), clear the input device from the setup.  Otherwise
+            // JUCE sees different input/output names and creates an internal
+            // AudioIODeviceCombiner — which crashes trying to sync a network
+            // audio device with a local hardware mic.
+            if (!needsAggregate && !setup.inputDeviceName.isEmpty()
+                && !setup.outputDeviceName.isEmpty()
+                && setup.inputDeviceName != setup.outputDeviceName) {
+                fprintf(stderr, "[audio-device] clearing input for wireless output "
+                        "(was '%s')\n",
+                        setup.inputDeviceName.toRawUTF8());
+                fflush(stderr);
+                setup.inputDeviceName = "";
+                setup.inputChannels.clear();
+            }
+
             AggregateDeviceHelper::destroy();
 
             // Let CoreAudio settle after aggregate teardown before opening
@@ -1024,8 +1041,16 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         // Timestamp so changeListenerCallback ignores ALL async notifications
         // triggered by our device setup.  A single setup can generate multiple
         // CoreAudio notifications (device change, rate change, aggregate events).
+        fprintf(stderr, "[audio-device] calling setAudioDeviceSetup: out='%s' in='%s' sr=%.0f buf=%d\n",
+                setup.outputDeviceName.toRawUTF8(),
+                setup.inputDeviceName.toRawUTF8(),
+                setup.sampleRate, setup.bufferSize);
+        fflush(stderr);
         mLastSelfTriggeredChange = std::chrono::steady_clock::now();
         juce::String err = mDeviceManager->setAudioDeviceSetup(setup, true);
+        fprintf(stderr, "[audio-device] setAudioDeviceSetup returned: '%s'\n",
+                err.isEmpty() ? "OK" : err.toRawUTF8());
+        fflush(stderr);
         if (err.isNotEmpty()) errStr = err.toStdString();
     } else {
         // Headless: no real device to configure; use failure hook for testing
