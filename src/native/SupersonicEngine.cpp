@@ -83,6 +83,22 @@ void SupersonicEngine::initialise(const Config& cfg) {
 
     if (!cfg.headless) {
 #ifdef __APPLE__
+        // Tell CoreAudio to dispatch HAL property notifications on its own
+        // internal threads instead of the main CFRunLoop.  Without this,
+        // AirPlay device setup hangs because it needs CFRunLoop dispatch
+        // to complete network negotiation — and we don't run a Cocoa event
+        // loop (same pattern Ardour uses for non-Cocoa audio apps).
+        {
+            CFRunLoopRef nullRunLoop = NULL;
+            AudioObjectPropertyAddress prop = {
+                kAudioHardwarePropertyRunLoop,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+            AudioObjectSetPropertyData(kAudioObjectSystemObject, &prop,
+                                       0, NULL, sizeof(CFRunLoopRef), &nullRunLoop);
+        }
+
         // Clean up any orphaned aggregate device from a previous crash
         // before initialising the audio device manager.
         AggregateDeviceHelper::cleanupOrphaned();
