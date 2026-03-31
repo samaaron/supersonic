@@ -80,16 +80,22 @@ export function writeMessageToBuffer({
             // Header fits contiguously
             uint8View.set(headerBytes, writePos1);
 
-            // Write payload (split across boundary)
+            // Write payload (split across boundary) — byte-by-byte to avoid subarray() allocation
             const payloadBytesInFirstPart = spaceToEnd - headerSize;
-            if (payloadBytesInFirstPart > 0) {
-                uint8View.set(payload.subarray(0, payloadBytesInFirstPart), writePos1 + headerSize);
+            for (let i = 0; i < payloadBytesInFirstPart; i++) {
+                uint8View[writePos1 + headerSize + i] = payload[i];
             }
-            uint8View.set(payload.subarray(payloadBytesInFirstPart), writePos2);
+            for (let i = payloadBytesInFirstPart; i < payloadSize; i++) {
+                uint8View[writePos2 + i - payloadBytesInFirstPart] = payload[i];
+            }
         } else {
-            // Header is split across boundary
-            uint8View.set(headerBytes.subarray(0, spaceToEnd), writePos1);
-            uint8View.set(headerBytes.subarray(spaceToEnd), writePos2);
+            // Header is split across boundary — byte-by-byte to avoid subarray() allocation
+            for (let i = 0; i < spaceToEnd; i++) {
+                uint8View[writePos1 + i] = headerBytes[i];
+            }
+            for (let i = spaceToEnd; i < headerSize; i++) {
+                uint8View[writePos2 + i - spaceToEnd] = headerBytes[i];
+            }
 
             // All payload goes at beginning after header remainder
             const payloadOffset = headerSize - spaceToEnd;
