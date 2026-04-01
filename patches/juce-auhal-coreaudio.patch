@@ -10,8 +10,8 @@
   #undef Component
  
 --- a/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-03-31 23:03:10.257004376 +0100
-+++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-04-01 10:23:25.207004993 +0100
-@@ -699,36 +699,126 @@
++++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-04-01 11:23:54.422006724 +0100
+@@ -699,36 +699,137 @@
  
          owner.hadDiscontinuity = false;
  
@@ -63,25 +63,35 @@
 +            bool hasOutput = outStream != nullptr && getChannels (outStream) > 0;
 +            bool hasInput  = inStream  != nullptr && getChannels (inStream)  > 0;
 +
-+            AudioUnitSetProperty (unit, kAudioOutputUnitProperty_EnableIO,
++            fprintf (stderr, "[auhal] setup: deviceID=%u sr=%.0f buf=%d outCh=%d inCh=%d\n",
++                     (unsigned) deviceID, sampleRate, bufferSize,
++                     hasOutput ? getChannels (outStream) : 0,
++                     hasInput  ? getChannels (inStream)  : 0);
++
++            OSStatus err;
++            err = AudioUnitSetProperty (unit, kAudioOutputUnitProperty_EnableIO,
 +                                  kAudioUnitScope_Output, 0,
 +                                  hasOutput ? &enableIO : &disableIO, sizeof (UInt32));
-+            AudioUnitSetProperty (unit, kAudioOutputUnitProperty_EnableIO,
++            if (err) fprintf (stderr, "[auhal] EnableIO output err=%d\n", (int) err);
++
++            err = AudioUnitSetProperty (unit, kAudioOutputUnitProperty_EnableIO,
 +                                  kAudioUnitScope_Input, 1,
 +                                  hasInput ? &enableIO : &disableIO, sizeof (UInt32));
++            if (err) fprintf (stderr, "[auhal] EnableIO input err=%d\n", (int) err);
 +
 +            // Assign the device
-+            if (AudioUnitSetProperty (unit, kAudioOutputUnitProperty_CurrentDevice,
++            err = AudioUnitSetProperty (unit, kAudioOutputUnitProperty_CurrentDevice,
 +                                      kAudioUnitScope_Global, 0,
-+                                      &deviceID, sizeof (deviceID)) != noErr)
++                                      &deviceID, sizeof (deviceID));
++            if (err)
 +            {
++                fprintf (stderr, "[auhal] CurrentDevice err=%d\n", (int) err);
 +                AudioComponentInstanceDispose (unit);
-+                JUCE_COREAUDIOLOG ("Failed to set AUHAL device");
 +                return false;
 +            }
 +
 +            // Set stream format — non-interleaved float32
-+            auto setupFormat = [&] (AudioUnitScope scope, UInt32 element, int numChannels)
++            auto setupFormat = [&] (AudioUnitScope scope, UInt32 element, int numChannels, const char* label)
 +            {
 +                if (numChannels <= 0) return;
 +                AudioStreamBasicDescription fmt = {};
@@ -93,17 +103,19 @@
 +                fmt.mBytesPerFrame    = sizeof (float);
 +                fmt.mChannelsPerFrame = static_cast<UInt32> (numChannels);
 +                fmt.mBitsPerChannel   = 32;
-+                AudioUnitSetProperty (unit, kAudioUnitProperty_StreamFormat, scope, element, &fmt, sizeof (fmt));
++                OSStatus e = AudioUnitSetProperty (unit, kAudioUnitProperty_StreamFormat, scope, element, &fmt, sizeof (fmt));
++                if (e) fprintf (stderr, "[auhal] StreamFormat %s err=%d\n", label, (int) e);
 +
 +                UInt32 maxFrames = static_cast<UInt32> (bufferSize);
-+                AudioUnitSetProperty (unit, kAudioUnitProperty_MaximumFramesPerSlice,
++                e = AudioUnitSetProperty (unit, kAudioUnitProperty_MaximumFramesPerSlice,
 +                                      scope, element, &maxFrames, sizeof (maxFrames));
++                if (e) fprintf (stderr, "[auhal] MaxFrames %s err=%d\n", label, (int) e);
 +            };
 +
 +            // Input stream format is set on Output scope, element 1
 +            // Output stream format is set on Input scope, element 0
-+            if (hasInput)  setupFormat (kAudioUnitScope_Output, 1, getChannels (inStream));
-+            if (hasOutput) setupFormat (kAudioUnitScope_Input,  0, getChannels (outStream));
++            if (hasInput)  setupFormat (kAudioUnitScope_Output, 1, getChannels (inStream), "input");
++            if (hasOutput) setupFormat (kAudioUnitScope_Input,  0, getChannels (outStream), "output");
  
 -                    if (self.OK (AudioDeviceStart (dID, procID)))
 -                        return std::move (nextProcID);
@@ -116,35 +128,34 @@
 +                {
 +                    auhalInputBufferList->mBuffers[i].mNumberChannels = 1;
 +                    auhalInputBufferList->mBuffers[i].mDataByteSize = static_cast<UInt32> (bufferSize) * sizeof (float);
-+                    auhalInputBufferList->mBuffers[i].mData = nullptr; // AudioUnitRender will fill these
++                    auhalInputBufferList->mBuffers[i].mData = nullptr;
                  }
 +            }
  
 -                return {};
 -            }();
 -        }
-+            // Register render callback on the input scope of element 0.
-+            // This supplies audio data to the output unit's input bus,
-+            // which then sends it to the hardware.
++            // Register render callback on the input scope of element 0
 +            AURenderCallbackStruct renderCallback = {};
 +            renderCallback.inputProc = auhalRenderProc;
 +            renderCallback.inputProcRefCon = this;
-+            AudioUnitSetProperty (unit, kAudioUnitProperty_SetRenderCallback,
++            err = AudioUnitSetProperty (unit, kAudioUnitProperty_SetRenderCallback,
 +                                  kAudioUnitScope_Input, 0,
 +                                  &renderCallback, sizeof (renderCallback));
-+
-+            // Initialize AFTER all properties are configured.
-+            // AudioUnitInitialize builds the internal render graph — if the
-+            // render callback isn't set yet, it won't be wired in.
-+            if (AudioUnitInitialize (unit) != noErr)
-+            {
-+                AudioComponentInstanceDispose (unit);
-+                JUCE_COREAUDIOLOG ("Failed to initialise AUHAL");
-+                return false;
-+            }
++            if (err) fprintf (stderr, "[auhal] SetRenderCallback err=%d\n", (int) err);
  
 -        playing = scopedProcID.get() != nullptr && callback != nullptr;
-+            if (AudioOutputUnitStart (unit) != noErr)
++            err = AudioUnitInitialize (unit);
++            if (err)
++            {
++                fprintf (stderr, "[auhal] Initialize err=%d\n", (int) err);
++                AudioComponentInstanceDispose (unit);
++                return false;
++            }
++            fprintf (stderr, "[auhal] initialized OK\n");
++
++            err = AudioOutputUnitStart (unit);
++            if (err)
 +            {
 +                AudioUnitUninitialize (unit);
 +                AudioComponentInstanceDispose (unit);
@@ -161,7 +172,7 @@
      }
  
      AudioIODeviceCallback* stop (bool leaveInterruptRunning)
-@@ -737,21 +827,14 @@
+@@ -737,21 +838,14 @@
  
          auto result = std::exchange (callback, nullptr);
  
@@ -190,7 +201,7 @@
              playing = false;
          }
  
-@@ -761,87 +844,63 @@
+@@ -761,87 +855,63 @@
      double getSampleRate() const  { return sampleRate; }
      int getBufferSize() const     { return bufferSize; }
  
@@ -307,7 +318,7 @@
      }
  
      // called by callbacks (possibly off the main thread)
-@@ -1060,54 +1119,12 @@
+@@ -1060,54 +1130,12 @@
      AudioWorkgroup audioWorkgroup;
  
  private:
@@ -364,7 +375,7 @@
      std::atomic<bool> playing { false };
      double sampleRate = 0;
      int bufferSize = 0;
-@@ -1135,15 +1152,14 @@
+@@ -1135,15 +1163,14 @@
              owner.deviceType->audioDeviceListChanged();
      }
  
