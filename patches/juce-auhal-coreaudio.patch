@@ -10,8 +10,8 @@
   #undef Component
  
 --- a/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-03-31 23:03:10.257004376 +0100
-+++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-04-01 11:23:54.422006724 +0100
-@@ -699,36 +699,137 @@
++++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-04-01 13:42:51.456000501 +0100
+@@ -699,36 +699,143 @@
  
          owner.hadDiscontinuity = false;
  
@@ -165,14 +165,20 @@
  
 -        return scopedProcID.get() != nullptr;
 +            auhalUnit = unit;
++            fprintf (stderr, "[auhal] started OK, callback=%p\n", (void*) callback);
++            fflush (stderr);
 +        }
 +
 +        playing = auhalUnit != nullptr && callback != nullptr;
++        fprintf (stderr, "[auhal] start() returning %s, playing=%s\n",
++                 auhalUnit != nullptr ? "true" : "false",
++                 playing ? "true" : "false");
++        fflush (stderr);
 +        return auhalUnit != nullptr;
      }
  
      AudioIODeviceCallback* stop (bool leaveInterruptRunning)
-@@ -737,21 +838,14 @@
+@@ -737,21 +844,14 @@
  
          auto result = std::exchange (callback, nullptr);
  
@@ -201,7 +207,7 @@
              playing = false;
          }
  
-@@ -761,87 +855,63 @@
+@@ -761,87 +861,69 @@
      double getSampleRate() const  { return sampleRate; }
      int getBufferSize() const     { return bufferSize; }
  
@@ -209,6 +215,15 @@
 -                        const AudioTimeStamp* outputTimestamp,
 -                        const AudioBufferList* inInputData,
 -                        AudioBufferList* outOutputData)
+-    {
+-        const ScopedLock sl (callbackLock);
+-
+-        if (audioDeviceStopPending)
+-        {
+-            if (OK (AudioDeviceStop (deviceID, scopedProcID.get())))
+-                audioDeviceStopPending = false;
+-
+-            return;
 +    // AUHAL render callback — called by CoreAudio on the real-time thread.
 +    // For output: fills ioData with audio samples.
 +    // For input: calls AudioUnitRender to pull input data.
@@ -216,17 +231,15 @@
 +                        const AudioTimeStamp* inTimeStamp,
 +                        UInt32 inNumberFrames,
 +                        AudioBufferList* ioData)
-     {
-         const ScopedLock sl (callbackLock);
++    {
++        static int auhalCallCount = 0;
++        if (auhalCallCount++ < 3) {
++            fprintf (stderr, "[auhal] render callback #%d frames=%u ioData=%p\n",
++                     auhalCallCount, (unsigned) inNumberFrames, (void*) ioData);
++            fflush (stderr);
+         }
++        const ScopedLock sl (callbackLock);
  
--        if (audioDeviceStopPending)
--        {
--            if (OK (AudioDeviceStop (deviceID, scopedProcID.get())))
--                audioDeviceStopPending = false;
--
--            return;
--        }
--
          const auto numInputChans  = getChannels (inStream);
          const auto numOutputChans = getChannels (outStream);
  
@@ -318,7 +331,7 @@
      }
  
      // called by callbacks (possibly off the main thread)
-@@ -1060,54 +1130,12 @@
+@@ -1060,54 +1142,12 @@
      AudioWorkgroup audioWorkgroup;
  
  private:
@@ -375,7 +388,7 @@
      std::atomic<bool> playing { false };
      double sampleRate = 0;
      int bufferSize = 0;
-@@ -1135,15 +1163,14 @@
+@@ -1135,15 +1175,14 @@
              owner.deviceType->audioDeviceListChanged();
      }
  
