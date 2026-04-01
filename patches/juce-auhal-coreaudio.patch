@@ -10,8 +10,8 @@
   #undef Component
  
 --- a/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-03-31 23:03:10.257004376 +0100
-+++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-04-01 00:27:06.944006778 +0100
-@@ -699,36 +699,121 @@
++++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp	2026-04-01 09:38:29.381003708 +0100
+@@ -699,36 +699,123 @@
  
          owner.hadDiscontinuity = false;
  
@@ -57,16 +57,16 @@
 +                return false;
 +            }
 +
-+            // Assign the device
-+            if (AudioUnitSetProperty (unit, kAudioOutputUnitProperty_CurrentDevice,
-+                                      kAudioUnitScope_Global, 0,
-+                                      &deviceID, sizeof (deviceID)) != noErr)
++            // Initialize before configuring (matches working CoreAudio patterns)
++            if (AudioUnitInitialize (unit) != noErr)
 +            {
 +                AudioComponentInstanceDispose (unit);
-+                JUCE_COREAUDIOLOG ("Failed to set AUHAL device");
++                JUCE_COREAUDIOLOG ("Failed to initialise AUHAL");
 +                return false;
 +            }
-+
+ 
+-                    if (self.OK (AudioDeviceStart (dID, procID)))
+-                        return std::move (nextProcID);
 +            // Enable I/O
 +            UInt32 enableIO = 1;
 +            UInt32 disableIO = 0;
@@ -79,6 +79,17 @@
 +            AudioUnitSetProperty (unit, kAudioOutputUnitProperty_EnableIO,
 +                                  kAudioUnitScope_Input, 1,
 +                                  hasInput ? &enableIO : &disableIO, sizeof (UInt32));
++
++            // Assign the device (after init)
++            if (AudioUnitSetProperty (unit, kAudioOutputUnitProperty_CurrentDevice,
++                                      kAudioUnitScope_Global, 0,
++                                      &deviceID, sizeof (deviceID)) != noErr)
++            {
++                AudioUnitUninitialize (unit);
++                AudioComponentInstanceDispose (unit);
++                JUCE_COREAUDIOLOG ("Failed to set AUHAL device");
++                return false;
++            }
 +
 +            // Set stream format — non-interleaved float32
 +            auto setupFormat = [&] (AudioUnitScope scope, UInt32 element, int numChannels)
@@ -99,9 +110,7 @@
 +                AudioUnitSetProperty (unit, kAudioUnitProperty_MaximumFramesPerSlice,
 +                                      scope, element, &maxFrames, sizeof (maxFrames));
 +            };
- 
--                    if (self.OK (AudioDeviceStart (dID, procID)))
--                        return std::move (nextProcID);
++
 +            // Input stream format is set on Output scope, element 1
 +            // Output stream format is set on Input scope, element 0
 +            if (hasInput)  setupFormat (kAudioUnitScope_Output, 1, getChannels (inStream));
@@ -132,14 +141,6 @@
 +                                  &renderCallback, sizeof (renderCallback));
  
 -        playing = scopedProcID.get() != nullptr && callback != nullptr;
-+            if (AudioUnitInitialize (unit) != noErr)
-+            {
-+                AudioComponentInstanceDispose (unit);
-+                JUCE_COREAUDIOLOG ("Failed to initialise AUHAL");
-+                return false;
-+            }
- 
--        return scopedProcID.get() != nullptr;
 +            if (AudioOutputUnitStart (unit) != noErr)
 +            {
 +                AudioUnitUninitialize (unit);
@@ -147,7 +148,8 @@
 +                JUCE_COREAUDIOLOG ("Failed to start AUHAL");
 +                return false;
 +            }
-+
+ 
+-        return scopedProcID.get() != nullptr;
 +            auhalUnit = unit;
 +        }
 +
@@ -156,7 +158,7 @@
      }
  
      AudioIODeviceCallback* stop (bool leaveInterruptRunning)
-@@ -737,21 +822,14 @@
+@@ -737,21 +824,14 @@
  
          auto result = std::exchange (callback, nullptr);
  
@@ -185,7 +187,7 @@
              playing = false;
          }
  
-@@ -761,87 +839,63 @@
+@@ -761,87 +841,63 @@
      double getSampleRate() const  { return sampleRate; }
      int getBufferSize() const     { return bufferSize; }
  
@@ -302,7 +304,7 @@
      }
  
      // called by callbacks (possibly off the main thread)
-@@ -1060,54 +1114,12 @@
+@@ -1060,54 +1116,12 @@
      AudioWorkgroup audioWorkgroup;
  
  private:
@@ -359,7 +361,7 @@
      std::atomic<bool> playing { false };
      double sampleRate = 0;
      int bufferSize = 0;
-@@ -1135,15 +1147,14 @@
+@@ -1135,15 +1149,14 @@
              owner.deviceType->audioDeviceListChanged();
      }
  
