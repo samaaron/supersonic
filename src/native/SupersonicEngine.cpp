@@ -83,6 +83,20 @@ void SupersonicEngine::initialise(const Config& cfg) {
 
     if (!cfg.headless) {
 #ifdef __APPLE__
+        // Tell CoreAudio to deliver HAL property notifications on its own
+        // internal thread instead of the main CFRunLoop.  Required because
+        // we don't run a Cocoa event loop.
+        {
+            CFRunLoopRef nullRunLoop = NULL;
+            AudioObjectPropertyAddress prop = {
+                kAudioHardwarePropertyRunLoop,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+            AudioObjectSetPropertyData(kAudioObjectSystemObject, &prop,
+                                       0, NULL, sizeof(CFRunLoopRef), &nullRunLoop);
+        }
+
         // Clean up any orphaned aggregate device from a previous crash
         // before initialising the audio device manager.
         AggregateDeviceHelper::cleanupOrphaned();
@@ -380,6 +394,23 @@ void SupersonicEngine::initialise(const Config& cfg) {
         // -- Register audio callback (triggers audioDeviceAboutToStart) ----
         mDeviceManager->addAudioCallback(&mAudioCallback);
         mDeviceManager->addChangeListener(this);
+
+        // Wait for audio callbacks to actually start firing.
+        // AUHAL's AudioOutputUnitStart may return before the first callback
+        // arrives. If we proceed before callbacks are flowing, Spider's
+        // /d_loadDir command goes into the ring buffer but process_audio
+        // never runs to process it, causing a boot timeout.
+        {
+            uint32_t before = mAudioCallback.processCount.load(std::memory_order_relaxed);
+            int timeout = 5000;  // 5 seconds, polling every 1ms
+            while (mAudioCallback.processCount.load(std::memory_order_relaxed) == before && --timeout > 0)
+                juce::Thread::sleep(1);
+            if (timeout == 0)
+                fprintf(stderr, "[supersonic] WARNING: audio callbacks not firing after 5 seconds\n");
+            else
+                fprintf(stderr, "[supersonic] audio callbacks started (%d ms)\n", 5000 - timeout);
+            fflush(stderr);
+        }
     } else {
         // -- Headless: start a timer thread to drive process_audio() ------
         mHeadlessDriver.configure(&mAudioCallback, &mSampleLoader,
