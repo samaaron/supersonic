@@ -750,10 +750,12 @@ extern "C" {
                 int64_t time_diff_osc = schedTime - currentOscTime;
                 double time_diff_ms = ((double)time_diff_osc / 4294967296.0) * 1000.0;
 
-                // Track late bundles (any amount past due) in metrics
-                // This matches JS classification which also uses 0ms threshold
-                // Rate-limit logging: only log first late bundle, then every 100th
-                if (time_diff_ms < 0) {
+                // Bundles within the current quantum are not late — they arrive when
+                // the VM's sleep target doesn't align with quantum boundaries.
+                // scsynth processes them at the correct sub-sample offset (lines above).
+                // Only bundles older than one quantum are genuinely late.
+                double quantum_ms = (1000.0 * QUANTUM_SIZE) / g_world->mSampleRate;
+                if (time_diff_ms < -quantum_ms) {
                     // Cap late_ms to prevent overflow from timing sync issues
                     // Values over 10 seconds indicate a systemic problem, not individual lateness
                     double raw_late_ms = -time_diff_ms;

@@ -104,8 +104,11 @@ export function classifyOscMessage(oscData, options = {}) {
     const bundleNTP = ntpSeconds + ntpFraction / 0x100000000;
     const diffSeconds = bundleNTP - currentNTP;
 
-    // Classify based on time difference
-    if (diffSeconds < 0) {
+    // Bundles within one audio quantum of "now" are not late — they arise
+    // when event timestamps don't align with quantum boundaries.
+    // Only bundles older than one quantum (~2.67ms at 48kHz) are genuinely late.
+    const quantumS = 128 / 48000; // QUANTUM_SIZE / sampleRate
+    if (diffSeconds < -quantumS) {
         return 'late';
     }
     if (diffSeconds < bypassLookaheadS) {

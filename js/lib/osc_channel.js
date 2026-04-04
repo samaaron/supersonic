@@ -439,9 +439,11 @@ export class OscChannel {
             // PM mode (worker): pre-fetched range hasn't arrived yet.
             // This only happens if IDs are consumed faster than the postMessage
             // round-trip — i.e. a tight synchronous loop of >9000 IDs without
-            // yielding to the event loop. Request again and warn.
-            console.warn('[OscChannel] nextNodeId() range exhausted before async refill arrived. IDs may not be unique. Yield to the event loop between large batches of nextNodeId() calls.');
-            this.#requestNodeIdRange();
+            // yielding to the event loop.
+            throw new Error(
+                '[OscChannel] Node ID range exhausted before async refill arrived. ' +
+                'Yield to the event loop between large batches of nextNodeId() calls.'
+            );
         }
     }
 
