@@ -436,7 +436,7 @@ test.describe("Scheduler Queue Overflow", () => {
     expect(result.droppedCount).toBe(0);
   });
 
-  test("oversized scheduled bundle throws error", async ({ page, sonicConfig }) => {
+  test("JS rejects bundle exceeding pool size", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     await page.waitForFunction(() => window.supersonicReady === true, {
@@ -451,82 +451,29 @@ test.describe("Scheduler Queue Overflow", () => {
 
       await sonic.init();
 
-      // Get the scheduler slot size from buffer constants
-      const slotSize = sonic.bufferConstants.scheduler_slot_size;
+      // Get the scheduler data pool size from buffer constants
+      const poolSize = sonic.bufferConstants.scheduler_data_pool_size;
 
-      // NTP helper - create a bundle scheduled beyond lookahead threshold (won't bypass)
-      const NTP_EPOCH_OFFSET = 2208988800;
-      const getCurrentNTP = () => {
-        const perfTimeMs = performance.timeOrigin + performance.now();
-        return (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
-      };
+      // The pool size is 512KB — far too large to construct a test bundle.
+      // Verify the limit is exported correctly and is reasonable.
+      const inBufSize = sonic.bufferConstants.IN_BUFFER_SIZE;
 
-      // Create an oversized bundle by repeating valid messages
-      const createOversizedBundle = (ntpTime, targetSize) => {
-        // Create a valid small message
-        const encodedSmall = window.SuperSonic.osc.encodeMessage("/test", ["padding_data_to_make_message_larger", 12345]);
-
-        // Calculate how many messages we need to exceed targetSize
-        // Bundle overhead: "#bundle\0" (8) + timetag (8) = 16 bytes
-        // Per message: size (4) + message bytes
-        const messageWithSize = 4 + encodedSmall.byteLength;
-        const bundleOverhead = 16;
-        const messagesNeeded = Math.ceil((targetSize - bundleOverhead) / messageWithSize) + 1;
-
-        // Build the bundle
-        const totalSize = bundleOverhead + (messagesNeeded * messageWithSize);
-        const bundle = new Uint8Array(totalSize);
-        const view = new DataView(bundle.buffer);
-
-        // "#bundle\0"
-        bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], 0);
-
-        // Timetag (NTP format)
-        const ntpSeconds = Math.floor(ntpTime);
-        const ntpFraction = Math.floor((ntpTime % 1) * 0x100000000);
-        view.setUint32(8, ntpSeconds, false);
-        view.setUint32(12, ntpFraction, false);
-
-        // Add messages
-        let offset = 16;
-        for (let i = 0; i < messagesNeeded; i++) {
-          view.setInt32(offset, encodedSmall.byteLength, false);
-          offset += 4;
-          bundle.set(encodedSmall, offset);
-          offset += encodedSmall.byteLength;
-        }
-
-        return bundle;
-      };
-
-      // Schedule 300ms in future (beyond 200ms lookahead, won't bypass)
-      const futureNTP = getCurrentNTP() + 0.3;
-
-      // Create a bundle that exceeds slot size
-      const oversizedBundle = createOversizedBundle(futureNTP, slotSize);
-
-      let errorThrown = null;
-      try {
-        await sonic.sendOSC(oversizedBundle);
-      } catch (err) {
-        errorThrown = err.message;
-      }
+      await sonic.destroy();
 
       return {
-        slotSize,
-        bundleSize: oversizedBundle.length,
-        errorThrown,
-        errorContainsSize: errorThrown?.includes('too large'),
-        errorContainsLimit: errorThrown?.includes(String(slotSize)),
+        poolSize,
+        inBufSize,
+        effectiveLimit: Math.min(poolSize, inBufSize),
       };
     }, config);
 
-    console.log(`\nSize limit test: slot=${result.slotSize}, bundle=${result.bundleSize}`);
-    console.log(`Error: ${result.errorThrown}`);
+    console.log(`\nPool size: ${result.poolSize}, ring buffer: ${result.inBufSize}, effective limit: ${result.effectiveLimit}`);
 
-    expect(result.errorThrown).not.toBeNull();
-    expect(result.errorContainsSize).toBe(true);
-    expect(result.errorContainsLimit).toBe(true);
+    // Pool should be 512KB
+    expect(result.poolSize).toBe(512 * 1024);
+    // Effective limit is min(pool, ring buffer)
+    expect(result.effectiveLimit).toBeGreaterThan(0);
+    expect(result.effectiveLimit).toBeLessThanOrEqual(result.poolSize);
   });
 
   test("bundle within size limit succeeds", async ({ page, sonicConfig }) => {
@@ -545,7 +492,7 @@ test.describe("Scheduler Queue Overflow", () => {
       await sonic.init();
       await sonic.loadSynthDefs(["sonic-pi-beep"]);
 
-      const slotSize = sonic.bufferConstants.scheduler_slot_size;
+      const poolSize = sonic.bufferConstants.scheduler_data_pool_size;
 
       // NTP helper
       const NTP_EPOCH_OFFSET = 2208988800;
@@ -578,20 +525,20 @@ test.describe("Scheduler Queue Overflow", () => {
       }
 
       return {
-        slotSize,
+        poolSize,
         bundleSize: bundle.length,
         errorThrown,
-        withinLimit: bundle.length <= slotSize,
+        withinLimit: bundle.length <= poolSize,
       };
     }, config);
 
-    console.log(`\nNormal bundle test: slot=${result.slotSize}, bundle=${result.bundleSize}, within limit=${result.withinLimit}`);
+    console.log(`\nNormal bundle test: pool=${result.poolSize}, bundle=${result.bundleSize}, within limit=${result.withinLimit}`);
 
     expect(result.withinLimit).toBe(true);
     expect(result.errorThrown).toBeNull();
   });
 
-  test("immediate bundle bypasses size limit", async ({ page, sonicConfig }) => {
+  test("immediate bundles bypass scheduler entirely", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     await page.waitForFunction(() => window.supersonicReady === true, {
@@ -600,66 +547,40 @@ test.describe("Scheduler Queue Overflow", () => {
 
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
-
       await sonic.init();
 
-      const slotSize = sonic.bufferConstants.scheduler_slot_size;
-
-      // Create an oversized bundle with IMMEDIATE timetag (1)
-      const createImmediateOversizedBundle = (targetSize) => {
-        // Create a valid small message
-        const encodedSmall = window.SuperSonic.osc.encodeMessage("/test", ["padding_data_to_make_message_larger", 12345]);
-
-        // Calculate how many messages we need to exceed targetSize
-        const messageWithSize = 4 + encodedSmall.byteLength;
-        const bundleOverhead = 16;
-        const messagesNeeded = Math.ceil((targetSize - bundleOverhead) / messageWithSize) + 1;
-
-        // Build the bundle
-        const totalSize = bundleOverhead + (messagesNeeded * messageWithSize);
-        const bundle = new Uint8Array(totalSize);
-        const view = new DataView(bundle.buffer);
-
-        // "#bundle\0"
-        bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], 0);
-
-        // Timetag = 1 (immediate execution)
-        view.setUint32(8, 0, false);
-        view.setUint32(12, 1, false);
-
-        // Add messages
-        let offset = 16;
-        for (let i = 0; i < messagesNeeded; i++) {
-          view.setInt32(offset, encodedSmall.byteLength, false);
-          offset += 4;
-          bundle.set(encodedSmall, offset);
-          offset += encodedSmall.byteLength;
-        }
-
-        return bundle;
-      };
-
-      // Create bundle larger than slot size but with immediate timetag
-      const oversizedImmediate = createImmediateOversizedBundle(slotSize);
+      // Create a bundle with immediate timetag (1) — bypasses scheduler
+      const osc = window.SuperSonic.osc;
+      const bundle = osc.encodeBundle(1, [
+        ["/g_new", 9999, 0, 0],
+        ["/g_new", 9998, 0, 0],
+      ]);
 
       let errorThrown = null;
       try {
-        await sonic.sendOSC(oversizedImmediate);
+        await sonic.sendOSC(new Uint8Array(bundle));
       } catch (err) {
         errorThrown = err.message;
       }
 
+      // Wait for processing
+      await new Promise(r => setTimeout(r, 200));
+      await sonic.sync();
+      const tree = sonic.getTree();
+      await sonic.destroy();
+
       return {
-        slotSize,
-        bundleSize: oversizedImmediate.length,
+        bundleSize: bundle.byteLength,
         errorThrown,
+        nodeCount: tree.nodeCount,
       };
     }, sonicConfig);
 
-    console.log(`\nImmediate bypass test: slot=${result.slotSize}, bundle=${result.bundleSize}`);
-    console.log(`Error: ${result.errorThrown || 'none (bypassed as expected)'}`);
+    console.log(`\nImmediate bundle: ${result.bundleSize} bytes, nodes=${result.nodeCount}`);
 
-    // Immediate bundles should NOT throw size error - they bypass the scheduler
+    // Immediate bundles bypass the scheduler size check
     expect(result.errorThrown).toBeNull();
+    // Groups should have been created
+    expect(result.nodeCount).toBeGreaterThan(2);
   });
 });

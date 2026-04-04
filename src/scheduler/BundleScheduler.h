@@ -3,12 +3,12 @@
     Copyright (c) 2025 Sam Aaron
 
     Index-based bundle scheduler for sample-accurate OSC timing.
-    Events are stored in a fixed pool and never moved.
-    Priority queue only stores small indices.
+    Events are stored in a fixed metadata pool with a shared variable-size
+    data pool (bump allocator). Priority queue only stores small indices.
 
-    Slot size and count are configurable via compile-time flags:
-      -DSCHEDULER_SLOT_SIZE=1024  (default: 1024 bytes)
-      -DSCHEDULER_SLOT_COUNT=512 (default: 512 slots)
+    Slot count and data pool size are configurable via compile-time flags:
+      -DSCHEDULER_DATA_POOL_SIZE=524288  (default: 512KB)
+      -DSCHEDULER_SLOT_COUNT=512         (default: 512 slots)
 */
 
 #pragma once
@@ -22,9 +22,8 @@ struct World;
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
 
 // Scheduler configuration - can be overridden via -D flags at compile time
-// Default: 512 slots × 1024 bytes = 512KB (was 128 × 8KB = 1MB)
-#ifndef SCHEDULER_SLOT_SIZE
-#define SCHEDULER_SLOT_SIZE 1024
+#ifndef SCHEDULER_DATA_POOL_SIZE
+#define SCHEDULER_DATA_POOL_SIZE (512 * 1024)  // 512KB — variable-size bundle data
 #endif
 
 #ifndef SCHEDULER_SLOT_COUNT
@@ -34,45 +33,37 @@ void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
 // Maximum scheduled events (RT-safe, statically allocated)
 constexpr int MAX_SCHEDULED_BUNDLES = SCHEDULER_SLOT_COUNT;
 
-// Scheduled OSC bundle - stored in pool, never copied
+// Scheduled OSC bundle metadata — data lives in shared pool
 struct ScheduledBundle {
     int64_t mTime;
     int32_t mSize;
+    uint32_t mDataOffset;              // Offset into BundleScheduler's data pool
     World* mWorld;
     int64_t mStabilityCount;
     ReplyAddress mReplyAddr;
-    char mData[SCHEDULER_SLOT_SIZE];  // Embedded OSC data (configurable)
-    bool mInUse;                       // Pool slot tracking
+    bool mInUse;
     int16_t mNextFree;                 // Intrusive free list link (-1 = end)
 
-    ScheduledBundle() : mTime(0), mSize(0), mWorld(nullptr), mStabilityCount(0), mInUse(false), mNextFree(-1) {
+    ScheduledBundle() : mTime(0), mSize(0), mDataOffset(0), mWorld(nullptr),
+                        mStabilityCount(0), mInUse(false), mNextFree(-1) {
         mReplyAddr.mReplyFunc = nullptr;
     }
 
-    void Init(World* world, int64_t time, const char* data, int32_t size,
+    void Init(World* world, int64_t time, int32_t size, uint32_t dataOffset,
               const ReplyAddress& replyAddr, int64_t stabilityCount) {
         mTime = time;
         mSize = size;
+        mDataOffset = dataOffset;
         mWorld = world;
         mStabilityCount = stabilityCount;
         mReplyAddr = replyAddr;
         mInUse = true;
-        // Size validation is done in schedule_bundle() before Add() is called
-        if (size > 0 && size <= SCHEDULER_SLOT_SIZE) {
-            std::memcpy(mData, data, size);
-        }
     }
 
-    void Perform() {
+    void Perform(uint8_t* dataPool) {
         if (mWorld && mSize > 0) {
-            // Validate mSize before performing - corruption detection
-            if (mSize > SCHEDULER_SLOT_SIZE) {
-                worklet_debug("ERROR: ScheduledBundle::Perform - mSize corrupted: %d (max %d)",
-                             mSize, SCHEDULER_SLOT_SIZE);
-                return;
-            }
             OSC_Packet packet;
-            packet.mData = mData;
+            packet.mData = reinterpret_cast<char*>(dataPool + mDataOffset);
             packet.mSize = mSize;
             packet.mIsBundle = true;
             packet.mReplyAddr = mReplyAddr;
@@ -108,19 +99,23 @@ struct QueueEntry {
     }
 };
 
-// Index-based bundle scheduler
-// - Pool of bundles (never moved/copied)
+// Index-based bundle scheduler with variable-size data pool
+// - Metadata pool of fixed slots (never moved/copied)
+// - Shared bump-allocated data pool for OSC bundle bytes
 // - Priority queue of small entries (safe to copy)
+// - Pool resets when scheduler empties (zero fragmentation)
 class BundleScheduler {
 private:
-    ScheduledBundle mPool[MAX_SCHEDULED_BUNDLES];  // Event pool
-    QueueEntry mQueue[MAX_SCHEDULED_BUNDLES];      // Priority queue (sorted)
+    ScheduledBundle mPool[MAX_SCHEDULED_BUNDLES];  // Metadata pool
+    QueueEntry mQueue[MAX_SCHEDULED_BUNDLES];      // Priority queue (min-heap)
+    uint8_t mDataPool[SCHEDULER_DATA_POOL_SIZE];   // Variable-size data pool
+    uint32_t mDataPoolHead;                        // Bump pointer
     int mQueueSize;
     int64_t mStabilityCounter;
     int16_t mFreeHead;                             // Free list head (-1 = empty)
 
 public:
-    BundleScheduler() : mQueueSize(0), mStabilityCounter(0) {
+    BundleScheduler() : mDataPoolHead(0), mQueueSize(0), mStabilityCounter(0) {
         // Build free list: 0 → 1 → 2 → ... → (N-1) → -1
         for (int i = 0; i < MAX_SCHEDULED_BUNDLES - 1; ++i) {
             mPool[i].mNextFree = static_cast<int16_t>(i + 1);
@@ -129,7 +124,7 @@ public:
         mFreeHead = 0;
     }
 
-    // Allocate a slot from the pool — O(1) via free list
+    // Allocate a metadata slot from the pool — O(1) via free list
     int AllocateSlot() {
         if (mFreeHead < 0) return -1;  // Pool full
         int slot = mFreeHead;
@@ -137,29 +132,46 @@ public:
         return slot;
     }
 
-    // Release a slot back to the free list — O(1)
+    // Release a metadata slot back to the free list — O(1)
+    // When the queue empties, reset the data pool (zero-cost compaction).
     void ReleaseSlot(ScheduledBundle* bundle) {
         bundle->Release();
         int16_t slot = static_cast<int16_t>(bundle - mPool);
         bundle->mNextFree = mFreeHead;
         mFreeHead = slot;
+
+        // When all bundles have fired, reset the data pool
+        if (mQueueSize == 0) {
+            mDataPoolHead = 0;
+        }
     }
 
-    // Add a bundle to the scheduler
+    // Add a bundle to the scheduler (variable size)
     bool Add(World* world, int64_t time, const char* data, int32_t size,
              const ReplyAddress& replyAddr) {
         if (mQueueSize >= MAX_SCHEDULED_BUNDLES) {
             return false;
         }
 
-        // Get a pool slot
+        // Bump-allocate from data pool (4-byte aligned for OSC)
+        uint32_t aligned = (static_cast<uint32_t>(size) + 3) & ~3u;
+        if (mDataPoolHead + aligned > SCHEDULER_DATA_POOL_SIZE) {
+            return false;  // Pool exhausted
+        }
+
+        // Get a metadata slot
         int slot = AllocateSlot();
         if (slot < 0) {
             return false;
         }
 
-        // Initialize the bundle in place (no copy!)
-        mPool[slot].Init(world, time, data, size, replyAddr, mStabilityCounter++);
+        // Copy data into pool
+        uint32_t offset = mDataPoolHead;
+        std::memcpy(mDataPool + offset, data, size);
+        mDataPoolHead += aligned;
+
+        // Initialize metadata (no data copy — already in pool)
+        mPool[slot].Init(world, time, size, offset, replyAddr, mStabilityCounter++);
 
         // Create queue entry (small, safe to copy)
         QueueEntry entry;
@@ -228,13 +240,19 @@ public:
         return nullptr;
     }
 
+    // Access data pool (for Perform calls)
+    uint8_t* DataPool() { return mDataPool; }
+
     bool Empty() const { return mQueueSize == 0; }
     bool IsFull() const { return mQueueSize >= MAX_SCHEDULED_BUNDLES; }
     int Size() const { return mQueueSize; }
     int Capacity() const { return MAX_SCHEDULED_BUNDLES; }
+    uint32_t DataPoolUsed() const { return mDataPoolHead; }
+    uint32_t DataPoolCapacity() const { return SCHEDULER_DATA_POOL_SIZE; }
 
     void Clear() {
         mQueueSize = 0;
+        mDataPoolHead = 0;
         for (int i = 0; i < MAX_SCHEDULED_BUNDLES; ++i) {
             mPool[i].Release();
             mPool[i].mNextFree = static_cast<int16_t>(i + 1);

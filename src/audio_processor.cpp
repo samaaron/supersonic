@@ -246,17 +246,14 @@ extern "C" {
     }
 
     // RT-safe bundle scheduling - no malloc!
-    // Returns true if scheduled, false if queue full
+    // Returns true if scheduled, false if queue full or data pool exhausted.
+    // Variable-size: bundles up to the pool's free space are accepted.
     bool schedule_bundle(World* world, int64_t ntp_time, int64_t current_osc_time,
                         const char* data, int32_t size, const ReplyAddress& reply_addr) {
-        if (size > SCHEDULER_SLOT_SIZE) {
-            worklet_debug("ERROR: Bundle too large: %d bytes (max %d)", size, SCHEDULER_SLOT_SIZE);
-            return false;
-        }
-
-        // Add directly to scheduler pool (data copied into pool slot)
         if (!g_scheduler.Add(world, ntp_time, data, size, reply_addr)) {
-            worklet_debug("ERROR: Scheduler queue full (%d events)", g_scheduler.Size());
+            worklet_debug("ERROR: Scheduler full — queue=%d pool=%u/%u bytes, bundle=%d bytes",
+                         g_scheduler.Size(), g_scheduler.DataPoolUsed(),
+                         g_scheduler.DataPoolCapacity(), size);
             increment_scheduler_drop_metric();
             update_scheduler_depth_metric(g_scheduler.Size());
             return false;
@@ -782,18 +779,17 @@ extern "C" {
 
                     if (late_count == 1 || late_count % 100 == 0) {
                         // Extract OSC address from first message in bundle
-                        // Bundle format: #bundle\0 (8) + timetag (8) + msg_size (4) + msg_data...
-                        // Message starts with null-terminated address string
                         const char* addr = "?";
+                        const uint8_t* bdata = g_scheduler.DataPool() + bundle->mDataOffset;
                         if (bundle->mSize > 20) {
-                            addr = bundle->mData + 20;  // Skip header + timetag + size
+                            addr = reinterpret_cast<const char*>(bdata + 20);
                         }
                         worklet_debug("LATE: %.1fms %s (count=%d)", -time_diff_ms, addr, late_count);
                     }
                 }
 
-                bundle->Perform();              // Execute the bundle
-                g_scheduler.ReleaseSlot(bundle); // Return slot to free list
+                bundle->Perform(g_scheduler.DataPool()); // Execute from data pool
+                g_scheduler.ReleaseSlot(bundle);          // Return slot + maybe reset pool
             }
 
             // Reset offset

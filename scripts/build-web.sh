@@ -62,10 +62,9 @@ echo "INITIAL_MEMORY: $FIXED_MEMORY bytes ($((FIXED_MEMORY / 1024 / 1024))MB)"
 echo "MAXIMUM_MEMORY: $MAX_MEMORY bytes ($((MAX_MEMORY / 1024 / 1024))MB)"
 
 # Scheduler configuration (override with environment variables if needed)
-SCHEDULER_SLOT_SIZE=${SCHEDULER_SLOT_SIZE:-1024}
+SCHEDULER_DATA_POOL_SIZE=${SCHEDULER_DATA_POOL_SIZE:-$((512 * 1024))}
 SCHEDULER_SLOT_COUNT=${SCHEDULER_SLOT_COUNT:-512}
-SCHEDULER_MEMORY=$((SCHEDULER_SLOT_SIZE * SCHEDULER_SLOT_COUNT))
-echo "SCHEDULER: $SCHEDULER_SLOT_COUNT slots × $SCHEDULER_SLOT_SIZE bytes = $((SCHEDULER_MEMORY / 1024))KB"
+echo "SCHEDULER: $SCHEDULER_SLOT_COUNT slots, ${SCHEDULER_DATA_POOL_SIZE} byte data pool ($((SCHEDULER_DATA_POOL_SIZE / 1024))KB)"
 
 # Node tree mirror configuration (override with environment variables if needed)
 # This is a mirror of the scsynth node tree for JS observability - actual tree can exceed this
@@ -116,7 +115,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -DNO_LIBSNDFILE \
     -DSUPERSONIC \
     -DNDEBUG \
-    -DSCHEDULER_SLOT_SIZE=$SCHEDULER_SLOT_SIZE \
+    -DSCHEDULER_DATA_POOL_SIZE=$SCHEDULER_DATA_POOL_SIZE \
     -DSCHEDULER_SLOT_COUNT=$SCHEDULER_SLOT_COUNT \
     -DNODE_TREE_MIRROR_MAX_NODES=$NODE_TREE_MIRROR_MAX_NODES \
     -DBOOST_ASIO_HAS_PTHREADS \

@@ -2171,12 +2171,12 @@ export class SuperSonic {
       }
     } else {
       // Far-future: goes to prescheduler for timing
-      // Check size limit: WASM scheduler has fixed slot size
-      const slotSize = this.#metricsReader.bufferConstants?.scheduler_slot_size;
-      if (slotSize && preparedData.length > slotSize) {
+      // Check size limit: must fit in both ring buffer and scheduler data pool
+      const bc = this.#metricsReader.bufferConstants;
+      const maxSize = bc ? Math.min(bc.IN_BUFFER_SIZE || Infinity, bc.scheduler_data_pool_size || Infinity) : Infinity;
+      if (preparedData.length > maxSize) {
         throw new Error(
-          `OSC bundle too large to schedule (${preparedData.length} > ${slotSize} bytes). ` +
-          `Use immediate timestamp (0 or 1) for large messages, or reduce bundle size.`
+          `OSC bundle too large to schedule (${preparedData.length} > ${maxSize} bytes).`
         );
       }
       // Send to prescheduler with session/tag options for cancellation

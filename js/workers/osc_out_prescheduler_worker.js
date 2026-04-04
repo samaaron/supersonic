@@ -15,10 +15,10 @@ let workletPort = null;
 
 // Limits to prevent resource exhaustion
 // Scheduler slot size - bundles larger than this can't be scheduled (WASM limitation)
-let schedulerSlotSize = 1024;  // Default, updated from bufferConstants if available
+let schedulerPoolSize = 524288;  // Default 512KB, updated from bufferConstants if available
 
 // Maximum individual OSC message size (must match SC_Stubs.cpp limit)
-// This is different from schedulerSlotSize - this limits messages within bundles
+// This is different from schedulerPoolSize - this limits messages within bundles
 const MAX_OSC_MESSAGE_SIZE = 65536;
 
 // Maximum time in the future a bundle can be scheduled (1 hour in seconds)
@@ -409,8 +409,8 @@ const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
     const timeUntilExec = ntpTime - currentNTP;
 
     // Reject bundles too large for scheduler slot (WASM has fixed slot size)
-    if (oscData.length > schedulerSlotSize) {
-        const errorMsg = `Bundle too large for scheduler (${oscData.length} > ${schedulerSlotSize} bytes)`;
+    if (oscData.length > schedulerPoolSize) {
+        const errorMsg = `Bundle too large for scheduler pool (${oscData.length} > ${schedulerPoolSize} bytes)`;
         console.error('[PreScheduler]', errorMsg);
         self.postMessage({ type: 'error', error: errorMsg, code: 'BUNDLE_TOO_LARGE' });
         return false;
@@ -783,8 +783,8 @@ self.addEventListener('message', (event) => {
                     initSharedBuffer();
 
                     // Update scheduler slot size from buffer constants if available
-                    if (bufferConstants && bufferConstants.scheduler_slot_size) {
-                        schedulerSlotSize = bufferConstants.scheduler_slot_size;
+                    if (bufferConstants && bufferConstants.scheduler_data_pool_size) {
+                        schedulerPoolSize = bufferConstants.scheduler_data_pool_size;
                     }
                 } else {
                     // postMessage mode: store worklet port

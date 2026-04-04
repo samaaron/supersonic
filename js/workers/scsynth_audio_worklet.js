@@ -223,7 +223,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             MAX_MESSAGE_SIZE: uint32View[39],
             MESSAGE_MAGIC: uint32View[40],
             PADDING_MAGIC: uint32View[41],
-            scheduler_slot_size: uint32View[42],
+            scheduler_data_pool_size: uint32View[42],
             scheduler_slot_count: uint32View[43],
             DEBUG_PADDING_MARKER: uint8View[176],  // After 44 uint32s = 176 bytes
             MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, sourceId)
