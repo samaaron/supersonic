@@ -38,7 +38,9 @@ static void signalHandler(int sig) {
 static void crashHandler(int sig) {
     const char* name = "UNKNOWN";
     if (sig == SIGSEGV) name = "SIGSEGV";
+#ifndef _WIN32
     else if (sig == SIGBUS)  name = "SIGBUS";
+#endif
     else if (sig == SIGABRT) name = "SIGABRT";
     else if (sig == SIGFPE)  name = "SIGFPE";
 
@@ -228,7 +230,9 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT,  signalHandler);
     std::signal(SIGTERM, signalHandler);
     std::signal(SIGSEGV, crashHandler);
+#ifndef _WIN32
     std::signal(SIGBUS,  crashHandler);
+#endif
     std::signal(SIGABRT, crashHandler);
     std::signal(SIGFPE,  crashHandler);
 
