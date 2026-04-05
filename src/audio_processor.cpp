@@ -1139,9 +1139,15 @@ bool ring_buffer_write(
             padding.sequence = 0;
 
             std::memcpy(buffer_start + buffer_start_offset + current_head, &padding, sizeof(Message));
-        } else if (space_to_end > 0) {
-            // Not enough room for padding header – clear remaining bytes
-            std::memset(buffer_start + buffer_start_offset + current_head, 0, space_to_end);
+        } else if (space_to_end >= 4) {
+            // Not enough room for full padding header but enough for the magic word.
+            // Write PADDING_MAGIC so the reader recognises this as a wrap marker
+            // (without this, zeroed bytes look like corruption to the reader).
+            uint32_t pad = PADDING_MAGIC;
+            std::memcpy(buffer_start + buffer_start_offset + current_head, &pad, 4);
+            if (space_to_end > 4) {
+                std::memset(buffer_start + buffer_start_offset + current_head + 4, 0, space_to_end - 4);
+            }
         }
 
         // Wrap head to beginning
