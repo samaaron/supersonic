@@ -79,9 +79,9 @@ test.describe("Audio Bus Channels Config", () => {
       await sonic.send("/s_new", "sonic-pi-fx_level", 1001, 0, 0,
         "in_bus", 500, "out_bus", 0, "amp", 1.0);
 
-      // Create beep writing to bus 500
+      // Create beep writing to bus 500 (long sustain so it survives the check)
       await sonic.send("/s_new", "sonic-pi-beep", 1002, 0, 0,
-        "note", 60, "out_bus", 500, "amp", 0.5, "sustain", 0.1, "release", 0.1);
+        "note", 60, "out_bus", 500, "amp", 0.5, "sustain", 5.0, "release", 0.1);
 
       await new Promise(r => setTimeout(r, 500));
 
