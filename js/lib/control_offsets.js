@@ -49,6 +49,33 @@ export const STATUS_FLAGS = 36;
 export const IN_WRITE_LOCK = 40;
 export const IN_LOG_TAIL = 44;
 
+// Reply channel control block (mirrors src/shared_memory.h:REPLY_CHANNEL_CONTROL_SIZE).
+// Each slot's control block is 16 bytes: head(4) tail(4) active(4) drops(4).
+export const REPLY_CTRL_HEAD = 0;
+export const REPLY_CTRL_TAIL = 4;
+export const REPLY_CTRL_ACTIVE = 8;
+export const REPLY_CTRL_DROPS = 12;
+
+/**
+ * Calculate Int32Array indices for one reply channel slot's control block.
+ *
+ * @param {number} ringBufferBase - Base offset of ring buffer region
+ * @param {number} controlStart - REPLY_CHANNELS_CONTROL_START
+ * @param {number} controlSize - REPLY_CHANNEL_CONTROL_SIZE (per-slot)
+ * @param {number} slotIndex - Slot index (0..REPLY_CHANNEL_COUNT-1)
+ * @returns {{controlBase: number, headIndex: number, tailIndex: number, activeIndex: number, dropsIndex: number}}
+ */
+export function calculateReplyChannelIndices(ringBufferBase, controlStart, controlSize, slotIndex) {
+    const controlBase = ringBufferBase + controlStart + (slotIndex * controlSize);
+    return {
+        controlBase,
+        headIndex: (controlBase + REPLY_CTRL_HEAD) / 4,
+        tailIndex: (controlBase + REPLY_CTRL_TAIL) / 4,
+        activeIndex: (controlBase + REPLY_CTRL_ACTIVE) / 4,
+        dropsIndex: (controlBase + REPLY_CTRL_DROPS) / 4,
+    };
+}
+
 // =============================================================================
 // Helper functions
 // =============================================================================

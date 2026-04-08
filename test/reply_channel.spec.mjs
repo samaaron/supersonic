@@ -9,7 +9,7 @@
  * Phase 3+: OscChannel API tests added incrementally
  */
 
-import { test, expect } from "./fixtures.mjs";
+import { test, expect, REPLY_WORKLET_MSG } from "./fixtures.mjs";
 
 // =============================================================================
 // SAB REPLY BUFFER FAN-OUT
@@ -397,10 +397,10 @@ test.describe("Reply channel PM fan-out", () => {
 });
 
 // =============================================================================
-// OscChannel onReply() / offReply() / pollReplies() API
+// OscChannel setReplyHandler() / clearReplyHandler() / pollReplies() API
 // =============================================================================
 
-// Helper: decode OSC address from onReply callback args.
+// Helper: decode OSC address from reply handler args.
 // SAB mode: (view, offset, length, sequence) — read from view at offset
 // PM mode: (oscData, sequence) — oscData is a Uint8Array copy
 // Injected into page.evaluate via string since it crosses the Playwright boundary.
@@ -425,7 +425,7 @@ const decodeReplyHelper = `
 `;
 
 test.describe("OscChannel reply API", () => {
-  test("onReply receives /status.reply on main thread OscChannel", async ({ page, sonicConfig }) => {
+  test("setReplyHandler receives /status.reply on main thread OscChannel", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async ({ config, helperSrc }) => {
@@ -436,7 +436,7 @@ test.describe("OscChannel reply API", () => {
       const channel = sonic.createOscChannel();
       const replies = [];
 
-      channel.onReply((...args) => {
+      channel.setReplyHandler((...args) => {
         replies.push(decodeOscAddrFromReply(...args));
       });
 
@@ -444,7 +444,7 @@ test.describe("OscChannel reply API", () => {
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 500));
 
-      channel.offReply();
+      channel.clearReplyHandler();
       channel.close();
       await sonic.shutdown();
 
@@ -455,7 +455,7 @@ test.describe("OscChannel reply API", () => {
     expect(result.hasStatusReply).toBe(true);
   });
 
-  test("offReply stops delivery", async ({ page, sonicConfig }) => {
+  test("clearReplyHandler stops delivery", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async ({ config, helperSrc }) => {
@@ -466,7 +466,7 @@ test.describe("OscChannel reply API", () => {
       const channel = sonic.createOscChannel();
       const replies = [];
 
-      channel.onReply((...args) => {
+      channel.setReplyHandler((...args) => {
         replies.push(decodeOscAddrFromReply(...args).addr);
       });
 
@@ -475,7 +475,7 @@ test.describe("OscChannel reply API", () => {
       await new Promise(r => setTimeout(r, 300));
       const countBefore = replies.length;
 
-      channel.offReply();
+      channel.clearReplyHandler();
       await new Promise(r => setTimeout(r, 100));
 
       // Send another command — should NOT arrive
@@ -506,15 +506,15 @@ test.describe("OscChannel reply API", () => {
       const replies1 = [];
       const replies2 = [];
 
-      ch1.onReply((...args) => replies1.push(decodeOscAddrFromReply(...args).addr));
-      ch2.onReply((...args) => replies2.push(decodeOscAddrFromReply(...args).addr));
+      ch1.setReplyHandler((...args) => replies1.push(decodeOscAddrFromReply(...args).addr));
+      ch2.setReplyHandler((...args) => replies2.push(decodeOscAddrFromReply(...args).addr));
 
       await sonic.send("/status");
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 500));
 
-      ch1.offReply(); ch1.close();
-      ch2.offReply(); ch2.close();
+      ch1.clearReplyHandler(); ch1.close();
+      ch2.clearReplyHandler(); ch2.close();
       await sonic.shutdown();
 
       return {
@@ -537,14 +537,14 @@ test.describe("OscChannel reply API", () => {
       const channel = sonic.createOscChannel();
       const replies = [];
 
-      channel.onReply((oscData) => replies.push(true));
+      channel.setReplyHandler((oscData) => replies.push(true));
 
       await sonic.send("/status");
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 300));
       const countBefore = replies.length;
 
-      // close() should implicitly call offReply()
+      // close() should implicitly call clearReplyHandler()
       channel.close();
       await new Promise(r => setTimeout(r, 100));
 
@@ -561,7 +561,7 @@ test.describe("OscChannel reply API", () => {
     expect(result.stopped).toBe(true);
   });
 
-  test("9th channel onReply throws", async ({ page, sonicConfig, sonicMode }) => {
+  test("9th channel setReplyHandler throws", async ({ page, sonicConfig, sonicMode }) => {
     test.skip(sonicMode !== 'sab', 'SAB slot exhaustion test');
     await page.goto("/test/harness.html");
 
@@ -575,7 +575,7 @@ test.describe("OscChannel reply API", () => {
       try {
         for (let i = 0; i < 9; i++) {
           const ch = sonic.createOscChannel();
-          ch.onReply(() => {});
+          ch.setReplyHandler(() => {});
           channels.push(ch);
         }
       } catch (e) {
@@ -592,7 +592,7 @@ test.describe("OscChannel reply API", () => {
     expect(result.error).toContain('reply channel slots are in use');
   });
 
-  test("worker receives replies via onReply after transfer", async ({ page, sonicConfig }) => {
+  test("worker receives replies via setReplyHandler after transfer", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
@@ -887,7 +887,7 @@ test.describe("Zero-copy SAB reply polling", () => {
       const channel = sonic.createOscChannel();
       const callbackArgs = [];
 
-      channel.onReply((...args) => {
+      channel.setReplyHandler((...args) => {
         const [view, offset, length, sequence] = args;
         // Verify we received view+offset+length, not a copied Uint8Array
         callbackArgs.push({
@@ -920,7 +920,7 @@ test.describe("Zero-copy SAB reply polling", () => {
       // Poll manually if needed (for Worker context, auto-poll handles it)
       // In SAB mode on main thread, replies are auto-polled
 
-      channel.offReply();
+      channel.clearReplyHandler();
       channel.close();
       await sonic.shutdown();
 
@@ -966,7 +966,7 @@ test.describe("Zero-copy SAB reply polling", () => {
       const channel = sonic.createOscChannel();
       const addresses = [];
 
-      channel.onReply((view, offset, length, sequence) => {
+      channel.setReplyHandler((view, offset, length, sequence) => {
         // Read OSC address from view at offset - proves the data is valid
         let end = 0;
         while (end < length && view[offset + end] !== 0) end++;
@@ -981,7 +981,7 @@ test.describe("Zero-copy SAB reply polling", () => {
       await sonic.sync(2);
       await new Promise(r => setTimeout(r, 500));
 
-      channel.offReply();
+      channel.clearReplyHandler();
       channel.close();
       await sonic.shutdown();
 
@@ -1023,7 +1023,7 @@ test.describe("Event-driven SAB reply notification", () => {
         return originalSetInterval.apply(this, args);
       };
 
-      channel.onReply((...args) => {
+      channel.setReplyHandler((...args) => {
         replies.push(decodeOscAddrFromReply(...args));
       });
 
@@ -1034,7 +1034,7 @@ test.describe("Event-driven SAB reply notification", () => {
       await sonic.sync(1);
       await new Promise(r => setTimeout(r, 500));
 
-      channel.offReply();
+      channel.clearReplyHandler();
       channel.close();
       await sonic.shutdown();
 
@@ -1177,5 +1177,176 @@ test.describe("Event-driven SAB reply notification", () => {
     }, sonicConfig);
 
     expect(result.hasStatusReply).toBe(true);
+  });
+});
+
+// =============================================================================
+// AudioWorklet using OscChannel import (activateReplies + pollReplies)
+// =============================================================================
+
+test.describe("AudioWorklet OscChannel import", () => {
+  test("worklet imports OscChannel and polls replies via activateReplies + pollReplies", async ({ page, sonicConfig, sonicMode }) => {
+    test.skip(sonicMode !== 'sab', 'SAB-only test');
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async ({ config, MSG }) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const ctx = sonic.node.input.context;
+      await ctx.audioWorklet.addModule("/test/assets/reply_oscchannel_test_worklet.js");
+      const testNode = new AudioWorkletNode(ctx, "reply-oscchannel-test-processor");
+      testNode.connect(ctx.destination);
+
+      // Create an OscChannel and transfer it to the worklet
+      const channel = sonic.createOscChannel();
+      const transferData = channel.transferable;
+      const transferList = channel.transferList;
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Ready timeout")), 5000);
+        testNode.port.onmessage = (e) => {
+          if (e.data.type === MSG.READY) { clearTimeout(timeout); resolve(); }
+        };
+        testNode.port.postMessage({ type: MSG.INIT_CHANNEL, channelData: transferData }, transferList);
+      });
+
+      // Start collecting
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Collecting timeout")), 5000);
+        testNode.port.onmessage = (e) => {
+          if (e.data.type === MSG.COLLECTING_STARTED) { clearTimeout(timeout); resolve(); }
+        };
+        testNode.port.postMessage({ type: MSG.START_COLLECTING });
+      });
+
+      // Send /status from main thread
+      await sonic.send("/status");
+      await sonic.sync(1);
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Get results
+      const replies = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Results timeout")), 5000);
+        testNode.port.onmessage = (e) => {
+          if (e.data.type === MSG.RESULTS) { clearTimeout(timeout); resolve(e.data.replies); }
+        };
+        testNode.port.postMessage({ type: MSG.GET_RESULTS });
+      });
+
+      testNode.disconnect();
+      channel.close();
+      await sonic.shutdown();
+
+      return { replies, hasStatusReply: replies.includes("/status.reply") };
+    }, { config: sonicConfig, MSG: REPLY_WORKLET_MSG });
+
+    expect(result.hasStatusReply).toBe(true);
+  });
+
+  test("stress: worklet receives many replies via activateReplies + pollReplies", async ({ page, sonicConfig, sonicMode }) => {
+    test.skip(sonicMode !== 'sab', 'SAB-only test');
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async ({ config, MSG }) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const ctx = sonic.node.input.context;
+      await ctx.audioWorklet.addModule("/test/assets/reply_oscchannel_test_worklet.js");
+      const testNode = new AudioWorkletNode(ctx, "reply-oscchannel-test-processor");
+      testNode.connect(ctx.destination);
+
+      const channel = sonic.createOscChannel();
+      const transferData = channel.transferable;
+      const transferList = channel.transferList;
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Ready timeout")), 5000);
+        testNode.port.onmessage = (e) => {
+          if (e.data.type === MSG.READY) { clearTimeout(timeout); resolve(); }
+        };
+        testNode.port.postMessage({ type: MSG.INIT_CHANNEL, channelData: transferData }, transferList);
+      });
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Collecting timeout")), 5000);
+        testNode.port.onmessage = (e) => {
+          if (e.data.type === MSG.COLLECTING_STARTED) { clearTimeout(timeout); resolve(); }
+        };
+        testNode.port.postMessage({ type: MSG.START_COLLECTING });
+      });
+
+      // Blast 50 /status commands rapidly — each produces a /status.reply
+      const count = 50;
+      for (let i = 0; i < count; i++) {
+        await sonic.send("/status");
+      }
+      await sonic.sync(1);
+      await new Promise(r => setTimeout(r, 2000));
+
+      const replies = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Results timeout")), 5000);
+        testNode.port.onmessage = (e) => {
+          if (e.data.type === MSG.RESULTS) { clearTimeout(timeout); resolve(e.data.replies); }
+        };
+        testNode.port.postMessage({ type: MSG.GET_RESULTS });
+      });
+
+      testNode.disconnect();
+      channel.close();
+      await sonic.shutdown();
+
+      const statusReplies = replies.filter(r => r === "/status.reply");
+      return { total: replies.length, statusReplies: statusReplies.length, expected: count };
+    }, { config: sonicConfig, MSG: REPLY_WORKLET_MSG });
+
+    expect(result.statusReplies).toBe(result.expected);
+  });
+
+  test("replyDrops counter increments when reply buffer overflows", async ({ page, sonicConfig, sonicMode }) => {
+    test.skip(sonicMode !== 'sab', 'SAB-only test');
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const channel = sonic.createOscChannel();
+      // Activate the slot but DON'T install a handler — so nothing drains
+      // the reply buffer and we can force an overflow.
+      channel.activateReplies();
+
+      const dropsBefore = channel.replyDrops;
+
+      // Flood with /status commands WITHOUT polling — fill the 16KB reply buffer.
+      // Each /status.reply is ~60 bytes + 16 byte header = ~76 bytes aligned to ~80.
+      // 16384 / 80 ≈ 204 messages fit. Send 300 to guarantee overflow.
+      for (let i = 0; i < 300; i++) {
+        await sonic.send("/status");
+      }
+      await sonic.sync(1);
+      await new Promise(r => setTimeout(r, 2000));
+
+      const dropsAfter = channel.replyDrops;
+
+      // Drain the buffer via a one-shot handler so we can count what landed.
+      let received = 0;
+      const drained = channel.pollReplies(() => { received++; });
+
+      channel.deactivateReplies();
+      channel.close();
+      await sonic.shutdown();
+
+      return { dropsBefore, dropsAfter, drained, received };
+    }, sonicConfig);
+
+    expect(result.dropsBefore).toBe(0);
+    expect(result.dropsAfter).toBeGreaterThan(0);
+    expect(result.drained).toBe(result.received);
+    // Some replies were received (buffer wasn't empty when we polled)
+    expect(result.received).toBeGreaterThan(0);
+    // But not all 300 — some were dropped
+    expect(result.received).toBeLessThan(300);
   });
 });

@@ -83,7 +83,7 @@ constexpr uint32_t WORLD_OPTIONS_START = NODE_ID_COUNTER_START + NODE_ID_COUNTER
 // The osc_in_worker (SAB) or AudioWorklet (PM) fans out replies to all active channels.
 constexpr uint32_t REPLY_CHANNEL_COUNT = 8;
 constexpr uint32_t REPLY_CHANNEL_BUFFER_SIZE = 16384;  // 16KB per channel
-constexpr uint32_t REPLY_CHANNEL_CONTROL_SIZE = 12;    // head(4) + tail(4) + active(4) per channel
+constexpr uint32_t REPLY_CHANNEL_CONTROL_SIZE = 16;    // head(4) + tail(4) + active(4) + drops(4) per channel
 constexpr uint32_t REPLY_CHANNELS_CONTROL_START = WORLD_OPTIONS_START + WORLD_OPTIONS_SIZE;
 constexpr uint32_t REPLY_CHANNELS_CONTROL_SIZE = REPLY_CHANNEL_COUNT * REPLY_CHANNEL_CONTROL_SIZE;  // 96 bytes
 constexpr uint32_t REPLY_CHANNELS_BUFFER_START = REPLY_CHANNELS_CONTROL_START + REPLY_CHANNELS_CONTROL_SIZE;

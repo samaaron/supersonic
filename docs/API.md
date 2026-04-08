@@ -2494,24 +2494,27 @@ OscChannel — unified dispatch for sending OSC to the AudioWorklet.
 Obtain a channel via [SuperSonic.createOscChannel](#createoscchannel) on the main thread,
 then transfer it to a Web Worker for direct communication with the AudioWorklet.
 
-| Member                                        | Description                                                                     |
-| --------------------------------------------- | ------------------------------------------------------------------------------- |
-| [`getCurrentNTP`](#getcurrentntp)             | Set the NTP time source for classification (used in AudioWorklet context).      |
-| [`mode`](#mode)                               | Transport mode this channel is using.                                           |
-| [`transferable`](#transferable)               | Serializable config for transferring this channel to a worker via postMessage.  |
-| [`transferList`](#transferlist)               | Array of transferable objects (MessagePorts) for the postMessage transfer list. |
-| [`classify()`](#classify)                     | Classify an OSC message to determine its routing.                               |
-| [`close()`](#close)                           | Close the channel and release its ports.                                        |
-| [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                           |
-| [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                   |
-| [`nextNodeId()`](#nextnodeid)                 | Get the next unique node ID.                                                    |
-| [`offReply()`](#offreply)                     | Unregister the reply callback and release the reply channel.                    |
-| [`onReply()`](#onreply)                       | Register a callback for OSC replies from scsynth.                               |
-| [`pollReplies()`](#pollreplies)               | Poll for pending replies and fire the onReply callback for each.                |
-| [`send()`](#send)                             | Send an OSC message with automatic routing.                                     |
-| [`sendDirect()`](#senddirect)                 | Send directly to worklet without classification or metrics tracking.            |
-| [`sendToPrescheduler()`](#sendtoprescheduler) | Send to prescheduler without classification.                                    |
-| [`fromTransferable()`](#fromtransferable)     | Reconstruct an OscChannel from data received via postMessage in a worker.       |
+| Member                                        | Description                                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| [`getCurrentNTP`](#getcurrentntp)             | Set the NTP time source for classification (used in AudioWorklet context).                              |
+| [`mode`](#mode)                               | Transport mode this channel is using.                                                                   |
+| [`replyDrops`](#replydrops)                   | Number of reply messages dropped because the reply buffer was full.                                     |
+| [`transferable`](#transferable)               | Serializable config for transferring this channel to a worker via postMessage.                          |
+| [`transferList`](#transferlist)               | Array of transferable objects (MessagePorts) for the postMessage transfer list.                         |
+| [`activateReplies()`](#activatereplies)       | Activate the reply slot without registering a handler.                                                  |
+| [`classify()`](#classify)                     | Classify an OSC message to determine its routing.                                                       |
+| [`clearReplyHandler()`](#clearreplyhandler)   | Clear the reply handler and release the reply channel.                                                  |
+| [`close()`](#close)                           | Close the channel and release its ports.                                                                |
+| [`deactivateReplies()`](#deactivatereplies)   | Release the reply slot.                                                                                 |
+| [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                                                   |
+| [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                                           |
+| [`nextNodeId()`](#nextnodeid)                 | Get the next unique node ID.                                                                            |
+| [`pollReplies()`](#pollreplies)               | Drain pending replies, calling the registered handler (or handler argument, if given) once per message. |
+| [`send()`](#send)                             | Send an OSC message with automatic routing.                                                             |
+| [`sendDirect()`](#senddirect)                 | Send directly to worklet without classification or metrics tracking.                                    |
+| [`sendToPrescheduler()`](#sendtoprescheduler) | Send to prescheduler without classification.                                                            |
+| [`setReplyHandler()`](#setreplyhandler)       | Register a handler for OSC replies from scsynth.                                                        |
+| [`fromTransferable()`](#fromtransferable)     | Reconstruct an OscChannel from data received via postMessage in a worker.                               |
 
 #### Example
 
@@ -2575,6 +2578,20 @@ Transport mode this channel is using.
 
 [`TransportMode`](#transportmode)
 
+##### replyDrops
+
+###### Get Signature
+
+> **get** **replyDrops**(): `number`
+
+Number of reply messages dropped because the reply buffer was full.
+SAB mode only — undefined in PM mode or before [activateReplies](#activatereplies).
+Counter resets each time the slot is (re)claimed.
+
+###### Returns
+
+`number`
+
 ##### transferable
 
 ###### Get Signature
@@ -2615,6 +2632,19 @@ worker.postMessage({ ch: channel.transferable }, channel.transferList);
 
 #### Methods
 
+##### activateReplies()
+
+> **activateReplies**(): `void`
+
+Activate the reply slot without registering a handler. Usually called
+for you by [setReplyHandler](#setreplyhandler); only call directly if you want to
+claim the slot before installing a handler (or to use the optional
+one-shot handler argument of [pollReplies](#pollreplies)).
+
+###### Returns
+
+`void`
+
 ##### classify()
 
 > **classify**(`oscData`): [`OscCategory`](#osccategory)
@@ -2631,11 +2661,31 @@ Classify an OSC message to determine its routing.
 
 [`OscCategory`](#osccategory)
 
+##### clearReplyHandler()
+
+> **clearReplyHandler**(): `void`
+
+Clear the reply handler and release the reply channel. Idempotent.
+
+###### Returns
+
+`void`
+
 ##### close()
 
 > **close**(): `void`
 
 Close the channel and release its ports.
+
+###### Returns
+
+`void`
+
+##### deactivateReplies()
+
+> **deactivateReplies**(): `void`
+
+Release the reply slot. Usually called for you by [clearReplyHandler](#clearreplyhandler).
 
 ###### Returns
 
@@ -2677,61 +2727,29 @@ the root group, 1 is the default group, 2–999 are reserved for manual use).
 
 A unique node ID (>= 1000)
 
-##### offReply()
+##### pollReplies()
 
-> **offReply**(): `void`
+> **pollReplies**(`handler?`): `number`
 
-Unregister the reply callback and release the reply channel.
+Drain pending replies, calling the registered handler (or `handler`
+argument, if given) once per message. Returns the number of messages
+processed. Zero-allocation on the hot path.
 
-###### Returns
-
-`void`
-
-##### onReply()
-
-> **onReply**(`callback`): `void`
-
-Register a callback for OSC replies from scsynth.
-
-In Worker context the callback fires automatically from the event loop.
-In AudioWorklet context the callback fires during [pollReplies](#pollreplies) calls.
-
-All registered channels receive all replies (broadcast). Filter locally
-if you only need specific addresses.
+Call from an AudioWorklet's `process()` method to receive replies on
+the audio thread. In other contexts automatic delivery already calls
+this for you.
 
 ###### Parameters
 
-| Parameter  | Type                              | Description                                                  |
-| ---------- | --------------------------------- | ------------------------------------------------------------ |
-| `callback` | (`oscData`, `sequence`) => `void` | Called with raw OSC bytes and sequence number for each reply |
-
-###### Returns
-
-`void`
-
-###### Example
-
-```ts
-channel.onReply((oscData, sequence) => {
-  // oscData is a Uint8Array of raw OSC bytes
-});
-```
-
-##### pollReplies()
-
-> **pollReplies**(): `number`
-
-Poll for pending replies and fire the [onReply](#onreply) callback for each.
-
-Call this from an AudioWorklet's `process()` method to receive replies
-synchronously on the audio thread. In Worker context replies are delivered
-automatically — calling this is optional but harmless.
+| Parameter  | Type                                                                                    | Description                          |
+| ---------- | --------------------------------------------------------------------------------------- | ------------------------------------ |
+| `handler?` | (`view`, `offset`, `length`, `sequence`) => `void` \| (`oscData`, `sequence`) => `void` | Optional override for this call only |
 
 ###### Returns
 
 `number`
 
-Number of replies processed
+Number of messages drained
 
 ##### send()
 
@@ -2791,6 +2809,40 @@ Send to prescheduler without classification.
 `boolean`
 
 true if sent successfully
+
+##### setReplyHandler()
+
+> **setReplyHandler**(`handler`): `void`
+
+Register a handler for OSC replies from scsynth. Idempotent — replaces
+any previously-registered handler. In AudioWorklet contexts the worklet
+must call [pollReplies](#pollreplies) from `process()` to drain; in all other
+contexts delivery is automatic. All registered channels receive all
+replies (broadcast); filter locally if you only need specific addresses.
+
+SAB mode: handler receives `(view, offset, length, sequence)` — zero-copy
+into the shared buffer. Read bytes from `view[offset..offset+length]`.
+Data is valid only for the duration of the handler call.
+
+PM mode: handler receives `(oscData, sequence)` where `oscData` is a copy.
+
+###### Parameters
+
+| Parameter | Type                                                                                    |
+| --------- | --------------------------------------------------------------------------------------- |
+| `handler` | (`view`, `offset`, `length`, `sequence`) => `void` \| (`oscData`, `sequence`) => `void` |
+
+###### Returns
+
+`void`
+
+###### Example
+
+```ts
+channel.setReplyHandler((view, offset, length, sequence) => {
+  // SAB: read raw OSC bytes from view[offset..offset+length]
+});
+```
 
 ##### fromTransferable()
 

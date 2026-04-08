@@ -3,7 +3,7 @@
 
 import { writeToRingBuffer, readMessagesFromBuffer } from './ring_buffer_core.js';
 import * as MetricsOffsets from './metrics_offsets.js';
-import { calculateInControlIndices } from './control_offsets.js';
+import { calculateInControlIndices, calculateReplyChannelIndices } from './control_offsets.js';
 import {
     classifyOscMessage,
     shouldBypass,
@@ -62,7 +62,7 @@ export class OscChannel {
     #replyPort;           // PM mode: MessagePort receiving replies from worklet
     #replyQueue = [];     // PM AudioWorklet mode: queued replies for pollReplies()
     #replyWorkletPort;    // PM mode: port to worklet for register/unregister
-    #replyControlBase;    // SAB mode: byte offset base for this slot's control words
+    #replyChannelIndices; // SAB mode: { headIndex, tailIndex, activeIndex, dropsIndex } for this slot
 
     // Local metrics counters
     // SAB mode: used for tracking, then written atomically to shared memory
@@ -479,6 +479,17 @@ export class OscChannel {
     }
 
     /**
+     * Number of reply messages dropped because the reply buffer was full.
+     * SAB mode only — returns undefined in PM mode or before activateReplies().
+     * Counter resets each time the slot is (re)claimed.
+     * @returns {number|undefined}
+     */
+    get replyDrops() {
+        if (this.#mode !== 'sab' || this.#replySlotIndex < 0) return undefined;
+        return Atomics.load(this.#views.atomicView, this.#replyChannelIndices.dropsIndex);
+    }
+
+    /**
      * Get data needed to transfer this channel to a worker
      * Use with: worker.postMessage({ channel: oscChannel.transferable }, oscChannel.transferList)
      * @returns {Object} Serializable config object
@@ -558,23 +569,13 @@ export class OscChannel {
     // =========================================================================
 
     /**
-     * Register a callback for OSC replies from scsynth.
-     *
-     * In Worker context: callback fires automatically from the event loop.
-     * In AudioWorklet context: callback fires during pollReplies() calls.
-     *
-     * SAB mode (zero-copy): callback receives (view: Uint8Array, offset: number, length: number, sequence: number).
-     *   The view is the shared buffer — read reply data from view[offset..offset+length].
-     *   Data is valid for the duration of the callback. No allocation, no copy.
-     *
-     * PM mode: callback receives (oscData: Uint8Array, sequence: number).
-     *   oscData is a copy of the reply data.
-     *
-     * @param {Function} callback - SAB: (view, offset, length, sequence) => void; PM: (oscData, sequence) => void
+     * Activate reply reception — claim a reply channel slot.
+     * Usually called for you by setReplyHandler(); only call directly if
+     * you want to claim the slot before installing a handler.
+     * In SAB mode, atomically claims one of 8 reply buffer slots.
+     * In PM mode, registers a MessagePort with the worklet for reply delivery.
      */
-    onReply(callback) {
-        this.#replyCallback = callback;
-
+    activateReplies() {
         if (this.#mode === 'sab') {
             this.#activateSabReply();
         } else {
@@ -583,12 +584,9 @@ export class OscChannel {
     }
 
     /**
-     * Unregister the reply callback and release the reply channel.
+     * Deactivate reply reception — release the reply channel slot.
      */
-    offReply() {
-        if (!this.#replyCallback) return;
-        this.#replyCallback = null;
-
+    deactivateReplies() {
         if (this.#mode === 'sab') {
             this.#deactivateSabReply();
         } else {
@@ -597,18 +595,52 @@ export class OscChannel {
     }
 
     /**
-     * Poll for pending replies and fire the callback for each.
-     * Call from AudioWorklet process() or anywhere you want synchronous delivery.
-     * No-op if no callback registered or no replies pending.
-     * @returns {number} Number of replies processed
+     * Register a handler for OSC replies from scsynth. Idempotent — replaces
+     * any previously-registered handler. In AudioWorklet contexts the worklet
+     * must call pollReplies() from process() to drain; in all other contexts
+     * delivery is automatic.
+     *
+     * SAB mode (zero-copy): handler receives (view, offset, length, sequence).
+     *   `view` is the shared SAB Uint8Array; read bytes from view[offset..offset+length].
+     *   Data is valid only for the duration of the handler call.
+     * PM mode: handler receives (oscData, sequence). `oscData` is a copy.
+     *
+     * @param {Function} handler
      */
-    pollReplies() {
-        if (!this.#replyCallback) return 0;
+    setReplyHandler(handler) {
+        this.#replyCallback = handler;
+        this.activateReplies();
+        this.#setupAutoNotification();
+    }
 
+    /**
+     * Clear the reply handler and release the reply channel. Idempotent.
+     */
+    clearReplyHandler() {
+        this.#replyCallback = null;
+        this.deactivateReplies();
+    }
+
+    /**
+     * Drain pending replies, calling the registered handler (or `handler`
+     * argument, if given) once per message. Returns the number of messages
+     * processed. Zero-allocation on the hot path.
+     *
+     * Call from AudioWorklet process() to receive replies on the audio thread.
+     * In non-worklet contexts, automatic delivery already calls this for you.
+     *
+     * @param {Function} [handler] - Optional override for this call only
+     * @returns {number} Number of messages drained
+     */
+    pollReplies(handler) {
+        const cb = handler || this.#replyCallback;
+        if (!cb) return 0;
         if (this.#mode === 'sab') {
-            return this.#pollRepliesSab();
+            if (this.#replySlotIndex < 0) return 0;
+            return this.#pollRepliesSab(cb);
         } else {
-            return this.#pollRepliesPm();
+            if (!this.#replyPort) return 0;
+            return this.#pollRepliesPm(cb);
         }
     }
 
@@ -622,41 +654,45 @@ export class OscChannel {
         const atomicView = this.#views.atomicView;
 
         // Atomically claim a slot via compareExchange on the active flag.
-        // This works from any thread without transport involvement.
-        // Head/tail are reset BEFORE setting active to avoid a race where
-        // the osc_in_worker sees active=1 and reads stale head/tail values.
-        let slot = -1;
+        // Head/tail/drops are reset BEFORE setting active to avoid a race
+        // where the osc_in_worker sees active=1 and reads stale values.
         for (let i = 0; i < bc.REPLY_CHANNEL_COUNT; i++) {
-            const controlBase = this.#sabConfig.ringBufferBase +
-                bc.REPLY_CHANNELS_CONTROL_START + (i * bc.REPLY_CHANNEL_CONTROL_SIZE);
-            const headIdx = controlBase / 4;
-            const tailIdx = (controlBase + 4) / 4;
-            const activeIdx = (controlBase + 8) / 4;
-            // Reset head/tail before claiming — safe because slot is inactive
-            Atomics.store(atomicView, headIdx, 0);
-            Atomics.store(atomicView, tailIdx, 0);
-            if (Atomics.compareExchange(atomicView, activeIdx, 0, 1) === 0) {
-                slot = i;
-                this.#replyControlBase = controlBase;
-                break;
+            const idx = calculateReplyChannelIndices(
+                this.#sabConfig.ringBufferBase,
+                bc.REPLY_CHANNELS_CONTROL_START,
+                bc.REPLY_CHANNEL_CONTROL_SIZE,
+                i,
+            );
+            Atomics.store(atomicView, idx.headIndex, 0);
+            Atomics.store(atomicView, idx.tailIndex, 0);
+            Atomics.store(atomicView, idx.dropsIndex, 0);
+            if (Atomics.compareExchange(atomicView, idx.activeIndex, 0, 1) === 0) {
+                this.#replyChannelIndices = idx;
+                this.#replySlotIndex = i;
+                return;
             }
         }
-        if (slot < 0) {
-            throw new Error('All ' + bc.REPLY_CHANNEL_COUNT + ' reply channel slots are in use — cannot register for replies');
-        }
-        this.#replySlotIndex = slot;
+        throw new Error('All ' + bc.REPLY_CHANNEL_COUNT + ' reply channel slots are in use — cannot register for replies');
+    }
+
+    #setupAutoNotification() {
+        // Idempotent: skip if already wired up.
+        if (this.#replyNotifyFn || this.#replyWaitLoopActive || this.#replyPollTimer) return;
 
         const isAudioWorklet = typeof AudioWorkletGlobalScope !== 'undefined';
         if (isAudioWorklet) {
-            // AudioWorklet: caller reads synchronously via pollReplies() in process().
-            // No auto-mechanism needed.
-        } else if (this.#replyNotifier) {
-            // Main thread (or any context with a notifier): event-driven via transport.
-            // The transport calls our function when the osc_in_worker posts new replies.
+            // AudioWorklet has no event loop available to process(); the worklet
+            // must call pollReplies() itself from process(). No-op here.
+            return;
+        }
+        if (this.#mode !== 'sab') {
+            // PM mode wires its own port-based delivery in #activatePmReply().
+            return;
+        }
+        if (this.#replyNotifier) {
             this.#replyNotifyFn = () => this.pollReplies();
             this.#replyNotifier.subscribe(this.#replyNotifyFn);
         } else if (typeof Atomics !== 'undefined' && typeof Atomics.waitAsync === 'function') {
-            // Worker: event-driven via Atomics.waitAsync on reply buffer head.
             this.#startReplyWaitLoop();
         } else {
             // Fallback: setInterval polling (should not happen in modern browsers)
@@ -668,8 +704,7 @@ export class OscChannel {
         if (this.#replySlotIndex < 0) return;
 
         // Deactivate — osc_in_worker stops writing
-        const atomicView = this.#views.atomicView;
-        Atomics.store(atomicView, (this.#replyControlBase + 8) / 4, 0); // active = 0
+        Atomics.store(this.#views.atomicView, this.#replyChannelIndices.activeIndex, 0);
 
         if (this.#replyPollTimer) {
             clearInterval(this.#replyPollTimer);
@@ -685,18 +720,18 @@ export class OscChannel {
         this.#replyWaitLoopActive = false;
 
         this.#replySlotIndex = -1;
+        this.#replyChannelIndices = null;
     }
 
     #startReplyWaitLoop() {
         const atomicView = this.#views.atomicView;
-        const headIdx = this.#replyControlBase / 4;
+        const { headIndex: headIdx, tailIndex: tailIdx } = this.#replyChannelIndices;
         this.#replyWaitLoopActive = true;
 
         const waitAndPoll = () => {
-            if (!this.#replyWaitLoopActive || !this.#replyCallback) return;
+            if (!this.#replyWaitLoopActive) return;
 
             const currentHead = Atomics.load(atomicView, headIdx);
-            const tailIdx = (this.#replyControlBase + 4) / 4;
             const currentTail = Atomics.load(atomicView, tailIdx);
 
             // If there's data, drain it first
@@ -725,10 +760,9 @@ export class OscChannel {
         waitAndPoll();
     }
 
-    #pollRepliesSab() {
+    #pollRepliesSab(callback) {
         const atomicView = this.#views.atomicView;
-        const headIdx = this.#replyControlBase / 4;
-        const tailIdx = (this.#replyControlBase + 4) / 4;
+        const { headIndex: headIdx, tailIndex: tailIdx } = this.#replyChannelIndices;
 
         const head = Atomics.load(atomicView, headIdx);
         const tail = Atomics.load(atomicView, tailIdx);
@@ -740,8 +774,6 @@ export class OscChannel {
             (this.#replySlotIndex * bc.REPLY_CHANNEL_BUFFER_SIZE);
         const bufferSize = bc.REPLY_CHANNEL_BUFFER_SIZE;
 
-        let count = 0;
-        const callback = this.#replyCallback;
         const uint8View = this.#views.uint8View;
 
         const { newTail, messagesRead } = readMessagesFromBuffer({
@@ -754,19 +786,17 @@ export class OscChannel {
             headerSize: bc.MESSAGE_HEADER_SIZE || 16,
             maxMessages: 64,
             onMessage: (payloadOffset, payloadLength, sequence) => {
-                // Zero-copy: pass the shared buffer view, offset, and length
-                // directly to the callback. No allocation, no copy.
-                // Data is valid for the duration of the callback (tail not
-                // yet advanced). Caller reads from view[offset..offset+length].
+                // Zero-copy: pass shared buffer view + offset/length directly.
+                // Data is valid for the duration of the callback only — caller
+                // must read or copy what they need before returning.
                 callback(uint8View, payloadOffset, payloadLength, sequence);
-                count++;
             },
         });
 
         if (messagesRead > 0) {
             Atomics.store(atomicView, tailIdx, newTail);
         }
-        return count;
+        return messagesRead;
     }
 
     #activatePmReply() {
@@ -827,11 +857,10 @@ export class OscChannel {
         this.#replyQueue.length = 0;
     }
 
-    #pollRepliesPm() {
+    #pollRepliesPm(callback) {
         const queue = this.#replyQueue;
-        if (queue.length === 0) return 0;
         const count = queue.length;
-        const callback = this.#replyCallback;
+        if (count === 0) return 0;
         for (let i = 0; i < count; i++) {
             callback(queue[i].oscData, queue[i].sequence);
         }
@@ -843,7 +872,7 @@ export class OscChannel {
      * Close the channel
      */
     close() {
-        this.offReply();
+        this.clearReplyHandler();
         if (this.#mode === 'postMessage' && this.#directPort) {
             this.#directPort.close();
             this.#directPort = null;

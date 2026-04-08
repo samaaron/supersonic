@@ -204,7 +204,7 @@ The AudioWorklet reads the OUT ring buffer directly during `process()` and sends
 
 ### Direct Reply Delivery to OscChannels
 
-The main thread path described above is the default. But workers and AudioWorklets can also register for replies directly via `channel.onReply()`, bypassing the main thread entirely. This mirrors the native backend's `/supersonic/notify` pattern where external OSC clients register to receive replies.
+The main thread path described above is the default. But workers and AudioWorklets can also register for replies directly via `channel.setReplyHandler()`, bypassing the main thread entirely. This mirrors the native backend's `/supersonic/notify` pattern where external OSC clients register to receive replies.
 
 When a channel registers, replies are fanned out at the point of origin — the same place that already has the reply bytes in hand:
 

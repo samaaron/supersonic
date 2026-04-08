@@ -1,6 +1,6 @@
 // Test AudioWorklet processor for verifying reply reception via pollReplies().
-// Cannot import OscChannel (AudioWorklets don't support ES modules in Chrome),
-// so it implements minimal SAB reply buffer polling inline.
+// Implements minimal SAB reply buffer polling inline rather than importing
+// OscChannel, to test the low-level ring buffer protocol directly.
 
 class ReplyTestProcessor extends AudioWorkletProcessor {
   constructor() {

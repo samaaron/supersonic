@@ -9,7 +9,7 @@
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { readMessagesFromBuffer, writeMessageToBuffer, calculateAvailableSpace } from '../lib/ring_buffer_core.js';
-import { calculateOutControlIndices } from '../lib/control_offsets.js';
+import { calculateOutControlIndices, calculateReplyChannelIndices } from '../lib/control_offsets.js';
 import { getCurrentNTPFromPerformance as getCurrentNTP } from '../lib/osc_classifier.js';
 import { runSabWorker } from '../lib/sab_worker_loop.js';
 
@@ -17,7 +17,7 @@ import { runSabWorker } from '../lib/sab_worker_loop.js';
 let lastSequenceReceived = -1;
 
 // Per-channel reply buffer fan-out state (populated on init)
-let replyChannels = null;  // Array of { bufferStart, bufferSize, headIndex, tailIndex, activeIndex }
+let replyChannels = null;  // Array of { bufferStart, bufferSize, headIndex, tailIndex, activeIndex, dropsIndex }
 let replyHeaderScratch = null;  // Pre-allocated scratch for wrap-around writes
 let replyHeaderScratchView = null;
 
@@ -79,7 +79,10 @@ function readOscMessages(ctx) {
                     const chTail = Atomics.load(atomicView, rc.tailIndex);
                     const available = calculateAvailableSpace(chHead, chTail, rc.bufferSize);
                     const needed = ((bufferConstants.MESSAGE_HEADER_SIZE + payloadLength) + 3) & ~3;
-                    if (needed > available) continue;  // Channel buffer full — drop for this channel
+                    if (needed > available) {
+                        Atomics.add(atomicView, rc.dropsIndex, 1);
+                        continue;
+                    }
 
                     const newHead = writeMessageToBuffer({
                         uint8View, dataView,
@@ -133,19 +136,19 @@ runSabWorker({
         replyHeaderScratch = new Uint8Array(bc.MESSAGE_HEADER_SIZE);
         replyHeaderScratchView = new DataView(replyHeaderScratch.buffer);
 
-        // Compute per-channel offsets.
-        // Control region: REPLY_CHANNELS_CONTROL_START + (i * 12) → [head(4), tail(4), active(4)]
-        // Buffer region:  REPLY_CHANNELS_BUFFER_START + (i * REPLY_CHANNEL_BUFFER_SIZE)
         const base = ctx.ringBufferBase;
         replyChannels = [];
         for (let i = 0; i < bc.REPLY_CHANNEL_COUNT; i++) {
-            const controlBase = base + bc.REPLY_CHANNELS_CONTROL_START + (i * bc.REPLY_CHANNEL_CONTROL_SIZE);
+            const idx = calculateReplyChannelIndices(
+                base, bc.REPLY_CHANNELS_CONTROL_START, bc.REPLY_CHANNEL_CONTROL_SIZE, i,
+            );
             replyChannels.push({
                 bufferStart: base + bc.REPLY_CHANNELS_BUFFER_START + (i * bc.REPLY_CHANNEL_BUFFER_SIZE),
                 bufferSize: bc.REPLY_CHANNEL_BUFFER_SIZE,
-                headIndex: controlBase / 4,       // Int32Array index
-                tailIndex: (controlBase + 4) / 4,
-                activeIndex: (controlBase + 8) / 4,
+                headIndex: idx.headIndex,
+                tailIndex: idx.tailIndex,
+                activeIndex: idx.activeIndex,
+                dropsIndex: idx.dropsIndex,
             });
         }
     },

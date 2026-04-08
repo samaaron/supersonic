@@ -163,7 +163,7 @@ self.onmessage = (e) => {
         return originalSetInterval.apply(this, args);
       };
 
-      oscChannel.onReply((...args) => {
+      oscChannel.setReplyHandler((...args) => {
         let data, dataOffset, dataLength;
         if (args.length === 4) {
           [data, dataOffset, dataLength] = args;
@@ -184,7 +184,7 @@ self.onmessage = (e) => {
       oscChannel.send(encodeStatusMessage());
 
       setTimeout(() => {
-        oscChannel.offReply();
+        oscChannel.clearReplyHandler();
         self.postMessage({
           type: "replyResults",
           addresses: noPollAddresses,
@@ -200,7 +200,7 @@ self.onmessage = (e) => {
         return;
       }
       const replyAddresses = [];
-      oscChannel.onReply((...args) => {
+      oscChannel.setReplyHandler((...args) => {
         // Handle both SAB mode (view, offset, length, sequence) and PM mode (oscData, sequence)
         let data, dataOffset, dataLength;
         if (args.length === 4) {
@@ -222,7 +222,7 @@ self.onmessage = (e) => {
 
       // Wait for replies to arrive, then report
       setTimeout(() => {
-        oscChannel.offReply();
+        oscChannel.clearReplyHandler();
         self.postMessage({ type: "replyResults", addresses: replyAddresses });
       }, 1000);
       break;

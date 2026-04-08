@@ -958,38 +958,71 @@ export class OscChannel {
   nextNodeId(): number;
 
   /**
-   * Register a callback for OSC replies from scsynth.
+   * Register a handler for OSC replies from scsynth. Idempotent — replaces
+   * any previously-registered handler. In AudioWorklet contexts the worklet
+   * must call {@link pollReplies} from `process()` to drain; in all other
+   * contexts delivery is automatic. All registered channels receive all
+   * replies (broadcast); filter locally if you only need specific addresses.
    *
-   * In Worker context the callback fires automatically from the event loop.
-   * In AudioWorklet context the callback fires during {@link pollReplies} calls.
+   * SAB mode: handler receives `(view, offset, length, sequence)` — zero-copy
+   * into the shared buffer. Read bytes from `view[offset..offset+length]`.
+   * Data is valid only for the duration of the handler call.
    *
-   * All registered channels receive all replies (broadcast). Filter locally
-   * if you only need specific addresses.
-   *
-   * @param callback - Called with raw OSC bytes and sequence number for each reply
+   * PM mode: handler receives `(oscData, sequence)` where `oscData` is a copy.
    *
    * @example
-   * channel.onReply((oscData, sequence) => {
-   *   // oscData is a Uint8Array of raw OSC bytes
+   * channel.setReplyHandler((view, offset, length, sequence) => {
+   *   // SAB: read raw OSC bytes from view[offset..offset+length]
    * });
    */
-  onReply(callback: (oscData: Uint8Array, sequence: number) => void): void;
+  setReplyHandler(
+    handler:
+      | ((view: Uint8Array, offset: number, length: number, sequence: number) => void)
+      | ((oscData: Uint8Array, sequence: number) => void),
+  ): void;
 
   /**
-   * Unregister the reply callback and release the reply channel.
+   * Clear the reply handler and release the reply channel. Idempotent.
    */
-  offReply(): void;
+  clearReplyHandler(): void;
 
   /**
-   * Poll for pending replies and fire the {@link onReply} callback for each.
-   *
-   * Call this from an AudioWorklet's `process()` method to receive replies
-   * synchronously on the audio thread. In Worker context replies are delivered
-   * automatically — calling this is optional but harmless.
-   *
-   * @returns Number of replies processed
+   * Activate the reply slot without registering a handler. Usually called
+   * for you by {@link setReplyHandler}; only call directly if you want to
+   * claim the slot before installing a handler (or to use the optional
+   * one-shot handler argument of {@link pollReplies}).
    */
-  pollReplies(): number;
+  activateReplies(): void;
+
+  /**
+   * Release the reply slot. Usually called for you by {@link clearReplyHandler}.
+   */
+  deactivateReplies(): void;
+
+  /**
+   * Drain pending replies, calling the registered handler (or `handler`
+   * argument, if given) once per message. Returns the number of messages
+   * processed. Zero-allocation on the hot path.
+   *
+   * Call from an AudioWorklet's `process()` method to receive replies on
+   * the audio thread. In other contexts automatic delivery already calls
+   * this for you.
+   *
+   * @param handler - Optional override for this call only
+   * @returns Number of messages drained
+   */
+  pollReplies(
+    handler?:
+      | ((view: Uint8Array, offset: number, length: number, sequence: number) => void)
+      | ((oscData: Uint8Array, sequence: number) => void),
+  ): number;
+
+  /**
+   * Number of reply messages dropped because the reply buffer was full.
+   * SAB mode only — undefined in PM mode or before {@link activateReplies}.
+   * Counter resets each time the slot is (re)claimed.
+   */
+  get replyDrops(): number | undefined;
 
   /** Close the channel and release its ports. */
   close(): void;
