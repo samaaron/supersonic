@@ -1058,34 +1058,44 @@ export class SuperSonic {
   getTree() {
     const raw = this.getRawTree();
 
-    // Build hierarchical tree from flat node list
-    const buildNode = (rawNode) => ({
-      id: rawNode.uuid || rawNode.id,
-      type: rawNode.isGroup ? 'group' : 'synth',
-      defName: rawNode.defName,
-      children: []
-    });
-
-    // Create node map for efficient lookup
-    const nodeMap = new Map();
+    // One map per node holding both raw + tree representations.
+    // Find the root in the same pass.
+    const byId = new Map();
+    let rootRaw = null;
     for (const rawNode of raw.nodes) {
-      nodeMap.set(rawNode.id, buildNode(rawNode));
-    }
-
-    // Build parent-child relationships
-    let root = null;
-    for (const rawNode of raw.nodes) {
-      const node = nodeMap.get(rawNode.id);
-      if (rawNode.parentId === -1 || rawNode.parentId === 0 && rawNode.id === 0) {
-        // Root node (id 0 with parentId -1 or 0)
-        root = node;
-      } else {
-        const parent = nodeMap.get(rawNode.parentId);
-        if (parent) {
-          parent.children.push(node);
-        }
+      const tree = {
+        id: rawNode.uuid || rawNode.id,
+        type: rawNode.isGroup ? 'group' : 'synth',
+        defName: rawNode.defName,
+        children: [],
+      };
+      byId.set(rawNode.id, { raw: rawNode, tree });
+      if (rawNode.parentId === -1 || (rawNode.parentId === 0 && rawNode.id === 0)) {
+        rootRaw = rawNode;
       }
     }
+
+    // Walk children via headId/nextId — sibling order is the linked-list
+    // order maintained by scsynth, NOT raw.nodes iteration order.
+    // Bound the walk by total node count to make any cycle visible.
+    const maxSteps = byId.size;
+    const populateChildren = (groupId) => {
+      const groupEntry = byId.get(groupId);
+      if (!groupEntry || !groupEntry.raw.isGroup) return;
+      let cur = groupEntry.raw.headId;
+      let steps = 0;
+      while (cur !== -1 && cur !== 0 && steps < maxSteps) {
+        const childEntry = byId.get(cur);
+        if (!childEntry) break;
+        groupEntry.tree.children.push(childEntry.tree);
+        if (childEntry.raw.isGroup) populateChildren(cur);
+        cur = childEntry.raw.nextId;
+        steps++;
+      }
+    };
+
+    const root = rootRaw ? byId.get(rootRaw.id).tree : null;
+    if (rootRaw) populateChildren(rootRaw.id);
 
     return {
       nodeCount: raw.nodeCount,

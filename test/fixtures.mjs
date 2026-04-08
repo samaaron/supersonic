@@ -144,3 +144,52 @@ export const WAIT_FOR_MESSAGE_HELPER = `
   }
 `;
 
+/**
+ * Helpers for raw node tree inspection (for use inside page.evaluate).
+ * Provides:
+ *   - makeUuid(suffix): build a 16-byte UUID v7 with a recognizable last byte
+ *   - findBySuffix(rawTree, suffix): node id for the node whose UUID ends in suffix
+ *   - childrenInOrder(rawTree, groupId): linked-list children ids in walk order
+ *   - findInTree(treeNode, id): depth-first lookup in a getTree() result
+ */
+export const NODE_TREE_HELPERS = `
+  function makeUuid(suffix) {
+    const b = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) b[i] = (i * 13 + suffix * 31) & 0xff;
+    b[6] = (b[6] & 0x0f) | 0x70; // version 7
+    b[8] = (b[8] & 0x3f) | 0x80; // variant
+    b[15] = suffix & 0xff;       // recognizable suffix
+    return b;
+  }
+  function findBySuffix(rawTree, suffix) {
+    const node = rawTree.nodes.find((n) => n.uuid && n.uuid[15] === suffix);
+    return node ? node.id : null;
+  }
+  function childrenInOrder(rawTree, groupId) {
+    const byId = new Map();
+    for (const n of rawTree.nodes) byId.set(n.id, n);
+    const group = byId.get(groupId);
+    if (!group || !group.isGroup) return [];
+    const out = [];
+    let cur = group.headId;
+    let safety = 0;
+    const max = byId.size + 1;
+    while (cur !== -1 && cur !== 0 && safety < max) {
+      out.push(cur);
+      const node = byId.get(cur);
+      if (!node) break;
+      cur = node.nextId;
+      safety++;
+    }
+    return out;
+  }
+  function findInTree(treeNode, id) {
+    if (treeNode.id === id) return treeNode;
+    for (const c of treeNode.children || []) {
+      const found = findInTree(c, id);
+      if (found) return found;
+    }
+    return null;
+  }
+`;
+
