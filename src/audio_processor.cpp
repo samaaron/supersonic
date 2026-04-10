@@ -338,6 +338,16 @@ extern "C" {
         audio_capture->sample_rate = static_cast<uint32_t>(sample_rate);
         audio_capture->channels = AUDIO_CAPTURE_CHANNELS;
 
+        // Initialize scope buffers
+        {
+            uint8_t* scopeBase = shared_memory + SCOPE_START;
+            memset(scopeBase, 0, SCOPE_TOTAL_SIZE);
+            auto* maxScopes = reinterpret_cast<uint32_t*>(scopeBase + 0);
+            auto* framesPerScope = reinterpret_cast<uint32_t*>(scopeBase + 8);
+            *maxScopes = SCOPE_MAX_SCOPES;
+            *framesPerScope = SCOPE_FRAMES_PER_SCOPE;
+        }
+
         // Enable worklet_debug
         memory_initialized = true;
 

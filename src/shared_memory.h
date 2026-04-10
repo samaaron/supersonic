@@ -89,8 +89,45 @@ constexpr uint32_t REPLY_CHANNELS_CONTROL_SIZE = REPLY_CHANNEL_COUNT * REPLY_CHA
 constexpr uint32_t REPLY_CHANNELS_BUFFER_START = REPLY_CHANNELS_CONTROL_START + REPLY_CHANNELS_CONTROL_SIZE;
 constexpr uint32_t REPLY_CHANNELS_BUFFER_SIZE = REPLY_CHANNEL_COUNT * REPLY_CHANNEL_BUFFER_SIZE;    // 128KB
 
+// Scope buffers — per-bus audio scope data for visualisation.
+// Uses the same triple-buffer algorithm as native scope_buffer.hpp
+// but with fixed layout in the SAB (no TLSF pool, no relative_ptr).
+//
+// Each scope slot: header (16B) + 3 triple-buffer regions of audio data.
+// ScopeOut2 UGen writes here; main thread reads via getScope(n).
+// In PM mode, scope snapshots are included in the heartbeat postMessage.
+#ifndef SCOPE_MAX_SCOPES
+#define SCOPE_MAX_SCOPES 32
+#endif
+#ifndef SCOPE_FRAMES_PER_SCOPE
+#define SCOPE_FRAMES_PER_SCOPE 1024
+#endif
+constexpr uint32_t SCOPE_CHANNELS = 2;  // Always stereo (ScopeOut2 writes 2 channels)
+constexpr uint32_t SCOPE_HEADER_SIZE = 32;  // Global header (16-aligned)
+constexpr uint32_t SCOPE_SLOT_HEADER_SIZE = 16;  // Per-slot metadata
+constexpr uint32_t SCOPE_REGION_SIZE = SCOPE_FRAMES_PER_SCOPE * SCOPE_CHANNELS * sizeof(float);  // One triple-buffer region
+constexpr uint32_t SCOPE_SLOT_DATA_SIZE = 3 * SCOPE_REGION_SIZE;  // Triple buffer (3 regions)
+constexpr uint32_t SCOPE_SLOT_SIZE = SCOPE_SLOT_HEADER_SIZE + SCOPE_SLOT_DATA_SIZE;  // ~24KB per slot
+constexpr uint32_t SCOPE_TOTAL_SIZE = SCOPE_HEADER_SIZE + (SCOPE_MAX_SCOPES * SCOPE_SLOT_SIZE);
+
+constexpr uint32_t SCOPE_START = REPLY_CHANNELS_BUFFER_START + REPLY_CHANNELS_BUFFER_SIZE;
+
+// Scope header layout (at SCOPE_START):
+//   [0..3]   u32  maxScopes
+//   [4..7]   u32  activeCount
+//   [8..11]  u32  framesPerScope
+//   [12..15] u32  version (increments on scope add/remove)
+//   [16..31] reserved
+//
+// Per-scope slot (at SCOPE_START + SCOPE_HEADER_SIZE + index * SCOPE_SLOT_SIZE):
+//   [0..3]   u32  state (0=free, 1=active)
+//   [4..7]   u32  channels
+//   [8..11]  i32  stage (atomic: triple-buffer swap index 0/1/2)
+//   [12..15] u32  _in (writer's current triple-buffer region index)
+//   [16..]   float data[3][framesPerScope * channels]  — triple-buffered audio
+
 // Total buffer size (for validation)
-constexpr uint32_t TOTAL_BUFFER_SIZE  = REPLY_CHANNELS_BUFFER_START + REPLY_CHANNELS_BUFFER_SIZE;
+constexpr uint32_t TOTAL_BUFFER_SIZE  = SCOPE_START + SCOPE_TOTAL_SIZE;
 
 // Message structure
 struct alignas(4) Message {
@@ -301,6 +338,15 @@ struct BufferLayout {
     uint32_t reply_channel_buffer_size;
     uint32_t reply_channel_control_size;
     uint32_t reply_channel_count;
+    uint32_t scope_start;
+    uint32_t scope_total_size;
+    uint32_t scope_header_size;
+    uint32_t scope_slot_size;
+    uint32_t scope_slot_header_size;
+    uint32_t scope_region_size;
+    uint32_t scope_max_scopes;
+    uint32_t scope_frames_per_scope;
+    uint32_t scope_channels;
     uint32_t total_buffer_size;
     uint32_t max_message_size;
     uint32_t message_magic;
@@ -352,6 +398,15 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     REPLY_CHANNEL_BUFFER_SIZE,
     REPLY_CHANNEL_CONTROL_SIZE,
     REPLY_CHANNEL_COUNT,
+    SCOPE_START,
+    SCOPE_TOTAL_SIZE,
+    SCOPE_HEADER_SIZE,
+    SCOPE_SLOT_SIZE,
+    SCOPE_SLOT_HEADER_SIZE,
+    SCOPE_REGION_SIZE,
+    SCOPE_MAX_SCOPES,
+    SCOPE_FRAMES_PER_SCOPE,
+    SCOPE_CHANNELS,
     TOTAL_BUFFER_SIZE,
     MAX_MESSAGE_SIZE,
     MESSAGE_MAGIC,

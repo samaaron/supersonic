@@ -89,6 +89,9 @@ extern "C" {
 // Shared memory is not supported in Emscripten/WebAssembly builds
 #ifndef __EMSCRIPTEN__
 #include "server_shm.hpp"
+#else
+#include "shared_memory.h"  // For SCOPE_ constants (SAB-backed scope buffers)
+extern "C" int get_ring_buffer_base();  // from audio_processor.cpp — returns WASM pointer as int
 #endif
 
 #include <filesystem>
@@ -1135,12 +1138,59 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
         return kSCFalse;
     }
 #else
-    // TODO: Scope buffers are currently disabled under Emscripten because they relied on
-    // native shared memory (shm). To support ScopeOut/ScopeOut2 UGens in the AudioWorklet,
-    // we'd need to route scope data out via the existing ring buffer or postMessage path.
-    // See also: ScopeOut/ScopeOut2 in DelayUGens.cpp.
-    hnd->internalData = nullptr;
-    return kSCFalse;
+    // Emscripten (WASM): scope buffers are backed by a fixed region in the
+    // SharedArrayBuffer, using the same triple-buffer algorithm as native
+    // scope_buffer.hpp but with flat offsets instead of relative_ptr + TLSF.
+    //
+    // SAB layout per slot (at SCOPE_START + SCOPE_HEADER_SIZE + index * SCOPE_SLOT_SIZE):
+    //   [0..3]   u32 state (0=free, 1=active)
+    //   [4..7]   u32 channels
+    //   [8..11]  i32 stage (atomic triple-buffer swap index)
+    //   [12..15] u32 _in (writer's current region)
+    //   [16..]   float data[3][maxFrames * channels]
+
+    uint8_t* base = reinterpret_cast<uint8_t*>(get_ring_buffer_base());
+    if (!base) {
+        hnd->internalData = nullptr;
+        return kSCFalse;
+    }
+
+    if (index < 0 || index >= SCOPE_MAX_SCOPES) {
+        hnd->internalData = nullptr;
+        return kSCFalse;
+    }
+
+    if ((uint32_t)maxFrames > SCOPE_FRAMES_PER_SCOPE)
+        maxFrames = SCOPE_FRAMES_PER_SCOPE;
+    if (channels > (int)SCOPE_CHANNELS)
+        channels = SCOPE_CHANNELS;
+
+    uint8_t* slotBase = base + SCOPE_START + SCOPE_HEADER_SIZE + index * SCOPE_SLOT_SIZE;
+    auto* state = reinterpret_cast<std::atomic<uint32_t>*>(slotBase + 0);
+    auto* slotChannels = reinterpret_cast<uint32_t*>(slotBase + 4);
+    auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slotBase + 8);
+    auto* writerIn = reinterpret_cast<uint32_t*>(slotBase + 12);
+
+    // Initialize slot
+    state->store(1, std::memory_order_relaxed);  // active
+    *slotChannels = channels;
+    stage->store(0, std::memory_order_relaxed);  // stage = region 0
+    *writerIn = 1;  // writer starts at region 1
+
+    // Update global header
+    auto* activeCount = reinterpret_cast<std::atomic<uint32_t>*>(base + SCOPE_START + 4);
+    activeCount->fetch_add(1, std::memory_order_relaxed);
+    auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SCOPE_START + 12);
+    version->fetch_add(1, std::memory_order_relaxed);
+
+    // Point hnd->data at writer's current region (region 1)
+    float* dataBase = reinterpret_cast<float*>(slotBase + SCOPE_SLOT_HEADER_SIZE);
+    uint32_t regionSamples = SCOPE_FRAMES_PER_SCOPE * SCOPE_CHANNELS;
+    hnd->data = dataBase + (*writerIn) * regionSamples;
+    hnd->internalData = slotBase;  // Store slot pointer for push/release
+    hnd->channels = channels;
+    hnd->maxFrames = maxFrames;
+    return kSCTrue;
 #endif
 }
 
@@ -1150,7 +1200,21 @@ void pushScopeBuffer(World* inWorld, ScopeBufferHnd* hnd, int frames) {
     writer.push(frames);
     hnd->data = writer.data();
 #else
-    // Emscripten: No-op (see getScopeBuffer TODO above)
+    // Emscripten: triple-buffer push on SAB scope slot.
+    // Swap writer's region (_in) with stage (atomic).
+    if (!hnd->internalData) return;
+    uint8_t* slotBase = reinterpret_cast<uint8_t*>(hnd->internalData);
+    auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slotBase + 8);
+    auto* writerIn = reinterpret_cast<uint32_t*>(slotBase + 12);
+
+    // Publish: swap _in with stage
+    int oldStage = stage->exchange((int)*writerIn, std::memory_order_release);
+    *writerIn = (uint32_t)oldStage;  // Reclaim old stage as new write region
+
+    // Update hnd->data to point at new write region
+    float* dataBase = reinterpret_cast<float*>(slotBase + SCOPE_SLOT_HEADER_SIZE);
+    uint32_t regionSamples = SCOPE_FRAMES_PER_SCOPE * SCOPE_CHANNELS;
+    hnd->data = dataBase + (*writerIn) * regionSamples;
 #endif
 }
 
@@ -1162,7 +1226,21 @@ void releaseScopeBuffer(World* inWorld, ScopeBufferHnd* hnd) {
         shm->release_scope_buffer_writer(writer);
     }
 #else
-    // Emscripten: No-op (see getScopeBuffer TODO above)
+    // Emscripten: mark slot as free
+    if (!hnd->internalData) return;
+    uint8_t* slotBase = reinterpret_cast<uint8_t*>(hnd->internalData);
+    auto* state = reinterpret_cast<std::atomic<uint32_t>*>(slotBase + 0);
+    state->store(0, std::memory_order_relaxed);  // free
+
+    uint8_t* base = reinterpret_cast<uint8_t*>(get_ring_buffer_base());
+    if (base) {
+        auto* activeCount = reinterpret_cast<std::atomic<uint32_t>*>(base + SCOPE_START + 4);
+        if (activeCount->load(std::memory_order_relaxed) > 0)
+            activeCount->fetch_sub(1, std::memory_order_relaxed);
+        auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SCOPE_START + 12);
+        version->fetch_add(1, std::memory_order_relaxed);
+    }
+    hnd->internalData = nullptr;
 #endif
 }
 

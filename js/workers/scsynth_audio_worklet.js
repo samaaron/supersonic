@@ -173,9 +173,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             throw new Error('WASM memory not available');
         }
 
-        // Read the struct (44 uint32_t fields + 1 uint8_t + 3 padding bytes = 180 bytes)
-        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 44);
-        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 180);
+        // Read the struct (54 uint32_t fields + 1 uint8_t + 3 padding bytes = 220 bytes)
+        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 54);
+        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 220);
 
         // Extract constants (order matches BufferLayout struct in shared_memory.h)
         // NOTE: NODE_TREE is now contiguous with METRICS for efficient postMessage copying
@@ -219,13 +219,23 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             REPLY_CHANNEL_BUFFER_SIZE: uint32View[35],
             REPLY_CHANNEL_CONTROL_SIZE: uint32View[36],
             REPLY_CHANNEL_COUNT: uint32View[37],
-            TOTAL_BUFFER_SIZE: uint32View[38],
-            MAX_MESSAGE_SIZE: uint32View[39],
-            MESSAGE_MAGIC: uint32View[40],
-            PADDING_MAGIC: uint32View[41],
-            scheduler_data_pool_size: uint32View[42],
-            scheduler_slot_count: uint32View[43],
-            DEBUG_PADDING_MARKER: uint8View[176],  // After 44 uint32s = 176 bytes
+            // Scope buffer region (ScopeOut2 → SAB triple-buffer)
+            SCOPE_START: uint32View[38],
+            SCOPE_TOTAL_SIZE: uint32View[39],
+            SCOPE_HEADER_SIZE: uint32View[40],
+            SCOPE_SLOT_SIZE: uint32View[41],
+            SCOPE_SLOT_HEADER_SIZE: uint32View[42],
+            SCOPE_REGION_SIZE: uint32View[43],
+            SCOPE_MAX_SCOPES: uint32View[44],
+            SCOPE_FRAMES_PER_SCOPE: uint32View[45],
+            SCOPE_CHANNELS: uint32View[46],
+            TOTAL_BUFFER_SIZE: uint32View[47],
+            MAX_MESSAGE_SIZE: uint32View[48],
+            MESSAGE_MAGIC: uint32View[49],
+            PADDING_MAGIC: uint32View[50],
+            scheduler_data_pool_size: uint32View[51],
+            scheduler_slot_count: uint32View[52],
+            DEBUG_PADDING_MARKER: uint8View[212],  // After 53 uint32s = 212 bytes
             MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, sourceId)
         };
 

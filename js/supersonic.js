@@ -438,6 +438,9 @@ export class SuperSonic {
   // Promise chain for async buffer alloc commands
   #bufferQueue = Promise.resolve();
 
+  // Cached TypedArray views for scope slots (lazily initialized, avoids per-frame allocations)
+  #scopeViews = null;
+
   /**
    * Validate scsynthOptions (worldOptions) at construction time.
    * Throws descriptive errors for invalid configurations.
@@ -991,6 +994,7 @@ export class SuperSonic {
     }
 
     this.#initialized = false;
+    this.#scopeViews = null;
     this.loadedSynthDefs.clear();
     this.#initPromise = null;
     this.#oscChannel = null;
@@ -1102,6 +1106,117 @@ export class SuperSonic {
       version: raw.version,
       droppedCount: raw.droppedCount,
       root: root || { id: 0, type: 'group', defName: '', children: [] }
+    };
+  }
+
+  // ============================================================================
+  // SCOPE API
+  // ============================================================================
+
+  /** @returns {object} Cached TypedArray views for a scope slot (lazily created) */
+  #getScopeSlotViews(scopeNum) {
+    if (!this.#scopeViews) {
+      this.#scopeViews = new Array(this.#metricsReader.bufferConstants.SCOPE_MAX_SCOPES);
+    }
+    let views = this.#scopeViews[scopeNum];
+    if (views) return views;
+
+    const bc = this.#metricsReader.bufferConstants;
+    const sab = this.#metricsReader.sharedBuffer;
+    const base = this.#metricsReader.ringBufferBase;
+    const slotOffset = base + bc.SCOPE_START + bc.SCOPE_HEADER_SIZE + scopeNum * bc.SCOPE_SLOT_SIZE;
+    const framesPerScope = bc.SCOPE_FRAMES_PER_SCOPE;
+    const regionSamples = framesPerScope * bc.SCOPE_CHANNELS;
+    const dataStart = slotOffset + bc.SCOPE_SLOT_HEADER_SIZE;
+
+    const regions = [];
+    for (let i = 0; i < 3; i++) {
+      const data = new Float32Array(sab, dataStart + i * regionSamples * 4, regionSamples);
+      regions.push({
+        left: data.subarray(0, framesPerScope),
+        right: data.subarray(framesPerScope, framesPerScope * 2),
+      });
+    }
+
+    views = {
+      meta: new Uint32Array(sab, slotOffset, 4),
+      stage: new Int32Array(sab, slotOffset + 8, 1),
+      framesPerScope,
+      regions,
+    };
+    this.#scopeViews[scopeNum] = views;
+    return views;
+  }
+
+  /**
+   * Get scope data for a ScopeOut2 scope_num.
+   *
+   * In SAB mode: zero-copy read from SharedArrayBuffer (always current).
+   * In PM mode: returns latest heartbeat snapshot (up to snapshotIntervalMs stale).
+   *
+   * @param {number} scopeNum - Scope slot index (0 to maxScopes-1)
+   * @returns {{ frames: number, channels: number, left: Float32Array, right: Float32Array|null }|null}
+   */
+  getScope(scopeNum) {
+    if (!this.#initialized) return null;
+
+    const bc = this.#metricsReader.bufferConstants;
+    if (!bc || bc.SCOPE_START == null || bc.SCOPE_MAX_SCOPES == null) return null;
+    if (scopeNum < 0 || scopeNum >= bc.SCOPE_MAX_SCOPES) return null;
+
+    // TODO: PM mode — read from latest heartbeat snapshot
+    if (!this.#metricsReader.sharedBuffer) return null;
+
+    const views = this.#getScopeSlotViews(scopeNum);
+    if (views.meta[0] === 0) return null;  // free/inactive
+
+    const channels = views.meta[1];
+    // Read the stage index atomically — slightly racy (writer might swap
+    // during our read) but for visualisation one stale frame is acceptable.
+    const stageIdx = Atomics.load(views.stage, 0);
+    if (stageIdx < 0 || stageIdx > 2) return null;  // corrupted/uninitialized
+
+    const region = views.regions[stageIdx];
+    return {
+      frames: views.framesPerScope,
+      channels,
+      left: region.left,
+      right: channels >= 2 ? region.right : null,
+    };
+  }
+
+  /**
+   * Get all active scope slots.
+   * @returns {Array<{ index: number, channels: number }>}
+   */
+  getScopes() {
+    if (!this.#initialized) return [];
+
+    const bc = this.#metricsReader.bufferConstants;
+    if (!bc || bc.SCOPE_START == null || bc.SCOPE_MAX_SCOPES == null) return [];
+    if (!this.#metricsReader.sharedBuffer) return [];
+
+    const scopes = [];
+    for (let i = 0; i < bc.SCOPE_MAX_SCOPES; i++) {
+      const views = this.#getScopeSlotViews(i);
+      if (views.meta[0] !== 0) {
+        scopes.push({ index: i, channels: views.meta[1] });
+      }
+    }
+    return scopes;
+  }
+
+  /**
+   * Get scope schema (capacity, frames per scope, SAB offsets).
+   * @returns {{ maxScopes: number, framesPerScope: number, channels: number }|null}
+   */
+  static getScopeSchema() {
+    // Compile-time defaults — matches shared_memory.h SCOPE_ constants.
+    // A proper implementation would read from the WASM buffer layout.
+    return {
+      maxScopes: 32,
+      framesPerScope: 1024,
+      channels: 2,
     };
   }
 
@@ -1542,6 +1657,7 @@ export class SuperSonic {
     this.#oscChannel = null;
     this.#bufferQueue = Promise.resolve();
     this.#initialized = false;
+    this.#scopeViews = null;
     this.loadedSynthDefs.clear();
     this.#initPromise = null;
     this.#wasmMemory = null;

@@ -65,14 +65,14 @@ test("WORLD_OPTIONS_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicP
     return {
       worldOptionsStart: bc.WORLD_OPTIONS_START,
       worldOptionsSize: bc.WORLD_OPTIONS_SIZE,
-      replyChannelsBufferStart: bc.REPLY_CHANNELS_BUFFER_START,
-      replyChannelsBufferSize: bc.REPLY_CHANNEL_BUFFER_SIZE * bc.REPLY_CHANNEL_COUNT,
+      scopeStart: bc.SCOPE_START,
+      scopeTotalSize: bc.SCOPE_TOTAL_SIZE,
       totalBufferSize: bc.TOTAL_BUFFER_SIZE,
     };
   }, sonicConfig);
 
-  // Reply channel buffers are the last region before TOTAL_BUFFER_SIZE
-  expect(result.replyChannelsBufferStart + result.replyChannelsBufferSize).toBe(result.totalBufferSize);
-  // WORLD_OPTIONS comes before reply channels
+  // Scope buffers are the last region before TOTAL_BUFFER_SIZE
+  expect(result.scopeStart + result.scopeTotalSize).toBe(result.totalBufferSize);
+  // WORLD_OPTIONS comes before the end of the buffer
   expect(result.worldOptionsStart + result.worldOptionsSize).toBeLessThan(result.totalBufferSize);
 });
