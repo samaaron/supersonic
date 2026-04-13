@@ -862,7 +862,26 @@ void World_SetSampleRate(World* inWorld, double inSampleRate) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void* World_Alloc(World* inWorld, size_t inByteSize) {
-    return inWorld->hw->mAllocPool->Alloc(inByteSize);
+    void* ptr = inWorld->hw->mAllocPool->Alloc(inByteSize);
+#ifdef __EMSCRIPTEN__
+    // Bounds check: verify allocation is within the pre-allocated RT pool.
+    // If this fires, the AllocPool has a bug or is out of memory.
+    if (ptr) {
+        extern void* g_rt_pool_ptr;
+        extern size_t g_rt_pool_size;
+        if (g_rt_pool_ptr) {
+            uintptr_t alloc_start = (uintptr_t)ptr;
+            uintptr_t alloc_end = alloc_start + inByteSize;
+            uintptr_t pool_start = (uintptr_t)g_rt_pool_ptr;
+            uintptr_t pool_end = pool_start + g_rt_pool_size;
+            if (alloc_start < pool_start || alloc_end > pool_end) {
+                worklet_debug("FATAL: World_Alloc returned %p+%zu, outside RT pool [%p,%p)",
+                    ptr, inByteSize, g_rt_pool_ptr, (void*)pool_end);
+            }
+        }
+    }
+#endif
+    return ptr;
 }
 
 void* World_Realloc(World* inWorld, void* inPtr, size_t inByteSize) {

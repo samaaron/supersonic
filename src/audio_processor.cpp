@@ -406,6 +406,28 @@ extern "C" {
         }
 #endif
 
+#ifdef __EMSCRIPTEN__
+        // REGION INTEGRITY CHECK: verify malloc heap doesn't extend into the RT pool.
+        // The WASM linear memory layout is:
+        //   [heap 0..sbrk] ... [RT pool at fixed offset] [buffer pool after RT pool]
+        // If malloc grows the heap past the RT pool start, allocations overlap.
+        {
+            extern void* sbrk(intptr_t);
+            uintptr_t heap_end = (uintptr_t)sbrk(0);
+            uintptr_t rt_start = g_rt_pool_ptr ? (uintptr_t)g_rt_pool_ptr : 0;
+            uintptr_t rt_end = rt_start + g_rt_pool_size;
+
+            if (rt_start > 0 && heap_end > rt_start) {
+                worklet_debug("FATAL: WASM heap (sbrk=0x%x) overlaps RT pool (start=0x%x) — reduce heap usage or increase rtPoolOffset",
+                    (uint32_t)heap_end, (uint32_t)rt_start);
+                control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
+                return;
+            }
+            worklet_debug("MEMORY OK: heap<0x%x rt=[0x%x,0x%x) buf=0x%x+",
+                (uint32_t)heap_end, (uint32_t)rt_start, (uint32_t)rt_end, (uint32_t)rt_end);
+        }
+#endif
+
         // Initialize pre-allocated heap (no-op on WASM, creates AllocPool on native)
         supersonic_heap_init(SUPERSONIC_HEAP_SIZE);
 
