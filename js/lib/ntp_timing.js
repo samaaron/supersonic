@@ -320,7 +320,7 @@ export class NTPTiming {
    */
   getNTPStartTime() {
     if (this.#ntpStartView) {
-      return this.#ntpStartView[0];
+      return this.#ntpStartView.getFloat64(0, true); // little-endian, matches #writeNtpStartTime
     }
     return this.#initialNTPStartTime ?? 0;
   }
