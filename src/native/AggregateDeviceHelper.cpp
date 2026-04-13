@@ -222,7 +222,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     CFStringRef uidRef  = CFStringCreateWithCString(nullptr, kAggregateUID, kCFStringEncodingUTF8);
     CFStringRef nameRef = CFStringCreateWithCString(nullptr, kAggregateName, kCFStringEncodingUTF8);
 
-    int privateVal = 1;  // private — hidden from device lists (Ardour pattern)
+    int privateVal = 1;  // private — hidden from system device lists
     CFNumberRef privateRef = CFNumberCreate(nullptr, kCFNumberIntType, &privateVal);
 
     const void* descKeys[] = {

@@ -224,6 +224,94 @@ void SupersonicEngine::initialise(const Config& cfg) {
         }
 
         if (!openedByHardwareFlag) {
+#ifdef __APPLE__
+            // On macOS, boot output-only then create an Aggregate Device.
+            // JUCE's AudioIODeviceCombiner (used when input and output are
+            // different hardware devices) is unreliable at small buffer sizes.
+            mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+            initError = mDeviceManager->initialiseWithDefaultDevices(
+                0, cfg.numOutputChannels);
+            if (initError.isNotEmpty()) {
+                fprintf(stderr, "[audio-device] init with 0 in / %d out failed: %s\n",
+                        cfg.numOutputChannels, initError.toRawUTF8());
+                mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                initError = mDeviceManager->initialiseWithDefaultDevices(0, 0);
+            }
+            if (initError.isEmpty() && cfg.numInputChannels > 0) {
+                auto* dev = mDeviceManager->getCurrentAudioDevice();
+                if (dev) {
+                    std::string outName = dev->getName().toStdString();
+                    std::string inName;
+                    AudioObjectPropertyAddress pa = {
+                        kAudioHardwarePropertyDefaultInputDevice,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+                    AudioDeviceID inputDevId = 0;
+                    UInt32 sz = sizeof(inputDevId);
+                    if (AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                            &pa, 0, nullptr, &sz, &inputDevId) == noErr
+                            && inputDevId != 0) {
+                        CFStringRef cfName = nullptr;
+                        UInt32 nsz = sizeof(cfName);
+                        AudioObjectPropertyAddress nameAddr = {
+                            kAudioDevicePropertyDeviceNameCFString,
+                            kAudioObjectPropertyScopeGlobal,
+                            kAudioObjectPropertyElementMain
+                        };
+                        if (AudioObjectGetPropertyData(inputDevId, &nameAddr,
+                                0, nullptr, &nsz, &cfName) == noErr && cfName) {
+                            char buf[256];
+                            CFStringGetCString(cfName, buf, sizeof(buf),
+                                               kCFStringEncodingUTF8);
+                            CFRelease(cfName);
+                            inName = buf;
+                        }
+                    }
+                    if (!inName.empty() && inName != outName) {
+                        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                        auto aggName = AggregateDeviceHelper::createOrUpdate(outName, inName);
+                        if (!aggName.empty()) {
+                            juce::Thread::sleep(300);
+                            if (auto* dt = mDeviceManager->getCurrentDeviceTypeObject())
+                                dt->scanForDevices();
+                            mRealOutputDeviceName = outName;
+                            mRealInputDeviceName  = inName;
+                            mLastInputDeviceName  = inName;
+                            juce::AudioDeviceManager::AudioDeviceSetup setup;
+                            mDeviceManager->getAudioDeviceSetup(setup);
+                            setup.outputDeviceName = juce::String(aggName);
+                            setup.inputDeviceName  = juce::String(aggName);
+                            setup.useDefaultInputChannels = false;
+                            juce::BigInteger inputBits;
+                            for (int i = 0; i < cfg.numInputChannels; ++i)
+                                inputBits.setBit(i);
+                            setup.inputChannels = inputBits;
+                            mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                            auto aggErr = mDeviceManager->setAudioDeviceSetup(setup, true);
+                            if (aggErr.isNotEmpty()) {
+                                fprintf(stderr, "[audio-device] aggregate setup failed: %s — "
+                                        "falling back to Combiner\n", aggErr.toRawUTF8());
+                                AggregateDeviceHelper::destroy();
+                                mRealOutputDeviceName.clear();
+                                mRealInputDeviceName.clear();
+                                // Fall back to Combiner
+                                mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                                mDeviceManager->initialiseWithDefaultDevices(
+                                    cfg.numInputChannels, cfg.numOutputChannels);
+                            } else {
+                                fprintf(stderr, "[audio-device] booted with aggregate: "
+                                        "out='%s' in='%s'\n", outName.c_str(), inName.c_str());
+                            }
+                        }
+                    } else if (inName == outName) {
+                        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                        initError = mDeviceManager->initialiseWithDefaultDevices(
+                            cfg.numInputChannels, cfg.numOutputChannels);
+                    }
+                }
+            }
+#else
             mLastSelfTriggeredChange = std::chrono::steady_clock::now();
             initError = mDeviceManager->initialiseWithDefaultDevices(
                 cfg.numInputChannels, cfg.numOutputChannels);
@@ -240,6 +328,7 @@ void SupersonicEngine::initialise(const Config& cfg) {
                 mLastSelfTriggeredChange = std::chrono::steady_clock::now();
                 initError = mDeviceManager->initialiseWithDefaultDevices(0, 0);
             }
+#endif
             if (initError.isNotEmpty()) {
                 fprintf(stderr, "[audio-device] all init attempts failed: %s\n",
                         initError.toRawUTF8());
@@ -1134,18 +1223,14 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                 setup.inputChannels.clear();
             }
 
-            AggregateDeviceHelper::destroy();
-
-            // Let CoreAudio settle after aggregate teardown before opening
-            // a new device — Ardour uses similar pauses between aggregate steps.
-            if (wasOnAggregate)
-                juce::Thread::sleep(150);
+            // Don't destroy aggregate yet — JUCE still references it.
+            // setAudioDeviceSetup below will switch JUCE to the new device,
+            // then we destroy the orphaned aggregate safely.
         }
 #endif
 
         // Timestamp so changeListenerCallback ignores ALL async notifications
-        // triggered by our device setup.  A single setup can generate multiple
-        // CoreAudio notifications (device change, rate change, aggregate events).
+        // triggered by our device setup.
         fprintf(stderr, "[audio-device] calling setAudioDeviceSetup: out='%s' in='%s' sr=%.0f buf=%d\n",
                 setup.outputDeviceName.toRawUTF8(),
                 setup.inputDeviceName.toRawUTF8(),
@@ -1157,6 +1242,14 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                 err.isEmpty() ? "OK" : err.toRawUTF8());
         fflush(stderr);
         if (err.isNotEmpty()) errStr = err.toStdString();
+
+#ifdef __APPLE__
+        // Now JUCE has switched away — safe to destroy the old aggregate.
+        if (wasOnAggregate && !needsAggregate) {
+            AggregateDeviceHelper::destroy();
+            juce::Thread::sleep(150);
+        }
+#endif
     } else {
         // Headless: no real device to configure; use failure hook for testing
         if (testSwapFailure) errStr = testSwapFailure();
