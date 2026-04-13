@@ -262,8 +262,20 @@ int main(int argc, char* argv[]) {
     // On macOS, pump the CFRunLoop so AUHAL audio callbacks fire.
     // On other platforms, just block.
 #ifdef __APPLE__
-    while (!gShutdownRequested.load())
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+    // If the run loop is suppressed (aggregate was created at boot),
+    // wait for Spider to finish initialising before pumping.
+    if (engine.mSuppressRunLoop.load()) {
+        fprintf(stderr, "[supersonic] waiting for boot to settle before pumping CFRunLoop...\n");
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        engine.mSuppressRunLoop.store(false);
+        fprintf(stderr, "[supersonic] CFRunLoop pump started\n");
+    }
+    while (!gShutdownRequested.load()) {
+        if (engine.mSuppressRunLoop.load())
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        else
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+    }
 #else
     while (!gShutdownRequested.load())
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

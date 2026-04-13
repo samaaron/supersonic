@@ -186,6 +186,9 @@ private:
     std::string              mRealInputDeviceName;    // actual input device behind aggregate
     std::mutex               mSwapMutex;
     std::chrono::steady_clock::time_point mLastSelfTriggeredChange{}; // suppress async change notifications from our own setAudioDeviceSetup
+public:
+    std::atomic<bool> mSuppressRunLoop{false};  // pause CFRunLoop pumping during aggregate transitions
+private:
     std::string              mDeviceMode;   // empty = system/auto, non-empty = manual device name
     bool                     mWorldRebuilt{false};
     std::map<std::string, int> mDeviceRateMemory; // per-device remembered sample rate

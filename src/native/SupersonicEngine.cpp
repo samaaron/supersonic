@@ -302,6 +302,11 @@ void SupersonicEngine::initialise(const Config& cfg) {
                             } else {
                                 fprintf(stderr, "[audio-device] booted with aggregate: "
                                         "out='%s' in='%s'\n", outName.c_str(), inName.c_str());
+                                // Suppress CFRunLoop until Spider has finished
+                                // cold_swap_reinit — queued audioDeviceListChanged
+                                // messages would trigger a second cold swap and
+                                // crash ScopeOut2 during the rebuild.
+                                mSuppressRunLoop.store(true);
                             }
                         }
                     } else if (inName == outName) {
@@ -1185,6 +1190,10 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             mRealOutputDeviceName = setup.outputDeviceName.toStdString();
             mRealInputDeviceName  = setup.inputDeviceName.toStdString();
 
+            // Pause CFRunLoop pumping to prevent JUCE's audioDeviceListChanged
+            // from firing during aggregate destroy/create — it crashes trying
+            // to reinitialise with a stale device reference.
+            mSuppressRunLoop.store(true);
             auto aggName = AggregateDeviceHelper::createOrUpdate(
                 mRealOutputDeviceName, mRealInputDeviceName);
             if (!aggName.empty()) {
@@ -1249,6 +1258,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             AggregateDeviceHelper::destroy();
             juce::Thread::sleep(150);
         }
+        mSuppressRunLoop.store(false);
 #endif
     } else {
         // Headless: no real device to configure; use failure hook for testing
@@ -1600,9 +1610,12 @@ OSStatus SupersonicEngine::defaultDevicePropertyListenerProc(
 }
 
 void SupersonicEngine::handleSystemDefaultOutputChanged() {
-    if (!mDeviceMode.empty()) return;
+    if (!mDeviceMode.empty()) return;     // only relevant in system-default mode
     if (!mRunning.load()) return;
     if (!mDeviceManager) return;
+    if (AggregateDeviceHelper::exists()) return;  // ignore — our aggregate is the active device
+    auto elapsed = std::chrono::steady_clock::now() - mLastSelfTriggeredChange;
+    if (elapsed < std::chrono::seconds(2)) return;
     setDeviceMode("");
 }
 #endif
