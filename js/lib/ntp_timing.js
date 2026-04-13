@@ -80,6 +80,22 @@ export class NTPTiming {
   }
 
   /**
+   * Write NTP start time to shared memory with a store-release fence.
+   * Float64Array doesn't support Atomics, so we write via DataView and
+   * fence with an Atomics.store on the adjacent drift Int32. The C++ side
+   * reads drift with memory_order_acquire before reading the float64,
+   * ensuring the double is fully visible.
+   */
+  #writeNtpStartTime(value) {
+    this.#ntpStartView.setFloat64(0, value, true); // little-endian
+    // Store-release fence: the C++ acquire-load on drift_offset will
+    // see all prior stores including the float64 above.
+    if (this.#driftView) {
+      Atomics.store(this.#driftView, 0, Atomics.load(this.#driftView, 0));
+    }
+  }
+
+  /**
    * Initialize shared views for SAB mode
    * @param {SharedArrayBuffer} sharedBuffer
    * @param {number} ringBufferBase
@@ -90,10 +106,13 @@ export class NTPTiming {
     this.#bufferConstants = bufferConstants;
 
     if (this.#mode === 'sab' && sharedBuffer && bufferConstants) {
-      this.#ntpStartView = new Float64Array(
+      // Use DataView for NTP start time writes — Float64Array doesn't support Atomics,
+      // so a plain assignment risks a torn read on the audio thread.
+      // After writing, we fence via Atomics.store on the adjacent drift Int32.
+      this.#ntpStartView = new DataView(
         sharedBuffer,
         ringBufferBase + bufferConstants.NTP_START_TIME_START,
-        1
+        8
       );
       this.#driftView = new Int32Array(
         sharedBuffer,
@@ -154,7 +173,7 @@ export class NTPTiming {
 
     // Write to memory (SAB directly, or via postMessage)
     if (this.#mode === 'sab' && this.#ntpStartView) {
-      this.#ntpStartView[0] = ntpStartTime;
+      this.#writeNtpStartTime(ntpStartTime);
     } else if (this.#workletPort) {
       this.#workletPort.postMessage({
         type: 'setNTPStartTime',
@@ -241,7 +260,7 @@ export class NTPTiming {
 
     // Update both SAB/worklet and internal state
     if (this.#mode === 'sab' && this.#ntpStartView) {
-      this.#ntpStartView[0] = ntpStartTime;
+      this.#writeNtpStartTime(ntpStartTime);
     } else if (this.#workletPort) {
       this.#workletPort.postMessage({
         type: 'setNTPStartTime',
