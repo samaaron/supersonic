@@ -14,10 +14,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22.x'
           registry-url: 'https://registry.npmjs.org'
@@ -28,10 +28,10 @@ jobs:
           npm --version
 
       - name: Setup esbuild
-        uses: sahelnuri/setup-esbuild@v1
+        run: npm install -g esbuild
 
       - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: emscripten-core/setup-emsdk@v16
         with:
           version: '4.0.21'
           actions-cache-folder: 'emsdk-cache'
