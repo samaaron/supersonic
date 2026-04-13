@@ -29,5 +29,6 @@
 #define sc_min(a, b) (((a) < (b)) ? (a) : (b))
 
 template <typename T, typename U, typename V> inline T sc_clip(T x, U lo, V hi) {
+    if (lo > hi) return std::max(std::min(x, (T)lo), (T)hi);
     return std::max(std::min(x, (T)hi), (T)lo);
 }
