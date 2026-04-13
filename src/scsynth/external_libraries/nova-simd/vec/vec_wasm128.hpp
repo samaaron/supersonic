@@ -322,12 +322,20 @@ public:
     }
 
     /* @{ */
-    /** comparison operators */
-
+    /** comparison operators
+     *
+     * These return 1.0f / 0.0f (not bit masks) so the result is valid audio.
+     * The mask_* operators below return raw bit masks for use with select().
+     * SSE/NEON backends can get away with returning masks from operator>
+     * because their callers always feed the result through select().
+     * But nova's greater/less/etc. functors in simd_binary_arithmetic.hpp
+     * pass the result straight to the output buffer, so it MUST be 0.0/1.0.
+     */
 #define RELATIONAL_OPERATOR(op, opfn) \
     vec operator op(vec const & rhs) const \
     { \
-        return opfn(data_, rhs.data_); \
+        v128_t mask = opfn(data_, rhs.data_); \
+        return wasm_v128_and(mask, wasm_f32x4_splat(1.0f)); \
     }
 
     RELATIONAL_OPERATOR(<, wasm_f32x4_lt)
