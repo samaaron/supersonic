@@ -22,24 +22,25 @@
 
 #include "vec/vec_generic.hpp"
 
-#if defined(__ARM_NEON__) || defined(__ARM_NEON) || defined(_M_ARM64)
+#if defined(__wasm_simd128__)
+// WASM SIMD128: native 128-bit SIMD for WebAssembly (emscripten)
+// This specializes vec<float> with wasm_simd128.h intrinsics,
+// replacing the generic scalar fallback.
+#  include "vec/vec_wasm128.hpp"
+#elif defined(__ARM_NEON__) || defined(__ARM_NEON) || defined(_M_ARM64)
 #  include "vec/vec_neon.hpp"
+#elif defined(__AVX__)
+#  include "vec/vec_avx_float.hpp"
+#  include "vec/vec_avx_double.hpp"
+#elif defined(__SSE__)
+#  include "vec/vec_sse.hpp"
+#  ifdef __SSE2__
+#    include "vec/vec_sse2.hpp"
+#  endif
 #endif
 
 #ifdef __ALTIVEC__
 #  include "vec/vec_altivec.hpp"
-#endif
-
-#ifdef __AVX__
-#  include "vec/vec_avx_float.hpp"
-#elif defined(__SSE__)
-#  include "vec/vec_sse.hpp"
-#endif
-
-#ifdef __AVX__
-#  include "vec/vec_avx_double.hpp"
-#elif defined(__SSE2__)
-#  include "vec/vec_sse2.hpp"
 #endif
 
 namespace nova
