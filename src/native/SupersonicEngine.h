@@ -7,8 +7,12 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <string>
+#ifdef __APPLE__
+#include <CoreAudio/CoreAudio.h>
+#endif
 
 #include "Prescheduler.h"
 #include "ReplyReader.h"
@@ -155,6 +159,13 @@ private:
     void restartHeadlessDriver(double sampleRate);
     juce::String reinitialiseWithDefaultsPreservingConfig();
 
+#ifdef __APPLE__
+    void handleSystemDefaultOutputChanged();
+    static OSStatus defaultDevicePropertyListenerProc(
+        AudioObjectID, UInt32, const AudioObjectPropertyAddress*, void* inClientData);
+    bool mDefaultDevicePropertyListenerInstalled = false;
+#endif
+
     JuceAudioCallback mAudioCallback;
     Prescheduler      mPrescheduler;
     ReplyReader       mReplyReader;
@@ -176,6 +187,8 @@ private:
     std::mutex               mSwapMutex;
     std::chrono::steady_clock::time_point mLastSelfTriggeredChange{}; // suppress async change notifications from our own setAudioDeviceSetup
     std::string              mDeviceMode;   // empty = system/auto, non-empty = manual device name
+    bool                     mWorldRebuilt{false};
+    std::map<std::string, int> mDeviceRateMemory; // per-device remembered sample rate
 
     // Shared memory — owned by the engine, survives across cold swaps.
     server_shared_memory_creator* mShmemCreator = nullptr;

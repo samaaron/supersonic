@@ -542,8 +542,8 @@ extern "C" {
     // active_input_channels: Number of input channels from AudioContext
     EMSCRIPTEN_KEEPALIVE
     bool process_audio(double current_time, uint32_t active_output_channels, uint32_t active_input_channels) {
-        if (!memory_initialized) {
-            return true; // Keep alive but do nothing if not initialized
+        if (!memory_initialized || !g_world) {
+            return true; // Not ready or world destroyed during cold swap — output silence
         }
 
         if (!metrics) {

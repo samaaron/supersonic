@@ -89,11 +89,12 @@ void OscUdpServer::sendDeviceReport() {
     auto mode    = mEngine->deviceMode();
 
     // Split devices into output-capable and input-capable lists.
-    // Bluetooth and AirPlay devices are excluded from input — they force
-    // low-quality codec modes (HFP 16kHz mono) that break audio quality.
+    // Wireless (AirPlay/Bluetooth) devices are hidden from BOTH:
+    //  - Output: can't be opened via HAL; user must set as macOS default
+    //  - Input: force low-quality codec modes (HFP 16kHz mono)
     std::vector<decltype(allDevices)::value_type> outputDevices, inputDevices;
     for (auto& dev : allDevices) {
-        if (dev.maxOutputChannels > 0)
+        if (dev.maxOutputChannels > 0 && !dev.isWirelessTransport())
             outputDevices.push_back(dev);
         if (dev.maxInputChannels > 0 && dev.isSuitableForInput())
             inputDevices.push_back(dev);
@@ -353,6 +354,7 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
         } else if (std::strcmp(addr, "/supersonic/devices/list") == 0) {
             auto devices = mEngine->listDevices();
             for (auto& dev : devices) {
+                if (dev.isWirelessTransport()) continue;
                 char buf[4096];
                 osc::OutboundPacketStream s(buf, sizeof(buf));
                 s << osc::BeginMessage("/supersonic/devices/list.reply")
@@ -407,6 +409,21 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
             }
             if (it != msg.ArgumentsEnd() && it->IsString()) {
                 inputDevName = it->AsStringUnchecked();
+            }
+
+            // "__system__" sentinel means "follow system default output"
+            if (devName == "__system__") {
+                auto error = mEngine->setDeviceMode("");
+                char buf[1024];
+                osc::OutboundPacketStream s(buf, sizeof(buf));
+                s << osc::BeginMessage("/supersonic/devices/switch.reply")
+                  << static_cast<osc::int32>(error.empty() ? 1 : 0);
+                if (!error.empty()) s << error.c_str();
+                s << osc::EndMessage;
+                sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                          static_cast<uint32_t>(s.Size()));
+                if (error.empty()) sendDeviceReport();
+                return true;
             }
 
             // "__none__" sentinel from GUI means "disable audio inputs"
@@ -666,7 +683,14 @@ void OscUdpServer::executePendingSwitch() {
         if (!devName.empty())
             mEngine->forceDeviceMode(devName);
 
-        auto result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
+        // Retry if a swap is already in progress (e.g. cascade from a
+        // device-change notification). Give it up to ~3 seconds.
+        SwapResult result;
+        for (int attempt = 0; attempt < 30; ++attempt) {
+            result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
+            if (result.success || result.error != "swap already in progress") break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
         if (result.success)
             sendDeviceReport();
         else

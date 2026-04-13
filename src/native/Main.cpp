@@ -96,6 +96,7 @@ static void printDeviceList(SupersonicEngine& engine) {
     fprintf(stdout, "  ─────────────\n\n");
 
     for (auto& dev : devices) {
+        if (dev.isWirelessTransport()) continue;
         bool isCurrent = (dev.name == current.name && dev.typeName == current.typeName);
         fprintf(stdout, "  %s %s : %s\n", isCurrent ? "▸" : " ",
                 dev.typeName.c_str(), dev.name.c_str());
