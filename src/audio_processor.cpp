@@ -367,7 +367,7 @@ extern "C" {
         options.mNumInputBusChannels = worldOptionsPtr[5];          // From JS
         options.mNumOutputBusChannels = worldOptionsPtr[6];         // From JS
         options.mNumControlBusChannels = worldOptionsPtr[7];        // From JS
-        options.mBufLength = worldOptionsPtr[8];                    // From JS (must be 128)
+        options.mBufLength = worldOptionsPtr[8];                    // From JS (128 for WebAudio)
         options.mRealTimeMemorySize = worldOptionsPtr[9];           // From JS
         options.mNumRGens = worldOptionsPtr[10];                    // From JS
         // worldOptionsPtr[11] = realTime (ignored, always false for WASM)
@@ -749,9 +749,6 @@ extern "C" {
             const int QUANTUM_SIZE = 128;
 
             // Zero OUTPUT audio buses for this render cycle
-            // SuperCollider expects output buses to start at 0.0f each frame
-            // IMPORTANT: Do NOT zero input buses - JS has already written audio data there!
-            // Layout: mAudioBus = [output buses 0..numOutputs-1][input buses][internal buses]
             uint32_t output_bus_bytes = g_world->mNumOutputs * g_world->mBufLength * sizeof(float);
             memset(g_world->mAudioBus, 0, output_bus_bytes);
 
@@ -868,7 +865,6 @@ extern "C" {
 
 #ifdef __wasm_simd128__
             // SIMD-optimized copy: process 4 floats at a time
-            // Each channel has 128 samples, total = numOutputs * 128 floats
             const int total_samples = g_world->mNumOutputs * QUANTUM_SIZE;
             const int simd_iterations = total_samples / 4;
 
@@ -877,13 +873,11 @@ extern "C" {
                 wasm_v128_store(dst + i * 4, vec);
             }
 
-            // Handle any remaining samples not divisible by 4
             const int remaining = total_samples % 4;
             if (remaining > 0) {
                 memcpy(dst + simd_iterations * 4, src + simd_iterations * 4, remaining * sizeof(float));
             }
 #else
-            // Fallback to memcpy if SIMD not available
             memcpy(dst, src, g_world->mNumOutputs * QUANTUM_SIZE * sizeof(float));
 #endif
 
