@@ -488,13 +488,20 @@ export class SuperSonic {
     }
   }
 
-  /** Build memory config, preserving computed getters after user overrides */
-  #buildMemoryConfig(overrides) {
+  /** Build memory config, syncing rtPoolSize with realTimeMemorySize */
+  #buildMemoryConfig(overrides, scsynthOptions) {
     const mem = overrides ? { ...MemoryLayout, ...overrides } : { ...MemoryLayout };
+    // Sync rtPoolSize with scsynthOptions.realTimeMemorySize (in KB).
+    // This ensures the SAB region is large enough for the RT pool.
+    const rtMemKB = scsynthOptions?.realTimeMemorySize || defaultWorldOptions.realTimeMemorySize;
+    if (rtMemKB) {
+      mem.rtPoolSize = Math.max(mem.rtPoolSize, rtMemKB * 1024);
+    }
     // Re-derive computed values since spread loses getters
+    mem.rtPoolOffset = (mem.wasmHeapSize || MemoryLayout.wasmHeapSize) + (mem.ringBufferReserved || MemoryLayout.ringBufferReserved);
+    mem.bufferPoolOffset = mem.rtPoolOffset + mem.rtPoolSize;
     mem.totalMemory = mem.bufferPoolOffset + mem.bufferPoolSize;
     mem.maxTotalMemory = mem.bufferPoolOffset + mem.maxBufferPoolSize;
-    mem.wasmHeapSize = mem.bufferPoolOffset - mem.ringBufferReserved;
     return mem;
   }
 
@@ -560,7 +567,7 @@ export class SuperSonic {
         sampleRate: 48000,
         ...options.audioContextOptions,
       },
-      memory: this.#buildMemoryConfig(options.memory),
+      memory: this.#buildMemoryConfig(options.memory, options.scsynthOptions),
       worldOptions: worldOptions,
       preschedulerCapacity: options.preschedulerCapacity || 65536,
       bypassLookaheadMs: options.bypassLookaheadMs ?? 500,
@@ -1856,7 +1863,10 @@ export class SuperSonic {
     const loadWasmMsg = {
       type: "loadWasm",
       wasmBytes: wasmBytes,
-      worldOptions: this.#config.worldOptions,
+      worldOptions: {
+        ...this.#config.worldOptions,
+        rtPoolOffset: this.#config.memory.rtPoolOffset,
+      },
       sampleRate: this.#audioContext.sampleRate,
     };
 

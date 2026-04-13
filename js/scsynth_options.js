@@ -31,7 +31,7 @@ const defaultWorldOptions = {
    * Each node: ~200-500 bytes depending on synth complexity
    * Default: 1024 (matching SuperCollider default)
    */
-  maxNodes: 1024,
+  maxNodes: 8192,
 
   /**
    * Maximum number of synth definitions (SynthDef count)

@@ -118,7 +118,8 @@ try {
         }
         // Validate it matches the calculation
         if (typeof memory.bufferPoolOffset === 'number' && typeof memory.ringBufferReserved === 'number') {
-            const expectedWasmHeap = memory.bufferPoolOffset - memory.ringBufferReserved;
+            const rtPoolSize = memory.rtPoolSize || 0;
+            const expectedWasmHeap = memory.bufferPoolOffset - memory.ringBufferReserved - rtPoolSize;
             if (wasmHeap !== expectedWasmHeap) {
                 console.error(`Error: wasmHeapSize inconsistency`);
                 console.error(`  wasmHeapSize getter returns: ${wasmHeap} bytes`);
@@ -160,7 +161,9 @@ try {
     // Output based on argument
     const arg = process.argv[2];
     if (arg === 'max') {
-        const maxTotalMemory = memory.maxTotalMemory || totalMemory;
+        // 1GB ceiling — virtual address space, not committed memory.
+        // Accommodates large RT pools (up to 256MB) and large sample libraries.
+        const maxTotalMemory = 2 * 1024 * 1024 * 1024; // 2GB
         console.log(maxTotalMemory);
     } else {
         // Default: output initial memory

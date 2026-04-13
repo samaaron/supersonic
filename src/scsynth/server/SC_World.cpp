@@ -334,6 +334,16 @@ bool asioThreadStarted();
 }
 
 
+#ifdef __EMSCRIPTEN__
+static void* s_rt_pool_block = nullptr;
+static void* supersonic_rt_pool_alloc(size_t size) {
+    void* ptr = s_rt_pool_block;
+    s_rt_pool_block = nullptr;
+    return ptr;
+}
+static void supersonic_rt_pool_free(void*) {}
+#endif
+
 World* World_New(WorldOptions* inOptions) {
 #if (_POSIX_MEMLOCK - 0) >= 200112L
     if (inOptions->mMemoryLocking && inOptions->mRealTime) {
@@ -374,7 +384,23 @@ World* World_New(WorldOptions* inOptions) {
 
         world = (World*)zalloc(1, sizeof(World));
         world->hw = (HiddenWorld*)zalloc(1, sizeof(HiddenWorld));
+#ifdef __EMSCRIPTEN__
+        {
+            extern void* g_rt_pool_ptr;
+            extern size_t g_rt_pool_size;
+            if (g_rt_pool_ptr && g_rt_pool_size > 0) {
+                s_rt_pool_block = g_rt_pool_ptr;
+                size_t poolInitSize = g_rt_pool_size > kAreaOverhead ? g_rt_pool_size - kAreaOverhead : g_rt_pool_size;
+                world->hw->mAllocPool = new AllocPool(
+                    supersonic_rt_pool_alloc, supersonic_rt_pool_free,
+                    poolInitSize, 0);
+            } else {
+                throw std::runtime_error("RT pool not pre-allocated — cannot use malloc (would overlap buffer pool)");
+            }
+        }
+#else
         world->hw->mAllocPool = new AllocPool(malloc, free, inOptions->mRealTimeMemorySize * 1024, 0);
+#endif
 #ifndef __EMSCRIPTEN__
         world->hw->mQuitProgram = new boost::sync::semaphore(0);
 #endif

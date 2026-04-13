@@ -112,6 +112,9 @@ extern "C" {
     // This buffer is used to copy OSC messages from ring buffer before processing.
     alignas(8) char static_osc_buffer[MAX_MESSAGE_SIZE];
 
+    void* g_rt_pool_ptr = nullptr;
+    size_t g_rt_pool_size = 0;
+
     uint8_t* shared_memory = nullptr;
     ControlPointers* control = nullptr;
     PerformanceMetrics* metrics = nullptr;
@@ -381,8 +384,21 @@ extern "C" {
             : (uint32_t)sample_rate;                                // From JS or AudioContext
         // worldOptionsPtr[15] = verbosity
         options.mVerbosity = worldOptionsPtr[15];                   // From JS
+#ifdef __EMSCRIPTEN__
+        {
+            uint32_t rtPoolOffset = worldOptionsPtr[16];
+            uint32_t rtPoolBytes = options.mRealTimeMemorySize * 1024;
+            if (rtPoolOffset > 0 && rtPoolBytes > 0) {
+                g_rt_pool_ptr = (void*)(shared_memory + rtPoolOffset);
+                g_rt_pool_size = rtPoolBytes;
+                memset(g_rt_pool_ptr, 0, g_rt_pool_size);
+                worklet_debug("RT_POOL: pre-allocated at offset %u (%uMB) size %uMB",
+                    rtPoolOffset, rtPoolOffset / (1024*1024), rtPoolBytes / (1024*1024));
+            }
+        }
+#endif
 #ifndef __EMSCRIPTEN__
-        options.mSharedMemoryID = worldOptionsPtr[17];              // UDP port for boost shm (native only)
+        options.mSharedMemoryID = worldOptionsPtr[18];              // UDP port for boost shm (native only)
         extern void* g_external_shared_memory;
         if (g_external_shared_memory) {
             options.mExternalSharedMemory = g_external_shared_memory;
@@ -474,7 +490,7 @@ extern "C" {
                      SUPERSONIC_VERSION_MAJOR, SUPERSONIC_VERSION_MINOR, SUPERSONIC_VERSION_PATCH,
                      SC_VersionMajor, SC_VersionMinor, SC_VersionPatch);
         {
-            const char* transport_mode = worldOptionsPtr[16] ? "PM" : "SAB";
+            const char* transport_mode = worldOptionsPtr[17] ? "PM" : "SAB";
             worklet_debug("%.0fkHz %dch [%s]",
                          sample_rate / 1000, options.mNumOutputBusChannels, transport_mode);
         }
