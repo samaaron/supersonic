@@ -49,8 +49,8 @@ export function parseNodeTree(buffer, treeOffset, bufferConstants) {
     const defName = textDecoder.decode(defNameBytes.subarray(0, nullIndex));
 
     // Read UUID (two little-endian uint64s at offset 56 within entry).
-    // The C++ uuid_rewriter stores UUIDs as big-endian-packed uint64 halves,
-    // but WASM is little-endian, so the bytes within each half are reversed.
+    // Stored as big-endian-packed uint64 halves in WASM (little-endian),
+    // so the bytes within each half are reversed.
     // Swap each 8-byte half back to big-endian (network) order.
     const uuidStart = entriesBase + byteOffset + 56;
     const uuidRaw = new Uint8Array(buffer, uuidStart, 16);

@@ -2,7 +2,7 @@ import { test, expect } from "./fixtures.mjs";
 
 /**
  * Tests that SuperSonic correctly processes a large OSC bundle containing
- * many /g_new and /s_new commands with UUID node IDs.
+ * many /g_new and /s_new commands with integer node IDs.
  *
  * Constructs 8 FX chains (16 groups + 8 FX synths) in a single bundle,
  * delivered via OscChannel.sendDirect(). Before the variable-size data pool,
@@ -30,21 +30,11 @@ test.describe("Big bundle FX setup", () => {
       await sonic.sync();
 
       const osc = window.SuperSonic.osc;
-      const u = (bytes) => ({ type: "uuid", value: bytes });
 
-      // Generate unique UUIDs (v7-like)
-      let ctr = 0;
+      // Generate unique integer node IDs starting from 1000
+      let nextId = 1000;
       function uid() {
-        ctr++;
-        const b = new Uint8Array(16);
-        const v = new DataView(b.buffer);
-        v.setUint32(0, 0x019D59E4, false);
-        v.setUint32(4, 0x2F850000 + ctr * 0x100, false);
-        v.setUint32(8, 0xA0000000 + ctr * 0x1000, false);
-        v.setUint32(12, ctr * 0x10000, false);
-        b[6] = (b[6] & 0x0F) | 0x70;
-        b[8] = (b[8] & 0x3F) | 0x80;
-        return b;
+        return nextId++;
       }
 
       // Helper to build one FX chain (container + synth_group + FX synth)
@@ -55,11 +45,11 @@ test.describe("Big bundle FX setup", () => {
         const fxSynth = uid();
         const packets = [];
         // /g_new container (tail of parent)
-        packets.push(["/g_new", u(container), 1, parentGroup]);
+        packets.push(["/g_new", container, 1, parentGroup]);
         // /g_new synth_group (head of container)
-        packets.push(["/g_new", u(synthGroup), 0, u(container)]);
+        packets.push(["/g_new", synthGroup, 0, container]);
         // /s_new FX (tail of container)
-        const fxArgs = ["/s_new", fxName, u(fxSynth), 1, u(container), "in_bus", inBus, "out_bus", outBus];
+        const fxArgs = ["/s_new", fxName, fxSynth, 1, container, "in_bus", inBus, "out_bus", outBus];
         for (const [k, v] of Object.entries(extraParams || {})) {
           fxArgs.push(k, v);
         }
@@ -75,7 +65,7 @@ test.describe("Big bundle FX setup", () => {
       packets.push(...echo.packets);
 
       // Chain 2: reverb (inside echo, around clap) — tail of echo.synthGroup
-      const revClap = fxChain(u(echo.synthGroup), "sonic-pi-fx_reverb", 122, 124, { mix: 0.2, room: 0.5 });
+      const revClap = fxChain(echo.synthGroup, "sonic-pi-fx_reverb", 122, 124, { mix: 0.2, room: 0.5 });
       packets.push(...revClap.packets);
 
       // Chain 3: reverb (around hhc1) — tail of 100
@@ -83,7 +73,7 @@ test.describe("Big bundle FX setup", () => {
       packets.push(...revHhc.packets);
 
       // Chain 4: panslicer (inside reverb, around hhc1)
-      const panHhc = fxChain(u(revHhc.synthGroup), "sonic-pi-fx_panslicer", 118, 120, { mix: 0.2, phase: 0.115385 });
+      const panHhc = fxChain(revHhc.synthGroup, "sonic-pi-fx_panslicer", 118, 120, { mix: 0.2, phase: 0.115385 });
       packets.push(...panHhc.packets);
 
       // Chain 5: reverb (around crash) — tail of 100
@@ -99,7 +89,7 @@ test.describe("Big bundle FX setup", () => {
       packets.push(...panBass.packets);
 
       // Chain 8: reverb (inside panslicer, around synthbass)
-      const revBass = fxChain(u(panBass.synthGroup), "sonic-pi-fx_reverb", 110, 112, { mix: 0.75 });
+      const revBass = fxChain(panBass.synthGroup, "sonic-pi-fx_reverb", 110, 112, { mix: 0.75 });
       packets.push(...revBass.packets);
 
       // Wrap all 24 packets into one timed bundle
@@ -122,7 +112,7 @@ test.describe("Big bundle FX setup", () => {
       function walk(node, depth) {
         nodes.push({
           depth,
-          id: typeof node.id === "number" ? node.id : "uuid",
+          id: node.id,
           name: node.defName,
           children: (node.children || []).length,
         });
@@ -149,7 +139,7 @@ test.describe("Big bundle FX setup", () => {
       console.log(`${"  ".repeat(n.depth)}${n.name} (id=${n.id}, children=${n.children})`);
     }
 
-    const fxGroups = result.nodes.filter(n => n.name === "group" && (n.id === "uuid" || n.id >= 1000));
+    const fxGroups = result.nodes.filter(n => n.name === "group" && n.id >= 1000);
     const fxSynths = result.nodes.filter(n => n.name.startsWith("sonic-pi-fx_"));
     console.log(`\nFX groups: ${fxGroups.length}/16   FX synths: ${fxSynths.length}/8`);
 

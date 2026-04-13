@@ -49,19 +49,10 @@ test("audio survives rapid FX chain rebuild with output mixer chain", async ({ p
     await sonic.loadSynthDef("sonic-pi-fx_reverb");
     await sonic.loadSynthDef("sonic-pi-mixer");
 
-    // UUID helper
-    var uuidCounter = 0;
-    function makeUuid() {
-      var u = new Uint8Array(16);
-      u[0] = 0x01; u[1] = 0x93; // version marker
-      u[6] = 0x70; u[8] = 0x80; // UUID v7 format bits
-      // Unique lower bytes
-      var c = ++uuidCounter;
-      u[12] = (c >> 24) & 0xff;
-      u[13] = (c >> 16) & 0xff;
-      u[14] = (c >> 8) & 0xff;
-      u[15] = c & 0xff;
-      return { type: 'uuid', value: u };
+    // Integer ID generator (starting from 1000 to avoid collisions with fixed IDs)
+    var idCounter = 1000;
+    function nextId() {
+      return idCounter++;
     }
 
     // === Output chain (matches real app) ===
@@ -70,17 +61,17 @@ test("audio survives rapid FX chain rebuild with output mixer chain", async ({ p
     await sonic.send('/s_new', 'sonic-pi-mixer', 203, 1, 200,
       'in_bus', 20, 'out_bus', 0, 'amp', 0.8, 'pre_amp', 0.3);
 
-    // === Persistent loop structure (UUIDs like real app) ===
-    var containerUuid = makeUuid();
-    var bodyUuid = makeUuid();
-    var mixerUuid = makeUuid();
-    var beepUuid = makeUuid();
+    // === Persistent loop structure ===
+    var containerId = nextId();
+    var bodyId = nextId();
+    var mixerId = nextId();
+    var beepId = nextId();
 
-    await sonic.send('/g_new', containerUuid, 1, 100);
-    await sonic.send('/g_new', bodyUuid, 0, containerUuid);
-    await sonic.send('/s_new', 'sonic-pi-fx_level', mixerUuid, 1, containerUuid,
+    await sonic.send('/g_new', containerId, 1, 100);
+    await sonic.send('/g_new', bodyId, 0, containerId);
+    await sonic.send('/s_new', 'sonic-pi-fx_level', mixerId, 1, containerId,
       'in_bus', 30, 'out_bus', 20, 'amp', 1.0);
-    await sonic.send('/s_new', 'sonic-pi-beep', beepUuid, 0, bodyUuid,
+    await sonic.send('/s_new', 'sonic-pi-beep', beepId, 0, bodyId,
       'note', 69, 'out_bus', 30, 'amp', 0.3, 'sustain', 30, 'release', 0.1);
 
     // Verify baseline audio
@@ -105,14 +96,14 @@ test("audio survives rapid FX chain rebuild with output mixer chain", async ({ p
       var innermostInnerG = null;
 
       for (var fx = 0; fx < FX_PER_ROUND; fx++) {
-        var outerG = makeUuid();
-        var innerG = makeUuid();
-        var fxSynthUuid = makeUuid();
+        var outerG = nextId();
+        var innerG = nextId();
+        var fxSynthId = nextId();
         var fxBus = nextBus; nextBus += 2;
 
         sonic.send('/g_new', outerG, 0, parentGroup);
         sonic.send('/g_new', innerG, 0, outerG);
-        sonic.send('/s_new', 'sonic-pi-fx_reverb', fxSynthUuid, 1, outerG,
+        sonic.send('/s_new', 'sonic-pi-fx_reverb', fxSynthId, 1, outerG,
           'in_bus', fxBus, 'out_bus', prevBus, 'mix', 0.3, 'room', 0.5);
 
         parentGroup = innerG;
@@ -121,10 +112,10 @@ test("audio survives rapid FX chain rebuild with output mixer chain", async ({ p
       }
 
       // Update loop mixer to write to innermost FX bus
-      sonic.send('/n_set', mixerUuid, 'out_bus', prevBus);
+      sonic.send('/n_set', mixerId, 'out_bus', prevBus);
 
       // Move loop container into innermost FX chain
-      sonic.send('/n_order', 1, innermostInnerG, containerUuid);
+      sonic.send('/n_order', 1, innermostInnerG, containerId);
 
       // NO teardown — old chains linger
     }

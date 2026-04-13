@@ -164,7 +164,6 @@ set(SUPERSONIC_CORE_SOURCES
     ${SUPERSONIC_SRC}/audio_processor.cpp
     ${SUPERSONIC_SRC}/buffer_commands.cpp
     ${SUPERSONIC_SRC}/node_tree.cpp
-    ${SUPERSONIC_SRC}/uuid_rewriter.cpp
     ${SUPERSONIC_SRC}/supersonic_heap.cpp
 )
 

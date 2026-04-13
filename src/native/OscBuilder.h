@@ -29,11 +29,6 @@ public:
         size_t size;
     };
 
-    // UUID wrapper — 16-byte node ID (transparently rewritten to int32 by uuid_rewriter)
-    struct Uuid {
-        const uint8_t* data;  // must point to 16 bytes
-    };
-
     // Build a single OSC message with typed args
     template<typename... Args>
     static OscPacket message(const char* address, Args&&... args) {
@@ -99,8 +94,5 @@ private:
     static void append(osc::OutboundPacketStream& s, const std::string& v) { s << v.c_str(); }
     static void append(osc::OutboundPacketStream& s, const Blob& b) {
         s << osc::Blob(b.data, static_cast<osc::osc_bundle_element_size_t>(b.size));
-    }
-    static void append(osc::OutboundPacketStream& s, const Uuid& u) {
-        s << osc::Uuid(u.data);
     }
 };

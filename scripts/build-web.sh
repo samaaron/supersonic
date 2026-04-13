@@ -94,7 +94,6 @@ SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" ! -name "
 emcc "$SRC_DIR/audio_processor.cpp" \
     "$SRC_DIR/buffer_commands.cpp" \
     "$SRC_DIR/node_tree.cpp" \
-    "$SRC_DIR/uuid_rewriter.cpp" \
     "$SRC_DIR/scsynth/server/SC_OscUnroll.cpp" \
     $SCSYNTH_SERVER_SOURCES \
     $SCSYNTH_COMMON_SOURCES \
@@ -130,7 +129,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -sINITIAL_MEMORY=$FIXED_MEMORY \
     -sMAXIMUM_MEMORY=$MAX_MEMORY \
     -sSTACK_SIZE=$WASM_STACK_SIZE \
-    -sEXPORTED_FUNCTIONS="['___wasm_call_ctors','_get_ring_buffer_base','_get_buffer_layout','_init_memory','_process_audio','_get_audio_output_bus','_get_audio_buffer_samples','_get_supersonic_version_string','_set_time_offset','_get_time_offset','_worklet_debug','_worklet_debug_va','_get_process_count','_get_messages_processed','_get_messages_dropped','_get_status_flags','_get_uuid_map_count','_get_uuid_map_capacity']" \
+    -sEXPORTED_FUNCTIONS="['___wasm_call_ctors','_get_ring_buffer_base','_get_buffer_layout','_init_memory','_process_audio','_get_audio_output_bus','_get_audio_buffer_samples','_get_supersonic_version_string','_set_time_offset','_get_time_offset','_worklet_debug','_worklet_debug_va','_get_process_count','_get_messages_processed','_get_messages_dropped','_get_status_flags']" \
     --no-entry \
     -Wl,--import-memory,--shared-memory,--allow-multiple-definition \
     -fcommon \

@@ -658,19 +658,6 @@ OutboundPacketStream& OutboundPacketStream::operator<<( const Blob& rhs )
     return *this;
 }
 
-// SuperSonic extension: UUID type for tau-state 16-byte node IDs.
-// Wire format: type tag 'u', 16 bytes big-endian.
-OutboundPacketStream& OutboundPacketStream::operator<<( const Uuid& rhs )
-{
-    CheckForAvailableArgumentSpace(16);
-
-    *(--typeTagsCurrent_) = UUID_TYPE_TAG;
-    std::memcpy( argumentCurrent_, rhs.data, 16 );
-    argumentCurrent_ += 16;  // 16 bytes is already 4-byte aligned
-
-    return *this;
-}
-
 OutboundPacketStream& OutboundPacketStream::operator<<( const ArrayInitiator& rhs )
 {
     (void) rhs;

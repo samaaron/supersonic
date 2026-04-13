@@ -120,7 +120,6 @@ public:
     OutboundPacketStream& operator<<( const char* rhs );
     OutboundPacketStream& operator<<( const Symbol& rhs );
     OutboundPacketStream& operator<<( const Blob& rhs );
-    OutboundPacketStream& operator<<( const Uuid& rhs );  // SuperSonic extension: UUID
 
     OutboundPacketStream& operator<<( const ArrayInitiator& rhs );
     OutboundPacketStream& operator<<( const ArrayTerminator& rhs );

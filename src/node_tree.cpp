@@ -15,7 +15,6 @@
 
 #include "node_tree.h"
 #include "audio_processor.h"  // For worklet_debug
-#include "uuid_rewriter.h"    // For uuid_map_reverse_lookup
 #include "scsynth/server/SC_Group.h"  // For Node, Group structs
 #include "scsynth/server/SC_SynthDef.h"  // For NodeDef (mName access)
 #include <cstring>  // For strncpy
@@ -175,11 +174,9 @@ void NodeTree_Add(Node* node, NodeTreeHeader* header, NodeEntry* entries) {
         }
     }
 
-    // Populate UUID if this node was created with one (zeroes otherwise)
-    if (!uuid_map_reverse_lookup(node->mID, &entry->uuid_hi, &entry->uuid_lo)) {
-        entry->uuid_hi = 0;
-        entry->uuid_lo = 0;
-    }
+    // UUID fields zeroed — caller can populate via its own reverse lookup
+    entry->uuid_hi = 0;
+    entry->uuid_lo = 0;
 
     // Insert into hash table (nodeId → slot) before sibling updates
     // so FindIndex calls can locate this node if needed

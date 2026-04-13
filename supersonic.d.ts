@@ -14,13 +14,9 @@
 export type UUID = Uint8Array;
 
 /**
- * A node identifier — either a classic i32 or a v7 UUID.
- *
- * UUIDs are rewritten to i32s at the AudioWorklet boundary and back again
- * on the way out, so concurrent clients can create and track synths without
- * coordinating over a shared integer numbering system.
+ * A node identifier (int32).
  */
-export type NodeID = number | UUID;
+export type NodeID = number;
 
 // ============================================================================
 // OSC Types
@@ -36,7 +32,7 @@ export type NodeID = number | UUID;
  * - `boolean` → `T` / `F`
  * - `Uint8Array` / `ArrayBuffer` → `b` (blob)
  *
- * For 64-bit, timetag, or UUID types, use the tagged object form:
+ * For 64-bit or timetag types, use the tagged object form:
  * @example
  * { type: 'int', value: 42 }
  * { type: 'float', value: 440 }     // force float32 for whole numbers
@@ -46,7 +42,6 @@ export type NodeID = number | UUID;
  * { type: 'int64', value: 9007199254740992n }
  * { type: 'double', value: 3.141592653589793 }
  * { type: 'timetag', value: ntpTimestamp }
- * { type: 'uuid', value: new Uint8Array(16) }
  */
 export type OscArg =
   | number
@@ -61,8 +56,7 @@ export type OscArg =
   | { type: 'bool'; value: boolean }
   | { type: 'int64'; value: number | bigint }
   | { type: 'double'; value: number }
-  | { type: 'timetag'; value: number }
-  | { type: 'uuid'; value: UUID };
+  | { type: 'timetag'; value: number };
 
 /**
  * Decoded OSC message as a plain array.
