@@ -77,7 +77,9 @@ public:
     void sendBundle(double ntpTimeSec, std::initializer_list<OscPacket> messages);
 
     // --- Device management ---
-    std::vector<DeviceInfo>  listDevices() const;
+    // rescan=true triggers a full CoreAudio re-enumeration (may disrupt a
+    // just-opened device on macOS). Pass false to reuse JUCE's cached list.
+    std::vector<DeviceInfo>  listDevices(bool rescan = true) const;
     CurrentDeviceInfo        currentDevice() const;     // resolves aggregate to real names
     std::string              realOutputDeviceName() const { return mRealOutputDeviceName; }
     std::string              realInputDeviceName() const  { return mRealInputDeviceName; }

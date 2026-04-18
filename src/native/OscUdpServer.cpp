@@ -84,7 +84,9 @@ void OscUdpServer::sendDeviceReport() {
     }
     if (targets.empty() || !mEngine || !mSocket) return;
 
-    auto allDevices = mEngine->listDevices();
+    // Skip rescan — sendDeviceReport() is usually called right after a
+    // device switch, when rescanning would disrupt the freshly-opened device.
+    auto allDevices = mEngine->listDevices(false);
     auto current = mEngine->currentDevice();
     auto mode    = mEngine->deviceMode();
 

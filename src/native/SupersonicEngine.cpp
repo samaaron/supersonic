@@ -749,7 +749,7 @@ void SupersonicEngine::sendBundle(double ntpTimeSec, std::initializer_list<OscPa
 
 // --- Device management ---
 
-std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
+std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
     std::vector<DeviceInfo> result;
     if (!mDeviceManager) return result;
 
@@ -819,7 +819,7 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
 
     auto& types = mDeviceManager->getAvailableDeviceTypes();
     for (auto* type : types) {
-        type->scanForDevices();
+        if (rescan) type->scanForDevices();
 
         auto populateFromDevice = [](DeviceInfo& info, juce::AudioIODevice* dev) {
             for (auto r : dev->getAvailableSampleRates())
@@ -1735,7 +1735,10 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
 void SupersonicEngine::printDeviceList() {
     if (!mDeviceManager) return;
 
-    auto devices = listDevices();
+    // Skip rescan — calling scanForDevices() right after a device switch
+    // can close the just-opened CoreAudio device. The switch path already
+    // rescanned when needed. This path only reports state.
+    auto devices = listDevices(false);
     auto current = currentDevice();
 
     fprintf(stderr, "[audio-devices-start]\n");
