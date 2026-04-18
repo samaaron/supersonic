@@ -497,6 +497,40 @@ std::string createOrUpdate(const std::string& outputDeviceName,
             (unsigned)newID);
     fflush(stderr);
 
+    // Diagnostic: check what streams the aggregate exposes on input scope.
+    {
+        AudioObjectPropertyAddress streamsAddr = {
+            kAudioDevicePropertyStreams,
+            kAudioObjectPropertyScopeInput,
+            kAudioObjectPropertyElementMain
+        };
+        UInt32 streamsSize = 0;
+        if (AudioObjectGetPropertyDataSize(newID, &streamsAddr, 0, nullptr, &streamsSize) == noErr) {
+            auto nStreams = streamsSize / sizeof(AudioStreamID);
+            fprintf(stderr, "[aggregate] input streams count: %zu (size=%u)\n",
+                    nStreams, (unsigned)streamsSize);
+            std::vector<AudioStreamID> streams(nStreams);
+            if (AudioObjectGetPropertyData(newID, &streamsAddr, 0, nullptr, &streamsSize, streams.data()) == noErr) {
+                for (auto s : streams) {
+                    AudioObjectPropertyAddress fmtAddr = {
+                        kAudioStreamPropertyPhysicalFormat,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+                    AudioStreamBasicDescription fmt{};
+                    UInt32 fmtSz = sizeof(fmt);
+                    AudioObjectGetPropertyData(s, &fmtAddr, 0, nullptr, &fmtSz, &fmt);
+                    fprintf(stderr, "[aggregate]   input stream id=%u sr=%.0f ch=%u bits=%u fmt=0x%x\n",
+                            (unsigned)s, fmt.mSampleRate, (unsigned)fmt.mChannelsPerFrame,
+                            (unsigned)fmt.mBitsPerChannel, (unsigned)fmt.mFormatFlags);
+                }
+            }
+        } else {
+            fprintf(stderr, "[aggregate] couldn't get input streams\n");
+        }
+        fflush(stderr);
+    }
+
     return kAggregateName;
 }
 
