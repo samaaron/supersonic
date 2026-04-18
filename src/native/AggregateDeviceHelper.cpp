@@ -19,16 +19,22 @@
 #include "AggregateDeviceHelper.h"
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace AggregateDeviceHelper {
 
-static const char* kAggregateUID  = "com.sonicpi.supersonic.aggregate";
-static const char* kAggregateName = "SuperSonic";
+static const char* kAggregateUIDBase  = "com.sonicpi.supersonic.aggregate";
+static const char* kAggregateNameBase = "SuperSonic";
 
 static AudioObjectID sAggregateID = kAudioObjectUnknown;
+static std::string  sCurrentUID;
+static std::string  sCurrentName;
+static std::atomic<int> sAggregateCounter{0};
 static std::mutex sMutex;
 
 // ---------------------------------------------------------------------------
@@ -158,7 +164,10 @@ void cleanupOrphaned() {
         CFStringGetCString(uid, buf, sizeof(buf), kCFStringEncodingUTF8);
         CFRelease(uid);
 
-        if (std::string(buf) == kAggregateUID) {
+        // Match any of our aggregate UIDs (we now suffix them with a counter).
+        std::string sUid(buf);
+        bool isOurs = (sUid.rfind(kAggregateUIDBase, 0) == 0);
+        if (isOurs) {
             fprintf(stderr, "[audio-device] cleaning up orphaned SuperSonic aggregate device\n");
             AudioHardwareDestroyAggregateDevice(id);
         }
@@ -267,11 +276,17 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     // Orphan cleanup now runs at boot via SupersonicEngine::initialise()
 
     // ── Step 1: Create empty aggregate device ────────────────────────────
-    // Following Ardour's pattern: create first, then configure in steps
-    // with RunLoop waits between each to let CoreAudio stabilise.
+    // Each new aggregate gets a unique UID and name suffix. Reusing the
+    // same UID causes JUCE's setAudioDeviceSetup to assume "same device"
+    // and not reopen — the new aggregate then starts with stale state
+    // and produces no callbacks. Incrementing a counter sidesteps this.
+    int n = sAggregateCounter.fetch_add(1) + 1;
+    char uidBuf[128], nameBuf[64];
+    snprintf(uidBuf, sizeof(uidBuf), "%s.%d", kAggregateUIDBase, n);
+    snprintf(nameBuf, sizeof(nameBuf), "%s#%d", kAggregateNameBase, n);
 
-    CFStringRef uidRef  = CFStringCreateWithCString(nullptr, kAggregateUID, kCFStringEncodingUTF8);
-    CFStringRef nameRef = CFStringCreateWithCString(nullptr, kAggregateName, kCFStringEncodingUTF8);
+    CFStringRef uidRef  = CFStringCreateWithCString(nullptr, uidBuf, kCFStringEncodingUTF8);
+    CFStringRef nameRef = CFStringCreateWithCString(nullptr, nameBuf, kCFStringEncodingUTF8);
 
     // NOTE: kAudioAggregateDeviceIsPrivateKey is known to be flaky on some
     // macOS versions — silently succeeds but leaves properties half-applied,
@@ -495,7 +510,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     }
 
     fprintf(stderr, "[audio-device] aggregate: created '%s' (out=%s, in=%s) id=%u\n",
-            kAggregateName, outputDeviceName.c_str(), inputDeviceName.c_str(),
+            nameBuf, outputDeviceName.c_str(), inputDeviceName.c_str(),
             (unsigned)newID);
     fflush(stderr);
 
@@ -533,16 +548,25 @@ std::string createOrUpdate(const std::string& outputDeviceName,
         fflush(stderr);
     }
 
-    return kAggregateName;
+    // Store the current (unique) name so listDevices can filter it out
+    {
+        std::lock_guard<std::mutex> lock(sMutex);
+        sCurrentName = nameBuf;
+        sCurrentUID  = uidBuf;
+    }
+
+    return nameBuf;
 }
 
 void destroy() {
     std::lock_guard<std::mutex> lock(sMutex);
 
     if (sAggregateID != kAudioObjectUnknown) {
-        fprintf(stderr, "[audio-device] aggregate: destroying '%s'\n", kAggregateName);
+        fprintf(stderr, "[audio-device] aggregate: destroying '%s'\n", sCurrentName.c_str());
         AudioHardwareDestroyAggregateDevice(sAggregateID);
         sAggregateID = kAudioObjectUnknown;
+        sCurrentName.clear();
+        sCurrentUID.clear();
     }
 }
 
@@ -553,7 +577,7 @@ bool exists() {
 
 std::string currentName() {
     std::lock_guard<std::mutex> lock(sMutex);
-    return (sAggregateID != kAudioObjectUnknown) ? kAggregateName : "";
+    return (sAggregateID != kAudioObjectUnknown) ? sCurrentName : "";
 }
 
 } // namespace AggregateDeviceHelper

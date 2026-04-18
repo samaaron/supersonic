@@ -1305,17 +1305,12 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         }
 #endif
 
-        // Close the current device explicitly before configuring the new
-        // one. When the new aggregate has the same NAME as the old one
-        // (we always use "SuperSonic"), JUCE's setAudioDeviceSetup skips
-        // the reopen — it thinks the device is unchanged. The underlying
-        // CoreAudio aggregate IS different though (different id, different
-        // sub-devices), so without this close() the new aggregate starts
-        // with stale JUCE state (outLat/inLat cached from previous device)
-        // and no audio callbacks fire.
-        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
-        mDeviceManager->closeAudioDevice();
-        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+        // Don't call closeAudioDevice() here — it races with JUCE's internal
+        // CoreAudio lock on destruction of aggregates that contained virtual
+        // sub-devices (_os_unfair_lock_unowned_abort). We rely on each new
+        // aggregate having a unique name (see AggregateDeviceHelper) so
+        // JUCE's setAudioDeviceSetup sees it as a different device and
+        // reopens properly.
 
         fprintf(stderr, "[audio-device] calling setAudioDeviceSetup: out='%s' in='%s' sr=%.0f buf=%d\n",
                 setup.outputDeviceName.toRawUTF8(),
