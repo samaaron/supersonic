@@ -347,6 +347,26 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
         }
     }
 
+    // Output level diagnostic — measured after scsynth has filled the buffer.
+    // Same cadence as input diagnostic above.
+    if (mCallbackCount > 4 && (mCallbackCount % (mSampleRate / numSamples)) == 0) {
+        float outPeak = 0.0f, outRms = 0.0f;
+        int outSamples = 0;
+        for (int ch = 0; ch < numOutputChannels; ++ch) {
+            if (!outputChannelData[ch]) continue;
+            for (int i = 0; i < numSamples; ++i) {
+                float v = outputChannelData[ch][i];
+                float av = std::abs(v);
+                if (av > outPeak) outPeak = av;
+                outRms += v * v;
+                outSamples++;
+            }
+        }
+        if (outSamples > 0) outRms = std::sqrt(outRms / outSamples);
+        fprintf(stderr, "[audio-output] nOut=%d peak=%.6f rms=%.6f\n",
+                numOutputChannels, outPeak, outRms);
+    }
+
     // ── 3. Recording tap — lock-free FIFO push to background writer ──────────
     auto* recWriter = static_cast<juce::AudioFormatWriter::ThreadedWriter*>(
         mRecordWriter.load(std::memory_order_acquire));
