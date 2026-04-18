@@ -268,9 +268,13 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     CFStringRef outUIDRef = CFStringCreateWithCString(nullptr, outputUID.c_str(), kCFStringEncodingUTF8);
     CFStringRef inUIDRef  = CFStringCreateWithCString(nullptr, inputUID.c_str(), kCFStringEncodingUTF8);
 
+    // Order matters: the FIRST sub-device in this list becomes the default
+    // clock master if the master-device property isn't set later, and
+    // drift-compensation logic skips index 0 assuming it's the master.
+    // Put INPUT first because it's the hardware clock source we prefer.
     CFMutableArrayRef subDevicesArray = CFArrayCreateMutable(nullptr, 0, &kCFTypeArrayCallBacks);
-    CFArrayAppendValue(subDevicesArray, outUIDRef);
     CFArrayAppendValue(subDevicesArray, inUIDRef);
+    CFArrayAppendValue(subDevicesArray, outUIDRef);
 
     AudioObjectPropertyAddress subDevAddr = {
         kAudioAggregateDevicePropertyFullSubDeviceList,
@@ -293,7 +297,13 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     runLoopWait();
 
     // ── Step 3: Set master (clock source) device ─────────────────────────
-    // Output device provides the clock — input device gets drift correction.
+    // The master MUST be a device with a real hardware clock.  Virtual
+    // devices (Loopback, Blackhole) are driven by the OS scheduler and
+    // have no stable hardware timestamps — using them as master causes
+    // CoreAudio's drift-compensation SRC to crash inside AudioUnitRender.
+    // Ardour's CoreAudio backend uses the same order: try INPUT (capture)
+    // first, fall back to OUTPUT (playback) — because the capture device
+    // is typically hardware while playback may be virtual.
 
     AudioObjectPropertyAddress masterAddr = {
         kAudioAggregateDevicePropertyMasterSubDevice,
@@ -301,15 +311,33 @@ std::string createOrUpdate(const std::string& outputDeviceName,
         kAudioObjectPropertyElementMain
     };
     UInt32 masterSize = sizeof(CFStringRef);
-    err = AudioObjectSetPropertyData(newID, &masterAddr, 0, nullptr, masterSize, &outUIDRef);
+
+    // Choose master: prefer whichever side is hardware. If both are hardware
+    // (the common case), prefer input (mic) — matches Ardour. If one side is
+    // virtual, that side cannot be master.
+    bool outIsVirtual = (outTransport == 0x76697274); // 'virt'
+    bool inIsVirtual  = (inTransport == 0x76697274);
+    CFStringRef* firstTry  = &inUIDRef;   // default: input as master
+    CFStringRef* secondTry = &outUIDRef;
+    const char*  firstName  = "input";
+    const char*  secondName = "output";
+    if (inIsVirtual && !outIsVirtual) {
+        firstTry = &outUIDRef; secondTry = &inUIDRef;
+        firstName = "output"; secondName = "input";
+    }
+
+    fprintf(stderr, "[audio-device] aggregate: setting %s as master clock\n", firstName);
+    fflush(stderr);
+    err = AudioObjectSetPropertyData(newID, &masterAddr, 0, nullptr, masterSize, firstTry);
 
     if (err != noErr) {
-        fprintf(stderr, "[audio-device] aggregate: failed to set master device (err %d), "
-                "trying input as master\n", (int)err);
-        // Fall back to input as master (like Ardour)
-        err = AudioObjectSetPropertyData(newID, &masterAddr, 0, nullptr, masterSize, &inUIDRef);
+        fprintf(stderr, "[audio-device] aggregate: %s-master failed (err %d), trying %s\n",
+                firstName, (int)err, secondName);
+        fflush(stderr);
+        err = AudioObjectSetPropertyData(newID, &masterAddr, 0, nullptr, masterSize, secondTry);
         if (err != noErr) {
-            fprintf(stderr, "[audio-device] aggregate: failed to set any master (err %d)\n", (int)err);
+            fprintf(stderr, "[audio-device] aggregate: no master could be set (err %d)\n", (int)err);
+            fflush(stderr);
             AudioHardwareDestroyAggregateDevice(newID);
             CFRelease(outUIDRef);
             CFRelease(inUIDRef);

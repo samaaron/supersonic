@@ -41,14 +41,13 @@ struct DeviceInfo {
     // Suitable for input: exclude Bluetooth/AirPlay (force low-quality codecs)
     bool isSuitableForInput() const { return !isWirelessTransport(); }
 
-    // Suitable for aggregation: exclude wireless AND virtual devices.
-    // - Wireless (BT/AirPlay): can't be opened via HAL at all.
-    // - Virtual (Loopback, Blackhole): no hardware clock → macOS aggregate
-    //   crashes inside AudioUnitRender within a couple of buffers.
-    // For virtual output + real input, we fall back to JUCE's combiner
-    // instead of our aggregate (handled in switchDevice).
+    // Suitable for aggregation: exclude only wireless (Bluetooth/AirPlay).
+    // Virtual devices (Loopback, Blackhole) CAN be aggregated when the
+    // master clock is set to the HARDWARE side (matches Ardour / JACK2
+    // patterns). Using a virtual device as master fails — see
+    // AggregateDeviceHelper::createOrUpdate for master-selection logic.
     bool isSuitableForAggregate() const {
-        return !isWirelessTransport() && !isVirtualTransport();
+        return !isWirelessTransport();
     }
 };
 
