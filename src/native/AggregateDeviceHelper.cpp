@@ -221,6 +221,49 @@ std::string createOrUpdate(const std::string& outputDeviceName,
             outputDeviceName.c_str(), transportTypeString(outTransport).c_str(),
             inputDeviceName.c_str(), transportTypeString(inTransport).c_str());
 
+    // Pre-set sample rate on both sub-devices so the aggregate doesn't have
+    // to negotiate rates at open time (Ardour's pattern). This is especially
+    // important for virtual devices whose default rate may differ from the
+    // master's — leaving them mismatched causes CoreAudio to stop the
+    // aggregate within a callback.
+    auto setDeviceRate = [](AudioObjectID devID, double rate, bool isInput) {
+        AudioObjectPropertyAddress rateAddr = {
+            kAudioDevicePropertyNominalSampleRate,
+            isInput ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput,
+            kAudioObjectPropertyElementMain
+        };
+        // Check current rate first
+        Float64 curRate = 0;
+        UInt32 sz = sizeof(curRate);
+        AudioObjectGetPropertyData(devID, &rateAddr, 0, nullptr, &sz, &curRate);
+        if ((int)curRate == (int)rate) return;
+        fprintf(stderr, "[aggregate] pre-setting sample rate on id=%u from %.0f to %.0f (%s)\n",
+                (unsigned)devID, curRate, rate, isInput ? "input" : "output");
+        fflush(stderr);
+        OSStatus err = AudioObjectSetPropertyData(devID, &rateAddr, 0, nullptr,
+                                                  sizeof(rate), &rate);
+        if (err != noErr) {
+            fprintf(stderr, "[aggregate] sample rate set err=%d on id=%u\n", (int)err, (unsigned)devID);
+            fflush(stderr);
+        }
+        // Brief wait for CoreAudio to apply
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+    };
+    // Get the master (input) device's current rate, then align output to it
+    AudioObjectPropertyAddress inRateAddr = {
+        kAudioDevicePropertyNominalSampleRate,
+        kAudioObjectPropertyScopeInput,
+        kAudioObjectPropertyElementMain
+    };
+    Float64 masterRate = 48000.0;
+    UInt32 rateSz = sizeof(masterRate);
+    AudioObjectGetPropertyData(inputID, &inRateAddr, 0, nullptr, &rateSz, &masterRate);
+    if (masterRate <= 0) masterRate = 48000.0;
+    setDeviceRate(inputID, masterRate, true);
+    setDeviceRate(outputID, masterRate, false);
+    fprintf(stderr, "[aggregate] sub-device rates aligned at %.0f Hz\n", masterRate);
+    fflush(stderr);
+
     // Orphan cleanup now runs at boot via SupersonicEngine::initialise()
 
     // ── Step 1: Create empty aggregate device ────────────────────────────
