@@ -170,20 +170,21 @@ int main(int argc, char* argv[]) {
     juce::ScopedJuceInitialiser_GUI libraryInitialiser;
 
 #ifdef __APPLE__
-    // Log macOS microphone permission status. live_audio silence is almost
-    // always caused by "denied" or "notDetermined" status.
+    // Log macOS microphone permission status. DO NOT request access here —
+    // supersonic runs as a background helper child of the GUI, and macOS
+    // auto-denies access requests from non-foreground processes without
+    // showing the prompt. The GUI (Sonic Pi.app) requests access on our
+    // behalf; TCC attributes the permission to the responsible process, so
+    // we inherit whatever the user granted.
     std::string micStatus = MicPermission::status();
     fprintf(stderr, "[mic-permission] status: %s\n", micStatus.c_str());
-    fflush(stderr);
-    if (micStatus == "notDetermined") {
-        fprintf(stderr, "[mic-permission] requesting access (user should see prompt)...\n");
-        fflush(stderr);
-        MicPermission::requestAccess();
-    } else if (micStatus == "denied") {
+    if (micStatus == "denied") {
         fprintf(stderr, "[mic-permission] WARNING: mic access DENIED. live_audio will be silent. "
                 "Grant access via System Settings > Privacy & Security > Microphone > Sonic Pi\n");
-        fflush(stderr);
+    } else if (micStatus == "notDetermined") {
+        fprintf(stderr, "[mic-permission] status notDetermined — GUI should request on our behalf\n");
     }
+    fflush(stderr);
 #endif
 
     // ── --list-devices: enumerate and exit ────────────────────────────────────
