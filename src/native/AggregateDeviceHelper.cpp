@@ -378,27 +378,32 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     }
 
     if (needsDriftComp) {
-        // Use a class qualifier to filter for sub-devices only. Without it,
-        // OwnedObjects returns all owned items (clocks, tap points, etc.)
-        // that don't support kAudioSubDevicePropertyDriftCompensation —
-        // which gave us 'who?' (kAudioHardwareUnknownPropertyError) on most
-        // of them. Pattern from Ardour's coreaudio_pcmio_aggregate.cc.
+        // Use Ardour's exact pattern: query OwnedObjects with a class-ID
+        // qualifier to get only the SubDevice children. Without the
+        // qualifier the owned list includes clocks/taps that don't support
+        // DriftCompensation (we saw 'who?' errors on them).
         AudioObjectPropertyAddress ownedAddr = {
             kAudioObjectPropertyOwnedObjects,
             kAudioObjectPropertyScopeGlobal,
             kAudioObjectPropertyElementMain
         };
-        AudioClassID classFilter = kAudioSubDeviceClassID;
-        UInt32 qualifierSize = sizeof(AudioClassID);
+        UInt32 qualifierDataSize = sizeof(AudioObjectID);
+        AudioClassID inClass = kAudioSubDeviceClassID;
         UInt32 ownedSize = 0;
-        err = AudioObjectGetPropertyDataSize(newID, &ownedAddr,
-            qualifierSize, &classFilter, &ownedSize);
-        if (err == noErr && ownedSize > 0) {
+        OSStatus szErr = AudioObjectGetPropertyDataSize(newID, &ownedAddr,
+            qualifierDataSize, &inClass, &ownedSize);
+        fprintf(stderr, "[aggregate] owned-objects query: err=%d size=%u (filter=%u)\n",
+                (int)szErr, (unsigned)ownedSize, (unsigned)inClass);
+        fflush(stderr);
+        if (szErr == noErr && ownedSize > 0) {
             auto nSubDevices = ownedSize / sizeof(AudioObjectID);
             std::vector<AudioObjectID> subDevices(nSubDevices);
-            err = AudioObjectGetPropertyData(newID, &ownedAddr,
-                qualifierSize, &classFilter, &ownedSize, subDevices.data());
-            if (err == noErr) {
+            OSStatus getErr = AudioObjectGetPropertyData(newID, &ownedAddr,
+                qualifierDataSize, &inClass, &ownedSize, subDevices.data());
+            fprintf(stderr, "[aggregate] got %zu sub-devices (getErr=%d)\n",
+                    nSubDevices, (int)getErr);
+            fflush(stderr);
+            if (getErr == noErr) {
                 AudioObjectPropertyAddress driftAddr = {
                     kAudioSubDevicePropertyDriftCompensation,
                     kAudioObjectPropertyScopeGlobal,
@@ -409,14 +414,14 @@ std::string createOrUpdate(const std::string& outputDeviceName,
                     UInt32 driftVal = 1;
                     OSStatus driftErr = AudioObjectSetPropertyData(
                         subDevices[i], &driftAddr, 0, nullptr, sizeof(UInt32), &driftVal);
-                    if (driftErr != noErr) {
-                        fprintf(stderr, "[audio-device] aggregate: drift comp failed on sub-device %zu (err %d)\n",
-                                i, (int)driftErr);
-                    } else {
-                        fprintf(stderr, "[audio-device] aggregate: drift comp enabled on sub-device %zu\n", i);
-                    }
+                    fprintf(stderr, "[audio-device] aggregate: drift comp sub-device %zu (id=%u) err=%d\n",
+                            i, (unsigned)subDevices[i], (int)driftErr);
+                    fflush(stderr);
                 }
             }
+        } else {
+            fprintf(stderr, "[aggregate] drift comp skipped: no sub-devices found\n");
+            fflush(stderr);
         }
     }
 
