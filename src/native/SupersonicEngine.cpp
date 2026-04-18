@@ -817,6 +817,20 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
     };
 #endif
 
+    // Don't probe (createDevice) the active aggregate — creating a second
+    // JUCE handle to a live CoreAudio device and immediately destroying it
+    // (end of unique_ptr scope) closes the HAL IO proc on the real one,
+    // silencing audio for ~1 callback period. Same applies to the currently
+    // open device name as reported by JUCE.
+    std::string activeAggName;
+    std::string activeDeviceName;
+#ifdef __APPLE__
+    if (AggregateDeviceHelper::exists())
+        activeAggName = AggregateDeviceHelper::currentName();
+#endif
+    if (auto* dev = mDeviceManager->getCurrentAudioDevice())
+        activeDeviceName = dev->getName().toStdString();
+
     auto& types = mDeviceManager->getAvailableDeviceTypes();
     for (auto* type : types) {
         if (rescan) type->scanForDevices();
@@ -831,6 +845,9 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
         };
 
         std::string typeNameStr = type->getTypeName().toStdString();
+        auto shouldSkipProbe = [&](const std::string& name) {
+            return name == activeAggName || name == activeDeviceName;
+        };
 
         // Enumerate output devices
         auto outputNames = type->getDeviceNames(false);
@@ -842,10 +859,12 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
             info.transportType = lookupTransport(info.name);
 #endif
 
-            std::unique_ptr<juce::AudioIODevice> tempDev(
-                type->createDevice(devName, juce::String()));
-            if (tempDev)
-                populateFromDevice(info, tempDev.get());
+            if (!shouldSkipProbe(info.name)) {
+                std::unique_ptr<juce::AudioIODevice> tempDev(
+                    type->createDevice(devName, juce::String()));
+                if (tempDev)
+                    populateFromDevice(info, tempDev.get());
+            }
 
             result.push_back(std::move(info));
         }
@@ -871,10 +890,12 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
             info.transportType = lookupTransport(info.name);
 #endif
 
-            std::unique_ptr<juce::AudioIODevice> tempDev(
-                type->createDevice(juce::String(), devName));
-            if (tempDev)
-                populateFromDevice(info, tempDev.get());
+            if (!shouldSkipProbe(info.name)) {
+                std::unique_ptr<juce::AudioIODevice> tempDev(
+                    type->createDevice(juce::String(), devName));
+                if (tempDev)
+                    populateFromDevice(info, tempDev.get());
+            }
 
             result.push_back(std::move(info));
         }
@@ -882,11 +903,10 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
 
 #ifdef __APPLE__
     // Filter out our managed aggregate device — it's an implementation detail.
-    if (AggregateDeviceHelper::exists()) {
-        auto aggName = AggregateDeviceHelper::currentName();
+    if (!activeAggName.empty()) {
         result.erase(
             std::remove_if(result.begin(), result.end(),
-                [&aggName](const DeviceInfo& d) { return d.name == aggName; }),
+                [&activeAggName](const DeviceInfo& d) { return d.name == activeAggName; }),
             result.end());
     }
 #endif
