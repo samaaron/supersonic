@@ -1228,12 +1228,16 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             && !setup.inputDeviceName.isEmpty()
             && setup.outputDeviceName != setup.inputDeviceName;
 
-        bool clearInputForWireless = false;
+        bool dropInput = false;
         if (needsAggregate) {
             // Check transport types — skip aggregate for wireless (Bluetooth/
-            // AirPlay) or virtual (Loopback, Blackhole) devices. Wireless
-            // devices use low-quality codecs; virtual devices lack a hardware
-            // clock and crash macOS's aggregate during AudioUnitRender.
+            // AirPlay) or virtual (Loopback, Blackhole) devices:
+            //   * Wireless: can't be opened as HAL at all
+            //   * Virtual:  no hardware clock; CoreAudio aggregate AND JUCE's
+            //               combiner both crash inside AudioUnitRender.
+            // In either case we drop the input — Sonic Pi can't mix mic +
+            // virtual-output reliably. Users who need both must use macOS
+            // aggregation in Audio MIDI Setup and pick that aggregate here.
             auto devices = listDevices();
             std::string outName = setup.outputDeviceName.toStdString();
             std::string inName  = setup.inputDeviceName.toStdString();
@@ -1241,21 +1245,10 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                 if ((dev.name == outName || dev.name == inName)
                     && !dev.isSuitableForAggregate()) {
                     needsAggregate = false;
-                    if (dev.isWirelessTransport()) {
-                        // Wireless output can't be opened as a HAL device at
-                        // all — drop input to avoid JUCE trying to combine.
-                        clearInputForWireless = true;
-                        fprintf(stderr, "[audio-device] skipping aggregate — '%s' is wireless\n",
-                                dev.name.c_str());
-                    } else {
-                        // Virtual output (Loopback) CAN be opened directly.
-                        // Let JUCE's AudioIODeviceCombiner handle input+output
-                        // separately — it's less reliable than an aggregate
-                        // but avoids the CoreAudio crash in aggregate+virtual.
-                        fprintf(stderr, "[audio-device] skipping aggregate — '%s' is virtual "
-                                "(JUCE combiner will handle I/O)\n",
-                                dev.name.c_str());
-                    }
+                    dropInput = true;
+                    const char* why = dev.isVirtualTransport() ? "virtual" : "wireless";
+                    fprintf(stderr, "[audio-device] skipping aggregate — '%s' is %s; input disabled\n",
+                            dev.name.c_str(), why);
                     fflush(stderr);
                     break;
                 }
@@ -1293,13 +1286,13 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             mRealOutputDeviceName.clear();
             mRealInputDeviceName.clear();
 
-            // Only clear input when we explicitly decided the output device
-            // can't handle it (currently: wireless outputs, which can't be
-            // opened as a HAL device at all). For virtual outputs (Loopback)
-            // we keep the input so JUCE's combiner can route the mic.
-            if (clearInputForWireless && !setup.inputDeviceName.isEmpty()) {
-                fprintf(stderr, "[audio-device] clearing input for wireless output "
-                        "(was '%s')\n",
+            // If we skipped aggregate because the output is unsuitable
+            // (wireless or virtual), drop the input. Keeping it would make
+            // JUCE fall back to its combiner, which has the same crash
+            // as our aggregate (both use AudioUnitRender under the hood).
+            if (dropInput && !setup.inputDeviceName.isEmpty()) {
+                fprintf(stderr, "[audio-device] clearing input (was '%s') because output "
+                        "can't be combined with it\n",
                         setup.inputDeviceName.toRawUTF8());
                 fflush(stderr);
                 setup.inputDeviceName = "";
