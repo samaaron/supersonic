@@ -378,17 +378,26 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     }
 
     if (needsDriftComp) {
+        // Use a class qualifier to filter for sub-devices only. Without it,
+        // OwnedObjects returns all owned items (clocks, tap points, etc.)
+        // that don't support kAudioSubDevicePropertyDriftCompensation —
+        // which gave us 'who?' (kAudioHardwareUnknownPropertyError) on most
+        // of them. Pattern from Ardour's coreaudio_pcmio_aggregate.cc.
         AudioObjectPropertyAddress ownedAddr = {
             kAudioObjectPropertyOwnedObjects,
             kAudioObjectPropertyScopeGlobal,
             kAudioObjectPropertyElementMain
         };
+        AudioClassID classFilter = kAudioSubDeviceClassID;
+        UInt32 qualifierSize = sizeof(AudioClassID);
         UInt32 ownedSize = 0;
-        err = AudioObjectGetPropertyDataSize(newID, &ownedAddr, 0, nullptr, &ownedSize);
+        err = AudioObjectGetPropertyDataSize(newID, &ownedAddr,
+            qualifierSize, &classFilter, &ownedSize);
         if (err == noErr && ownedSize > 0) {
             auto nSubDevices = ownedSize / sizeof(AudioObjectID);
             std::vector<AudioObjectID> subDevices(nSubDevices);
-            err = AudioObjectGetPropertyData(newID, &ownedAddr, 0, nullptr, &ownedSize, subDevices.data());
+            err = AudioObjectGetPropertyData(newID, &ownedAddr,
+                qualifierSize, &classFilter, &ownedSize, subDevices.data());
             if (err == noErr) {
                 AudioObjectPropertyAddress driftAddr = {
                     kAudioSubDevicePropertyDriftCompensation,
