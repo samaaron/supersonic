@@ -41,11 +41,14 @@ struct DeviceInfo {
     // Suitable for input: exclude Bluetooth/AirPlay (force low-quality codecs)
     bool isSuitableForInput() const { return !isWirelessTransport(); }
 
-    // Suitable for aggregation: exclude wireless (Bluetooth/AirPlay).
-    // Virtual devices (Loopback, Blackhole) CAN be aggregated but may
-    // introduce drift — SuperSonic enables drift compensation to mitigate.
+    // Suitable for aggregation: exclude wireless AND virtual devices.
+    // - Wireless (BT/AirPlay): can't be opened via HAL at all.
+    // - Virtual (Loopback, Blackhole): no hardware clock → macOS aggregate
+    //   crashes inside AudioUnitRender within a couple of buffers.
+    // For virtual output + real input, we fall back to JUCE's combiner
+    // instead of our aggregate (handled in switchDevice).
     bool isSuitableForAggregate() const {
-        return !isWirelessTransport();
+        return !isWirelessTransport() && !isVirtualTransport();
     }
 };
 

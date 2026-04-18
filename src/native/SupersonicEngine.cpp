@@ -1196,11 +1196,12 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             && !setup.inputDeviceName.isEmpty()
             && setup.outputDeviceName != setup.inputDeviceName;
 
+        bool clearInputForWireless = false;
         if (needsAggregate) {
             // Check transport types — skip aggregate for wireless (Bluetooth/
             // AirPlay) or virtual (Loopback, Blackhole) devices. Wireless
             // devices use low-quality codecs; virtual devices lack a hardware
-            // clock and cause aggregate failure within a couple of buffers.
+            // clock and crash macOS's aggregate during AudioUnitRender.
             auto devices = listDevices();
             std::string outName = setup.outputDeviceName.toStdString();
             std::string inName  = setup.inputDeviceName.toStdString();
@@ -1208,9 +1209,21 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                 if ((dev.name == outName || dev.name == inName)
                     && !dev.isSuitableForAggregate()) {
                     needsAggregate = false;
-                    const char* why = dev.isVirtualTransport() ? "virtual" : "wireless";
-                    fprintf(stderr, "[audio-device] skipping aggregate — '%s' is %s\n",
-                            dev.name.c_str(), why);
+                    if (dev.isWirelessTransport()) {
+                        // Wireless output can't be opened as a HAL device at
+                        // all — drop input to avoid JUCE trying to combine.
+                        clearInputForWireless = true;
+                        fprintf(stderr, "[audio-device] skipping aggregate — '%s' is wireless\n",
+                                dev.name.c_str());
+                    } else {
+                        // Virtual output (Loopback) CAN be opened directly.
+                        // Let JUCE's AudioIODeviceCombiner handle input+output
+                        // separately — it's less reliable than an aggregate
+                        // but avoids the CoreAudio crash in aggregate+virtual.
+                        fprintf(stderr, "[audio-device] skipping aggregate — '%s' is virtual "
+                                "(JUCE combiner will handle I/O)\n",
+                                dev.name.c_str());
+                    }
                     fflush(stderr);
                     break;
                 }
@@ -1248,14 +1261,11 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             mRealOutputDeviceName.clear();
             mRealInputDeviceName.clear();
 
-            // If we skipped aggregate because the output is wireless (AirPlay/
-            // Bluetooth), clear the input device from the setup.  Otherwise
-            // JUCE sees different input/output names and creates an internal
-            // AudioIODeviceCombiner — which crashes trying to sync a network
-            // audio device with a local hardware mic.
-            if (!needsAggregate && !setup.inputDeviceName.isEmpty()
-                && !setup.outputDeviceName.isEmpty()
-                && setup.inputDeviceName != setup.outputDeviceName) {
+            // Only clear input when we explicitly decided the output device
+            // can't handle it (currently: wireless outputs, which can't be
+            // opened as a HAL device at all). For virtual outputs (Loopback)
+            // we keep the input so JUCE's combiner can route the mic.
+            if (clearInputForWireless && !setup.inputDeviceName.isEmpty()) {
                 fprintf(stderr, "[audio-device] clearing input for wireless output "
                         "(was '%s')\n",
                         setup.inputDeviceName.toRawUTF8());
