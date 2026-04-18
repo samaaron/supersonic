@@ -1177,8 +1177,10 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             && setup.outputDeviceName != setup.inputDeviceName;
 
         if (needsAggregate) {
-            // Check transport types — skip aggregate for Bluetooth/AirPlay
-            // on either side (wireless codecs don't support drift correction)
+            // Check transport types — skip aggregate for wireless (Bluetooth/
+            // AirPlay) or virtual (Loopback, Blackhole) devices. Wireless
+            // devices use low-quality codecs; virtual devices lack a hardware
+            // clock and cause aggregate failure within a couple of buffers.
             auto devices = listDevices();
             std::string outName = setup.outputDeviceName.toStdString();
             std::string inName  = setup.inputDeviceName.toStdString();
@@ -1186,8 +1188,10 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                 if ((dev.name == outName || dev.name == inName)
                     && !dev.isSuitableForAggregate()) {
                     needsAggregate = false;
-                    fprintf(stderr, "[audio-device] skipping aggregate — '%s' is Bluetooth/AirPlay\n",
-                            dev.name.c_str());
+                    const char* why = dev.isVirtualTransport() ? "virtual" : "wireless";
+                    fprintf(stderr, "[audio-device] skipping aggregate — '%s' is %s\n",
+                            dev.name.c_str(), why);
+                    fflush(stderr);
                     break;
                 }
             }
@@ -1401,7 +1405,11 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             mCurrentConfig.numOutputChannels, mCurrentConfig.numInputChannels,
             result.error.c_str());
     fflush(stderr);
+    fprintf(stderr, "[switchDevice] about to call printDeviceList\n");
+    fflush(stderr);
     printDeviceList();
+    fprintf(stderr, "[switchDevice] printDeviceList returned\n");
+    fflush(stderr);
     return result;
 }
 
@@ -1735,11 +1743,17 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
 void SupersonicEngine::printDeviceList() {
     if (!mDeviceManager) return;
 
+    fprintf(stderr, "[printDeviceList] calling listDevices(false)\n");
+    fflush(stderr);
     // Skip rescan — calling scanForDevices() right after a device switch
     // can close the just-opened CoreAudio device. The switch path already
     // rescanned when needed. This path only reports state.
     auto devices = listDevices(false);
+    fprintf(stderr, "[printDeviceList] listDevices returned %zu devices, calling currentDevice\n", devices.size());
+    fflush(stderr);
     auto current = currentDevice();
+    fprintf(stderr, "[printDeviceList] currentDevice returned\n");
+    fflush(stderr);
 
     fprintf(stderr, "[audio-devices-start]\n");
     for (auto& dev : devices) {

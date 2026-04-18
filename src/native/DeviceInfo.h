@@ -28,11 +28,24 @@ struct DeviceInfo {
             || transportType == kContinuityCam;
     }
 
+    // Virtual devices (Loopback Audio, Blackhole, SoundSource, etc.) don't
+    // have a real hardware clock — their sample clock is driven by the OS
+    // scheduler. Aggregating a virtual device with real hardware results in
+    // severe clock drift that macOS can't compensate, causing the aggregate
+    // to fail within a buffer or two.
+    bool isVirtualTransport() const {
+        constexpr uint32_t kVirtual = 0x76697274; // 'virt'
+        return transportType == kVirtual;
+    }
+
     // Suitable for input: exclude Bluetooth/AirPlay (force low-quality codecs)
     bool isSuitableForInput() const { return !isWirelessTransport(); }
 
-    // Suitable for aggregation: exclude Bluetooth/AirPlay on either side
-    bool isSuitableForAggregate() const { return !isWirelessTransport(); }
+    // Suitable for aggregation: exclude wireless AND virtual devices.
+    // Virtual devices lack a hardware clock and cause aggregate failure.
+    bool isSuitableForAggregate() const {
+        return !isWirelessTransport() && !isVirtualTransport();
+    }
 };
 
 struct CurrentDeviceInfo : DeviceInfo {
