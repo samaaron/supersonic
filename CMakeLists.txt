@@ -30,22 +30,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
-# Apply AUHAL patch to JUCE CoreAudio backend every configure (not just on fetch).
-# This ensures the patch is always applied even when the JUCE source is cached.
+# Previously we patched JUCE's CoreAudio backend to use AUHAL for AirPlay
+# compatibility, but it turned out to be a red herring — stock JUCE handles
+# AirPlay fine via the macOS system-default device path. The AUHAL patch
+# was also suspected of interfering with aggregates containing virtual
+# devices (Loopback + mic). Reset JUCE to pristine on every configure.
 if(APPLE)
     execute_process(
         COMMAND git checkout -- .
         WORKING_DIRECTORY "${juce_SOURCE_DIR}"
         ERROR_QUIET
     )
-    execute_process(
-        COMMAND git apply --whitespace=nowarn "${CMAKE_CURRENT_SOURCE_DIR}/patches/juce-auhal-coreaudio.patch"
-        WORKING_DIRECTORY "${juce_SOURCE_DIR}"
-        RESULT_VARIABLE _patch_result
-    )
-    if(NOT _patch_result EQUAL 0)
-        message(WARNING "JUCE AUHAL patch failed to apply (result=${_patch_result})")
-    endif()
 endif()
 
 # ─── libsndfile + audio codecs via FetchContent ──────────────────────────────
