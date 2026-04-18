@@ -41,10 +41,11 @@ struct DeviceInfo {
     // Suitable for input: exclude Bluetooth/AirPlay (force low-quality codecs)
     bool isSuitableForInput() const { return !isWirelessTransport(); }
 
-    // Suitable for aggregation: exclude wireless AND virtual devices.
-    // Virtual devices lack a hardware clock and cause aggregate failure.
+    // Suitable for aggregation: exclude wireless (Bluetooth/AirPlay).
+    // Virtual devices (Loopback, Blackhole) CAN be aggregated but may
+    // introduce drift — SuperSonic enables drift compensation to mitigate.
     bool isSuitableForAggregate() const {
-        return !isWirelessTransport() && !isVirtualTransport();
+        return !isWirelessTransport();
     }
 };
 
