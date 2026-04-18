@@ -1325,7 +1325,13 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         if (err.isNotEmpty()) errStr = err.toStdString();
 
 #ifdef __APPLE__
-        // Now JUCE has switched away — safe to destroy the old aggregate.
+        // Now JUCE has switched away from the old aggregate — safe to
+        // destroy it. AggregateDeviceHelper stashes the previous ID in
+        // sPrevAggregateID precisely so this happens after JUCE has moved.
+        AggregateDeviceHelper::destroyPrevious();
+        juce::Thread::sleep(150);
+        // Also destroy the current one if we're no longer using an aggregate
+        // (e.g. single-device setup that doesn't need input combining).
         if (wasOnAggregate && !needsAggregate) {
             AggregateDeviceHelper::destroy();
             juce::Thread::sleep(150);

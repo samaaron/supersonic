@@ -32,6 +32,7 @@ static const char* kAggregateUIDBase  = "com.sonicpi.supersonic.aggregate";
 static const char* kAggregateNameBase = "SuperSonic";
 
 static AudioObjectID sAggregateID = kAudioObjectUnknown;
+static AudioObjectID sPrevAggregateID = kAudioObjectUnknown;
 static std::string  sCurrentUID;
 static std::string  sCurrentName;
 static std::atomic<int> sAggregateCounter{0};
@@ -185,18 +186,34 @@ std::string createOrUpdate(const std::string& outputDeviceName,
             (unsigned)sAggregateID);
     fflush(stderr);
 
-    // Destroy existing aggregate first (destroy-and-recreate pattern)
+    // IMPORTANT: Do NOT destroy the existing aggregate here. JUCE's
+    // CoreAudioIODevice still holds a reference to it; destroying it now
+    // means JUCE's later call to AudioComponentInstanceDispose (triggered
+    // by setAudioDeviceSetup switching away) hits a dangling device and
+    // crashes inside AudioToolbox. Instead, we stash the old aggregate ID
+    // in sPrevAggregateID and let the caller destroy it (via
+    // destroyPrevious()) AFTER setAudioDeviceSetup has moved JUCE to the
+    // new aggregate.
     {
         std::lock_guard<std::mutex> lock(sMutex);
-        if (sAggregateID != kAudioObjectUnknown) {
-            fprintf(stderr, "[aggregate] destroying existing id=%u before recreate\n",
-                    (unsigned)sAggregateID);
+        // If there's already a pending previous, destroy it now — this
+        // means multiple back-to-back switches; JUCE's now on the most
+        // recent, so the earlier one is safe to destroy.
+        if (sPrevAggregateID != kAudioObjectUnknown) {
+            fprintf(stderr, "[aggregate] draining older pending previous id=%u\n",
+                    (unsigned)sPrevAggregateID);
             fflush(stderr);
-            AudioHardwareDestroyAggregateDevice(sAggregateID);
-            sAggregateID = kAudioObjectUnknown;
+            AudioHardwareDestroyAggregateDevice(sPrevAggregateID);
+            sPrevAggregateID = kAudioObjectUnknown;
+        }
+        sPrevAggregateID = sAggregateID;
+        sAggregateID = kAudioObjectUnknown;
+        if (sPrevAggregateID != kAudioObjectUnknown) {
+            fprintf(stderr, "[aggregate] deferring destroy of previous id=%u until JUCE releases it\n",
+                    (unsigned)sPrevAggregateID);
+            fflush(stderr);
         }
     }
-    runLoopWait();
 
     if (outputDeviceName.empty() || inputDeviceName.empty())
         return "";
@@ -567,6 +584,25 @@ void destroy() {
         sAggregateID = kAudioObjectUnknown;
         sCurrentName.clear();
         sCurrentUID.clear();
+    }
+    // Also clear any pending previous aggregate — shutdown path.
+    if (sPrevAggregateID != kAudioObjectUnknown) {
+        AudioHardwareDestroyAggregateDevice(sPrevAggregateID);
+        sPrevAggregateID = kAudioObjectUnknown;
+    }
+}
+
+void destroyPrevious() {
+    AudioObjectID id = kAudioObjectUnknown;
+    {
+        std::lock_guard<std::mutex> lock(sMutex);
+        id = sPrevAggregateID;
+        sPrevAggregateID = kAudioObjectUnknown;
+    }
+    if (id != kAudioObjectUnknown) {
+        fprintf(stderr, "[audio-device] aggregate: destroying previous id=%u\n", (unsigned)id);
+        fflush(stderr);
+        AudioHardwareDestroyAggregateDevice(id);
     }
 }
 

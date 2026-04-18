@@ -30,6 +30,12 @@ std::string createOrUpdate(const std::string& outputDeviceName,
 // Destroy the managed Aggregate Device if one exists.
 void destroy();
 
+// Destroy the PREVIOUS aggregate (if any) — call this AFTER the caller
+// has switched JUCE to the new aggregate via setAudioDeviceSetup.
+// Destroying the old aggregate before JUCE releases it causes JUCE's
+// AudioComponentInstanceDispose to crash on the dangling CoreAudio ID.
+void destroyPrevious();
+
 // Returns true if a managed Aggregate Device currently exists.
 bool exists();
 
