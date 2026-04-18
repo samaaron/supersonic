@@ -24,6 +24,7 @@
 #endif
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
+#include "MicPermission.h"
 #endif
 
 static constexpr const char* VERSION = SUPERSONIC_VERSION_STRING;
@@ -167,6 +168,23 @@ int main(int argc, char* argv[]) {
     }
 
     juce::ScopedJuceInitialiser_GUI libraryInitialiser;
+
+#ifdef __APPLE__
+    // Log macOS microphone permission status. live_audio silence is almost
+    // always caused by "denied" or "notDetermined" status.
+    std::string micStatus = MicPermission::status();
+    fprintf(stderr, "[mic-permission] status: %s\n", micStatus.c_str());
+    fflush(stderr);
+    if (micStatus == "notDetermined") {
+        fprintf(stderr, "[mic-permission] requesting access (user should see prompt)...\n");
+        fflush(stderr);
+        MicPermission::requestAccess();
+    } else if (micStatus == "denied") {
+        fprintf(stderr, "[mic-permission] WARNING: mic access DENIED. live_audio will be silent. "
+                "Grant access via System Settings > Privacy & Security > Microphone > Sonic Pi\n");
+        fflush(stderr);
+    }
+#endif
 
     // ── --list-devices: enumerate and exit ────────────────────────────────────
     for (int i = 1; i < argc; ++i) {

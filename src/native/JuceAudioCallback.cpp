@@ -63,6 +63,18 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
     mBaseNTP        = wallClockNTP();
     std::fill(mPrefetchBuf.begin(), mPrefetchBuf.end(), 0.0f);
 
+    int activeOut = device->getActiveOutputChannels().countNumberOfSetBits();
+    int activeIn  = device->getActiveInputChannels().countNumberOfSetBits();
+    fprintf(stderr, "[juce-callback] aboutToStart: device='%s' type='%s' sr=%d bs=%d activeOut=%d activeIn=%d outLat=%d inLat=%d\n",
+            device->getName().toRawUTF8(),
+            device->getTypeName().toRawUTF8(),
+            mSampleRate,
+            device->getCurrentBufferSizeSamples(),
+            activeOut, activeIn,
+            device->getOutputLatencyInSamples(),
+            device->getInputLatencyInSamples());
+    fflush(stderr);
+
     // Native timing: set ntp_start and drift to 0. NTP is derived from sample
     // position with slow drift correction (see run loop), so these offsets are unused.
     if (mRingBufferStorage) {
@@ -78,6 +90,8 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
 }
 
 void JuceAudioCallback::audioDeviceStopped() {
+    fprintf(stderr, "[juce-callback] audioDeviceStopped (callbackCount=%u)\n", mCallbackCount);
+    fflush(stderr);
     mSamplePosition = 0.0;
     mPrefetchCount  = 0;
 }
@@ -206,19 +220,24 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
 
     double wallNTP = mBaseNTP + mSamplePosition / mSampleRate;
 
-    // Periodic input level diagnostic (every ~2 seconds)
-    if (mCallbackCount > 4 && (mCallbackCount % (2 * mSampleRate / numSamples)) == 0) {
-        float peak = 0.0f;
+    // Periodic input level diagnostic (every ~1 second)
+    if (mCallbackCount > 4 && (mCallbackCount % (mSampleRate / numSamples)) == 0) {
+        float peak = 0.0f, rms = 0.0f, firstSample = 0.0f;
+        int nullPtrCount = 0, totalSamples = 0;
         for (int ch = 0; ch < numInputChannels; ++ch) {
-            if (inputChannelData[ch]) {
-                for (int i = 0; i < numSamples; ++i) {
-                    float v = std::abs(inputChannelData[ch][i]);
-                    if (v > peak) peak = v;
-                }
+            if (!inputChannelData[ch]) { nullPtrCount++; continue; }
+            if (ch == 0 && numSamples > 0) firstSample = inputChannelData[ch][0];
+            for (int i = 0; i < numSamples; ++i) {
+                float v = inputChannelData[ch][i];
+                float av = std::abs(v);
+                if (av > peak) peak = av;
+                rms += v * v;
+                totalSamples++;
             }
         }
-        fprintf(stderr, "[audio-input] hwIn=%d worldIn=%d nIn=%d peak=%.6f\n",
-                numInputChannels, mNumInputChannels, nIn, peak);
+        if (totalSamples > 0) rms = std::sqrt(rms / totalSamples);
+        fprintf(stderr, "[audio-input] hwIn=%d worldIn=%d nIn=%d peak=%.6f rms=%.6f sample0=%.6f nullPtrs=%d\n",
+                numInputChannels, mNumInputChannels, nIn, peak, rms, firstSample, nullPtrCount);
     }
 
     while (outputFilled < numSamples) {

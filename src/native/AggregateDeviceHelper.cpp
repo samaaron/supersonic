@@ -171,10 +171,18 @@ void cleanupOrphaned() {
 
 std::string createOrUpdate(const std::string& outputDeviceName,
                            const std::string& inputDeviceName) {
+    fprintf(stderr, "[aggregate] createOrUpdate ENTER out='%s' in='%s' existing=%u\n",
+            outputDeviceName.c_str(), inputDeviceName.c_str(),
+            (unsigned)sAggregateID);
+    fflush(stderr);
+
     // Destroy existing aggregate first (destroy-and-recreate pattern)
     {
         std::lock_guard<std::mutex> lock(sMutex);
         if (sAggregateID != kAudioObjectUnknown) {
+            fprintf(stderr, "[aggregate] destroying existing id=%u before recreate\n",
+                    (unsigned)sAggregateID);
+            fflush(stderr);
             AudioHardwareDestroyAggregateDevice(sAggregateID);
             sAggregateID = kAudioObjectUnknown;
         }
@@ -388,8 +396,10 @@ std::string createOrUpdate(const std::string& outputDeviceName,
         sAggregateID = newID;
     }
 
-    fprintf(stderr, "[audio-device] aggregate: created '%s' (out=%s, in=%s)\n",
-            kAggregateName, outputDeviceName.c_str(), inputDeviceName.c_str());
+    fprintf(stderr, "[audio-device] aggregate: created '%s' (out=%s, in=%s) id=%u\n",
+            kAggregateName, outputDeviceName.c_str(), inputDeviceName.c_str(),
+            (unsigned)newID);
+    fflush(stderr);
 
     return kAggregateName;
 }

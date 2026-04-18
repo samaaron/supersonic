@@ -411,6 +411,10 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
                 inputDevName = it->AsStringUnchecked();
             }
 
+            fprintf(stderr, "[osc] /supersonic/devices/switch RECEIVED: out='%s' in='%s' sr=%.0f buf=%d\n",
+                    devName.c_str(), inputDevName.c_str(), sr, bufSz);
+            fflush(stderr);
+
             // "__system__" sentinel means "follow system default output"
             if (devName == "__system__") {
                 auto error = mEngine->setDeviceMode("");
@@ -557,12 +561,21 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
             if (it != msg.ArgumentsEnd() && it->IsInt32())
                 numChannels = it->AsInt32Unchecked();
 
+            fprintf(stderr, "[osc] /supersonic/inputs/enable RECEIVED: numChannels=%d\n",
+                    numChannels);
+            fflush(stderr);
+
             // Lock device mode so changeListenerCallback doesn't interfere
             auto curDev = mEngine->currentDevice();
             if (!curDev.name.empty())
                 mEngine->forceDeviceMode(curDev.name);
 
             auto result = mEngine->enableInputChannels(numChannels);
+            fprintf(stderr, "[osc] /supersonic/inputs/enable DONE: success=%d type=%s err='%s'\n",
+                    result.success ? 1 : 0,
+                    (result.type == SwapType::Cold) ? "Cold" : "Hot",
+                    result.error.c_str());
+            fflush(stderr);
             char buf[1024];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/supersonic/inputs/enable.reply");
@@ -686,11 +699,18 @@ void OscUdpServer::executePendingSwitch() {
         // Retry if a swap is already in progress (e.g. cascade from a
         // device-change notification). Give it up to ~3 seconds.
         SwapResult result;
+        int attempts = 0;
         for (int attempt = 0; attempt < 30; ++attempt) {
+            attempts = attempt + 1;
             result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
             if (result.success || result.error != "swap already in progress") break;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+        fprintf(stderr, "[audio-device] debounced switch DONE: attempts=%d success=%d type=%s sr=%.0f buf=%d err='%s'\n",
+                attempts, result.success ? 1 : 0,
+                (result.type == SwapType::Cold) ? "Cold" : "Hot",
+                result.sampleRate, result.bufferSize, result.error.c_str());
+        fflush(stderr);
         if (result.success)
             sendDeviceReport();
         else

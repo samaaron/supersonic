@@ -976,8 +976,16 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     result.deviceName = deviceName;
     bool recovered = false;
 
+    fprintf(stderr, "[switchDevice] ENTER dev='%s' in='%s' sr=%.0f buf=%d forceCold=%d | curCfg: sr=%d bs=%d out=%d in=%d\n",
+            deviceName.c_str(), inputDeviceName.c_str(), sampleRate, bufferSize, forceCold ? 1 : 0,
+            mCurrentConfig.sampleRate, mCurrentConfig.bufferSize,
+            mCurrentConfig.numOutputChannels, mCurrentConfig.numInputChannels);
+    fflush(stderr);
+
     // Try to acquire swap mutex (non-blocking)
     if (!mSwapMutex.try_lock()) {
+        fprintf(stderr, "[switchDevice] EXIT: swap already in progress\n");
+        fflush(stderr);
         result.error = "swap already in progress";
         return result;
     }
@@ -1386,6 +1394,13 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     } else {
         if (onSwapEvent) onSwapEvent("swap:complete", result);
     }
+    fprintf(stderr, "[switchDevice] EXIT success=%d type=%s sr=%.0f buf=%d out=%d in=%d err='%s'\n",
+            result.success ? 1 : 0,
+            (result.type == SwapType::Cold) ? "Cold" : "Hot",
+            result.sampleRate, result.bufferSize,
+            mCurrentConfig.numOutputChannels, mCurrentConfig.numInputChannels,
+            result.error.c_str());
+    fflush(stderr);
     printDeviceList();
     return result;
 }

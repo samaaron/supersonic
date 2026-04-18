@@ -159,6 +159,10 @@ set(ENGINE_SOURCES
     ${WORKERS_SRC}/DebugReader.cpp
 )
 
+if(APPLE)
+    list(APPEND ENGINE_SOURCES ${NATIVE_SRC}/MicPermission.mm)
+endif()
+
 # SuperSonic core (audio_processor + companions)
 set(SUPERSONIC_CORE_SOURCES
     ${SUPERSONIC_SRC}/audio_processor.cpp
@@ -361,7 +365,8 @@ if(WIN32)
 elseif(APPLE)
     target_link_libraries(supersonic_engine PUBLIC
         "-framework CoreAudio" "-framework AudioUnit"
-        "-framework Foundation" "-framework CoreFoundation")
+        "-framework Foundation" "-framework CoreFoundation"
+        "-framework AVFoundation")
 elseif(UNIX)
     find_package(Threads REQUIRED)
     target_link_libraries(supersonic_engine PUBLIC Threads::Threads rt)
