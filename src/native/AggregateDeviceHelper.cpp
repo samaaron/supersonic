@@ -439,8 +439,16 @@ std::string createOrUpdate(const std::string& outputDeviceName,
         UInt32 qualifierDataSize = sizeof(AudioObjectID);
         AudioClassID inClass = kAudioSubDeviceClassID;
         UInt32 ownedSize = 0;
-        OSStatus szErr = AudioObjectGetPropertyDataSize(newID, &ownedAddr,
-            qualifierDataSize, &inClass, &ownedSize);
+        OSStatus szErr = noErr;
+        // For aggregates with virtual sub-devices (Loopback, Blackhole),
+        // CoreAudio needs extra time to expose owned sub-device objects.
+        // Poll up to ~1 second (10 × 100ms) until we see the sub-devices.
+        for (int i = 0; i < 10; ++i) {
+            szErr = AudioObjectGetPropertyDataSize(newID, &ownedAddr,
+                qualifierDataSize, &inClass, &ownedSize);
+            if (szErr == noErr && ownedSize > 0) break;
+            runLoopWait();
+        }
         fprintf(stderr, "[aggregate] owned-objects query: err=%d size=%u (filter=%u)\n",
                 (int)szErr, (unsigned)ownedSize, (unsigned)inClass);
         fflush(stderr);
