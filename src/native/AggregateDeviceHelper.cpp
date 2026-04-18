@@ -230,28 +230,27 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     CFStringRef uidRef  = CFStringCreateWithCString(nullptr, kAggregateUID, kCFStringEncodingUTF8);
     CFStringRef nameRef = CFStringCreateWithCString(nullptr, kAggregateName, kCFStringEncodingUTF8);
 
-    int privateVal = 1;  // private — hidden from system device lists
-    CFNumberRef privateRef = CFNumberCreate(nullptr, kCFNumberIntType, &privateVal);
-
+    // NOTE: kAudioAggregateDeviceIsPrivateKey is known to be flaky on some
+    // macOS versions — silently succeeds but leaves properties half-applied,
+    // which breaks drift compensation. Create a public aggregate (visible in
+    // Audio MIDI Setup as "SuperSonic") instead. We clean up orphaned ones
+    // at boot, so there's no persistence issue.
     const void* descKeys[] = {
         CFSTR(kAudioAggregateDeviceUIDKey),
         CFSTR(kAudioAggregateDeviceNameKey),
-        CFSTR(kAudioAggregateDeviceIsPrivateKey),
     };
     const void* descVals[] = {
         uidRef,
         nameRef,
-        privateRef,
     };
     CFDictionaryRef desc = CFDictionaryCreate(nullptr,
-        descKeys, descVals, 3,
+        descKeys, descVals, 2,
         &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
     AudioObjectID newID = kAudioObjectUnknown;
     OSStatus err = AudioHardwareCreateAggregateDevice(desc, &newID);
 
     CFRelease(desc);
-    CFRelease(privateRef);
     CFRelease(nameRef);
     CFRelease(uidRef);
 
