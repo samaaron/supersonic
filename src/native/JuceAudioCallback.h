@@ -108,6 +108,16 @@ private:
     std::vector<float> mPrefetchBuf;
     int   mPrefetchCount = 0;
 
+    // Input accumulator: when the hardware buffer is smaller than kBufLen
+    // (e.g. 64-sample CoreAudio buffer vs 128-sample scsynth block), we need
+    // to gather input samples across multiple callbacks before feeding
+    // scsynth a full block. Without this, scsynth receives zero-padded
+    // input every block, producing crunchy mic distortion.
+    // Layout: channel-major, holds up to 2*kBufLen samples per channel so
+    // we can absorb one full scsynth block plus a partial next block.
+    std::vector<float> mInputAccum;
+    int   mInputAccumCount = 0;
+
     std::atomic<bool> mPaused{false};
 
     // Sample-position-based NTP clock.

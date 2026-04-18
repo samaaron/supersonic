@@ -32,6 +32,12 @@ void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
     // Allocate prefetch buffer for the configured output channel count
     mPrefetchBuf.assign(static_cast<size_t>(numOutputChannels) * kBufLen, 0.0f);
 
+    // Input accumulator sized for 2*kBufLen per channel (see header comment).
+    // Allocate at least 1 channel's worth even if no inputs so pointer stays valid.
+    int inChans = std::max(1, numInputChannels);
+    mInputAccum.assign(static_cast<size_t>(inChans) * kBufLen * 2, 0.0f);
+    mInputAccumCount = 0;
+
     // Write WorldOptions at WORLD_OPTIONS_START (safe offset outside ring buffers)
     uint32_t* opts = reinterpret_cast<uint32_t*>(ringBufferStorage + WORLD_OPTIONS_START);
     opts[0]  = static_cast<uint32_t>(numBuffers);
@@ -105,6 +111,7 @@ void JuceAudioCallback::pause() {
 void JuceAudioCallback::resume() {
     mSamplePosition = 0.0;
     mPrefetchCount  = 0;
+    mInputAccumCount = 0;      // discard stale mic samples from before pause
     mBaseNTP        = wallClockNTP();
     mCallbackCount  = 0;       // re-arm warmup for new device
     mLastCbTime     = {};      // clear gap detector baseline
@@ -182,8 +189,40 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
         mSampleLoader->installPendingBuffers();
 
     int outputFilled  = 0;
-    int inputConsumed = 0;
     float* prefBase   = mPrefetchBuf.data();
+    float* accumBase  = mInputAccum.data();
+    const int accumPerChanCap = kBufLen * 2;  // accumulator capacity per channel
+
+    // Accumulate ALL available hardware input samples from this callback.
+    // This decouples HW buffer size from scsynth block size: we process
+    // scsynth blocks only when we have a full kBufLen of real input.
+    // Without this, when HW buffer < kBufLen, we'd zero-pad every block
+    // and also drop mic samples on callbacks that serve from prefetch.
+    if (nIn > 0) {
+        int roomLeft = accumPerChanCap - mInputAccumCount;
+        int toStore  = std::min(numSamples, roomLeft);
+        if (toStore < numSamples) {
+            // Accumulator overflow — shouldn't happen in practice since we
+            // drain it in the loop below. Drop oldest samples to make room.
+            int drop = numSamples - roomLeft;
+            for (int ch = 0; ch < nIn; ++ch)
+                std::memmove(accumBase + ch * accumPerChanCap,
+                             accumBase + ch * accumPerChanCap + drop,
+                             static_cast<size_t>(mInputAccumCount - drop) * sizeof(float));
+            mInputAccumCount -= drop;
+            toStore = numSamples;
+        }
+        for (int ch = 0; ch < nIn; ++ch) {
+            if (inputChannelData[ch])
+                std::memcpy(accumBase + ch * accumPerChanCap + mInputAccumCount,
+                            inputChannelData[ch],
+                            static_cast<size_t>(toStore) * sizeof(float));
+            else
+                std::memset(accumBase + ch * accumPerChanCap + mInputAccumCount,
+                            0, static_cast<size_t>(toStore) * sizeof(float));
+        }
+        mInputAccumCount += toStore;
+    }
 
     // ── 1. Drain leftover samples from the previous callback ─────────────────
     if (mPrefetchCount > 0) {
@@ -241,22 +280,34 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     }
 
     while (outputFilled < numSamples) {
-        // Copy JUCE input into scsynth's input bus (channel-major, kBufLen per ch).
-        // If we overshoot the available input (due to prefetch alignment), zero-pad.
+        // Feed scsynth one full kBufLen block of input from the accumulator.
+        // If the accumulator doesn't have a full block yet (common at startup
+        // when HW buffer < kBufLen), fall back to zero-padding the rest —
+        // but this is now a rare edge case, not the common path.
         auto* inputBus = reinterpret_cast<float*>(get_audio_input_bus());
-        if (inputBus) {
+        if (inputBus && nIn > 0) {
+            int usable = std::min(mInputAccumCount, kBufLen);
             for (int ch = 0; ch < nIn; ++ch) {
-                int avail = std::max(0, std::min(kBufLen, numSamples - inputConsumed));
-                if (avail > 0 && inputChannelData[ch])
+                if (usable > 0)
                     std::memcpy(inputBus + ch * kBufLen,
-                                inputChannelData[ch] + inputConsumed,
-                                static_cast<size_t>(avail) * sizeof(float));
-                if (avail < kBufLen)
-                    std::memset(inputBus + ch * kBufLen + avail, 0,
-                                static_cast<size_t>(kBufLen - avail) * sizeof(float));
+                                accumBase + ch * accumPerChanCap,
+                                static_cast<size_t>(usable) * sizeof(float));
+                if (usable < kBufLen)
+                    std::memset(inputBus + ch * kBufLen + usable, 0,
+                                static_cast<size_t>(kBufLen - usable) * sizeof(float));
+            }
+            // Shift accumulator down to discard the block we just consumed.
+            if (usable > 0) {
+                int remaining = mInputAccumCount - usable;
+                if (remaining > 0) {
+                    for (int ch = 0; ch < nIn; ++ch)
+                        std::memmove(accumBase + ch * accumPerChanCap,
+                                     accumBase + ch * accumPerChanCap + usable,
+                                     static_cast<size_t>(remaining) * sizeof(float));
+                }
+                mInputAccumCount = remaining;
             }
         }
-        inputConsumed += kBufLen;
 
         // Pre-tick hook (for tau integration)
         if (preTick)
