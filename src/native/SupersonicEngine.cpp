@@ -1305,8 +1305,18 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         }
 #endif
 
-        // Timestamp so changeListenerCallback ignores ALL async notifications
-        // triggered by our device setup.
+        // Close the current device explicitly before configuring the new
+        // one. When the new aggregate has the same NAME as the old one
+        // (we always use "SuperSonic"), JUCE's setAudioDeviceSetup skips
+        // the reopen — it thinks the device is unchanged. The underlying
+        // CoreAudio aggregate IS different though (different id, different
+        // sub-devices), so without this close() the new aggregate starts
+        // with stale JUCE state (outLat/inLat cached from previous device)
+        // and no audio callbacks fire.
+        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+        mDeviceManager->closeAudioDevice();
+        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+
         fprintf(stderr, "[audio-device] calling setAudioDeviceSetup: out='%s' in='%s' sr=%.0f buf=%d\n",
                 setup.outputDeviceName.toRawUTF8(),
                 setup.inputDeviceName.toRawUTF8(),
