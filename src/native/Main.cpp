@@ -214,6 +214,7 @@ int main(int argc, char* argv[]) {
     cfg.bufferSize           = 0;
     cfg.udpPort              = 57110;
 
+
     for (int i = 1; i < argc; ++i) {
         const char* arg = argv[i];
         const char* val = nextArg(i, argc, argv);
@@ -246,6 +247,22 @@ int main(int argc, char* argv[]) {
             }
         }
     }
+
+#ifdef __APPLE__
+    // If mic permission isn't explicitly authorized, force numInputChannels=0
+    // for the boot config. AUHAL's AudioUnitInitialize blocks indefinitely
+    // when it tries to open an input stream while TCC permission is pending
+    // (the prompt can't be shown from a background helper). Booting output-
+    // only avoids the hang; the user can enable inputs later via
+    // /supersonic/inputs/enable once permission is granted.
+    if (micStatus != "authorized" && cfg.numInputChannels > 0) {
+        fprintf(stderr, "[main] mic status='%s' — forcing numInputChannels=0 "
+                "(user can enable inputs later after granting permission)\n",
+                micStatus.c_str());
+        fflush(stderr);
+        cfg.numInputChannels = 0;
+    }
+#endif
 
     std::signal(SIGINT,  signalHandler);
     std::signal(SIGTERM, signalHandler);
