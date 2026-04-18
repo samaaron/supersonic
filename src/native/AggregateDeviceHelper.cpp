@@ -420,17 +420,11 @@ std::string createOrUpdate(const std::string& outputDeviceName,
         }
     }
 
-    // TEMPORARY DIAGNOSTIC: disable drift comp for virtual outputs to see if
-    // drift comp itself is what's killing the aggregate after 0-1 callbacks.
-    // Virtual devices (Loopback) have clock_domain=0 which signals
-    // drift-comp-needed, but CoreAudio's SRC may fail when asked to
-    // compensate a device with no real clock.
-    if (needsDriftComp && outIsVirtual) {
-        fprintf(stderr, "[aggregate] SKIPPING drift comp — output is virtual; "
-                "accepting potential drift over time\n");
-        fflush(stderr);
-        needsDriftComp = false;
-    }
+    // Previously disabled drift comp for virtual outputs, but that caused
+    // the aggregate to expose ZERO input streams on the input scope —
+    // CoreAudio needs drift comp enabled to sync a virtual output's
+    // scheduler clock with the hardware input master. Re-enabling.
+    (void)outIsVirtual;
 
     if (needsDriftComp) {
         // Use Ardour's exact pattern: query OwnedObjects with a class-ID
