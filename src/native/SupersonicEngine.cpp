@@ -1013,6 +1013,27 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             mCurrentConfig.numOutputChannels, mCurrentConfig.numInputChannels);
     fflush(stderr);
 
+    // No-op detection: if the requested config matches the active setup
+    // exactly, don't tear down anything. Destroying and recreating the same
+    // aggregate is fragile — CoreAudio sometimes stops the new instance
+    // within a callback or two.
+    if (!deviceName.empty() && inputDeviceName.empty() && sampleRate <= 0 && bufferSize <= 0 && !forceCold) {
+        std::string activeReal = mRealOutputDeviceName.empty()
+            ? (mDeviceManager && mDeviceManager->getCurrentAudioDevice()
+               ? mDeviceManager->getCurrentAudioDevice()->getName().toStdString() : "")
+            : mRealOutputDeviceName;
+        if (activeReal == deviceName) {
+            fprintf(stderr, "[switchDevice] no-op: already on '%s'\n", deviceName.c_str());
+            fflush(stderr);
+            result.success = true;
+            result.type = SwapType::Hot;
+            result.deviceName = deviceName;
+            result.sampleRate = mCurrentConfig.sampleRate;
+            result.bufferSize = mCurrentConfig.bufferSize;
+            return result;
+        }
+    }
+
     // Try to acquire swap mutex (non-blocking)
     if (!mSwapMutex.try_lock()) {
         fprintf(stderr, "[switchDevice] EXIT: swap already in progress\n");
