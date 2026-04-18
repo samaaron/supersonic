@@ -817,17 +817,20 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
     };
 #endif
 
-    // Don't probe (createDevice) the active aggregate — creating a second
-    // JUCE handle to a live CoreAudio device and immediately destroying it
-    // (end of unique_ptr scope) closes the HAL IO proc on the real one,
-    // silencing audio for ~1 callback period. Same applies to the currently
-    // open device name as reported by JUCE.
-    std::string activeAggName;
-    std::string activeDeviceName;
+    // When an aggregate is active, DON'T probe any devices via createDevice.
+    // Creating a JUCE AudioIODevice wrapper on a subdevice of our aggregate
+    // (e.g. MacBook Pro Microphone when the aggregate owns it) and then
+    // destroying it at end of unique_ptr scope closes the HAL IOProc and
+    // silences the aggregate. We return device names without sample-rate /
+    // buffer-size info in this case; cached values from pre-aggregate
+    // enumeration remain with the GUI until the aggregate is torn down.
+    bool skipAllProbing = false;
 #ifdef __APPLE__
     if (AggregateDeviceHelper::exists())
-        activeAggName = AggregateDeviceHelper::currentName();
+        skipAllProbing = true;
 #endif
+    // Also skip probing the currently open device — its handle is live.
+    std::string activeDeviceName;
     if (auto* dev = mDeviceManager->getCurrentAudioDevice())
         activeDeviceName = dev->getName().toStdString();
 
@@ -846,7 +849,7 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
 
         std::string typeNameStr = type->getTypeName().toStdString();
         auto shouldSkipProbe = [&](const std::string& name) {
-            return name == activeAggName || name == activeDeviceName;
+            return skipAllProbing || name == activeDeviceName;
         };
 
         // Enumerate output devices
@@ -864,6 +867,10 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
                     type->createDevice(devName, juce::String()));
                 if (tempDev)
                     populateFromDevice(info, tempDev.get());
+            } else {
+                // Mark as output-capable so GUI knows to show it in the
+                // output dropdown even without probe data.
+                info.maxOutputChannels = 2;
             }
 
             result.push_back(std::move(info));
@@ -895,6 +902,9 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
                     type->createDevice(juce::String(), devName));
                 if (tempDev)
                     populateFromDevice(info, tempDev.get());
+            } else {
+                // Mark as input-capable so GUI's input dropdown lists it.
+                info.maxInputChannels = 1;
             }
 
             result.push_back(std::move(info));
@@ -903,10 +913,11 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
 
 #ifdef __APPLE__
     // Filter out our managed aggregate device — it's an implementation detail.
-    if (!activeAggName.empty()) {
+    if (AggregateDeviceHelper::exists()) {
+        auto aggName = AggregateDeviceHelper::currentName();
         result.erase(
             std::remove_if(result.begin(), result.end(),
-                [&activeAggName](const DeviceInfo& d) { return d.name == activeAggName; }),
+                [&aggName](const DeviceInfo& d) { return d.name == aggName; }),
             result.end());
     }
 #endif
