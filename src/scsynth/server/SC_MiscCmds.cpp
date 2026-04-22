@@ -846,6 +846,11 @@ SCErr meth_d_free(World* inWorld, int inSize, char* inData, ReplyAddress* inRepl
 }
 
 
+// [SuperSonic] Declared in SC_Graph.cpp. Runs UGen constructors + zombie check
+// synchronously so /n_set (and siblings) later in the same bundle mutate the
+// post-init graph state instead of racing the constructors.
+bool Graph_InitUnits(Graph* inGraph);
+
 SCErr meth_s_new(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_s_new(World* inWorld, int inSize, char* inData, ReplyAddress* /*inReply*/) {
     SCErr err;
@@ -918,6 +923,11 @@ SCErr meth_s_new(World* inWorld, int inSize, char* inData, ReplyAddress* /*inRep
         return kSCErr_Failed;
     }
     Node_StateMsg(&graph->mNode, kNode_Go);
+    // [SuperSonic] Eager UGen construction — makes intra-bundle /n_set after
+    // /s_new target the post-init state (fixes slides that would otherwise
+    // see the /n_set value clobber the /s_new's initial args before VarLag
+    // et al. get to capture them in their Ctors).
+    Graph_InitUnits(graph);
     return kSCErr_None;
 }
 
@@ -991,6 +1001,8 @@ SCErr meth_s_newargs(World* inWorld, int inSize, char* inData, ReplyAddress* /*i
         return kSCErr_Failed;
     }
     Node_StateMsg(&graph->mNode, kNode_Go);
+    // [SuperSonic] Eager UGen construction — see meth_s_new comment above.
+    Graph_InitUnits(graph);
     return kSCErr_None;
 }
 

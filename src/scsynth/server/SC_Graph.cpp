@@ -565,7 +565,24 @@ static void Graph_DispatchUnitCmds(Graph* inGraph) {
     inGraph->mPrivate = nullptr;
 }
 
-void Graph_FirstCalc(Graph* inGraph) {
+// [SuperSonic] Run UGen constructors, zombie-check, install Graph_Calc, and
+// dispatch any queued unit commands. Returns true if the graph is now ready
+// to compute audio; false if all units failed construction (zombie — Node_End
+// has been called) so callers should skip the compute step.
+//
+// Split out of Graph_FirstCalc so /s_new can initialise UGens synchronously
+// (see SC_MiscCmds.cpp: eager init in meth_s_new / meth_s_newargs). Eager
+// initialisation makes intra-bundle /n_set target the post-init UGen state,
+// which is what callers intuitively expect when they place /n_set after
+// /s_new in a bundle.
+bool Graph_InitUnits(Graph* inGraph) {
+    // Already initialised (e.g. meth_s_new ran us, then the audio loop's
+    // first mCalcFunc call landed here again through Graph_FirstCalc). No-op.
+    if (inGraph->mNode.mCalcFunc != (NodeCalcFunc)&Graph_FirstCalc
+        && inGraph->mNode.mCalcFunc != (NodeCalcFunc)&Graph_NullFirstCalc) {
+        return true;
+    }
+
     uint32 numUnits = inGraph->mNumUnits;
     Unit** units = inGraph->mUnits;
     for (uint32 i = 0; i < numUnits; ++i) {
@@ -596,13 +613,19 @@ void Graph_FirstCalc(Graph* inGraph) {
         }
         if (allDone && numUnits > 0) {
             Node_End(&inGraph->mNode);
-            return;
+            return false;
         }
     }
 
     inGraph->mNode.mCalcFunc = (NodeCalcFunc)&Graph_Calc;
     // after setting the calc function!
     Graph_DispatchUnitCmds(inGraph);
+    return true;
+}
+
+void Graph_FirstCalc(Graph* inGraph) {
+    if (!Graph_InitUnits(inGraph))
+        return;
     // now do actual graph calculation
     Graph_Calc(inGraph);
 }
