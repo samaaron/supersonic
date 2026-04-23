@@ -24,6 +24,7 @@ jobs:
             deps: |
               sudo apt-get update
               sudo apt-get install -y build-essential cmake libasound2-dev \
+                libjack-dev \
                 libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
                 libxinerama-dev libxcursor-dev libxcomposite-dev
           - os: ubuntu-24.04-arm
@@ -31,6 +32,7 @@ jobs:
             deps: |
               sudo apt-get update
               sudo apt-get install -y build-essential cmake libasound2-dev \
+                libjack-dev \
                 libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
                 libxinerama-dev libxcursor-dev libxcomposite-dev
           - os: macos-latest
@@ -142,6 +144,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libasound2-dev \
+            libjack-dev \
             libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
             libxinerama-dev libxcursor-dev libxcomposite-dev
 
