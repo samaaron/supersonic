@@ -23,7 +23,7 @@
 #endif
 
 #include "SC_PlugIn.h"
-#include "src/audio_config.h"
+#include "audio_config.h"
 #include <atomic>
 #include <cstdio>
 

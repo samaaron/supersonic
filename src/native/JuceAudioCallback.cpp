@@ -4,8 +4,8 @@
 #include "JuceAudioCallback.h"
 #include "WallClock.h"
 #include "SampleLoader.h"
-#include "src/shared_memory.h"
-#include "src/audio_config.h"
+#include "shared_memory.h"
+#include "audio_config.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
 #include <cstring>

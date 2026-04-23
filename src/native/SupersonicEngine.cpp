@@ -5,7 +5,7 @@
 #include "AggregateDeviceHelper.h"
 #include "DevicePolicy.h"
 #include "src/audio_processor.h"
-#include "src/audio_config.h"
+#include "audio_config.h"
 #include "src/shared_memory.h"
 #include "osc/OscReceivedElements.h"
 #include "RingBufferWriter.h"

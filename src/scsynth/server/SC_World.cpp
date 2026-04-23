@@ -29,7 +29,7 @@
 
 #include "SC_World.h"
 #include "SC_WorldOptions.h"
-#include "src/audio_config.h"   // for DEV_LOG macro
+#include "audio_config.h"   // for DEV_LOG macro
 #include "SC_HiddenWorld.h"
 #include "SC_InterfaceTable.h"
 #include "SC_AllocPool.h"
