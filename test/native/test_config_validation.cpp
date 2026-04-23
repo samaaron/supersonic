@@ -20,8 +20,11 @@ TEST_CASE("Default Config values are correct", "[config]") {
     CHECK(cfg.preschedulerLookaheadS == 0.500);
     CHECK(cfg.maxNodes               == 1024);
     CHECK(cfg.numBuffers             == 1024);
-    CHECK(cfg.numOutputChannels      == 2);
-    CHECK(cfg.numInputChannels       == 2);
+    // Default is "auto" (-1) — JUCE/CoreAudio clamps to the device's real
+    // channel count. Headless test fixtures override these to get
+    // predictable 2-in / 2-out behaviour.
+    CHECK(cfg.numOutputChannels      == SupersonicEngine::kAutoChannelCount);
+    CHECK(cfg.numInputChannels       == SupersonicEngine::kAutoChannelCount);
     CHECK(cfg.maxGraphDefs           == 512);
     CHECK(cfg.maxWireBufs            == 64);
     CHECK(cfg.numControlBusChannels  == 16384);

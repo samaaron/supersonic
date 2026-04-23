@@ -2,8 +2,9 @@
  * HeadlessDriver.h — Timer-driven audio processing without a real audio device.
  *
  * When no audio hardware is available (headless mode), this thread calls
- * process_audio() at the correct block rate (128 samples per tick), using
- * platform-specific high-resolution timers for accurate timing:
+ * process_audio() at the correct block rate (matches whatever block size
+ * the engine configured, typically 128 samples), using platform-specific
+ * high-resolution timers for accurate timing:
  *
  *   Linux:   clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)
  *   macOS:   mach_wait_until()
@@ -37,7 +38,10 @@ private:
     // Called once per block from the platform-specific run() loop.
     void processBlock(double& baseNTP, double& samplePos);
 
-    static constexpr int kBlockSize = 128;
+    // Ticks the engine at this block size. Populated in configure() from
+    // the audio callback's current block length so headless runs match
+    // whatever native path the engine booted with.
+    int mBlockSize = 128;
 
     JuceAudioCallback* mCallback         = nullptr;
     SampleLoader*      mSampleLoader     = nullptr;

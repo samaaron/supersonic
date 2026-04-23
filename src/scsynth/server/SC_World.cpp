@@ -29,6 +29,7 @@
 
 #include "SC_World.h"
 #include "SC_WorldOptions.h"
+#include "src/audio_config.h"   // for DEV_LOG macro
 #include "SC_HiddenWorld.h"
 #include "SC_InterfaceTable.h"
 #include "SC_AllocPool.h"
@@ -1166,8 +1167,10 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
     server_shared_memory_creator* shm = inWorld->hw->mShmem;
 
     if (!shm) {
+        DEV_LOG("[scope-diag] getScopeBuffer(idx=%d ch=%d maxFrames=%d): "
+                "shm is NULL\n", index, channels, maxFrames);
         hnd->internalData = nullptr;
-        return kSCFalse;  // Shared memory not available
+        return kSCFalse;
     }
 
     scope_buffer_writer writer = shm->get_scope_buffer_writer(index, channels, maxFrames);
@@ -1177,8 +1180,15 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
         hnd->data = writer.data();
         hnd->channels = channels;
         hnd->maxFrames = maxFrames;
+        DEV_LOG("[scope-diag] getScopeBuffer(idx=%d ch=%d maxFrames=%d): "
+                "OK buffer=%p data=%p shm=%p\n",
+                index, channels, maxFrames,
+                hnd->internalData, hnd->data, (void*)shm);
         return kSCTrue;
     } else {
+        DEV_LOG("[scope-diag] getScopeBuffer(idx=%d ch=%d maxFrames=%d): "
+                "writer INVALID (pool full or slot busy) shm=%p\n",
+                index, channels, maxFrames, (void*)shm);
         hnd->internalData = nullptr;
         return kSCFalse;
     }
@@ -1265,11 +1275,19 @@ void pushScopeBuffer(World* inWorld, ScopeBufferHnd* hnd, int frames) {
 
 void releaseScopeBuffer(World* inWorld, ScopeBufferHnd* hnd) {
 #ifndef __EMSCRIPTEN__
+    DEV_LOG("[scope-diag] releaseScopeBuffer: buffer=%p data=%p\n",
+            hnd->internalData, hnd->data);
     scope_buffer_writer writer(reinterpret_cast<scope_buffer*>(hnd->internalData));
     server_shared_memory_creator* shm = inWorld->hw->mShmem;
     if (shm) {
         shm->release_scope_buffer_writer(writer);
     }
+    // Null out the handle so anyone holding a stale reference sees NULL
+    // instead of dangling pointers. The UGen's check (!m_buffer) relies
+    // on internalData being nullable; we zero data too for the defensive
+    // NULL checks we added in ScopeOut2_next.
+    hnd->internalData = nullptr;
+    hnd->data = nullptr;
 #else
     // Emscripten: mark slot as free
     if (!hnd->internalData) return;

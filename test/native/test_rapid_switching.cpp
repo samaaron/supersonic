@@ -798,8 +798,10 @@ TEST_CASE("RapidSwitch: exact crash sequence from production logs",
     REQUIRE(r8.success);
     REQUIRE(r8.type == SwapType::Cold);
 
-    // Step 9: Device switch (hot)
-    auto r9 = fix.engine().switchDevice("PipeWire Sound Server");
+    // Step 9: Device switch (hot). Explicit rate pins this as hot — without
+    // it, mDeviceRateMemory would restore the 44100 from step 2 and trigger
+    // a cold swap.
+    auto r9 = fix.engine().switchDevice("PipeWire Sound Server", 48000);
     REQUIRE(r9.success);
 
     // Step 10: Buffer to 256 (hot)

@@ -2,7 +2,7 @@
  * OscUdpServer.h — UDP OSC listener on port 57110
  *
  * Handles incoming OSC over UDP, routing messages to either the ring
- * buffer (for scsynth) or handling /supersonic/* commands directly.
+ * buffer (for scsynth) or handling "/supersonic/..." commands directly.
  *
  * ## Notify targets (multi-notify)
  *
@@ -127,4 +127,15 @@ private:
     std::atomic<bool>          mDebounceSwitchStop{false};
 
     void executePendingSwitch();
+
+    // Reopen — rejects while an existing reopen is in flight and within a
+    // short cooldown after completion. Accepted requests run on a worker
+    // thread so the OSC handler thread isn't blocked by the cold swap;
+    // two OSC messages go back to the caller — .reply (accepted/rejected,
+    // immediate) and .done (completion result).
+    std::atomic<bool>          mReopenInProgress{false};
+    std::chrono::steady_clock::time_point mLastReopenFinishedAt{};
+    std::thread                mReopenThread;
+
+    void executeReopen();
 };

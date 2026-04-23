@@ -13,7 +13,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ─── Options ─────────────────────────────────────────────────────────────────
 option(BUILD_TESTS "Build native Catch2 test suite" OFF)
 option(BUILD_NIF   "Build BEAM NIF shared library"  OFF)
-
 # NIF target requires all static libraries to be built with -fPIC
 if(BUILD_NIF)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -30,22 +29,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
-# Apply AUHAL patch to JUCE CoreAudio backend every configure (not just on fetch).
-# This ensures the patch is always applied even when the JUCE source is cached.
+# Reset JUCE to pristine on every configure — defensive cleanup in case
+# a previous build applied a (now-removed) local patch.
 if(APPLE)
     execute_process(
         COMMAND git checkout -- .
         WORKING_DIRECTORY "${juce_SOURCE_DIR}"
         ERROR_QUIET
     )
-    execute_process(
-        COMMAND git apply --whitespace=nowarn "${CMAKE_CURRENT_SOURCE_DIR}/patches/juce-auhal-coreaudio.patch"
-        WORKING_DIRECTORY "${juce_SOURCE_DIR}"
-        RESULT_VARIABLE _patch_result
-    )
-    if(NOT _patch_result EQUAL 0)
-        message(WARNING "JUCE AUHAL patch failed to apply (result=${_patch_result})")
-    endif()
 endif()
 
 # ─── libsndfile + audio codecs via FetchContent ──────────────────────────────
@@ -152,12 +143,17 @@ set(ENGINE_SOURCES
     ${NATIVE_SRC}/OscUdpServer.cpp
     ${NATIVE_SRC}/SampleLoader.cpp
     ${NATIVE_SRC}/SupersonicEngine.cpp
+    ${NATIVE_SRC}/DevicePolicy.cpp
     ${NATIVE_SRC}/AggregateDeviceHelper.cpp
     ${NATIVE_SRC}/StateCache.cpp
     ${WORKERS_SRC}/Prescheduler.cpp
     ${WORKERS_SRC}/ReplyReader.cpp
     ${WORKERS_SRC}/DebugReader.cpp
 )
+
+if(APPLE)
+    list(APPEND ENGINE_SOURCES ${NATIVE_SRC}/MicPermission.mm)
+endif()
 
 # SuperSonic core (audio_processor + companions)
 set(SUPERSONIC_CORE_SOURCES
@@ -347,6 +343,14 @@ target_compile_definitions(supersonic_engine PUBLIC
     JUCE_WEB_BROWSER=0
 )
 
+# Enable JUCE's JACK backend on Linux. JUCE dlopens libjack.so.0 at
+# runtime, so this just compiles in the code path — no hard link to
+# jack-dev. Users with jackd (or pipewire-jack) running will see
+# "JACK" in /supersonic/drivers/list; users without it still get ALSA.
+if(UNIX AND NOT APPLE)
+    target_compile_definitions(supersonic_engine PUBLIC JUCE_JACK=1)
+endif()
+
 target_link_libraries(supersonic_engine PUBLIC
     juce::juce_core
     juce::juce_audio_basics
@@ -361,10 +365,11 @@ if(WIN32)
 elseif(APPLE)
     target_link_libraries(supersonic_engine PUBLIC
         "-framework CoreAudio" "-framework AudioUnit"
-        "-framework Foundation" "-framework CoreFoundation")
+        "-framework Foundation" "-framework CoreFoundation"
+        "-framework AVFoundation")
 elseif(UNIX)
     find_package(Threads REQUIRED)
-    target_link_libraries(supersonic_engine PUBLIC Threads::Threads rt)
+    target_link_libraries(supersonic_engine PUBLIC Threads::Threads rt ${CMAKE_DL_LIBS})
 endif()
 
 if(MSVC)

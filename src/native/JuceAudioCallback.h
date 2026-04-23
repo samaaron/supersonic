@@ -39,7 +39,11 @@ public:
                          int numControlBusChannels,
                          int realTimeMemorySize,
                          int numRGens,
-                         int sharedMemoryID = 0);
+                         int sharedMemoryID = 0,
+                         int bufLen        = 0);  // 0 = use kDefaultBlockSize
+
+    // scsynth's audio block size — read at audio-thread frequency.
+    int bufferLength() const { return mBufLen; }
 
     // Wire the SampleLoader so installPendingBuffers() runs on the audio thread
     void setSampleLoader(SampleLoader* loader) { mSampleLoader = loader; }
@@ -90,23 +94,36 @@ public:
     std::atomic<void*> mRecordWriter{nullptr};
 
 private:
-    // scsynth's internal block size is hardcoded to 128 in audio_processor.cpp
-    // (QUANTUM_SIZE = 128, static_audio_bus[128*128]).
-    // We accumulate 128-sample blocks into a prefetch buffer to serve whatever
-    // size JUCE requests without ever dropping samples.
-    static constexpr int kBufLen = 128;
+    // scsynth's audio block size — the number of samples the graph
+    // processes per tick. Matches the hardware callback size when set at
+    // init so the process loop is 1:1 (no accumulator / prefetch dance).
+    // Capped at sonicpi::kMaxBlockSize because static_audio_bus in
+    // audio_processor.cpp is sized at that max. Initialised in
+    // initialiseWorld from the caller's chosen value (typically HW buffer
+    // size) and honoured thereafter.
+    int mBufLen = 128;
 
     SampleLoader* mSampleLoader = nullptr;
     uint8_t*   mRingBufferStorage  = nullptr;
     int        mSampleRate         = 48000;
     int        mNumOutputChannels  = 2;
     int        mNumInputChannels   = 2;
-    double     mSamplePosition     = 0.0;   // cumulative samples (increments by kBufLen)
+    double     mSamplePosition     = 0.0;   // cumulative samples (increments by mBufLen)
 
-    // Prefetch buffer: dynamically sized at init (numOutputChannels * kBufLen).
-    // Layout: channel-major, kBufLen samples per channel.
+    // Prefetch buffer: channel-major, mBufLen samples per channel. Only
+    // populated when the HW callback wants fewer samples than a scsynth
+    // block (rare — happens if HW buffer shrinks after World init).
     std::vector<float> mPrefetchBuf;
     int   mPrefetchCount = 0;
+
+    // Input accumulator: needed only when HW callback size < mBufLen.
+    // In the typical case (HW buffer == block size) mInputAccumCount is
+    // always == mBufLen after one callback and the accumulator is a
+    // no-op copy. Layout: channel-major, capacity sized to hold at
+    // least HW + block.
+    std::vector<float> mInputAccum;
+    int   mInputAccumCount = 0;
+    int   mAccumPerChanCap = 0;
 
     std::atomic<bool> mPaused{false};
 

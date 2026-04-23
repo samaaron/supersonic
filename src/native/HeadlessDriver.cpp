@@ -28,6 +28,7 @@ void HeadlessDriver::configure(JuceAudioCallback* callback,
     mSampleRate        = (sampleRate > 0) ? sampleRate : 48000;
     mNumOutputChannels = numOutputChannels;
     mNumInputChannels  = numInputChannels;
+    if (callback) mBlockSize = callback->bufferLength();
 }
 
 // Shared loop body — called once per block from the platform-specific run() loop.
@@ -45,7 +46,7 @@ void HeadlessDriver::processBlock(double& baseNTP, double& samplePos) {
     process_audio(ntp,
                   static_cast<uint32_t>(mNumOutputChannels),
                   static_cast<uint32_t>(mNumInputChannels));
-    samplePos += kBlockSize;
+    samplePos += mBlockSize;
 
     mCallback->processCount.fetch_add(1, std::memory_order_release);
     mCallback->processCount.notify_all();
@@ -57,7 +58,7 @@ void HeadlessDriver::processBlock(double& baseNTP, double& samplePos) {
 #if defined(__linux__)
 
 void HeadlessDriver::run() {
-    const int64_t blockNs = 1'000'000'000LL * kBlockSize / mSampleRate;
+    const int64_t blockNs = 1'000'000'000LL * mBlockSize / mSampleRate;
     struct timespec next;
     clock_gettime(CLOCK_MONOTONIC, &next);
     double baseNTP = wallClockNTP();
@@ -79,7 +80,7 @@ void HeadlessDriver::run() {
 void HeadlessDriver::run() {
     mach_timebase_info_data_t tbi;
     mach_timebase_info(&tbi);
-    const uint64_t blockNs    = 1'000'000'000ULL * kBlockSize / mSampleRate;
+    const uint64_t blockNs    = 1'000'000'000ULL * mBlockSize / mSampleRate;
     const uint64_t blockTicks = blockNs * tbi.denom / tbi.numer;
     uint64_t nextWake = mach_absolute_time();
     double baseNTP = wallClockNTP();
@@ -103,7 +104,7 @@ void HeadlessDriver::run() {
 
     LARGE_INTEGER freq;
     QueryPerformanceFrequency(&freq);
-    const LONGLONG blockTicks = freq.QuadPart * kBlockSize / mSampleRate;
+    const LONGLONG blockTicks = freq.QuadPart * mBlockSize / mSampleRate;
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     LONGLONG nextWake = now.QuadPart;

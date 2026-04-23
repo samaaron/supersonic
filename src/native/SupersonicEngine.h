@@ -7,8 +7,13 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <string>
+#include <vector>
+#ifdef __APPLE__
+#include <CoreAudio/CoreAudio.h>
+#endif
 
 #include "Prescheduler.h"
 #include "ReplyReader.h"
@@ -26,6 +31,23 @@
 class SupersonicEngine : private juce::ChangeListener {
     friend class EngineFixture;  // test fixture needs access to mAudioCallback
 public:
+    // Channel-count sentinel: negative means "open the device with all its
+    // channels active (let JUCE/CoreAudio clamp to the hardware max)".
+    // 0 still means "disabled" for inputs; positive N means "exactly N".
+    static constexpr int kAutoChannelCount   = -1;
+    // Upper bound on channels we'll ever request. JUCE's BigInteger bitmask
+    // gets clamped to the device's real channel count by CoreAudio, so
+    // over-requesting is safe — we just set this many bits and JUCE drops
+    // the excess. 64 covers commodity audio interfaces (MOTU, RME, etc.).
+    static constexpr int kRequestMaxChannels = 64;
+    // Minimum buffer size on an aggregate device. Aggregates combine two
+    // independent clocks (e.g. MBP Speakers + motu-xaero over USB) and run
+    // kernel-level sample-rate conversion in the IOProc for drift
+    // correction. Anything below ~256 samples starves the SRC and the
+    // audio warbles ("drift storm"). Enforced at aggregate creation
+    // paths regardless of -z / -Z / TOML.
+    static constexpr int kMinAggregateBufferSize = 256;
+
     struct Config {
         int    sampleRate               = 48000;
         int    bufferSize               = 0;   // 0 = auto (smallest multiple of 128)
@@ -33,8 +55,8 @@ public:
         double preschedulerLookaheadS   = 0.500;
         int    maxNodes                 = 1024;
         int    numBuffers               = 1024;
-        int    numOutputChannels        = 2;
-        int    numInputChannels         = 2;
+        int    numOutputChannels        = kAutoChannelCount;
+        int    numInputChannels         = kAutoChannelCount;
         int    numAudioBusChannels      = 1024;
         int    maxGraphDefs             = 512;
         int    maxWireBufs              = 64;
@@ -73,7 +95,18 @@ public:
     void sendBundle(double ntpTimeSec, std::initializer_list<OscPacket> messages);
 
     // --- Device management ---
-    std::vector<DeviceInfo>  listDevices() const;
+    //
+    // Device-name sentinels recognised by switchDevice / setDeviceMode and
+    // mirrored on the GUI side:
+    //   "__system__"  — follow the macOS system default output (mDeviceMode
+    //                   is kept empty internally while this is active).
+    //   "__none__"    — (input only) disable audio inputs; clears the
+    //                   preferred input sub-device.
+    // Any other non-empty value is treated as a literal device name.
+    //
+    // rescan=true triggers a full CoreAudio re-enumeration (may disrupt a
+    // just-opened device on macOS). Pass false to reuse JUCE's cached list.
+    std::vector<DeviceInfo>  listDevices(bool rescan = true) const;
     CurrentDeviceInfo        currentDevice() const;     // resolves aggregate to real names
     std::string              realOutputDeviceName() const { return mRealOutputDeviceName; }
     std::string              realInputDeviceName() const  { return mRealInputDeviceName; }
@@ -82,6 +115,13 @@ public:
                                           int bufferSize = 0,
                                           bool forceCold = false,
                                           const std::string& inputDeviceName = "");
+
+    // Re-open the current device (tear down and recreate without changing
+    // selection). Use when an external config change — e.g. a MOTU Pro
+    // Audio Control "Computer" channel-count bump — needs to flow through
+    // without a full supersonic restart. Preserves aggregate / system-
+    // default / manual mode semantics.
+    SwapResult               reopenCurrentDevice();
 
     // --- Input channel management ---
     // Enable/disable audio input. Triggers a cold swap (world rebuild).
@@ -139,10 +179,27 @@ public:
     // --- Audio callback access (for preTick hook, pause/resume) ---
     JuceAudioCallback& audioCallback() { return mAudioCallback; }
 
+    // CFRunLoop suppression (macOS). Main.cpp's run-loop pump calls
+    // isRunLoopSuppressed() each tick and sleeps instead of pumping
+    // while true. setRunLoopSuppressed(false) is called by Main once
+    // the boot-time aggregate has settled.
+    bool isRunLoopSuppressed() const { return mSuppressRunLoop.load(); }
+    void setRunLoopSuppressed(bool v) { mSuppressRunLoop.store(v); }
+
     // --- Device mode (system/auto vs manual device name) ---
     std::string setDeviceMode(const std::string& mode);
     void forceDeviceMode(const std::string& mode) { mDeviceMode = mode; }
     std::string deviceMode() const { return mDeviceMode; }
+
+    // Preferred-device accessors. These track the user's long-lived
+    // intent for auto-re-attach on hot-plug, independent of what device
+    // is currently active (the device may have been removed and we
+    // fell back to the system default — but we still want to come back
+    // when it reappears). deviceMode() is "current selection"; these
+    // are "want to use whenever available".
+    std::string preferredOutputDevice() const { return mPreferredOutputDevice; }
+    std::string preferredInputDevice() const  { return mPreferredInputDevice; }
+
     void printDeviceList();
 
     // --- Purge stale messages ---
@@ -152,8 +209,69 @@ private:
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
     void interceptForCache(const uint8_t* data, uint32_t size);
     bool interceptBufferFreed(const uint8_t* data, uint32_t size);
+
+    // Clamp bufferSize up to kMinAggregateBufferSize when the current
+    // aggregate has kernel drift compensation running (SRC IOProc
+    // starves at tight buffers — audible warble). Also mirrors the
+    // clamped value into mCurrentConfig.bufferSize. No-op on single
+    // devices and same-clock aggregates (where drift-comp is skipped).
+    // Called from all three aggregate-setup sites (initialise boot
+    // path, initialise post-setup negotiate step, switchDevice
+    // aggregate branch) so the floor is uniformly applied.
+    void clampAggregateBufferIfNeeded(int& bufferSize);
     void restartHeadlessDriver(double sampleRate);
     juce::String reinitialiseWithDefaultsPreservingConfig();
+
+    // switchDevice sub-stages. Each has a single responsibility and is
+    // safe to call independently (they read / write engine state, so
+    // they're member methods rather than pure functions). Extracted to
+    // keep switchDevice itself readable.
+    //
+    // Refuses "add mic while wireless output is active" upfront — the
+    // aggregate logic later would drop it anyway, but refusing early
+    // avoids triggering a cold swap that can race ScopeOut2 during
+    // rebuild. Returns non-empty error string on refusal; empty = OK.
+    std::string refuseWirelessMicAddition(const std::string& deviceName,
+                                          const std::string& inputDeviceName);
+
+    // Probes a named device (input or output) via JUCE and returns the
+    // number of channels it advertises, or -1 if the name doesn't
+    // match / device can't be opened. Handles the "__none__" sentinel
+    // by returning -1 without probing.
+    int probeDeviceChannelCount(const std::string& name, bool isInput);
+
+    // Returns the sample rates advertised by a named device, or an
+    // empty vector if the name doesn't match or the device can't be
+    // opened. Core primitive: the rate-matching helpers below compose
+    // it so there's one place that owns "walk device types → scan →
+    // createDevice → getAvailableSampleRates".
+    std::vector<double> probeDeviceSampleRates(const std::string& name,
+                                               bool isInput);
+
+    // Probes a named device for available sample rates and, if the
+    // engine's currentRate isn't supported, sets sampleRate to the
+    // nearest available rate. No-op if caller specified a rate, the
+    // device can't be opened, or the name is empty. This is what makes
+    // a switch "cold" when the target device can't run at the current
+    // rate.
+    void probeAndAdjustForTargetRate(const std::string& name, bool isInput,
+                                     double& sampleRate, double currentRate);
+
+    // Records the user's preferred output/input device for future
+    // hot-plug re-attach, and caches the successfully-used sample rate
+    // for this device name so a later switch back can restore it.
+    // Called from switchDevice's success tail. deviceName empty means
+    // rate/buffer-only change — no preference update.
+    void recordSwapPreferences(const std::string& deviceName,
+                               const std::string& inputDeviceName,
+                               double sampleRate);
+
+#ifdef __APPLE__
+    void handleSystemDefaultOutputChanged();
+    static OSStatus defaultDevicePropertyListenerProc(
+        AudioObjectID, UInt32, const AudioObjectPropertyAddress*, void* inClientData);
+    bool mDefaultDevicePropertyListenerInstalled = false;
+#endif
 
     JuceAudioCallback mAudioCallback;
     Prescheduler      mPrescheduler;
@@ -170,12 +288,47 @@ private:
     bool                     mHeadless{false};
     Config                   mCurrentConfig;
     int                      mBootInputChannels = 2;  // original -i value, for re-enabling inputs
+    // Rate held while on a non-wireless device. Remembered so a detour
+    // through wireless (AirPlay/Bluetooth) — which forces 44.1 or its own
+    // negotiated rate — doesn't leave the engine sticky at that rate once
+    // the user switches back to a hardware device that can do the original.
+    int                      mPreWirelessRate = 0;
+
+    // User's preferred output device name across hot-plug cycles. Set from
+    // -H / sound_card_name at boot even when that device isn't present at
+    // boot time (so we fall back to system default now but auto-re-attach
+    // when the device reappears), and also from explicit user switches.
+    // Empty = no preference (follow macOS default, don't auto-switch on
+    // hot-plug). mDeviceMode tracks "current selection regardless of
+    // whether device is present"; mPreferredOutputDevice tracks "want to
+    // use this device whenever it's available".
+    std::string              mPreferredOutputDevice;
+    // Same for the input sub-device in an aggregate.
+    std::string              mPreferredInputDevice;
     std::string              mLastInputDeviceName;    // saved on disable, restored on re-enable
     std::string              mRealOutputDeviceName;   // actual output device behind aggregate
     std::string              mRealInputDeviceName;    // actual input device behind aggregate
     std::mutex               mSwapMutex;
     std::chrono::steady_clock::time_point mLastSelfTriggeredChange{}; // suppress async change notifications from our own setAudioDeviceSetup
+
+    // listDrivers() cache — avoids re-scanning every AudioIODeviceType
+    // on every /supersonic/info push. Re-scanning is expensive (each
+    // scan touches JACK / ASIO / etc. whether or not they're usable)
+    // and, on Linux without a JACK server, produces stderr spam from
+    // libjack's connect() failures. Cache TTL is short so a user who
+    // starts jackd mid-session sees JACK reappear within a few seconds.
+    mutable std::mutex                           mListDriversMutex;
+    mutable std::vector<std::string>             mCachedDrivers;
+    mutable std::chrono::steady_clock::time_point mCachedDriversAt{};
+    // Pause CFRunLoop pumping in Main.cpp during aggregate destroy/create
+    // — queued audioDeviceListChanged messages would trigger a second
+    // cold swap and crash ScopeOut2 during the rebuild. Accessed from
+    // both the engine (writer during aggregate transitions) and Main's
+    // CFRunLoop pump (reader at every tick), so an atomic is needed.
+    std::atomic<bool>        mSuppressRunLoop{false};
     std::string              mDeviceMode;   // empty = system/auto, non-empty = manual device name
+    bool                     mWorldRebuilt{false};
+    std::map<std::string, int> mDeviceRateMemory; // per-device remembered sample rate
 
     // Shared memory — owned by the engine, survives across cold swaps.
     server_shared_memory_creator* mShmemCreator = nullptr;

@@ -24,3 +24,4 @@ deps/
 *.ez
 test/wasm_simd/simd_test.mjs
 test/wasm_simd/simd_test.wasm
+.DS_Store

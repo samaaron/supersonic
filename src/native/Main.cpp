@@ -24,6 +24,7 @@
 #endif
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
+#include "MicPermission.h"
 #endif
 
 static constexpr const char* VERSION = SUPERSONIC_VERSION_STRING;
@@ -74,12 +75,27 @@ static void printBanner(const char* version, const CurrentDeviceInfo& dev, int u
         "\n", version);
 
     if (!dev.name.empty()) {
+        // "out A/M in B/N" — A channels currently routed / M available on
+        // the device (likewise for inputs). M shows the device's real
+        // capability from CoreAudio; A is what scsynth is actually
+        // using (capped by daemon's -i / -o args, currently 2/2 by
+        // default). Useful for MOTU-class devices with 8+ channels
+        // where "active 2" doesn't mean "only 2 available".
+        char outStr[32], inStr[32];
+        if (dev.maxOutputChannels > 0 && dev.maxOutputChannels != dev.activeOutputChannels)
+            snprintf(outStr, sizeof(outStr), "%d/%d", dev.activeOutputChannels, dev.maxOutputChannels);
+        else
+            snprintf(outStr, sizeof(outStr), "%d", dev.activeOutputChannels);
+        if (dev.maxInputChannels > 0 && dev.maxInputChannels != dev.activeInputChannels)
+            snprintf(inStr, sizeof(inStr), "%d/%d", dev.activeInputChannels, dev.maxInputChannels);
+        else
+            snprintf(inStr, sizeof(inStr), "%d", dev.activeInputChannels);
         fprintf(stderr,
             "  %s (%s)\n"
-            "  %d Hz | buffer %d | out %d | in %d\n",
+            "  %d Hz | buffer %d | out %s | in %s\n",
             dev.name.c_str(), dev.typeName.c_str(),
             static_cast<int>(dev.activeSampleRate), dev.activeBufferSize,
-            dev.activeOutputChannels, dev.activeInputChannels);
+            outStr, inStr);
     } else {
         fprintf(stderr, "  headless (no audio device)\n");
     }
@@ -96,6 +112,7 @@ static void printDeviceList(SupersonicEngine& engine) {
     fprintf(stdout, "  ─────────────\n\n");
 
     for (auto& dev : devices) {
+        if (dev.isWirelessTransport()) continue;
         bool isCurrent = (dev.name == current.name && dev.typeName == current.typeName);
         fprintf(stdout, "  %s %s : %s\n", isCurrent ? "▸" : " ",
                 dev.typeName.c_str(), dev.name.c_str());
@@ -148,8 +165,8 @@ int main(int argc, char* argv[]) {
                 "  -u <port>    UDP port (default: 57110)\n"
                 "  -S <rate>    Sample rate (default: 48000)\n"
                 "  -Z <size>    Buffer size (default: auto)\n"
-                "  -i <num>     Input channels (default: 2)\n"
-                "  -o <num>     Output channels (default: 2)\n"
+                "  -i <num>     Input channels (default: device max; 0 = disable)\n"
+                "  -o <num>     Output channels (default: device max)\n"
                 "  -n <num>     Max nodes (default: 1024)\n"
                 "  -b <num>     Sample buffers (default: 1024)\n"
                 "  -a <num>     Audio bus channels (default: 1024)\n"
@@ -166,6 +183,24 @@ int main(int argc, char* argv[]) {
     }
 
     juce::ScopedJuceInitialiser_GUI libraryInitialiser;
+
+#ifdef __APPLE__
+    // Log macOS microphone permission status. DO NOT request access here —
+    // supersonic runs as a background helper child of the GUI, and macOS
+    // auto-denies access requests from non-foreground processes without
+    // showing the prompt. The GUI (Sonic Pi.app) requests access on our
+    // behalf; TCC attributes the permission to the responsible process, so
+    // we inherit whatever the user granted.
+    MicPermission::logDiagnostics();
+    std::string micStatus = MicPermission::status();
+    if (micStatus == "denied") {
+        fprintf(stderr, "[mic-permission] WARNING: mic access DENIED. live_audio will be silent. "
+                "Grant access via System Settings > Privacy & Security > Microphone > Sonic Pi\n");
+    } else if (micStatus == "notDetermined") {
+        fprintf(stderr, "[mic-permission] status notDetermined — GUI should request on our behalf\n");
+    }
+    fflush(stderr);
+#endif
 
     // ── --list-devices: enumerate and exit ────────────────────────────────────
     for (int i = 1; i < argc; ++i) {
@@ -187,12 +222,14 @@ int main(int argc, char* argv[]) {
     }
 
     // ── Parse scsynth-compatible CLI flags ────────────────────────────────────
+    // Channel counts default to SupersonicEngine::kAutoChannelCount (-1) via
+    // the Config struct — meaning "open the device with all its channels
+    // active". The -i / -o CLI flags override with an explicit count.
     SupersonicEngine::Config cfg;
-    cfg.numOutputChannels    = 2;
-    cfg.numInputChannels     = 2;
     cfg.sampleRate           = 48000;
     cfg.bufferSize           = 0;
     cfg.udpPort              = 57110;
+
 
     for (int i = 1; i < argc; ++i) {
         const char* arg = argv[i];
@@ -227,6 +264,32 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Preserve the user's originally-requested input channel count.
+    // On macOS this may be zeroed below by the mic-permission guard; on
+    // other platforms the value stays equal to cfg.numInputChannels and
+    // the later setConfiguredInputChannels call is a harmless no-op.
+    int desiredInputChannels = cfg.numInputChannels;
+
+#ifdef __APPLE__
+    // If mic permission isn't explicitly authorized, force numInputChannels=0
+    // for the boot config. AUHAL's AudioUnitInitialize blocks indefinitely
+    // when it tries to open an input stream while TCC permission is pending
+    // (the prompt can't be shown from a background helper). Booting output-
+    // only avoids the hang; the user can enable inputs later via
+    // /supersonic/inputs/enable once permission is granted.
+    //
+    // Use != 0 rather than > 0 — the new auto-max sentinel is -1, which also
+    // represents "the user wants inputs" and must still be disabled pending
+    // mic permission.
+    if (micStatus != "authorized" && cfg.numInputChannels != 0) {
+        fprintf(stderr, "[main] mic status='%s' — forcing numInputChannels=0 "
+                "(user can enable inputs later after granting permission)\n",
+                micStatus.c_str());
+        fflush(stderr);
+        cfg.numInputChannels = 0;
+    }
+#endif
+
     std::signal(SIGINT,  signalHandler);
     std::signal(SIGTERM, signalHandler);
     std::signal(SIGSEGV, crashHandler);
@@ -255,14 +318,51 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Preserve the user's originally-requested input channel count across
+    // the permission-pending zeroing above. Otherwise re-enable paths fall
+    // back to the hard-coded default of 2, which can produce ghost channels
+    // on a mono mic (peak overload, activeIn=2 on a 1-channel device).
+    // The value may be -1 (auto-max) — enableInputChannels resolves that to
+    // kRequestMaxChannels so JUCE clamps to the device's real input count.
+    if (desiredInputChannels != 0 && desiredInputChannels != cfg.numInputChannels) {
+        engine.setConfiguredInputChannels(desiredInputChannels);
+    }
+
     auto dev = engine.currentDevice();
     printBanner(VERSION, dev, cfg.udpPort);
 
     // On macOS, pump the CFRunLoop so AUHAL audio callbacks fire.
     // On other platforms, just block.
 #ifdef __APPLE__
-    while (!gShutdownRequested.load())
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+    // If the run loop is suppressed (aggregate was created at boot),
+    // wait for Spider to finish initialising before pumping.
+    if (engine.isRunLoopSuppressed()) {
+        fprintf(stderr, "[supersonic] waiting for boot to settle before pumping CFRunLoop...\n");
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        engine.setRunLoopSuppressed(false);
+        fprintf(stderr, "[supersonic] CFRunLoop pump started\n");
+    }
+    // If we booted with inputs disabled because mic permission was pending,
+    // watch for the grant and auto-enable inputs. Re-check once per second
+    // until either we're running with inputs or the process shuts down.
+    bool needsInputEnableCheck = (cfg.numInputChannels == 0 && micStatus != "authorized");
+    int inputCheckCounter = 0;
+    while (!gShutdownRequested.load()) {
+        if (engine.isRunLoopSuppressed())
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        else
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+
+        if (needsInputEnableCheck && ++inputCheckCounter >= 10) {
+            inputCheckCounter = 0;
+            if (MicPermission::status() == "authorized") {
+                fprintf(stderr, "[mic-permission] status now authorized — enabling inputs\n");
+                fflush(stderr);
+                engine.enableInputChannels(-1);
+                needsInputEnableCheck = false;
+            }
+        }
+    }
 #else
     while (!gShutdownRequested.load())
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

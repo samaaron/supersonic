@@ -7,6 +7,7 @@
 */
 
 #include "audio_processor.h"
+#include "audio_config.h"
 #include <emscripten/webaudio.h>
 #include <algorithm>
 #include <cstring>
@@ -100,9 +101,12 @@ extern "C" {
     static_assert(TOTAL_BUFFER_SIZE <= sizeof(ring_buffer_storage),
                   "Buffer layout exceeds allocated storage!");
 
-    // Static audio bus buffer (128 channels * 128 samples * 4 bytes = 64KB)
-    // Pre-allocated to avoid malloc in critical audio path
-    alignas(16) float static_audio_bus[128 * 128];
+    // Pre-allocated audio bus staging buffer — sized to the compile-time
+    // max so runtime block sizes up to that cap fit without reallocation.
+    // (128 * 128 * 4 = 64 KB on web, up to 512 KB on native.) Used as a
+    // scratch copy area for channel-major output; we only write
+    // g_world->mBufLength samples per channel at runtime.
+    alignas(16) float static_audio_bus[sonicpi::kMaxBlockSize * sonicpi::kMaxChannels];
 
     // Static OSC message buffer - MUST NOT be on stack!
     // MAX_MESSAGE_SIZE is ~768KB which would overflow the WASM stack.
@@ -518,6 +522,9 @@ extern "C" {
 #ifndef __EMSCRIPTEN__
     // destroy_world / rebuild_world — for native cold swap (device sample rate change).
     // Tears down the World (keeping UGen plugins loaded) and rebuilds with new sample rate.
+    // Cold-swap entry/exit — the engine's state-transition lines
+    // ([supersonic] state: restarting -> running) already record when these
+    // fire, so separate tracing here is redundant.
     void destroy_world() {
         if (g_world) {
             World_Cleanup(g_world, false);  // false = keep UGen plugins loaded
@@ -531,7 +538,7 @@ extern "C" {
 
     void rebuild_world(double sample_rate) {
         // Re-read worldOptions from ring_buffer_storage + WORLD_OPTIONS_START
-        // (caller must update opts[14] = sampleRate before calling)
+        // (caller must update opts[WorldOpts::kSampleRate] before calling)
         init_memory(sample_rate);
     }
 #endif
@@ -542,8 +549,8 @@ extern "C" {
     // active_input_channels: Number of input channels from AudioContext
     EMSCRIPTEN_KEEPALIVE
     bool process_audio(double current_time, uint32_t active_output_channels, uint32_t active_input_channels) {
-        if (!memory_initialized) {
-            return true; // Keep alive but do nothing if not initialized
+        if (!memory_initialized || !g_world) {
+            return true; // Not ready or world destroyed during cold swap — output silence
         }
 
         if (!metrics) {
@@ -745,8 +752,10 @@ extern "C" {
                 in_tail = control->in_tail.load(std::memory_order_acquire);
             }
 
-            // AudioWorklet provides 128 samples per quantum, and we configure SC to match
-            const int QUANTUM_SIZE = 128;
+            // Block size from scsynth's World options. Web: always 128
+            // (AudioWorklet render quantum). Native: chosen at boot —
+            // typically equal to the hardware callback buffer size.
+            const int QUANTUM_SIZE = g_world->mBufLength;
 
             // Zero OUTPUT audio buses for this render cycle
             uint32_t output_bus_bytes = g_world->mNumOutputs * g_world->mBufLength * sizeof(float);
@@ -1019,7 +1028,10 @@ extern "C" {
 
     EMSCRIPTEN_KEEPALIVE
     int get_audio_buffer_samples() {
-        return 128; // AudioWorklet quantum size
+        // Block size currently in use. On web this is always 128
+        // (AudioWorklet render quantum). On native it reflects whatever
+        // was configured when the World was built.
+        return g_world ? g_world->mBufLength : sonicpi::kDefaultBlockSize;
     }
 
     // scsynth audio input accessor

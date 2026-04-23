@@ -48,6 +48,10 @@ add_executable(SuperSonicNativeTests
     test_input_channels.cpp
     test_driver_switch.cpp
     test_rapid_switching.cpp
+    test_device_selection.cpp
+    test_aggregate_buffer_clamp.cpp
+    test_device_policy.cpp
+    test_scope_race.cpp
     test_heap_growth.cpp
     test_priority_queue.cpp
     test_ring_buffer_write.cpp

@@ -23,6 +23,8 @@
 #endif
 
 #include "SC_PlugIn.h"
+#include "src/audio_config.h"
+#include <atomic>
 #include <cstdio>
 
 #include <boost/align/is_aligned.hpp>
@@ -4519,6 +4521,14 @@ void ScopeOut_Dtor(ScopeOut* unit) { TAKEDOWN_IN }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Diagnostic counter: increments each time ScopeOut2_next's defensive
+// NULL-guards trip (either m_buffer.data or a channel_data(i) comes
+// back null mid-callback). Tests read this to tell whether a stress
+// scenario is actually firing the race, or whether the race window is
+// already closed by other ordering guarantees. Always on — the cost is
+// a single atomic increment on an already-broken path.
+std::atomic<int> gScopeOut2DefenseTripCount{0};
+
 struct ScopeOut2 : public Unit {
     ScopeBufferHnd m_buffer;
     float** m_inBuffers;
@@ -4549,10 +4559,39 @@ void ScopeOut2_next(ScopeOut2* unit, int inNumSamples) {
     else
         wrap = inNumSamples - remain;
 
+    // Defensive check: if m_buffer.data was invalidated (e.g. the scope_buffer
+    // in shm was released out from under us by a cold-swap race), memcpy
+    // would crash. Skip-and-return rather than segfault; the [scope-diag]
+    // line in the log tells us which channel went bad.
+    if (!unit->m_buffer.data) {
+        gScopeOut2DefenseTripCount.fetch_add(1, std::memory_order_relaxed);
+        static int warned = 0;
+        if (warned++ < 3) {
+            DEV_LOG("[scope-diag] ScopeOut2_next: m_buffer.data is NULL "
+                    "(internalData=%p channels=%u maxFrames=%u) — scope write skipped\n",
+                    unit->m_buffer.internalData, unit->m_buffer.channels,
+                    unit->m_buffer.maxFrames);
+        }
+        return;
+    }
+
     for (int i = 0; i != numChannels; ++i) {
         float* inBuf = unit->m_buffer.channel_data(i);
         const float* in = IN(inputOffset + i);
 
+        // Second defensive check: channel_data returns data + channel*maxFrames.
+        // If the bound channels/maxFrames don't match what's in the underlying
+        // scope_buffer (perhaps freed and re-allocated by another caller), we
+        // could still land on invalid memory. Verify the computed address is
+        // non-null before the memcpy.
+        if (!inBuf) {
+            gScopeOut2DefenseTripCount.fetch_add(1, std::memory_order_relaxed);
+            static int warned = 0;
+            if (warned++ < 3) {
+                DEV_LOG("[scope-diag] ScopeOut2_next: channel_data(%d)=NULL — skip\n", i);
+            }
+            return;
+        }
         memcpy(inBuf + framepos, in, remain * sizeof(float));
     }
 
@@ -4562,6 +4601,7 @@ void ScopeOut2_next(ScopeOut2* unit, int inNumSamples) {
     if (wrap) {
         for (int i = 0; i != numChannels; ++i) {
             float* inBuf = unit->m_buffer.channel_data(i);
+            if (!inBuf) return;
             const float* in = IN(inputOffset + i);
             memcpy(inBuf, in + remain, wrap * sizeof(float));
         }
@@ -4581,6 +4621,12 @@ void ScopeOut2_Ctor(ScopeOut2* unit) {
 
     bool ok = (*ft->fGetScopeBuffer)(unit->mWorld, scopeNum, numChannels, maxFrames, &unit->m_buffer);
 
+    DEV_LOG("[scope-diag] ScopeOut2_Ctor: unit=%p scopeNum=%u ch=%u maxFrames=%u "
+            "result=%s internalData=%p data=%p\n",
+            (void*)unit, scopeNum, numChannels, maxFrames,
+            ok ? "OK" : "FAIL",
+            unit->m_buffer.internalData, unit->m_buffer.data);
+
     if (!ok) {
         if (unit->mWorld->mVerbosity > -1 && !unit->mDone)
             Print("ScopeOut2: Requested scope buffer unavailable! (index: %d, channels: %d, size: %d)\n", scopeNum,
@@ -4593,6 +4639,8 @@ void ScopeOut2_Ctor(ScopeOut2* unit) {
 }
 
 void ScopeOut2_Dtor(ScopeOut2* unit) {
+    DEV_LOG("[scope-diag] ScopeOut2_Dtor: unit=%p internalData=%p data=%p\n",
+            (void*)unit, unit->m_buffer.internalData, unit->m_buffer.data);
     if (unit->m_buffer)
         (*ft->fReleaseScopeBuffer)(unit->mWorld, &unit->m_buffer);
 }

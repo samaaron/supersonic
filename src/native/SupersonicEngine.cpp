@@ -3,7 +3,9 @@
  */
 #include "SupersonicEngine.h"
 #include "AggregateDeviceHelper.h"
+#include "DevicePolicy.h"
 #include "src/audio_processor.h"
+#include "src/audio_config.h"
 #include "src/shared_memory.h"
 #include "osc/OscReceivedElements.h"
 #include "RingBufferWriter.h"
@@ -13,8 +15,12 @@
 #include <chrono>
 #include <cstring>
 #include <thread>
+#ifdef __linux__
+#include <dlfcn.h>
+#endif
 #ifdef __APPLE__
 #include <CoreAudio/CoreAudio.h>
+#include "MicPermission.h"
 #endif
 
 extern "C" {
@@ -26,7 +32,190 @@ extern "C" {
     void rebuild_world(double sample_rate);
 }
 
+namespace {
+// JUCE appends " (N)" suffixes to disambiguate duplicate CoreAudio device
+// names (e.g. two "USB Audio Device" instances become "USB Audio Device"
+// and "USB Audio Device (2)"). Returns true if `full` is exactly `base`,
+// or begins with `base` followed by a space — i.e. base matches the
+// real device name inside the JUCE-disambiguated form.
+bool deviceNameMatches(const std::string& full, const std::string& base) {
+    if (full == base) return true;
+    return full.size() > base.size()
+        && full.compare(0, base.size(), base) == 0
+        && full[base.size()] == ' ';
+}
+
+#ifdef __linux__
+// Silence libjack's stderr chatter on boxes where no jackd / pipewire-
+// jack server is running. With JUCE_JACK=1 enabled, JUCE's
+// JackAudioIODeviceType calls jack_client_open() during scanForDevices;
+// libjack writes a two-line "connect(2) ... failed / attempt to connect
+// to server failed" pair for every failed attempt. Routing that through
+// our noop callback eliminates the spam without affecting the scan's
+// outcome (JUCE still sees the open-failed return and correctly reports
+// zero devices for the JACK type).
+void silentJackLog(const char*) {}
+
+void silenceJackLogsIfPossible() {
+    // Only relevant after libjack has been loaded. JUCE dlopens it
+    // lazily inside JackAudioIODeviceType's ctor; calling this once
+    // after AudioDeviceManager construction catches that first scan.
+    // If libjack isn't loadable at all (no package installed), dlopen
+    // fails and we skip quietly.
+    void* handle = dlopen("libjack.so.0", RTLD_LAZY | RTLD_NOLOAD);
+    if (!handle) handle = dlopen("libjack.so.0", RTLD_LAZY);
+    if (!handle) return;
+    using set_fn = void (*)(void (*)(const char*));
+    if (auto set_err  = (set_fn)dlsym(handle, "jack_set_error_function"))
+        set_err(silentJackLog);
+    if (auto set_info = (set_fn)dlsym(handle, "jack_set_info_function"))
+        set_info(silentJackLog);
+    // Don't dlclose — JUCE needs libjack resident for its own dlsym path.
+}
+#endif
+}
+
 SupersonicEngine::SupersonicEngine() = default;
+
+void SupersonicEngine::recordSwapPreferences(const std::string& deviceName,
+                                             const std::string& inputDeviceName,
+                                             double sampleRate) {
+    if (!deviceName.empty() && sampleRate > 0) {
+        // Cap to avoid unbounded growth across long sessions of hot-plug
+        // cycling (USB dock / AirPlay / Bluetooth churn can accumulate
+        // device-name variants indefinitely). 32 is well above any realistic
+        // device set a user juggles in one session — if we hit it, the
+        // entries we forget get re-probed next time the device is chosen.
+        static constexpr size_t kMaxDeviceRateMemoryEntries = 32;
+        if (mDeviceRateMemory.size() >= kMaxDeviceRateMemoryEntries
+            && mDeviceRateMemory.find(deviceName) == mDeviceRateMemory.end())
+            mDeviceRateMemory.clear();
+        mDeviceRateMemory[deviceName] = static_cast<int>(sampleRate);
+    }
+
+    // Track the user's long-lived preferred device for hot-plug re-attach.
+    // An explicit deviceName means the caller picked it (GUI switch, OSC,
+    // setDeviceMode); remember it even across cycles where the device
+    // disappears. inputDeviceName == "__none__" means "disable inputs"
+    // (user intent to not have any input), so clear the preferred input;
+    // any other explicit input means that's the desired sub-device.
+    if (!deviceName.empty())
+        mPreferredOutputDevice = deviceName;
+    if (inputDeviceName == "__none__")
+        mPreferredInputDevice.clear();
+    else if (!inputDeviceName.empty())
+        mPreferredInputDevice = inputDeviceName;
+}
+
+std::string SupersonicEngine::refuseWirelessMicAddition(
+        const std::string& deviceName,
+        const std::string& inputDeviceName) {
+#ifdef __APPLE__
+    // Only applies to "add mic while keeping current output" swaps.
+    if (!deviceName.empty()) return {};
+    if (inputDeviceName.empty() || inputDeviceName == "__none__") return {};
+    if (!mDeviceManager) return {};
+    auto* cur = mDeviceManager->getCurrentAudioDevice();
+    if (!cur) return {};
+    std::string curOut = mRealOutputDeviceName.empty()
+        ? cur->getName().toStdString()
+        : mRealOutputDeviceName;
+    for (auto& dev : listDevices(false)) {
+        if (deviceNameMatches(dev.name, curOut) && dev.isWirelessTransport()) {
+            std::string err = "can't add input '" + inputDeviceName
+                            + "' — current output '" + curOut
+                            + "' is wireless and can't be aggregated with a mic";
+            fprintf(stderr, "[switchDevice] %s\n", err.c_str());
+            fflush(stderr);
+            return err;
+        }
+    }
+#else
+    (void)deviceName; (void)inputDeviceName;
+#endif
+    return {};
+}
+
+int SupersonicEngine::probeDeviceChannelCount(const std::string& name,
+                                              bool isInput) {
+    if (name.empty() || name == "__none__") return -1;
+    if (!mDeviceManager) return -1;
+    auto& types = mDeviceManager->getAvailableDeviceTypes();
+    for (auto* type : types) {
+        for (auto& n : type->getDeviceNames(isInput)) {
+            if (!deviceNameMatches(n.toStdString(), name)) continue;
+            auto outArg = isInput ? juce::String() : n;
+            auto inArg  = isInput ? n : juce::String();
+            std::unique_ptr<juce::AudioIODevice> probe(
+                type->createDevice(outArg, inArg));
+            if (probe)
+                return isInput ? probe->getInputChannelNames().size()
+                               : probe->getOutputChannelNames().size();
+        }
+    }
+    return -1;
+}
+
+std::vector<double> SupersonicEngine::probeDeviceSampleRates(
+        const std::string& name, bool isInput) {
+    std::vector<double> result;
+    if (name.empty() || !mDeviceManager) return result;
+    auto& types = mDeviceManager->getAvailableDeviceTypes();
+    for (auto* type : types) {
+        type->scanForDevices();
+        for (auto& n : type->getDeviceNames(isInput)) {
+            if (!deviceNameMatches(n.toStdString(), name)) continue;
+            auto outArg = isInput ? juce::String() : n;
+            auto inArg  = isInput ? n : juce::String();
+            std::unique_ptr<juce::AudioIODevice> probe(
+                type->createDevice(outArg, inArg));
+            if (!probe) return result;
+            for (auto r : probe->getAvailableSampleRates())
+                result.push_back(r);
+            return result;
+        }
+    }
+    return result;
+}
+
+void SupersonicEngine::probeAndAdjustForTargetRate(const std::string& name,
+                                                   bool isInput,
+                                                   double& sampleRate,
+                                                   double currentRate) {
+    if (sampleRate > 0 || currentRate <= 0) return;
+    auto rates = probeDeviceSampleRates(name, isInput);
+    if (rates.empty()) return;
+
+    for (auto r : rates)
+        if (static_cast<int>(r) == static_cast<int>(currentRate))
+            return;  // supported — keep current rate
+
+    double nearest = rates[0];
+    for (auto r : rates)
+        if (std::abs(r - currentRate) < std::abs(nearest - currentRate))
+            nearest = r;
+    sampleRate = nearest;
+    fprintf(stderr,
+        "[audio-device] current rate %.0f not supported "
+        "by %s, will use %.0f (cold swap)\n",
+        currentRate, name.c_str(), sampleRate);
+}
+
+void SupersonicEngine::clampAggregateBufferIfNeeded(int& bufferSize) {
+#ifdef __APPLE__
+    const bool active = AggregateDeviceHelper::exists()
+                     && AggregateDeviceHelper::driftCompensationEnabled();
+    const int clamped = sonicpi::device::clampBufferForDriftComp(bufferSize, active);
+    if (clamped != bufferSize) {
+        fprintf(stderr, "[audio-device] clamping aggregate buffer "
+                "%d -> %d (drift-comp minimum)\n",
+                bufferSize, clamped);
+        fflush(stderr);
+        bufferSize = clamped;
+        mCurrentConfig.bufferSize = clamped;
+    }
+#endif
+}
 
 void SupersonicEngine::setEngineState(EngineState state, const std::string& reason) {
     EngineState prev = mEngineState.exchange(state);
@@ -40,8 +229,12 @@ void SupersonicEngine::setEngineState(EngineState state, const std::string& reas
 
     mUdpServer.sendStateChange(stateStr, reason.c_str());
 
-    // /supersonic/setup fires on transitions to Running (world is ready)
-    if (state == EngineState::Running) {
+    // /supersonic/setup fires ONLY when the World was actually rebuilt
+    // (cold swap). Spider receives this and runs cold_swap_reinit! which
+    // resets all node IDs. Sending it on swap-failed-rollback or hot swaps
+    // (where old nodes still exist) would cause duplicate node ID errors.
+    if (state == EngineState::Running && mWorldRebuilt) {
+        mWorldRebuilt = false;
         auto* dev = mDeviceManager ? mDeviceManager->getCurrentAudioDevice() : nullptr;
         int sr  = dev ? static_cast<int>(dev->getCurrentSampleRate()) : mCurrentConfig.sampleRate;
         int buf = dev ? dev->getCurrentBufferSizeSamples() : mCurrentConfig.bufferSize;
@@ -60,7 +253,35 @@ void SupersonicEngine::initialise(const Config& cfg) {
 
     mHeadless = cfg.headless;
     mCurrentConfig = cfg;
+    // mBootInputChannels may be kAutoChannelCount (-1) here — resolved to a
+    // concrete count when enableInputChannels() is eventually called.
     mBootInputChannels = cfg.numInputChannels;
+
+    // Seed the pre-wireless rate from the boot config so that a user who
+    // boots directly into a wireless default (e.g. AirPlay because no
+    // other output is present) still has a rate to restore when they
+    // later switch to a hardware device. Without this seed, the first
+    // non-wireless switch after a boot-on-wireless has mPreWirelessRate=0
+    // and the AirPlay-negotiated 44.1 kHz sticks onto the new device.
+    mPreWirelessRate = cfg.sampleRate;
+
+    // Seed the preferred-output-device name from -H / sound_card_name so
+    // that a boot with the device absent (USB interface unplugged, etc.)
+    // still remembers the user's intent — the device-list-change listener
+    // will auto-switch to it when it reappears. "__system__" sentinel means
+    // "explicitly follow macOS default"; leave the preferred empty.
+    if (!cfg.hardwareDevice.empty() && cfg.hardwareDevice != "__system__")
+        mPreferredOutputDevice = cfg.hardwareDevice;
+
+    // Map -1 (auto/max) to a large request count. JUCE/CoreAudio will clamp
+    // the bitmask to the actual device channel count, so asking for more
+    // than exists is safe; the callback's active-channels query later reads
+    // the real count back.
+    auto resolveReq = [](int n) -> int {
+        return n < 0 ? kRequestMaxChannels : n;
+    };
+    int reqIn  = resolveReq(cfg.numInputChannels);
+    int reqOut = resolveReq(cfg.numOutputChannels);
 
     // -- Wire callbacks ---------------------------------------------------
     // onReply/onDebug should be set before initialise() — worker threads
@@ -103,6 +324,10 @@ void SupersonicEngine::initialise(const Config& cfg) {
 #endif
         mDeviceManager = std::make_unique<juce::AudioDeviceManager>();
 
+#ifdef __linux__
+        silenceJackLogsIfPossible();
+#endif
+
         // -- Select audio driver --------------------------------------------------
         {
             auto& types = mDeviceManager->getAvailableDeviceTypes();
@@ -129,33 +354,12 @@ void SupersonicEngine::initialise(const Config& cfg) {
         }
 #endif
 
-        // Open with requested channel counts; if that fails (e.g. device has
-        // fewer channels), fall back to stereo out / no in, then zero/zero.
-        juce::String initError = mDeviceManager->initialiseWithDefaultDevices(
-            cfg.numInputChannels, cfg.numOutputChannels);
-        if (initError.isNotEmpty()) {
-            fprintf(stderr, "[audio-device] init with %d in / %d out failed: %s\n",
-                    cfg.numInputChannels, cfg.numOutputChannels,
-                    initError.toRawUTF8());
-            initError = mDeviceManager->initialiseWithDefaultDevices(0, 2);
-        }
-        if (initError.isNotEmpty()) {
-            fprintf(stderr, "[audio-device] init with 0 in / 2 out failed: %s\n",
-                    initError.toRawUTF8());
-            initError = mDeviceManager->initialiseWithDefaultDevices(0, 0);
-        }
-        if (initError.isNotEmpty()) {
-            fprintf(stderr, "[audio-device] all init attempts failed: %s\n",
-                    initError.toRawUTF8());
-        }
+        // -H "__system__" is the GUI sentinel for "follow macOS default".
+        // Skip fuzzy-match and go straight to initialiseWithDefaultDevices.
+        juce::String initError;
+        bool openedByHardwareFlag = false;
 
-        // If -H was specified, fuzzy-match against combined "Driver : Device"
-        // strings — matching scsynth's PortAudio convention.  Each word in
-        // the pattern is an independent substring filter, so:
-        //   -H "speakers"           → any device with Speakers
-        //   -H "direct"             → any DirectSound device
-        //   -H "direct headphones"  → DirectSound + Headphones
-        if (!cfg.hardwareDevice.empty()) {
+        if (!cfg.hardwareDevice.empty() && cfg.hardwareDevice != "__system__") {
             struct DevEntry { std::string combined, typeName, devName; };
             std::vector<DevEntry> entries;
             std::vector<std::string> combinedNames;
@@ -173,46 +377,286 @@ void SupersonicEngine::initialise(const Config& cfg) {
                 }
             }
 
+#ifdef __APPLE__
+            // Filter wireless (AirPlay/Bluetooth) from fuzzy-match candidates.
+            // These can't be opened via HAL — the route is only warmed up when
+            // the device becomes the macOS system default via System Settings.
+            {
+                auto allDevs = listDevices();
+                std::set<std::string> wirelessNames;
+                for (auto& d : allDevs)
+                    if (d.isWirelessTransport()) wirelessNames.insert(d.name);
+
+                entries.erase(std::remove_if(entries.begin(), entries.end(),
+                    [&wirelessNames](const DevEntry& e) {
+                        for (auto& w : wirelessNames)
+                            if (deviceNameMatches(e.devName, w)) return true;
+                        return false;
+                    }), entries.end());
+                combinedNames.clear();
+                for (auto& e : entries) combinedNames.push_back(e.combined);
+            }
+#endif
+
             std::string matched = fuzzyMatch(cfg.hardwareDevice, combinedNames);
             if (matched.empty()) {
-                fprintf(stderr, "[audio-device] -H '%s' not found, available:\n",
+                fprintf(stderr,
+                        "[audio-device] WARNING: requested output device '%s' not found. "
+                        "Falling back to system default. Available outputs:\n",
                         cfg.hardwareDevice.c_str());
                 for (auto& e : entries)
                     fprintf(stderr, "    %s\n", e.combined.c_str());
             } else {
-                // Find the matching entry
                 for (auto& e : entries) {
                     if (e.combined != matched) continue;
 
-                    // Switch driver if needed
-                    auto* curType = mDeviceManager->getCurrentDeviceTypeObject();
-                    if (!curType || curType->getTypeName().toStdString() != e.typeName) {
-                        mDeviceManager->setCurrentAudioDeviceType(
-                            juce::String(e.typeName), true);
-                        mDeviceManager->initialiseWithDefaultDevices(
-                            cfg.numInputChannels, cfg.numOutputChannels);
-                    }
+                    mDeviceManager->setCurrentAudioDeviceType(
+                        juce::String(e.typeName), true);
 
                     juce::AudioDeviceManager::AudioDeviceSetup setup;
-                    mDeviceManager->getAudioDeviceSetup(setup);
                     setup.outputDeviceName = juce::String(e.devName);
+                    setup.inputDeviceName  = juce::String();
                     setup.useDefaultOutputChannels = true;
-                    setup.useDefaultInputChannels = true;
+                    setup.useDefaultInputChannels  = false;
                     if (cfg.sampleRate > 0) setup.sampleRate = cfg.sampleRate;
-                    juce::String hwErr = mDeviceManager->setAudioDeviceSetup(setup, true);
-                    if (hwErr.isNotEmpty()) {
+                    if (cfg.bufferSize > 0) setup.bufferSize = cfg.bufferSize;
+
+                    initError = mDeviceManager->initialise(
+                        reqIn, reqOut,
+                        nullptr, false, juce::String(), &setup);
+
+                    if (initError.isNotEmpty()) {
                         fprintf(stderr, "[audio-device] -H '%s' matched '%s' but failed: %s\n",
                                 cfg.hardwareDevice.c_str(), e.combined.c_str(),
-                                hwErr.toRawUTF8());
-                        mDeviceManager->initialiseWithDefaultDevices(
-                            cfg.numInputChannels, cfg.numOutputChannels);
+                                initError.toRawUTF8());
                     } else {
                         fprintf(stderr, "  -H '%s' -> %s\n",
                                 cfg.hardwareDevice.c_str(), e.combined.c_str());
                         mDeviceMode = e.devName;
+                        openedByHardwareFlag = true;
                     }
                     break;
                 }
+            }
+        }
+
+        if (!openedByHardwareFlag) {
+#ifdef __APPLE__
+            // On macOS, boot output-only then create an Aggregate Device.
+            // JUCE's AudioIODeviceCombiner (used when input and output are
+            // different hardware devices) is unreliable at small buffer sizes.
+            //
+            // Pre-check: if the macOS system default is wireless (AirPlay
+            // / Bluetooth), do NOT open it at boot. Opening wireless then
+            // transitioning to a non-wireless device for the aggregate
+            // triggers a ~15 s CoreAudio IOProc halt — Sonic Pi's boot
+            // handshake times out in that window and scopes never start.
+            // Pick a non-wireless fallback up front.
+            std::string bootFallback;
+            {
+                AudioDeviceID defaultID = kAudioObjectUnknown;
+                AudioObjectPropertyAddress addr = {
+                    kAudioHardwarePropertyDefaultOutputDevice,
+                    kAudioObjectPropertyScopeGlobal,
+                    kAudioObjectPropertyElementMain
+                };
+                UInt32 sz = sizeof(defaultID);
+                if (AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                        &addr, 0, nullptr, &sz, &defaultID) == noErr
+                    && defaultID != kAudioObjectUnknown) {
+                    // Default name
+                    CFStringRef cfName = nullptr;
+                    UInt32 nsz = sizeof(cfName);
+                    AudioObjectPropertyAddress nameAddr = {
+                        kAudioDevicePropertyDeviceNameCFString,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+                    std::string defaultName;
+                    if (AudioObjectGetPropertyData(defaultID, &nameAddr,
+                            0, nullptr, &nsz, &cfName) == noErr && cfName) {
+                        char buf[256];
+                        CFStringGetCString(cfName, buf, sizeof(buf),
+                                           kCFStringEncodingUTF8);
+                        CFRelease(cfName);
+                        defaultName = buf;
+                    }
+                    // Transport type
+                    AudioObjectPropertyAddress tAddr = {
+                        kAudioDevicePropertyTransportType,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+                    UInt32 tType = 0, tSize = sizeof(tType);
+                    bool defaultIsWireless = false;
+                    if (AudioObjectGetPropertyData(defaultID, &tAddr, 0,
+                            nullptr, &tSize, &tType) == noErr) {
+                        defaultIsWireless = CoreAudioTransport::isWireless(tType);
+                    }
+                    if (defaultIsWireless && !defaultName.empty()) {
+                        std::vector<std::string> names;
+                        std::vector<bool> wirelessFlags;
+                        for (auto& d : listDevices()) {
+                            names.push_back(d.name);
+                            wirelessFlags.push_back(d.isWirelessTransport());
+                        }
+                        bootFallback = sonicpi::device::selectBootOutputDevice(
+                            defaultName, defaultIsWireless, names, wirelessFlags);
+                        if (!bootFallback.empty()) {
+                            fprintf(stderr, "[audio-device] boot: default '%s' "
+                                    "is wireless; using non-wireless fallback '%s'\n",
+                                    defaultName.c_str(), bootFallback.c_str());
+                            fflush(stderr);
+                        } else {
+                            fprintf(stderr, "[audio-device] boot: default '%s' "
+                                    "is wireless and no non-wireless fallback "
+                                    "available — opening wireless default may "
+                                    "silence audio for ~15 s during boot handshake\n",
+                                    defaultName.c_str());
+                            fflush(stderr);
+                        }
+                    }
+                }
+            }
+
+            mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+            if (!bootFallback.empty()) {
+                juce::AudioDeviceManager::AudioDeviceSetup setup;
+                setup.outputDeviceName = juce::String(bootFallback);
+                setup.useDefaultOutputChannels = true;
+                initError = mDeviceManager->initialise(
+                    0, reqOut, nullptr, false, juce::String(), &setup);
+                if (initError.isEmpty()) mDeviceMode = bootFallback;
+            } else {
+                initError = mDeviceManager->initialiseWithDefaultDevices(
+                    0, reqOut);
+            }
+            if (initError.isNotEmpty()) {
+                fprintf(stderr, "[audio-device] init with 0 in / %d out failed: %s\n",
+                        reqOut, initError.toRawUTF8());
+                mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                initError = mDeviceManager->initialiseWithDefaultDevices(0, 0);
+            }
+            if (initError.isEmpty() && cfg.numInputChannels != 0) {
+                auto* dev = mDeviceManager->getCurrentAudioDevice();
+                if (dev) {
+                    std::string outName = dev->getName().toStdString();
+                    std::string inName;
+                    AudioObjectPropertyAddress pa = {
+                        kAudioHardwarePropertyDefaultInputDevice,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+                    AudioDeviceID inputDevId = 0;
+                    UInt32 sz = sizeof(inputDevId);
+                    if (AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                            &pa, 0, nullptr, &sz, &inputDevId) == noErr
+                            && inputDevId != 0) {
+                        CFStringRef cfName = nullptr;
+                        UInt32 nsz = sizeof(cfName);
+                        AudioObjectPropertyAddress nameAddr = {
+                            kAudioDevicePropertyDeviceNameCFString,
+                            kAudioObjectPropertyScopeGlobal,
+                            kAudioObjectPropertyElementMain
+                        };
+                        if (AudioObjectGetPropertyData(inputDevId, &nameAddr,
+                                0, nullptr, &nsz, &cfName) == noErr && cfName) {
+                            char buf[256];
+                            CFStringGetCString(cfName, buf, sizeof(buf),
+                                               kCFStringEncodingUTF8);
+                            CFRelease(cfName);
+                            inName = buf;
+                        }
+                    }
+                    // Skip aggregate for wireless (Bluetooth/AirPlay) or virtual
+                    // (Loopback/Blackhole) outputs — same rule as switchDevice.
+                    // Boot with output-only instead so we don't crash JUCE's
+                    // Combiner fallback when sample-rate negotiation fails.
+                    bool outputSuitable = true;
+                    if (!inName.empty() && inName != outName) {
+                        for (auto& d : listDevices()) {
+                            if (d.name == outName && !d.isSuitableForAggregate()) {
+                                outputSuitable = false;
+                                fprintf(stderr, "[audio-device] boot: skipping aggregate — "
+                                        "'%s' is %s; input disabled\n",
+                                        outName.c_str(),
+                                        d.isVirtualTransport() ? "virtual" : "wireless");
+                                fflush(stderr);
+                                break;
+                            }
+                        }
+                    }
+                    if (!inName.empty() && inName != outName && outputSuitable) {
+                        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                        auto aggName = AggregateDeviceHelper::createOrUpdate(
+                            outName, inName,
+                            static_cast<double>(mCurrentConfig.sampleRate));
+                        if (!aggName.empty()) {
+                            juce::Thread::sleep(300);
+                            if (auto* dt = mDeviceManager->getCurrentDeviceTypeObject())
+                                dt->scanForDevices();
+                            mRealOutputDeviceName = outName;
+                            mRealInputDeviceName  = inName;
+                            mLastInputDeviceName  = inName;
+                            juce::AudioDeviceManager::AudioDeviceSetup setup;
+                            mDeviceManager->getAudioDeviceSetup(setup);
+                            setup.outputDeviceName = juce::String(aggName);
+                            setup.inputDeviceName  = juce::String(aggName);
+                            setup.useDefaultInputChannels = false;
+                            clampAggregateBufferIfNeeded(setup.bufferSize);
+                            juce::BigInteger inputBits;
+                            inputBits.setRange(0, reqIn, true);
+                            setup.inputChannels = inputBits;
+                            mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                            auto aggErr = mDeviceManager->setAudioDeviceSetup(setup, true);
+                            if (aggErr.isNotEmpty()) {
+                                fprintf(stderr, "[audio-device] aggregate setup failed: %s — "
+                                        "falling back to Combiner\n", aggErr.toRawUTF8());
+                                AggregateDeviceHelper::destroy();
+                                mRealOutputDeviceName.clear();
+                                mRealInputDeviceName.clear();
+                                // Fall back to Combiner
+                                mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                                mDeviceManager->initialiseWithDefaultDevices(
+                                    reqIn, reqOut);
+                            } else {
+                                fprintf(stderr, "[audio-device] booted with aggregate: "
+                                        "out='%s' in='%s'\n", outName.c_str(), inName.c_str());
+                                // Suppress CFRunLoop until Spider has finished
+                                // cold_swap_reinit — queued audioDeviceListChanged
+                                // messages would trigger a second cold swap and
+                                // crash ScopeOut2 during the rebuild.
+                                mSuppressRunLoop.store(true);
+                            }
+                        }
+                    } else if (inName == outName) {
+                        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                        initError = mDeviceManager->initialiseWithDefaultDevices(
+                            reqIn, reqOut);
+                    }
+                }
+            }
+#else
+            mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+            initError = mDeviceManager->initialiseWithDefaultDevices(
+                reqIn, reqOut);
+            if (initError.isNotEmpty()) {
+                fprintf(stderr, "[audio-device] init with %d in / %d out failed: %s\n",
+                        reqIn, reqOut,
+                        initError.toRawUTF8());
+                mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                initError = mDeviceManager->initialiseWithDefaultDevices(0, 2);
+            }
+            if (initError.isNotEmpty()) {
+                fprintf(stderr, "[audio-device] init with 0 in / 2 out failed: %s\n",
+                        initError.toRawUTF8());
+                mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                initError = mDeviceManager->initialiseWithDefaultDevices(0, 0);
+            }
+#endif
+            if (initError.isNotEmpty()) {
+                fprintf(stderr, "[audio-device] all init attempts failed: %s\n",
+                        initError.toRawUTF8());
             }
         }
 
@@ -245,27 +689,32 @@ void SupersonicEngine::initialise(const Config& cfg) {
             }
 
             if (cfg.bufferSize > 0) {
-                // User explicitly requested a buffer size — honour it
-                setup.bufferSize = cfg.bufferSize;
+                // Honour the user's -z / -Z / TOML buffer size, clamped up
+                // only when we're running a drift-comp aggregate (a stale
+                // block_size=64 in the TOML would otherwise boot into a
+                // drift storm).
+                int wantedBuf = cfg.bufferSize;
+                clampAggregateBufferIfNeeded(wantedBuf);
+                setup.bufferSize = wantedBuf;
                 changed = true;
             } else if (dev->getTypeName() != "DirectSound") {
-                // Auto: pick the smallest available buffer that is a multiple of 128.
-                // DirectSound manages its own large circular buffer internally —
-                // overriding its default causes distortion, so we leave it alone.
-                constexpr int kBlockSize = 128;
-                int minBuf = kBlockSize;
+                // Auto: pick the smallest available buffer that is at least
+                // 128 samples. We no longer require a multiple of 128 —
+                // scsynth's block size matches the HW buffer on native, so
+                // any size works. Buffers below 128 mostly add callback
+                // overhead without a latency win.
+                constexpr int kMinBuf = 128;
                 auto sizes = dev->getAvailableBufferSizes();
                 int best = 0;
                 for (auto s : sizes) {
-                    if (s >= minBuf && s % kBlockSize == 0) {
+                    if (s >= kMinBuf && s <= sonicpi::kMaxBlockSize) {
                         best = s;
-                        break;  // sizes are sorted ascending — first match is smallest
+                        break;  // sizes are sorted ascending
                     }
                 }
                 if (best > 0 && best != dev->getCurrentBufferSizeSamples()) {
                     setup.bufferSize = best;
                     changed = true;
-                    (void)kBlockSize; // used in the calculation above
                 }
             }
 
@@ -277,7 +726,7 @@ void SupersonicEngine::initialise(const Config& cfg) {
                     // Recover: reinitialise with defaults rather than leaving device broken
                     fprintf(stderr, "[audio-device] recovering with device defaults\n");
                     mDeviceManager->initialiseWithDefaultDevices(
-                        cfg.numInputChannels, cfg.numOutputChannels);
+                        reqIn, reqOut);
                 }
             }
         }
@@ -302,6 +751,12 @@ void SupersonicEngine::initialise(const Config& cfg) {
         fflush(stderr);
     }
 
+    // Resolve any remaining auto-max sentinels to concrete counts before the
+    // World is initialised. This covers headless mode and any path where the
+    // device failed to open (readback block above didn't run).
+    if (mCurrentConfig.numOutputChannels < 0) mCurrentConfig.numOutputChannels = 2;
+    if (mCurrentConfig.numInputChannels  < 0) mCurrentConfig.numInputChannels  = 0;
+
     // -- Create shared memory (owned by engine, survives cold swaps) --------
     if (cfg.udpPort > 0) {
         server_shared_memory_creator::cleanup(cfg.udpPort);
@@ -318,6 +773,28 @@ void SupersonicEngine::initialise(const Config& cfg) {
     }
 
     // -- Initialise scsynth World ------------------------------------------
+    // Pick scsynth's block size. Matching it to the hardware callback
+    // makes the audio-thread loop 1:1 (one scsynth block per HW
+    // callback, no prefetch buffer, no input accumulator). Previous
+    // attempts to auto-match were abandoned because of an unexplained
+    // "IOProc stays silent" issue; current hypothesis is that was from
+    // a code path that changed mBufLen AFTER the device was started.
+    // Here we set it BEFORE addAudioCallback, so the World is built
+    // with the right size from the start — no mid-flight reconfig.
+    int chosenBufLen = sonicpi::kDefaultBlockSize;
+    if (auto* dev = mDeviceManager ? mDeviceManager->getCurrentAudioDevice() : nullptr) {
+        int hwBufSize = dev->getCurrentBufferSizeSamples();
+        chosenBufLen = sonicpi::device::chooseBlockSize(
+            hwBufSize, sonicpi::kDefaultBlockSize,
+            /*minBlockSize=*/32, sonicpi::kMaxBlockSize);
+        fprintf(stderr, "[supersonic] scsynth block size = %d samples "
+                "(hwBufSize=%d; auto-matched)\n", chosenBufLen, hwBufSize);
+    } else {
+        fprintf(stderr, "[supersonic] scsynth block size = %d samples "
+                "(default; no active device)\n", chosenBufLen);
+    }
+    fflush(stderr);
+
     // Use actual device sample rate and channel counts (may differ from requested)
     mAudioCallback.initialiseWorld(
         ring_buffer_storage,
@@ -332,7 +809,8 @@ void SupersonicEngine::initialise(const Config& cfg) {
         cfg.numControlBusChannels,
         cfg.realTimeMemorySize,
         cfg.numRGens,
-        cfg.udpPort   // sharedMemoryID — creates boost shm named "SuperColliderServer_<port>"
+        cfg.udpPort,  // sharedMemoryID — creates boost shm named "SuperColliderServer_<port>"
+        chosenBufLen
     );
 
     // Derive pointers into ring_buffer_storage for worker threads
@@ -394,6 +872,25 @@ void SupersonicEngine::initialise(const Config& cfg) {
         // -- Register audio callback (triggers audioDeviceAboutToStart) ----
         mDeviceManager->addAudioCallback(&mAudioCallback);
         mDeviceManager->addChangeListener(this);
+
+#ifdef __APPLE__
+        // JUCE only listens for kAudioHardwarePropertyDevices (device
+        // connect/disconnect), not kAudioHardwarePropertyDefaultOutputDevice.
+        // Install our own listener so "macOS Default" mode tracks System
+        // Settings changes live.
+        if (!mDefaultDevicePropertyListenerInstalled) {
+            AudioObjectPropertyAddress pa = {
+                kAudioHardwarePropertyDefaultOutputDevice,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+            if (AudioObjectAddPropertyListener(kAudioObjectSystemObject, &pa,
+                                               &SupersonicEngine::defaultDevicePropertyListenerProc,
+                                               this) == noErr) {
+                mDefaultDevicePropertyListenerInstalled = true;
+            }
+        }
+#endif
 
         // Wait for audio callbacks to actually start firing.
         // AUHAL's AudioOutputUnitStart may return before the first callback
@@ -482,6 +979,18 @@ void SupersonicEngine::shutdown() {
     }
 
 #ifdef __APPLE__
+    if (mDefaultDevicePropertyListenerInstalled) {
+        AudioObjectPropertyAddress pa = {
+            kAudioHardwarePropertyDefaultOutputDevice,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        AudioObjectRemovePropertyListener(
+            kAudioObjectSystemObject, &pa,
+            &SupersonicEngine::defaultDevicePropertyListenerProc,
+            this);
+        mDefaultDevicePropertyListenerInstalled = false;
+    }
     AggregateDeviceHelper::destroy();
 #endif
 
@@ -594,7 +1103,7 @@ void SupersonicEngine::sendBundle(double ntpTimeSec, std::initializer_list<OscPa
 
 // --- Device management ---
 
-std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
+std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
     std::vector<DeviceInfo> result;
     if (!mDeviceManager) return result;
 
@@ -647,24 +1156,102 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
     // JUCE appends " (N)" suffixes to disambiguate duplicate CoreAudio names.
     // This lambda strips the suffix for fallback matching against CoreAudio names.
 #ifdef __APPLE__
+    // Build a parallel name→AudioObjectID map (alongside transportMap) so
+    // we can query per-device CoreAudio properties without opening JUCE
+    // devices — critical when an aggregate is active and probing a sub-
+    // device via JUCE would disrupt the live callback.
+    std::map<std::string, AudioObjectID> idMap;
+    {
+        AudioObjectPropertyAddress pa = {
+            kAudioHardwarePropertyDevices,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        UInt32 dataSize = 0;
+        if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &pa, 0, nullptr, &dataSize) == noErr) {
+            auto count = dataSize / sizeof(AudioObjectID);
+            std::vector<AudioObjectID> ids(count);
+            if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &pa, 0, nullptr, &dataSize, ids.data()) == noErr) {
+                for (auto id : ids) {
+                    AudioObjectPropertyAddress nameAddr = {
+                        kAudioDevicePropertyDeviceNameCFString,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+                    CFStringRef cfName = nullptr;
+                    UInt32 sz = sizeof(cfName);
+                    if (AudioObjectGetPropertyData(id, &nameAddr, 0, nullptr, &sz, &cfName) != noErr || !cfName)
+                        continue;
+                    char buf[256];
+                    CFStringGetCString(cfName, buf, sizeof(buf), kCFStringEncodingUTF8);
+                    CFRelease(cfName);
+                    idMap[std::string(buf)] = id;
+                }
+            }
+        }
+    }
+
     auto lookupTransport = [&transportMap](const std::string& juceName) -> uint32_t {
         auto it = transportMap.find(juceName);
         if (it != transportMap.end()) return it->second;
-        // JUCE appends suffixes to disambiguate duplicates — match by prefix
-        for (auto& [caName, transport] : transportMap) {
-            if (juceName.size() > caName.size()
-                && juceName.compare(0, caName.size(), caName) == 0
-                && juceName[caName.size()] == ' ') {
-                return transport;
-            }
-        }
+        for (auto& [caName, transport] : transportMap)
+            if (deviceNameMatches(juceName, caName)) return transport;
         return 0;
+    };
+
+    auto lookupID = [&idMap](const std::string& juceName) -> AudioObjectID {
+        auto it = idMap.find(juceName);
+        if (it != idMap.end()) return it->second;
+        for (auto& [caName, id] : idMap)
+            if (deviceNameMatches(juceName, caName)) return id;
+        return kAudioObjectUnknown;
+    };
+
+    // Channel count via CoreAudio's kAudioDevicePropertyStreamConfiguration.
+    // Sums channels across all streams in the requested scope. Works
+    // without opening the device via JUCE — so it's safe to call when
+    // the aggregate is active and skipAllProbing is true.
+    auto scopeChannelCount = [](AudioObjectID devID, bool isInput) -> int {
+        if (devID == kAudioObjectUnknown) return 0;
+        AudioObjectPropertyAddress addr = {
+            kAudioDevicePropertyStreamConfiguration,
+            isInput ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput,
+            kAudioObjectPropertyElementMain
+        };
+        UInt32 sz = 0;
+        if (AudioObjectGetPropertyDataSize(devID, &addr, 0, nullptr, &sz) != noErr || sz == 0)
+            return 0;
+        std::vector<uint8_t> buf(sz);
+        auto* bl = reinterpret_cast<AudioBufferList*>(buf.data());
+        if (AudioObjectGetPropertyData(devID, &addr, 0, nullptr, &sz, bl) != noErr)
+            return 0;
+        int total = 0;
+        for (UInt32 i = 0; i < bl->mNumberBuffers; ++i)
+            total += (int)bl->mBuffers[i].mNumberChannels;
+        return total;
     };
 #endif
 
+    // When an aggregate is active, DON'T probe any devices via createDevice.
+    // Creating a JUCE AudioIODevice wrapper on a subdevice of our aggregate
+    // (e.g. MacBook Pro Microphone when the aggregate owns it) and then
+    // destroying it at end of unique_ptr scope closes the HAL IOProc and
+    // silences the aggregate. We return device names without sample-rate /
+    // buffer-size info in this case; cached values from pre-aggregate
+    // enumeration remain with the GUI until the aggregate is torn down.
+    bool skipAllProbing = false;
+#ifdef __APPLE__
+    if (AggregateDeviceHelper::exists())
+        skipAllProbing = true;
+#endif
+    // Also skip probing the currently open device — its handle is live.
+    std::string activeDeviceName;
+    if (auto* dev = mDeviceManager->getCurrentAudioDevice())
+        activeDeviceName = dev->getName().toStdString();
+
     auto& types = mDeviceManager->getAvailableDeviceTypes();
     for (auto* type : types) {
-        type->scanForDevices();
+        if (rescan) type->scanForDevices();
 
         auto populateFromDevice = [](DeviceInfo& info, juce::AudioIODevice* dev) {
             for (auto r : dev->getAvailableSampleRates())
@@ -676,6 +1263,9 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
         };
 
         std::string typeNameStr = type->getTypeName().toStdString();
+        auto shouldSkipProbe = [&](const std::string& name) {
+            return skipAllProbing || name == activeDeviceName;
+        };
 
         // Enumerate output devices
         auto outputNames = type->getDeviceNames(false);
@@ -687,28 +1277,76 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
             info.transportType = lookupTransport(info.name);
 #endif
 
-            std::unique_ptr<juce::AudioIODevice> tempDev(
-                type->createDevice(devName, juce::String()));
-            if (tempDev)
-                populateFromDevice(info, tempDev.get());
+            if (!shouldSkipProbe(info.name)) {
+                std::unique_ptr<juce::AudioIODevice> tempDev(
+                    type->createDevice(devName, juce::String()));
+                if (tempDev)
+                    populateFromDevice(info, tempDev.get());
+            }
+#ifdef __APPLE__
+            // Fill maxOutputChannels from CoreAudio if we don't already have
+            // it (either because we skipped probing, or the JUCE probe
+            // didn't return the full count). CoreAudio's stream
+            // configuration is authoritative for a full-duplex multi-
+            // channel device like a MOTU: no need to open the device,
+            // so it's safe even while the aggregate is live.
+            if (info.maxOutputChannels == 0) {
+                AudioObjectID devID = lookupID(info.name);
+                info.maxOutputChannels = scopeChannelCount(devID, false);
+            }
+#else
+            if (info.maxOutputChannels == 0) info.maxOutputChannels = 2;
+#endif
 
             result.push_back(std::move(info));
         }
 
-        // Enumerate input-only devices (e.g. macOS microphones)
+        // Enumerate input devices. A full-duplex device (e.g. a MOTU
+        // soundcard with both playback and capture) shows up in both the
+        // output and input enumerations with the same name. Merge the
+        // input-side info into the existing entry rather than skipping —
+        // previously we just `continue`d on alreadyListed, which meant
+        // full-duplex inputs never got recorded and the GUI's input
+        // dropdown silently omitted them.
         auto inputNames = type->getDeviceNames(true);
         for (auto& devName : inputNames) {
             std::string nameStr = devName.toStdString();
 
-            bool alreadyListed = false;
-            for (auto& existing : result) {
-                if (existing.name == nameStr && existing.typeName == typeNameStr) {
-                    alreadyListed = true;
+            DeviceInfo* existing = nullptr;
+            for (auto& e : result) {
+                if (e.name == nameStr && e.typeName == typeNameStr) {
+                    existing = &e;
                     break;
                 }
             }
-            if (alreadyListed) continue;
 
+            if (existing) {
+                // Same device seen on the output side already. Add its
+                // input capability to the existing entry.
+                if (!shouldSkipProbe(existing->name)) {
+                    std::unique_ptr<juce::AudioIODevice> tempDev(
+                        type->createDevice(juce::String(), devName));
+                    if (tempDev) {
+                        existing->maxInputChannels =
+                            tempDev->getInputChannelNames().size();
+                    }
+                }
+#ifdef __APPLE__
+                // Always check CoreAudio for the actual input count,
+                // so full-duplex devices (MOTU etc.) report the true
+                // number even when probing was skipped.
+                if (existing->maxInputChannels == 0) {
+                    AudioObjectID devID = lookupID(existing->name);
+                    existing->maxInputChannels = scopeChannelCount(devID, true);
+                }
+#else
+                if (existing->maxInputChannels == 0)
+                    existing->maxInputChannels = 1;
+#endif
+                continue;
+            }
+
+            // Input-only device (e.g. MacBook Pro Microphone).
             DeviceInfo info;
             info.name = std::move(nameStr);
             info.typeName = typeNameStr;
@@ -716,10 +1354,20 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices() const {
             info.transportType = lookupTransport(info.name);
 #endif
 
-            std::unique_ptr<juce::AudioIODevice> tempDev(
-                type->createDevice(juce::String(), devName));
-            if (tempDev)
-                populateFromDevice(info, tempDev.get());
+            if (!shouldSkipProbe(info.name)) {
+                std::unique_ptr<juce::AudioIODevice> tempDev(
+                    type->createDevice(juce::String(), devName));
+                if (tempDev)
+                    populateFromDevice(info, tempDev.get());
+            }
+#ifdef __APPLE__
+            if (info.maxInputChannels == 0) {
+                AudioObjectID devID = lookupID(info.name);
+                info.maxInputChannels = scopeChannelCount(devID, true);
+            }
+#else
+            if (info.maxInputChannels == 0) info.maxInputChannels = 1;
+#endif
 
             result.push_back(std::move(info));
         }
@@ -771,6 +1419,70 @@ CurrentDeviceInfo SupersonicEngine::currentDevice() const {
     for (auto b : dev->getAvailableBufferSizes())
         info.availableBufferSizes.push_back(b);
 
+    // Populate max channel counts. When on aggregate, query the real
+    // underlying devices (not the aggregate wrapper — which reports
+    // the union of sub-device channels). When on a plain device,
+    // JUCE's channel-name lists are accurate.
+    info.maxOutputChannels = dev->getOutputChannelNames().size();
+    info.maxInputChannels  = dev->getInputChannelNames().size();
+#ifdef __APPLE__
+    auto caChannelCount = [](const std::string& name, bool isInput) -> int {
+        if (name.empty()) return 0;
+        AudioObjectPropertyAddress listAddr = {
+            kAudioHardwarePropertyDevices,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        UInt32 listSize = 0;
+        if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &listAddr, 0, nullptr, &listSize) != noErr)
+            return 0;
+        std::vector<AudioObjectID> ids(listSize / sizeof(AudioObjectID));
+        if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &listAddr, 0, nullptr, &listSize, ids.data()) != noErr)
+            return 0;
+        for (auto id : ids) {
+            AudioObjectPropertyAddress nameAddr = {
+                kAudioDevicePropertyDeviceNameCFString,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+            CFStringRef cfName = nullptr;
+            UInt32 sz = sizeof(cfName);
+            if (AudioObjectGetPropertyData(id, &nameAddr, 0, nullptr, &sz, &cfName) != noErr || !cfName)
+                continue;
+            char buf[256];
+            CFStringGetCString(cfName, buf, sizeof(buf), kCFStringEncodingUTF8);
+            CFRelease(cfName);
+            if (name != buf) continue;
+            AudioObjectPropertyAddress scopeAddr = {
+                kAudioDevicePropertyStreamConfiguration,
+                isInput ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput,
+                kAudioObjectPropertyElementMain
+            };
+            UInt32 cfgSize = 0;
+            if (AudioObjectGetPropertyDataSize(id, &scopeAddr, 0, nullptr, &cfgSize) != noErr || cfgSize == 0)
+                return 0;
+            std::vector<uint8_t> cfgBuf(cfgSize);
+            auto* bl = reinterpret_cast<AudioBufferList*>(cfgBuf.data());
+            if (AudioObjectGetPropertyData(id, &scopeAddr, 0, nullptr, &cfgSize, bl) != noErr)
+                return 0;
+            int total = 0;
+            for (UInt32 i = 0; i < bl->mNumberBuffers; ++i)
+                total += (int)bl->mBuffers[i].mNumberChannels;
+            return total;
+        }
+        return 0;
+    };
+    // Prefer real-device counts when we're on an aggregate.
+    if (!mRealOutputDeviceName.empty()) {
+        int n = caChannelCount(mRealOutputDeviceName, false);
+        if (n > 0) info.maxOutputChannels = n;
+    }
+    if (!mRealInputDeviceName.empty()) {
+        int n = caChannelCount(mRealInputDeviceName, true);
+        if (n > 0) info.maxInputChannels = n;
+    }
+#endif
+
     return info;
 }
 
@@ -794,28 +1506,159 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
     auto prevSetup = mDeviceManager->getAudioDeviceSetup();
     int prevBufSize = prevSetup.bufferSize;
 
+    // Refresh suppression timestamp before each JUCE call to prevent
+    // changeListenerCallback feedback storms.
+    mLastSelfTriggeredChange = std::chrono::steady_clock::now();
     auto err = mDeviceManager->initialiseWithDefaultDevices(0, 2);
     if (err.isNotEmpty()) {
+        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
         err = mDeviceManager->initialiseWithDefaultDevices(0, 0);
     }
     if (err.isNotEmpty()) return err;
 
-    // Re-apply the previous sample rate and buffer size
+    // Don't second-guess JUCE's negotiation on wireless devices. AirPlay
+    // / Bluetooth negotiate a specific buffer size with the remote end
+    // (often 512+); JUCE reports many buffer sizes as "available" but in
+    // practice only the negotiated one actually delivers audio. Forcing
+    // a different size runs the IOProc (scope stays happy) but produces
+    // silence at the speakers. For non-wireless devices we still
+    // preserve the user's previous rate/buffer so GUI selections stick
+    // across System Output toggles.
     auto setup = mDeviceManager->getAudioDeviceSetup();
-    setup.sampleRate = static_cast<double>(prevRate);
-    setup.bufferSize = prevBufSize;
-    mDeviceManager->setAudioDeviceSetup(setup, true);
+    bool isWireless = false;
+#ifdef __APPLE__
+    if (auto* dev = mDeviceManager->getCurrentAudioDevice()) {
+        std::string curName = dev->getName().toStdString();
+        for (auto& d : listDevices(false)) {
+            if (deviceNameMatches(d.name, curName) && d.isWirelessTransport()) {
+                isWireless = true;
+                break;
+            }
+        }
+    }
+#endif
+    if (!isWireless) {
+        setup.sampleRate = static_cast<double>(prevRate);
+        setup.bufferSize = prevBufSize;
+        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+        mDeviceManager->setAudioDeviceSetup(setup, true);
+    } else {
+        // Wireless device is now active. AirPlay 1 negotiates 44.1 kHz
+        // with the receiver, but AirPlay 2 receivers commonly support
+        // 48 kHz. Probe the device's available rates — if prevRate is
+        // in the list, force it rather than silently accepting the
+        // receiver's default. That way a modern AirPlay 2 speaker
+        // doesn't downgrade a 48 kHz session to 44.1.
+        bool forcedPrev = false;
+        if (auto* dev = mDeviceManager->getCurrentAudioDevice()) {
+            bool prevSupported = false;
+            for (auto r : dev->getAvailableSampleRates()) {
+                if (static_cast<int>(r) == prevRate) {
+                    prevSupported = true;
+                    break;
+                }
+            }
+            if (prevSupported && static_cast<int>(setup.sampleRate) != prevRate) {
+                setup.sampleRate = static_cast<double>(prevRate);
+                mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                auto err2 = mDeviceManager->setAudioDeviceSetup(setup, true);
+                if (err2.isEmpty()) {
+                    forcedPrev = true;
+                    fprintf(stderr, "[audio-device] reinit: wireless device supports "
+                            "prev rate %d — forcing it (was %.0f)\n",
+                            prevRate, dev->getCurrentSampleRate());
+                    fflush(stderr);
+                } else {
+                    fprintf(stderr, "[audio-device] reinit: setAudioDeviceSetup at "
+                            "prev rate %d failed on wireless (%s), keeping negotiated\n",
+                            prevRate, err2.toRawUTF8());
+                    fflush(stderr);
+                }
+            }
+        }
+        if (!forcedPrev) {
+            fprintf(stderr, "[audio-device] reinit: keeping JUCE's negotiated rate=%.0f buf=%d "
+                    "for wireless device (prev rate=%d buf=%d)\n",
+                    setup.sampleRate, setup.bufferSize, prevRate, prevBufSize);
+            fflush(stderr);
+        }
+    }
+
+    // Post-init cleanup: we just switched away from whatever device we
+    // were on (aggregate or otherwise) to JUCE's default. If we were on
+    // an aggregate, drop the stale real-device-name state so
+    // currentDevice() reports the actual new device, not the previous
+    // aggregate's sub-devices. Same story for leftover aggregates in
+    // CoreAudio — clean them up now that JUCE has switched away.
+#ifdef __APPLE__
+    mRealOutputDeviceName.clear();
+    mRealInputDeviceName.clear();
+    AggregateDeviceHelper::destroyPrevious();
+    if (AggregateDeviceHelper::exists()) {
+        AggregateDeviceHelper::destroy();
+    }
+#endif
     return {};
 }
 
-SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
+SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                                            double sampleRate,
                                            int bufferSize,
                                            bool forceCold,
-                                           const std::string& inputDeviceName) {
+                                           const std::string& rawInputName) {
+    // Normalise raw CoreAudio names to JUCE's disambiguated form. Callers
+    // that source names from CoreAudio APIs (setDeviceMode's default-
+    // output resolution, platform property listeners) otherwise hand raw
+    // names straight to setAudioDeviceSetup, which errors "No such device"
+    // when CoreAudio has duplicate base names (two identical USB
+    // interfaces, two AirPlay endpoints with the same base name).
+    // Caller-supplied names from the GUI dropdown are already JUCE-form
+    // and pass through unchanged. Sentinels like "__system__" / "__none__"
+    // don't match anything and also pass through. Shadowing the function
+    // parameters keeps the rest of this function free to use the names
+    // without thinking about which layer they came from.
+    std::string deviceName = rawOutputName;
+    std::string inputDeviceName = rawInputName;
+    if (mDeviceManager && (!deviceName.empty() || !inputDeviceName.empty())) {
+        std::vector<std::string> visibleNames;
+        for (auto& d : listDevices(false)) visibleNames.push_back(d.name);
+        deviceName      = sonicpi::device::resolveJuceDeviceName(deviceName, visibleNames);
+        inputDeviceName = sonicpi::device::resolveJuceDeviceName(inputDeviceName, visibleNames);
+    }
+
     SwapResult result;
     result.deviceName = deviceName;
     bool recovered = false;
+
+    // No-op detection: destroying and recreating an identical aggregate is
+    // fragile — CoreAudio sometimes stops the new instance within a
+    // callback or two. If the caller asked for exactly what we already
+    // have, short-circuit.
+    if (!deviceName.empty() && inputDeviceName.empty() && sampleRate <= 0 && bufferSize <= 0 && !forceCold) {
+        std::string activeReal = mRealOutputDeviceName.empty()
+            ? (mDeviceManager && mDeviceManager->getCurrentAudioDevice()
+               ? mDeviceManager->getCurrentAudioDevice()->getName().toStdString() : "")
+            : mRealOutputDeviceName;
+        if (activeReal == deviceName) {
+            result.success = true;
+            result.type = SwapType::Hot;
+            result.deviceName = deviceName;
+            result.sampleRate = mCurrentConfig.sampleRate;
+            result.bufferSize = mCurrentConfig.bufferSize;
+            return result;
+        }
+    }
+
+    // Reject "add mic while current output is wireless" upfront, BEFORE
+    // any cold-swap work. The aggregate filter later in this function
+    // would drop the mic anyway, but by that point we've already
+    // triggered a cold swap that can race the audio thread's scope UGen
+    // and crash in ScopeOut2_next.
+    if (auto err = refuseWirelessMicAddition(deviceName, inputDeviceName);
+        !err.empty()) {
+        result.error = err;
+        return result;
+    }
 
     // Try to acquire swap mutex (non-blocking)
     if (!mSwapMutex.try_lock()) {
@@ -833,58 +1676,117 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         currentRate = static_cast<double>(mCurrentConfig.sampleRate);
     }
 
-    // When no explicit sample rate requested, probe the target device to see
-    // if the current rate is supported.  If not, auto-select the first available
-    // rate — this makes the swap a cold swap (world rebuild).
-    auto probeDeviceRate = [&](const std::string& name, bool isInput) {
-        if (name.empty() || sampleRate > 0 || currentRate <= 0 || !mDeviceManager) return;
-        auto& types = mDeviceManager->getAvailableDeviceTypes();
-        for (auto* type : types) {
-            type->scanForDevices();
-            auto names = type->getDeviceNames(isInput);
-            for (auto& n : names) {
-                auto juceStr = n.toStdString();
-                // Match exact name or prefix (JUCE appends " (N)" suffixes
-                // to disambiguate duplicate CoreAudio device names).
-                bool match = (juceStr == name);
-                if (!match && juceStr.size() > name.size()
-                    && juceStr.compare(0, name.size(), name) == 0
-                    && juceStr[name.size()] == ' ') {
-                    match = true;
-                }
-                if (match) {
-                    auto outArg = isInput ? juce::String() : n;
-                    auto inArg  = isInput ? n : juce::String();
-                    std::unique_ptr<juce::AudioIODevice> tempDev(
-                        type->createDevice(outArg, inArg));
-                    if (tempDev) {
-                        auto rates = tempDev->getAvailableSampleRates();
-                        bool supported = false;
-                        for (auto r : rates)
-                            if (static_cast<int>(r) == static_cast<int>(currentRate))
-                                supported = true;
-                        if (!supported && !rates.isEmpty()) {
-                            double nearest = rates[0];
-                            for (auto r : rates)
-                                if (std::abs(r - currentRate) < std::abs(nearest - currentRate))
-                                    nearest = r;
-                            sampleRate = nearest;
-                            fprintf(stderr,
-                                "[audio-device] current rate %.0f not supported "
-                                "by %s, will use %.0f (cold swap)\n",
-                                currentRate, name.c_str(), sampleRate);
-                        }
-                    }
-                    return;
-                }
+#ifdef __APPLE__
+    // If we're leaving a wireless device (AirPlay/Bluetooth) for a
+    // non-wireless one, the currentRate is whatever the wireless receiver
+    // negotiated (often 44.1 kHz — AirPlay 1's fixed rate). Sticking with
+    // it on the new device would carry the AirPlay detour's rate onto
+    // e.g. MacBook Pro Speakers, which doesn't want to run at 44.1. Use
+    // the remembered pre-wireless rate instead so the probe below picks
+    // it up and the new device opens at the right rate.
+    if (sampleRate <= 0 && mPreWirelessRate > 0 && mDeviceManager) {
+        bool currentIsWireless = false;
+        bool targetIsWireless  = false;
+        std::string curName;
+        if (auto* curDev = mDeviceManager->getCurrentAudioDevice())
+            curName = curDev->getName().toStdString();
+        std::string targetName = deviceName.empty() ? mDeviceMode : deviceName;
+        if (!curName.empty() || !targetName.empty()) {
+            for (auto& d : listDevices(false)) {
+                if (!curName.empty() && deviceNameMatches(d.name, curName)
+                    && d.isWirelessTransport())
+                    currentIsWireless = true;
+                if (!targetName.empty() && deviceNameMatches(d.name, targetName)
+                    && d.isWirelessTransport())
+                    targetIsWireless = true;
             }
         }
-    };
+        const double resolved = sonicpi::device::resolveWirelessExitRate(
+            sampleRate, mPreWirelessRate, currentRate,
+            currentIsWireless, targetIsWireless);
+        if (resolved != sampleRate) {
+            fprintf(stderr, "[audio-device] restoring pre-wireless rate %d "
+                    "(current=%.0f, target='%s')\n",
+                    mPreWirelessRate, currentRate, targetName.c_str());
+            fflush(stderr);
+            sampleRate = resolved;
+        }
+    }
+#endif
 
-    probeDeviceRate(deviceName, false);
-    probeDeviceRate(inputDeviceName, true);
+    // When no explicit sample rate requested, probe the target device to see
+    // if the current rate is supported. If not, auto-select the nearest
+    // available rate — this makes the swap a cold swap (world rebuild).
+    probeAndAdjustForTargetRate(deviceName,      false, sampleRate, currentRate);
+    probeAndAdjustForTargetRate(inputDeviceName, true,  sampleRate, currentRate);
 
-    bool isCold = forceCold || (sampleRate > 0 && sampleRate != currentRate);
+    // Auto-enable inputs if the caller named a device but we have 0 inputs.
+    // Must be BEFORE isCold so forceCold takes effect.
+    if (!inputDeviceName.empty() && inputDeviceName != "__none__"
+        && mCurrentConfig.numInputChannels == 0) {
+#ifdef __APPLE__
+        // Log mic permission status for diagnostics — but don't refuse
+        // enabling inputs. supersonic's TCC query may return notDetermined
+        // when launched as a child of the GUI, while CoreAudio's actual
+        // mic stream honours the GUI's grant via responsible-process
+        // attribution. Trying anyway may work; if buffers come back zero,
+        // we'll know TCC really is denying.
+        std::string micStat = MicPermission::status();
+        if (micStat != "authorized") {
+            fprintf(stderr, "[audio-device] mic permission status=%s (proceeding anyway; "
+                    "CoreAudio may still grant via GUI's responsible process)\n",
+                    micStat.c_str());
+            fflush(stderr);
+        }
+#endif
+        int reEnableCount;
+        if (mBootInputChannels > 0)        reEnableCount = mBootInputChannels;
+        else if (mBootInputChannels < 0)   reEnableCount = kRequestMaxChannels;
+        else                               reEnableCount = 2;
+        fprintf(stderr, "[audio-device] auto-enabling %d input channels for '%s'\n",
+                reEnableCount, inputDeviceName.c_str());
+        mCurrentConfig.numInputChannels = reEnableCount;
+        uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
+        opts[sonicpi::WorldOpts::kNumInputBusChannels] = static_cast<uint32_t>(reEnableCount);
+        forceCold = true;
+    }
+
+    // Restore per-device sample rate if no explicit rate given.
+    if (sampleRate <= 0 && !deviceName.empty()) {
+        auto it = mDeviceRateMemory.find(deviceName);
+        if (it != mDeviceRateMemory.end() && it->second > 0)
+            sampleRate = static_cast<double>(it->second);
+    }
+
+    // Force cold swap when the target device will change the scsynth
+    // world's bus count. Hot swaps keep the existing World; opts[5] /
+    // opts[6] only get re-read by World_New on rebuild, so a hot swap
+    // to a device with more channels leaves the World at the old count
+    // and writes to higher buses land on internal private buses instead
+    // of hardware. Probe the target device(s) and compare against the
+    // current config.
+    bool forceColdForChannels = false;
+    if (mDeviceManager && !forceCold) {
+        int probedOut = probeDeviceChannelCount(deviceName,      false);
+        int probedIn  = probeDeviceChannelCount(inputDeviceName, true);
+        if (probedOut > 0 && probedOut != mCurrentConfig.numOutputChannels)
+            forceColdForChannels = true;
+        if (probedIn  > 0 && probedIn  != mCurrentConfig.numInputChannels)
+            forceColdForChannels = true;
+        if (forceColdForChannels) {
+            fprintf(stderr, "[audio-device] channel-count change detected "
+                    "(probedOut=%d probedIn=%d currentOut=%d currentIn=%d) "
+                    "— forcing cold swap so World rebuilds at new bus count\n",
+                    probedOut, probedIn,
+                    mCurrentConfig.numOutputChannels,
+                    mCurrentConfig.numInputChannels);
+            fflush(stderr);
+        }
+    }
+
+    bool inputWasDropped = false;
+    bool isCold = forceCold || forceColdForChannels
+                || (sampleRate > 0 && sampleRate != currentRate);
     result.type = isCold ? SwapType::Cold : SwapType::Hot;
 
     if (isCold) setEngineState(EngineState::Restarting, "rate-change");
@@ -927,8 +1829,12 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         }
 #endif
 
-        if (!deviceName.empty())
+        if (!deviceName.empty()) {
             setup.outputDeviceName = juce::String(deviceName);
+        } else if (!mDeviceMode.empty()) {
+            // Re-assert the user's explicit output choice on input-only switches
+            setup.outputDeviceName = juce::String(mDeviceMode);
+        }
         if (mCurrentConfig.numInputChannels > 0) {
             if (!inputDeviceName.empty()) {
                 // Explicit input device requested — save for future re-enable
@@ -936,8 +1842,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                 setup.inputDeviceName = juce::String(inputDeviceName);
                 mLastInputDeviceName = inputDeviceName;
                 juce::BigInteger inputBits;
-                for (int i = 0; i < mCurrentConfig.numInputChannels; ++i)
-                    inputBits.setBit(i);
+                inputBits.setRange(0, mCurrentConfig.numInputChannels, true);
                 setup.inputChannels = inputBits;
             } else {
                 // Re-enable inputs — must explicitly set the input device name.
@@ -945,8 +1850,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                 // numInputChansNeeded was 0 at initialise() time (boot with -i 0).
                 setup.useDefaultInputChannels = false;
                 juce::BigInteger inputBits;
-                for (int i = 0; i < mCurrentConfig.numInputChannels; ++i)
-                    inputBits.setBit(i);
+                inputBits.setRange(0, mCurrentConfig.numInputChannels, true);
                 setup.inputChannels = inputBits;
 
                 if (setup.inputDeviceName.isEmpty()) {
@@ -970,7 +1874,21 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             setup.inputChannels.clear();
             setup.inputDeviceName = "";
         }
-        setup.useDefaultOutputChannels = true;
+        // Explicitly set output bits rather than relying on
+        // useDefaultOutputChannels. JUCE's "default" is derived from the
+        // numOutputChannelsNeeded passed at initialise() time — with
+        // auto-max that's kRequestMaxChannels, but under some swap
+        // sequences JUCE re-evaluates and reports 0 active outputs on
+        // setAudioDeviceSetup (symptom: activeOut=0 on Loopback despite
+        // the device having 4 channels). Setting kRequestMaxChannels
+        // bits directly lets CoreAudio clamp to the device's real
+        // channel count — same pattern as the input side.
+        setup.useDefaultOutputChannels = false;
+        {
+            juce::BigInteger outputBits;
+            outputBits.setRange(0, kRequestMaxChannels, true);
+            setup.outputChannels = outputBits;
+        }
         if (sampleRate > 0) setup.sampleRate = sampleRate;
         if (bufferSize > 0) setup.bufferSize = bufferSize;
 
@@ -985,20 +1903,43 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             && !setup.inputDeviceName.isEmpty()
             && setup.outputDeviceName != setup.inputDeviceName;
 
+        bool dropInput = false;
         if (needsAggregate) {
-            // Check transport types — skip aggregate for Bluetooth/AirPlay
-            // on either side (wireless codecs don't support drift correction)
+            // Check transport types — skip aggregate for wireless (Bluetooth/
+            // AirPlay) or virtual (Loopback, Blackhole) devices:
+            //   * Wireless: can't be opened as HAL at all
+            //   * Virtual:  no hardware clock; CoreAudio aggregate AND JUCE's
+            //               combiner both crash inside AudioUnitRender.
+            // In either case we drop the input — Sonic Pi can't mix mic +
+            // virtual-output reliably. Users who need both must use macOS
+            // aggregation in Audio MIDI Setup and pick that aggregate here.
             auto devices = listDevices();
             std::string outName = setup.outputDeviceName.toStdString();
             std::string inName  = setup.inputDeviceName.toStdString();
+            // Look for a wireless / virtual sub-device and drop the input
+            // if we find one — those transports can't be HAL-aggregated
+            // (Bluetooth / AirPlay negotiate codec modes; Loopback-class
+            // virtual devices crash inside AudioUnitRender via the HAL
+            // combiner). The skip line below IS user-actionable and
+            // always logs; per-device match tracing was noise.
+            bool matched = false;
             for (auto& dev : devices) {
-                if ((dev.name == outName || dev.name == inName)
-                    && !dev.isSuitableForAggregate()) {
+                bool nameMatch = (dev.name == outName || dev.name == inName);
+                if (nameMatch) matched = true;
+                if (nameMatch && !dev.isSuitableForAggregate()) {
                     needsAggregate = false;
-                    fprintf(stderr, "[audio-device] skipping aggregate — '%s' is Bluetooth/AirPlay\n",
-                            dev.name.c_str());
+                    dropInput = true;
+                    const char* why = dev.isVirtualTransport() ? "virtual" : "wireless";
+                    fprintf(stderr, "[audio-device] skipping aggregate — '%s' is %s; input disabled\n",
+                            dev.name.c_str(), why);
+                    fflush(stderr);
                     break;
                 }
+            }
+            if (!matched) {
+                fprintf(stderr, "[agg-filter] WARNING: no device matched outName='%s' inName='%s' "
+                        "— filter never fired\n", outName.c_str(), inName.c_str());
+                fflush(stderr);
             }
         }
 
@@ -1007,14 +1948,28 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             mRealOutputDeviceName = setup.outputDeviceName.toStdString();
             mRealInputDeviceName  = setup.inputDeviceName.toStdString();
 
+            // Pause CFRunLoop pumping to prevent JUCE's audioDeviceListChanged
+            // from firing during aggregate destroy/create — it crashes trying
+            // to reinitialise with a stale device reference.
+            mSuppressRunLoop.store(true);
+            // Pass the engine's current sample rate so the aggregate's
+            // sub-devices are forced to the same rate — otherwise
+            // CoreAudio will apply aggregate-level SRC inside the
+            // IOProc to bridge a rate mismatch, producing "hideous
+            // distortion" (user-reported symptom).
+            double wantedRate = sampleRate > 0
+                ? sampleRate
+                : static_cast<double>(mCurrentConfig.sampleRate);
             auto aggName = AggregateDeviceHelper::createOrUpdate(
-                mRealOutputDeviceName, mRealInputDeviceName);
+                mRealOutputDeviceName, mRealInputDeviceName, wantedRate);
             if (!aggName.empty()) {
                 // Use the aggregate as a single device for both I/O
                 setup.outputDeviceName = juce::String(aggName);
                 setup.inputDeviceName  = juce::String(aggName);
+                clampAggregateBufferIfNeeded(setup.bufferSize);
 
-                // Need to rescan so JUCE sees the new aggregate device
+                // Let CoreAudio settle then rescan so JUCE sees the new aggregate
+                juce::Thread::sleep(200);
                 if (auto* type = mDeviceManager->getCurrentDeviceTypeObject())
                     type->scanForDevices();
             }
@@ -1028,34 +1983,34 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             mRealOutputDeviceName.clear();
             mRealInputDeviceName.clear();
 
-            // If we skipped aggregate because the output is wireless (AirPlay/
-            // Bluetooth), clear the input device from the setup.  Otherwise
-            // JUCE sees different input/output names and creates an internal
-            // AudioIODeviceCombiner — which crashes trying to sync a network
-            // audio device with a local hardware mic.
-            if (!needsAggregate && !setup.inputDeviceName.isEmpty()
-                && !setup.outputDeviceName.isEmpty()
-                && setup.inputDeviceName != setup.outputDeviceName) {
-                fprintf(stderr, "[audio-device] clearing input for wireless output "
-                        "(was '%s')\n",
+            // If we skipped aggregate because the output is unsuitable
+            // (wireless or virtual), drop the input. Keeping it would make
+            // JUCE fall back to its combiner, which has the same crash
+            // as our aggregate (both use AudioUnitRender under the hood).
+            if (dropInput && !setup.inputDeviceName.isEmpty()) {
+                fprintf(stderr, "[audio-device] clearing input (was '%s') because output "
+                        "can't be combined with it\n",
                         setup.inputDeviceName.toRawUTF8());
                 fflush(stderr);
+                mLastInputDeviceName = setup.inputDeviceName.toStdString();
                 setup.inputDeviceName = "";
                 setup.inputChannels.clear();
+                inputWasDropped = true;
             }
 
-            AggregateDeviceHelper::destroy();
-
-            // Let CoreAudio settle after aggregate teardown before opening
-            // a new device — Ardour uses similar pauses between aggregate steps.
-            if (wasOnAggregate)
-                juce::Thread::sleep(150);
+            // Don't destroy aggregate yet — JUCE still references it.
+            // setAudioDeviceSetup below will switch JUCE to the new device,
+            // then we destroy the orphaned aggregate safely.
         }
 #endif
 
-        // Timestamp so changeListenerCallback ignores ALL async notifications
-        // triggered by our device setup.  A single setup can generate multiple
-        // CoreAudio notifications (device change, rate change, aggregate events).
+        // Don't call closeAudioDevice() here — it races with JUCE's internal
+        // CoreAudio lock on destruction of aggregates that contained virtual
+        // sub-devices (_os_unfair_lock_unowned_abort). We rely on each new
+        // aggregate having a unique name (see AggregateDeviceHelper) so
+        // JUCE's setAudioDeviceSetup sees it as a different device and
+        // reopens properly.
+
         fprintf(stderr, "[audio-device] calling setAudioDeviceSetup: out='%s' in='%s' sr=%.0f buf=%d\n",
                 setup.outputDeviceName.toRawUTF8(),
                 setup.inputDeviceName.toRawUTF8(),
@@ -1067,13 +2022,28 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                 err.isEmpty() ? "OK" : err.toRawUTF8());
         fflush(stderr);
         if (err.isNotEmpty()) errStr = err.toStdString();
+
+#ifdef __APPLE__
+        // Now JUCE has switched away from the old aggregate — safe to
+        // destroy it. AggregateDeviceHelper stashes the previous ID in
+        // sPrevAggregateID precisely so this happens after JUCE has moved.
+        AggregateDeviceHelper::destroyPrevious();
+        juce::Thread::sleep(150);
+        // Also destroy the current one if we're no longer using an aggregate
+        // (e.g. single-device setup that doesn't need input combining).
+        if (wasOnAggregate && !needsAggregate) {
+            AggregateDeviceHelper::destroy();
+            juce::Thread::sleep(150);
+        }
+        mSuppressRunLoop.store(false);
+#endif
     } else {
         // Headless: no real device to configure; use failure hook for testing
         if (testSwapFailure) errStr = testSwapFailure();
     }
 
     if (!errStr.empty()) {
-        if (isCold) rebuild_world(currentRate);
+        if (isCold) { rebuild_world(currentRate); mWorldRebuilt = true; }
         // --- Restart audio (failure path) ---
         if (mDeviceManager) {
             mDeviceManager->addAudioCallback(&mAudioCallback);
@@ -1097,7 +2067,34 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         mCurrentConfig.sampleRate = static_cast<int>(newRate);
 
         uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
-        opts[14] = static_cast<uint32_t>(newRate);
+        opts[sonicpi::WorldOpts::kSampleRate] = static_cast<uint32_t>(newRate);
+
+        // Update the world's input/output bus counts to match the new
+        // device. rebuild_world() reads these to size the scsynth
+        // World's audio buses; without the update the rebuilt World
+        // stays at the boot-time channel count, so Out.ar to higher
+        // buses (e.g. Out.ar(2, sig) with 4-channel Loopback) lands on
+        // internal private buses instead of hardware.
+        if (mDeviceManager) {
+            if (auto* dev = mDeviceManager->getCurrentAudioDevice()) {
+                int newOut = dev->getActiveOutputChannels().countNumberOfSetBits();
+                int newIn  = dev->getActiveInputChannels().countNumberOfSetBits();
+                if (newOut > 0) {
+                    mCurrentConfig.numOutputChannels = newOut;
+                    opts[sonicpi::WorldOpts::kNumOutputBusChannels]
+                        = static_cast<uint32_t>(newOut);
+                }
+                // Respect inputWasDropped: when we've dropped input because
+                // the new output can't be aggregated (wireless / virtual),
+                // keep the previously-remembered input count in config but
+                // tell the world there are zero inputs for this rebuild.
+                if (!inputWasDropped || newIn > 0) {
+                    mCurrentConfig.numInputChannels = newIn;
+                }
+                opts[sonicpi::WorldOpts::kNumInputBusChannels]
+                    = static_cast<uint32_t>(inputWasDropped ? 0 : newIn);
+            }
+        }
 
         try {
             if (testRebuildFailure) {
@@ -1106,6 +2103,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                     throw std::runtime_error(failMsg);
             }
             rebuild_world(newRate);
+            mWorldRebuilt = true;
         } catch (const std::exception& e) {
             fprintf(stderr, "[supersonic] rebuild_world failed: %s — recovering with safe defaults\n",
                     e.what());
@@ -1113,12 +2111,13 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
 
             double safeRate = currentRate;
             int safeBuffer = 128;
-            opts[14] = static_cast<uint32_t>(safeRate);
+            opts[sonicpi::WorldOpts::kSampleRate] = static_cast<uint32_t>(safeRate);
             mCurrentConfig.sampleRate = static_cast<int>(safeRate);
             mCurrentConfig.bufferSize = safeBuffer;
 
             try {
                 rebuild_world(safeRate);
+                mWorldRebuilt = true;
                 recovered = true;
                 result.error = std::string("rebuild failed (") + e.what()
                              + "), recovered at safe defaults";
@@ -1159,7 +2158,14 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
             result.bufferSize = finalDev->getCurrentBufferSizeSamples();
             mCurrentConfig.sampleRate = static_cast<int>(result.sampleRate);
             mCurrentConfig.numOutputChannels = finalDev->getActiveOutputChannels().countNumberOfSetBits();
-            mCurrentConfig.numInputChannels = finalDev->getActiveInputChannels().countNumberOfSetBits();
+            // Preserve the user's desired input channel count when we had to
+            // drop inputs for an unsuitable output (wireless/virtual). Without
+            // this, a detour through e.g. AirPlay would permanently erase the
+            // mic setting — switching back to speakers wouldn't re-aggregate.
+            int actualIn = finalDev->getActiveInputChannels().countNumberOfSetBits();
+            if (!inputWasDropped || actualIn > 0) {
+                mCurrentConfig.numInputChannels = actualIn;
+            }
 
             juce::AudioDeviceManager::AudioDeviceSetup finalSetup;
             mDeviceManager->getAudioDeviceSetup(finalSetup);
@@ -1170,6 +2176,26 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
                     finalDev->getName().toRawUTF8(),
                     result.sampleRate, result.bufferSize,
                     mCurrentConfig.numOutputChannels);
+
+#ifdef __APPLE__
+            // Remember the rate of the last non-wireless settle so a
+            // future detour through AirPlay/Bluetooth doesn't leave the
+            // engine stuck at the wireless receiver's negotiated rate.
+            if (result.sampleRate > 0) {
+                bool finalIsWireless = false;
+                std::string finalName = mRealOutputDeviceName.empty()
+                    ? finalDev->getName().toStdString()
+                    : mRealOutputDeviceName;
+                for (auto& d : listDevices(false)) {
+                    if (deviceNameMatches(d.name, finalName) && d.isWirelessTransport()) {
+                        finalIsWireless = true;
+                        break;
+                    }
+                }
+                if (!finalIsWireless)
+                    mPreWirelessRate = static_cast<int>(result.sampleRate);
+            }
+#endif
         }
     } else {
         if (!recovered) {
@@ -1178,6 +2204,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
         result.bufferSize = mCurrentConfig.bufferSize;
     }
     result.success = true;
+    recordSwapPreferences(deviceName, inputDeviceName, result.sampleRate);
     if (isCold) {
         if (recovered) {
             setEngineState(EngineState::Running, "swap-recovered");
@@ -1189,19 +2216,68 @@ SwapResult SupersonicEngine::switchDevice(const std::string& deviceName,
     } else {
         if (onSwapEvent) onSwapEvent("swap:complete", result);
     }
+    fprintf(stderr, "[switchDevice] EXIT success=%d type=%s sr=%.0f buf=%d out=%d in=%d err='%s'\n",
+            result.success ? 1 : 0,
+            (result.type == SwapType::Cold) ? "Cold" : "Hot",
+            result.sampleRate, result.bufferSize,
+            mCurrentConfig.numOutputChannels, mCurrentConfig.numInputChannels,
+            result.error.c_str());
+    fflush(stderr);
     printDeviceList();
     return result;
+}
+
+SwapResult SupersonicEngine::reopenCurrentDevice() {
+    SwapResult result;
+
+    if (!mDeviceManager) {
+        result.error = "no audio device manager (headless)";
+        return result;
+    }
+
+    // Always delegate to switchDevice with forceCold=true so aggregates
+    // get rebuilt with the same sub-device pair (and pick up any fresh
+    // channel-count change). System / manual / aggregate all share this
+    // path — mRealOutputDeviceName / mRealInputDeviceName track sub-
+    // device names behind an aggregate and are the right thing to pass
+    // whether we're in system mode or pinned to an explicit selection.
+    // For direct (non-aggregate) devices those fields are empty and we
+    // fall back to the JUCE device name.
+    std::string outName = mRealOutputDeviceName;
+    std::string inName  = mRealInputDeviceName;
+    if (outName.empty()) {
+        if (auto* dev = mDeviceManager->getCurrentAudioDevice())
+            outName = dev->getName().toStdString();
+    }
+    if (outName.empty()) {
+        result.error = "no current output device to reopen";
+        return result;
+    }
+    fprintf(stderr, "[reopen] forceCold switch out='%s' in='%s' mode='%s'\n",
+            outName.c_str(), inName.c_str(),
+            mDeviceMode.empty() ? "system" : mDeviceMode.c_str());
+    fflush(stderr);
+    return switchDevice(outName, 0, 0, /*forceCold=*/true, inName);
 }
 
 // --- Input channel management ---
 
 SwapResult SupersonicEngine::enableInputChannels(int numChannels) {
-    // -1 means "re-enable inputs". Use the boot-time channel count if it
-    // was non-zero, otherwise fall back to stereo. This handles the case
-    // where the daemon booted with -i 0 but the user later enables inputs.
+    // -1 means "re-enable inputs". Resolve to a concrete count:
+    //   * mBootInputChannels > 0: user asked for an explicit count at boot
+    //   * mBootInputChannels < 0: boot requested auto-max — ask JUCE for
+    //     kRequestMaxChannels; CoreAudio clamps to the device's real count
+    //   * mBootInputChannels == 0: boot explicitly disabled inputs — default
+    //     to stereo when the user enables them later
     if (numChannels < 0) {
         static constexpr int kDefaultInputChannels = 2;
-        numChannels = (mBootInputChannels > 0) ? mBootInputChannels : kDefaultInputChannels;
+        if (mBootInputChannels > 0) {
+            numChannels = mBootInputChannels;
+        } else if (mBootInputChannels < 0) {
+            numChannels = kRequestMaxChannels;
+        } else {
+            numChannels = kDefaultInputChannels;
+        }
     }
 
     // Check if this is actually a change
@@ -1217,17 +2293,66 @@ SwapResult SupersonicEngine::enableInputChannels(int numChannels) {
     // Save old values for rollback on failure
     int oldNumInputChannels = mCurrentConfig.numInputChannels;
     uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
-    uint32_t oldOpts5 = opts[5];
+    uint32_t oldNumInputBusChannelsOpt =
+        opts[sonicpi::WorldOpts::kNumInputBusChannels];
 
     // Update config and worldOptions before the cold swap
     mCurrentConfig.numInputChannels = numChannels;
-    opts[5] = static_cast<uint32_t>(numChannels);
+    opts[sonicpi::WorldOpts::kNumInputBusChannels] = static_cast<uint32_t>(numChannels);
 
-    auto result = switchDevice("", 0, 0, true);
+    // When disabling (numChannels == 0) we pass __none__ so switchDevice
+    // tears down the input path. When enabling, we resolve an explicit
+    // input device name rather than letting switchDevice fall back to
+    // "first in JUCE's input list" — that fallback can pick a virtual
+    // device (e.g. NDI Audio) over the real hardware mic, producing silent
+    // zeros. Prefer, in order: saved mLastInputDeviceName, the macOS system
+    // default input, then an empty string (switchDevice falls back).
+    std::string inputName;
+    const char* inputSource = "disable";
+    if (numChannels > 0) {
+        inputName = mLastInputDeviceName;
+        inputSource = inputName.empty() ? "none" : "mLastInputDeviceName";
+    }
+#ifdef __APPLE__
+    if (numChannels > 0 && inputName.empty()) {
+        AudioObjectPropertyAddress addr = {
+            kAudioHardwarePropertyDefaultInputDevice,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        AudioDeviceID devId = 0;
+        UInt32 sz = sizeof(devId);
+        if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, nullptr, &sz, &devId) == noErr
+            && devId != 0) {
+            CFStringRef cfName = nullptr;
+            UInt32 nsz = sizeof(cfName);
+            AudioObjectPropertyAddress nameAddr = {
+                kAudioDevicePropertyDeviceNameCFString,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+            if (AudioObjectGetPropertyData(devId, &nameAddr, 0, nullptr, &nsz, &cfName) == noErr && cfName) {
+                char buf[256];
+                CFStringGetCString(cfName, buf, sizeof(buf), kCFStringEncodingUTF8);
+                CFRelease(cfName);
+                inputName = buf;
+                inputSource = "kAudioHardwarePropertyDefaultInputDevice";
+            }
+        }
+    }
+#endif
+
+    fprintf(stderr, "[enable-inputs] resolved input='%s' (source=%s) channels=%d\n",
+            inputName.c_str(), inputSource, numChannels);
+    fflush(stderr);
+    // For disable, pass __none__ sentinel so switchDevice takes the disable
+    // path (clears setup.inputDeviceName + inputChannels) instead of trying
+    // to treat an empty string as "re-enable with last known input".
+    auto result = switchDevice("", 0, 0, true, numChannels > 0 ? inputName : std::string("__none__"));
 
     if (!result.success) {
         mCurrentConfig.numInputChannels = oldNumInputChannels;
-        opts[5] = oldOpts5;
+        opts[sonicpi::WorldOpts::kNumInputBusChannels] = oldNumInputBusChannelsOpt;
     }
 
     return result;
@@ -1236,12 +2361,44 @@ SwapResult SupersonicEngine::enableInputChannels(int numChannels) {
 // --- Audio driver management ---
 
 std::vector<std::string> SupersonicEngine::listDrivers() const {
-    std::vector<std::string> result;
-    if (!mDeviceManager) return result;
+    if (!mDeviceManager) return {};
 
+    // Cache hit — skip the rescan. sendDeviceReport() is called many
+    // times during boot (notify registration, first info push, device
+    // change settles, aggregate build) and once per user-initiated
+    // switch; re-running scanForDevices() on every call is wasteful
+    // and on Linux without a JACK server produces libjack connect()
+    // stderr spam. Short TTL so a freshly-started jackd shows up.
+    {
+        std::lock_guard<std::mutex> lk(mListDriversMutex);
+        auto now = std::chrono::steady_clock::now();
+        if (!mCachedDrivers.empty()
+            && (now - mCachedDriversAt) < std::chrono::seconds(3))
+            return mCachedDrivers;
+    }
+
+    std::vector<std::string> result;
     auto& types = mDeviceManager->getAvailableDeviceTypes();
-    for (auto* type : types)
+    for (auto* type : types) {
+        // JUCE registers every compiled-in device type regardless of
+        // runtime availability (e.g. JackAudioIODeviceType appears in
+        // getAvailableDeviceTypes() whenever JUCE_JACK=1, even if no
+        // jackd / pipewire-jack server is running). Offering a driver
+        // the user can't switch to is worse than hiding it, so rescan
+        // and only advertise drivers that enumerate at least one output
+        // device right now. ALSA / CoreAudio / WASAPI always have the
+        // hardware on their side so they pass; JACK / ASIO only show
+        // when a server or driver is actually reachable.
+        type->scanForDevices();
+        if (type->getDeviceNames(false).isEmpty()) continue;
         result.push_back(type->getTypeName().toStdString());
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(mListDriversMutex);
+        mCachedDrivers = result;
+        mCachedDriversAt = std::chrono::steady_clock::now();
+    }
     return result;
 }
 
@@ -1293,6 +2450,19 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
         // Pause audio and remove callback
         mAudioCallback.pause();
         mDeviceManager->removeAudioCallback(&mAudioCallback);
+
+        // Reset the user's device preference BEFORE touching the driver.
+        // Preferences are keyed by device name, and device names are
+        // per-driver — a JACK device name ("Built-in Audio Analog Stereo")
+        // doesn't exist in the ALSA list and vice versa. Carrying a
+        // preference across a driver swap makes the next /devices/switch
+        // cascade through "No such device: X" into a device-didn't-start
+        // failure and a swap-failed-rollback limbo. Start the new driver
+        // fresh: default device, no preference, no hot-plug memory.
+        mPreferredOutputDevice.clear();
+        mPreferredInputDevice.clear();
+        mPreWirelessRate = 0;
+        mDeviceRateMemory.clear();
 
         // Switch driver type
         mDeviceManager->setCurrentAudioDeviceType(juce::String(driverName), true);
@@ -1372,73 +2542,252 @@ void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
     if (source != mDeviceManager.get()) return;
     if (!mRunning.load()) return;
 
-    // Ignore async notifications triggered by our own setAudioDeviceSetup.
-    // A single device change can generate multiple CoreAudio notifications
-    // (especially with aggregate devices), so suppress for 1 second.
     auto elapsed = std::chrono::steady_clock::now() - mLastSelfTriggeredChange;
     if (elapsed < std::chrono::seconds(1)) return;
+    if (!mSwapMutex.try_lock()) {
+        DEV_LOG("[hotplug] changeListenerCallback skipped — swap in progress\n");
+        return;
+    }
 
-    // Don't fight with an in-progress device swap
-    if (!mSwapMutex.try_lock()) return;
+    mLastSelfTriggeredChange = std::chrono::steady_clock::now();
 
-    bool needsColdSwap = false;
-    std::string coldSwapDevice;
-    double coldSwapRate = 0;
+    // Collected hot-plug work to schedule after the mutex is released.
+    std::string pendingSwitchOutput;
+    std::string pendingSwitchInput;
+    bool schedulePreferredReattach = false;
+    bool scheduleInputReattach = false;
 
     {
         std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
 
-        if (mDeviceMode.empty()) {
-            // System mode: reinitialise with default device, preserving sample rate and buffer
-            fprintf(stderr, "[audio-device] device change detected (system mode) — reinitialising\n");
-            reinitialiseWithDefaultsPreservingConfig();
+        auto devices = listDevices(true);
+        auto* dev = mDeviceManager->getCurrentAudioDevice();
+        std::string currentOutput = mRealOutputDeviceName.empty()
+            ? (dev ? dev->getName().toStdString() : "")
+            : mRealOutputDeviceName;
+        int currentActiveIn = dev ? dev->getActiveInputChannels().countNumberOfSetBits() : 0;
 
-            auto* dev = mDeviceManager->getCurrentAudioDevice();
+        std::vector<std::string> visibleNames;
+        visibleNames.reserve(devices.size());
+        for (auto& d : devices) visibleNames.push_back(d.name);
+
+        auto decision = sonicpi::device::decideHotplugAction(
+            mPreferredOutputDevice, mPreferredInputDevice,
+            currentOutput, currentActiveIn, visibleNames);
+
+        schedulePreferredReattach = decision.switchOutput;
+        scheduleInputReattach     = decision.switchInput;
+        pendingSwitchOutput       = decision.outputName;
+        pendingSwitchInput        = decision.inputName;
+
+        if (mDeviceMode.empty()) {
+            // System mode: don't reinitialise here — that would destroy our
+            // aggregate device (needed for input). The dedicated
+            // handleSystemDefaultOutputChanged listener handles actual
+            // default-output changes. Just update channel counts.
             if (dev) {
-                int newRate = static_cast<int>(dev->getCurrentSampleRate());
-                if (newRate > 0 && newRate != mCurrentConfig.sampleRate) {
-                    fprintf(stderr, "[audio-device] system device sample rate changed "
-                            "(%d -> %d Hz) — will perform cold swap\n",
-                            mCurrentConfig.sampleRate, newRate);
-                    needsColdSwap = true;
-                    coldSwapDevice = dev->getName().toStdString();
-                    coldSwapRate = static_cast<double>(newRate);
-                } else {
-                    mCurrentConfig.numOutputChannels =
-                        dev->getActiveOutputChannels().countNumberOfSetBits();
-                    mCurrentConfig.numInputChannels =
-                        dev->getActiveInputChannels().countNumberOfSetBits();
-                }
+                mCurrentConfig.numOutputChannels =
+                    dev->getActiveOutputChannels().countNumberOfSetBits();
+                mCurrentConfig.numInputChannels =
+                    dev->getActiveInputChannels().countNumberOfSetBits();
             }
         }
 
-        if (!needsColdSwap) {
-            printDeviceList();
-        }
+        printDeviceList();
     }
 
-    // Cold swap outside the lock — switchDevice acquires the mutex itself
-    if (needsColdSwap) {
-        switchDevice(coldSwapDevice, coldSwapRate, 0);
+    // Schedule switchDevice async so it can take mSwapMutex itself.
+    if (schedulePreferredReattach) {
+        std::string outName = pendingSwitchOutput;
+        std::string inName  = pendingSwitchInput;
+        fprintf(stderr, "[hotplug] preferred output '%s' returned — scheduling switch "
+                "(preferred input='%s')\n", outName.c_str(), inName.c_str());
+        fflush(stderr);
+        juce::MessageManager::callAsync([this, outName, inName]() {
+            switchDevice(outName, 0, 0, false, inName);
+        });
+    } else if (scheduleInputReattach) {
+        std::string inName = pendingSwitchInput;
+        fprintf(stderr, "[hotplug] preferred input '%s' returned — scheduling input re-attach\n",
+                inName.c_str());
+        fflush(stderr);
+        juce::MessageManager::callAsync([this, inName]() {
+            switchDevice("", 0, 0, false, inName);
+        });
     }
+
+    mLastSelfTriggeredChange = std::chrono::steady_clock::now();
 }
+
+#ifdef __APPLE__
+OSStatus SupersonicEngine::defaultDevicePropertyListenerProc(
+    AudioObjectID, UInt32, const AudioObjectPropertyAddress*, void* inClientData)
+{
+    fprintf(stderr, "[default-output-listener] fired\n"); fflush(stderr);
+    auto* self = static_cast<SupersonicEngine*>(inClientData);
+    juce::MessageManager::callAsync([self]() {
+        fprintf(stderr, "[default-output-listener] dispatched to handler\n"); fflush(stderr);
+        self->handleSystemDefaultOutputChanged();
+    });
+    return noErr;
+}
+
+void SupersonicEngine::handleSystemDefaultOutputChanged() {
+    if (!mDeviceMode.empty()) {
+        fprintf(stderr, "[default-output-handler] bail: mDeviceMode='%s' (not empty — not in system mode)\n",
+                mDeviceMode.c_str()); fflush(stderr);
+        return;
+    }
+    if (!mRunning.load()) {
+        fprintf(stderr, "[default-output-handler] bail: not running\n"); fflush(stderr);
+        return;
+    }
+    if (!mDeviceManager) return;
+    auto elapsed = std::chrono::steady_clock::now() - mLastSelfTriggeredChange;
+    if (elapsed < std::chrono::seconds(2)) {
+        fprintf(stderr, "[default-output-handler] bail: %lld ms since last self-triggered change (< 2 s)\n",
+                (long long)std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
+        fflush(stderr);
+        return;
+    }
+
+    // Read the new macOS system-default output device.
+    AudioDeviceID defaultID = kAudioObjectUnknown;
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    UInt32 sz = sizeof(defaultID);
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, nullptr, &sz, &defaultID) != noErr
+        || defaultID == kAudioObjectUnknown) {
+        return;
+    }
+    CFStringRef nameCF = nullptr;
+    UInt32 nameSz = sizeof(nameCF);
+    AudioObjectPropertyAddress nameAddr = {
+        kAudioDevicePropertyDeviceNameCFString,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    if (AudioObjectGetPropertyData(defaultID, &nameAddr, 0, nullptr, &nameSz, &nameCF) != noErr
+        || !nameCF) {
+        return;
+    }
+    char buf[256];
+    CFStringGetCString(nameCF, buf, sizeof(buf), kCFStringEncodingUTF8);
+    CFRelease(nameCF);
+    std::string newDefault(buf);
+
+    // Ignore if CoreAudio reports one of our own aggregates as the new
+    // default — creating the aggregate can briefly elevate it to default,
+    // and treating that as a "change" would trigger a nested aggregation.
+    if (newDefault.compare(0, 10, "SuperSonic") == 0) return;
+
+    // If we're on an aggregate, compare the new default against the real
+    // (underlying) output we're aggregating, not the aggregate's own name.
+    std::string currentOutput = mRealOutputDeviceName.empty()
+        ? (mDeviceManager->getCurrentAudioDevice()
+           ? mDeviceManager->getCurrentAudioDevice()->getName().toStdString() : "")
+        : mRealOutputDeviceName;
+    if (newDefault == currentOutput) return;
+
+    fprintf(stderr, "[audio-device] system default output changed: '%s' -> '%s'\n",
+            currentOutput.c_str(), newDefault.c_str());
+    fflush(stderr);
+    // Route through setDeviceMode("") so we get the wireless/non-wireless
+    // branching: non-wireless defaults go via switchDevice (aggregate
+    // preserved); wireless defaults go via reinitialiseWithDefaults
+    // (JUCE's default-device abstraction, which CoreAudio routes through
+    // AirPlay correctly).
+    setDeviceMode("");
+}
+#endif
 
 std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
     std::string previousMode = mDeviceMode;
 
     if (mode == "system" || mode.empty()) {
         mDeviceMode.clear();
+        // Entering system mode means "follow macOS default" — user has
+        // opted out of sticking to a specific hardware device, so drop
+        // the hot-plug preference that would otherwise pull them back.
+        mPreferredOutputDevice.clear();
     } else {
         mDeviceMode = mode;
+        mPreferredOutputDevice = mode;
     }
 
     if (!mRunning.load()) return "";
 
     if (mDeviceMode.empty()) {
-        // System mode — switch to system default device while preserving
-        // sample rate, buffer size, and channel count.
-        if (!previousMode.empty() && mDeviceManager) {
+        // System mode — switch to the current macOS default output while
+        // keeping the input device (mic) so live_audio follows the output.
+        if (mDeviceManager) {
             fprintf(stderr, "[audio-device] switching to system default\n");
+#ifdef __APPLE__
+            AudioDeviceID defaultID = kAudioObjectUnknown;
+            AudioObjectPropertyAddress addr = {
+                kAudioHardwarePropertyDefaultOutputDevice,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+            UInt32 sz = sizeof(defaultID);
+            std::string newDefault;
+            if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, nullptr, &sz, &defaultID) == noErr
+                && defaultID != kAudioObjectUnknown) {
+                CFStringRef nameCF = nullptr;
+                UInt32 nameSz = sizeof(nameCF);
+                AudioObjectPropertyAddress nameAddr = {
+                    kAudioDevicePropertyDeviceNameCFString,
+                    kAudioObjectPropertyScopeGlobal,
+                    kAudioObjectPropertyElementMain
+                };
+                if (AudioObjectGetPropertyData(defaultID, &nameAddr, 0, nullptr, &nameSz, &nameCF) == noErr && nameCF) {
+                    char buf[256];
+                    CFStringGetCString(nameCF, buf, sizeof(buf), kCFStringEncodingUTF8);
+                    CFRelease(nameCF);
+                    newDefault = buf;
+                }
+            }
+            if (!newDefault.empty()) {
+                // Branch based on the new default's transport type:
+                //
+                //  * Wireless (AirPlay/Bluetooth): go through
+                //    reinitialiseWithDefaultsPreservingConfig. JUCE uses
+                //    CoreAudio's default-output abstraction, which
+                //    correctly routes through AirPlay. Opening AirPlay
+                //    by explicit device name (via switchDevice) has
+                //    never been reliable in our tests.
+                //  * Non-wireless: go through switchDevice so we
+                //    preserve/restore the mic via aggregate.
+                AudioObjectPropertyAddress tAddr = {
+                    kAudioDevicePropertyTransportType,
+                    kAudioObjectPropertyScopeGlobal,
+                    kAudioObjectPropertyElementMain
+                };
+                UInt32 tType = 0, tSize = sizeof(tType);
+                bool newIsWireless = false;
+                if (AudioObjectGetPropertyData(defaultID, &tAddr, 0, nullptr, &tSize, &tType) == noErr) {
+                    newIsWireless = CoreAudioTransport::isWireless(tType);
+                }
+                if (!newIsWireless) {
+                    std::string inputName = mRealInputDeviceName;
+                    if (inputName.empty() && mCurrentConfig.numInputChannels > 0) {
+                        auto setup = mDeviceManager->getAudioDeviceSetup();
+                        inputName = setup.inputDeviceName.toStdString();
+                    }
+                    auto result = switchDevice(newDefault, 0, 0, false, inputName);
+                    if (!result.success) return result.error;
+                    return {};
+                }
+                // Wireless default — fall through to the reinitialise
+                // path below.
+                fprintf(stderr, "[audio-device] system default '%s' is wireless; "
+                        "using JUCE default-device init\n", newDefault.c_str());
+                fflush(stderr);
+            }
+#endif
             auto err = reinitialiseWithDefaultsPreservingConfig();
             if (err.isNotEmpty()) {
                 fprintf(stderr, "[audio-device] system mode init failed: %s\n",
@@ -1446,9 +2795,31 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
                 return err.toStdString();
             }
 
+            std::string newDevName;
+            double newRate = 0.0;
             if (auto* dev = mDeviceManager->getCurrentAudioDevice()) {
-                mCurrentConfig.numOutputChannels = dev->getActiveOutputChannels().countNumberOfSetBits();
-                mCurrentConfig.numInputChannels = dev->getActiveInputChannels().countNumberOfSetBits();
+                mCurrentConfig.numOutputChannels =
+                    dev->getActiveOutputChannels().countNumberOfSetBits();
+                mCurrentConfig.numInputChannels =
+                    dev->getActiveInputChannels().countNumberOfSetBits();
+                newRate = dev->getCurrentSampleRate();
+                newDevName = dev->getName().toStdString();
+            }
+
+            if (newRate > 0 && static_cast<int>(newRate) != mCurrentConfig.sampleRate) {
+                fprintf(stderr,
+                        "[audio-device] system default has different rate "
+                        "(%d -> %.0f Hz) — performing cold swap\n",
+                        mCurrentConfig.sampleRate, newRate);
+                // Force cold even though JUCE is already at newRate (we
+                // just opened it via reinitialiseWithDefaultsPreservingConfig).
+                // Without forceCold, switchDevice sees currentRate ==
+                // sampleRate and skips the World rebuild, leaving scsynth
+                // running at the old rate while JUCE delivers samples at
+                // the new rate — mismatch, pitched-down audio.
+                switchDevice(newDevName, newRate, 0, /*forceCold=*/true);
+            } else {
+                printDeviceList();
             }
         }
     } else {
@@ -1462,24 +2833,11 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
             auto* curDev = mDeviceManager->getCurrentAudioDevice();
             double curRate = curDev ? curDev->getCurrentSampleRate() : 0.0;
             if (curRate > 0) {
+                auto rates = probeDeviceSampleRates(mDeviceMode, false);
                 bool rateOk = false;
-                auto& types = mDeviceManager->getAvailableDeviceTypes();
-                for (auto* type : types) {
-                    if (rateOk) break;
-                    type->scanForDevices();
-                    for (auto& name : type->getDeviceNames(false)) {
-                        if (name.toStdString() == mDeviceMode) {
-                            std::unique_ptr<juce::AudioIODevice> probe(
-                                type->createDevice(name, juce::String()));
-                            if (probe) {
-                                for (auto r : probe->getAvailableSampleRates())
-                                    if (static_cast<int>(r) == static_cast<int>(curRate))
-                                        rateOk = true;
-                            }
-                            break;
-                        }
-                    }
-                }
+                for (auto r : rates)
+                    if (static_cast<int>(r) == static_cast<int>(curRate))
+                        rateOk = true;
                 if (!rateOk) {
                     fprintf(stderr,
                         "[audio-device] rejecting mode switch to %s: "
@@ -1507,7 +2865,10 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
 void SupersonicEngine::printDeviceList() {
     if (!mDeviceManager) return;
 
-    auto devices = listDevices();
+    // Skip rescan — calling scanForDevices() right after a device switch
+    // can close the just-opened CoreAudio device. The switch path already
+    // rescanned when needed. This path only reports state.
+    auto devices = listDevices(false);
     auto current = currentDevice();
 
     fprintf(stderr, "[audio-devices-start]\n");

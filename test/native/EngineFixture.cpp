@@ -16,14 +16,20 @@
 
 static SupersonicEngine::Config defaultConfig() {
     SupersonicEngine::Config cfg;
-    cfg.sampleRate    = 48000;
-    cfg.bufferSize    = 128;
-    cfg.udpPort       = 0;
-    cfg.numBuffers    = 1024;
-    cfg.maxNodes      = 1024;
-    cfg.maxGraphDefs  = 512;
-    cfg.maxWireBufs   = 64;
-    cfg.headless      = true;
+    cfg.sampleRate        = 48000;
+    cfg.bufferSize        = 128;
+    cfg.udpPort           = 0;
+    cfg.numBuffers        = 1024;
+    cfg.maxNodes          = 1024;
+    cfg.maxGraphDefs      = 512;
+    cfg.maxWireBufs       = 64;
+    cfg.headless          = true;
+    // Pin channel counts for the headless test fixture. The live engine
+    // uses kAutoChannelCount (-1) so JUCE picks up each device's real
+    // channel count, but that's not meaningful without a device — tests
+    // want a predictable 2-in / 2-out world to reason against.
+    cfg.numOutputChannels = 2;
+    cfg.numInputChannels  = 2;
     return cfg;
 }
 

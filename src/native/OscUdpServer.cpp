@@ -6,8 +6,12 @@
 #include "Prescheduler.h"
 #include "osc/OscOutboundPacketStream.h"
 #include "osc/OscReceivedElements.h"
+#ifdef __APPLE__
+#include "AggregateDeviceHelper.h"
+#endif
 #include <cstring>
 #include <mutex>
+#include <set>
 #include <thread>
 
 OscUdpServer::OscUdpServer()
@@ -21,6 +25,9 @@ OscUdpServer::~OscUdpServer() {
     mDebounceSwitchStop.store(true);
     if (mDebounceSwitchThread.joinable())
         mDebounceSwitchThread.join();
+
+    if (mReopenThread.joinable())
+        mReopenThread.join();
 
     signalThreadShouldExit();
     if (mSocket) mSocket->shutdown();
@@ -84,19 +91,77 @@ void OscUdpServer::sendDeviceReport() {
     }
     if (targets.empty() || !mEngine || !mSocket) return;
 
-    auto allDevices = mEngine->listDevices();
+    // Skip rescan — sendDeviceReport() is usually called right after a
+    // device switch, when rescanning would disrupt the freshly-opened device.
+    auto allDevices = mEngine->listDevices(false);
     auto current = mEngine->currentDevice();
     auto mode    = mEngine->deviceMode();
 
+    // Detect whether PipeWire is managing audio on Linux. The reliable
+    // signal is presence of the "PipeWire Sound Server" ALSA-typed
+    // virtual device — that's what PipeWire exposes when its ALSA
+    // compat layer is active. Passed into isPlatformClutter() so direct-
+    // hardware PCMs (which PipeWire holds exclusive) can be hidden.
+    bool pipewireActive = false;
+    for (auto& dev : allDevices) {
+        if (dev.typeName == "ALSA" && dev.name == "PipeWire Sound Server") {
+            pipewireActive = true;
+            break;
+        }
+    }
+
     // Split devices into output-capable and input-capable lists.
-    // Bluetooth and AirPlay devices are excluded from input — they force
-    // low-quality codec modes (HFP 16kHz mono) that break audio quality.
+    // Platform filters applied:
+    //  - macOS: hide wireless (AirPlay/Bluetooth) from both lists —
+    //    can't be opened via HAL (output) and they force low-quality
+    //    codec modes for input (HFP 16 kHz mono).
+    //  - Linux: hide ALSA plug/dmix/dsnoop/surround variants and, when
+    //    PipeWire is active, direct-hardware PCMs (unopenable while
+    //    PipeWire owns the card).
     std::vector<decltype(allDevices)::value_type> outputDevices, inputDevices;
     for (auto& dev : allDevices) {
-        if (dev.maxOutputChannels > 0)
+        if (dev.isPlatformClutter(pipewireActive)) continue;
+        if (dev.maxOutputChannels > 0 && !dev.isWirelessTransport())
             outputDevices.push_back(dev);
         if (dev.maxInputChannels > 0 && dev.isSuitableForInput())
             inputDevices.push_back(dev);
+    }
+
+    // When current output is wireless (e.g. AirPlay via System Output),
+    // we cannot aggregate it with a hardware mic — the IOProc freezes.
+    // Hide input devices from the GUI in that case so the user isn't
+    // shown options that would fail. The "-- None --" entry is still
+    // offered on the GUI side, making the effective state clear: no
+    // input available while on this output.
+    if (!current.name.empty()) {
+        for (auto& dev : allDevices) {
+            if ((dev.name == current.name
+                 || (dev.name.size() > current.name.size()
+                     && dev.name.compare(0, current.name.size(), current.name) == 0
+                     && dev.name[current.name.size()] == ' '))
+                && dev.isWirelessTransport()) {
+                inputDevices.clear();
+                break;
+            }
+        }
+    }
+
+    // Guard against reporting an inconsistent snapshot: JUCE's device
+    // enumeration can briefly return an empty list around a device-list-
+    // changed event (especially when an aggregate is being torn down /
+    // recreated). If we have a current input but the list is empty, the
+    // GUI's findText() would fall back to "-- None --" and silently
+    // deselect the user's real mic. Skip this report; the next one (after
+    // the change settles) will carry the full picture.
+    fprintf(stderr, "[device-report] outputs=%zu inputs=%zu currentIn='%s' currentOut='%s'\n",
+            outputDevices.size(), inputDevices.size(),
+            current.inputDeviceName.c_str(), current.name.c_str());
+    fflush(stderr);
+    if (inputDevices.empty() && !current.inputDeviceName.empty()) {
+        fprintf(stderr, "[device-report] skipping: currentIn set but inputDevices list empty "
+                "(transient enumeration, probably mid-swap)\n");
+        fflush(stderr);
+        return;
     }
 
     // Build output device list message
@@ -137,21 +202,46 @@ void OscUdpServer::sendDeviceReport() {
     double outLatMs = sr > 0 ? (current.outputLatencySamples / sr) * 1000.0 : 0.0;
     double inLatMs  = sr > 0 ? (current.inputLatencySamples  / sr) * 1000.0 : 0.0;
 
+    // Use per-device channel counts (maxOutputChannels / maxInputChannels)
+    // rather than the aggregate's activeOutputChannels / activeInputChannels.
+    // When running on an aggregate, active counts are sums across sub-devices
+    // (MBP Speakers 2 out + MOTU 8 out = 10) which is confusing when the
+    // user picked MBP Speakers as the output — they see "10 out" on a
+    // 2-channel device. currentDevice() populates maxOutputChannels /
+    // maxInputChannels with the real underlying sub-device counts.
+    int outCh = current.maxOutputChannels > 0 ? current.maxOutputChannels
+                                              : current.activeOutputChannels;
+    int inCh  = current.maxInputChannels  > 0 ? current.maxInputChannels
+                                              : current.activeInputChannels;
+
     char info[1024];
-    snprintf(info, sizeof(info),
-             "Device:      %s\n"
-             "Driver:      %s\n"
-             "Sample Rate: %.0f Hz\n"
-             "Buffer Size: %d samples\n"
-             "Channels:    %d out / %d in\n"
-             "Latency:     %.1f / %.1f ms (out/in)",
-             current.name.c_str(),
-             current.typeName.c_str(),
-             sr,
-             current.activeBufferSize,
-             current.activeOutputChannels,
-             current.activeInputChannels,
-             outLatMs, inLatMs);
+    if (!current.inputDeviceName.empty() && inCh > 0) {
+        snprintf(info, sizeof(info),
+                 "Output:      %s (%d ch)\n"
+                 "Input:       %s (%d ch)\n"
+                 "Driver:      %s\n"
+                 "Sample Rate: %.0f Hz\n"
+                 "Buffer Size: %d samples\n"
+                 "Latency:     %.1f / %.1f ms (out/in)",
+                 current.name.c_str(), outCh,
+                 current.inputDeviceName.c_str(), inCh,
+                 current.typeName.c_str(),
+                 sr,
+                 current.activeBufferSize,
+                 outLatMs, inLatMs);
+    } else {
+        snprintf(info, sizeof(info),
+                 "Output:      %s (%d ch)\n"
+                 "Driver:      %s\n"
+                 "Sample Rate: %.0f Hz\n"
+                 "Buffer Size: %d samples\n"
+                 "Latency:     %.1f ms",
+                 current.name.c_str(), outCh,
+                 current.typeName.c_str(),
+                 sr,
+                 current.activeBufferSize,
+                 outLatMs);
+    }
 
     // Info message with config data appended
     // Format: info_string, sampleRate(int32), bufferSize(int32),
@@ -163,11 +253,24 @@ void OscUdpServer::sendDeviceReport() {
 
     // Compute usable sample rates: intersection of output and input device rates.
     // If no input device is active, use the output device's rates.
-    // When an aggregate is active, the device rates already reflect the
-    // combined capabilities — skip intersection with standalone device info.
+    //
+    // When an aggregate is active, constrain to the CURRENT rate only.
+    // Rate changes on a live aggregate are not reliable: pre-aligning
+    // sub-devices in AggregateDeviceHelper::createOrUpdate fails because
+    // the old aggregate still owns the sub-devices (destroying it early
+    // crashes JUCE's AudioComponentInstanceDispose on the dangling id),
+    // so the new aggregate inherits the old sub-device rates and the
+    // requested rate gets snapped back by CoreAudio within a few audio
+    // callbacks. Rather than expose rates that silently fail, show only
+    // the current rate — the user can change rate by first switching to
+    // a non-aggregated device (so the aggregate is torn down), then
+    // changing rate, then re-adding the mic.
     std::vector<double> usableRates = current.availableSampleRates;
     bool onAggregate = !mEngine->realOutputDeviceName().empty();
-    if (!onAggregate && !current.inputDeviceName.empty()) {
+    if (onAggregate) {
+        if (current.activeSampleRate > 0)
+            usableRates = { current.activeSampleRate };
+    } else if (!current.inputDeviceName.empty()) {
         for (auto& dev : allDevices) {
             if (dev.name == current.inputDeviceName) {
                 std::vector<double> intersection;
@@ -209,6 +312,56 @@ void OscUdpServer::sendDeviceReport() {
         }
     }
 
+    // Filter to a canonical set of useful buffer sizes. Raw CoreAudio
+    // lists up to 10+ sizes including weird non-powers-of-two (14, 24,
+    // 48, 96) and extreme values (16, 8192). Most Sonic Pi users only
+    // want 64–2048. On an aggregate with kernel drift correction,
+    // buffers below 256 starve the drift compensator — the IOProc's
+    // sample-rate conversion can't keep up and the audio warbles (the
+    // "drift storm" the user reported after picking bs=16 on an
+    // aggregate). Raise the minimum in that case.
+    //
+    // This is a DISPLAY filter, not a safety net: -Z / -z CLI flags and
+    // TOML sound_card_buffer_size can still force any value for power
+    // users who know what they're doing.
+    {
+        // Non-aggregate and same-clock aggregate: include small sizes
+        // for low-latency use. Only drift-compensated aggregates force
+        // the 256-sample floor — SRC IOProc starves at tight buffers
+        // and produces warbling. Same-clock aggregates (e.g. MBP
+        // Speakers + MBP Mic, both Apple Silicon built-in) have no SRC
+        // running and can handle 16/32 just like a single device.
+        static const int kCanonicalSingle[] = {16, 32, 64, 128, 256, 512, 1024, 2048};
+        static const int kCanonicalAggregate[] = {256, 512, 1024, 2048};
+        std::set<int> canonical;
+#ifdef __APPLE__
+        bool driftAggregate = onAggregate
+            && AggregateDeviceHelper::driftCompensationEnabled();
+#else
+        bool driftAggregate = false;
+#endif
+        if (driftAggregate) {
+            for (int b : kCanonicalAggregate) canonical.insert(b);
+        } else {
+            for (int b : kCanonicalSingle) canonical.insert(b);
+        }
+        std::vector<int> filtered;
+        for (int b : usableBufferSizes)
+            if (canonical.count(b)) filtered.push_back(b);
+        if (!filtered.empty()) usableBufferSizes = std::move(filtered);
+        // Also ensure the currently-active buffer size is represented so
+        // the GUI dropdown can display the correct selection when a
+        // non-canonical size was forced via CLI / TOML.
+        if (current.activeBufferSize > 0) {
+            bool present = false;
+            for (int b : usableBufferSizes)
+                if (b == current.activeBufferSize) { present = true; break; }
+            if (!present) {
+                usableBufferSizes.insert(usableBufferSizes.begin(), current.activeBufferSize);
+            }
+        }
+    }
+
     infoMsg << static_cast<osc::int32>(usableBufferSizes.size());
     for (auto b : usableBufferSizes)
         infoMsg << static_cast<osc::int32>(b);
@@ -216,8 +369,11 @@ void OscUdpServer::sendDeviceReport() {
     for (auto& d : drivers)
         infoMsg << d.c_str();
     infoMsg << curDriver.c_str();
-    infoMsg << static_cast<osc::int32>(current.activeOutputChannels);
-    infoMsg << static_cast<osc::int32>(current.activeInputChannels);
+    // Send per-device counts (outCh/inCh), not aggregate sums — same
+    // semantics as the banner. GUI shows these as "out N | in M" in the
+    // SuperSonic summary label.
+    infoMsg << static_cast<osc::int32>(outCh);
+    infoMsg << static_cast<osc::int32>(inCh);
     infoMsg << osc::EndMessage;
 
     // Send to all registered targets
@@ -353,6 +509,7 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
         } else if (std::strcmp(addr, "/supersonic/devices/list") == 0) {
             auto devices = mEngine->listDevices();
             for (auto& dev : devices) {
+                if (dev.isWirelessTransport()) continue;
                 char buf[4096];
                 osc::OutboundPacketStream s(buf, sizeof(buf));
                 s << osc::BeginMessage("/supersonic/devices/list.reply")
@@ -409,6 +566,21 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
                 inputDevName = it->AsStringUnchecked();
             }
 
+            // "__system__" sentinel means "follow system default output"
+            if (devName == "__system__") {
+                auto error = mEngine->setDeviceMode("");
+                char buf[1024];
+                osc::OutboundPacketStream s(buf, sizeof(buf));
+                s << osc::BeginMessage("/supersonic/devices/switch.reply")
+                  << static_cast<osc::int32>(error.empty() ? 1 : 0);
+                if (!error.empty()) s << error.c_str();
+                s << osc::EndMessage;
+                sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                          static_cast<uint32_t>(s.Size()));
+                if (error.empty()) sendDeviceReport();
+                return true;
+            }
+
             // "__none__" sentinel from GUI means "disable audio inputs"
             if (inputDevName == "__none__") {
                 // Lock device mode so changeListenerCallback doesn't interfere
@@ -458,6 +630,53 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
                 mDebounceSwitchThread = std::thread(
                     &OscUdpServer::executePendingSwitch, this);
             }
+            return true;
+
+        } else if (std::strcmp(addr, "/supersonic/devices/reopen") == 0) {
+            // Reopen the current device to re-read its properties (e.g. the
+            // user just bumped channel count in MOTU Pro Audio Control).
+            //
+            // Debounced two ways:
+            //   * reject if a reopen is already in flight (atomic flag)
+            //   * reject if < kReopenCooldownMs since last completion
+            // Cooldown covers Spider's cold_swap_reinit — which reloads
+            // synthdefs, recreates groups + mixer + scope, and takes
+            // roughly 1-3 seconds. A shorter cooldown lets a second
+            // reopen race a still-running reinit and leaves Spider
+            // with missing synthdefs / groups.
+            // Replies: .reply (accepted=1|0 + reason) immediately; .done
+            // (success, device, rate, buffer, error) when the swap finishes.
+            constexpr int kReopenCooldownMs = 3000;
+            auto send = [this](const char* address, int accepted,
+                               const char* reason) {
+                char buf[512];
+                osc::OutboundPacketStream s(buf, sizeof(buf));
+                s << osc::BeginMessage(address)
+                  << static_cast<osc::int32>(accepted)
+                  << reason << osc::EndMessage;
+                sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                          static_cast<uint32_t>(s.Size()));
+            };
+
+            if (mReopenInProgress.load()) {
+                send("/supersonic/devices/reopen.reply", 0, "already in progress");
+                return true;
+            }
+            auto sinceLast = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - mLastReopenFinishedAt).count();
+            if (sinceLast < kReopenCooldownMs) {
+                char msg[96];
+                snprintf(msg, sizeof(msg), "cooldown (%lld ms since last)",
+                         (long long)sinceLast);
+                send("/supersonic/devices/reopen.reply", 0, msg);
+                return true;
+            }
+
+            mReopenInProgress.store(true);
+            send("/supersonic/devices/reopen.reply", 1, "started");
+
+            if (mReopenThread.joinable()) mReopenThread.join();
+            mReopenThread = std::thread(&OscUdpServer::executeReopen, this);
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/devices/report") == 0) {
@@ -666,14 +885,49 @@ void OscUdpServer::executePendingSwitch() {
         if (!devName.empty())
             mEngine->forceDeviceMode(devName);
 
-        auto result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
-        if (result.success)
-            sendDeviceReport();
-        else
-            fprintf(stderr, "[audio-device] debounced switch failed: %s\n", result.error.c_str());
+        // Retry if a swap is already in progress (e.g. cascade from a
+        // device-change notification). Give it up to ~3 seconds.
+        SwapResult result;
+        int attempts = 0;
+        for (int attempt = 0; attempt < 30; ++attempt) {
+            attempts = attempt + 1;
+            result = mEngine->switchDevice(devName, sr, bufSz, false, inputDevName);
+            if (result.success || result.error != "swap already in progress") break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (!result.success) {
+            fprintf(stderr, "[audio-device] debounced switch failed after %d attempts: %s\n",
+                    attempts, result.error.c_str());
+            fflush(stderr);
+        }
+        // No sendDeviceReport() here — switchDevice's printDeviceList
+        // already broadcasts. A second call can race with JUCE's post-
+        // switch device-list rescan and report an empty snapshot.
     }
 
     mDebounceSwitchRunning.store(false);
+}
+
+void OscUdpServer::executeReopen() {
+    SwapResult result;
+    if (mEngine) result = mEngine->reopenCurrentDevice();
+
+    char buf[1024];
+    osc::OutboundPacketStream s(buf, sizeof(buf));
+    s << osc::BeginMessage("/supersonic/devices/reopen.done")
+      << static_cast<osc::int32>(result.success ? 1 : 0)
+      << result.deviceName.c_str()
+      << static_cast<float>(result.sampleRate)
+      << static_cast<osc::int32>(result.bufferSize)
+      << (result.error.empty() ? "" : result.error.c_str())
+      << osc::EndMessage;
+    sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+              static_cast<uint32_t>(s.Size()));
+
+    if (result.success) sendDeviceReport();
+
+    mLastReopenFinishedAt = std::chrono::steady_clock::now();
+    mReopenInProgress.store(false);
 }
 
 void OscUdpServer::handlePacket(const uint8_t* data, uint32_t size,
