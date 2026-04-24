@@ -1810,6 +1810,18 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
 
     if (isCold) destroy_world();
 
+    // Snapshot the current device setup so we can restore it if the new
+    // setAudioDeviceSetup call below fails. JUCE's AudioDeviceManager can
+    // be left with no bound device after a failed setAudioDeviceSetup
+    // (e.g. user-selected name not in the device list, exclusive-mode
+    // contention, sample-rate-not-supported). Without restoring, the
+    // rollback below re-attaches the audio callback to a manager with
+    // no device — symptom: device-report shows currentIn=''/currentOut='',
+    // GUI prefs read 0hz | 0buf | 0out | 0in, every scsynth reply times
+    // out because the audio thread isn't ticking.
+    juce::AudioDeviceManager::AudioDeviceSetup prevSetup;
+    if (mDeviceManager) mDeviceManager->getAudioDeviceSetup(prevSetup);
+
     // --- Apply new device configuration ---
     std::string errStr;
     if (mDeviceManager) {
@@ -2046,6 +2058,27 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         if (isCold) { rebuild_world(currentRate); mWorldRebuilt = true; }
         // --- Restart audio (failure path) ---
         if (mDeviceManager) {
+            // Restore the previous device setup. A failed setAudioDeviceSetup
+            // typically leaves the manager with no bound device, so simply
+            // re-attaching the audio callback wires it to nothing — the
+            // resulting "no device" state surfaces as currentIn=''/currentOut=''
+            // in device reports and 0hz/0buf in the GUI prefs panel, while
+            // every Spider /done sync waits the full 5-10s timeout because
+            // the audio callback is never ticking.
+            fprintf(stderr,
+                    "[audio-device] swap failed (%s), restoring previous setup: out='%s' in='%s' sr=%.0f buf=%d\n",
+                    errStr.c_str(),
+                    prevSetup.outputDeviceName.toRawUTF8(),
+                    prevSetup.inputDeviceName.toRawUTF8(),
+                    prevSetup.sampleRate, prevSetup.bufferSize);
+            fflush(stderr);
+            juce::String restoreErr = mDeviceManager->setAudioDeviceSetup(prevSetup, true);
+            if (restoreErr.isNotEmpty()) {
+                fprintf(stderr,
+                        "[audio-device] WARNING: failed to restore previous setup: %s\n",
+                        restoreErr.toRawUTF8());
+                fflush(stderr);
+            }
             mDeviceManager->addAudioCallback(&mAudioCallback);
         } else {
             restartHeadlessDriver(currentRate);
