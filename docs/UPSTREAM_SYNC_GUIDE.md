@@ -1,9 +1,9 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2026-03-18
-**Last Sync Commit**: b365366bc
-**Upstream Branch**: supercollider/develop (tracked to 2026-03-18)
-**Verified Against**: SuperCollider 3.15.0-dev + PR #7418 (Convolution UGen fixes)
+**Last Updated**: 2026-04-25
+**Last Sync Commit**: a27ec6c01
+**Upstream Branch**: supercollider/develop (tracked to 2026-04-25)
+**Verified Against**: SuperCollider 3.15.0-dev + PR #7402 (Synth reblocking and upsampling)
 
 ---
 
@@ -586,6 +586,62 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 ---
 
 ## Reference: Previous Sync Summary
+
+### Synth reblocking and upsampling (2026-04-25)
+
+Applied SuperCollider PR #7402 (commit a27ec6c01).
+
+**Feature summary:**
+- Per-Synth `Reblock(N)` and `Resample(factor)` — a SynthDef can now run at a different block size and/or sample rate than the server. The factor can be a constant or a Synth Control.
+- SynthDef v3 format extended with 4 new fields: `mBlockSize`, `mBlockSizeIndex`, `mResampleFactor`, `mResampleIndex`. Old v3 fixtures (compiled before this PR) are not compatible — the new reader expects these 16 bytes.
+- Plugin API version bumped 5 → 6 (upstream notes the bump may be temporary; will likely revert to 4 once 3.15 stabilises).
+
+**Applied:**
+- **SC_Graph.h** (header): added `mFlags`, `mNumTicks`, `mTickCounter`, `mFullRate*`, `mBufRate*` fields. Moved `mSubsampleOffset` next to `mSampleOffset`. Preserved SuperSonic's `int` typedef preference (instead of upstream's `int32`).
+- **SC_InterfaceTable.h**: bumped `sc_api_version` 5 → 6 with upstream's transitional comment. SuperSonic's `worklet_debug` decl and `DefineSimpleUnit` macro variant preserved (different region).
+- **SC_Unit.h**: `FULLRATE`/`FULLBUFLENGTH`/`FULLSAMPLEDUR` macros now read from `mParent->mFullRate->...` (per-Graph rate) instead of `mWorld->mFullRate.X`. Added `REBLOCK_OR_RESAMPLE` macro. Required for reblock/resample correctness — UGens must use these macros to pick up the local rate.
+- **ErrorMessage.hpp**: added API version 4 → "3.15" entry.
+- **SC_GraphDef.cpp/.h**: read 4 new fields when `inVersion > 2`, default to `(0, 0, 1.0, 0)` for older versions.
+- **SC_Prototypes.h** + **SC_Unit.cpp**: `Unit_New` now takes `Graph* graph`. The unit's `mRate` is now `graph->mFullRate` or `graph->mBufRate` (per-Graph) instead of `inUnitSpec->mRateInfo` (global). Note `mRateInfo` is still set up in `SC_GraphDef.cpp` but is now effectively dead code.
+- **SC_Graph.cpp**: new `Graph_Ctor` block (~100 lines) reads `mBlockSize`/`mResampleFactor` from the GraphDef (or from a Synth Control if they're negative), allocates per-Graph `Rate*` via `World_Alloc` only when reblock/resample is requested, otherwise points to `inWorld->mFullRate`/`mBufRate`. `Graph_Dtor` frees the allocated rates if non-shared. `Graph_Calc` and `Graph_CalcTrace` wrap their existing loops in an outer `for k < numTicks` to drive sub-block ticks. `Graph_New` reformatted (signature on one line, comment moved out). SuperSonic's `Graph_InitUnits` split, `worklet_debug` substitutions, and `[Graph_New] ERROR` log all preserved.
+- **SC_MiscCmds.cpp**: factored `meth_s_new` and `meth_s_newargs` into a shared `meth_s_do_new(...)` per upstream. SuperSonic's eager `Graph_InitUnits(graph)` call (commit `7438a8fe2`) moved into the unified function — both `s_new` and `s_newargs` still get eager init, now from a single call site. Note: upstream removed the `Node_RemoveID(replaceThisNode)` call from case 4 (replace) — `Node_Replace → Node_Delete → Graph_Dtor → Node_Dtor` still emits `kNode_End` with the original node ID, which is what the SAB mirror expects.
+- **DelayUGens.cpp**: `RadiansPerSample_Ctor` now reads `unit->mParent->mFullRate->mRadiansPerSample` instead of `mWorld->mFullRate.mRadiansPerSample`. SuperSonic's ctor signature (no `inNumSamples`) preserved.
+- **IOUGens.cpp**: 1091-line rewrite — every IO UGen (`In`, `Out`, `XOut`, `OffsetOut`, `ReplaceOut`, `LocalIn`, `LocalOut`, `AudioControl`, `LagControl`, `LagIn`, `InFeedback`, `InTrig`, `SharedIn`, `SharedOut`) gains a `_reblock` variant and per-channel `m_busTouchedCache` for first-tick buffer state. AudioBusGuard improved (privatised + `isValid()`). SuperSonic's `extern "C"` before `PluginLoad(IO)` preserved.
+
+**v3 SynthDef fixtures recompiled:**
+- `test/synthdefs/versions/test_simple_v3.scsyndef` (214 → 230 bytes)
+- `test/synthdefs/versions/test_multi_v3.scsyndef` (514 → 530 bytes)
+- `packages/supersonic-scsynth-synthdefs/synthdefs/u_cmd_test.scsyndef` (130 → 146 bytes)
+- `packages/supersonic-scsynth-synthdefs/synthdefs/number.scsyndef` (106 → 122 bytes)
+
+Each gained 16 bytes per def: `00 00 00 00` (mBlockSize=0) + `00 00 00 00` (mBlockSizeIndex=0) + `3F 80 00 00` (mResampleFactor=1.0 BE) + `00 00 00 00` (mResampleIndex=0). The v3 per-def size header was bumped accordingly. Compiled with sclang built from supercollider commit `a27ec6c01`.
+
+**WASM Adaptations:**
+- New error/warning prints in `Graph_Ctor` (block size out of range, resample factor not power-of-two, etc.) use `worklet_debug` instead of upstream's `scprintf`.
+- `Graph_CalcTrace` debug output uses `worklet_debug`.
+
+**Skipped (not applicable):**
+- `SCClassLibrary/Common/Audio/SynthDef.sc`, `Reblock.sc`, `Resample.sc` — sclang only.
+- `HelpSource/` schelp files — not in SuperSonic.
+- `testsuite/classlibrary/TestReblock.sc`, `TestResample.sc` — sclang test suite.
+- `server/supernova/sc/*` — supernova not in SuperSonic.
+
+**Testing:**
+- Native: 6480 assertions, 579 test cases passed.
+- Web (Playwright): 1358 passed, 60 skipped, 0 failed across SAB and postMessage modes (pre-feature-tests).
+- Existing v3 synthdef tests (`test/synthdef_versions.spec.mjs`) verified that the new format reads correctly.
+- New `test/reblock_resample.spec.mjs` (22 tests across SAB+PM, 1 skipped in PM where audio capture is unavailable). Probe-based: each fixture writes `BlockSize.ir` and `SampleRate.ir` to two control buses, the test reads them via `/c_get` and asserts the *observed* per-Graph rate matches the requested Reblock/Resample. This is what proves the feature is actually wired up — a no-op Reblock would still produce audio, but only the rate observation distinguishes "feature is active" from "feature was silently ignored". Coverage:
+  - 6 constant configurations (baseline, Reblock(32), Reblock(64), Resample(2), Resample(4), Reblock(32)+Resample(2))
+  - 2 control-driven Reblock cases (default + override via `/s_new` args)
+  - 2 control-driven Resample cases (default + override)
+  - 1 audio-output smoke test for combined Reblock+Resample (SAB only)
+- Fixtures generated by `test/synthdefs/compile_reblock_resample_synthdefs.scd` and committed to `test/synthdefs/reblock_resample/`.
+
+**Upstream:**
+- https://github.com/supercollider/supercollider/commit/a27ec6c01ac78fba2967c136ba8cfc94414d1c61
+- https://github.com/supercollider/supercollider/pull/7402
+
+---
 
 ### Convolution UGen fixes (2026-03-18)
 

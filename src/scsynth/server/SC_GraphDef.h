@@ -61,6 +61,12 @@ struct GraphDef {
     ParamSpec* mParamSpecs;
     ParamSpecTable* mParamSpecTable;
 
+    int32 mBlockSize;
+    uint32 mBlockSizeIndex;
+
+    float32 mResampleFactor;
+    uint32 mResampleIndex;
+
     int mRefCount;
     struct GraphDef* mNext;
 
