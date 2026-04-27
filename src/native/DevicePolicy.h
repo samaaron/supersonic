@@ -98,6 +98,25 @@ std::string selectBootOutputDevice(const std::string& defaultName,
                                    const std::vector<std::string>& visibleDevices,
                                    const std::vector<bool>& visibleIsWireless);
 
+// Validate device names against a visible-device list before any
+// destructive swap work happens. Returns empty string on success or
+// an error string naming the bad argument. Names are accepted if:
+//   - empty (means "leave unchanged")
+//   - "__system__" sentinel (output only — system default)
+//   - "__none__" sentinel (input only — disable inputs)
+//   - exact match in visibleDevices
+//   - matches "<name> (<digits>)" form in visibleDevices
+//
+// switchDevice does many destructive operations (destroy_world,
+// removeAudioCallback, opts[] mutation) before reaching JUCE's
+// setAudioDeviceSetup. If the doomed name only fails *there*, we're
+// already in a half-built state with no easy rollback. Refusing
+// up-front keeps the engine on the previous device.
+std::string validateSwapDeviceNames(
+    const std::string& deviceName,
+    const std::string& inputDeviceName,
+    const std::vector<std::string>& visibleDevices);
+
 // Decide scsynth's block size (mBufLength) at boot given the hardware
 // callback buffer size. Matching them means the audio-thread loop
 // processes exactly one scsynth block per HW callback — no prefetch

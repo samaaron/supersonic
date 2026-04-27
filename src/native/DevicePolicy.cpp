@@ -132,4 +132,43 @@ HotplugDecision decideHotplugAction(
     return d;
 }
 
+namespace {
+// Matches resolveJuceDeviceName's stricter "<base> (<digits>)" form.
+bool deviceNameAcceptable(const std::string& name,
+                          const std::vector<std::string>& visible) {
+    for (auto& v : visible) {
+        if (v == name) return true;
+        if (v.size() < name.size() + 4) continue;          // need " (1)"
+        if (v.compare(0, name.size(), name) != 0) continue;
+        size_t i = name.size();
+        if (v[i] != ' ' || v[i + 1] != '(') continue;
+        if (v.back() != ')') continue;
+        bool digits = false;
+        for (size_t k = i + 2; k + 1 < v.size(); ++k) {
+            if (v[k] < '0' || v[k] > '9') { digits = false; break; }
+            digits = true;
+        }
+        if (digits) return true;
+    }
+    return false;
+}
+} // anonymous namespace
+
+std::string validateSwapDeviceNames(
+        const std::string& deviceName,
+        const std::string& inputDeviceName,
+        const std::vector<std::string>& visibleDevices) {
+    if (!deviceName.empty()
+        && deviceName != "__system__"
+        && !deviceNameAcceptable(deviceName, visibleDevices)) {
+        return "unknown output device: '" + deviceName + "'";
+    }
+    if (!inputDeviceName.empty()
+        && inputDeviceName != "__none__"
+        && !deviceNameAcceptable(inputDeviceName, visibleDevices)) {
+        return "unknown input device: '" + inputDeviceName + "'";
+    }
+    return {};
+}
+
 } // namespace sonicpi::device

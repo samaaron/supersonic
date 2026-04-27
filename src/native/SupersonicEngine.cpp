@@ -107,6 +107,17 @@ void SupersonicEngine::recordSwapPreferences(const std::string& deviceName,
         mPreferredInputDevice = inputDeviceName;
 }
 
+std::string SupersonicEngine::refuseUnknownDeviceName(
+        const std::string& deviceName,
+        const std::string& inputDeviceName) {
+    if (!mDeviceManager) return {};
+    if (deviceName.empty() && inputDeviceName.empty()) return {};
+    std::vector<std::string> visibleNames;
+    for (auto& d : listDevices(false)) visibleNames.push_back(d.name);
+    return sonicpi::device::validateSwapDeviceNames(
+        deviceName, inputDeviceName, visibleNames);
+}
+
 std::string SupersonicEngine::refuseWirelessMicAddition(
         const std::string& deviceName,
         const std::string& inputDeviceName) {
@@ -1660,6 +1671,20 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         return result;
     }
 
+    // Reject swap with an unknown output / input device name BEFORE any
+    // destructive state mutation. Without this, switchDevice mutates
+    // mCurrentConfig.numInputChannels, opts[], destroys the World, and
+    // pauses the audio callback before discovering at setAudioDeviceSetup
+    // time that the name doesn't resolve. The half-built state poisons
+    // the next cold-swap reinit (mixer_group never confirms via /n_go).
+    if (auto err = refuseUnknownDeviceName(deviceName, inputDeviceName);
+        !err.empty()) {
+        result.error = err;
+        fprintf(stderr, "[switchDevice] refused: %s\n", err.c_str());
+        fflush(stderr);
+        return result;
+    }
+
     // Try to acquire swap mutex (non-blocking)
     if (!mSwapMutex.try_lock()) {
         result.error = "swap already in progress";
@@ -2078,6 +2103,36 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                         "[audio-device] WARNING: failed to restore previous setup: %s\n",
                         restoreErr.toRawUTF8());
                 fflush(stderr);
+                // Last-resort recovery: when the primary swap fails AND the
+                // rollback fails, JUCE is left bound to nothing (or to a
+                // device that can't open). The audio callback would attach
+                // but never tick, so Spider's next /g_new times out waiting
+                // for /n_go and the engine is silently dead. Force a known-
+                // good state by reinitialising with macOS defaults — no
+                // input, current output channel count. The next user-driven
+                // swap can take it from there.
+                mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                juce::String fallbackErr =
+                    mDeviceManager->initialiseWithDefaultDevices(0, mCurrentConfig.numOutputChannels);
+                if (fallbackErr.isNotEmpty()) {
+                    fprintf(stderr,
+                            "[audio-device] WARNING: default-device fallback also failed: %s\n",
+                            fallbackErr.toRawUTF8());
+                    fflush(stderr);
+                } else {
+                    fprintf(stderr,
+                            "[audio-device] recovered to system default after rollback failure\n");
+                    fflush(stderr);
+                    // Clear aggregate-bookkeeping; we're on a single device now.
+                    mRealOutputDeviceName.clear();
+                    mRealInputDeviceName.clear();
+                    // Drop input — fallback is output-only. Caller can
+                    // re-enable inputs explicitly afterward.
+                    mCurrentConfig.numInputChannels = 0;
+                    uint32_t* opts = reinterpret_cast<uint32_t*>(
+                        ring_buffer_storage + WORLD_OPTIONS_START);
+                    opts[sonicpi::WorldOpts::kNumInputBusChannels] = 0;
+                }
             }
             mDeviceManager->addAudioCallback(&mAudioCallback);
         } else {

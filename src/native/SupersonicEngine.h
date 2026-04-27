@@ -234,6 +234,15 @@ private:
     std::string refuseWirelessMicAddition(const std::string& deviceName,
                                           const std::string& inputDeviceName);
 
+    // Refuses a swap whose output or input name doesn't resolve to any
+    // visible device (and isn't a known sentinel like "__system__" /
+    // "__none__"). Without this, switchDevice mutates state (mCurrentConfig,
+    // opts[], destroy_world) before the doomed setAudioDeviceSetup —
+    // leaving the engine half-broken when JUCE returns "No such device".
+    // Returns non-empty error string on refusal; empty = OK.
+    std::string refuseUnknownDeviceName(const std::string& deviceName,
+                                        const std::string& inputDeviceName);
+
     // Probes a named device (input or output) via JUCE and returns the
     // number of channels it advertises, or -1 if the name doesn't
     // match / device can't be opened. Handles the "__none__" sentinel

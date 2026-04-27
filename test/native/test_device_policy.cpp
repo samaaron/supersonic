@@ -385,3 +385,73 @@ TEST_CASE("ChooseBlockSize: respects custom default", "[ChooseBlockSize]") {
     REQUIRE(chooseBlock(0, 64) == 64);
     REQUIRE(chooseBlock(2048, 256) == 256);
 }
+
+// =============================================================================
+// validateSwapDeviceNames — pre-flight check before destructive swap
+// =============================================================================
+
+static std::string validate(const std::string& out, const std::string& in,
+                            std::vector<std::string> visible) {
+    return sonicpi::device::validateSwapDeviceNames(out, in, visible);
+}
+
+TEST_CASE("ValidateSwap: empty names accepted (means leave unchanged)",
+          "[ValidateSwap]") {
+    REQUIRE(validate("", "", {"MacBook Pro Speakers"}).empty());
+}
+
+TEST_CASE("ValidateSwap: known sentinels accepted", "[ValidateSwap]") {
+    REQUIRE(validate("__system__", "", {}).empty());
+    REQUIRE(validate("", "__none__", {}).empty());
+    REQUIRE(validate("__system__", "__none__", {}).empty());
+}
+
+TEST_CASE("ValidateSwap: matching device name accepted", "[ValidateSwap]") {
+    REQUIRE(validate("MacBook Pro Speakers", "",
+                     {"MacBook Pro Speakers", "MOTU UltraLite"}).empty());
+}
+
+TEST_CASE("ValidateSwap: matching JUCE-suffixed form accepted",
+          "[ValidateSwap]") {
+    REQUIRE(validate("USB Audio", "",
+                     {"USB Audio (1)", "USB Audio (2)"}).empty());
+}
+
+TEST_CASE("ValidateSwap: '-- None --' display string refused",
+          "[ValidateSwap]") {
+    // The exact bug from the field: GUI's display string leaked through
+    // to the wire. validateSwapDeviceNames must reject it so switchDevice
+    // refuses up-front instead of mutating state and then failing
+    // half-way through setAudioDeviceSetup.
+    auto err = validate("", "-- None --",
+                        {"MacBook Pro Speakers", "MacBook Pro Microphone"});
+    REQUIRE_FALSE(err.empty());
+    REQUIRE(err.find("-- None --") != std::string::npos);
+}
+
+TEST_CASE("ValidateSwap: unknown output device refused",
+          "[ValidateSwap]") {
+    auto err = validate("Phantom Device", "",
+                        {"MacBook Pro Speakers"});
+    REQUIRE_FALSE(err.empty());
+    REQUIRE(err.find("Phantom Device") != std::string::npos);
+    REQUIRE(err.find("output") != std::string::npos);
+}
+
+TEST_CASE("ValidateSwap: unknown input device refused",
+          "[ValidateSwap]") {
+    auto err = validate("", "Phantom Mic",
+                        {"MacBook Pro Speakers", "MacBook Pro Microphone"});
+    REQUIRE_FALSE(err.empty());
+    REQUIRE(err.find("Phantom Mic") != std::string::npos);
+    REQUIRE(err.find("input") != std::string::npos);
+}
+
+TEST_CASE("ValidateSwap: 'USB Audio' doesn't false-positive 'USB Audio Pro'",
+          "[ValidateSwap]") {
+    // Same prefix-matching trap as resolveJuceDeviceName — the
+    // "(<digits>)" requirement is what excludes "USB Audio Pro" from
+    // matching against base "USB Audio".
+    auto err = validate("USB Audio", "", {"USB Audio Pro"});
+    REQUIRE_FALSE(err.empty());
+}
