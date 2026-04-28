@@ -107,4 +107,11 @@ struct SwapResult {
     std::string inputDeviceName;
     double      sampleRate  = 0.0;
     int         bufferSize  = 0;
+    // Set when the caller asked for an input device but it couldn't be
+    // opened (e.g. Windows microphone privacy denied). The swap still
+    // succeeded for the output, so we don't roll back the whole thing —
+    // we just clear the input. The client surface this so the user knows
+    // why their mic isn't live.
+    bool        inputUnavailable = false;
+    std::string inputUnavailableReason;
 };

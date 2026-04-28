@@ -2086,6 +2086,40 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         fflush(stderr);
         if (err.isNotEmpty()) errStr = err.toStdString();
 
+        // Input-fallback: if the setup failed specifically because the input
+        // device couldn't be opened (Windows mic privacy denied, exclusive-
+        // mode contention, …), retry with the input cleared. Output keeps
+        // working and the user sees an empty input in prefs rather than the
+        // whole rate change rolling back into a cold-swap rebuild loop.
+        if (!errStr.empty()
+            && setup.inputDeviceName.isNotEmpty()
+            && errStr.find("input device") != std::string::npos)
+        {
+            const std::string firstError = errStr;
+            const std::string failedInputName = setup.inputDeviceName.toStdString();
+            juce::AudioDeviceManager::AudioDeviceSetup outOnly = setup;
+            outOnly.inputDeviceName = juce::String();
+            outOnly.useDefaultInputChannels = false;
+            outOnly.inputChannels.clear();
+            fprintf(stderr,
+                    "[audio-device] input '%s' failed (%s) — retrying output-only\n",
+                    failedInputName.c_str(), firstError.c_str());
+            fflush(stderr);
+            juce::String retryErr = mDeviceManager->setAudioDeviceSetup(outOnly, true);
+            if (retryErr.isEmpty()) {
+                setup = outOnly;
+                errStr.clear();
+                result.inputUnavailable = true;
+                result.inputUnavailableReason = firstError;
+            } else {
+                errStr = retryErr.toStdString();
+                fprintf(stderr,
+                        "[audio-device] output-only retry also failed: %s\n",
+                        errStr.c_str());
+                fflush(stderr);
+            }
+        }
+
 #ifdef __APPLE__
         // Now JUCE has switched away from the old aggregate — safe to
         // destroy it. AggregateDeviceHelper stashes the previous ID in
@@ -2101,8 +2135,26 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         mSuppressRunLoop.store(false);
 #endif
     } else {
-        // Headless: no real device to configure; use failure hook for testing
-        if (testSwapFailure) errStr = testSwapFailure();
+        // Headless: no real device to configure; use failure hook for testing.
+        // Mirrors the real-device input-fallback above so the same code path
+        // can be exercised by unit tests via the testSwapFailure hook.
+        if (testSwapFailure) {
+            const bool inputRequested = !inputDeviceName.empty();
+            errStr = testSwapFailure(inputRequested);
+            if (!errStr.empty() && inputRequested
+                && errStr.find("input device") != std::string::npos)
+            {
+                const std::string firstError = errStr;
+                std::string retryErr = testSwapFailure(false);
+                if (retryErr.empty()) {
+                    errStr.clear();
+                    result.inputUnavailable = true;
+                    result.inputUnavailableReason = firstError;
+                } else {
+                    errStr = retryErr;
+                }
+            }
+        }
     }
 
     if (!errStr.empty()) {

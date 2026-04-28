@@ -157,7 +157,10 @@ public:
 
     // Injectable hook for testing: if set and returns non-empty string,
     // the device configuration step is treated as failed with that error.
-    std::function<std::string()> testSwapFailure;
+    // The bool argument is true when an input device was requested in the
+    // attempted setup, allowing the hook to simulate an input-specific
+    // failure that should be retried output-only.
+    std::function<std::string(bool inputRequested)> testSwapFailure;
 
     // Injectable hook for testing: if set and returns non-empty string,
     // rebuild_world() is skipped and the error triggers recovery to safe defaults.

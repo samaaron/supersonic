@@ -69,7 +69,7 @@ TEST_CASE("ColdSwap: failed swap rolls back to original rate", "[ColdSwap]") {
     };
 
     // Inject failure
-    fix.engine().testSwapFailure = []() -> std::string {
+    fix.engine().testSwapFailure = [](bool) -> std::string {
         return "simulated device error";
     };
 
@@ -127,7 +127,7 @@ TEST_CASE("ColdSwap: state transitions Running -> Restarting -> Running on failu
         states.push_back(fix.engine().engineState());
     };
 
-    fix.engine().testSwapFailure = []() -> std::string {
+    fix.engine().testSwapFailure = [](bool) -> std::string {
         return "test failure";
     };
 
@@ -190,7 +190,7 @@ TEST_CASE("ColdSwap: concurrent swap is rejected", "[ColdSwap]") {
     EngineFixture fix;
 
     // Use a slow failure hook to hold the swap mutex
-    fix.engine().testSwapFailure = []() -> std::string {
+    fix.engine().testSwapFailure = [](bool) -> std::string {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         return "slow failure";
     };
@@ -256,7 +256,7 @@ TEST_CASE("ColdSwap: captureAll called on failed cold swap too", "[ColdSwap]") {
         [&]() { /* restore */ }
     });
 
-    fix.engine().testSwapFailure = []() -> std::string {
+    fix.engine().testSwapFailure = [](bool) -> std::string {
         return "test failure";
     };
 

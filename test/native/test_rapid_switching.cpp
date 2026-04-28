@@ -475,7 +475,7 @@ TEST_CASE("RapidSwitch: concurrent swap rejected during cold swap",
     EngineFixture fix;
 
     // Slow down the swap with a delay hook
-    fix.engine().testSwapFailure = []() -> std::string {
+    fix.engine().testSwapFailure = [](bool) -> std::string {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         return "slow failure";
     };
@@ -515,7 +515,7 @@ TEST_CASE("RapidSwitch: concurrent switchDriver rejected during switchDevice",
           "[RapidSwitch]") {
     EngineFixture fix;
 
-    fix.engine().testSwapFailure = []() -> std::string {
+    fix.engine().testSwapFailure = [](bool) -> std::string {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         return "slow failure";
     };
@@ -596,7 +596,7 @@ TEST_CASE("RapidSwitch: failed cold swap then immediate successful retry",
     EngineFixture fix;
 
     // First attempt: inject failure
-    fix.engine().testSwapFailure = []() -> std::string {
+    fix.engine().testSwapFailure = [](bool) -> std::string {
         return "simulated device error";
     };
 
@@ -622,7 +622,7 @@ TEST_CASE("RapidSwitch: multiple failures then success",
     EngineFixture fix;
 
     int callCount = 0;
-    fix.engine().testSwapFailure = [&]() -> std::string {
+    fix.engine().testSwapFailure = [&](bool) -> std::string {
         callCount++;
         if (callCount <= 3) return "transient error";
         return "";  // success on 4th attempt
