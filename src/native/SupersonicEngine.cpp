@@ -1128,6 +1128,17 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
     std::vector<DeviceInfo> result;
     if (!mDeviceManager) return result;
 
+    // Cache hit — see SupersonicEngine.h for the rationale (JUCE WASAPI
+    // probing is ~10 s for a typical device set, called multiple times
+    // during boot). Skip the cache when rescan=true (explicit refresh) or
+    // when the cache has been invalidated by an audioDeviceListChanged.
+    if (!rescan) {
+        std::lock_guard<std::mutex> lk(mListDevicesMutex);
+        if (!mCachedDevices.empty()
+            && mCachedDevicesAt.time_since_epoch().count() != 0)
+            return mCachedDevices;
+    }
+
 #ifdef __APPLE__
     // Build a name→transportType map from CoreAudio for all devices
     std::map<std::string, uint32_t> transportMap;
@@ -1405,6 +1416,11 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
     }
 #endif
 
+    {
+        std::lock_guard<std::mutex> lk(mListDevicesMutex);
+        mCachedDevices = result;
+        mCachedDevicesAt = std::chrono::steady_clock::now();
+    }
     return result;
 }
 

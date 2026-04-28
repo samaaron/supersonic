@@ -335,6 +335,16 @@ private:
     mutable std::mutex                           mListDriversMutex;
     mutable std::vector<std::string>             mCachedDrivers;
     mutable std::chrono::steady_clock::time_point mCachedDriversAt{};
+    // Cache for listDevices(false). Building this list calls JUCE's
+    // type->createDevice() + initialise() per device — on Windows that's a
+    // full WASAPI IAudioClient activation each time, ~50–100 ms per device.
+    // With ~150 device/type combinations on a typical machine the call takes
+    // ~10 s, which during boot starves the OSC thread and causes spider's
+    // /supersonic/notify handshake to time out. Cache invalidated by device-
+    // change events (audioDeviceListChanged) and by listDevices(true).
+    mutable std::mutex                           mListDevicesMutex;
+    mutable std::vector<DeviceInfo>              mCachedDevices;
+    mutable std::chrono::steady_clock::time_point mCachedDevicesAt{};
     // Pause CFRunLoop pumping in Main.cpp during aggregate destroy/create
     // — queued audioDeviceListChanged messages would trigger a second
     // cold swap and crash ScopeOut2 during the rebuild. Accessed from
