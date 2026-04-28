@@ -27,6 +27,7 @@ add_executable(SuperSonicNativeTests
     test_error_handling.cpp
     test_config_validation.cpp
     test_engine_lifecycle.cpp
+    test_lifecycle_leaks.cpp
     test_callbacks.cpp
     test_metrics.cpp
     test_node_tree_mirror.cpp
