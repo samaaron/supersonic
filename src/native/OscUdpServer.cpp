@@ -128,6 +128,31 @@ void OscUdpServer::sendDeviceReport() {
             inputDevices.push_back(dev);
     }
 
+    // Dedupe by device name. JUCE on Windows enumerates the same physical
+    // device under each driver type (Windows Audio shared / exclusive /
+    // low-latency / DirectSound), so a single pair of speakers shows up
+    // four times. Keep the entry whose typeName matches the active
+    // driver, falling back to the first occurrence so devices not present
+    // in the active driver still appear. Driver selection is exposed
+    // separately via /supersonic/drivers.
+    auto dedupeByName = [&](std::vector<decltype(allDevices)::value_type>& devs) {
+        std::vector<decltype(allDevices)::value_type> out;
+        out.reserve(devs.size());
+        std::set<std::string> seen;
+        // Pass 1: entries matching the active driver win.
+        for (auto& dev : devs) {
+            if (dev.typeName == current.typeName && seen.insert(dev.name).second)
+                out.push_back(dev);
+        }
+        // Pass 2: anything not yet represented.
+        for (auto& dev : devs) {
+            if (seen.insert(dev.name).second) out.push_back(dev);
+        }
+        devs.swap(out);
+    };
+    dedupeByName(outputDevices);
+    dedupeByName(inputDevices);
+
     // When current output is wireless (e.g. AirPlay via System Output),
     // we cannot aggregate it with a hardware mic — the IOProc freezes.
     // Hide input devices from the GUI in that case so the user isn't
