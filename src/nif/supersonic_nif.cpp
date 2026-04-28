@@ -283,4 +283,8 @@ static ErlNifFunc nif_funcs[] = {
     {"clear_notification_pid", 0, nif_clear_notification_pid, 0},
 };
 
+// Hot upgrade intentionally disabled: JUCE/NSApplication teardown is
+// not safe from arbitrary BEAM schedulers (see on_unload). The two
+// NULLs below are the `reload' and `upgrade' slots. Rationale and
+// user-facing docs: supersonic.erl module @doc.
 ERL_NIF_INIT(supersonic, nif_funcs, on_load, NULL, NULL, on_unload)

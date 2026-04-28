@@ -14,6 +14,22 @@
 %%     {:osc_reply, binary} -> ...
 %%   end
 %%   :supersonic.stop()
+%%
+%% == Hot upgrade not supported ==
+%%
+%% Hot upgrade of this NIF is not supported. `appup' files involving
+%% this module must trigger a full VM restart, not a hot reload. The
+%% NIF is loaded with NULL `reload' and `upgrade' callbacks in
+%% `ERL_NIF_INIT', so the BEAM rejects hot-upgrade attempts rather
+%% than silently accepting them.
+%%
+%% Calling {@link start/1} and {@link stop/0} repeatedly within a
+%% single VM lifetime is supported and tested.
+%%
+%% Background: the engine spins up a JUCE runtime and, on macOS, an
+%% NSApplication / message thread. Their teardown can only run on
+%% specific threads; calling `shutdownJuce_GUI()' from an arbitrary
+%% BEAM scheduler aborts on macOS.
 -module(supersonic).
 
 -export([
