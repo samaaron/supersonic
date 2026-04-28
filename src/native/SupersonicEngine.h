@@ -340,7 +340,7 @@ private:
     std::map<std::string, int> mDeviceRateMemory; // per-device remembered sample rate
 
     // Shared memory — owned by the engine, survives across cold swaps.
-    server_shared_memory_creator* mShmemCreator = nullptr;
+    std::unique_ptr<server_shared_memory_creator> mShmemCreator;
 
     // Recording
     juce::TimeSliceThread    mRecordThread{"SuperSonic-RecordIO"};

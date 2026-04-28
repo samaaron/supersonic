@@ -772,14 +772,14 @@ void SupersonicEngine::initialise(const Config& cfg) {
     if (cfg.udpPort > 0) {
         server_shared_memory_creator::cleanup(cfg.udpPort);
         try {
-            mShmemCreator = new server_shared_memory_creator(
+            mShmemCreator = std::make_unique<server_shared_memory_creator>(
                 cfg.udpPort, cfg.numControlBusChannels);
             // Tell init_memory()/World_New to reuse this instead of creating its own
-            g_external_shared_memory = mShmemCreator;
+            g_external_shared_memory = mShmemCreator.get();
         } catch (const std::exception& e) {
             fprintf(stderr, "[supersonic] shared memory creation failed: %s\n", e.what());
             fflush(stderr);
-            mShmemCreator = nullptr;
+            mShmemCreator.reset();
         }
     }
 
@@ -960,8 +960,14 @@ void SupersonicEngine::initialise(const Config& cfg) {
 }
 
 void SupersonicEngine::shutdown() {
-    if (!mRunning.exchange(false)) return;
-    setEngineState(EngineState::Stopped, "shutdown");
+    // Don't early-out on !mRunning here: a partial initialise() (which
+    // throws before mRunning becomes true) still needs the cleanup below
+    // to run, particularly the macOS CoreAudio property listener removal,
+    // which would otherwise fire against a destroyed `this`. Each cleanup
+    // step below is individually guarded against missing resources.
+    bool wasRunning = mRunning.exchange(false);
+    if (wasRunning)
+        setEngineState(EngineState::Stopped, "shutdown");
 
     // Stop recording if active
     if (isRecording())
@@ -1014,8 +1020,7 @@ void SupersonicEngine::shutdown() {
 
     // Destroy engine-owned shared memory (after World is gone)
     g_external_shared_memory = nullptr;
-    delete mShmemCreator;
-    mShmemCreator = nullptr;
+    mShmemCreator.reset();
 }
 
 // --- OSC send with cache interception ---
