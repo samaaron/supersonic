@@ -955,6 +955,11 @@ void SupersonicEngine::initialise(const Config& cfg) {
         }
     }
 
+    if (testInitFailure) {
+        auto msg = testInitFailure();
+        if (!msg.empty()) throw std::runtime_error(msg);
+    }
+
     mRunning.store(true);
     setEngineState(EngineState::Running, "boot");
 }

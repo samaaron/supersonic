@@ -115,15 +115,52 @@ TEST_CASE("Repeated initialise/shutdown does not leak FDs or threads", "[lifecyc
 }
 
 TEST_CASE("Shutdown without initialise is safe", "[lifecycle]") {
-    // Guards the partial-init cleanup path: shutdown() must run safely on
-    // an engine that never reached the running state, so resources
-    // allocated by a thrown initialise() still get released.
+    // Easy case: shutdown on a never-touched engine. Catches regressions
+    // that assume initialise() has run.
     SupersonicEngine engine;
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
 
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
+}
+
+TEST_CASE("Partial-init failure cleans up allocated resources",
+          "[lifecycle]") {
+    // Drives initialise() to throw after the scsynth World has been
+    // created, worker threads have started, and the audio callback is
+    // wired to the SampleLoader, but before mRunning is set. shutdown()
+    // (explicit and via the destructor) must release everything.
+    // Headless mode means no AudioDeviceManager / property listener is
+    // exercised here; that path needs a non-headless test environment.
+    SupersonicEngine::Config cfg;
+    cfg.headless = true;
+    cfg.udpPort  = 0;
+
+    {
+        SupersonicEngine engine;
+        engine.initialise(cfg);
+        engine.shutdown();
+    }
+
+    const long baselineRss     = readRssKb();
+    const int  baselineFds     = countFds();
+    const int  baselineThreads = countThreads();
+
+    {
+        SupersonicEngine engine;
+        engine.testInitFailure = []() { return std::string("injected"); };
+        REQUIRE_THROWS_AS(engine.initialise(cfg), std::runtime_error);
+        CHECK_FALSE(engine.isRunning());
+
+        engine.shutdown();
+        CHECK_FALSE(engine.isRunning());
+    }
+
+    CHECK(countFds()     == baselineFds);
+    CHECK(countThreads() == baselineThreads);
+    const long rssBudget = baselineRss / 2;
+    CHECK(readRssKb() - baselineRss < rssBudget);
 }
 
 #endif  // __linux__

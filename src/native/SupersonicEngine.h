@@ -168,6 +168,12 @@ public:
     // device reports this sample rate. Allows testing rate-mismatch cold swaps.
     std::function<double()> testDriverSwitchRate;
 
+    // Injectable hook for testing: if set and returns a non-empty string,
+    // initialise() throws std::runtime_error with that message just before
+    // setting mRunning=true. Used to exercise the partial-init shutdown
+    // cleanup path.
+    std::function<std::string()> testInitFailure;
+
     // --- State cache ---
     StateCache& stateCache() { return mStateCache; }
     const StateCache& stateCache() const { return mStateCache; }
