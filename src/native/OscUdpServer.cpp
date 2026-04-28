@@ -75,12 +75,13 @@ void OscUdpServer::sendReply(const uint8_t* data, uint32_t size) {
         mSocket->write(ip, port, data, static_cast<int>(size));
 }
 
-void OscUdpServer::setNotifyTarget(const juce::String& ip, int port) {
+bool OscUdpServer::setNotifyTarget(const juce::String& ip, int port) {
     juce::ScopedLock sl(mSenderLock);
     // Add to list if not already registered
     for (auto& t : mNotifyTargets)
-        if (t.ip == ip && t.port == port) return;
+        if (t.ip == ip && t.port == port) return false;
     mNotifyTargets.push_back({ip, port});
+    return true;
 }
 
 void OscUdpServer::sendDeviceReport() {
@@ -457,8 +458,9 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
                 senderIP = mLastSenderIP;
                 senderPort = mLastSenderPort;
             }
-            setNotifyTarget(senderIP, senderPort);
-            fprintf(stderr, "[osc-notify] registered %s:%d as notify target\n",
+            const bool firstRegistration = setNotifyTarget(senderIP, senderPort);
+            fprintf(stderr, "[osc-notify] %s %s:%d as notify target\n",
+                    firstRegistration ? "registered" : "re-registered (already known)",
                     senderIP.toRawUTF8(), senderPort);
             fflush(stderr);
             char buf[128];
@@ -469,9 +471,14 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
             sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
 
-            // Send current device state so the new target starts
-            // with an accurate picture (important after client restart).
-            sendDeviceReport();
+            // Send current device state ONLY for newly registered clients.
+            // Re-registrations from existing clients (e.g. spider's boot
+            // retry loop firing 20 notifies before its first ack arrives)
+            // would otherwise each trigger a fresh listDevices() — and on
+            // Windows that probes every WASAPI device via createDevice +
+            // initialise (full COM activation per device), taking ~10 s
+            // per call and starving the OSC thread for new packets.
+            if (firstRegistration) sendDeviceReport();
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/notify/unregister") == 0) {

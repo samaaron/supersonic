@@ -59,8 +59,9 @@ public:
     // Send a reply back to the most recently registered client
     void sendReply(const uint8_t* data, uint32_t size);
 
-    // Register a notify target (deduped by ip:port)
-    void setNotifyTarget(const juce::String& ip, int port);
+    // Register a notify target (deduped by ip:port).
+    // Returns true if a new entry was added, false if already registered.
+    bool setNotifyTarget(const juce::String& ip, int port);
 
     // Send /supersonic/devices + /supersonic/info to all notify targets
     void sendDeviceReport();
