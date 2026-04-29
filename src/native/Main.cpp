@@ -363,7 +363,39 @@ int main(int argc, char* argv[]) {
             }
         }
     }
-#else
+#elif defined(_WIN32)
+    // Pump Win32 messages on the main thread so JUCE's hidden message
+    // windows can dispatch what they receive:
+    //
+    //   * DeviceChangeDetector — listens for WM_DEVICECHANGE on USB
+    //     hot-plug, which triggers WASAPIAudioIODeviceType::scan() →
+    //     ChangeBroadcaster → AudioDeviceManager → our
+    //     changeListenerCallback. This is the path that refreshes the
+    //     GUI's audio device dropdowns when devices are added/removed.
+    //   * MessageManager::callAsync — posts a custom WM message to
+    //     JUCE's hidden window; without a pump those callbacks never run.
+    //
+    // Without this loop the messages queue forever and JUCE's whole
+    // device-refresh path is dead. juce::MessageManager::runDispatchLoop
+    // would do the same job but is gated by JUCE_MODAL_LOOPS_PERMITTED
+    // (intentionally off for non-GUI apps), so we drive the pump
+    // directly. PeekMessage with hWnd=nullptr retrieves both window
+    // messages and thread messages owned by this thread, which covers
+    // all JUCE hidden windows and queued thread messages.
+    MSG msg;
+    while (!gShutdownRequested.load()) {
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        // Sleep keeps shutdown latency to ~50 ms while avoiding a busy
+        // spin. MsgWaitForMultipleObjects would let us block precisely
+        // on "message arrives or shutdown signalled", but the signal
+        // path here is a plain atomic — a coarse sleep is simpler and
+        // costs nothing meaningful at this granularity.
+        Sleep(50);
+    }
+#else  // Linux
     while (!gShutdownRequested.load())
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 #endif
