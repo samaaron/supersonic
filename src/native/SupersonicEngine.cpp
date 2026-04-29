@@ -784,26 +784,13 @@ void SupersonicEngine::initialise(const Config& cfg) {
     }
 
     // -- Initialise scsynth World ------------------------------------------
-    // Pick scsynth's block size. Matching it to the hardware callback
-    // makes the audio-thread loop 1:1 (one scsynth block per HW
-    // callback, no prefetch buffer, no input accumulator). Previous
-    // attempts to auto-match were abandoned because of an unexplained
-    // "IOProc stays silent" issue; current hypothesis is that was from
-    // a code path that changed mBufLen AFTER the device was started.
-    // Here we set it BEFORE addAudioCallback, so the World is built
-    // with the right size from the start — no mid-flight reconfig.
+    // scsynth's block size is fixed at kDefaultBlockSize (128) regardless
+    // of the hardware callback buffer. JuceAudioCallback's accumulator +
+    // prefetch decoupling handles HW-buffer ≠ scsynth-block, so the
+    // smaller block buys us a finer OSC-bundle scheduling grid (~3 ms at
+    // 48 kHz) without paying any latency cost on the audio thread.
     int chosenBufLen = sonicpi::kDefaultBlockSize;
-    if (auto* dev = mDeviceManager ? mDeviceManager->getCurrentAudioDevice() : nullptr) {
-        int hwBufSize = dev->getCurrentBufferSizeSamples();
-        chosenBufLen = sonicpi::device::chooseBlockSize(
-            hwBufSize, sonicpi::kDefaultBlockSize,
-            /*minBlockSize=*/32, sonicpi::kMaxBlockSize);
-        fprintf(stderr, "[supersonic] scsynth block size = %d samples "
-                "(hwBufSize=%d; auto-matched)\n", chosenBufLen, hwBufSize);
-    } else {
-        fprintf(stderr, "[supersonic] scsynth block size = %d samples "
-                "(default; no active device)\n", chosenBufLen);
-    }
+    fprintf(stderr, "[supersonic] scsynth block size = %d samples\n", chosenBufLen);
     fflush(stderr);
 
     // Use actual device sample rate and channel counts (may differ from requested)
