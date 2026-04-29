@@ -66,7 +66,11 @@ jobs:
         run: cmake --build build/native --config Release --parallel --target SuperSonic
 
       - name: Build tests
-        run: cmake --build build/native --config Release --parallel --target SuperSonicNativeTests
+        # Capped at 2 parallel jobs to avoid OOM on the 16 GB GitHub runners:
+        # the test target recompiles JUCE alongside Catch2 and the test sources,
+        # and unbounded parallelism can exhaust memory on heavy modules like
+        # juce_audio_devices on Linux.
+        run: cmake --build build/native --config Release --parallel 2 --target SuperSonicNativeTests
 
       - name: Run tests
         run: |
