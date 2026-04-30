@@ -866,63 +866,29 @@ void SupersonicEngine::initialise(const Config& cfg) {
     // Pass engine reference for /supersonic/* command handling
     mUdpServer.setEngine(this);
 
-    if (mDeviceManager) {
-        // -- Register audio callback (triggers audioDeviceAboutToStart) ----
-        mDeviceManager->addAudioCallback(&mAudioCallback);
-        mDeviceManager->addChangeListener(this);
-
-#ifdef __APPLE__
-        // JUCE only listens for kAudioHardwarePropertyDevices (device
-        // connect/disconnect), not kAudioHardwarePropertyDefaultOutputDevice.
-        // Install our own listener so "macOS Default" mode tracks System
-        // Settings changes live.
-        if (!mDefaultDevicePropertyListenerInstalled) {
-            AudioObjectPropertyAddress pa = {
-                kAudioHardwarePropertyDefaultOutputDevice,
-                kAudioObjectPropertyScopeGlobal,
-                kAudioObjectPropertyElementMain
-            };
-            if (AudioObjectAddPropertyListener(kAudioObjectSystemObject, &pa,
-                                               &SupersonicEngine::defaultDevicePropertyListenerProc,
-                                               this) == noErr) {
-                mDefaultDevicePropertyListenerInstalled = true;
-            }
-        }
-#endif
-
-        // Wait for audio callbacks to actually start firing.
-        // AUHAL's AudioOutputUnitStart may return before the first callback
-        // arrives. If we proceed before callbacks are flowing, Spider's
-        // /d_loadDir command goes into the ring buffer but process_audio
-        // never runs to process it, causing a boot timeout.
-        {
-            uint32_t before = mAudioCallback.processCount.load(std::memory_order_relaxed);
-            int timeout = 5000;  // 5 seconds, polling every 1ms
-            while (mAudioCallback.processCount.load(std::memory_order_relaxed) == before && --timeout > 0)
-                juce::Thread::sleep(1);
-            if (timeout == 0)
-                fprintf(stderr, "[supersonic] WARNING: audio callbacks not firing after 5 seconds\n");
-            else
-                fprintf(stderr, "[supersonic] audio callbacks started (%d ms)\n", 5000 - timeout);
-            fflush(stderr);
-        }
-    } else {
-        // -- Headless: start a timer thread to drive process_audio() ------
-        mHeadlessDriver.configure(&mAudioCallback, &mSampleLoader,
-                                   mCurrentConfig.sampleRate,
-                                   mCurrentConfig.numOutputChannels,
-                                   mCurrentConfig.numInputChannels);
-        mHeadlessDriver.startThread(juce::Thread::Priority::highest);
+    // Test hook for issue #3526: close the device before the source
+    // decision so startAudioSource() sees no current device and falls
+    // back to the headless driver.
+    if (testForceNoCurrentDeviceAfterInit && mDeviceManager) {
+        fprintf(stderr,
+                "[supersonic] testForceNoCurrentDeviceAfterInit: closing device "
+                "to exercise headless fallback path\n");
+        fflush(stderr);
+        mDeviceManager->closeAudioDevice();
     }
 
-    // -- SampleLoader (background file I/O for /b_allocRead) ----------------
-    // Wire to audio callback so installPendingBuffers() runs on the audio thread.
-    // Replies go through the OUT ring buffer -> ReplyReader (matching WASM arch).
+    // -- SampleLoader + audio callback wiring ------------------------------
+    // Wire to audio callback so installPendingBuffers() runs on the audio
+    // thread. Done before startAudioSource() so the audio thread sees a
+    // fully-configured callback the first time it fires.
     mSampleLoader.initialise();
     mAudioCallback.setSampleLoader(&mSampleLoader);
     mAudioCallback.onWake = [this]() { purge(); };
 
     // -- Start worker threads ----------------------------------------------
+    // Workers must be running before the audio source starts, otherwise
+    // OUT/DEBUG ring buffers can back up during the audio thread's first
+    // few hundred ticks (~ms) before any reader is draining them.
     mPrescheduler.startThread(juce::Thread::Priority::normal);
     mReplyReader.startThread(juce::Thread::Priority::normal);
     mDebugReader.startThread(juce::Thread::Priority::low);
@@ -930,17 +896,32 @@ void SupersonicEngine::initialise(const Config& cfg) {
     if (mDeviceManager)
         mUdpServer.startThread(juce::Thread::Priority::normal);
 
-    // Block until the audio callback fires at least once — ensures
-    // sendOsc() calls made immediately after initialise() don't race
-    // device startup (observed on macOS Intel CI).
-    {
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        uint32_t snapshot = mAudioCallback.processCount.load(std::memory_order_acquire);
-        while (mAudioCallback.processCount.load(std::memory_order_acquire) == snapshot
-               && std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    // -- Start the audio source (real callback or headless fallback) -------
+    // Picks based on whether the device manager has a current device.
+    // Blocks until process_audio has ticked at least once, or 5 s with a
+    // warning. After this returns the engine is fully responsive: OSC sent
+    // via sendOsc() / UDP will be drained on the next audio block.
+    startAudioSource();
+
+#ifdef __APPLE__
+    // CoreAudio default-output listener: JUCE only watches device
+    // connect/disconnect, not "user changed default in System Settings".
+    // Only install on a real device; a headless-fallback engine has no
+    // system default to track.
+    if (mActiveSource == AudioSource::RealCallback &&
+        !mDefaultDevicePropertyListenerInstalled) {
+        AudioObjectPropertyAddress pa = {
+            kAudioHardwarePropertyDefaultOutputDevice,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        if (AudioObjectAddPropertyListener(kAudioObjectSystemObject, &pa,
+                                           &SupersonicEngine::defaultDevicePropertyListenerProc,
+                                           this) == noErr) {
+            mDefaultDevicePropertyListenerInstalled = true;
         }
     }
+#endif
 
     if (testInitFailure) {
         auto msg = testInitFailure();
@@ -1510,18 +1491,94 @@ CurrentDeviceInfo SupersonicEngine::currentDevice() const {
     return info;
 }
 
-void SupersonicEngine::restartHeadlessDriver(double sampleRate) {
-    mHeadlessDriver.configure(&mAudioCallback, &mSampleLoader,
-                               static_cast<int>(sampleRate),
-                               mCurrentConfig.numOutputChannels,
-                               mCurrentConfig.numInputChannels);
-    mHeadlessDriver.startThread(juce::Thread::Priority::highest);
-    // Wait for first audio tick after restart
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    uint32_t snapshot = mAudioCallback.processCount.load(std::memory_order_acquire);
-    while (mAudioCallback.processCount.load(std::memory_order_acquire) == snapshot
+// ── Audio source state machine ──────────────────────────────────────────────
+//
+// See the contract on the enum/helpers in SupersonicEngine.h.
+
+SupersonicEngine::AudioSource SupersonicEngine::desiredAudioSource() const {
+    if (mDeviceManager && mDeviceManager->getCurrentAudioDevice())
+        return AudioSource::RealCallback;
+    return AudioSource::Headless;
+}
+
+void SupersonicEngine::startAudioSource() {
+    if (mActiveSource != AudioSource::None) {
+        // Should be unreachable: every caller stops before starting.
+        // Assert in debug so a regression fails CI loudly; log+return in
+        // release so we don't crash a user session.
+        jassertfalse;
+        fprintf(stderr,
+                "[supersonic] BUG: startAudioSource called while %s already active\n",
+                mActiveSource == AudioSource::RealCallback ? "RealCallback" : "Headless");
+        fflush(stderr);
+        return;
+    }
+
+    uint32_t before = mAudioCallback.processCount.load(std::memory_order_acquire);
+
+    if (desiredAudioSource() == AudioSource::RealCallback) {
+        mDeviceManager->addAudioCallback(&mAudioCallback);
+        // addChangeListener is idempotent (JUCE's ListenerList dedupes), so
+        // re-attaching across hot-plug / swap sequences is harmless.
+        mDeviceManager->addChangeListener(this);
+        mActiveSource = AudioSource::RealCallback;
+    } else {
+        if (mDeviceManager) {
+            fprintf(stderr,
+                    "[supersonic] no audio device opened, running via "
+                    "headless fallback driver\n");
+            fflush(stderr);
+        }
+        mHeadlessDriver.configure(&mAudioCallback, &mSampleLoader,
+                                   mCurrentConfig.sampleRate,
+                                   mCurrentConfig.numOutputChannels,
+                                   mCurrentConfig.numInputChannels);
+        mHeadlessDriver.startThread(juce::Thread::Priority::highest);
+        mActiveSource = AudioSource::Headless;
+    }
+
+    waitForFirstAudioTick(before);
+}
+
+void SupersonicEngine::stopAudioSource() {
+    switch (mActiveSource) {
+    case AudioSource::None:
+        return;
+    case AudioSource::RealCallback:
+        if (mDeviceManager)
+            mDeviceManager->removeAudioCallback(&mAudioCallback);
+        // Change listener is NOT removed here; it survives swaps and is
+        // removed only in shutdown(). Removing it would lose hot-plug
+        // events between stop and the next start.
+        break;
+    case AudioSource::Headless:
+        mHeadlessDriver.signalThreadShouldExit();
+        mHeadlessDriver.stopThread(2000);
+        break;
+    }
+    mActiveSource = AudioSource::None;
+}
+
+void SupersonicEngine::waitForFirstAudioTick(uint32_t before) {
+    constexpr int kTimeoutMs = 5000;
+    auto start = std::chrono::steady_clock::now();
+    auto deadline = start + std::chrono::milliseconds(kTimeoutMs);
+    while (mAudioCallback.processCount.load(std::memory_order_acquire) == before
            && std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    bool ticked = mAudioCallback.processCount.load(std::memory_order_acquire) != before;
+    if (!ticked) {
+        fprintf(stderr,
+                "[supersonic] WARNING: audio callbacks not firing after %d ms, "
+                "engine is alive but the audio thread has not started\n", kTimeoutMs);
+        fflush(stderr);
+    } else {
+        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        fprintf(stderr, "[supersonic] audio callbacks started (%lld ms)\n",
+                static_cast<long long>(elapsedMs));
+        fflush(stderr);
     }
 }
 
@@ -1839,12 +1896,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     if (isCold) mStateCache.captureAll();
 
     // --- Stop audio ---
-    if (mDeviceManager) {
-        mDeviceManager->removeAudioCallback(&mAudioCallback);
-    } else {
-        mHeadlessDriver.signalThreadShouldExit();
-        mHeadlessDriver.stopThread(2000);
-    }
+    stopAudioSource();
 
     if (isCold) destroy_world();
 
@@ -2149,12 +2201,12 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         // --- Restart audio (failure path) ---
         if (mDeviceManager) {
             // Restore the previous device setup. A failed setAudioDeviceSetup
-            // typically leaves the manager with no bound device, so simply
-            // re-attaching the audio callback wires it to nothing — the
-            // resulting "no device" state surfaces as currentIn=''/currentOut=''
-            // in device reports and 0hz/0buf in the GUI prefs panel, while
-            // every Spider /done sync waits the full 5-10s timeout because
-            // the audio callback is never ticking.
+            // typically leaves the manager with no bound device. If we can't
+            // restore (and the default-device fallback below also fails),
+            // startAudioSource() sees no current device and brings up the
+            // headless driver so the engine stays responsive (Spider /done
+            // syncs return) instead of silently dead with the audio thread
+            // never ticking.
             fprintf(stderr,
                     "[audio-device] swap failed (%s), restoring previous setup: out='%s' in='%s' sr=%.0f buf=%d\n",
                     errStr.c_str(),
@@ -2168,20 +2220,17 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                         "[audio-device] WARNING: failed to restore previous setup: %s\n",
                         restoreErr.toRawUTF8());
                 fflush(stderr);
-                // Last-resort recovery: when the primary swap fails AND the
-                // rollback fails, JUCE is left bound to nothing (or to a
-                // device that can't open). The audio callback would attach
-                // but never tick, so Spider's next /g_new times out waiting
-                // for /n_go and the engine is silently dead. Force a known-
-                // good state by reinitialising with macOS defaults — no
-                // input, current output channel count. The next user-driven
-                // swap can take it from there.
+                // Last-resort recovery: try the system default with output-only.
+                // If even this fails, startAudioSource() will choose the headless
+                // fallback (no current device, so Headless) and the engine
+                // stays up; the next user-driven swap can take it from there.
                 mLastSelfTriggeredChange = std::chrono::steady_clock::now();
                 juce::String fallbackErr =
                     mDeviceManager->initialiseWithDefaultDevices(0, mCurrentConfig.numOutputChannels);
                 if (fallbackErr.isNotEmpty()) {
                     fprintf(stderr,
-                            "[audio-device] WARNING: default-device fallback also failed: %s\n",
+                            "[audio-device] WARNING: default-device fallback also failed: %s, "
+                            "engine will run via headless driver\n",
                             fallbackErr.toRawUTF8());
                     fflush(stderr);
                 } else {
@@ -2199,10 +2248,8 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                     opts[sonicpi::WorldOpts::kNumInputBusChannels] = 0;
                 }
             }
-            mDeviceManager->addAudioCallback(&mAudioCallback);
-        } else {
-            restartHeadlessDriver(currentRate);
         }
+        startAudioSource();
         mAudioCallback.resume();
         if (isCold) mSampleLoader.resumeLoading();
         result.error = errStr;
@@ -2288,11 +2335,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     }
 
     // --- Restart audio (success path) ---
-    if (mDeviceManager) {
-        mDeviceManager->addAudioCallback(&mAudioCallback);
-    } else {
-        restartHeadlessDriver(mCurrentConfig.sampleRate);
-    }
+    startAudioSource();
     mAudioCallback.resume();
 
     if (isCold) {
@@ -2600,9 +2643,9 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
         }
         std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
 
-        // Pause audio and remove callback
+        // Pause audio and stop the active source
         mAudioCallback.pause();
-        mDeviceManager->removeAudioCallback(&mAudioCallback);
+        stopAudioSource();
 
         // Reset the user's device preference BEFORE touching the driver.
         // Preferences are keyed by device name, and device names are
@@ -2629,8 +2672,10 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
         }
 
         if (err.isNotEmpty()) {
-            // Fallback: try to restore previous driver
-            mDeviceManager->addAudioCallback(&mAudioCallback);
+            // All driver-init attempts failed. startAudioSource() will see
+            // no current device and bring up the headless driver so the
+            // engine stays responsive while the user retries from prefs.
+            startAudioSource();
             mAudioCallback.resume();
             result.error = err.toStdString();
             if (onSwapEvent) onSwapEvent("swap:failed", result);
@@ -2647,8 +2692,8 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
             }
         }
 
-        // Re-add callback and resume
-        mDeviceManager->addAudioCallback(&mAudioCallback);
+        // Restart on the new device (or headless if even this fails)
+        startAudioSource();
         mAudioCallback.resume();
 
         // Read actual device state after switch

@@ -59,6 +59,7 @@ add_executable(SuperSonicNativeTests
     test_benchmark.cpp
     test_bundle_sequential.cpp
     test_input_fallback.cpp
+    test_headless_fallback.cpp
     OscTestUtils.cpp
     EngineFixture.cpp
 )

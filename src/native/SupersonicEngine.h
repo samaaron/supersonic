@@ -177,6 +177,15 @@ public:
     // cleanup path.
     std::function<std::string()> testInitFailure;
 
+    // Test-only: when true, initialise() closes the audio device immediately
+    // after the JUCE init block, before deciding which audio source to start.
+    // This reproduces the "device manager exists but no current device"
+    // state real users hit when JUCE/ALSA returns "no channels" against
+    // PipeWire's default sink (issue #3526). Used to verify the headless
+    // fallback path actually starts and that process_audio runs so OSC
+    // commands aren't queued forever in the IN ring buffer.
+    bool testForceNoCurrentDeviceAfterInit = false;
+
     // --- State cache ---
     StateCache& stateCache() { return mStateCache; }
     const StateCache& stateCache() const { return mStateCache; }
@@ -228,8 +237,43 @@ private:
     // path, initialise post-setup negotiate step, switchDevice
     // aggregate branch) so the floor is uniformly applied.
     void clampAggregateBufferIfNeeded(int& bufferSize);
-    void restartHeadlessDriver(double sampleRate);
     juce::String reinitialiseWithDefaultsPreservingConfig();
+
+    // ── Audio source state machine ──────────────────────────────────────────
+    //
+    // process_audio() runs from exactly one of two drivers:
+    //   RealCallback: JUCE's AudioDeviceManager fires our JuceAudioCallback
+    //                 when a device is open.
+    //   Headless:     a high-priority timer thread (HeadlessDriver) fakes
+    //                 the same contract when no device is available. Used
+    //                 for explicit cfg.headless==true, for boot-time
+    //                 device-init failures (issue #3526: ALSA/PipeWire
+    //                 "no channels"), and for cold-swap rollback when no
+    //                 usable device is left.
+    //
+    // mActiveSource is the source of truth. Every device-swap path goes
+    // through stopAudioSource() then startAudioSource() so the "exactly
+    // one source active while running" invariant holds. Without it, a
+    // partially-failed init can leave mDeviceManager non-null with no
+    // current device, neither driver firing, and process_audio silently
+    // never called.
+    enum class AudioSource { None, RealCallback, Headless };
+
+    AudioSource mActiveSource = AudioSource::None;
+
+    AudioSource desiredAudioSource() const;
+
+    // Precondition: mActiveSource == None. Picks RealCallback or Headless
+    // based on desiredAudioSource(), then blocks until process_audio has
+    // ticked at least once (or 5s with a warning). This blocking wait is
+    // the boot/swap barrier so callers can sendOsc() immediately after.
+    void startAudioSource();
+
+    // Idempotent. Does NOT remove the change listener (shutdown-only) so
+    // hot-plug events survive swaps.
+    void stopAudioSource();
+
+    void waitForFirstAudioTick(uint32_t before);
 
     // switchDevice sub-stages. Each has a single responsibility and is
     // safe to call independently (they read / write engine state, so
