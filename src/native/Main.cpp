@@ -212,7 +212,7 @@ int main(int argc, char* argv[]) {
             SupersonicEngine::Config cfg;
             cfg.headless = false;
             cfg.udpPort  = 0;
-            engine.initialise(cfg);
+            engine.init(cfg);
 
             printDeviceList(engine);
 
@@ -309,12 +309,12 @@ int main(int argc, char* argv[]) {
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
     try {
-        engine.initialise(cfg);
+        engine.init(cfg);
     } catch (const std::exception& e) {
         fprintf(stderr, "[supersonic] ERROR: %s\n", e.what());
         return 1;
     } catch (...) {
-        fprintf(stderr, "[supersonic] ERROR: unknown exception during initialise\n");
+        fprintf(stderr, "[supersonic] ERROR: unknown exception during init\n");
         return 1;
     }
 

@@ -650,7 +650,7 @@ TEST_CASE("RapidSwitch: multiple failures then success",
 // OSC-LEVEL DEVICE SWITCH MESSAGES
 // =============================================================================
 
-TEST_CASE("RapidSwitch: /supersonic/devices/switch via sendOsc",
+TEST_CASE("RapidSwitch: /supersonic/devices/switch via sendOSC",
           "[RapidSwitch]") {
     EngineFixture fix;
 

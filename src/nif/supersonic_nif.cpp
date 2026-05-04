@@ -174,7 +174,7 @@ static ERL_NIF_TERM nif_start(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
         g_engine = std::make_unique<SupersonicEngine>();
         g_engine->onReply = on_osc_reply;
         g_engine->onDebug = on_debug;
-        g_engine->initialise(cfg);
+        g_engine->init(cfg);
     } catch (const std::exception& e) {
         g_engine.reset();
         return enif_make_tuple2(env,
@@ -220,7 +220,7 @@ static ERL_NIF_TERM nif_send_osc(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
             enif_make_atom(env, "not_running"));
     }
 
-    g_engine->sendOsc(bin.data, static_cast<uint32_t>(bin.size));
+    g_engine->sendOSC(bin.data, static_cast<uint32_t>(bin.size));
     return enif_make_atom(env, "ok");
 }
 

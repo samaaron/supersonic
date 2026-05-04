@@ -313,7 +313,7 @@ TEST_CASE("ColdSwap: engine processes OSC after cold swap", "[ColdSwap]") {
     fix.send(osc_test::message("/g_new", 1, 0, 0));
     OscReply reply;
     auto syncPkt = osc_test::message("/sync", 99);
-    fix.engine().sendOsc(syncPkt.ptr(), syncPkt.size());
+    fix.engine().sendOSC(syncPkt.ptr(), syncPkt.size());
     REQUIRE(fix.waitForReply("/synced", reply));
     fix.clearReplies();
 
@@ -355,7 +355,7 @@ TEST_CASE("ColdSwap: notify + group clear + group create work after cold swap", 
     // Step 2: /g_freeAll 0 + /sync (Spider clears root group)
     fix.send(osc_test::message("/g_freeAll", 0));
     auto syncPkt = osc_test::message("/sync", 42);
-    fix.engine().sendOsc(syncPkt.ptr(), syncPkt.size());
+    fix.engine().sendOSC(syncPkt.ptr(), syncPkt.size());
     REQUIRE(fix.waitForReply("/synced", reply, 5000));
     fix.clearReplies();
 
@@ -392,7 +392,7 @@ TEST_CASE("ColdSwap: commands work after 1s delay post cold swap", "[ColdSwap]")
 
     fix.send(osc_test::message("/g_freeAll", 0));
     auto syncPkt = osc_test::message("/sync", 99);
-    fix.engine().sendOsc(syncPkt.ptr(), syncPkt.size());
+    fix.engine().sendOSC(syncPkt.ptr(), syncPkt.size());
     REQUIRE(fix.waitForReply("/synced", reply, 5000));
 }
 

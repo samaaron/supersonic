@@ -308,7 +308,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
         fflush(stderr);
     }
 
-    // Orphan cleanup now runs at boot via SupersonicEngine::initialise()
+    // Orphan cleanup now runs at boot via SupersonicEngine::init()
 
     // ── Step 1: Create empty aggregate device ────────────────────────────
     // Each new aggregate gets a unique UID and name suffix. Reusing the

@@ -176,7 +176,7 @@ TEST_CASE("InputChannels: engine processes OSC after input change", "[InputChann
     // Recreate default group
     fix.send(osc_test::message("/g_new", 1, 0, 0));
     auto syncPkt = osc_test::message("/sync", 99);
-    fix.engine().sendOsc(syncPkt.ptr(), syncPkt.size());
+    fix.engine().sendOSC(syncPkt.ptr(), syncPkt.size());
     OscReply reply;
     REQUIRE(fix.waitForReply("/synced", reply));
     fix.clearReplies();

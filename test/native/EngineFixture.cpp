@@ -59,11 +59,11 @@ void EngineFixture::init(const SupersonicEngine::Config& cfg) {
         mDebugMessages.push_back(msg);
     };
 
-    mEngine.initialise(cfg);
+    mEngine.init(cfg);
 
     // HeadlessDriver is now ticking — wait for the engine to be ready
     OscReply r;
-    mEngine.sendOsc(osc_test::message("/sync", 0).ptr(),
+    mEngine.sendOSC(osc_test::message("/sync", 0).ptr(),
                     osc_test::message("/sync", 0).size());
     waitForReply("/synced", r);
 
@@ -72,7 +72,7 @@ void EngineFixture::init(const SupersonicEngine::Config& cfg) {
     send(osc_test::message("/g_new", 1, 0, 0));
     // Barrier: wait until /g_new has been processed (node tree mirror updated)
     auto syncPkt = osc_test::message("/sync", 1);
-    mEngine.sendOsc(syncPkt.ptr(), syncPkt.size());
+    mEngine.sendOSC(syncPkt.ptr(), syncPkt.size());
     waitForReply("/synced", r);
 
     // Clear any boot-time debug/reply output so tests start with a clean slate
@@ -91,7 +91,7 @@ void EngineFixture::send(const osc_test::Packet& pkt) {
 }
 
 void EngineFixture::send(const uint8_t* data, uint32_t size) {
-    mEngine.sendOsc(data, size);
+    mEngine.sendOSC(data, size);
 }
 
 // ── Reply collection ─────────────────────────────────────────────────────────

@@ -30,9 +30,9 @@ static void bootAndVerify(int outCh, int inCh) {
     cfg.udpPort           = 0;
     cfg.numOutputChannels = outCh;
     cfg.numInputChannels  = inCh;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
-    // initialise() blocks until HeadlessDriver fires at least one audio
+    // init() blocks until HeadlessDriver fires at least one audio
     // block — if the channel config would crash process_audio(), we'd
     // already know by this point.
     REQUIRE(engine.isRunning());
@@ -110,7 +110,7 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
     cfg.udpPort           = 0;
     cfg.numOutputChannels = outCh;
     cfg.numInputChannels  = inCh;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     REQUIRE(engine.isRunning());
 
@@ -151,7 +151,7 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
     cfg.udpPort           = 0;
     cfg.numOutputChannels = outCh;
     cfg.numInputChannels  = inCh;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     REQUIRE(engine.isRunning());
 
@@ -185,7 +185,7 @@ TEST_CASE("Prefetch buffer resizes for channel count", "[multichannel]") {
     cfg.udpPort           = 0;
     cfg.numOutputChannels = 8;
     cfg.numInputChannels  = 0;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     REQUIRE(engine.isRunning());
 
@@ -202,11 +202,11 @@ TEST_CASE("Prefetch buffer resizes for channel count", "[multichannel]") {
     cfg2.udpPort           = 0;
     cfg2.numOutputChannels = 16;
     cfg2.numInputChannels  = 0;
-    engine2.initialise(cfg2);
+    engine2.init(cfg2);
     REQUIRE(engine2.isRunning());
 
     // HeadlessDriver is already processing with 16 channels —
-    // if the prefetch buffer were too small, initialise() would have crashed.
+    // if the prefetch buffer were too small, init() would have crashed.
 
     engine2.shutdown();
 }
@@ -221,7 +221,7 @@ TEST_CASE("Recording start and stop", "[recording]") {
     cfg.headless          = true;
     cfg.udpPort           = 0;
     cfg.numOutputChannels = 2;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     REQUIRE(engine.isRunning());
 
@@ -267,7 +267,7 @@ TEST_CASE("Recording creates valid WAV file", "[recording]") {
     cfg.headless          = true;
     cfg.udpPort           = 0;
     cfg.numOutputChannels = 2;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     REQUIRE(engine.isRunning());
 
@@ -305,7 +305,7 @@ TEST_CASE("Recording stops on engine shutdown", "[recording]") {
         cfg.headless          = true;
         cfg.udpPort           = 0;
         cfg.numOutputChannels = 2;
-        engine.initialise(cfg);
+        engine.init(cfg);
         REQUIRE(engine.isRunning());
 
         auto result = engine.startRecording(wavPath, "wav", 16);

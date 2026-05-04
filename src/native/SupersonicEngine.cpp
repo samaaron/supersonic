@@ -258,7 +258,7 @@ SupersonicEngine::~SupersonicEngine() {
 }
 
 
-void SupersonicEngine::initialise(const Config& cfg) {
+void SupersonicEngine::init(const Config& cfg) {
     if (mRunning.load()) return;
     setEngineState(EngineState::Booting, "init");
 
@@ -295,9 +295,9 @@ void SupersonicEngine::initialise(const Config& cfg) {
     int reqOut = resolveReq(cfg.numOutputChannels);
 
     // -- Wire callbacks ---------------------------------------------------
-    // onReply/onDebug should be set before initialise() — worker threads
+    // onReply/onDebug should be set before init() — worker threads
     // read them via captured `this` pointer without synchronisation.
-    // Setting them after initialise() is a data race.
+    // Setting them after init() is a data race.
     mReplyReader.onReply = [this](const uint8_t* d, uint32_t s) {
         // Intercept /supersonic/buffer/freed — free the buffer memory
         // and don't forward this internal message to external listeners.
@@ -900,7 +900,7 @@ void SupersonicEngine::initialise(const Config& cfg) {
     // Picks based on whether the device manager has a current device.
     // Blocks until process_audio has ticked at least once, or 5 s with a
     // warning. After this returns the engine is fully responsive: OSC sent
-    // via sendOsc() / UDP will be drained on the next audio block.
+    // via sendOSC() / UDP will be drained on the next audio block.
     startAudioSource();
 
 #ifdef __APPLE__
@@ -933,7 +933,7 @@ void SupersonicEngine::initialise(const Config& cfg) {
 }
 
 void SupersonicEngine::shutdown() {
-    // Don't early-out on !mRunning here: a partial initialise() (which
+    // Don't early-out on !mRunning here: a partial init() (which
     // throws before mRunning becomes true) still needs the cleanup below
     // to run, particularly the macOS CoreAudio property listener removal,
     // which would otherwise fire against a destroyed `this`. Each cleanup
@@ -998,7 +998,7 @@ void SupersonicEngine::shutdown() {
 
 // --- OSC send with cache interception ---
 
-void SupersonicEngine::sendOsc(const uint8_t* data, uint32_t size) {
+void SupersonicEngine::sendOSC(const uint8_t* data, uint32_t size) {
     if (size >= 8 && data[0] == '/') {
         interceptForCache(data, size);
     }
@@ -1087,7 +1087,7 @@ void SupersonicEngine::sendBundle(double ntpTimeSec, std::initializer_list<OscPa
     uint32_t frac = static_cast<uint32_t>((ntpTimeSec - secs) * 4294967296.0);
     uint64_t tag = (static_cast<uint64_t>(secs) << 32) | frac;
     auto pkt = OscBuilder::bundle(tag, messages);
-    sendOsc(pkt.ptr(), pkt.size());
+    sendOSC(pkt.ptr(), pkt.size());
 }
 
 // --- Device management ---
@@ -1949,7 +1949,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             } else {
                 // Re-enable inputs — must explicitly set the input device name.
                 // useDefaultInputChannels won't auto-fill the device name when
-                // numInputChansNeeded was 0 at initialise() time (boot with -i 0).
+                // numInputChansNeeded was 0 at init() time (boot with -i 0).
                 setup.useDefaultInputChannels = false;
                 juce::BigInteger inputBits;
                 inputBits.setRange(0, mCurrentConfig.numInputChannels, true);
@@ -1978,7 +1978,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         }
         // Explicitly set output bits rather than relying on
         // useDefaultOutputChannels. JUCE's "default" is derived from the
-        // numOutputChannelsNeeded passed at initialise() time — with
+        // numOutputChannelsNeeded passed at init() time — with
         // auto-max that's kRequestMaxChannels, but under some swap
         // sequences JUCE re-evaluates and reports 0 active outputs on
         // setAudioDeviceSetup (symptom: activeOut=0 on Loopback despite

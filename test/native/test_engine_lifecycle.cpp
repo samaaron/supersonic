@@ -1,7 +1,7 @@
 /*
  * test_engine_lifecycle.cpp — SupersonicEngine lifecycle tests.
  *
- * Covers initialise/shutdown safety, callback wiring, and basic OSC
+ * Covers init/shutdown safety, callback wiring, and basic OSC
  * round-trips that verify the engine is alive and well after boot.
  */
 #include "EngineFixture.h"
@@ -9,20 +9,20 @@
 #include <chrono>
 
 // =============================================================================
-// RAW ENGINE STATE (no fixture — tests before/after initialise/shutdown)
+// RAW ENGINE STATE (no fixture — tests before/after init/shutdown)
 // =============================================================================
 
-TEST_CASE("Engine starts in non-running state before initialise", "[lifecycle]") {
+TEST_CASE("Engine starts in non-running state before init", "[lifecycle]") {
     SupersonicEngine engine;
     CHECK_FALSE(engine.isRunning());
 }
 
-TEST_CASE("isRunning returns true after initialise", "[lifecycle]") {
+TEST_CASE("isRunning returns true after init", "[lifecycle]") {
     SupersonicEngine engine;
     SupersonicEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
-    engine.initialise(cfg);
+    engine.init(cfg);
     CHECK(engine.isRunning());
     engine.shutdown();
 }
@@ -32,23 +32,23 @@ TEST_CASE("isRunning returns false after shutdown", "[lifecycle]") {
     SupersonicEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
-    engine.initialise(cfg);
+    engine.init(cfg);
     REQUIRE(engine.isRunning());
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
 }
 
-TEST_CASE("Double initialise is safe", "[lifecycle]") {
+TEST_CASE("Double init is safe", "[lifecycle]") {
     SupersonicEngine engine;
     SupersonicEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
 
-    engine.initialise(cfg);
+    engine.init(cfg);
     REQUIRE(engine.isRunning());
 
     // Second call should be a no-op (mRunning is already true)
-    engine.initialise(cfg);
+    engine.init(cfg);
     CHECK(engine.isRunning());
 
     engine.shutdown();
@@ -60,7 +60,7 @@ TEST_CASE("Double shutdown is safe", "[lifecycle]") {
     cfg.headless = true;
     cfg.udpPort  = 0;
 
-    engine.initialise(cfg);
+    engine.init(cfg);
     REQUIRE(engine.isRunning());
 
     engine.shutdown();
@@ -78,15 +78,15 @@ TEST_CASE("Null onReply callback does not crash", "[lifecycle]") {
     SupersonicEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     // Send a command that would normally trigger a reply
     auto pkt = osc_test::message("/status");
-    engine.sendOsc(pkt.ptr(), pkt.size());
+    engine.sendOSC(pkt.ptr(), pkt.size());
 
     // Sync barrier: ensures /status was processed (exercising the null callback path)
     auto sync = osc_test::message("/sync", 0);
-    engine.sendOsc(sync.ptr(), sync.size());
+    engine.sendOSC(sync.ptr(), sync.size());
     // Can't waitForReply (onReply is null) but shutdown will drain;
     // HeadlessDriver guarantees the message is processed within a few ms.
     engine.shutdown();
@@ -100,15 +100,15 @@ TEST_CASE("Null onDebug callback does not crash", "[lifecycle]") {
     SupersonicEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     // Send a command that might produce debug output
     auto pkt = osc_test::message("/dumpOSC", 1);
-    engine.sendOsc(pkt.ptr(), pkt.size());
+    engine.sendOSC(pkt.ptr(), pkt.size());
 
     // Send another command so dumpOSC has something to print
     auto status = osc_test::message("/status");
-    engine.sendOsc(status.ptr(), status.size());
+    engine.sendOSC(status.ptr(), status.size());
 
     engine.shutdown();
     SUCCEED();
@@ -143,12 +143,12 @@ TEST_CASE("Engine responds to /version after boot", "[lifecycle]") {
     CHECK(p.argCount() >= 3);        // name, major, minor at minimum
 }
 
-TEST_CASE("sendOsc works after initialise", "[lifecycle]") {
+TEST_CASE("sendOSC works after init", "[lifecycle]") {
     EngineFixture fx;
 
-    // Verify the engine can receive and process OSC via sendOsc
+    // Verify the engine can receive and process OSC via sendOSC
     auto pkt = osc_test::message("/status");
-    fx.engine().sendOsc(pkt.ptr(), pkt.size());
+    fx.engine().sendOSC(pkt.ptr(), pkt.size());
 
     OscReply r;
     REQUIRE(fx.waitForReply("/status.reply", r));

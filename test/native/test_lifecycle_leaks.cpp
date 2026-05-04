@@ -6,7 +6,7 @@
  * drift but capped well below what an obvious leak would produce.
  *
  * Scope: catches FD/thread regressions in the graceful no-throw lifecycle.
- * Does NOT exercise partial-init failure (initialise() throwing partway),
+ * Does NOT exercise partial-init failure (init() throwing partway),
  * which needs a separate test with a failure-injection hook on the engine.
  * Does NOT install the macOS CoreAudio property listener, since the test
  * runs in headless mode. The RSS budget is generous, so small slow leaks
@@ -61,7 +61,7 @@ int countThreads() { return countDirEntries("/proc/self/task"); }
 
 }  // namespace
 
-TEST_CASE("Repeated initialise/shutdown does not leak FDs or threads", "[lifecycle][stress]") {
+TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][stress]") {
     constexpr int kCycles = 20;
 
     SupersonicEngine::Config cfg;
@@ -73,7 +73,7 @@ TEST_CASE("Repeated initialise/shutdown does not leak FDs or threads", "[lifecyc
     // would otherwise be misread as a leak. Measure baseline AFTER warm-up.
     {
         SupersonicEngine engine;
-        engine.initialise(cfg);
+        engine.init(cfg);
         REQUIRE(engine.isRunning());
         engine.shutdown();
     }
@@ -91,7 +91,7 @@ TEST_CASE("Repeated initialise/shutdown does not leak FDs or threads", "[lifecyc
 
     for (int i = 0; i < kCycles; ++i) {
         SupersonicEngine engine;
-        engine.initialise(cfg);
+        engine.init(cfg);
         REQUIRE(engine.isRunning());
         engine.shutdown();
         REQUIRE_FALSE(engine.isRunning());
@@ -114,9 +114,9 @@ TEST_CASE("Repeated initialise/shutdown does not leak FDs or threads", "[lifecyc
     CHECK(finalRss - baselineRss < rssBudget);
 }
 
-TEST_CASE("Shutdown without initialise is safe", "[lifecycle]") {
+TEST_CASE("Shutdown without init is safe", "[lifecycle]") {
     // Easy case: shutdown on a never-touched engine. Catches regressions
-    // that assume initialise() has run.
+    // that assume init() has run.
     SupersonicEngine engine;
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
@@ -127,7 +127,7 @@ TEST_CASE("Shutdown without initialise is safe", "[lifecycle]") {
 
 TEST_CASE("Partial-init failure cleans up allocated resources",
           "[lifecycle]") {
-    // Drives initialise() to throw after the scsynth World has been
+    // Drives init() to throw after the scsynth World has been
     // created, worker threads have started, and the audio callback is
     // wired to the SampleLoader, but before mRunning is set. shutdown()
     // (explicit and via the destructor) must release everything.
@@ -139,7 +139,7 @@ TEST_CASE("Partial-init failure cleans up allocated resources",
 
     {
         SupersonicEngine engine;
-        engine.initialise(cfg);
+        engine.init(cfg);
         engine.shutdown();
     }
 
@@ -150,7 +150,7 @@ TEST_CASE("Partial-init failure cleans up allocated resources",
     {
         SupersonicEngine engine;
         engine.testInitFailure = []() { return std::string("injected"); };
-        REQUIRE_THROWS_AS(engine.initialise(cfg), std::runtime_error);
+        REQUIRE_THROWS_AS(engine.init(cfg), std::runtime_error);
         CHECK_FALSE(engine.isRunning());
 
         engine.shutdown();

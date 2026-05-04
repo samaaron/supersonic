@@ -66,7 +66,7 @@ TEST_CASE("DeviceManagement: onSwapEvent callback fires", "[DeviceManagement]") 
 
 // ── State cache interception ─────────────────────────────────────────────────
 
-TEST_CASE("DeviceManagement: sendOsc intercepts /d_recv for cache",
+TEST_CASE("DeviceManagement: sendOSC intercepts /d_recv for cache",
           "[DeviceManagement]") {
     EngineFixture fix;
 

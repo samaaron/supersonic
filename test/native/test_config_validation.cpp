@@ -48,7 +48,7 @@ TEST_CASE("Engine boots with minimum viable config", "[config]") {
     cfg.maxGraphDefs = 4;
     cfg.maxWireBufs  = 4;
     cfg.numRGens     = 4;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -66,7 +66,7 @@ TEST_CASE("Engine boots with large config values", "[config]") {
     cfg.udpPort    = 0;
     cfg.maxNodes   = 4096;
     cfg.numBuffers = 4096;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -83,7 +83,7 @@ TEST_CASE("Engine boots at 44100 Hz", "[config]") {
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.sampleRate = 44100;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -98,7 +98,7 @@ TEST_CASE("Engine boots at 96000 Hz", "[config]") {
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.sampleRate = 96000;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -115,7 +115,7 @@ TEST_CASE("Engine boots with bufferSize=64", "[config]") {
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.bufferSize = 64;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -130,7 +130,7 @@ TEST_CASE("Engine boots with bufferSize=256", "[config]") {
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.bufferSize = 256;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -145,7 +145,7 @@ TEST_CASE("Engine boots with bufferSize=512", "[config]") {
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.bufferSize = 512;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -175,7 +175,7 @@ TEST_CASE("udpPort=0 disables UDP listener", "[config]") {
     SupersonicEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     // Engine should still be running, just without UDP
     CHECK(engine.isRunning());
@@ -194,7 +194,7 @@ TEST_CASE("Engine boots with mono output", "[config]") {
     cfg.headless          = true;
     cfg.udpPort           = 0;
     cfg.numOutputChannels = 1;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -211,7 +211,7 @@ TEST_CASE("Engine boots with zero input channels", "[config]") {
     cfg.headless         = true;
     cfg.udpPort          = 0;
     cfg.numInputChannels = 0;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -228,7 +228,7 @@ TEST_CASE("Engine boots with short prescheduler lookahead", "[config]") {
     cfg.headless               = true;
     cfg.udpPort                = 0;
     cfg.preschedulerLookaheadS = 0.050;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -243,7 +243,7 @@ TEST_CASE("Engine boots with long prescheduler lookahead", "[config]") {
     cfg.headless               = true;
     cfg.udpPort                = 0;
     cfg.preschedulerLookaheadS = 2.0;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -260,7 +260,7 @@ TEST_CASE("Engine boots with small numControlBusChannels", "[config]") {
     cfg.headless              = true;
     cfg.udpPort               = 0;
     cfg.numControlBusChannels = 128;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -277,7 +277,7 @@ TEST_CASE("Engine boots with small realTimeMemorySize", "[config]") {
     cfg.headless           = true;
     cfg.udpPort            = 0;
     cfg.realTimeMemorySize = 256;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();
@@ -292,7 +292,7 @@ TEST_CASE("Engine boots with large realTimeMemorySize", "[config]") {
     cfg.headless           = true;
     cfg.udpPort            = 0;
     cfg.realTimeMemorySize = 32768;
-    engine.initialise(cfg);
+    engine.init(cfg);
 
     CHECK(engine.isRunning());
     engine.shutdown();

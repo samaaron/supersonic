@@ -19,18 +19,18 @@
 
 // ── State transitions ──────────────────────────────────────────────────────
 
-TEST_CASE("EngineState: starts Stopped before initialise", "[EngineState]") {
+TEST_CASE("EngineState: starts Stopped before init", "[EngineState]") {
     SupersonicEngine engine;
     CHECK(engine.engineState() == EngineState::Stopped);
 }
 
-TEST_CASE("EngineState: Running after initialise", "[EngineState]") {
+TEST_CASE("EngineState: Running after init", "[EngineState]") {
     SupersonicEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
     SupersonicEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
-    engine.initialise(cfg);
+    engine.init(cfg);
     CHECK(engine.engineState() == EngineState::Running);
     engine.shutdown();
 }
@@ -41,7 +41,7 @@ TEST_CASE("EngineState: Stopped after shutdown", "[EngineState]") {
     SupersonicEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
-    engine.initialise(cfg);
+    engine.init(cfg);
     REQUIRE(engine.engineState() == EngineState::Running);
     engine.shutdown();
     CHECK(engine.engineState() == EngineState::Stopped);
@@ -91,7 +91,7 @@ TEST_CASE("EngineState: recording survives pause/resume cycle", "[EngineState][r
     cfg.headless          = true;
     cfg.udpPort           = 0;
     cfg.numOutputChannels = 2;
-    engine.initialise(cfg);
+    engine.init(cfg);
     REQUIRE(engine.isRunning());
 
     auto tempDir = std::filesystem::temp_directory_path() / "supersonic_test_hotswap";
@@ -190,7 +190,7 @@ TEST_CASE("SharedMemory: engine creates POSIX segment on boot", "[EngineState][S
         SupersonicEngine::Config cfg;
         cfg.headless = true;
         cfg.udpPort  = testPort;
-        engine.initialise(cfg);
+        engine.init(cfg);
         REQUIRE(engine.isRunning());
 
         // Shared memory segment should exist
@@ -217,14 +217,14 @@ TEST_CASE("SharedMemory: segment survives cold swap (destroy_world + rebuild_wor
     SupersonicEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = testPort;
-    engine.initialise(cfg);
+    engine.init(cfg);
     REQUIRE(posix_shm_exists(shmName));
 
     // Verify the ownership contract: World_Cleanup should NOT remove the
     // segment because mOwnsShmem is false.  Verify indirectly: after
     // shutdown + re-init with the same port, the segment is still accessible.
     auto pkt = osc_test::message("/status");
-    engine.sendOsc(pkt.ptr(), pkt.size());
+    engine.sendOSC(pkt.ptr(), pkt.size());
 
     CHECK(posix_shm_exists(shmName));
 

@@ -71,24 +71,24 @@ public:
     SupersonicEngine();
     ~SupersonicEngine();
 
-    void initialise(const Config& config);
+    void init(const Config& config);
     void shutdown();
 
     std::function<void(const uint8_t*, uint32_t)> onReply;
     std::function<void(const std::string&)>        onDebug;
 
-    void sendOsc(const uint8_t* data, uint32_t size);
+    void sendOSC(const uint8_t* data, uint32_t size);
     bool isRunning() const { return mRunning.load(); }
 
     // --- Engine lifecycle state ---
     EngineState engineState() const { return mEngineState.load(); }
     void        setEngineState(EngineState state, const std::string& reason = "");
 
-    // --- Variadic OSC send (builds message + dispatches through sendOsc) ---
+    // --- Variadic OSC send (builds message + dispatches through sendOSC) ---
     template<typename... Args>
     void send(const char* address, Args&&... args) {
         auto pkt = OscBuilder::message(address, std::forward<Args>(args)...);
-        sendOsc(pkt.ptr(), pkt.size());
+        sendOSC(pkt.ptr(), pkt.size());
     }
 
     // Bundle send — ntpTimeSec is NTP time in seconds (double -> uint64 timetag)
@@ -172,12 +172,12 @@ public:
     std::function<double()> testDriverSwitchRate;
 
     // Injectable hook for testing: if set and returns a non-empty string,
-    // initialise() throws std::runtime_error with that message just before
+    // init() throws std::runtime_error with that message just before
     // setting mRunning=true. Used to exercise the partial-init shutdown
     // cleanup path.
     std::function<std::string()> testInitFailure;
 
-    // Test-only: when true, initialise() closes the audio device immediately
+    // Test-only: when true, init() closes the audio device immediately
     // after the JUCE init block, before deciding which audio source to start.
     // This reproduces the "device manager exists but no current device"
     // state real users hit when JUCE/ALSA returns "no channels" against
@@ -233,8 +233,8 @@ private:
     // starves at tight buffers — audible warble). Also mirrors the
     // clamped value into mCurrentConfig.bufferSize. No-op on single
     // devices and same-clock aggregates (where drift-comp is skipped).
-    // Called from all three aggregate-setup sites (initialise boot
-    // path, initialise post-setup negotiate step, switchDevice
+    // Called from all three aggregate-setup sites (init boot
+    // path, init post-setup negotiate step, switchDevice
     // aggregate branch) so the floor is uniformly applied.
     void clampAggregateBufferIfNeeded(int& bufferSize);
     juce::String reinitialiseWithDefaultsPreservingConfig();
@@ -266,7 +266,7 @@ private:
     // Precondition: mActiveSource == None. Picks RealCallback or Headless
     // based on desiredAudioSource(), then blocks until process_audio has
     // ticked at least once (or 5s with a warning). This blocking wait is
-    // the boot/swap barrier so callers can sendOsc() immediately after.
+    // the boot/swap barrier so callers can sendOSC() immediately after.
     void startAudioSource();
 
     // Idempotent. Does NOT remove the change listener (shutdown-only) so

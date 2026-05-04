@@ -20,7 +20,7 @@ namespace {
 
 // Boot config that mirrors how Sonic Pi launches supersonic at runtime:
 // non-headless (a real device manager exists), 2-channel output, no input,
-// 48 kHz, no UDP port (we send OSC in-process via sendOsc to keep the test
+// 48 kHz, no UDP port (we send OSC in-process via sendOSC to keep the test
 // hermetic).
 SupersonicEngine::Config nonHeadlessTestConfig() {
     SupersonicEngine::Config cfg;
@@ -39,7 +39,7 @@ SupersonicEngine::Config nonHeadlessTestConfig() {
 
 // EngineFixture constructs and initialises atomically, which is too late
 // to set testForceNoCurrentDeviceAfterInit. This harness sets the flag
-// before initialise().
+// before init().
 class FailedInitEngine {
 public:
     FailedInitEngine() {
@@ -56,8 +56,8 @@ public:
 
     ~FailedInitEngine() { mEngine.shutdown(); }
 
-    void initialise(const SupersonicEngine::Config& cfg) {
-        mEngine.initialise(cfg);
+    void init(const SupersonicEngine::Config& cfg) {
+        mEngine.init(cfg);
     }
 
     SupersonicEngine& engine() { return mEngine; }
@@ -102,14 +102,14 @@ TEST_CASE("HeadlessFallback: boot completes when device init fails",
     // Should not throw. Before the fix this could hang for 5 s in
     // waitForFirstAudioTick and continue with no audio source running;
     // after the fix it boots in <1 s via the headless driver.
-    REQUIRE_NOTHROW(harness.initialise(cfg));
+    REQUIRE_NOTHROW(harness.init(cfg));
     REQUIRE(harness.engine().isRunning());
 }
 
 TEST_CASE("HeadlessFallback: process_audio runs after failed device init",
           "[HeadlessFallback]") {
     FailedInitEngine harness;
-    harness.initialise(nonHeadlessTestConfig());
+    harness.init(nonHeadlessTestConfig());
 
     // The bug: process_audio was never called because neither the audio
     // callback (no device) nor the headless driver (not started) was
@@ -133,13 +133,13 @@ TEST_CASE("HeadlessFallback: process_audio runs after failed device init",
 TEST_CASE("HeadlessFallback: /sync round-trips through process_audio",
           "[HeadlessFallback]") {
     FailedInitEngine harness;
-    harness.initialise(nonHeadlessTestConfig());
+    harness.init(nonHeadlessTestConfig());
 
     // /sync triggers /synced via the IN/OUT ring buffers, which only works
     // if process_audio is actually ticking. Failure here matches the
     // user-visible symptom (Spider's with_done_sync timeout).
     auto pkt = osc_test::message("/sync", 4242);
-    harness.engine().sendOsc(pkt.ptr(), pkt.size());
+    harness.engine().sendOSC(pkt.ptr(), pkt.size());
 
     REQUIRE(harness.waitForReplyMatching("/synced", /*timeoutMs=*/2000));
 }
@@ -151,7 +151,7 @@ TEST_CASE("HeadlessFallback: /d_recv reaches /done (the user-reported failure)",
     // for /done with a 5 s deadline (with_done_sync). Replicate the
     // path with a real synthdef from the test asset directory.
     FailedInitEngine harness;
-    harness.initialise(nonHeadlessTestConfig());
+    harness.init(nonHeadlessTestConfig());
 
     std::string path = std::string(SUPERSONIC_SYNTHDEFS_DIR) + "/sonic-pi-beep.scsyndef";
     std::ifstream f(path, std::ios::binary);
@@ -162,7 +162,7 @@ TEST_CASE("HeadlessFallback: /d_recv reaches /done (the user-reported failure)",
     REQUIRE_FALSE(data.empty());
 
     auto pkt = osc_test::messageWithBlob("/d_recv", data.data(), data.size());
-    harness.engine().sendOsc(pkt.ptr(), pkt.size());
+    harness.engine().sendOSC(pkt.ptr(), pkt.size());
 
     // Match Spider's 5 s deadline (with_done_sync). On a working engine
     // this returns in <50 ms via the headless driver.
@@ -174,7 +174,7 @@ TEST_CASE("HeadlessFallback: /d_recv reaches /done (the user-reported failure)",
 TEST_CASE("HeadlessFallback: device manager survives but reports no current device",
           "[HeadlessFallback]") {
     FailedInitEngine harness;
-    harness.initialise(nonHeadlessTestConfig());
+    harness.init(nonHeadlessTestConfig());
 
     // The contract: in the failed-init state, mDeviceManager STAYS alive
     // so the user can later call switchDevice() to pick a working device
@@ -194,7 +194,7 @@ TEST_CASE("HeadlessFallback: shutdown after failed-init boot is clean",
     // start the headless thread at all so this was vacuously true; the
     // refactor MUST keep shutdown clean for the new boot mode.
     FailedInitEngine harness;
-    harness.initialise(nonHeadlessTestConfig());
+    harness.init(nonHeadlessTestConfig());
 
     REQUIRE(harness.engine().isRunning());
     // Destructor calls shutdown(). If the thread isn't joined cleanly
@@ -225,7 +225,7 @@ TEST_CASE("HeadlessFallback: process_audio rate matches cfg.headless==true mode"
     uint32_t fallbackTicks = 0;
     {
         FailedInitEngine harness;
-        harness.initialise(nonHeadlessTestConfig());
+        harness.init(nonHeadlessTestConfig());
         fallbackTicks = countTicksIn200ms(harness.engine());
     }
 
