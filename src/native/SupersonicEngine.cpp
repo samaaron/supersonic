@@ -814,7 +814,8 @@ void SupersonicEngine::init(const Config& cfg) {
     // Derive pointers into ring_buffer_storage for worker threads
     uint8_t* base = ring_buffer_storage;
     ControlPointers*    ctrl = reinterpret_cast<ControlPointers*>(base + CONTROL_START);
-    PerformanceMetrics* met  = reinterpret_cast<PerformanceMetrics*>(base + METRICS_START);
+    mMetrics                 = reinterpret_cast<PerformanceMetrics*>(base + METRICS_START);
+    PerformanceMetrics* met  = mMetrics;
 
     // -- Prescheduler -------------------------------------------------------
     mPrescheduler.initialise(

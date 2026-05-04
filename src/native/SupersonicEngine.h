@@ -84,6 +84,14 @@ public:
     EngineState engineState() const { return mEngineState.load(); }
     void        setEngineState(EngineState state, const std::string& reason = "");
 
+    // --- Metrics ---
+    // Shared PerformanceMetrics struct (defined in src/shared_memory.h).
+    // Same struct that JS callers see via SuperSonic.getMetrics(). Both
+    // runtimes write to it from symmetric paths (audio_processor, prescheduler,
+    // OSC reader/writer, debug reader). Pointer is null before init().
+    const PerformanceMetrics& getMetrics() const { return *mMetrics; }
+    const PerformanceMetrics* metricsPtr() const { return mMetrics; }
+
     // --- Variadic OSC send (builds message + dispatches through sendOSC) ---
     template<typename... Args>
     void send(const char* address, Args&&... args) {
@@ -345,6 +353,7 @@ private:
 
     HeadlessDriver               mHeadlessDriver;
     std::unique_ptr<juce::AudioDeviceManager> mDeviceManager;
+    PerformanceMetrics*          mMetrics = nullptr;  // points into ring_buffer_storage; null before init()
     std::atomic<bool>        mRunning{false};
     std::atomic<EngineState> mEngineState{EngineState::Stopped};
     bool                     mHeadless{false};
