@@ -146,6 +146,67 @@ public:
         }
     }
 
+    // Compact the data pool: walk live bundles in their current
+    // mDataOffset order and slide each chunk forward to eliminate the
+    // gaps left by released bundles. The bump-allocator design only
+    // resets mDataPoolHead when the queue is fully empty (see
+    // ReleaseSlot below) — for callers that always have at least one
+    // bundle scheduled (Sonic Pi's live loops, etc.) the pool grows
+    // monotonically until exhausted, then bundles get dropped (audible
+    // glitches / scheduling jitter in user audio). This compactor lets
+    // us reclaim the gaps without ever needing the queue to drain.
+    //
+    // RT-safe: no allocation, max ~512 in-place insertion sort + memmove.
+    // Called lazily from Add when a bundle wouldn't fit otherwise.
+    void Compact() {
+        if (mQueueSize == 0) {
+            mDataPoolHead = 0;
+            return;
+        }
+
+        // Collect (slot, currentOffset, size) for each live bundle by
+        // scanning the metadata pool. mInUse is cleared by Release(),
+        // so this enumerates exactly the bundles whose data must be
+        // preserved.
+        struct Live { int16_t slot; uint32_t off; uint32_t size; };
+        Live lives[MAX_SCHEDULED_BUNDLES];
+        int n = 0;
+        for (int s = 0; s < MAX_SCHEDULED_BUNDLES; ++s) {
+            if (mPool[s].mInUse && mPool[s].mSize > 0) {
+                lives[n++] = { static_cast<int16_t>(s),
+                               mPool[s].mDataOffset,
+                               static_cast<uint32_t>(mPool[s].mSize) };
+            }
+        }
+
+        // Sort by current offset ascending so we can slide each chunk
+        // forward (newOff <= oldOff) without overlap hazards. Insertion
+        // sort — N up to 512, expected use is far smaller.
+        for (int i = 1; i < n; ++i) {
+            Live key = lives[i];
+            int j = i - 1;
+            while (j >= 0 && lives[j].off > key.off) {
+                lives[j + 1] = lives[j];
+                --j;
+            }
+            lives[j + 1] = key;
+        }
+
+        // Slide each live chunk down to the new compact head.
+        uint32_t newHead = 0;
+        for (int i = 0; i < n; ++i) {
+            uint32_t aligned = (lives[i].size + 3) & ~3u;
+            if (newHead != lives[i].off) {
+                std::memmove(mDataPool + newHead,
+                             mDataPool + lives[i].off,
+                             lives[i].size);
+                mPool[lives[i].slot].mDataOffset = newHead;
+            }
+            newHead += aligned;
+        }
+        mDataPoolHead = newHead;
+    }
+
     // Add a bundle to the scheduler (variable size)
     bool Add(World* world, int64_t time, const char* data, int32_t size,
              const ReplyAddress& replyAddr) {
@@ -156,7 +217,14 @@ public:
         // Bump-allocate from data pool (4-byte aligned for OSC)
         uint32_t aligned = (static_cast<uint32_t>(size) + 3) & ~3u;
         if (mDataPoolHead + aligned > SCHEDULER_DATA_POOL_SIZE) {
-            return false;  // Pool exhausted
+            // Pool head past capacity — but the gaps left by previously-
+            // released bundles may free enough room. Compact in-place
+            // and retry. If it still doesn't fit, the genuinely-live
+            // data exceeds capacity — true failure.
+            Compact();
+            if (mDataPoolHead + aligned > SCHEDULER_DATA_POOL_SIZE) {
+                return false;
+            }
         }
 
         // Get a metadata slot

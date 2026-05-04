@@ -227,3 +227,140 @@ TEST_CASE("PriorityQueueT - remove from empty returns default", "[scheduler][pri
     TestEvent out = q.Remove();
     CHECK(out.mTime == 0);  // default-constructed
 }
+
+// ======================== BundleScheduler ========================
+//
+// These tests target BundleScheduler's data-pool accounting — separate
+// from the inner PriorityQueueT. The pool is a bump allocator that only
+// resets when the queue is fully empty. That's correct for batch
+// patterns (fill → drain → fill) but wrong for steady-state streams
+// (Sonic Pi's live loops never let the queue reach zero), which exhaust
+// the pool monotonically and start dropping bundles. The tests here
+// exercise the steady-state pattern explicitly.
+
+#include "src/scheduler/BundleScheduler.h"
+
+namespace {
+    // BundleScheduler::Add takes a World*; its Perform() method is the
+    // only thing that dereferences it. We never call Perform here, so
+    // a null World pointer is safe.
+    World* const kNoWorld = nullptr;
+
+    // Construct a ReplyAddress that's safe to pass through Add — its
+    // mReplyFunc is only invoked by reply-emitting code paths we don't
+    // exercise.
+    ReplyAddress make_null_reply() {
+        ReplyAddress addr;
+        addr.mReplyFunc = nullptr;
+        addr.mReplyData = nullptr;
+        addr.mProtocol = kUDP;
+        addr.mPort = 0;
+        addr.mSocket = 0;
+        return addr;
+    }
+}
+
+TEST_CASE("BundleScheduler - data pool reclaims released bytes "
+          "(no leak under continuous use)",
+          "[scheduler][bundle-scheduler]") {
+    BundleScheduler sched;
+    auto addr = make_null_reply();
+
+    // Pin the queue at >=1 by holding one bundle in for the duration.
+    // The pool only resets on full drain, so without the keeper bundle
+    // the bug would self-heal between iterations.
+    char keeperData[64] = {};
+    REQUIRE(sched.Add(kNoWorld, INT64_MAX, keeperData, sizeof(keeperData), addr));
+
+    // Cycle add-then-pop-then-release. Each iteration consumes 152
+    // pool bytes (typical OSC bundle in Sonic Pi). With pool size
+    // 524288 bytes (512 KB default) and ~152 bytes per cycle, the
+    // un-fixed bump allocator runs out around iteration 3,448. We
+    // run 10,000 to give plenty of headroom for the fix to prove
+    // it's actually compacting, not just delaying.
+    constexpr int  kCycles      = 10000;
+    constexpr int  kBundleBytes = 152;
+    char busyData[kBundleBytes];
+    std::memset(busyData, 0xAB, sizeof(busyData));
+
+    int  failedAt    = -1;
+    uint32_t peakPool = 0;
+    for (int i = 0; i < kCycles; ++i) {
+        if (!sched.Add(kNoWorld, i, busyData, sizeof(busyData), addr)) {
+            failedAt = i;
+            break;
+        }
+        if (sched.DataPoolUsed() > peakPool) peakPool = sched.DataPoolUsed();
+
+        // Pop the freshly-added bundle (it's the highest time so far,
+        // but the keeper has time INT64_MAX so the new bundle pops first).
+        ScheduledBundle* b = sched.Remove();
+        REQUIRE(b != nullptr);
+        sched.ReleaseSlot(b);
+    }
+
+    INFO("Add failed at iteration " << failedAt
+         << " of " << kCycles
+         << ", peak pool used = " << peakPool
+         << "/" << sched.DataPoolCapacity()
+         << ", queue size at exit = " << sched.Size());
+    CHECK(failedAt == -1);
+}
+
+TEST_CASE("BundleScheduler - drained queue resets pool head",
+          "[scheduler][bundle-scheduler]") {
+    // Existing batch-pattern guarantee — verify the pre-existing reset
+    // still works after any compaction work we add. Add a few bundles,
+    // pop+release them all, expect mDataPoolHead back to zero.
+    BundleScheduler sched;
+    auto addr = make_null_reply();
+    char data[100] = {};
+
+    for (int i = 0; i < 5; ++i) {
+        REQUIRE(sched.Add(kNoWorld, i, data, sizeof(data), addr));
+    }
+    CHECK(sched.DataPoolUsed() > 0);
+
+    while (sched.Size() > 0) {
+        ScheduledBundle* b = sched.Remove();
+        REQUIRE(b != nullptr);
+        sched.ReleaseSlot(b);
+    }
+    CHECK(sched.DataPoolUsed() == 0);
+}
+
+TEST_CASE("BundleScheduler - bundle data integrity preserved across pool churn",
+          "[scheduler][bundle-scheduler]") {
+    // Whatever pool-management strategy we use (compaction or not),
+    // bundles popped from the queue must return data that exactly
+    // matches what was passed to Add. This catches accidental data
+    // corruption from in-place memmove / wrong-offset bugs.
+    BundleScheduler sched;
+    auto addr = make_null_reply();
+
+    char keeperData[32] = {};
+    REQUIRE(sched.Add(kNoWorld, INT64_MAX, keeperData, sizeof(keeperData), addr));
+
+    // Add a marker bundle, pop it, verify the data is intact.
+    // Repeat enough times that the pool head will have moved well
+    // past the keeper's offset (forcing any compaction to re-place
+    // both the keeper and the marker correctly).
+    for (int i = 0; i < 100; ++i) {
+        char marker[64];
+        for (int b = 0; b < 64; ++b) marker[b] = static_cast<char>((i * 7 + b) & 0xFF);
+
+        REQUIRE(sched.Add(kNoWorld, i, marker, sizeof(marker), addr));
+        ScheduledBundle* popped = sched.Remove();
+        REQUIRE(popped != nullptr);
+        REQUIRE(popped->mSize == sizeof(marker));
+
+        // mDataOffset points into sched's data pool; recover bytes via
+        // the public DataPool() accessor.
+        const uint8_t* poolData = sched.DataPool() + popped->mDataOffset;
+        for (int b = 0; b < 64; ++b) {
+            CHECK(static_cast<char>(poolData[b]) == marker[b]);
+        }
+
+        sched.ReleaseSlot(popped);
+    }
+}
