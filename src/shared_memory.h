@@ -188,29 +188,28 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> scheduler_lates;         // 8: Bundles executed after scheduled time
 
     // Prescheduler metrics [9-23]
-    // Writers: native — src/workers/Prescheduler.cpp (pending,
-    //   bundles_scheduled, events_cancelled, dispatched, total_dispatches,
-    //   retries_failed); web — js/workers/osc_out_prescheduler_worker.js
-    //   (the same six plus the eight currently JS-only fields below).
-    // JS-only fields (always 0 on native): pending_peak, min_headroom_ms,
-    //   lates, retries_succeeded, retry_queue_size, retry_queue_peak,
-    //   messages_retried, max_late_ms.
-    // bypassed is also written by OscUdpServer.cpp on native (FAR_FUTURE path).
+    // Writers: native — src/workers/Prescheduler.cpp; web —
+    //   js/workers/osc_out_prescheduler_worker.js. Both implementations
+    //   write the same set of fields with matching semantics.
+    // bypassed is additionally written by OscUdpServer.cpp on native
+    //   (FAR_FUTURE classification path) and by the JS transport.
+    // min_headroom_ms uses 0xFFFFFFFF as a sentinel meaning "never recorded";
+    //   set on init, replaced with the smallest observed headroom on dispatch.
     std::atomic<uint32_t> prescheduler_pending;           // 9
-    std::atomic<uint32_t> prescheduler_pending_peak;      // 10 (JS-only)
+    std::atomic<uint32_t> prescheduler_pending_peak;      // 10: Peak heap size
     std::atomic<uint32_t> prescheduler_bundles_scheduled; // 11
-    std::atomic<uint32_t> prescheduler_dispatched;        // 12
+    std::atomic<uint32_t> prescheduler_dispatched;        // 12: Successful dispatches
     std::atomic<uint32_t> prescheduler_events_cancelled;  // 13
-    std::atomic<uint32_t> prescheduler_min_headroom_ms;   // 14: Min headroom (JS-only)
-    std::atomic<uint32_t> prescheduler_lates;             // 15: Late dispatches (JS-only)
-    std::atomic<uint32_t> prescheduler_retries_succeeded; // 16 (JS-only)
-    std::atomic<uint32_t> prescheduler_retries_failed;    // 17
-    std::atomic<uint32_t> prescheduler_retry_queue_size;  // 18 (JS-only)
-    std::atomic<uint32_t> prescheduler_retry_queue_peak;  // 19 (JS-only)
-    std::atomic<uint32_t> prescheduler_messages_retried;  // 20 (JS-only)
-    std::atomic<uint32_t> prescheduler_total_dispatches;  // 21
+    std::atomic<uint32_t> prescheduler_min_headroom_ms;   // 14: Min headroom (0xFFFFFFFF until first record)
+    std::atomic<uint32_t> prescheduler_lates;             // 15: Dispatched after scheduled time
+    std::atomic<uint32_t> prescheduler_retries_succeeded; // 16: Retry attempts that succeeded
+    std::atomic<uint32_t> prescheduler_retries_failed;    // 17: Retry-queue overflow drops (backpressure)
+    std::atomic<uint32_t> prescheduler_retry_queue_size;  // 18: Current retry queue depth
+    std::atomic<uint32_t> prescheduler_retry_queue_peak;  // 19: Peak retry queue depth
+    std::atomic<uint32_t> prescheduler_messages_retried;  // 20: Total push-to-retry events
+    std::atomic<uint32_t> prescheduler_total_dispatches;  // 21: All dispatch attempts (success + retried)
     std::atomic<uint32_t> prescheduler_bypassed;          // 22
-    std::atomic<int32_t> prescheduler_max_late_ms;        // 23: Max prescheduler lateness (JS-only)
+    std::atomic<int32_t> prescheduler_max_late_ms;        // 23: Max lateness observed (ms)
 
     // OSC Out metrics [24-25]
     // Writers: native — OscUdpServer.cpp (handlePacket); web — sab_transport.js.

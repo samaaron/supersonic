@@ -23,16 +23,16 @@
  *   ReplyReader.cpp writes: osc_in_messages_received, osc_in_bytes_received,
  *     osc_in_corrupted, messages_sequence_gaps.
  *   DebugReader.cpp writes: debug_messages_received, debug_bytes_received.
- *   Prescheduler.cpp writes: prescheduler_pending, prescheduler_bundles_scheduled,
- *     prescheduler_events_cancelled, prescheduler_dispatched,
- *     prescheduler_total_dispatches, prescheduler_retries_failed.
+ *   Prescheduler.cpp writes: prescheduler_pending, prescheduler_pending_peak,
+ *     prescheduler_bundles_scheduled, prescheduler_events_cancelled,
+ *     prescheduler_dispatched, prescheduler_total_dispatches,
+ *     prescheduler_retries_failed, prescheduler_retries_succeeded,
+ *     prescheduler_retry_queue_size, prescheduler_retry_queue_peak,
+ *     prescheduler_messages_retried, prescheduler_min_headroom_ms,
+ *     prescheduler_lates, prescheduler_max_late_ms.
  *
  * Native-unwritten fields (JS-only, always 0 on native):
- *   wasm_errors, bypass_non_bundle, osc_in_dropped_messages,
- *   prescheduler_pending_peak, prescheduler_min_headroom_ms,
- *   prescheduler_lates, prescheduler_retries_succeeded,
- *   prescheduler_retry_queue_size, prescheduler_retry_queue_peak,
- *   prescheduler_messages_retried, prescheduler_max_late_ms.
+ *   wasm_errors, bypass_non_bundle, osc_in_dropped_messages.
  */
 #include "EngineFixture.h"
 #include "OscBuilder.h"
@@ -191,11 +191,19 @@ TEST_CASE("metrics: prescheduler_pending is 0 at idle",
     CHECK(metrics(fx).prescheduler_pending.load() == 0);
 }
 
-TEST_CASE("metrics: prescheduler_pending_peak is 0 on native (JS-only)",
-          "[metrics][prescheduler][js-only]") {
-    // C++ Prescheduler does not write pending_peak. Documented gap.
+TEST_CASE("metrics: prescheduler_pending_peak grows with concurrent FAR_FUTURE schedules",
+          "[metrics][prescheduler]") {
     EngineFixture fx;
-    CHECK(metrics(fx).prescheduler_pending_peak.load() == 0);
+    constexpr int N = 5;
+    uint32_t before = metrics(fx).prescheduler_pending_peak.load();
+    for (int i = 0; i < N; ++i) {
+        fx.engine().sendBundle(wallClockNTP() + 60.0 + i,
+                               { OscBuilder::message("/status") });
+    }
+    // Give the prescheduler thread a moment to register the schedules
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Peak must have at some point reached at least the pending count
+    CHECK(metrics(fx).prescheduler_pending_peak.load() >= before + N);
 }
 
 TEST_CASE("metrics: prescheduler_bundles_scheduled increments on FAR_FUTURE",
@@ -252,20 +260,38 @@ TEST_CASE("metrics: prescheduler_events_cancelled increments on purge",
     CHECK(metrics(fx).prescheduler_events_cancelled.load() > before);
 }
 
-TEST_CASE("metrics: prescheduler_min_headroom_ms is 0 on native (JS-only)",
-          "[metrics][prescheduler][js-only]") {
+TEST_CASE("metrics: prescheduler_min_headroom_ms initialised to sentinel",
+          "[metrics][prescheduler]") {
     EngineFixture fx;
-    CHECK(metrics(fx).prescheduler_min_headroom_ms.load() == 0);
+    // 0xFFFFFFFF is HEADROOM_UNSET_SENTINEL — see Prescheduler.h.
+    CHECK(metrics(fx).prescheduler_min_headroom_ms.load() == 0xFFFFFFFFu);
 }
 
-TEST_CASE("metrics: prescheduler_lates is 0 on native (JS-only)",
-          "[metrics][prescheduler][js-only]") {
+TEST_CASE("metrics: prescheduler_min_headroom_ms recorded after FAR_FUTURE dispatch",
+          "[metrics][prescheduler]") {
+    EngineFixture fx;
+    // Schedule at now + 0.7s (FAR_FUTURE since lookahead is 0.5s).
+    // Dispatch fires at ~ now + 0.2s with ~500ms remaining until exec.
+    fx.engine().sendBundle(wallClockNTP() + 0.7,
+                           { OscBuilder::message("/status") });
+    std::this_thread::sleep_for(std::chrono::milliseconds(900));
+    uint32_t headroom = metrics(fx).prescheduler_min_headroom_ms.load();
+    CHECK(headroom != 0xFFFFFFFFu);
+    CHECK(headroom < 1000);  // sanity bound: well under 1 second
+}
+
+TEST_CASE("metrics: prescheduler_lates is 0 at idle",
+          "[metrics][prescheduler]") {
+    // Native writes this on late dispatch (event time already past at fire);
+    // no late events expected in a normal idle test.
     EngineFixture fx;
     CHECK(metrics(fx).prescheduler_lates.load() == 0);
 }
 
-TEST_CASE("metrics: prescheduler_retries_succeeded is 0 on native (JS-only)",
-          "[metrics][prescheduler][js-only]") {
+TEST_CASE("metrics: prescheduler_retries_succeeded is 0 without buffer-full",
+          "[metrics][prescheduler]") {
+    // Native writes this when a previously-queued retry succeeds. No buffer-full
+    // condition expected at idle.
     EngineFixture fx;
     CHECK(metrics(fx).prescheduler_retries_succeeded.load() == 0);
 }
@@ -279,26 +305,27 @@ TEST_CASE("metrics: prescheduler_retries_failed is 0 at idle",
     CHECK(metrics(fx).prescheduler_retries_failed.load() == 0);
 }
 
-TEST_CASE("metrics: prescheduler_retry_queue_size is 0 on native (JS-only)",
-          "[metrics][prescheduler][js-only]") {
+TEST_CASE("metrics: prescheduler_retry_queue_size is 0 without buffer-full",
+          "[metrics][prescheduler]") {
     EngineFixture fx;
     CHECK(metrics(fx).prescheduler_retry_queue_size.load() == 0);
 }
 
-TEST_CASE("metrics: prescheduler_retry_queue_peak is 0 on native (JS-only)",
-          "[metrics][prescheduler][js-only]") {
+TEST_CASE("metrics: prescheduler_retry_queue_peak is 0 without buffer-full",
+          "[metrics][prescheduler]") {
     EngineFixture fx;
     CHECK(metrics(fx).prescheduler_retry_queue_peak.load() == 0);
 }
 
-TEST_CASE("metrics: prescheduler_messages_retried is 0 on native (JS-only)",
-          "[metrics][prescheduler][js-only]") {
+TEST_CASE("metrics: prescheduler_messages_retried is 0 without buffer-full",
+          "[metrics][prescheduler]") {
     EngineFixture fx;
     CHECK(metrics(fx).prescheduler_messages_retried.load() == 0);
 }
 
-TEST_CASE("metrics: prescheduler_max_late_ms is 0 on native (JS-only)",
-          "[metrics][prescheduler][js-only]") {
+TEST_CASE("metrics: prescheduler_max_late_ms is 0 at idle",
+          "[metrics][prescheduler]") {
+    // Native writes max(lateMs) on late dispatch. No late events expected at idle.
     EngineFixture fx;
     CHECK(metrics(fx).prescheduler_max_late_ms.load() == 0);
 }

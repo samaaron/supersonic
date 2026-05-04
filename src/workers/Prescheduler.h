@@ -6,6 +6,7 @@
 #include <juce_core/juce_core.h>
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <vector>
 #include <queue>
@@ -16,6 +17,14 @@
 
 class Prescheduler : public juce::Thread {
 public:
+    // Backpressure cap on combined heap + retry queue. Mirrors JS
+    // osc_out_prescheduler_worker.js maxPendingMessages.
+    static constexpr uint32_t kMaxPendingMessages = 65536;
+
+    // Sentinel value meaning "min headroom never recorded yet". Mirrors JS
+    // HEADROOM_UNSET_SENTINEL. Required because 0 is a valid headroom value.
+    static constexpr uint32_t kHeadroomUnsetSentinel = 0xFFFFFFFFu;
+
     void schedule(const uint8_t* data, uint32_t size, double ntpTimeSec);
     void cancelAll();
 
@@ -34,6 +43,8 @@ public:
 private:
     void run() override;
     void checkAndDispatch();
+    void processRetryQueue();
+    void updatePendingPeak();   // call under mLock
 
     struct Event {
         double   ntpTimeSec;
@@ -75,5 +86,6 @@ private:
     juce::CriticalSection mLock;
     juce::WaitableEvent   mNewEventSignal;
     MinHeap               mHeap;
+    std::deque<Event>     mRetryQueue;   // guarded by mLock
     std::atomic<uint32_t> mNextId{0};
 };
