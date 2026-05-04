@@ -167,65 +167,92 @@ struct alignas(4) ControlPointers {
 // - [42-44] scsynth late timing diagnostics (WASM writes)
 // - [45]    padding
 struct alignas(4) PerformanceMetrics {
-    // scsynth metrics [0-8] (offsets 0-6,8 written by WASM, 7 by JS worklet)
+    // The same struct is written from native (binary + NIF) and web (WASM/JS).
+    // Each group below identifies its writers by runtime. "shared C++" means
+    // the writer is in shared source (audio_processor.cpp / scsynth core) and
+    // runs on all three runtimes. Fields tagged JS-only stay 0 on native;
+    // fields tagged native-only stay 0 on web.
+
+    // scsynth core metrics [0-8]
+    // Writers: shared C++ in audio_processor.cpp (runs on all runtimes).
+    // Exception: wasm_errors is JS-only (worklet-side WASM exec errors).
+    // Exception: messages_sequence_gaps also written by ReplyReader.cpp (native).
     std::atomic<uint32_t> process_count;           // 0: Audio process() callbacks
     std::atomic<uint32_t> messages_processed;      // 1: OSC messages processed
     std::atomic<uint32_t> messages_dropped;        // 2: Messages dropped
     std::atomic<uint32_t> scheduler_queue_depth;   // 3: Current scheduler depth
     std::atomic<uint32_t> scheduler_queue_max;     // 4: Peak scheduler depth
     std::atomic<uint32_t> scheduler_queue_dropped; // 5: Scheduler overflow drops
-    std::atomic<uint32_t> messages_sequence_gaps;  // 6: Sequence gaps detected (WASM)
-    std::atomic<uint32_t> wasm_errors;             // 7: WASM execution errors (JS worklet)
-    std::atomic<uint32_t> scheduler_lates;         // 8: Bundles executed after scheduled time (WASM)
+    std::atomic<uint32_t> messages_sequence_gaps;  // 6: Sequence gaps detected
+    std::atomic<uint32_t> wasm_errors;             // 7: WASM execution errors (JS-only)
+    std::atomic<uint32_t> scheduler_lates;         // 8: Bundles executed after scheduled time
 
-    // Prescheduler metrics [9-23] (written by JS prescheduler worker - all contiguous)
+    // Prescheduler metrics [9-23]
+    // Writers: native — src/workers/Prescheduler.cpp (pending,
+    //   bundles_scheduled, events_cancelled, dispatched, total_dispatches,
+    //   retries_failed); web — js/workers/osc_out_prescheduler_worker.js
+    //   (the same six plus the eight currently JS-only fields below).
+    // JS-only fields (always 0 on native): pending_peak, min_headroom_ms,
+    //   lates, retries_succeeded, retry_queue_size, retry_queue_peak,
+    //   messages_retried, max_late_ms.
+    // bypassed is also written by OscUdpServer.cpp on native (FAR_FUTURE path).
     std::atomic<uint32_t> prescheduler_pending;           // 9
-    std::atomic<uint32_t> prescheduler_pending_peak;      // 10
+    std::atomic<uint32_t> prescheduler_pending_peak;      // 10 (JS-only)
     std::atomic<uint32_t> prescheduler_bundles_scheduled; // 11
     std::atomic<uint32_t> prescheduler_dispatched;        // 12
     std::atomic<uint32_t> prescheduler_events_cancelled;  // 13
-    std::atomic<uint32_t> prescheduler_min_headroom_ms;   // 14: All-time min headroom before execution
-    std::atomic<uint32_t> prescheduler_lates;             // 15: Bundles dispatched after execution time
-    std::atomic<uint32_t> prescheduler_retries_succeeded; // 16
+    std::atomic<uint32_t> prescheduler_min_headroom_ms;   // 14: Min headroom (JS-only)
+    std::atomic<uint32_t> prescheduler_lates;             // 15: Late dispatches (JS-only)
+    std::atomic<uint32_t> prescheduler_retries_succeeded; // 16 (JS-only)
     std::atomic<uint32_t> prescheduler_retries_failed;    // 17
-    std::atomic<uint32_t> prescheduler_retry_queue_size;  // 18
-    std::atomic<uint32_t> prescheduler_retry_queue_peak;  // 19
-    std::atomic<uint32_t> prescheduler_messages_retried;  // 20
+    std::atomic<uint32_t> prescheduler_retry_queue_size;  // 18 (JS-only)
+    std::atomic<uint32_t> prescheduler_retry_queue_peak;  // 19 (JS-only)
+    std::atomic<uint32_t> prescheduler_messages_retried;  // 20 (JS-only)
     std::atomic<uint32_t> prescheduler_total_dispatches;  // 21
     std::atomic<uint32_t> prescheduler_bypassed;          // 22
-    std::atomic<int32_t> prescheduler_max_late_ms;        // 23: Maximum lateness at prescheduler (ms)
+    std::atomic<int32_t> prescheduler_max_late_ms;        // 23: Max prescheduler lateness (JS-only)
 
-    // OSC Out metrics [24-25] (written by JS main thread)
+    // OSC Out metrics [24-25]
+    // Writers: native — OscUdpServer.cpp (handlePacket); web — sab_transport.js.
     std::atomic<uint32_t> osc_out_messages_sent;   // 24
     std::atomic<uint32_t> osc_out_bytes_sent;      // 25
 
-    // OSC In metrics [26-29] (written by JS osc_in_worker)
+    // OSC In metrics [26-29]
+    // Writers: native — src/workers/ReplyReader.cpp; web — js/workers/osc_in_worker.js.
+    // osc_in_dropped_messages is JS-only (no native writer).
     std::atomic<uint32_t> osc_in_messages_received; // 26
     std::atomic<uint32_t> osc_in_bytes_received;    // 27
-    std::atomic<uint32_t> osc_in_dropped_messages;  // 28
-    std::atomic<uint32_t> osc_in_corrupted;         // 29: Ring buffer message corruption detected
+    std::atomic<uint32_t> osc_in_dropped_messages;  // 28 (JS-only)
+    std::atomic<uint32_t> osc_in_corrupted;         // 29: Ring buffer message corruption
 
-    // Debug metrics [30-31] (written by JS debug_worker)
+    // Debug metrics [30-31]
+    // Writers: native — src/workers/DebugReader.cpp; web — debug_worker.
     std::atomic<uint32_t> debug_messages_received;  // 30
     std::atomic<uint32_t> debug_bytes_received;     // 31
 
-    // Ring buffer usage [32-34] (written by WASM during process())
+    // Ring buffer usage [32-34]
+    // Writers: shared C++ during process() (audio_processor.cpp / scsynth core).
     std::atomic<uint32_t> in_buffer_used_bytes;     // 32: Bytes used in IN buffer
     std::atomic<uint32_t> out_buffer_used_bytes;    // 33: Bytes used in OUT buffer
     std::atomic<uint32_t> debug_buffer_used_bytes;  // 34: Bytes used in DEBUG buffer
 
-    // Ring buffer peak usage [35-37] (written by WASM during process())
+    // Ring buffer peak usage [35-37]
+    // Writers: shared C++ during process() (audio_processor.cpp / scsynth core).
     std::atomic<uint32_t> in_buffer_peak_bytes;     // 35: Peak bytes used in IN buffer
     std::atomic<uint32_t> out_buffer_peak_bytes;    // 36: Peak bytes used in OUT buffer
     std::atomic<uint32_t> debug_buffer_peak_bytes;  // 37: Peak bytes used in DEBUG buffer
 
-    // Bypass category metrics [38-41] (written by JS main thread / PM transport)
-    std::atomic<uint32_t> bypass_non_bundle;        // 38: Plain OSC messages (not bundles)
+    // Bypass category metrics [38-41]
+    // Writers: native — OscUdpServer.cpp (immediate, near_future, late);
+    //   web — JS transport.
+    // bypass_non_bundle is JS-only (native counts plain messages as IMMEDIATE).
+    std::atomic<uint32_t> bypass_non_bundle;        // 38: Plain OSC messages (JS-only)
     std::atomic<uint32_t> bypass_immediate;         // 39: Bundles with timetag 0 or 1
     std::atomic<uint32_t> bypass_near_future;       // 40: Within lookahead window but not late
     std::atomic<uint32_t> bypass_late;              // 41: Past their scheduled time
 
-    // scsynth late timing diagnostics [42-44] (written by WASM during process())
+    // scsynth late timing diagnostics [42-44]
+    // Writers: shared C++ during process() (audio_processor.cpp).
     std::atomic<int32_t> scheduler_max_late_ms;     // 42: Maximum lateness observed (ms)
     std::atomic<int32_t> scheduler_last_late_ms;    // 43: Most recent late magnitude (ms)
     std::atomic<uint32_t> scheduler_last_late_tick; // 44: Process count when last late occurred
