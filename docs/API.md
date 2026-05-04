@@ -100,18 +100,20 @@ scsynth with low latency inside a web page.
 
 **Advanced**
 
-| Member                                    | Description                                                  |
-| ----------------------------------------- | ------------------------------------------------------------ |
-| [`bufferConstants`](#bufferconstants)     | Buffer layout constants from the WASM build.                 |
-| [`initTime`](#inittime)                   | NTP time (seconds since 1900) when the AudioContext started. |
-| [`mode`](#mode)                           | Active transport mode ('sab' or 'postMessage').              |
-| [`ringBufferBase`](#ringbufferbase)       | Ring buffer base offset in SharedArrayBuffer.                |
-| [`sharedBuffer`](#sharedbuffer)           | The SharedArrayBuffer (SAB mode) or null (postMessage mode). |
-| [`getLoadedBuffers()`](#getloadedbuffers) | Get info about all loaded audio buffers.                     |
-| [`getSystemReport()`](#getsystemreport)   | Get a comprehensive system performance report.               |
-| [`nextNodeId()`](#nextnodeid)             | Get the next unique node ID.                                 |
-| [`getRawTreeSchema()`](#getrawtreeschema) | Get schema describing the raw flat node tree structure.      |
-| [`getTreeSchema()`](#gettreeschema)       | Get schema describing the hierarchical node tree structure.  |
+| Member                                    | Description                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [`bufferConstants`](#bufferconstants)     | Buffer layout constants from the WASM build.                                               |
+| [`initTime`](#inittime)                   | NTP time (seconds since 1900) when the AudioContext started.                               |
+| [`mode`](#mode)                           | Active transport mode ('sab' or 'postMessage').                                            |
+| [`ringBufferBase`](#ringbufferbase)       | Ring buffer base offset in SharedArrayBuffer.                                              |
+| [`sharedBuffer`](#sharedbuffer)           | The SharedArrayBuffer (SAB mode) or null (postMessage mode).                               |
+| [`getEngineState()`](#getenginestate)     | Returns the current engine lifecycle state.                                                |
+| [`getLoadedBuffers()`](#getloadedbuffers) | Get info about all loaded audio buffers.                                                   |
+| [`getSystemReport()`](#getsystemreport)   | Get a comprehensive system performance report.                                             |
+| [`isRunning()`](#isrunning)               | Returns true if the engine has finished booting and is ready to send and receive messages. |
+| [`nextNodeId()`](#nextnodeid)             | Get the next unique node ID.                                                               |
+| [`getRawTreeSchema()`](#getrawtreeschema) | Get schema describing the raw flat node tree structure.                                    |
+| [`getTreeSchema()`](#gettreeschema)       | Get schema describing the hierarchical node tree structure.                                |
 
 #### Examples
 
@@ -523,6 +525,27 @@ Get number of audio frames captured so far.
 
 `number`
 
+##### getEngineState()
+
+> **getEngineState**(): `"running"` | `"stopped"` | `"booting"`
+
+Returns the current engine lifecycle state.
+
+One of:
+
+* `'stopped'` — before `init()` or after `shutdown()`/`destroy()`.
+* `'booting'` — while `init()` is in progress.
+* `'running'` — after `init()` resolves and before any teardown.
+
+Mirrors the C++ `SupersonicEngine::engineState()` accessor. The C++
+enum also has `'restarting'` and `'error'` states that the web runtime
+does not currently distinguish — `recover()` and `resume()` do not
+surface a `'restarting'` state from JS.
+
+###### Returns
+
+`"running"` | `"stopped"` | `"booting"`
+
 ##### getInfo()
 
 > **getInfo**(): [`SuperSonicInfo`](#supersonicinfo)
@@ -723,6 +746,21 @@ await sonic.init();
 > **isCaptureEnabled**(): `boolean`
 
 Check if audio capture is currently enabled.
+
+###### Returns
+
+`boolean`
+
+##### isRunning()
+
+> **isRunning**(): `boolean`
+
+Returns true if the engine has finished booting and is ready to send
+and receive messages.
+
+Mirrors the C++ `SupersonicEngine::isRunning()` accessor; returns the
+same value as the existing `initialized` getter, exposed as a method
+to match the C++ API shape.
 
 ###### Returns
 

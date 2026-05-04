@@ -617,6 +617,20 @@ export class SuperSonic {
 
   get initialized() { return this.#initialized; }
   get initializing() { return this.#initializing; }
+
+  // Mirrors C++ SupersonicEngine::isRunning(). Same value as the
+  // `initialized` getter, exposed as a method to match the C++ API shape.
+  isRunning() { return this.#initialized; }
+
+  // Mirrors C++ SupersonicEngine::engineState(). Returns 'stopped',
+  // 'booting', or 'running'. The C++ enum also has 'restarting' and 'error'
+  // values that JS does not currently distinguish — calls to recover/resume
+  // do not surface a separate 'restarting' state from JS.
+  getEngineState() {
+    if (this.#initializing) return 'booting';
+    if (this.#initialized) return 'running';
+    return 'stopped';
+  }
   get audioContext() { return this.#audioContext; }
   get mode() { return this.#config.mode; }
   get bufferConstants() { return this.#metricsReader.bufferConstants; }

@@ -1464,6 +1464,35 @@ export class SuperSonic {
   reload(): Promise<boolean>;
 
   // ──────────────────────────────────────────────────────────────────────────
+  // State observation
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Returns true if the engine has finished booting and is ready to send
+   * and receive messages.
+   *
+   * Mirrors the C++ `SupersonicEngine::isRunning()` accessor; returns the
+   * same value as the existing `initialized` getter, exposed as a method
+   * to match the C++ API shape.
+   */
+  isRunning(): boolean;
+
+  /**
+   * Returns the current engine lifecycle state.
+   *
+   * One of:
+   *   - `'stopped'` — before `init()` or after `shutdown()`/`destroy()`.
+   *   - `'booting'` — while `init()` is in progress.
+   *   - `'running'` — after `init()` resolves and before any teardown.
+   *
+   * Mirrors the C++ `SupersonicEngine::engineState()` accessor. The C++
+   * enum also has `'restarting'` and `'error'` states that the web runtime
+   * does not currently distinguish — `recover()` and `resume()` do not
+   * surface a `'restarting'` state from JS.
+   */
+  getEngineState(): 'stopped' | 'booting' | 'running';
+
+  // ──────────────────────────────────────────────────────────────────────────
   // OSC Messaging
   // ──────────────────────────────────────────────────────────────────────────
 
