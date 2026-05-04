@@ -28,6 +28,12 @@ extern "C" {
     // Declared extern "C" because init_memory() references it from an extern "C" block.
     void* g_external_shared_memory = nullptr;
 
+    // Override for the metrics pointer. When non-null, init_memory() uses
+    // this address for the global metrics pointer instead of the in-band slot
+    // inside ring_buffer_storage. Set by the engine after creating its public
+    // POSIX shm segment so Sonic Pi can observe metrics directly.
+    extern PerformanceMetrics* g_external_metrics;
+
     void destroy_world();
     void rebuild_world(double sample_rate);
 }
@@ -776,11 +782,17 @@ void SupersonicEngine::init(const Config& cfg) {
                 cfg.udpPort, cfg.numControlBusChannels);
             // Tell init_memory()/World_New to reuse this instead of creating its own
             g_external_shared_memory = mShmemCreator.get();
+            // Redirect the metrics pointer into the public segment so external
+            // observers (Sonic Pi) can read it directly via shm.
+            g_external_metrics = mShmemCreator->get_metrics();
         } catch (const std::exception& e) {
             fprintf(stderr, "[supersonic] shared memory creation failed: %s\n", e.what());
             fflush(stderr);
             mShmemCreator.reset();
+            g_external_metrics = nullptr;
         }
+    } else {
+        g_external_metrics = nullptr;
     }
 
     // -- Initialise scsynth World ------------------------------------------
@@ -814,7 +826,12 @@ void SupersonicEngine::init(const Config& cfg) {
     // Derive pointers into ring_buffer_storage for worker threads
     uint8_t* base = ring_buffer_storage;
     ControlPointers*    ctrl = reinterpret_cast<ControlPointers*>(base + CONTROL_START);
-    mMetrics                 = reinterpret_cast<PerformanceMetrics*>(base + METRICS_START);
+    // Workers write metrics into the public POSIX shm segment when one was
+    // created, so external observers (Sonic Pi) read the same struct without
+    // OSC roundtrips. Falls back to the in-band slot for headless tests.
+    mMetrics                 = mShmemCreator
+                             ? mShmemCreator->get_metrics()
+                             : reinterpret_cast<PerformanceMetrics*>(base + METRICS_START);
     PerformanceMetrics* met  = mMetrics;
 
     // -- Prescheduler -------------------------------------------------------

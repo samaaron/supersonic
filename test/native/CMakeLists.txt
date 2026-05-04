@@ -30,6 +30,7 @@ add_executable(SuperSonicNativeTests
     test_lifecycle_leaks.cpp
     test_callbacks.cpp
     test_metrics.cpp
+    test_metrics_shm.cpp
     test_node_tree_mirror.cpp
     test_osc_codec.cpp
     test_load_sample.cpp

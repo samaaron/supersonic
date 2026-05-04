@@ -116,6 +116,12 @@ extern "C" {
     void* g_rt_pool_ptr = nullptr;
     size_t g_rt_pool_size = 0;
 
+    // Optional override for the metrics pointer. When set (native backend with
+    // a public POSIX shm segment), init_memory() uses this address instead of
+    // the in-band slot inside ring_buffer_storage. Lets Sonic Pi observe
+    // metrics directly via the public shared segment without OSC roundtrips.
+    PerformanceMetrics* g_external_metrics = nullptr;
+
     uint8_t* shared_memory = nullptr;
     ControlPointers* control = nullptr;
     PerformanceMetrics* metrics = nullptr;
@@ -273,7 +279,13 @@ extern "C" {
     void init_memory(double sample_rate) {
         shared_memory = ring_buffer_storage;
         control = reinterpret_cast<ControlPointers*>(shared_memory + CONTROL_START);
-        metrics = reinterpret_cast<PerformanceMetrics*>(shared_memory + METRICS_START);
+        // Metrics: prefer the external-shm slot when one was set by the host
+        // (native engine with public POSIX shm segment). Falls back to the
+        // in-band slot inside ring_buffer_storage on web (and on native if no
+        // shm creator was constructed, e.g. headless tests with udpPort = 0).
+        metrics = g_external_metrics
+                ? g_external_metrics
+                : reinterpret_cast<PerformanceMetrics*>(shared_memory + METRICS_START);
 
         // Timing pointers
         ntp_start_time = reinterpret_cast<double*>(shared_memory + NTP_START_TIME_START);
