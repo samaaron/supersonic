@@ -1062,6 +1062,18 @@ void OscUdpServer::run() {
     }
 
     while (!threadShouldExit()) {
+        // Wait up to 100ms for a packet, then loop to re-check
+        // threadShouldExit(). A bare non-blocking read here pegged a CPU
+        // core; a fully blocking read won't wake on shutdown because
+        // ::shutdown() on macOS doesn't reliably unblock a recvfrom on
+        // a UDP socket (see JUCE comment in juce_Socket.cpp::closeSocket
+        // about shutdown not unblocking select on macOS — the same
+        // applies to recvfrom in practice). The timed wait + non-blocking
+        // read pattern gives ~0% idle CPU and ≤100ms shutdown latency.
+        const int ready = mSocket->waitUntilReady(true, 100);
+        if (ready < 0) break;       // socket error / shutdown
+        if (ready == 0) continue;   // timeout — re-check threadShouldExit
+
         juce::String senderIP;
         int senderPort = 0;
 
