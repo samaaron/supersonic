@@ -1189,7 +1189,10 @@ void PSinGrain_next(PSinGrain* unit, int inNumSamples) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+// Phase accumulator wraps intentionally — the wrapped bit pattern is the
+// oscillator's lookup-table index.
 template <typename OscType, int FreqInputIndex>
+SC_NO_SANITIZE("signed-integer-overflow")
 force_inline void Osc_ikk_perform(OscType* unit, const float* table0, const float* table1, int inNumSamples) {
     float* out = ZOUT(0);
     float freqin = ZIN0(FreqInputIndex);
@@ -2386,6 +2389,8 @@ void Saw_Ctor(Saw* unit) {
     unit->m_y1 = -0.46f;
 }
 
+// Phase accumulator wraps intentionally (see Osc_ikk_perform).
+SC_NO_SANITIZE("signed-integer-overflow")
 void Saw_next(Saw* unit, int inNumSamples) {
     float* out = ZOUT(0);
     float freqin = ZIN0(0);

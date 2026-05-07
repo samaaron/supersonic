@@ -23,6 +23,7 @@
 
 #include "SC_Types.h"
 #include "SC_Endian.h"
+#include "function_attributes.h"
 
 // These hash functions are among the best there are in terms of both speed and quality.
 // A good hash function makes a lot of difference.
@@ -109,6 +110,9 @@ inline int64 Hash64(int64 inKey) {
     return (int64)hash;
 }
 
+// Hash mixing relies on wrap as part of the algorithm; Hash(int32) above
+// uses unsigned arithmetic internally and the additions here just feed it.
+SC_NO_SANITIZE("signed-integer-overflow")
 inline int32 Hash(const int32* inKey, int32 inLength) {
     // one-at-a-time hashing of a string of int32's.
     // uses Thomas Wang's integer hash for the combining step.
@@ -125,6 +129,7 @@ const int32 kLASTCHAR = (int32)0xFF000000;
 const int32 kLASTCHAR = (int32)0x000000FF;
 #endif
 
+SC_NO_SANITIZE("signed-integer-overflow")
 inline int32 Hash(const int32* inKey) {
     // hashing of a string of int32's.
     // uses Thomas Wang's integer hash for the combining step.

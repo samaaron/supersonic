@@ -27,6 +27,7 @@ count leading zeroes function and those that can be derived from it
 #pragma once
 
 #include "SC_Types.h"
+#include "function_attributes.h"
 
 #ifdef __MWERKS__
 
@@ -84,6 +85,10 @@ static __inline__ int32 CLZ(int32 arg) { return __builtin_clz(arg); }
 #endif
 
 // count trailing zeroes
+// x - 1 wraps when x == INT32_MIN; the wrapped bit pattern is exactly what
+// the algorithm wants (it AND-masks with ~x). Defined on every two's-
+// complement target.
+SC_NO_SANITIZE("signed-integer-overflow")
 SC_INLINE int32 CTZ(int32 x) { return 32 - CLZ(~x & (x - 1)); }
 
 // count leading ones

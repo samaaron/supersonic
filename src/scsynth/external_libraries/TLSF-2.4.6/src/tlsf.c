@@ -369,6 +369,13 @@ static __inline__ void MAPPING_INSERT(size_t _r, int *_fl, int *_sl)
 }
 
 
+/* no_sanitize: ~0 << *_sl is a left-shift of -1 (signed int), which is UB
+ * per C standard but a defined idiom on every two's-complement target —
+ * masking off the low bits of an all-ones bitmap. UBSan flags it; the
+ * arithmetic result is what TLSF wants. */
+#if defined(__clang__) || defined(__GNUC__)
+__attribute__((no_sanitize("undefined")))
+#endif
 static __inline__ bhdr_t *FIND_SUITABLE_BLOCK(tlsf_t * _tlsf, int *_fl, int *_sl)
 {
     u32_t _tmp = _tlsf->sl_bitmap[*_fl] & (~0 << *_sl);

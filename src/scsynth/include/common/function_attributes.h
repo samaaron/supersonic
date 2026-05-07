@@ -85,6 +85,15 @@
 #    define __restrict__ /* __restrict */
 #endif
 
+// Suppress UBSan/TSan/ASan checks for a function whose UB or race is intentional
+// (hash mixing, oscillator phase wrap, hardware-specific idioms). `what` is the
+// sanitizer subcategory: "signed-integer-overflow", "shift", "undefined", etc.
+#if defined(__clang__) || defined(__GNUC__)
+#    define SC_NO_SANITIZE(what) __attribute__((no_sanitize(what)))
+#else
+#    define SC_NO_SANITIZE(what) /* no_sanitize what */
+#endif
+
 // force inlining in release mode
 #ifndef NDEBUG
 #    define force_inline inline
