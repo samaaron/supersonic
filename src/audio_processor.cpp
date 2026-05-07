@@ -10,6 +10,7 @@
 #include "audio_config.h"
 #include <emscripten/webaudio.h>
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <cstdio>
 #include <cstdarg>
@@ -137,18 +138,19 @@ extern "C" {
     // Events stored in pool (never copied), queue only stores small indices
     BundleScheduler g_scheduler;
 
-    // Ring buffer sequence tracking — reset on drain to suppress spurious gap warnings
-    int32_t last_in_sequence = -1;
-
-    // Process-audio state that must be reset on cold swap
-    uint32_t local_in_peak = 0;
-    uint32_t local_out_peak = 0;
-    uint32_t local_debug_peak = 0;
-    uint32_t metrics_cycle = 0;
-    uint32_t corruption_count = 0;
-    uint32_t gap_log_count = 0;
-    int late_count = 0;
-    bool logged_buffer_full = false;
+    // File-scope state shared across threads: written by clear_scheduler()
+    // on the control thread, read/updated by process_audio() on the audio
+    // thread. Relaxed ordering — these are diagnostic counters with no
+    // cross-variable invariants.
+    std::atomic<int32_t> last_in_sequence{-1};
+    std::atomic<uint32_t> local_in_peak{0};
+    std::atomic<uint32_t> local_out_peak{0};
+    std::atomic<uint32_t> local_debug_peak{0};
+    std::atomic<uint32_t> metrics_cycle{0};
+    std::atomic<uint32_t> corruption_count{0};
+    std::atomic<uint32_t> gap_log_count{0};
+    std::atomic<int> late_count{0};
+    std::atomic<bool> logged_buffer_full{false};
 
     // Time conversion constants - Based on SC_CoreAudio.cpp
     double g_osc_increment_numerator = 0.0;  // Buffer length in NTP units
@@ -238,21 +240,17 @@ extern "C" {
     // so new messages written after purge() resolves are not affected.
     EMSCRIPTEN_KEEPALIVE
     void clear_scheduler() {
-        g_scheduler.Clear();
+        last_in_sequence.store(-1, std::memory_order_relaxed);
+        local_in_peak.store(0, std::memory_order_relaxed);
+        local_out_peak.store(0, std::memory_order_relaxed);
+        local_debug_peak.store(0, std::memory_order_relaxed);
+        metrics_cycle.store(0, std::memory_order_relaxed);
+        corruption_count.store(0, std::memory_order_relaxed);
+        gap_log_count.store(0, std::memory_order_relaxed);
+        late_count.store(0, std::memory_order_relaxed);
+        logged_buffer_full.store(false, std::memory_order_relaxed);
         update_scheduler_depth_metric(0);
-        // Reset sequence tracking so the next message after the ring buffer
-        // drain doesn't trigger a spurious gap warning.
-        last_in_sequence = -1;
-        // Reset process-audio state that would otherwise carry stale values
-        // across cold swaps (e.g. logged_buffer_full would suppress all future logs)
-        local_in_peak = 0;
-        local_out_peak = 0;
-        local_debug_peak = 0;
-        metrics_cycle = 0;
-        corruption_count = 0;
-        gap_log_count = 0;
-        late_count = 0;
-        logged_buffer_full = false;
+        g_scheduler.RequestClear();
     }
 
     // RT-safe bundle scheduling - no malloc!
@@ -545,7 +543,7 @@ extern "C" {
         supersonic_heap_destroy();
         g_scheduler.Clear();
         update_scheduler_depth_metric(0);
-        last_in_sequence = -1;
+        last_in_sequence.store(-1, std::memory_order_relaxed);
     }
 
     void rebuild_world(double sample_rate) {
@@ -569,6 +567,8 @@ extern "C" {
             return false;
         }
 
+        g_scheduler.DrainPendingClear();
+
         // Calculate current NTP time from components
         // currentNTP = audioContextTime + ntp_start + (drift_us/1000000) + (global_ms/1000)
         // Read ntp_start_time directly from shared memory every frame
@@ -591,26 +591,32 @@ extern "C" {
             int32_t in_tail = control->in_tail.load(std::memory_order_relaxed);
             uint32_t in_used = (in_head - in_tail + IN_BUFFER_SIZE) % IN_BUFFER_SIZE;
             metrics->in_buffer_used_bytes.store(in_used, std::memory_order_relaxed);
-            if (in_used > local_in_peak) local_in_peak = in_used;
+            if (in_used > local_in_peak.load(std::memory_order_relaxed)) {
+                local_in_peak.store(in_used, std::memory_order_relaxed);
+            }
 
             int32_t out_head = control->out_head.load(std::memory_order_relaxed);
             int32_t out_tail = control->out_tail.load(std::memory_order_relaxed);
             uint32_t out_used = (out_head - out_tail + OUT_BUFFER_SIZE) % OUT_BUFFER_SIZE;
             metrics->out_buffer_used_bytes.store(out_used, std::memory_order_relaxed);
-            if (out_used > local_out_peak) local_out_peak = out_used;
+            if (out_used > local_out_peak.load(std::memory_order_relaxed)) {
+                local_out_peak.store(out_used, std::memory_order_relaxed);
+            }
 
             int32_t debug_head = control->debug_head.load(std::memory_order_relaxed);
             int32_t debug_tail = control->debug_tail.load(std::memory_order_relaxed);
             uint32_t debug_used = (debug_head - debug_tail + DEBUG_BUFFER_SIZE) % DEBUG_BUFFER_SIZE;
             metrics->debug_buffer_used_bytes.store(debug_used, std::memory_order_relaxed);
-            if (debug_used > local_debug_peak) local_debug_peak = debug_used;
+            if (debug_used > local_debug_peak.load(std::memory_order_relaxed)) {
+                local_debug_peak.store(debug_used, std::memory_order_relaxed);
+            }
 
             // Write peaks to atomics every 16 cycles (~43ms at 48kHz/128)
-            if (++metrics_cycle >= 16) {
-                metrics_cycle = 0;
-                metrics->in_buffer_peak_bytes.store(local_in_peak, std::memory_order_relaxed);
-                metrics->out_buffer_peak_bytes.store(local_out_peak, std::memory_order_relaxed);
-                metrics->debug_buffer_peak_bytes.store(local_debug_peak, std::memory_order_relaxed);
+            if (metrics_cycle.fetch_add(1, std::memory_order_relaxed) + 1 >= 16) {
+                metrics_cycle.store(0, std::memory_order_relaxed);
+                metrics->in_buffer_peak_bytes.store(local_in_peak.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                metrics->out_buffer_peak_bytes.store(local_out_peak.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                metrics->debug_buffer_peak_bytes.store(local_debug_peak.load(std::memory_order_relaxed), std::memory_order_relaxed);
             }
         }
 
@@ -642,10 +648,10 @@ extern "C" {
 
                 // Validate message
                 if (header.magic != MESSAGE_MAGIC) {
-                    if (corruption_count < 5) {
+                    if (corruption_count.load(std::memory_order_relaxed) < 5) {
                         worklet_debug("ERROR: Invalid magic at tail=%d head=%d: got 0x%08X expected 0x%08X (len=%u seq=%u)",
                                      in_tail, in_head, header.magic, MESSAGE_MAGIC, header.length, header.sequence);
-                        corruption_count++;
+                        corruption_count.fetch_add(1, std::memory_order_relaxed);
                     }
                     control->in_tail.store((in_tail + 1) % IN_BUFFER_SIZE, std::memory_order_release);
                     metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
@@ -673,23 +679,23 @@ extern "C" {
                 }
 
                 // Gap detection: check for missing messages
-                // last_in_sequence is file-scope (reset by clear_scheduler on drain)
-                if (last_in_sequence >= 0) {
-                    int32_t expected = (last_in_sequence + 1) & 0x7FFFFFFF;  // Handle wrap at INT32_MAX
+                int32_t prev_seq = last_in_sequence.load(std::memory_order_relaxed);
+                if (prev_seq >= 0) {
+                    int32_t expected = (prev_seq + 1) & 0x7FFFFFFF;  // Handle wrap at INT32_MAX
                     if ((int32_t)header.sequence != expected) {
                         // Gap detected - messages were lost
                         int32_t gap_size = ((int32_t)header.sequence - expected + 0x80000000) & 0x7FFFFFFF;
                         if (gap_size > 0 && gap_size < 1000) {  // Sanity check - ignore huge gaps (likely reset)
                             metrics->messages_sequence_gaps.fetch_add(gap_size, std::memory_order_relaxed);
-                            if (gap_log_count < 5) {
+                            if (gap_log_count.load(std::memory_order_relaxed) < 5) {
                                 worklet_debug("WARNING: Sequence gap detected: expected %d, got %u (gap of %d)",
                                              expected, header.sequence, gap_size);
-                                gap_log_count++;
+                                gap_log_count.fetch_add(1, std::memory_order_relaxed);
                             }
                         }
                     }
                 }
-                last_in_sequence = (int32_t)header.sequence;
+                last_in_sequence.store((int32_t)header.sequence, std::memory_order_relaxed);
 
                 // Use static buffer - local 768KB buffer would overflow WASM stack!
                 char* osc_buffer = static_osc_buffer;
@@ -736,7 +742,7 @@ extern "C" {
                         if (g_scheduler.IsFull()) {
                             // Scheduler full - leave message in ring buffer for next callback
                             // Reset sequence tracking so next iteration processes this message correctly
-                            last_in_sequence = (header.sequence > 0) ? (int32_t)(header.sequence - 1) : -1;
+                            last_in_sequence.store((header.sequence > 0) ? (int32_t)(header.sequence - 1) : -1, std::memory_order_relaxed);
                             worklet_debug("INFO: Scheduler full (%d events), backpressure - message stays in ring buffer",
                                          g_scheduler.Size());
                             break;  // Exit message processing loop
@@ -820,7 +826,7 @@ extern "C" {
                     // Values over 10 seconds indicate a systemic problem, not individual lateness
                     double raw_late_ms = -time_diff_ms;
                     int32_t late_ms = (raw_late_ms > 10000.0) ? 10000 : (int32_t)raw_late_ms;
-                    late_count++;
+                    int late_now = late_count.fetch_add(1, std::memory_order_relaxed) + 1;
                     metrics->scheduler_lates.fetch_add(1, std::memory_order_relaxed);
 
                     // Track max lateness (compare-exchange loop for atomic max)
@@ -839,14 +845,14 @@ extern "C" {
                         metrics->process_count.load(std::memory_order_relaxed),
                         std::memory_order_relaxed);
 
-                    if (late_count == 1 || late_count % 100 == 0) {
+                    if (late_now == 1 || late_now % 100 == 0) {
                         // Extract OSC address from first message in bundle
                         const char* addr = "?";
                         const uint8_t* bdata = g_scheduler.DataPool() + bundle->mDataOffset;
                         if (bundle->mSize > 20) {
                             addr = reinterpret_cast<const char*>(bdata + 20);
                         }
-                        worklet_debug("LATE: %.1fms %s (count=%d)", -time_diff_ms, addr, late_count);
+                        worklet_debug("LATE: %.1fms %s (count=%d)", -time_diff_ms, addr, late_now);
                     }
                 }
 
@@ -922,9 +928,9 @@ extern "C" {
                     audio_capture->head.store(head + frames_to_copy, std::memory_order_release);
                 } else {
                     // Buffer full - log once and stop capturing
-                    if (!logged_buffer_full) {
+                    if (!logged_buffer_full.load(std::memory_order_relaxed)) {
                         worklet_debug("[AudioCapture] Buffer full (%u frames), capture stopped", AUDIO_CAPTURE_FRAMES);
-                        logged_buffer_full = true;
+                        logged_buffer_full.store(true, std::memory_order_relaxed);
                     }
                 }
             }

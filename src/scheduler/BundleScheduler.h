@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include "../scsynth/server/OSC_Packet.h"
@@ -328,4 +329,25 @@ public:
         mPool[MAX_SCHEDULED_BUNDLES - 1].mNextFree = -1;
         mFreeHead = 0;
     }
+
+    // Cross-thread clear handshake: Clear() above is not safe to call
+    // concurrently with NextTime/Add/Remove on the audio thread. Instead the
+    // control thread calls RequestClear() (atomic, lock-free), and the audio
+    // thread calls DrainPendingClear() at a safe point in its callback.
+    // Release on the request pairs with acquire on the drain so the control
+    // thread's prior writes (e.g. metrics counter resets) are visible after
+    // the drain returns true.
+    void RequestClear() { mClearPending.store(true, std::memory_order_release); }
+
+    // Returns true if a clear was pending and has now been executed.
+    bool DrainPendingClear() {
+        if (mClearPending.exchange(false, std::memory_order_acquire)) {
+            Clear();
+            return true;
+        }
+        return false;
+    }
+
+private:
+    std::atomic<bool> mClearPending{false};
 };
