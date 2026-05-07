@@ -46,7 +46,10 @@ bool UnitDef_Create(const char* inName, size_t inAllocSize, UnitCtorFunc inCtor,
     str4cpy(unitDef->mUnitDefName, inName);
     unitDef->mHash = Hash(unitDef->mUnitDefName);
 
-    unitDef->mAllocSize = inAllocSize;
+    // Unit_New bump-allocates per-instance Wire**/float** arrays directly
+    // after the Unit struct; unrounded mAllocSize lands those 8-byte
+    // pointers at 4-byte offsets on 64-bit targets.
+    unitDef->mAllocSize = sc_align_up(inAllocSize, alignof(void*));
     unitDef->mUnitCtorFunc = inCtor;
     unitDef->mUnitDtorFunc = inDtor;
 

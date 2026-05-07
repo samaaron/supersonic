@@ -73,6 +73,12 @@ typedef union {
 #ifdef __cplusplus
 const unsigned int kSCNameLen = 8;
 const unsigned int kSCNameByteLen = 8 * sizeof(int32);
+
+// Round n up to the next multiple of a (a must be a power of two). Used by
+// the bump allocators in SC_UnitDef / SC_GraphDef / SC_Node / SendReply_Ctor
+// to keep 8-byte pointers and 4-byte floats from landing at sub-aligned
+// offsets within packed-buffer layouts.
+constexpr size_t sc_align_up(size_t n, size_t a) { return (n + a - 1) & ~(a - 1); }
 #else
 #    define kSCNameLen 8
 #    define kSCNameByteLen (8 * sizeof(int32))

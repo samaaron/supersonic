@@ -166,7 +166,10 @@ void UnitSpec_Read(UnitSpec* inUnitSpec, const char*& buffer, const char* end, i
         OutputSpec_Read(inUnitSpec->mOutputSpec + i, buffer, end);
     }
     uint64 numPorts = inUnitSpec->mNumInputs + inUnitSpec->mNumOutputs;
-    inUnitSpec->mAllocSize = inUnitSpec->mUnitDef->mAllocSize + numPorts * (sizeof(Wire*) + sizeof(float*));
+    // Pointer-align so consecutive Units in the bump-allocated graph block
+    // stay aligned (see SC_UnitDef.cpp).
+    size_t raw = inUnitSpec->mUnitDef->mAllocSize + numPorts * (sizeof(Wire*) + sizeof(float*));
+    inUnitSpec->mAllocSize = sc_align_up(raw, alignof(void*));
 }
 
 GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, GraphDef* inList, int32 inVersion);
@@ -270,25 +273,27 @@ inline static void calcParamSpecs(GraphDef* graphDef, const char*& buffer, const
     }
 }
 
+// The GraphDef block is bump-allocated as a sequence of sub-arrays (Wires,
+// Unit*, controls, float*, ints, …). Each sub-array's start must be at
+// least pointer-aligned: a section of N×4-byte ints would otherwise leave
+// the bump pointer 4-aligned, misaligning the next section's 8-byte
+// pointers.
 static void GraphDef_SetAllocSizes(GraphDef* graphDef) {
-    graphDef->mWiresAllocSize = graphDef->mNumWires * sizeof(Wire);
-    graphDef->mUnitsAllocSize = graphDef->mNumUnitSpecs * sizeof(Unit*);
-    graphDef->mCalcUnitsAllocSize = graphDef->mNumCalcUnits * sizeof(Unit*);
+    constexpr size_t a = alignof(void*);
+    graphDef->mWiresAllocSize           = sc_align_up(graphDef->mNumWires     * sizeof(Wire),    a);
+    graphDef->mUnitsAllocSize           = sc_align_up(graphDef->mNumUnitSpecs * sizeof(Unit*),   a);
+    graphDef->mCalcUnitsAllocSize       = sc_align_up(graphDef->mNumCalcUnits * sizeof(Unit*),   a);
+    graphDef->mControlAllocSize         = sc_align_up(graphDef->mNumControls  * sizeof(float),   a);
+    graphDef->mMapControlsAllocSize     = sc_align_up(graphDef->mNumControls  * sizeof(float*),  a);
+    graphDef->mMapControlRatesAllocSize = sc_align_up(graphDef->mNumControls  * sizeof(int),     a);
+    graphDef->mAudioMapBusOffsetSize    = sc_align_up(graphDef->mNumControls  * sizeof(int32),   a);
 
     graphDef->mNodeDef.mAllocSize += graphDef->mWiresAllocSize;
     graphDef->mNodeDef.mAllocSize += graphDef->mUnitsAllocSize;
     graphDef->mNodeDef.mAllocSize += graphDef->mCalcUnitsAllocSize;
-
-    graphDef->mControlAllocSize = graphDef->mNumControls * sizeof(float);
     graphDef->mNodeDef.mAllocSize += graphDef->mControlAllocSize;
-
-    graphDef->mMapControlsAllocSize = graphDef->mNumControls * sizeof(float*);
     graphDef->mNodeDef.mAllocSize += graphDef->mMapControlsAllocSize;
-
-    graphDef->mMapControlRatesAllocSize = graphDef->mNumControls * sizeof(int);
     graphDef->mNodeDef.mAllocSize += graphDef->mMapControlRatesAllocSize;
-
-    graphDef->mAudioMapBusOffsetSize = graphDef->mNumControls * sizeof(int32);
     graphDef->mNodeDef.mAllocSize += graphDef->mAudioMapBusOffsetSize;
 }
 

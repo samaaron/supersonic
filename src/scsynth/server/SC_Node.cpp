@@ -363,7 +363,10 @@ void Node_SendReply(Node* inNode, int replyID, const char* cmdName, int numArgs,
     // =========================================================================
 
     const int cmdNameSize = strlen(cmdName);
-    void* mem = World_Alloc(world, cmdNameSize + numArgs * sizeof(float));
+    // Floats follow cmdName in the same allocation; pad the string region
+    // so the float region lands on alignof(float).
+    const size_t cmdNamePadded = sc_align_up(cmdNameSize, alignof(float));
+    void* mem = World_Alloc(world, cmdNamePadded + numArgs * sizeof(float));
     if (mem == nullptr)
         return;
 
@@ -371,7 +374,7 @@ void Node_SendReply(Node* inNode, int replyID, const char* cmdName, int numArgs,
     msg.mWorld = world;
     msg.mNodeID = inNode->mID;
     msg.mID = replyID;
-    msg.mValues = (float*)((char*)mem + cmdNameSize);
+    msg.mValues = (float*)((char*)mem + cmdNamePadded);
     memcpy(msg.mValues, values, numArgs * sizeof(float));
     msg.mNumArgs = numArgs;
     msg.mCmdName = (char*)mem;

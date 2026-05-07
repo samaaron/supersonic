@@ -696,14 +696,16 @@ void SendReply_Ctor(SendReply* unit) {
     unit->m_valueSize = unit->mNumInputs - unit->m_cmdNameSize - kVarOffset;
     unit->m_valueOffset = kVarOffset + unit->m_cmdNameSize;
 
-    // allocations
-    const int cmdNameAllocSize = (unit->m_cmdNameSize + 1) * sizeof(char);
-    const int valuesAllocSize = unit->m_valueSize * sizeof(float);
-    char* chunk = (char*)RTAlloc(unit->mWorld, cmdNameAllocSize + valuesAllocSize);
+    // Pad cmdName so unit->m_values lands on alignof(float) regardless of
+    // the OSC address length.
+    const size_t cmdNameAllocSize = (unit->m_cmdNameSize + 1) * sizeof(char);
+    const size_t cmdNamePadded = sc_align_up(cmdNameAllocSize, alignof(float));
+    const size_t valuesAllocSize = unit->m_valueSize * sizeof(float);
+    char* chunk = (char*)RTAlloc(unit->mWorld, cmdNamePadded + valuesAllocSize);
     ClearUnitIfMemFailed(chunk);
 
     unit->m_cmdName = chunk;
-    unit->m_values = (float*)(chunk + cmdNameAllocSize);
+    unit->m_values = (float*)(chunk + cmdNamePadded);
 
     for (int i = 0; i < (int)unit->m_cmdNameSize; i++)
         unit->m_cmdName[i] = (char)IN0(kVarOffset + i);
