@@ -18,6 +18,34 @@ if(BUILD_NIF)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
+# ─── Sanitizers ─────────────────────────────────────────────────────────────
+# Build with -DSUPERSONIC_SANITIZER=<value> in a dedicated build dir.
+#   address  → heap overflow / UAF / double-free / leaks (~2× runtime)
+#   thread   → data races between threads (~5–15× runtime)
+#   undefined→ signed overflow / null deref / misaligned access (~1.5× runtime)
+# ASan and TSan are mutually exclusive (separate binaries). Flags propagate
+# to all FetchContent deps (JUCE / libsndfile / codecs / Catch2) so the
+# sanitizer sees the full heap and thread state. Pair with
+# -DCMAKE_BUILD_TYPE=RelWithDebInfo for symbolicated traces.
+set(_SS_SAN_VALUES "address;thread;undefined;address+undefined;thread+undefined")
+set(SUPERSONIC_SANITIZER "" CACHE STRING
+    "Sanitizer: ${_SS_SAN_VALUES}")
+set_property(CACHE SUPERSONIC_SANITIZER PROPERTY STRINGS "" ${_SS_SAN_VALUES})
+
+if(SUPERSONIC_SANITIZER)
+    if(MSVC)
+        message(FATAL_ERROR "SUPERSONIC_SANITIZER is not supported under MSVC")
+    endif()
+    if(NOT SUPERSONIC_SANITIZER IN_LIST _SS_SAN_VALUES)
+        message(FATAL_ERROR "Unknown SUPERSONIC_SANITIZER: ${SUPERSONIC_SANITIZER}")
+    endif()
+    string(REPLACE "+" "," _SS_SAN_LIST "${SUPERSONIC_SANITIZER}")
+    set(_SS_SAN_FLAGS -fsanitize=${_SS_SAN_LIST} -fno-omit-frame-pointer)
+    message(STATUS "SuperSonic sanitizer: ${SUPERSONIC_SANITIZER}")
+    add_compile_options(${_SS_SAN_FLAGS})
+    add_link_options(${_SS_SAN_FLAGS})
+endif()
+
 # ─── JUCE via FetchContent ────────────────────────────────────────────────────
 include(FetchContent)
 

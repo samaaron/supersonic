@@ -191,6 +191,57 @@ jobs:
           name: supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}
           path: supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}
 
+  # ── Sanitizer builds (ASan+UBSan and TSan) ──────────────────────────────────
+  # Linux only: TSan support is incomplete on Windows, and the sanitizers
+  # exercise the platform-agnostic engine — platform-specific audio backend
+  # paths (CoreAudio, WASAPI) are covered by the juce job above.
+  sanitize:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sanitizer: address+undefined
+            name: asan-ubsan
+          - sanitizer: thread
+            name: tsan
+
+    runs-on: ubuntu-latest
+    name: sanitize-${{ matrix.name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libasound2-dev \
+            libjack-dev \
+            libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxcomposite-dev
+
+      - name: Configure
+        run: |
+          cmake -B build/native-sanitize \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBUILD_TESTS=ON \
+            -DSUPERSONIC_SANITIZER=${{ matrix.sanitizer }}
+
+      - name: Build tests
+        # parallel 2 keeps memory usage in check (instrumented builds are
+        # heavier than Release).
+        run: cmake --build build/native-sanitize --config RelWithDebInfo --parallel 2 --target SuperSonicNativeTests
+
+      - name: Run tests
+        env:
+          # halt_on_error=1 makes the first sanitizer report fatal — without
+          # this UBSan logs and continues, leaving CI green. Local dev can
+          # set =0 to collect every report in one run.
+          ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_leaks=0:symbolize=1"
+          UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1:symbolize=1"
+          TSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:second_deadlock_stack=1:history_size=4"
+        run: ./build/native-sanitize/test/native/SuperSonicNativeTests "~[benchmark]"
+
   # ── Attach artifacts to GitHub Release ──────────────────────────────────────
   release:
     if: startsWith(github.ref, 'refs/tags/')
