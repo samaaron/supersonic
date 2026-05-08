@@ -46,6 +46,9 @@
 #include "supersonic_heap.h"
 #include "supersonic_config.h"
 
+// Thread-local RT guard for allocation detection (read by test binary only)
+#include "rt_alloc.h"
+
 // Forward declarations
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
@@ -877,8 +880,17 @@ extern "C" {
                 }
             }
 
-            // Run scsynth to generate audio (128 samples)
-            World_Run(g_world);
+            // Run scsynth to generate audio (128 samples). Guarded so the
+            // test binary's new/delete hooks count any allocation in the
+            // DSP pass — UGen Calc functions must not allocate. Scoped
+            // tightly to World_Run; synthdef parsing (/d_recv), synth
+            // construction (/s_new), and reply formatting (FIFO Performs
+            // below) are not covered. Dedicated [rt_alloc] tests exercise
+            // those paths explicitly.
+            {
+                rt_alloc::Guard rt_dsp_guard;
+                World_Run(g_world);
+            }
 
             // Process notification FIFOs to send /tr, /n_end, /n_go, etc. messages
             g_world->hw->mTriggers.Perform();
