@@ -127,13 +127,29 @@ void warmup(int blocks = 200) {
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
+// Noinline shims so the compiler can't see the new/delete pair across the
+// function boundary and elide it. C++14 [expr.new]/p10 allows compilers to
+// omit replaceable allocation calls when the result is never observably
+// used; GCC's RelWithDebInfo build does this aggressively, Apple clang
+// does not. Without these shims the self-test passes locally and fails on
+// Linux CI because the allocation never happens.
+#if defined(__clang__) || defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static int* rt_alloc_self_test_alloc() { return new int(42); }
+
+#if defined(__clang__) || defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static void rt_alloc_self_test_free(int* p) { delete p; }
+
 TEST_CASE("RT-alloc: detector counts allocations under guard", "[rt_alloc]") {
     // Self-test — guards against silent breakage of the hooks.
     rt_alloc::reset();
     {
         rt_alloc::Guard g;
-        int* p = new int(42);
-        delete p;
+        int* p = rt_alloc_self_test_alloc();
+        rt_alloc_self_test_free(p);
     }
     CHECK(rt_alloc::g_allocs.load() >= 1);
     CHECK(rt_alloc::g_frees.load() >= 1);
