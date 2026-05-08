@@ -48,10 +48,16 @@ Packet message(const char* address, const char* s) {
 }
 
 Packet messageWithBlob(const char* address, const void* blobData, size_t blobSize) {
+    // memcpy(dst, NULL, 0) is UB by the C standard even when n=0, and
+    // std::vector<T>::data() may return nullptr for an empty vector. Pass
+    // a sentinel so oscpack's blob copy gets a valid (unread) source.
+    static const char kEmptyBlobSentinel = 0;
+    const void* data = blobData ? blobData : &kEmptyBlobSentinel;
+
     char buf[65536];
     osc::OutboundPacketStream s(buf, sizeof(buf));
     s << osc::BeginMessage(address)
-      << osc::Blob(blobData, static_cast<osc::osc_bundle_element_size_t>(blobSize))
+      << osc::Blob(data, static_cast<osc::osc_bundle_element_size_t>(blobSize))
       << osc::EndMessage;
     return streamToPacket(s);
 }
