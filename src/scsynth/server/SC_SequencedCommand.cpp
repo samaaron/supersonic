@@ -476,7 +476,11 @@ void BufZeroCmd::CallDestructor() { this->~BufZeroCmd(); }
 
 bool BufZeroCmd::Stage2() {
     SndBuf* buf = World_GetNRTBuf(mWorld, mBufIndex);
-    memset(buf->data, 0, buf->samples * sizeof(float));
+    // /b_zero on an unallocated buffer leaves data == nullptr and samples == 0.
+    // memset(NULL, 0, 0) is UB by the C standard (memset declares dest nonnull).
+    if (buf->data) {
+        memset(buf->data, 0, buf->samples * sizeof(float));
+    }
     return true;
 }
 
