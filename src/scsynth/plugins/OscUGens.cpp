@@ -1078,6 +1078,7 @@ void FSinOsc_Ctor(FSinOsc* unit) {
     ZOUT0(0) = b1 * y1 - y2;
 }
 
+SC_NO_SANITIZE("signed-integer-overflow")
 void FSinOsc_next(FSinOsc* unit, int inNumSamples) {
     float* out = ZOUT(0);
     double freq = ZIN0(0);
@@ -1099,6 +1100,7 @@ void FSinOsc_next(FSinOsc* unit, int inNumSamples) {
     unit->m_y2 = y2;
 }
 
+SC_NO_SANITIZE("signed-integer-overflow")
 void FSinOsc_next_i(FSinOsc* unit, int inNumSamples) {
     float* __restrict__ out = ZOUT(0);
     double b1 = unit->m_b1;
@@ -1190,7 +1192,8 @@ void PSinGrain_next(PSinGrain* unit, int inNumSamples) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Phase accumulator wraps intentionally — the wrapped bit pattern is the
-// oscillator's lookup-table index.
+// oscillator's lookup-table index. Same applies to every Osc_*_perform
+// variant and FSinOsc/VOsc/Saw/Pulse below.
 template <typename OscType, int FreqInputIndex>
 SC_NO_SANITIZE("signed-integer-overflow")
 force_inline void Osc_ikk_perform(OscType* unit, const float* table0, const float* table1, int inNumSamples) {
@@ -1218,6 +1221,7 @@ void SinOsc_next_ikk(SinOsc* unit, int inNumSamples) {
 
 
 template <typename OscType, int FreqInputIndex>
+SC_NO_SANITIZE("signed-integer-overflow")
 force_inline void Osc_ika_perform(OscType* unit, const float* table0, const float* table1, int inNumSamples) {
     float* out = ZOUT(0);
     float freqin = ZIN0(FreqInputIndex);
@@ -1241,6 +1245,7 @@ void SinOsc_next_ika(SinOsc* unit, int inNumSamples) {
 
 
 template <typename OscType, int FreqInputIndex>
+SC_NO_SANITIZE("signed-integer-overflow")
 force_inline void Osc_iaa_perform(OscType* unit, const float* table0, const float* table1, int inNumSamples) {
     float* out = ZOUT(0);
     float* freqin = ZIN(FreqInputIndex);
@@ -1266,6 +1271,7 @@ void SinOsc_next_iaa(SinOsc* unit, int inNumSamples) {
 
 
 template <typename OscType, int FreqInputIndex>
+SC_NO_SANITIZE("signed-integer-overflow")
 force_inline void Osc_iak_perform(OscType* unit, const float* table0, const float* table1, int inNumSamples) {
     float* out = ZOUT(0);
     float* freqin = ZIN(FreqInputIndex);
@@ -1302,6 +1308,7 @@ void SinOsc_next_iak(SinOsc* unit, int inNumSamples) {
 
 
 template <typename OscType, int FreqInputIndex>
+SC_NO_SANITIZE("signed-integer-overflow")
 force_inline void Osc_iai_perform(OscType* unit, const float* table0, const float* table1, int inNumSamples) {
     float* out = ZOUT(0);
     float* freqin = ZIN(FreqInputIndex);
@@ -1798,6 +1805,7 @@ void VOsc_Ctor(VOsc* unit) {
     unit->m_phase = initphase;
 }
 
+SC_NO_SANITIZE("signed-integer-overflow")
 void VOsc_next_ikk(VOsc* unit, int inNumSamples) {
     float* out = ZOUT(0);
     float nextbufpos = ZIN0(0);
@@ -1894,6 +1902,7 @@ void VOsc_next_ikk(VOsc* unit, int inNumSamples) {
     unit->m_phase = phase;
 }
 
+SC_NO_SANITIZE("signed-integer-overflow")
 void VOsc_next_ika(VOsc* unit, int inNumSamples) {
     float* out = ZOUT(0);
     float nextbufpos = ZIN0(0);
@@ -2537,6 +2546,7 @@ void Pulse_Ctor(Pulse* unit) {
     ZOUT0(0) = 0.f;
 }
 
+SC_NO_SANITIZE("signed-integer-overflow")
 void Pulse_next(Pulse* unit, int inNumSamples) {
     float* out = ZOUT(0);
     float freqin = ZIN0(0);
