@@ -7,6 +7,11 @@
  * explicit Guards in tests below; allocations under the guard bump an
  * atomic counter that must stay at zero.
  *
+ * Tests drive process_audio() directly on the test thread, so they call
+ * fx.stopHeadlessDriver() first — otherwise the autonomous audio thread
+ * would be racing the test thread on every process_audio() invocation
+ * (TSan flagged this on Linux where scheduling actually overlaps).
+ *
  * Catches operator new/delete only — bare malloc from C code isn't
  * intercepted. scsynth's RT path goes through new in supersonic_heap,
  * so most audio-path allocations are covered.
@@ -157,6 +162,7 @@ TEST_CASE("RT-alloc: detector counts allocations under guard", "[rt_alloc]") {
 
 TEST_CASE("RT-alloc: empty world", "[rt_alloc]") {
     EngineFixture fx;
+    fx.stopHeadlessDriver();
     warmup();
 
     auto snap = runGuarded(2000);
@@ -174,6 +180,7 @@ TEST_CASE("RT-alloc: variety of synths in steady state", "[rt_alloc]") {
         fx.send(sNewSustained(def, id++));
     }
 
+    fx.stopHeadlessDriver();
     warmup();
 
     auto snap = runGuarded(2000);
@@ -195,6 +202,7 @@ TEST_CASE("RT-alloc: variety of FX in steady state", "[rt_alloc]") {
         fx.send(sNewSustained(def, id++));
     }
 
+    fx.stopHeadlessDriver();
     warmup();
 
     auto snap = runGuarded(2000);
@@ -218,6 +226,7 @@ TEST_CASE("RT-alloc: many synths spanning multiple types", "[rt_alloc]") {
         fx.send(sNewSustained(def, id++));
     }
 
+    fx.stopHeadlessDriver();
     warmup();
 
     auto snap = runGuarded(2000);
@@ -237,6 +246,7 @@ TEST_CASE("RT-alloc: synth construction inside guarded callback", "[rt_alloc]") 
     EngineFixture fx;
     for (auto def : kSynthDefs) REQUIRE(fx.loadSynthDef(def));
 
+    fx.stopHeadlessDriver();
     warmup();
 
     // Queue all /s_new before entering the guard. process_audio under the
@@ -263,6 +273,7 @@ TEST_CASE("RT-alloc: FX construction inside guarded callback", "[rt_alloc]") {
     EngineFixture fx;
     for (auto def : kFxDefs) REQUIRE(fx.loadSynthDef(def));
 
+    fx.stopHeadlessDriver();
     warmup();
 
     int32_t id = 1400;
@@ -291,6 +302,7 @@ TEST_CASE("RT-alloc: synth /n_free inside guarded callback", "[rt_alloc]") {
         fx.send(sNewSustained(def, id++));
     }
 
+    fx.stopHeadlessDriver();
     warmup();
 
     // Queue all /n_free before guard.
