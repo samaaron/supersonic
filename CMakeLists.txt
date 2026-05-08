@@ -41,6 +41,11 @@ if(SUPERSONIC_SANITIZER)
     endif()
     string(REPLACE "+" "," _SS_SAN_LIST "${SUPERSONIC_SANITIZER}")
     set(_SS_SAN_FLAGS -fsanitize=${_SS_SAN_LIST} -fno-omit-frame-pointer)
+    if(_SS_SAN_LIST MATCHES "undefined")
+        # vptr needs typeinfo for every class with virtuals; SC_AudioDriver
+        # has no key function in our build, so Linux/GCC link fails on it.
+        list(APPEND _SS_SAN_FLAGS -fno-sanitize=vptr)
+    endif()
     message(STATUS "SuperSonic sanitizer: ${SUPERSONIC_SANITIZER}")
     add_compile_options(${_SS_SAN_FLAGS})
     add_link_options(${_SS_SAN_FLAGS})
