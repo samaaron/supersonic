@@ -341,6 +341,13 @@ set(SUPERSONIC_COMPILE_DEFS
     # but the header requires a value.  PORTAUDIO (3) is neutral and includes no
     # platform-specific headers.
     SC_AUDIO_API=3
+
+    # AudioCapture buffer duration. Production default is 1 second (~375KB);
+    # test builds bump it to give the scheduling-jitter / audio-capture tests
+    # enough samples for stable percentile statistics. The same value must
+    # propagate to every TU that includes shared_memory.h, so it lives here
+    # rather than as a per-target compile definition.
+    SUPERSONIC_AUDIO_CAPTURE_SECONDS=$<IF:$<BOOL:${BUILD_TESTS}>,10,1>
 )
 
 # ─── TLSF memory allocator (for scope buffer pool in shared memory) ─────────

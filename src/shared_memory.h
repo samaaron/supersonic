@@ -49,10 +49,16 @@ constexpr uint32_t NODE_TREE_ENTRY_SIZE = 72;  // 6 x int32 (24) + def_name (32)
 constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MIRROR_MAX_NODES * NODE_TREE_ENTRY_SIZE); // ~57KB
 
 // Audio capture configuration (for testing - captures audio output to SharedArrayBuffer)
-// 1 second at 48kHz stereo = 96000 samples * 4 bytes = ~375KB
+// Production default: 1 second at 48kHz stereo = ~375KB. The duration is
+// override-able at compile time via -DSUPERSONIC_AUDIO_CAPTURE_SECONDS so the
+// test build can carry a much larger buffer (enables p99 scheduling-jitter
+// statistics over 100+ bundles) without inflating the production binary.
 constexpr uint32_t AUDIO_CAPTURE_SAMPLE_RATE = 48000;
 constexpr uint32_t AUDIO_CAPTURE_CHANNELS = 2;
-constexpr uint32_t AUDIO_CAPTURE_SECONDS = 1;
+#ifndef SUPERSONIC_AUDIO_CAPTURE_SECONDS
+#    define SUPERSONIC_AUDIO_CAPTURE_SECONDS 1
+#endif
+constexpr uint32_t AUDIO_CAPTURE_SECONDS = SUPERSONIC_AUDIO_CAPTURE_SECONDS;
 constexpr uint32_t AUDIO_CAPTURE_FRAMES = AUDIO_CAPTURE_SAMPLE_RATE * AUDIO_CAPTURE_SECONDS;
 constexpr uint32_t AUDIO_CAPTURE_HEADER_SIZE = 16; // enabled (4) + head (4) + sample_rate (4) + channels (4)
 constexpr uint32_t AUDIO_CAPTURE_DATA_SIZE = AUDIO_CAPTURE_FRAMES * AUDIO_CAPTURE_CHANNELS * sizeof(float);
