@@ -1780,6 +1780,52 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     }
     std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
 
+    // Validate names against the active driver via planDeviceSwitch.
+    // Unresolved names refuse the swap; a cold-init resolution sets
+    // crossDriver for the setCurrentAudioDeviceType call below.
+    bool        crossDriver       = false;
+    std::string crossDriverTarget;
+    if (mDeviceManager) {
+        std::string juceCurrentType;
+        if (auto* dev = mDeviceManager->getCurrentAudioDevice())
+            juceCurrentType = dev->getTypeName().toStdString();
+        else
+            juceCurrentType = mDeviceManager->getCurrentAudioDeviceType().toStdString();
+
+        std::vector<std::pair<std::string, std::string>> deviceTable;
+        for (auto& d : listDevices(false))
+            deviceTable.emplace_back(d.typeName, d.name);
+
+        auto considerName = [&](const std::string& name) -> std::string {
+            if (name.empty() || name == "__system__" || name == "__none__")
+                return {};
+            auto plan = sonicpi::device::planDeviceSwitch(
+                juceCurrentType, name, deviceTable);
+            if (!plan.deviceFound) {
+                return "device '" + name + "' not available on driver '"
+                     + (juceCurrentType.empty() ? "(none)" : juceCurrentType) + "'";
+            }
+            if (plan.needsTypeSwitch && !crossDriver) {
+                crossDriver       = true;
+                crossDriverTarget = plan.targetDriver;
+                fprintf(stderr,
+                    "[audio-device] cross-driver: '%s' -> '%s' (device '%s')\n",
+                    juceCurrentType.c_str(), crossDriverTarget.c_str(),
+                    name.c_str());
+                fflush(stderr);
+            }
+            return {};
+        };
+        if (auto err = considerName(deviceName); !err.empty()) {
+            result.error = err;
+            return result;
+        }
+        if (auto err = considerName(inputDeviceName); !err.empty()) {
+            result.error = err;
+            return result;
+        }
+    }
+
     // Determine current rate — from device if available, else from config
     double currentRate = 0.0;
     if (mDeviceManager) {
@@ -2147,6 +2193,15 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         // aggregate having a unique name (see AggregateDeviceHelper) so
         // JUCE's setAudioDeviceSetup sees it as a different device and
         // reopens properly.
+
+        if (crossDriver) {
+            // Cold-init: planDeviceSwitch's global lookup resolved the
+            // requested device under a driver JUCE isn't currently on
+            // (or JUCE has no current type). Move the type before the
+            // open so setAudioDeviceSetup sees a valid name.
+            mDeviceManager->setCurrentAudioDeviceType(
+                juce::String(crossDriverTarget), false);
+        }
 
         fprintf(stderr, "[audio-device] calling setAudioDeviceSetup: out='%s' in='%s' sr=%.0f buf=%d\n",
                 setup.outputDeviceName.toRawUTF8(),

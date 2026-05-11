@@ -117,6 +117,49 @@ std::string validateSwapDeviceNames(
     const std::string& inputDeviceName,
     const std::vector<std::string>& visibleDevices);
 
+// A device's location: which AudioIODeviceType owns it, and the
+// canonical (driver-disambiguated) device name. Pure data — no JUCE
+// dependency so it can be returned from a unit-testable helper.
+struct DeviceLocation {
+    std::string driverName;
+    std::string deviceName;
+    bool found = false;
+};
+
+// Find which driver type owns a given device name. The deviceTable is a
+// flat list of (driverName, deviceName) pairs across every available
+// type (callers build this by iterating getAvailableDeviceTypes() +
+// scanForDevices() + getDeviceNames(false)). Match is case-sensitive
+// exact, plus the JUCE "<base> (N)" disambiguation suffix tolerated
+// (matches resolveJuceDeviceName's rules).
+//
+// Returns {found=false} if the name resolves to no known device. The
+// caller should treat that as "validation failure" — a name that
+// doesn't appear under any driver isn't openable.
+DeviceLocation locateDevice(
+    const std::string& deviceName,
+    const std::vector<std::pair<std::string, std::string>>& deviceTable);
+
+// Resolved plan for a switchDevice call. `targetDriver` /
+// `targetDevice` carry the resolved (driver, device) pair; both are
+// empty when deviceFound=false. `needsTypeSwitch` is true only when
+// the engine must call setCurrentAudioDeviceType before opening —
+// currently that's the cold-init path (no driver active yet).
+// Runtime device picks resolve strictly within the active driver,
+// so needsTypeSwitch is always false there; an unresolvable name
+// returns deviceFound=false and the caller rejects the swap.
+struct DeviceSwitchPlan {
+    bool        needsTypeSwitch = false;
+    std::string targetDriver;
+    std::string targetDevice;
+    bool        deviceFound = false;
+};
+
+DeviceSwitchPlan planDeviceSwitch(
+    const std::string& currentDriver,
+    const std::string& targetDeviceName,
+    const std::vector<std::pair<std::string, std::string>>& deviceTable);
+
 // Decide scsynth's block size (mBufLength) at boot given the hardware
 // callback buffer size. Matching them means the audio-thread loop
 // processes exactly one scsynth block per HW callback — no prefetch

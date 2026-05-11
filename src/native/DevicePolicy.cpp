@@ -154,6 +154,81 @@ bool deviceNameAcceptable(const std::string& name,
 }
 } // anonymous namespace
 
+DeviceLocation locateDevice(
+        const std::string& deviceName,
+        const std::vector<std::pair<std::string, std::string>>& deviceTable) {
+    DeviceLocation result;
+    if (deviceName.empty()) return result;
+
+    // Exact match wins outright.
+    for (auto& [drv, dev] : deviceTable) {
+        if (dev == deviceName) {
+            result.driverName = drv;
+            result.deviceName = dev;
+            result.found = true;
+            return result;
+        }
+    }
+    // Tolerate JUCE's "<base> (N)" disambiguation suffix on either side.
+    for (auto& [drv, dev] : deviceTable) {
+        if (dev.size() < deviceName.size() + 4) continue;
+        if (dev.compare(0, deviceName.size(), deviceName) != 0) continue;
+        size_t i = deviceName.size();
+        if (dev[i] != ' ' || dev[i + 1] != '(') continue;
+        if (dev.back() != ')') continue;
+        bool digits = false;
+        for (size_t k = i + 2; k + 1 < dev.size(); ++k) {
+            if (dev[k] < '0' || dev[k] > '9') { digits = false; break; }
+            digits = true;
+        }
+        if (digits) {
+            result.driverName = drv;
+            result.deviceName = dev;
+            result.found = true;
+            return result;
+        }
+    }
+    return result;
+}
+
+DeviceSwitchPlan planDeviceSwitch(
+        const std::string& currentDriver,
+        const std::string& targetDeviceName,
+        const std::vector<std::pair<std::string, std::string>>& deviceTable) {
+    DeviceSwitchPlan plan;
+
+    // Empty currentDriver: cold-init / boot. Global lookup;
+    // needsTypeSwitch=true so the caller does
+    // setCurrentAudioDeviceType before opening.
+    if (currentDriver.empty()) {
+        auto loc = locateDevice(targetDeviceName, deviceTable);
+        if (!loc.found) return plan;
+        plan.deviceFound     = true;
+        plan.targetDriver    = loc.driverName;
+        plan.targetDevice    = loc.deviceName;
+        plan.needsTypeSwitch = true;
+        return plan;
+    }
+
+    // Runtime: scope strictly to the active driver. A name that
+    // resolves only under a different driver returns
+    // deviceFound=false and the caller refuses the swap. Cross-
+    // driver transitions are explicit user actions via
+    // /supersonic/devices/mode, never an implicit side effect of
+    // a device pick.
+    std::vector<std::pair<std::string, std::string>> scoped;
+    for (auto& [drv, dev] : deviceTable)
+        if (drv == currentDriver) scoped.emplace_back(drv, dev);
+    auto loc = locateDevice(targetDeviceName, scoped);
+    if (!loc.found) return plan;
+
+    plan.deviceFound     = true;
+    plan.targetDriver    = loc.driverName;
+    plan.targetDevice    = loc.deviceName;
+    plan.needsTypeSwitch = false;
+    return plan;
+}
+
 std::string validateSwapDeviceNames(
         const std::string& deviceName,
         const std::string& inputDeviceName,

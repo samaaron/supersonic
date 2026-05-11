@@ -455,3 +455,208 @@ TEST_CASE("ValidateSwap: 'USB Audio' doesn't false-positive 'USB Audio Pro'",
     auto err = validate("USB Audio", "", {"USB Audio Pro"});
     REQUIRE_FALSE(err.empty());
 }
+
+// =============================================================================
+// locateDevice / planDeviceSwitch
+// =============================================================================
+//
+// locateDevice answers "which AudioIODeviceType owns this device name?"
+// from a flat (driver, device) table. planDeviceSwitch sits above it and
+// returns the resolved (driver, device) pair plus whether the engine must
+// call setCurrentAudioDeviceType before opening — the input to
+// switchDevice's cross-driver branch.
+
+using sonicpi::device::locateDevice;
+using sonicpi::device::planDeviceSwitch;
+using DevTable = std::vector<std::pair<std::string, std::string>>;
+
+TEST_CASE("LocateDevice: empty name returns not-found",
+          "[LocateDevice]") {
+    DevTable table = {{"Windows Audio", "Speakers"}, {"ASIO", "MOTU Pro Audio"}};
+    auto loc = locateDevice("", table);
+    REQUIRE_FALSE(loc.found);
+    REQUIRE(loc.driverName.empty());
+}
+
+TEST_CASE("LocateDevice: empty table returns not-found",
+          "[LocateDevice]") {
+    auto loc = locateDevice("MOTU Pro Audio", {});
+    REQUIRE_FALSE(loc.found);
+}
+
+TEST_CASE("LocateDevice: exact name match returns owning driver",
+          "[LocateDevice]") {
+    DevTable table = {
+        {"Windows Audio", "Speakers (MOTU Pro Audio)"},
+        {"DirectSound",   "Primary Sound Driver"},
+        {"ASIO",          "MOTU Pro Audio"},
+        {"ASIO",          "Ableton Move"},
+    };
+    auto loc = locateDevice("MOTU Pro Audio", table);
+    REQUIRE(loc.found);
+    REQUIRE(loc.driverName == "ASIO");
+    REQUIRE(loc.deviceName == "MOTU Pro Audio");
+}
+
+TEST_CASE("LocateDevice: same base name in two drivers — first wins",
+          "[LocateDevice]") {
+    // First-match-wins is the contract. A device name shared across
+    // drivers resolves to whichever entry appears first in the table.
+    // Callers that need a driver-specific answer scope the table.
+    DevTable table = {
+        {"Windows Audio", "MOTU Pro Audio"},
+        {"ASIO",          "MOTU Pro Audio"},
+    };
+    auto loc = locateDevice("MOTU Pro Audio", table);
+    REQUIRE(loc.found);
+    REQUIRE(loc.driverName == "Windows Audio");
+}
+
+TEST_CASE("LocateDevice: tolerates JUCE '<base> (N)' disambiguation suffix",
+          "[LocateDevice]") {
+    // Two identical USB interfaces — JUCE appends " (2)" to the second.
+    // A caller passing the unsuffixed base name should resolve.
+    DevTable table = {
+        {"Windows Audio", "Speakers (USB Audio)"},
+        {"Windows Audio", "Speakers (USB Audio) (2)"},
+    };
+    auto loc = locateDevice("Speakers (USB Audio) (2)", table);
+    REQUIRE(loc.found);
+    REQUIRE(loc.deviceName == "Speakers (USB Audio) (2)");
+}
+
+TEST_CASE("PlanDeviceSwitch: device on current driver — no type switch",
+          "[PlanDeviceSwitch]") {
+    DevTable table = {
+        {"Windows Audio", "Speakers"},
+        {"ASIO",          "MOTU Pro Audio"},
+    };
+    auto plan = planDeviceSwitch("Windows Audio", "Speakers", table);
+    REQUIRE(plan.deviceFound);
+    REQUIRE_FALSE(plan.needsTypeSwitch);
+    REQUIRE(plan.targetDriver == "Windows Audio");
+    REQUIRE(plan.targetDevice == "Speakers");
+}
+
+TEST_CASE("PlanDeviceSwitch: device only on different driver — refused",
+          "[PlanDeviceSwitch]") {
+    // Runtime invariant: a device name that exists only on a driver
+    // other than currentDriver resolves to deviceFound=false.
+    // Cross-driver transitions are reserved for the explicit driver
+    // selector; planDeviceSwitch does not perform them.
+    DevTable table = {
+        {"Windows Audio", "Speakers"},
+        {"ASIO",          "MOTU Pro Audio"},
+    };
+    auto plan = planDeviceSwitch("Windows Audio", "MOTU Pro Audio", table);
+    REQUIRE_FALSE(plan.deviceFound);
+    REQUIRE_FALSE(plan.needsTypeSwitch);
+    REQUIRE(plan.targetDriver.empty());
+    REQUIRE(plan.targetDevice.empty());
+}
+
+TEST_CASE("PlanDeviceSwitch: unknown device — deviceFound=false",
+          "[PlanDeviceSwitch]") {
+    DevTable table = {{"ASIO", "MOTU Pro Audio"}};
+    auto plan = planDeviceSwitch("ASIO", "Phantom Device", table);
+    REQUIRE_FALSE(plan.deviceFound);
+    REQUIRE_FALSE(plan.needsTypeSwitch);
+    REQUIRE(plan.targetDriver.empty());
+    REQUIRE(plan.targetDevice.empty());
+}
+
+TEST_CASE("PlanDeviceSwitch: empty current driver (cold init) — type switch needed",
+          "[PlanDeviceSwitch]") {
+    // At cold boot the engine has no current type yet; any named device
+    // requires a type switch.
+    DevTable table = {{"ASIO", "MOTU Pro Audio"}};
+    auto plan = planDeviceSwitch("", "MOTU Pro Audio", table);
+    REQUIRE(plan.deviceFound);
+    REQUIRE(plan.needsTypeSwitch);
+    REQUIRE(plan.targetDriver == "ASIO");
+}
+
+TEST_CASE("PlanDeviceSwitch: device exists under current AND another driver — stays on current",
+          "[PlanDeviceSwitch]") {
+    // When the same device name appears under multiple drivers
+    // including currentDriver, the resolved driver is currentDriver.
+    // The unscoped locateDevice would return the first matching entry
+    // (always a WASAPI variant on Windows by JUCE's enumeration
+    // order); planDeviceSwitch must scope the lookup to currentDriver
+    // first so a DirectSound session stays on DirectSound.
+    DevTable table = {
+        {"Windows Audio",                    "Microphone (Realtek Audio)"},
+        {"Windows Audio (Exclusive Mode)",   "Microphone (Realtek Audio)"},
+        {"Windows Audio (Low Latency Mode)", "Microphone (Realtek Audio)"},
+        {"DirectSound",                      "Microphone (Realtek Audio)"},
+    };
+    auto plan = planDeviceSwitch("DirectSound", "Microphone (Realtek Audio)", table);
+    REQUIRE(plan.deviceFound);
+    REQUIRE_FALSE(plan.needsTypeSwitch);
+    REQUIRE(plan.targetDriver == "DirectSound");
+    REQUIRE(plan.targetDevice == "Microphone (Realtek Audio)");
+}
+
+TEST_CASE("PlanDeviceSwitch: shared name — current=Windows Audio also stays",
+          "[PlanDeviceSwitch]") {
+    // Same invariant from the other direction. With currentDriver=
+    // "Windows Audio", the resolved driver is "Windows Audio" — the
+    // scope rule applies regardless of which driver the user is on.
+    DevTable table = {
+        {"Windows Audio", "Microphone (Realtek Audio)"},
+        {"DirectSound",   "Microphone (Realtek Audio)"},
+    };
+    auto plan = planDeviceSwitch("Windows Audio", "Microphone (Realtek Audio)", table);
+    REQUIRE(plan.deviceFound);
+    REQUIRE_FALSE(plan.needsTypeSwitch);
+    REQUIRE(plan.targetDriver == "Windows Audio");
+}
+
+TEST_CASE("PlanDeviceSwitch: ASIO pick from DirectSound — refused, not auto-flipped",
+          "[PlanDeviceSwitch]") {
+    // ASIO is full-duplex single-device but the scope rule still
+    // applies: an ASIO device name resolved from a non-ASIO
+    // currentDriver returns deviceFound=false. No special-case
+    // bypass for ASIO.
+    DevTable table = {
+        {"Windows Audio", "Speakers (Realtek)"},
+        {"DirectSound",   "Primary Sound Driver"},
+        {"ASIO",          "Focusrite USB ASIO"},
+    };
+    auto plan = planDeviceSwitch("DirectSound", "Focusrite USB ASIO", table);
+    REQUIRE_FALSE(plan.deviceFound);
+    REQUIRE_FALSE(plan.needsTypeSwitch);
+    REQUIRE(plan.targetDriver.empty());
+}
+
+TEST_CASE("PlanDeviceSwitch: cold-init (currentDriver empty) — accepts any driver",
+          "[PlanDeviceSwitch]") {
+    // currentDriver=="" disables the scope rule (cold-init / boot,
+    // -H, saved-config restoration). The lookup falls back to the
+    // full table and needsTypeSwitch is set.
+    DevTable table = {
+        {"Windows Audio", "Speakers"},
+        {"ASIO",          "Focusrite USB ASIO"},
+    };
+    auto plan = planDeviceSwitch("", "Focusrite USB ASIO", table);
+    REQUIRE(plan.deviceFound);
+    REQUIRE(plan.needsTypeSwitch);
+    REQUIRE(plan.targetDriver == "ASIO");
+    REQUIRE(plan.targetDevice == "Focusrite USB ASIO");
+}
+
+TEST_CASE("PlanDeviceSwitch: tolerates JUCE '<base> (N)' suffix under current driver",
+          "[PlanDeviceSwitch]") {
+    // The scoped (currentDriver-filtered) lookup applies the same
+    // "<base> (N)" disambiguation rule as the global lookup.
+    DevTable table = {
+        {"DirectSound",   "USB Audio"},
+        {"DirectSound",   "USB Audio (2)"},
+        {"Windows Audio", "USB Audio"},
+    };
+    auto plan = planDeviceSwitch("DirectSound", "USB Audio (2)", table);
+    REQUIRE(plan.deviceFound);
+    REQUIRE_FALSE(plan.needsTypeSwitch);
+    REQUIRE(plan.targetDriver == "DirectSound");
+    REQUIRE(plan.targetDevice == "USB Audio (2)");
+}
