@@ -1852,12 +1852,29 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             fflush(stderr);
         }
 #endif
-        int reEnableCount;
-        if (mBootInputChannels > 0)        reEnableCount = mBootInputChannels;
-        else if (mBootInputChannels < 0)   reEnableCount = kRequestMaxChannels;
-        else                               reEnableCount = 2;
-        fprintf(stderr, "[audio-device] auto-enabling %d input channels for '%s'\n",
-                reEnableCount, inputDeviceName.c_str());
+        int requested;
+        if (mBootInputChannels > 0)        requested = mBootInputChannels;
+        else if (mBootInputChannels < 0)   requested = kRequestMaxChannels;
+        else                               requested = 2;
+
+        // Clamp the requested count to the device's actual input
+        // capacity. JUCE/WASAPI rejects setAudioDeviceSetup outright
+        // when asked for more inputs than the device exposes; the
+        // default -i sentinel asks for kRequestMaxChannels (64),
+        // which exceeds most devices. probeDeviceChannelCount opens
+        // a transient AudioIODevice and reads getInputChannelNames()
+        // — true count, no live-device disturbance. Probe failure
+        // (-1) means "unknown"; `requested` is used as-is.
+        int probed = probeDeviceChannelCount(inputDeviceName, true);
+        int reEnableCount = (probed > 0 && probed < requested) ? probed : requested;
+        if (reEnableCount != requested) {
+            fprintf(stderr, "[audio-device] auto-enabling %d input channels for '%s' "
+                    "(requested %d, device max %d)\n",
+                    reEnableCount, inputDeviceName.c_str(), requested, probed);
+        } else {
+            fprintf(stderr, "[audio-device] auto-enabling %d input channels for '%s'\n",
+                    reEnableCount, inputDeviceName.c_str());
+        }
         mCurrentConfig.numInputChannels = reEnableCount;
         uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
         opts[sonicpi::WorldOpts::kNumInputBusChannels] = static_cast<uint32_t>(reEnableCount);
