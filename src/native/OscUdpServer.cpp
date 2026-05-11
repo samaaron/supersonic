@@ -192,8 +192,11 @@ void OscUdpServer::sendDeviceReport() {
 
     // Build output device list message
     // Format: mode(str), current(str), device1(str), ..., deviceN(str),
-    //         sampleRate(int32), compat1(int32), ..., compatN(int32)
-    //         (compat: 1 = device supports current rate, 0 = rate change needed)
+    //         sampleRate(int32), compat1(int32), ..., compatN(int32),
+    //         type1(str), ..., typeN(str)
+    //   compat: 1 = device supports current rate, 0 = rate change needed
+    //   type:   driver type per device, enables the GUI's per-driver
+    //           dropdown filter
     char devBuf[8192];
     osc::OutboundPacketStream devMsg(devBuf, sizeof(devBuf));
     devMsg << osc::BeginMessage("/supersonic/devices")
@@ -210,10 +213,14 @@ void OscUdpServer::sendDeviceReport() {
                 compat = true;
         devMsg << static_cast<osc::int32>(compat ? 1 : 0);
     }
+    for (auto& dev : outputDevices)
+        devMsg << dev.typeName.c_str();
     devMsg << osc::EndMessage;
 
     // Build input device list message
-    // Format: currentInput(str), numDevices(int32), device1(str), ..., deviceN(str)
+    // Format: currentInput(str), numDevices(int32),
+    //         name1(str), ..., nameN(str),
+    //         type1(str), ..., typeN(str)
     char inDevBuf[2048];
     osc::OutboundPacketStream inDevMsg(inDevBuf, sizeof(inDevBuf));
     inDevMsg << osc::BeginMessage("/supersonic/input-devices")
@@ -221,6 +228,8 @@ void OscUdpServer::sendDeviceReport() {
              << static_cast<osc::int32>(inputDevices.size());
     for (auto& dev : inputDevices)
         inDevMsg << dev.name.c_str();
+    for (auto& dev : inputDevices)
+        inDevMsg << dev.typeName.c_str();
     inDevMsg << osc::EndMessage;
 
     // Build hardware info message
