@@ -17,6 +17,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <new>
+#include <atomic>
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -155,6 +156,12 @@ inline void shm_remove(const string& name) {
 //
 // MAGIC bumped to 0x5C09E002 when metrics + node tree were added — older
 // readers will refuse to connect rather than silently misinterpret offsets.
+//
+// Publication: writer stores MAGIC last (after every other field is
+// initialised) with a release fence in between; reader pairs that with
+// an acquire fence after observing MAGIC. Sighting MAGIC implies the
+// whole header is visible — no torn-init race even when the OSC ready
+// handshake is bypassed.
 
 struct scope_shm_header {
     static constexpr uint32_t MAGIC = 0x5C09E002;
@@ -207,7 +214,6 @@ public:
         pool_size_ = SEGMENT_SIZE - off;
 
         if (init) {
-            header_->magic = scope_shm_header::MAGIC;
             header_->num_scope_buffers = MAX_SCOPE_BUFFERS;
             header_->control_bus_count = static_cast<uint32_t>(control_busses);
 
@@ -228,6 +234,12 @@ public:
             memset(node_tree_header_, 0, NODE_TREE_HEADER_SIZE);
             memset(node_tree_entries_, 0xFF,
                    static_cast<size_t>(NODE_TREE_MIRROR_MAX_NODES) * NODE_TREE_ENTRY_SIZE);
+
+            // Release fence pairs with the reader's acquire after the
+            // MAGIC load. Aligned 32-bit store is atomic on every
+            // supported platform — no atomic<uint32_t> on the field.
+            std::atomic_thread_fence(std::memory_order_release);
+            header_->magic = scope_shm_header::MAGIC;
         }
     }
 
@@ -330,6 +342,12 @@ public:
         if (header->magic != scope_shm_header::MAGIC)
             throw std::runtime_error(
                 "Invalid shared memory magic — is the audio engine running?");
+
+        // Acquire pairs with the writer's release before the MAGIC
+        // store. control_bus_count is read just below — without the
+        // fence the reader could observe MAGIC while still seeing a
+        // zeroed control_bus_count.
+        std::atomic_thread_fence(std::memory_order_acquire);
 
         shm = new server_shared_memory(
             handle.ptr,
