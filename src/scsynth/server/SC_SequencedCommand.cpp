@@ -1162,7 +1162,12 @@ bool AudioQuitCmd::Stage3() {
     return false;
 #else
 #ifndef __EMSCRIPTEN__
-    if (mWorld->hw->mShmem)
+    // Honor host ownership of the segment: World_Cleanup gates segment
+    // deletion on mOwnsShmem (SC_World.cpp:1117); the same rule applies
+    // here. When the host supplies its own SHM via mExternalSharedMemory,
+    // disconnecting would leave Stage4's SendDone("/quit") writing to a
+    // freed page.
+    if (mWorld->hw->mShmem && mWorld->hw->mOwnsShmem)
         mWorld->hw->mShmem->disconnect();
 #endif
     return true;
