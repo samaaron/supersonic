@@ -45,6 +45,17 @@ Based on SuperCollider's scsynth
 Copyright (c) 2002-2023 James McCartney and SuperCollider contributors
 
 ================================================================================
+Third-Party Components
+================================================================================
+
+- [Steinberg ASIO SDK 2.3.4](https://www.steinberg.net/en/company/developers.html) —
+  [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.html)
+  Bundled in external_libs/ASIOSDK2.3.4/. Compiled into the native
+  build on Windows only (JUCE_ASIO=1). Dual-licensed; SuperSonic uses
+  it under GPL-3.0. "ASIO" is a trademark of Steinberg Media
+  Technologies GmbH.
+
+================================================================================
 MIT License
 ================================================================================
 

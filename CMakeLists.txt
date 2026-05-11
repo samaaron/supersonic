@@ -391,6 +391,18 @@ if(UNIX AND NOT APPLE)
     target_compile_definitions(supersonic_engine PUBLIC JUCE_JACK=1)
 endif()
 
+# Enable JUCE's ASIO backend on Windows. The Steinberg ASIO SDK lives
+# under external_libs/ASIOSDK2.3.4 (dual-licensed Steinberg-proprietary
+# OR GPLv3 since 2.3.4 — we take it under GPLv3). Only headers from
+# common/ are needed; the .cpp files in there are for ASIO driver
+# development, not hosts. JUCE's juce_ASIO_windows.cpp wrapper #includes
+# the SDK headers and is compiled into juce_audio_devices when JUCE_ASIO=1.
+if(WIN32)
+    target_compile_definitions(supersonic_engine PUBLIC JUCE_ASIO=1)
+    target_include_directories(supersonic_engine PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/external_libs/ASIOSDK2.3.4/common")
+endif()
+
 target_link_libraries(supersonic_engine PUBLIC
     juce::juce_core
     juce::juce_audio_basics
