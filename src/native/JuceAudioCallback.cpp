@@ -113,12 +113,29 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
     // worth of samples plus a scsynth block. HW buffers > 2*mBufLen (e.g.
     // 512 or 1024) would otherwise overflow the default 256-sample
     // accumulator and corrupt memory in the overflow branch.
+    //
+    // Two independent growth dimensions: per-channel capacity AND
+    // channel count. The accumulator is channel-major — the callback
+    // addresses it as `accumBase + ch * mAccumPerChanCap` — so the
+    // vector must hold mAccumPerChanCap * chans floats. A cold-swap
+    // from a 2-ch device to an 8-ch device at the same hardware
+    // buffer size leaves mAccumPerChanCap unchanged but doubles the
+    // required total size; without a separate channel-count check,
+    // the next callback's input memcpy would walk past the vector
+    // end at ch >= old chans.
     int hwBufSize = device->getCurrentBufferSizeSamples();
     int perChanNeeded = std::max(hwBufSize + mBufLen, 2 * mBufLen);
     int chans = std::max(1, std::max(activeIn, mNumInputChannels));
-    if (perChanNeeded > mAccumPerChanCap) {
+    if (perChanNeeded > mAccumPerChanCap)
         mAccumPerChanCap = perChanNeeded;
-        mInputAccum.assign(static_cast<size_t>(mAccumPerChanCap) * chans, 0.0f);
+    size_t neededSize = static_cast<size_t>(mAccumPerChanCap) * chans;
+    if (mInputAccum.size() < neededSize) {
+        fprintf(stderr, "[juce-callback] resizing input accum: %zu -> %zu floats "
+                "(perChanCap=%d chans=%d hwBuf=%d activeIn=%d mNumIn=%d)\n",
+                mInputAccum.size(), neededSize, mAccumPerChanCap, chans,
+                hwBufSize, activeIn, mNumInputChannels);
+        fflush(stderr);
+        mInputAccum.assign(neededSize, 0.0f);
     }
 
     // Log the full output channel layout so we can verify which physical
