@@ -1459,6 +1459,15 @@ CurrentDeviceInfo SupersonicEngine::currentDevice() const {
     mDeviceManager->getAudioDeviceSetup(setup);
     info.inputDeviceName = setup.inputDeviceName.toStdString();
 
+    // ASIO drivers are full-duplex single-device by spec — one
+    // AudioIODevice carries both directions. JUCE has no separate
+    // input-device concept on ASIO; setup.inputDeviceName echoes
+    // back whatever the caller passed in, regardless of what's
+    // actually open. Derive the truthful input name from the
+    // output device when on ASIO and the input is active.
+    if (info.typeName == "ASIO")
+        info.inputDeviceName = (info.activeInputChannels > 0) ? info.name : "";
+
     // If running on an aggregate device, report the real underlying names
     // so the GUI sees the actual hardware, not "SuperSonic".
     if (!mRealOutputDeviceName.empty())
@@ -1867,9 +1876,8 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
 
         // ASIO is full-duplex single-device by spec — one open call
         // delivers both directions. On a cross-driver switch to ASIO
-        // with an explicit output but no input, mirror the output to
-        // the input. Without this, the info display reports "in 8"
-        // while the input dropdown shows "-- None --".
+        // with an explicit output but no input, mirror the output
+        // into the input.
         if (crossDriver && crossDriverTarget == "ASIO"
             && !deviceName.empty()
             && (inputDeviceName.empty() || inputDeviceName == "__none__")) {
@@ -2073,12 +2081,18 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         mDeviceManager->getAudioDeviceSetup(setup);
 
         if (crossDriver) {
-            // The transient open above left setup carrying the alpha-
-            // first device (or empty). Force-set to the resolved
-            // crossDriverDevice so the setAudioDeviceSetup below is
-            // unambiguous.
+            // Override the names left by the transient open with the
+            // resolved values: outputDeviceName to crossDriverDevice,
+            // inputDeviceName to the local inputDeviceName (already
+            // mirrored by the ASIO full-duplex auto-pick when empty).
+            // An empty inputDeviceName here would re-trigger
+            // insertDefaultDeviceNames, which picks the alphabetical-
+            // first input of the new type.
             setup.outputDeviceName = juce::String(crossDriverDevice);
-            setup.inputDeviceName  = juce::String();
+            setup.inputDeviceName  =
+                (inputDeviceName.empty() || inputDeviceName == "__none__")
+                    ? juce::String()
+                    : juce::String(inputDeviceName);
         }
 
 #ifdef __APPLE__
