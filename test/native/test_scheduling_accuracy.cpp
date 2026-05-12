@@ -56,6 +56,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     }
     EngineFixture fx(cfg);
     if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
+    REQUIRE(fx.loadSynthDef("supersonic-audio-out"));
     fx.clearReplies();
 
     constexpr int    NUM_BUNDLES      = 10;
@@ -68,13 +69,25 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     auto* capture = &slots[SHM_AUDIO_MASTER_SLOT];
     auto* captureData = capture->data;  // inline ring storage
 
-    // Reset position and enable. The capture window stays below the
-    // ring capacity (10s in test builds) so write_position never wraps
-    // and linear indexing into captureData stays valid.
+    // Native has no built-in master tap for slot 0 (the post-block hook
+    // in audio_processor.cpp is WASM-only). Instead, /s_new a
+    // supersonic-audio-out synth at the tail of the root group so its
+    // AudioOut2 UGen reads bus 0 (master output) and writes slot 0.
+    // The Ctor activates the slot (sample_rate, channels, capacity).
+    constexpr int AUDIO_OUT_NODE_ID = 9001;
+    fx.engine().send("/s_new", "supersonic-audio-out",
+                     AUDIO_OUT_NODE_ID, /*addAction=tail*/1, /*targetId=root*/0);
+
+    // Let the audio thread process the /s_new and a few blocks fire so
+    // the writer is established and the capture is running.
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    // Reset position to mark the test's time zero. The capture window
+    // stays below the ring capacity (10s in test builds) so
+    // write_position never wraps and linear indexing into captureData
+    // stays valid.
     capture->write_position.store(0, std::memory_order_release);
     capture->enabled.store(1, std::memory_order_release);
-
-    // Let a few audio blocks process so the capture is running.
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
     // Snapshot the writer's position as the test's time zero.
@@ -107,6 +120,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     // Free any lingering synths
     for (int i = 0; i < NUM_BUNDLES; i++)
         fx.send(osc_test::message("/n_free", 1001 + i));
+    fx.send(osc_test::message("/n_free", AUDIO_OUT_NODE_ID));
 
     REQUIRE(captureEndFrame > captureStartFrame);
     uint32_t framesAvailable = static_cast<uint32_t>(captureEndFrame - captureStartFrame);
@@ -208,6 +222,7 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     }
     EngineFixture fx(cfg);
     if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
+    REQUIRE(fx.loadSynthDef("supersonic-audio-out"));
     fx.clearReplies();
 
     constexpr int    NUM_BUNDLES     = 100;
@@ -219,6 +234,14 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
         ring_buffer_storage + SHM_AUDIO_START);
     auto* capture = &slots[SHM_AUDIO_MASTER_SLOT];
     auto* captureData = capture->data;
+
+    // Native has no built-in master tap for slot 0 — feed it via a
+    // supersonic-audio-out synth at the tail of the root group. See
+    // the first scheduling-accuracy test for the rationale.
+    constexpr int AUDIO_OUT_NODE_ID = 9002;
+    fx.engine().send("/s_new", "supersonic-audio-out",
+                     AUDIO_OUT_NODE_ID, /*addAction=tail*/1, /*targetId=root*/0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
     capture->write_position.store(0, std::memory_order_release);
     capture->enabled.store(1, std::memory_order_release);
@@ -250,6 +273,7 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
 
     for (int i = 0; i < NUM_BUNDLES; i++)
         fx.send(osc_test::message("/n_free", 5001 + i));
+    fx.send(osc_test::message("/n_free", AUDIO_OUT_NODE_ID));
 
     REQUIRE(captureEndFrame > captureStartFrame);
     uint32_t framesAvailable = static_cast<uint32_t>(captureEndFrame - captureStartFrame);
