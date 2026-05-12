@@ -20,11 +20,13 @@
 
 #if defined(__linux__)
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -59,6 +61,36 @@ int countDirEntries(const char* path) {
 int countFds()     { return countDirEntries("/proc/self/fd"); }
 int countThreads() { return countDirEntries("/proc/self/task"); }
 
+// JUCE threads on Linux are pthread_detach'd at creation
+// (juce_SharedCode_posix.h). stopThread() returns once the dying thread
+// clears threadHandle, before the kernel reaps /proc/self/task/<tid>.
+// Reap delay is tens of ms typically, hundreds under load, so a thread
+// count sampled right after shutdown can latch a zombie entry.
+// WARN on timeout so a downstream assertion failure is distinguishable
+// from a real leak.
+int settleThreadCount(std::chrono::milliseconds timeout = std::chrono::milliseconds(3000)) {
+    constexpr int kStableSamples = 3;        // consecutive identical samples
+    constexpr auto kInterval = std::chrono::milliseconds(10);
+
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    int last = countThreads();
+    int stableRun = 1;
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(kInterval);
+        int now = countThreads();
+        if (now == last) {
+            if (++stableRun >= kStableSamples) return now;
+        } else {
+            last = now;
+            stableRun = 1;
+        }
+    }
+    WARN("settleThreadCount: /proc/self/task did not stabilise within "
+         << timeout.count() << "ms (last=" << last
+         << ", stableRun=" << stableRun << "/" << kStableSamples << ")");
+    return last;
+}
+
 }  // namespace
 
 TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][stress]") {
@@ -80,7 +112,7 @@ TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][st
 
     const long baselineRss      = readRssKb();
     const int  baselineFds      = countFds();
-    const int  baselineThreads  = countThreads();
+    const int  baselineThreads  = settleThreadCount();
 
     REQUIRE(baselineRss > 0);
     REQUIRE(baselineFds > 0);
@@ -99,7 +131,7 @@ TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][st
 
     const long finalRss     = readRssKb();
     const int  finalFds     = countFds();
-    const int  finalThreads = countThreads();
+    const int  finalThreads = settleThreadCount();
 
     INFO("after " << kCycles << " cycles: rss=" << finalRss << "kb fds="
                   << finalFds << " threads=" << finalThreads);
@@ -145,7 +177,7 @@ TEST_CASE("Partial-init failure cleans up allocated resources",
 
     const long baselineRss     = readRssKb();
     const int  baselineFds     = countFds();
-    const int  baselineThreads = countThreads();
+    const int  baselineThreads = settleThreadCount();
 
     {
         SupersonicEngine engine;
@@ -158,7 +190,7 @@ TEST_CASE("Partial-init failure cleans up allocated resources",
     }
 
     CHECK(countFds()     == baselineFds);
-    CHECK(countThreads() == baselineThreads);
+    CHECK(settleThreadCount() == baselineThreads);
     const long rssBudget = baselineRss / 2;
     CHECK(readRssKb() - baselineRss < rssBudget);
 }
