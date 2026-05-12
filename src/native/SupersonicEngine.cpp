@@ -1834,12 +1834,41 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         else
             juceCurrentType = mDeviceManager->getCurrentAudioDeviceType().toStdString();
 
-        const std::string scopedDriver =
+        std::string scopedDriver =
             mIntendedDriver.empty() ? juceCurrentType : mIntendedDriver;
 
         std::vector<std::pair<std::string, std::string>> deviceTable;
         for (auto& d : listDevices(false))
             deviceTable.emplace_back(d.typeName, d.name);
+
+        // Intent abandonment: if mIntendedDriver is set but the picks
+        // resolve only under JUCE's actual current type, drop the
+        // intent and proceed on the current driver. The user clicked
+        // a driver in the GUI but has implicitly walked away from
+        // the swap by picking a device that belongs to the still-
+        // active driver.
+        if (!mIntendedDriver.empty() && mIntendedDriver != juceCurrentType) {
+            auto resolvesUnder = [&](const std::string& drv,
+                                     const std::string& n) {
+                if (n.empty() || n == "__system__" || n == "__none__")
+                    return true;
+                return sonicpi::device::planDeviceSwitch(
+                    drv, n, deviceTable).deviceFound;
+            };
+            bool intendedOk = resolvesUnder(mIntendedDriver, deviceName)
+                           && resolvesUnder(mIntendedDriver, inputDeviceName);
+            bool currentOk  = resolvesUnder(juceCurrentType, deviceName)
+                           && resolvesUnder(juceCurrentType, inputDeviceName);
+            if (!intendedOk && currentOk) {
+                fprintf(stderr,
+                    "[audio-device] abandoning pending driver intent '%s' "
+                    "— picks resolve under '%s'\n",
+                    mIntendedDriver.c_str(), juceCurrentType.c_str());
+                fflush(stderr);
+                mIntendedDriver.clear();
+                scopedDriver = juceCurrentType;
+            }
+        }
 
         auto considerName = [&](const std::string& name) -> std::string {
             if (name.empty() || name == "__system__" || name == "__none__")
@@ -2309,7 +2338,8 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         // whole rate change rolling back into a cold-swap rebuild loop.
         if (!errStr.empty()
             && setup.inputDeviceName.isNotEmpty()
-            && errStr.find("input device") != std::string::npos)
+            && errStr.find(setup.inputDeviceName.toStdString())
+                 != std::string::npos)
         {
             const std::string firstError = errStr;
             const std::string failedInputName = setup.inputDeviceName.toStdString();
