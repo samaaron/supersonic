@@ -138,10 +138,10 @@ test.describe("Audio Capture API", () => {
 
       const bc = sonic.bufferConstants;
       return {
-        captureFrames: bc.AUDIO_CAPTURE_FRAMES,
-        captureChannels: bc.AUDIO_CAPTURE_CHANNELS,
-        captureSampleRate: bc.AUDIO_CAPTURE_SAMPLE_RATE,
-        expectedSeconds: bc.AUDIO_CAPTURE_FRAMES / bc.AUDIO_CAPTURE_SAMPLE_RATE,
+        captureFrames: bc.SHM_AUDIO_FRAMES,
+        captureChannels: bc.SHM_AUDIO_CHANNELS,
+        captureSampleRate: bc.SHM_AUDIO_SAMPLE_RATE,
+        expectedSeconds: bc.SHM_AUDIO_FRAMES / bc.SHM_AUDIO_SAMPLE_RATE,
       };
     }, sonicConfig);
 

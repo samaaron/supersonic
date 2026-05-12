@@ -49,6 +49,10 @@
 // Thread-local RT guard for allocation detection (read by test binary only)
 #include "rt_alloc.h"
 
+// Definition of the slot-array pointer declared in shm_audio_buffer.hpp.
+// Assigned once at init; AudioOut2 instances read it to locate their slot.
+shm_audio_buffer* g_shm_audio_buffers = nullptr;
+
 // Forward declarations
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
@@ -126,14 +130,20 @@ extern "C" {
     // metrics directly via the public shared segment without OSC roundtrips.
     PerformanceMetrics* g_external_metrics = nullptr;
 
+    // Mirror of g_external_metrics for the audio-buffer slot array. When
+    // non-null (native, cross-process shm), the post-block hook and any
+    // AudioOut2 UGens write into this segment-resident array so external
+    // readers (e.g. the Sonic Pi GUI recorder) see the frames. On WASM
+    // and no-shm native init_memory() falls back to the in-band slots
+    // inside ring_buffer_storage.
+    shm_audio_buffer* g_external_audio_buffers = nullptr;
+
     uint8_t* shared_memory = nullptr;
     ControlPointers* control = nullptr;
     PerformanceMetrics* metrics = nullptr;
     double* ntp_start_time = nullptr;        // NEW
     std::atomic<int32_t>* drift_offset = nullptr;  // NEW
     std::atomic<int32_t>* global_offset = nullptr; // NEW
-    AudioCaptureHeader* audio_capture = nullptr;   // Audio capture for testing
-    float* audio_capture_data = nullptr;           // Audio capture data buffer
     bool memory_initialized = false;
     World* g_world = nullptr;
 
@@ -153,7 +163,6 @@ extern "C" {
     std::atomic<uint32_t> corruption_count{0};
     std::atomic<uint32_t> gap_log_count{0};
     std::atomic<int> late_count{0};
-    std::atomic<bool> logged_buffer_full{false};
 
     // Time conversion constants - Based on SC_CoreAudio.cpp
     double g_osc_increment_numerator = 0.0;  // Buffer length in NTP units
@@ -251,7 +260,6 @@ extern "C" {
         corruption_count.store(0, std::memory_order_relaxed);
         gap_log_count.store(0, std::memory_order_relaxed);
         late_count.store(0, std::memory_order_relaxed);
-        logged_buffer_full.store(false, std::memory_order_relaxed);
         update_scheduler_depth_metric(0);
         g_scheduler.RequestClear();
     }
@@ -344,22 +352,31 @@ extern "C" {
         worklet_debug("[NodeTree] Initialized at offset %u, size %u bytes",
                      NODE_TREE_START, NODE_TREE_SIZE);
 
-        // Initialize audio capture
-        audio_capture = reinterpret_cast<AudioCaptureHeader*>(shared_memory + AUDIO_CAPTURE_START);
-        audio_capture_data = reinterpret_cast<float*>(shared_memory + AUDIO_CAPTURE_START + AUDIO_CAPTURE_HEADER_SIZE);
-        audio_capture->enabled.store(0, std::memory_order_relaxed);  // Disabled by default
-        audio_capture->head.store(0, std::memory_order_relaxed);
-        audio_capture->sample_rate = static_cast<uint32_t>(sample_rate);
-        audio_capture->channels = AUDIO_CAPTURE_CHANNELS;
+        // Audio buffer slot array. Slot 0 carries the master output mix
+        // and is written by the post-block hook below when `enabled` is
+        // set; slots 1..N-1 are written by AudioOut2 UGens (each calls
+        // activate() from its Ctor). Native cross-process mode supplies
+        // an override into the POSIX shm segment so external readers see
+        // the writes; otherwise the slots live in ring_buffer_storage.
+        shm_audio_buffer* slots = g_external_audio_buffers
+            ? g_external_audio_buffers
+            : reinterpret_cast<shm_audio_buffer*>(
+                  shared_memory + SHM_AUDIO_START);
+        memset(static_cast<void*>(slots), 0,
+               MAX_SHM_AUDIO_BUFFERS * sizeof(shm_audio_buffer));
+        slots[SHM_AUDIO_MASTER_SLOT].sample_rate = static_cast<uint32_t>(sample_rate);
+        slots[SHM_AUDIO_MASTER_SLOT].channels = SHM_AUDIO_CHANNELS;
+        slots[SHM_AUDIO_MASTER_SLOT].capacity_frames = SHM_AUDIO_FRAMES;
+        g_shm_audio_buffers = slots;
 
         // Initialize scope buffers
         {
-            uint8_t* scopeBase = shared_memory + SCOPE_START;
-            memset(scopeBase, 0, SCOPE_TOTAL_SIZE);
+            uint8_t* scopeBase = shared_memory + SHM_SCOPE_START;
+            memset(scopeBase, 0, SHM_SCOPE_TOTAL_SIZE);
             auto* maxScopes = reinterpret_cast<uint32_t*>(scopeBase + 0);
             auto* framesPerScope = reinterpret_cast<uint32_t*>(scopeBase + 8);
-            *maxScopes = SCOPE_MAX_SCOPES;
-            *framesPerScope = SCOPE_FRAMES_PER_SCOPE;
+            *maxScopes = SHM_SCOPE_MAX_SCOPES;
+            *framesPerScope = SHM_SCOPE_FRAMES_PER_SCOPE;
         }
 
         // Enable worklet_debug
@@ -919,34 +936,26 @@ extern "C" {
 #else
             memcpy(dst, src, g_world->mNumOutputs * QUANTUM_SIZE * sizeof(float));
 #endif
-
-            // Audio capture for testing - copy interleaved audio to capture buffer
-            if (audio_capture && audio_capture->enabled.load(std::memory_order_relaxed)) {
-                uint32_t head = audio_capture->head.load(std::memory_order_relaxed);
-                const uint32_t channels = g_world->mNumOutputs;
-                const uint32_t frames_to_copy = QUANTUM_SIZE;
-
-                // Check if we have room in the capture buffer
-                if (head + frames_to_copy <= AUDIO_CAPTURE_FRAMES) {
-                    // Copy audio data - interleave channels for easier JS processing
-                    // Source is channel-by-channel (ch0[0..127], ch1[0..127])
-                    // Destination is interleaved (ch0[0], ch1[0], ch0[1], ch1[1], ...)
-                    for (uint32_t frame = 0; frame < frames_to_copy; frame++) {
-                        for (uint32_t ch = 0; ch < channels && ch < AUDIO_CAPTURE_CHANNELS; ch++) {
-                            audio_capture_data[(head + frame) * AUDIO_CAPTURE_CHANNELS + ch] =
-                                static_audio_bus[ch * QUANTUM_SIZE + frame];
-                        }
-                    }
-                    audio_capture->head.store(head + frames_to_copy, std::memory_order_release);
-                } else {
-                    // Buffer full - log once and stop capturing
-                    if (!logged_buffer_full.load(std::memory_order_relaxed)) {
-                        worklet_debug("[AudioCapture] Buffer full (%u frames), capture stopped", AUDIO_CAPTURE_FRAMES);
-                        logged_buffer_full.store(true, std::memory_order_relaxed);
-                    }
+#ifdef __EMSCRIPTEN__
+            // Master output tap (slot 0) — WASM only. Native uses the
+            // supersonic-audio-out synth (AudioOut2 UGen) to write the
+            // same slot from inside the graph; running both would
+            // double-write and drop recorded pitch by an octave.
+            if (g_shm_audio_buffers) {
+                auto* tap = &g_shm_audio_buffers[SHM_AUDIO_MASTER_SLOT];
+                if (tap->enabled.load(std::memory_order_relaxed)) {
+                    shm_audio_buffer_writer w(tap);
+                    const float* channel_data[SHM_AUDIO_CHANNELS];
+                    const uint32_t channels = g_world->mNumOutputs;
+                    const uint32_t tc = (channels < SHM_AUDIO_CHANNELS) ? channels : SHM_AUDIO_CHANNELS;
+                    for (uint32_t c = 0; c < tc; ++c)
+                        channel_data[c] = static_audio_bus + c * QUANTUM_SIZE;
+                    for (uint32_t c = tc; c < SHM_AUDIO_CHANNELS; ++c)
+                        channel_data[c] = channel_data[tc - 1];
+                    w.write(channel_data, QUANTUM_SIZE);
                 }
             }
-
+#endif
         }
 
         return true; // Keep processor alive

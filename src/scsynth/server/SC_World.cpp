@@ -1173,7 +1173,7 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
         return kSCFalse;
     }
 
-    scope_buffer_writer writer = shm->get_scope_buffer_writer(index, channels, maxFrames);
+    shm_scope_buffer_writer writer = shm->get_scope_buffer_writer(index, channels, maxFrames);
 
     if (writer.valid()) {
         hnd->internalData = writer.buffer;
@@ -1195,9 +1195,9 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
 #else
     // Emscripten (WASM): scope buffers are backed by a fixed region in the
     // SharedArrayBuffer, using the same triple-buffer algorithm as native
-    // scope_buffer.hpp but with flat offsets instead of relative_ptr + TLSF.
+    // shm_scope_buffer.hpp but with flat offsets instead of relative_ptr + TLSF.
     //
-    // SAB layout per slot (at SCOPE_START + SCOPE_HEADER_SIZE + index * SCOPE_SLOT_SIZE):
+    // SAB layout per slot (at SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE + index * SHM_SCOPE_SLOT_SIZE):
     //   [0..3]   u32 state (0=free, 1=active)
     //   [4..7]   u32 channels
     //   [8..11]  i32 stage (atomic triple-buffer swap index)
@@ -1210,17 +1210,17 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
         return kSCFalse;
     }
 
-    if (index < 0 || index >= SCOPE_MAX_SCOPES) {
+    if (index < 0 || index >= SHM_SCOPE_MAX_SCOPES) {
         hnd->internalData = nullptr;
         return kSCFalse;
     }
 
-    if ((uint32_t)maxFrames > SCOPE_FRAMES_PER_SCOPE)
-        maxFrames = SCOPE_FRAMES_PER_SCOPE;
-    if (channels > (int)SCOPE_CHANNELS)
-        channels = SCOPE_CHANNELS;
+    if ((uint32_t)maxFrames > SHM_SCOPE_FRAMES_PER_SCOPE)
+        maxFrames = SHM_SCOPE_FRAMES_PER_SCOPE;
+    if (channels > (int)SHM_SCOPE_CHANNELS)
+        channels = SHM_SCOPE_CHANNELS;
 
-    uint8_t* slotBase = base + SCOPE_START + SCOPE_HEADER_SIZE + index * SCOPE_SLOT_SIZE;
+    uint8_t* slotBase = base + SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE + index * SHM_SCOPE_SLOT_SIZE;
     auto* state = reinterpret_cast<std::atomic<uint32_t>*>(slotBase + 0);
     auto* slotChannels = reinterpret_cast<uint32_t*>(slotBase + 4);
     auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slotBase + 8);
@@ -1233,14 +1233,14 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
     *writerIn = 1;  // writer starts at region 1
 
     // Update global header
-    auto* activeCount = reinterpret_cast<std::atomic<uint32_t>*>(base + SCOPE_START + 4);
+    auto* activeCount = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 4);
     activeCount->fetch_add(1, std::memory_order_relaxed);
-    auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SCOPE_START + 12);
+    auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 12);
     version->fetch_add(1, std::memory_order_relaxed);
 
     // Point hnd->data at writer's current region (region 1)
-    float* dataBase = reinterpret_cast<float*>(slotBase + SCOPE_SLOT_HEADER_SIZE);
-    uint32_t regionSamples = SCOPE_FRAMES_PER_SCOPE * SCOPE_CHANNELS;
+    float* dataBase = reinterpret_cast<float*>(slotBase + SHM_SCOPE_SLOT_HEADER_SIZE);
+    uint32_t regionSamples = SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS;
     hnd->data = dataBase + (*writerIn) * regionSamples;
     hnd->internalData = slotBase;  // Store slot pointer for push/release
     hnd->channels = channels;
@@ -1251,7 +1251,7 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
 
 void pushScopeBuffer(World* inWorld, ScopeBufferHnd* hnd, int frames) {
 #ifndef __EMSCRIPTEN__
-    scope_buffer_writer writer(reinterpret_cast<scope_buffer*>(hnd->internalData));
+    shm_scope_buffer_writer writer(reinterpret_cast<shm_scope_buffer*>(hnd->internalData));
     writer.push(frames);
     hnd->data = writer.data();
 #else
@@ -1267,8 +1267,8 @@ void pushScopeBuffer(World* inWorld, ScopeBufferHnd* hnd, int frames) {
     *writerIn = (uint32_t)oldStage;  // Reclaim old stage as new write region
 
     // Update hnd->data to point at new write region
-    float* dataBase = reinterpret_cast<float*>(slotBase + SCOPE_SLOT_HEADER_SIZE);
-    uint32_t regionSamples = SCOPE_FRAMES_PER_SCOPE * SCOPE_CHANNELS;
+    float* dataBase = reinterpret_cast<float*>(slotBase + SHM_SCOPE_SLOT_HEADER_SIZE);
+    uint32_t regionSamples = SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS;
     hnd->data = dataBase + (*writerIn) * regionSamples;
 #endif
 }
@@ -1277,7 +1277,7 @@ void releaseScopeBuffer(World* inWorld, ScopeBufferHnd* hnd) {
 #ifndef __EMSCRIPTEN__
     DEV_LOG("[scope-diag] releaseScopeBuffer: buffer=%p data=%p\n",
             hnd->internalData, hnd->data);
-    scope_buffer_writer writer(reinterpret_cast<scope_buffer*>(hnd->internalData));
+    shm_scope_buffer_writer writer(reinterpret_cast<shm_scope_buffer*>(hnd->internalData));
     server_shared_memory_creator* shm = inWorld->hw->mShmem;
     if (shm) {
         shm->release_scope_buffer_writer(writer);
@@ -1297,10 +1297,10 @@ void releaseScopeBuffer(World* inWorld, ScopeBufferHnd* hnd) {
 
     uint8_t* base = reinterpret_cast<uint8_t*>(get_ring_buffer_base());
     if (base) {
-        auto* activeCount = reinterpret_cast<std::atomic<uint32_t>*>(base + SCOPE_START + 4);
+        auto* activeCount = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 4);
         if (activeCount->load(std::memory_order_relaxed) > 0)
             activeCount->fetch_sub(1, std::memory_order_relaxed);
-        auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SCOPE_START + 12);
+        auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 12);
         version->fetch_add(1, std::memory_order_relaxed);
     }
     hnd->internalData = nullptr;

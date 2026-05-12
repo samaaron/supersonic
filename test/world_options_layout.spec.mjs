@@ -65,8 +65,8 @@ test("WORLD_OPTIONS_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicP
     return {
       worldOptionsStart: bc.WORLD_OPTIONS_START,
       worldOptionsSize: bc.WORLD_OPTIONS_SIZE,
-      scopeStart: bc.SCOPE_START,
-      scopeTotalSize: bc.SCOPE_TOTAL_SIZE,
+      scopeStart: bc.SHM_SCOPE_START,
+      scopeTotalSize: bc.SHM_SCOPE_TOTAL_SIZE,
       totalBufferSize: bc.TOTAL_BUFFER_SIZE,
     };
   }, sonicConfig);

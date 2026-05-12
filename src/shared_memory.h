@@ -12,6 +12,8 @@
 #include <atomic>
 #include <cstdint>
 
+#include "scsynth/common/shm_audio_buffer.hpp"
+
 // ============================================================================
 // BUFFER LAYOUT CONFIGURATION
 // ============================================================================
@@ -48,21 +50,11 @@ constexpr uint32_t NODE_TREE_DEF_NAME_SIZE = 32; // Max synthdef name length (in
 constexpr uint32_t NODE_TREE_ENTRY_SIZE = 72;  // 6 x int32 (24) + def_name (32) + uuid_hi (8) + uuid_lo (8) = 72 bytes per entry
 constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MIRROR_MAX_NODES * NODE_TREE_ENTRY_SIZE); // ~57KB
 
-// Audio capture configuration (for testing - captures audio output to SharedArrayBuffer)
-// Production default: 1 second at 48kHz stereo = ~375KB. The duration is
-// override-able at compile time via -DSUPERSONIC_AUDIO_CAPTURE_SECONDS so the
-// test build can carry a much larger buffer (enables p99 scheduling-jitter
-// statistics over 100+ bundles) without inflating the production binary.
-constexpr uint32_t AUDIO_CAPTURE_SAMPLE_RATE = 48000;
-constexpr uint32_t AUDIO_CAPTURE_CHANNELS = 2;
-#ifndef SUPERSONIC_AUDIO_CAPTURE_SECONDS
-#    define SUPERSONIC_AUDIO_CAPTURE_SECONDS 1
-#endif
-constexpr uint32_t AUDIO_CAPTURE_SECONDS = SUPERSONIC_AUDIO_CAPTURE_SECONDS;
-constexpr uint32_t AUDIO_CAPTURE_FRAMES = AUDIO_CAPTURE_SAMPLE_RATE * AUDIO_CAPTURE_SECONDS;
-constexpr uint32_t AUDIO_CAPTURE_HEADER_SIZE = 16; // enabled (4) + head (4) + sample_rate (4) + channels (4)
-constexpr uint32_t AUDIO_CAPTURE_DATA_SIZE = AUDIO_CAPTURE_FRAMES * AUDIO_CAPTURE_CHANNELS * sizeof(float);
-constexpr uint32_t AUDIO_CAPTURE_SIZE = AUDIO_CAPTURE_HEADER_SIZE + AUDIO_CAPTURE_DATA_SIZE;
+// Audio buffer multi-slot ring. Struct, writer, and reader live in
+// scsynth/common/shm_audio_buffer.hpp. Slot 0 carries the master output
+// mix; slots 1..N-1 are written by AudioOut2 UGens. Per-slot ring
+// duration is controlled by SUPERSONIC_SHM_AUDIO_SECONDS (1s in
+// production, larger in test builds so captures don't wrap).
 
 // Auto-calculated offsets (DO NOT MODIFY - computed from sizes above)
 constexpr uint32_t IN_BUFFER_START    = 0;
@@ -74,9 +66,9 @@ constexpr uint32_t NODE_TREE_START = METRICS_START + METRICS_SIZE;  // Contiguou
 constexpr uint32_t NTP_START_TIME_START = NODE_TREE_START + NODE_TREE_SIZE;
 constexpr uint32_t DRIFT_OFFSET_START = NTP_START_TIME_START + NTP_START_TIME_SIZE;
 constexpr uint32_t GLOBAL_OFFSET_START = DRIFT_OFFSET_START + DRIFT_OFFSET_SIZE;
-constexpr uint32_t AUDIO_CAPTURE_START = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
-constexpr uint32_t NODE_ID_COUNTER_SIZE = 4;     // Int32, atomic — for nextNodeId() range allocation
-constexpr uint32_t NODE_ID_COUNTER_START = AUDIO_CAPTURE_START + AUDIO_CAPTURE_SIZE;
+constexpr uint32_t SHM_AUDIO_START       = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
+constexpr uint32_t NODE_ID_COUNTER_SIZE  = 4;     // Int32, atomic — for nextNodeId() range allocation
+constexpr uint32_t NODE_ID_COUNTER_START = SHM_AUDIO_START + SHM_AUDIO_TOTAL_SIZE;
 
 // World options (native only) — 18 x uint32 written by initialiseWorld(), read by init_memory().
 // MUST live outside the IN ring buffer (offsets 0..786431) to survive OSC traffic.
@@ -96,36 +88,36 @@ constexpr uint32_t REPLY_CHANNELS_BUFFER_START = REPLY_CHANNELS_CONTROL_START + 
 constexpr uint32_t REPLY_CHANNELS_BUFFER_SIZE = REPLY_CHANNEL_COUNT * REPLY_CHANNEL_BUFFER_SIZE;    // 128KB
 
 // Scope buffers — per-bus audio scope data for visualisation.
-// Uses the same triple-buffer algorithm as native scope_buffer.hpp
+// Uses the same triple-buffer algorithm as native shm_scope_buffer.hpp
 // but with fixed layout in the SAB (no TLSF pool, no relative_ptr).
 //
 // Each scope slot: header (16B) + 3 triple-buffer regions of audio data.
 // ScopeOut2 UGen writes here; main thread reads via getScope(n).
 // In PM mode, scope snapshots are included in the heartbeat postMessage.
-#ifndef SCOPE_MAX_SCOPES
-#define SCOPE_MAX_SCOPES 32
+#ifndef SHM_SCOPE_MAX_SCOPES
+#define SHM_SCOPE_MAX_SCOPES 32
 #endif
-#ifndef SCOPE_FRAMES_PER_SCOPE
-#define SCOPE_FRAMES_PER_SCOPE 1024
+#ifndef SHM_SCOPE_FRAMES_PER_SCOPE
+#define SHM_SCOPE_FRAMES_PER_SCOPE 1024
 #endif
-constexpr uint32_t SCOPE_CHANNELS = 2;  // Always stereo (ScopeOut2 writes 2 channels)
-constexpr uint32_t SCOPE_HEADER_SIZE = 32;  // Global header (16-aligned)
-constexpr uint32_t SCOPE_SLOT_HEADER_SIZE = 16;  // Per-slot metadata
-constexpr uint32_t SCOPE_REGION_SIZE = SCOPE_FRAMES_PER_SCOPE * SCOPE_CHANNELS * sizeof(float);  // One triple-buffer region
-constexpr uint32_t SCOPE_SLOT_DATA_SIZE = 3 * SCOPE_REGION_SIZE;  // Triple buffer (3 regions)
-constexpr uint32_t SCOPE_SLOT_SIZE = SCOPE_SLOT_HEADER_SIZE + SCOPE_SLOT_DATA_SIZE;  // ~24KB per slot
-constexpr uint32_t SCOPE_TOTAL_SIZE = SCOPE_HEADER_SIZE + (SCOPE_MAX_SCOPES * SCOPE_SLOT_SIZE);
+constexpr uint32_t SHM_SCOPE_CHANNELS = 2;  // Always stereo (ScopeOut2 writes 2 channels)
+constexpr uint32_t SHM_SCOPE_HEADER_SIZE = 32;  // Global header (16-aligned)
+constexpr uint32_t SHM_SCOPE_SLOT_HEADER_SIZE = 16;  // Per-slot metadata
+constexpr uint32_t SHM_SCOPE_REGION_SIZE = SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS * sizeof(float);  // One triple-buffer region
+constexpr uint32_t SCOPE_SLOT_DATA_SIZE = 3 * SHM_SCOPE_REGION_SIZE;  // Triple buffer (3 regions)
+constexpr uint32_t SHM_SCOPE_SLOT_SIZE = SHM_SCOPE_SLOT_HEADER_SIZE + SCOPE_SLOT_DATA_SIZE;  // ~24KB per slot
+constexpr uint32_t SHM_SCOPE_TOTAL_SIZE = SHM_SCOPE_HEADER_SIZE + (SHM_SCOPE_MAX_SCOPES * SHM_SCOPE_SLOT_SIZE);
 
-constexpr uint32_t SCOPE_START = REPLY_CHANNELS_BUFFER_START + REPLY_CHANNELS_BUFFER_SIZE;
+constexpr uint32_t SHM_SCOPE_START = REPLY_CHANNELS_BUFFER_START + REPLY_CHANNELS_BUFFER_SIZE;
 
-// Scope header layout (at SCOPE_START):
+// Scope header layout (at SHM_SCOPE_START):
 //   [0..3]   u32  maxScopes
 //   [4..7]   u32  activeCount
 //   [8..11]  u32  framesPerScope
 //   [12..15] u32  version (increments on scope add/remove)
 //   [16..31] reserved
 //
-// Per-scope slot (at SCOPE_START + SCOPE_HEADER_SIZE + index * SCOPE_SLOT_SIZE):
+// Per-scope slot (at SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE + index * SHM_SCOPE_SLOT_SIZE):
 //   [0..3]   u32  state (0=free, 1=active)
 //   [4..7]   u32  channels
 //   [8..11]  i32  stage (atomic: triple-buffer swap index 0/1/2)
@@ -133,7 +125,7 @@ constexpr uint32_t SCOPE_START = REPLY_CHANNELS_BUFFER_START + REPLY_CHANNELS_BU
 //   [16..]   float data[3][framesPerScope * channels]  — triple-buffered audio
 
 // Total buffer size (for validation)
-constexpr uint32_t TOTAL_BUFFER_SIZE  = SCOPE_START + SCOPE_TOTAL_SIZE;
+constexpr uint32_t TOTAL_BUFFER_SIZE  = SHM_SCOPE_START + SHM_SCOPE_TOTAL_SIZE;
 
 // Message structure
 struct alignas(4) Message {
@@ -298,16 +290,6 @@ struct alignas(8) NodeEntry {
     uint64_t uuid_lo;   // Lower 8 bytes of UUID (0 if node was created with int32 ID)
 };
 
-// Audio capture header (at AUDIO_CAPTURE_START offset in ring_buffer_storage)
-// Written by WASM when capture is enabled, read by JS to retrieve captured audio
-struct alignas(4) AudioCaptureHeader {
-    std::atomic<uint32_t> enabled;      // 0 = disabled, 1 = enabled (JS writes to start/stop)
-    std::atomic<uint32_t> head;         // Write position in frames (WASM writes)
-    uint32_t sample_rate;               // Actual sample rate (set by WASM on init)
-    uint32_t channels;                  // Number of channels (2 for stereo)
-    // Audio data follows: float[AUDIO_CAPTURE_FRAMES * AUDIO_CAPTURE_CHANNELS]
-};
-
 // Constants
 constexpr uint32_t MAX_MESSAGE_SIZE = IN_BUFFER_SIZE - sizeof(Message);
 constexpr uint32_t MESSAGE_MAGIC = 0xDEADBEEF;
@@ -354,12 +336,12 @@ struct BufferLayout {
     uint32_t drift_offset_size;
     uint32_t global_offset_start;
     uint32_t global_offset_size;
-    uint32_t audio_capture_start;
-    uint32_t audio_capture_size;
-    uint32_t audio_capture_header_size;
-    uint32_t audio_capture_frames;
-    uint32_t audio_capture_channels;
-    uint32_t audio_capture_sample_rate;
+    uint32_t shm_audio_start;
+    uint32_t shm_audio_total_size;
+    uint32_t shm_audio_header_size;
+    uint32_t shm_audio_frames;
+    uint32_t shm_audio_channels;
+    uint32_t shm_audio_sample_rate;
     uint32_t node_id_counter_start;
     uint32_t node_id_counter_size;
     uint32_t world_options_start;
@@ -370,15 +352,15 @@ struct BufferLayout {
     uint32_t reply_channel_buffer_size;
     uint32_t reply_channel_control_size;
     uint32_t reply_channel_count;
-    uint32_t scope_start;
-    uint32_t scope_total_size;
-    uint32_t scope_header_size;
-    uint32_t scope_slot_size;
-    uint32_t scope_slot_header_size;
-    uint32_t scope_region_size;
-    uint32_t scope_max_scopes;
-    uint32_t scope_frames_per_scope;
-    uint32_t scope_channels;
+    uint32_t shm_scope_start;
+    uint32_t shm_scope_total_size;
+    uint32_t shm_scope_header_size;
+    uint32_t shm_scope_slot_size;
+    uint32_t shm_scope_slot_header_size;
+    uint32_t shm_scope_region_size;
+    uint32_t shm_scope_max_scopes;
+    uint32_t shm_scope_frames_per_scope;
+    uint32_t shm_scope_channels;
     uint32_t total_buffer_size;
     uint32_t max_message_size;
     uint32_t message_magic;
@@ -414,12 +396,12 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     DRIFT_OFFSET_SIZE,
     GLOBAL_OFFSET_START,
     GLOBAL_OFFSET_SIZE,
-    AUDIO_CAPTURE_START,
-    AUDIO_CAPTURE_SIZE,
-    AUDIO_CAPTURE_HEADER_SIZE,
-    AUDIO_CAPTURE_FRAMES,
-    AUDIO_CAPTURE_CHANNELS,
-    AUDIO_CAPTURE_SAMPLE_RATE,
+    SHM_AUDIO_START,
+    SHM_AUDIO_TOTAL_SIZE,
+    SHM_AUDIO_HEADER_SIZE,
+    SHM_AUDIO_FRAMES,
+    SHM_AUDIO_CHANNELS,
+    SHM_AUDIO_SAMPLE_RATE,
     NODE_ID_COUNTER_START,
     NODE_ID_COUNTER_SIZE,
     WORLD_OPTIONS_START,
@@ -430,15 +412,15 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     REPLY_CHANNEL_BUFFER_SIZE,
     REPLY_CHANNEL_CONTROL_SIZE,
     REPLY_CHANNEL_COUNT,
-    SCOPE_START,
-    SCOPE_TOTAL_SIZE,
-    SCOPE_HEADER_SIZE,
-    SCOPE_SLOT_SIZE,
-    SCOPE_SLOT_HEADER_SIZE,
-    SCOPE_REGION_SIZE,
-    SCOPE_MAX_SCOPES,
-    SCOPE_FRAMES_PER_SCOPE,
-    SCOPE_CHANNELS,
+    SHM_SCOPE_START,
+    SHM_SCOPE_TOTAL_SIZE,
+    SHM_SCOPE_HEADER_SIZE,
+    SHM_SCOPE_SLOT_SIZE,
+    SHM_SCOPE_SLOT_HEADER_SIZE,
+    SHM_SCOPE_REGION_SIZE,
+    SHM_SCOPE_MAX_SCOPES,
+    SHM_SCOPE_FRAMES_PER_SCOPE,
+    SHM_SCOPE_CHANNELS,
     TOTAL_BUFFER_SIZE,
     MAX_MESSAGE_SIZE,
     MESSAGE_MAGIC,

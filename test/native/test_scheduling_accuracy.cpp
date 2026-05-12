@@ -63,20 +63,22 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     constexpr double FIRST_DELAY_SEC  = 0.200;   // first bundle at +200ms
     constexpr double RELEASE_SEC      = 0.020;    // 20ms release — silent well before next
 
-    auto* capture = reinterpret_cast<AudioCaptureHeader*>(
-        ring_buffer_storage + AUDIO_CAPTURE_START);
-    auto* captureData = reinterpret_cast<float*>(
-        ring_buffer_storage + AUDIO_CAPTURE_START + AUDIO_CAPTURE_HEADER_SIZE);
+    auto* slots = reinterpret_cast<shm_audio_buffer*>(
+        ring_buffer_storage + SHM_AUDIO_START);
+    auto* capture = &slots[SHM_AUDIO_MASTER_SLOT];
+    auto* captureData = capture->data;  // inline ring storage
 
-    // Reset capture buffer and enable
-    capture->head.store(0, std::memory_order_release);
+    // Reset position and enable. The capture window stays below the
+    // ring capacity (10s in test builds) so write_position never wraps
+    // and linear indexing into captureData stays valid.
+    capture->write_position.store(0, std::memory_order_release);
     capture->enabled.store(1, std::memory_order_release);
 
-    // Let a few audio blocks process so the capture is running
+    // Let a few audio blocks process so the capture is running.
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
-    // Record capture head position — this is our reference "time zero"
-    uint32_t captureStartFrame = capture->head.load(std::memory_order_acquire);
+    // Snapshot the writer's position as the test's time zero.
+    uint64_t captureStartFrame = capture->write_position.load(std::memory_order_acquire);
     uint32_t sampleRate = capture->sample_rate;
     REQUIRE(sampleRate > 0);
 
@@ -100,15 +102,15 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     std::this_thread::sleep_for(std::chrono::milliseconds(totalWaitMs));
 
     capture->enabled.store(0, std::memory_order_release);
-    uint32_t captureEndFrame = capture->head.load(std::memory_order_acquire);
+    uint64_t captureEndFrame = capture->write_position.load(std::memory_order_acquire);
 
     // Free any lingering synths
     for (int i = 0; i < NUM_BUNDLES; i++)
         fx.send(osc_test::message("/n_free", 1001 + i));
 
     REQUIRE(captureEndFrame > captureStartFrame);
-    uint32_t framesAvailable = captureEndFrame - captureStartFrame;
-    const float* startPtr = captureData + captureStartFrame * AUDIO_CAPTURE_CHANNELS;
+    uint32_t framesAvailable = static_cast<uint32_t>(captureEndFrame - captureStartFrame);
+    const float* startPtr = captureData + captureStartFrame * SHM_AUDIO_CHANNELS;
 
     // ── Detect all onsets ────────────────────────────────────────────────
     std::vector<int> onsets;
@@ -118,9 +120,9 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
         if (static_cast<uint32_t>(searchFrom) >= framesAvailable) break;
 
         int onset = findOnsetFrame(
-            startPtr + searchFrom * AUDIO_CAPTURE_CHANNELS,
+            startPtr + searchFrom * SHM_AUDIO_CHANNELS,
             framesAvailable - searchFrom,
-            AUDIO_CAPTURE_CHANNELS);
+            SHM_AUDIO_CHANNELS);
         if (onset < 0) break;
         onset += searchFrom;
         onsets.push_back(onset);
@@ -132,8 +134,8 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
         int gapStart = -1;
         for (uint32_t f = skipTo; f < framesAvailable; f++) {
             bool silent = true;
-            for (uint32_t ch = 0; ch < AUDIO_CAPTURE_CHANNELS; ch++) {
-                if (std::fabs(startPtr[f * AUDIO_CAPTURE_CHANNELS + ch]) > 0.001f)
+            for (uint32_t ch = 0; ch < SHM_AUDIO_CHANNELS; ch++) {
+                if (std::fabs(startPtr[f * SHM_AUDIO_CHANNELS + ch]) > 0.001f)
                     silent = false;
             }
             if (silent) { gapStart = static_cast<int>(f); break; }
@@ -181,11 +183,11 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
 // ─────────────────────────────────────────────────────────────────────────
 // Distribution of bundle spacing jitter.
 //
-// 100 bundles at 50ms intervals = 5 seconds of audio — fits in the test
-// build's enlarged AUDIO_CAPTURE buffer (cmake bumps SUPERSONIC_AUDIO_
-// CAPTURE_SECONDS from 1 to 10 when BUILD_TESTS=ON). 100 samples gives
-// a stable p99 alongside mean / stddev / p50 / p90 / max. A spike in
-// p99 means live-coders feel occasional flams even when mean is fine.
+// 100 bundles at 50ms intervals = 5 seconds of audio, which fits the
+// test build's 10-second ring (CMake sets SUPERSONIC_SHM_AUDIO_SECONDS
+// to 10 when BUILD_TESTS=ON). 100 samples gives a stable p99 alongside
+// mean / stddev / p50 / p90 / max. A spike in p99 means live-coders
+// feel occasional flams even when the mean is fine.
 // ─────────────────────────────────────────────────────────────────────────
 TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bundles)",
           "[scheduling][accuracy]") {
@@ -213,16 +215,16 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     constexpr double FIRST_DELAY_SEC = 0.200;
     constexpr double RELEASE_SEC     = 0.012;   // 12ms — silent ~38ms before next
 
-    auto* capture = reinterpret_cast<AudioCaptureHeader*>(
-        ring_buffer_storage + AUDIO_CAPTURE_START);
-    auto* captureData = reinterpret_cast<float*>(
-        ring_buffer_storage + AUDIO_CAPTURE_START + AUDIO_CAPTURE_HEADER_SIZE);
+    auto* slots = reinterpret_cast<shm_audio_buffer*>(
+        ring_buffer_storage + SHM_AUDIO_START);
+    auto* capture = &slots[SHM_AUDIO_MASTER_SLOT];
+    auto* captureData = capture->data;
 
-    capture->head.store(0, std::memory_order_release);
+    capture->write_position.store(0, std::memory_order_release);
     capture->enabled.store(1, std::memory_order_release);
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
-    uint32_t captureStartFrame = capture->head.load(std::memory_order_acquire);
+    uint64_t captureStartFrame = capture->write_position.load(std::memory_order_acquire);
     uint32_t sampleRate = capture->sample_rate;
     REQUIRE(sampleRate > 0);
 
@@ -244,23 +246,23 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     std::this_thread::sleep_for(std::chrono::milliseconds(totalWaitMs));
 
     capture->enabled.store(0, std::memory_order_release);
-    uint32_t captureEndFrame = capture->head.load(std::memory_order_acquire);
+    uint64_t captureEndFrame = capture->write_position.load(std::memory_order_acquire);
 
     for (int i = 0; i < NUM_BUNDLES; i++)
         fx.send(osc_test::message("/n_free", 5001 + i));
 
     REQUIRE(captureEndFrame > captureStartFrame);
-    uint32_t framesAvailable = captureEndFrame - captureStartFrame;
-    const float* startPtr = captureData + captureStartFrame * AUDIO_CAPTURE_CHANNELS;
+    uint32_t framesAvailable = static_cast<uint32_t>(captureEndFrame - captureStartFrame);
+    const float* startPtr = captureData + captureStartFrame * SHM_AUDIO_CHANNELS;
 
     std::vector<int> onsets;
     int searchFrom = 0;
     for (int i = 0; i < NUM_BUNDLES; i++) {
         if (static_cast<uint32_t>(searchFrom) >= framesAvailable) break;
         int onset = findOnsetFrame(
-            startPtr + searchFrom * AUDIO_CAPTURE_CHANNELS,
+            startPtr + searchFrom * SHM_AUDIO_CHANNELS,
             framesAvailable - searchFrom,
-            AUDIO_CAPTURE_CHANNELS);
+            SHM_AUDIO_CHANNELS);
         if (onset < 0) break;
         onset += searchFrom;
         onsets.push_back(onset);
@@ -272,8 +274,8 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
         int gapStart = -1;
         for (uint32_t f = skipTo; f < framesAvailable; f++) {
             bool silent = true;
-            for (uint32_t ch = 0; ch < AUDIO_CAPTURE_CHANNELS; ch++) {
-                if (std::fabs(startPtr[f * AUDIO_CAPTURE_CHANNELS + ch]) > 0.001f)
+            for (uint32_t ch = 0; ch < SHM_AUDIO_CHANNELS; ch++) {
+                if (std::fabs(startPtr[f * SHM_AUDIO_CHANNELS + ch]) > 0.001f)
                     silent = false;
             }
             if (silent) { gapStart = static_cast<int>(f); break; }

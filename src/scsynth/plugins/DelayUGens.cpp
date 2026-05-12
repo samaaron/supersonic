@@ -24,6 +24,8 @@
 
 #include "SC_PlugIn.h"
 #include "audio_config.h"
+#include "shm_audio_buffer.hpp"
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 
@@ -4559,7 +4561,7 @@ void ScopeOut2_next(ScopeOut2* unit, int inNumSamples) {
     else
         wrap = inNumSamples - remain;
 
-    // Defensive check: if m_buffer.data was invalidated (e.g. the scope_buffer
+    // Defensive check: if m_buffer.data was invalidated (e.g. the shm_scope_buffer
     // in shm was released out from under us by a cold-swap race), memcpy
     // would crash. Skip-and-return rather than segfault; the [scope-diag]
     // line in the log tells us which channel went bad.
@@ -4581,7 +4583,7 @@ void ScopeOut2_next(ScopeOut2* unit, int inNumSamples) {
 
         // Second defensive check: channel_data returns data + channel*maxFrames.
         // If the bound channels/maxFrames don't match what's in the underlying
-        // scope_buffer (perhaps freed and re-allocated by another caller), we
+        // shm_scope_buffer (perhaps freed and re-allocated by another caller), we
         // could still land on invalid memory. Verify the computed address is
         // non-null before the memcpy.
         if (!inBuf) {
@@ -4643,6 +4645,74 @@ void ScopeOut2_Dtor(ScopeOut2* unit) {
             (void*)unit, unit->m_buffer.internalData, unit->m_buffer.data);
     if (unit->m_buffer)
         (*ft->fReleaseScopeBuffer)(unit->mWorld, &unit->m_buffer);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// AudioOut2: write input channels into a chosen shm_audio_buffer slot.
+// Counterpart to ScopeOut2, targeting the shm_audio_buffer array (see
+// shm_audio_buffer.hpp). Readers — Sonic Pi GUI on native, Playwright
+// or JS on web — pull frames via shm_audio_buffer_reader.
+//
+//   Inputs: AudioOut2.ar(slot, channel0, channel1, ...)
+//
+// Ctor activates the slot at the World's sample rate using the number
+// of audio inputs as the channel count. _next writes one block via the
+// lock-free monotonic-position writer. Dtor deactivates the slot so
+// readers don't keep observing a stale `enabled` flag.
+
+struct AudioOut2 : public Unit {
+    shm_audio_buffer_writer m_writer;
+    bool                    m_active;
+};
+
+// Input 0 is the slot index; inputs 1..N-1 are the audio channels.
+static constexpr int kAudioOut2FirstChannelInput = 1;
+
+void AudioOut2_next(AudioOut2* unit, int inNumSamples) {
+    if (!unit->m_active) return;
+    const int channels = unit->mNumInputs - kAudioOut2FirstChannelInput;
+    const int n = std::min(channels, (int)SHM_AUDIO_CHANNELS);
+    const float* channel_data[SHM_AUDIO_CHANNELS];
+    for (int c = 0; c < n; ++c)
+        channel_data[c] = IN(kAudioOut2FirstChannelInput + c);
+    unit->m_writer.write(channel_data, (uint32_t)inNumSamples);
+}
+
+void AudioOut2_Ctor(AudioOut2* unit) {
+    new (&unit->m_writer) shm_audio_buffer_writer();
+    unit->m_active = false;
+
+    const uint32_t slot = (uint32_t)ZIN0(0);
+    const int channels = unit->mNumInputs - kAudioOut2FirstChannelInput;
+    const uint32_t requested_channels =
+        (uint32_t)std::clamp(channels, 0, (int)SHM_AUDIO_CHANNELS);
+
+    if (!g_shm_audio_buffers || slot >= MAX_SHM_AUDIO_BUFFERS ||
+        requested_channels == 0) {
+        if (unit->mWorld->mVerbosity > -1)
+            Print("AudioOut2: bad params (slot=%u channels=%d) — skipping\n",
+                  slot, channels);
+        SETCALC(ClearUnitOutputs);
+        return;
+    }
+
+    unit->m_writer = shm_audio_buffer_writer(&g_shm_audio_buffers[slot]);
+    unit->m_active = unit->m_writer.activate(
+        requested_channels,
+        (uint32_t)SAMPLERATE,
+        SHM_AUDIO_FRAMES);
+
+    if (!unit->m_active && unit->mWorld->mVerbosity > -1)
+        Print("AudioOut2: writer.activate() rejected (slot=%u ch=%u)\n",
+              slot, requested_channels);
+
+    SETCALC(AudioOut2_next);
+}
+
+void AudioOut2_Dtor(AudioOut2* unit) {
+    if (unit->m_active)
+        unit->m_writer.deactivate();
 }
 
 
@@ -7039,6 +7109,7 @@ PluginLoad(Delay) {
     DefineSimpleCantAliasUnit(TGrains);
     DefineDtorUnit(ScopeOut);
     DefineDtorUnit(ScopeOut2);
+    DefineDtorUnit(AudioOut2);
     DefineDelayUnit(Pluck);
 
     DefineSimpleUnit(DelTapWr);

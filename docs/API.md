@@ -945,11 +945,7 @@ Subscribe to an event.
 
 Unsubscribe function — call it to remove the listener
 
-> (): `void`
-
-###### Returns
-
-`void`
+() => `void`
 
 ###### Example
 
@@ -986,11 +982,7 @@ Returns an unsubscribe function (matching [on](#on)).
 
 Unsubscribe function — call it to remove the listener before it fires
 
-> (): `void`
-
-###### Returns
-
-`void`
+() => `void`
 
 ##### purge()
 
@@ -2778,9 +2770,9 @@ this for you.
 
 ###### Parameters
 
-| Parameter  | Type                                                                                    | Description                          |
-| ---------- | --------------------------------------------------------------------------------------- | ------------------------------------ |
-| `handler?` | (`view`, `offset`, `length`, `sequence`) => `void` \| (`oscData`, `sequence`) => `void` | Optional override for this call only |
+| Parameter  | Type                                                                                        | Description                          |
+| ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `handler?` | ((`view`, `offset`, `length`, `sequence`) => `void`) \| ((`oscData`, `sequence`) => `void`) | Optional override for this call only |
 
 ###### Returns
 
@@ -2865,9 +2857,9 @@ PM mode: handler receives `(oscData, sequence)` where `oscData` is a copy.
 
 ###### Parameters
 
-| Parameter | Type                                                                                    |
-| --------- | --------------------------------------------------------------------------------------- |
-| `handler` | (`view`, `offset`, `length`, `sequence`) => `void` \| (`oscData`, `sequence`) => `void` |
+| Parameter | Type                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------- |
+| `handler` | ((`view`, `offset`, `length`, `sequence`) => `void`) \| ((`oscData`, `sequence`) => `void`) |
 
 ###### Returns
 

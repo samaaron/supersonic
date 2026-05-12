@@ -3,7 +3,7 @@
  *
  * Background: ScopeOut2_next has two defensive NULL checks on the scope
  * buffer pointer. A comment in DelayUGens.cpp says they're there because
- * "the scope_buffer in shm was released out from under us by a cold-swap
+ * "the shm_scope_buffer in shm was released out from under us by a cold-swap
  * race." The defenses were added in response to a SIGSEGV seen during
  * macOS device-switching work.
  *

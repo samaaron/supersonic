@@ -34,6 +34,11 @@ extern "C" {
     // POSIX shm segment so Sonic Pi can observe metrics directly.
     extern PerformanceMetrics* g_external_metrics;
 
+    // Same pattern for the audio-buffer slot array: points into the
+    // POSIX shm segment so external readers (Sonic Pi session recorder)
+    // see the master mix and any AudioOut2-driven stems.
+    extern shm_audio_buffer* g_external_audio_buffers;
+
     void destroy_world();
     void rebuild_world(double sample_rate);
 }
@@ -802,14 +807,20 @@ void SupersonicEngine::init(const Config& cfg) {
             // Redirect the metrics pointer into the public segment so external
             // observers (Sonic Pi) can read it directly via shm.
             g_external_metrics = mShmemCreator->get_metrics();
+            // Same for the audio-buffer slot array. Without this override
+            // the audio thread writes into ring_buffer_storage (process-
+            // local) and the GUI reader sees only zeros.
+            g_external_audio_buffers = mShmemCreator->get_audio_buffers();
         } catch (const std::exception& e) {
             fprintf(stderr, "[supersonic] shared memory creation failed: %s\n", e.what());
             fflush(stderr);
             mShmemCreator.reset();
             g_external_metrics = nullptr;
+            g_external_audio_buffers = nullptr;
         }
     } else {
         g_external_metrics = nullptr;
+        g_external_audio_buffers = nullptr;
     }
 
     // -- Initialise scsynth World ------------------------------------------
@@ -1028,6 +1039,7 @@ void SupersonicEngine::shutdown() {
 
     // Destroy engine-owned shared memory (after World is gone)
     g_external_shared_memory = nullptr;
+    g_external_audio_buffers = nullptr;
     mShmemCreator.reset();
 }
 

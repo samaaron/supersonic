@@ -37,9 +37,10 @@ export const MemoryLayout = {
      * Actual ring buffer usage: IN: 768KB, OUT: 128KB, DEBUG: 64KB = 960KB
      * Plus control structures: CONTROL_SIZE (48B) + METRICS_SIZE (184B) + timing (16B) = 248B
      * Plus node tree: ~57KB
-     * Plus audio capture buffer (for testing): 3sec at 48kHz stereo = ~1.1MB
-     * Total actual usage: ~2.2MB
-     * Reserved: 3MB (provides headroom for future expansion)
+     * Plus shm_audio_buffer slot array:
+     *   MAX_SHM_AUDIO_BUFFERS * (32B header + SHM_AUDIO_FRAMES * SHM_AUDIO_CHANNELS * 4B)
+     *   = 4 * (32 + 48000 * 2 * 4) ≈ 1.5MB at the production 1-second ring.
+     * Total ~2.6MB. Overflow into the RT pool silently breaks OSC.
      */
     ringBufferReserved: 3 * 1024 * 1024,  // 3MB reserved
 

@@ -342,12 +342,12 @@ set(SUPERSONIC_COMPILE_DEFS
     # platform-specific headers.
     SC_AUDIO_API=3
 
-    # AudioCapture buffer duration. Production default is 1 second (~375KB);
-    # test builds bump it to give the scheduling-jitter / audio-capture tests
-    # enough samples for stable percentile statistics. The same value must
-    # propagate to every TU that includes shared_memory.h, so it lives here
-    # rather than as a per-target compile definition.
-    SUPERSONIC_AUDIO_CAPTURE_SECONDS=$<IF:$<BOOL:${BUILD_TESTS}>,10,1>
+    # Per-slot shm_audio_buffer ring duration, in seconds. Production
+    # defaults to 1s (~375KB per slot); test builds bump it so the
+    # scheduling-jitter and audio-capture tests carry enough samples for
+    # stable percentile statistics. Set globally rather than per-target
+    # because every TU that includes shm_audio_buffer.hpp must agree.
+    SUPERSONIC_SHM_AUDIO_SECONDS=$<IF:$<BOOL:${BUILD_TESTS}>,10,1>
 )
 
 # ─── TLSF memory allocator (for scope buffer pool in shared memory) ─────────

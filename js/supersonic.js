@@ -1137,7 +1137,7 @@ export class SuperSonic {
   /** @returns {object} Cached TypedArray views for a scope slot (lazily created) */
   #getScopeSlotViews(scopeNum) {
     if (!this.#scopeViews) {
-      this.#scopeViews = new Array(this.#metricsReader.bufferConstants.SCOPE_MAX_SCOPES);
+      this.#scopeViews = new Array(this.#metricsReader.bufferConstants.SHM_SCOPE_MAX_SCOPES);
     }
     let views = this.#scopeViews[scopeNum];
     if (views) return views;
@@ -1145,10 +1145,10 @@ export class SuperSonic {
     const bc = this.#metricsReader.bufferConstants;
     const sab = this.#metricsReader.sharedBuffer;
     const base = this.#metricsReader.ringBufferBase;
-    const slotOffset = base + bc.SCOPE_START + bc.SCOPE_HEADER_SIZE + scopeNum * bc.SCOPE_SLOT_SIZE;
-    const framesPerScope = bc.SCOPE_FRAMES_PER_SCOPE;
-    const regionSamples = framesPerScope * bc.SCOPE_CHANNELS;
-    const dataStart = slotOffset + bc.SCOPE_SLOT_HEADER_SIZE;
+    const slotOffset = base + bc.SHM_SCOPE_START + bc.SHM_SCOPE_HEADER_SIZE + scopeNum * bc.SHM_SCOPE_SLOT_SIZE;
+    const framesPerScope = bc.SHM_SCOPE_FRAMES_PER_SCOPE;
+    const regionSamples = framesPerScope * bc.SHM_SCOPE_CHANNELS;
+    const dataStart = slotOffset + bc.SHM_SCOPE_SLOT_HEADER_SIZE;
 
     const regions = [];
     for (let i = 0; i < 3; i++) {
@@ -1182,8 +1182,8 @@ export class SuperSonic {
     if (!this.#initialized) return null;
 
     const bc = this.#metricsReader.bufferConstants;
-    if (!bc || bc.SCOPE_START == null || bc.SCOPE_MAX_SCOPES == null) return null;
-    if (scopeNum < 0 || scopeNum >= bc.SCOPE_MAX_SCOPES) return null;
+    if (!bc || bc.SHM_SCOPE_START == null || bc.SHM_SCOPE_MAX_SCOPES == null) return null;
+    if (scopeNum < 0 || scopeNum >= bc.SHM_SCOPE_MAX_SCOPES) return null;
 
     // TODO: PM mode — read from latest heartbeat snapshot
     if (!this.#metricsReader.sharedBuffer) return null;
@@ -1214,11 +1214,11 @@ export class SuperSonic {
     if (!this.#initialized) return [];
 
     const bc = this.#metricsReader.bufferConstants;
-    if (!bc || bc.SCOPE_START == null || bc.SCOPE_MAX_SCOPES == null) return [];
+    if (!bc || bc.SHM_SCOPE_START == null || bc.SHM_SCOPE_MAX_SCOPES == null) return [];
     if (!this.#metricsReader.sharedBuffer) return [];
 
     const scopes = [];
-    for (let i = 0; i < bc.SCOPE_MAX_SCOPES; i++) {
+    for (let i = 0; i < bc.SHM_SCOPE_MAX_SCOPES; i++) {
       const views = this.#getScopeSlotViews(i);
       if (views.meta[0] !== 0) {
         scopes.push({ index: i, channels: views.meta[1] });
@@ -1243,10 +1243,22 @@ export class SuperSonic {
 
   // ============================================================================
   // AUDIO CAPTURE API
+  //
+  // Slot 0 of shm_audio_buffer is the master output mix, written by the
+  // audio thread's post-block hook (audio_processor.cpp) while the slot's
+  // `enabled` flag is set. startCapture/stopCapture toggle that flag and
+  // read the slot through the SAB.
+  //
+  // Slots 1..N-1 are written by AudioOut2 UGens (DelayUGens.cpp) for
+  // user-driven stem and FX taps; that path is independent of this API.
   // ============================================================================
 
   startCapture() {
     this.#ensureInitialized("start capture");
+    if (!this.#audioCapture.isAvailable()) {
+      throw new Error(
+        "Audio capture is only available in SAB mode (set mode: 'sab').");
+    }
     this.#audioCapture.start();
   }
 
