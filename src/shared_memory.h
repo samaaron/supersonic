@@ -66,7 +66,12 @@ constexpr uint32_t NODE_TREE_START = METRICS_START + METRICS_SIZE;  // Contiguou
 constexpr uint32_t NTP_START_TIME_START = NODE_TREE_START + NODE_TREE_SIZE;
 constexpr uint32_t DRIFT_OFFSET_START = NTP_START_TIME_START + NTP_START_TIME_SIZE;
 constexpr uint32_t GLOBAL_OFFSET_START = DRIFT_OFFSET_START + DRIFT_OFFSET_SIZE;
-constexpr uint32_t SHM_AUDIO_START       = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
+// shm_audio_buffer is alignas(16); round up so slots stay aligned as
+// preceding region sizes change.
+constexpr uint32_t SHM_AUDIO_START       =
+    (GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE + 15u) & ~15u;
+static_assert(SHM_AUDIO_START % 16 == 0,
+              "SHM_AUDIO_START must be 16-byte aligned for shm_audio_buffer");
 constexpr uint32_t NODE_ID_COUNTER_SIZE  = 4;     // Int32, atomic — for nextNodeId() range allocation
 constexpr uint32_t NODE_ID_COUNTER_START = SHM_AUDIO_START + SHM_AUDIO_TOTAL_SIZE;
 

@@ -99,11 +99,11 @@ extern "C" {
 
 // Global pointers
 extern "C" {
-    // Static ring buffer allocated in WASM data segment
-    // This ensures no conflicts with scsynth heap allocations
-    // IMPORTANT: Must be 8-byte aligned for Float64Array access from JavaScript
+    // Static ring buffer in WASM data segment, separate from scsynth heap.
     // Size: ~1.4MB (IN: 768KB, OUT: 128KB, DEBUG: 64KB, control/metrics, node tree ~57KB, audio capture ~375KB)
-    alignas(8) uint8_t ring_buffer_storage[TOTAL_BUFFER_SIZE];
+    // 16-byte aligned for shm_audio_buffer slots (alignas(16)) at
+    // SHM_AUDIO_START; JS Float64Array access only needs 8.
+    alignas(16) uint8_t ring_buffer_storage[TOTAL_BUFFER_SIZE];
 
     // Validate at compile time that buffer layout fits in allocated storage
     static_assert(TOTAL_BUFFER_SIZE <= sizeof(ring_buffer_storage),
