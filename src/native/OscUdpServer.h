@@ -36,6 +36,7 @@
 
 class Prescheduler;
 class SupersonicEngine;
+struct SwapResult;  // declared in DeviceInfo.h, carried into sendSwitchDone
 
 class OscUdpServer : public juce::Thread {
 public:
@@ -72,8 +73,24 @@ public:
     // Broadcast /supersonic/statechange to all notify targets
     void sendStateChange(const char* state, const char* reason);
 
-    // Broadcast /supersonic/setup to all notify targets (world is ready)
-    void sendSetup(int sampleRate, int bufferSize);
+    // Broadcast /supersonic/setup to all notify targets (world is ready).
+    // `generation` carries the engine's cold-swap counter — see
+    // SupersonicEngine::setupGeneration().
+    void sendSetup(int sampleRate, int bufferSize, uint32_t generation);
+
+    // Broadcast /supersonic/devices/switch.done with the truthful outcome
+    // of a debounced switch. Two failure shapes are surfaced explicitly:
+    //   - success == false              → entire swap failed; GUI shows
+    //                                      a modal with `result.error`.
+    //   - success == true, inputUnavailable
+    //                                   → output opened, the requested
+    //                                      input couldn't; GUI shows
+    //                                      `inputUnavailableReason` and
+    //                                      reverts the input dropdown.
+    // The engine does not diagnose — JUCE's verbatim string is carried.
+    void sendSwitchDone(const SwapResult& result,
+                        const std::string& requestedOutput,
+                        const std::string& requestedInput);
 
     // Set engine pointer for /supersonic/* command interception
     void setEngine(SupersonicEngine* engine) { mEngine = engine; }

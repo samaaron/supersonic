@@ -111,6 +111,20 @@ void SupersonicEngine::recordSwapPreferences(const std::string& deviceName,
         mPreferredInputDevice.clear();
     else if (!inputDeviceName.empty())
         mPreferredInputDevice = inputDeviceName;
+
+    // Per-driver memory: record the just-opened device under the
+    // driver JUCE actually opened on. switchDriver reads this to
+    // delegate driver-only picks to an explicit-name switchDevice,
+    // closing the alphabetical-first-auto-pick hazard. Use JUCE's
+    // type directly — currentDriver() hides the intent fallback.
+    if (!deviceName.empty() && mDeviceManager) {
+        if (auto* dev = mDeviceManager->getCurrentAudioDevice()) {
+            std::string drv = dev->getTypeName().toStdString();
+            if (!drv.empty())
+                mPreferredDeviceByDriver[drv] = deviceName;
+            mIntendedDriver.clear();
+        }
+    }
 }
 
 std::string SupersonicEngine::refuseUnknownDeviceName(
@@ -252,10 +266,13 @@ void SupersonicEngine::setEngineState(EngineState state, const std::string& reas
     // (where old nodes still exist) would cause duplicate node ID errors.
     if (state == EngineState::Running && mWorldRebuilt) {
         mWorldRebuilt = false;
+        // Bump before emit so the wire value is the post-rebuild
+        // generation (mSetupGeneration starts at 1; first cold swap = 2).
+        uint32_t gen = mSetupGeneration.fetch_add(1) + 1;
         auto* dev = mDeviceManager ? mDeviceManager->getCurrentAudioDevice() : nullptr;
         int sr  = dev ? static_cast<int>(dev->getCurrentSampleRate()) : mCurrentConfig.sampleRate;
         int buf = dev ? dev->getCurrentBufferSizeSamples() : mCurrentConfig.bufferSize;
-        mUdpServer.sendSetup(sr, buf);
+        mUdpServer.sendSetup(sr, buf, gen);
     }
 }
 
@@ -1780,17 +1797,24 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     }
     std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
 
-    // Validate names against the active driver via planDeviceSwitch.
-    // Unresolved names refuse the swap; a cold-init resolution sets
-    // crossDriver for the setCurrentAudioDeviceType call below.
+    // Resolve the requested device name(s) against the scoped driver:
+    // mIntendedDriver if a switchDriver-no-pref pick is pending, else
+    // JUCE's actual current type. Pending-driver scoping is required
+    // for the two-step driver→device flow — a switchDevice for the
+    // intended driver's device would otherwise scope against JUCE's
+    // unchanged type and fail to resolve.
     bool        crossDriver       = false;
     std::string crossDriverTarget;
+    std::string crossDriverDevice;
     if (mDeviceManager) {
         std::string juceCurrentType;
         if (auto* dev = mDeviceManager->getCurrentAudioDevice())
             juceCurrentType = dev->getTypeName().toStdString();
         else
             juceCurrentType = mDeviceManager->getCurrentAudioDeviceType().toStdString();
+
+        const std::string scopedDriver =
+            mIntendedDriver.empty() ? juceCurrentType : mIntendedDriver;
 
         std::vector<std::pair<std::string, std::string>> deviceTable;
         for (auto& d : listDevices(false))
@@ -1800,14 +1824,18 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             if (name.empty() || name == "__system__" || name == "__none__")
                 return {};
             auto plan = sonicpi::device::planDeviceSwitch(
-                juceCurrentType, name, deviceTable);
+                scopedDriver, name, deviceTable);
             if (!plan.deviceFound) {
                 return "device '" + name + "' not available on driver '"
-                     + (juceCurrentType.empty() ? "(none)" : juceCurrentType) + "'";
+                     + (scopedDriver.empty() ? "(none)" : scopedDriver) + "'";
             }
-            if (plan.needsTypeSwitch && !crossDriver) {
+            // Compare against JUCE's actual type — that's what
+            // setCurrentAudioDeviceType has to be called for, regardless
+            // of the pending-intent scope used for the lookup.
+            if (plan.targetDriver != juceCurrentType && !crossDriver) {
                 crossDriver       = true;
                 crossDriverTarget = plan.targetDriver;
+                crossDriverDevice = plan.targetDevice;
                 fprintf(stderr,
                     "[audio-device] cross-driver: '%s' -> '%s' (device '%s')\n",
                     juceCurrentType.c_str(), crossDriverTarget.c_str(),
@@ -1823,6 +1851,21 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         if (auto err = considerName(inputDeviceName); !err.empty()) {
             result.error = err;
             return result;
+        }
+
+        // ASIO is full-duplex single-device by spec — one open call
+        // delivers both directions. On a cross-driver switch to ASIO
+        // with an explicit output but no input, mirror the output to
+        // the input. Without this, the info display reports "in 8"
+        // while the input dropdown shows "-- None --".
+        if (crossDriver && crossDriverTarget == "ASIO"
+            && !deviceName.empty()
+            && (inputDeviceName.empty() || inputDeviceName == "__none__")) {
+            inputDeviceName = crossDriverDevice;
+            fprintf(stderr,
+                "[audio-device] ASIO full-duplex: mirroring '%s' to input\n",
+                crossDriverDevice.c_str());
+            fflush(stderr);
         }
     }
 
@@ -1961,7 +2004,10 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     }
 
     bool inputWasDropped = false;
-    bool isCold = forceCold || forceColdForChannels
+    // Cross-driver swaps need a cold swap: the new AudioIODeviceType
+    // may report different rate / channel-count / buffer-size ranges,
+    // so the World must be rebuilt against the new device's specs.
+    bool isCold = forceCold || forceColdForChannels || crossDriver
                 || (sampleRate > 0 && sampleRate != currentRate);
     result.type = isCold ? SwapType::Cold : SwapType::Hot;
 
@@ -1996,8 +2042,32 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     // --- Apply new device configuration ---
     std::string errStr;
     if (mDeviceManager) {
+        // Cross-driver: move JUCE to the new AudioIODeviceType before
+        // reading the setup. setCurrentAudioDeviceType internally calls
+        // setAudioDeviceSetup with the new type's saved (often empty)
+        // config; insertDefaultDeviceNames fills the empty field with
+        // the alphabetical-first device of the type. The transient
+        // open is discardable — outputDeviceName is overridden below
+        // and setAudioDeviceSetup is re-run authoritatively. On
+        // Windows ASIO an unplugged-but-registered driver can hang
+        // here in IASIO::init().
+        if (crossDriver) {
+            mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+            mDeviceManager->setCurrentAudioDeviceType(
+                juce::String(crossDriverTarget), false);
+        }
+
         juce::AudioDeviceManager::AudioDeviceSetup setup;
         mDeviceManager->getAudioDeviceSetup(setup);
+
+        if (crossDriver) {
+            // The transient open above left setup carrying the alpha-
+            // first device (or empty). Force-set to the resolved
+            // crossDriverDevice so the setAudioDeviceSetup below is
+            // unambiguous.
+            setup.outputDeviceName = juce::String(crossDriverDevice);
+            setup.inputDeviceName  = juce::String();
+        }
 
 #ifdef __APPLE__
         // If currently on an aggregate device, resolve back to real device names
@@ -2194,15 +2264,6 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         // JUCE's setAudioDeviceSetup sees it as a different device and
         // reopens properly.
 
-        if (crossDriver) {
-            // Cold-init: planDeviceSwitch's global lookup resolved the
-            // requested device under a driver JUCE isn't currently on
-            // (or JUCE has no current type). Move the type before the
-            // open so setAudioDeviceSetup sees a valid name.
-            mDeviceManager->setCurrentAudioDeviceType(
-                juce::String(crossDriverTarget), false);
-        }
-
         fprintf(stderr, "[audio-device] calling setAudioDeviceSetup: out='%s' in='%s' sr=%.0f buf=%d\n",
                 setup.outputDeviceName.toRawUTF8(),
                 setup.inputDeviceName.toRawUTF8(),
@@ -2226,13 +2287,16 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         {
             const std::string firstError = errStr;
             const std::string failedInputName = setup.inputDeviceName.toStdString();
+            const std::string pairedOutputName = setup.outputDeviceName.toStdString();
             juce::AudioDeviceManager::AudioDeviceSetup outOnly = setup;
             outOnly.inputDeviceName = juce::String();
             outOnly.useDefaultInputChannels = false;
             outOnly.inputChannels.clear();
             fprintf(stderr,
-                    "[audio-device] input '%s' failed (%s) — retrying output-only\n",
-                    failedInputName.c_str(), firstError.c_str());
+                    "[audio-device] input '%s' failed when paired with output '%s' "
+                    "(%s) — retrying output-only\n",
+                    failedInputName.c_str(), pairedOutputName.c_str(),
+                    firstError.c_str());
             fflush(stderr);
             juce::String retryErr = mDeviceManager->setAudioDeviceSetup(outOnly, true);
             if (retryErr.isEmpty()) {
@@ -2240,6 +2304,16 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                 errStr.clear();
                 result.inputUnavailable = true;
                 result.inputUnavailableReason = firstError;
+                // Remember the (output, input) pair as known-bad so
+                // sendDeviceReport hides this input from the dropdown
+                // while pairedOutputName is the active output. Per-
+                // output scoping: the same input can pair fine with a
+                // different output (typical with WASAPI Shared vs
+                // ASIO on the same hardware).
+                {
+                    std::lock_guard<std::mutex> lock(mUngatableInputPairsMutex);
+                    mUngatableInputPairs.emplace(pairedOutputName, failedInputName);
+                }
             } else {
                 errStr = retryErr.toStdString();
                 fprintf(stderr,
@@ -2576,6 +2650,26 @@ SwapResult SupersonicEngine::enableInputChannels(int numChannels) {
         return result;
     }
 
+    // Refuse "disable inputs" on ASIO. ASIO drivers are full-duplex
+    // single-device by spec — one stream owns both directions.
+    // Reconfiguring with input=0 while keeping output crashes real
+    // drivers (MOTU Pro Audio observed). Output-only is served by
+    // switching driver to Windows Audio / DirectSound.
+    if (numChannels == 0 && mDeviceManager) {
+        if (auto* dev = mDeviceManager->getCurrentAudioDevice()) {
+            if (dev->getTypeName().toStdString() == "ASIO") {
+                SwapResult result;
+                result.error = "Cannot disable input on ASIO — ASIO drivers "
+                               "are full-duplex by spec. Switch driver to "
+                               "Windows Audio / DirectSound to run output-only.";
+                fprintf(stderr, "[enable-inputs] refusing disable on ASIO "
+                        "(would crash the driver)\n");
+                fflush(stderr);
+                return result;
+            }
+        }
+    }
+
     // Save old values for rollback on failure
     int oldNumInputChannels = mCurrentConfig.numInputChannels;
     uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
@@ -2690,138 +2784,111 @@ std::vector<std::string> SupersonicEngine::listDrivers() const {
 
 std::string SupersonicEngine::currentDriver() const {
     if (!mDeviceManager) return "";
-    auto* dev = mDeviceManager->getCurrentAudioDevice();
-    if (!dev) return "";
-    return dev->getTypeName().toStdString();
+    if (auto* dev = mDeviceManager->getCurrentAudioDevice())
+        return dev->getTypeName().toStdString();
+    // No device open: fall back to the active type so the GUI's
+    // driver dropdown stays on the right entry instead of going
+    // blank. The type can be set without a device during cross-
+    // driver swaps and after open failures.
+    return mDeviceManager->getCurrentAudioDeviceType().toStdString();
+}
+
+std::string SupersonicEngine::intendedDriver() const {
+    return mIntendedDriver;
+}
+
+bool SupersonicEngine::isInputKnownBadFor(const std::string& outputName,
+                                          const std::string& inputName) const {
+    if (outputName.empty() || inputName.empty()) return false;
+    std::lock_guard<std::mutex> lock(mUngatableInputPairsMutex);
+    return mUngatableInputPairs.count({outputName, inputName}) > 0;
 }
 
 SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
     SwapResult result;
     result.deviceName = driverName;
 
-    // ── Headless mode ───────────────────────────────────────────────────
-    // No real audio driver to switch.  If the test hook is set, simulate
-    // the rate the new driver's default device would report.
-    if (!mDeviceManager) {
-        if (!testDriverSwitchRate) {
-            result.error = "no audio device in headless mode";
-            return result;
+    // ── Real-driver path ────────────────────────────────────────────────
+    // Always carry an explicit device name into setAudioDeviceSetup —
+    // never let JUCE's insertDefaultDeviceNames pick alphabetical-first
+    // for the new type. On Windows ASIO that's the registered-but-
+    // unplugged-driver hang hazard (IASIO::init() can block in COM);
+    // on every driver it's a quiet UX surprise (the device dropdown
+    // shows one thing, the audio is routed through another).
+    if (mDeviceManager) {
+        // (a) Saved per-driver preference → delegate to switchDevice
+        //     with the remembered name. switchDevice's cross-driver
+        //     path moves JUCE atomically.
+        auto pref = mPreferredDeviceByDriver.find(driverName);
+        if (pref != mPreferredDeviceByDriver.end() && !pref->second.empty()) {
+            fprintf(stderr, "[audio-device] switchDriver('%s'): delegating to "
+                    "switchDevice('%s') (saved preference)\n",
+                    driverName.c_str(), pref->second.c_str());
+            fflush(stderr);
+            mIntendedDriver = driverName;
+            return switchDevice(pref->second);
         }
-        double newRate = testDriverSwitchRate();
-        if (static_cast<int>(newRate) == mCurrentConfig.sampleRate) {
-            // Same rate — hot swap, no world rebuild needed
-            result.success    = true;
-            result.type       = SwapType::Hot;
-            result.sampleRate = newRate;
-            result.bufferSize = mCurrentConfig.bufferSize;
-            if (onSwapEvent) onSwapEvent("swap:start", result);
-            if (onSwapEvent) onSwapEvent("swap:complete", result);
-            return result;
+
+        // (b) No saved preference, non-ASIO driver with at least one
+        //     device visible → pick the driver's system-default device
+        //     and delegate. Keeps the transition atomic (one cold swap)
+        //     and avoids leaving the GUI in a "driver=X but no device"
+        //     limbo for drivers that have a sensible default.
+        if (driverName != "ASIO") {
+            auto& types = mDeviceManager->getAvailableDeviceTypes();
+            for (auto* type : types) {
+                if (type->getTypeName().toStdString() != driverName) continue;
+                type->scanForDevices();
+                auto names = type->getDeviceNames(false);
+                if (names.isEmpty()) break;  // fall through to (c)
+                int idx = type->getDefaultDeviceIndex(false);
+                if (idx < 0 || idx >= names.size()) idx = 0;
+                std::string defaultName = names[idx].toStdString();
+                fprintf(stderr, "[audio-device] switchDriver('%s'): no saved pref, "
+                        "auto-selecting default '%s'\n",
+                        driverName.c_str(), defaultName.c_str());
+                fflush(stderr);
+                mIntendedDriver = driverName;
+                return switchDevice(defaultName);
+            }
         }
-        // Different rate — delegate to switchDevice for a cold swap.
-        // Mutex is not held here so switchDevice can acquire it.
-        return switchDevice("", newRate);
+
+        // (c) ASIO with no saved preference, or any driver with no
+        //     visible devices → don't touch JUCE. setCurrentAudio-
+        //     DeviceType + initialiseWithDefaultDevices stops the
+        //     audio callback, so scsynth stops ticking; any user-code
+        //     call hitting trigger_synth before a follow-up
+        //     switchDevice would hang on /n_go. Record intent and
+        //     wait for the caller's explicit device pick.
+        mIntendedDriver                 = driverName;
+        result.success                  = true;
+        result.requiresDeviceSelection  = true;
+        fprintf(stderr, "[audio-device] switchDriver('%s'): intent recorded, "
+                "no device opened — caller must follow with switchDevice\n",
+                driverName.c_str());
+        fflush(stderr);
+        if (onSwapEvent) onSwapEvent("swap:complete", result);
+        return result;
     }
 
-    // ── Real driver switch ──────────────────────────────────────────────
-    double coldSwapRate = 0;
-
-    {   // Mutex scope — released before any cold swap delegation
-        if (!mSwapMutex.try_lock()) {
-            result.error = "swap already in progress";
-            return result;
-        }
-        std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
-
-        // Pause audio and stop the active source
-        mAudioCallback.pause();
-        stopAudioSource();
-
-        // Reset the user's device preference BEFORE touching the driver.
-        // Preferences are keyed by device name, and device names are
-        // per-driver — a JACK device name ("Built-in Audio Analog Stereo")
-        // doesn't exist in the ALSA list and vice versa. Carrying a
-        // preference across a driver swap makes the next /devices/switch
-        // cascade through "No such device: X" into a device-didn't-start
-        // failure and a swap-failed-rollback limbo. Start the new driver
-        // fresh: default device, no preference, no hot-plug memory.
-        mPreferredOutputDevice.clear();
-        mPreferredInputDevice.clear();
-        mPreWirelessRate = 0;
-        mDeviceRateMemory.clear();
-
-        // Switch driver type
-        mDeviceManager->setCurrentAudioDeviceType(juce::String(driverName), true);
-        juce::String err = mDeviceManager->initialiseWithDefaultDevices(
-            mCurrentConfig.numInputChannels, mCurrentConfig.numOutputChannels);
-        if (err.isNotEmpty()) {
-            err = mDeviceManager->initialiseWithDefaultDevices(0, mCurrentConfig.numOutputChannels);
-        }
-        if (err.isNotEmpty()) {
-            err = mDeviceManager->initialiseWithDefaultDevices(0, 0);
-        }
-
-        if (err.isNotEmpty()) {
-            // All driver-init attempts failed. startAudioSource() will see
-            // no current device and bring up the headless driver so the
-            // engine stays responsive while the user retries from prefs.
-            startAudioSource();
-            mAudioCallback.resume();
-            result.error = err.toStdString();
-            if (onSwapEvent) onSwapEvent("swap:failed", result);
-            return result;
-        }
-
-        // Try to match sample rate (let driver pick its own buffer size)
-        if (auto* dev = mDeviceManager->getCurrentAudioDevice()) {
-            juce::AudioDeviceManager::AudioDeviceSetup setup;
-            mDeviceManager->getAudioDeviceSetup(setup);
-            if (static_cast<int>(setup.sampleRate) != mCurrentConfig.sampleRate) {
-                setup.sampleRate = mCurrentConfig.sampleRate;
-                mDeviceManager->setAudioDeviceSetup(setup, true);
-            }
-        }
-
-        // Restart on the new device (or headless if even this fails)
-        startAudioSource();
-        mAudioCallback.resume();
-
-        // Read actual device state after switch
-        auto* finalDev = mDeviceManager->getCurrentAudioDevice();
-        if (finalDev) {
-            result.sampleRate = finalDev->getCurrentSampleRate();
-            result.bufferSize = finalDev->getCurrentBufferSizeSamples();
-            mCurrentConfig.numOutputChannels = finalDev->getActiveOutputChannels().countNumberOfSetBits();
-            mCurrentConfig.numInputChannels  = finalDev->getActiveInputChannels().countNumberOfSetBits();
-
-            fprintf(stderr, "[audio-device] switched to %s: %s %.0fHz buf=%d %dch\n",
-                    finalDev->getTypeName().toRawUTF8(),
-                    finalDev->getName().toRawUTF8(),
-                    result.sampleRate, result.bufferSize,
-                    mCurrentConfig.numOutputChannels);
-
-            // Check for rate mismatch — if the new driver can't match the
-            // World's rate, we need a cold swap to rebuild at the actual rate.
-            if (static_cast<int>(result.sampleRate) != mCurrentConfig.sampleRate) {
-                coldSwapRate = result.sampleRate;
-            }
-        }
-
-        if (coldSwapRate == 0) {
-            // No rate mismatch — complete as a hot swap
-            result.success = true;
-            result.type    = SwapType::Hot;
-            if (onSwapEvent) onSwapEvent("swap:start", result);
-            if (onSwapEvent) onSwapEvent("swap:complete", result);
-            return result;
-        }
-    } // mutex released
-
-    // Rate mismatch detected — cold swap to rebuild World at the new rate.
-    // Mutex is released so switchDevice can acquire it.
-    fprintf(stderr, "[audio-device] driver rate mismatch (world=%d, device=%.0f) — cold swap\n",
-            mCurrentConfig.sampleRate, coldSwapRate);
-    return switchDevice("", coldSwapRate);
+    // ── Headless mode ───────────────────────────────────────────────────
+    // No real audio driver to switch. If the test hook is set, simulate
+    // the rate the new driver's default device would report.
+    if (!testDriverSwitchRate) {
+        result.error = "no audio device in headless mode";
+        return result;
+    }
+    double newRate = testDriverSwitchRate();
+    if (static_cast<int>(newRate) == mCurrentConfig.sampleRate) {
+        result.success    = true;
+        result.type       = SwapType::Hot;
+        result.sampleRate = newRate;
+        result.bufferSize = mCurrentConfig.bufferSize;
+        if (onSwapEvent) onSwapEvent("swap:start", result);
+        if (onSwapEvent) onSwapEvent("swap:complete", result);
+        return result;
+    }
+    return switchDevice("", newRate);
 }
 
 // --- Device change detection ---

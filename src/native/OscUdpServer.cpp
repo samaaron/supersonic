@@ -9,6 +9,7 @@
 #ifdef __APPLE__
 #include "AggregateDeviceHelper.h"
 #endif
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <set>
@@ -152,6 +153,19 @@ void OscUdpServer::sendDeviceReport() {
     };
     dedupeByName(outputDevices);
     dedupeByName(inputDevices);
+
+    // Hide inputs that have already failed when paired with the current
+    // output (remembered by switchDevice's input-fallback branch). Per-
+    // output scoping: the same input may pair fine with a different
+    // output. "Don't show options we can't honour."
+    if (mEngine && !current.name.empty()) {
+        inputDevices.erase(
+            std::remove_if(inputDevices.begin(), inputDevices.end(),
+                [&](const DeviceInfo& d) {
+                    return mEngine->isInputKnownBadFor(current.name, d.name);
+                }),
+            inputDevices.end());
+    }
 
     // When current output is wireless (e.g. AirPlay via System Output),
     // we cannot aggregate it with a hardware mic — the IOProc freezes.
@@ -450,7 +464,41 @@ void OscUdpServer::sendStateChange(const char* state, const char* reason) {
         mSocket->write(t.ip, t.port, s.Data(), static_cast<int>(s.Size()));
 }
 
-void OscUdpServer::sendSetup(int sampleRate, int bufferSize) {
+void OscUdpServer::sendSwitchDone(const SwapResult& result,
+                                  const std::string& requestedOutput,
+                                  const std::string& requestedInput) {
+    std::vector<NotifyTarget> targets;
+    {
+        juce::ScopedLock sl(mSenderLock);
+        targets = mNotifyTargets;
+    }
+    if (targets.empty() || !mSocket) return;
+
+    // Wire format (all fields present on every emit):
+    //   success(int32),
+    //   requestedOutput(str),  requestedInput(str),
+    //   actualOutput(str),     actualInput(str),
+    //   error(str),                  ← top-level error, "" on success
+    //   inputUnavailable(int32),     ← 1 = output opened, input fell back
+    //   inputUnavailableReason(str)  ← JUCE verbatim, "" otherwise
+    char buf[2048];
+    osc::OutboundPacketStream s(buf, sizeof(buf));
+    s << osc::BeginMessage("/supersonic/devices/switch.done")
+      << static_cast<osc::int32>(result.success ? 1 : 0)
+      << requestedOutput.c_str()
+      << requestedInput.c_str()
+      << result.deviceName.c_str()
+      << result.inputDeviceName.c_str()
+      << result.error.c_str()
+      << static_cast<osc::int32>(result.inputUnavailable ? 1 : 0)
+      << result.inputUnavailableReason.c_str()
+      << osc::EndMessage;
+
+    for (auto& t : targets)
+        mSocket->write(t.ip, t.port, s.Data(), static_cast<int>(s.Size()));
+}
+
+void OscUdpServer::sendSetup(int sampleRate, int bufferSize, uint32_t generation) {
     std::vector<NotifyTarget> targets;
     {
         juce::ScopedLock sl(mSenderLock);
@@ -463,6 +511,7 @@ void OscUdpServer::sendSetup(int sampleRate, int bufferSize) {
     s << osc::BeginMessage("/supersonic/setup")
       << static_cast<osc::int32>(sampleRate)
       << static_cast<osc::int32>(bufferSize)
+      << static_cast<osc::int32>(generation)
       << osc::EndMessage;
 
     for (auto& t : targets)
@@ -944,6 +993,11 @@ void OscUdpServer::executePendingSwitch() {
         // No sendDeviceReport() here — switchDevice's printDeviceList
         // already broadcasts. A second call can race with JUCE's post-
         // switch device-list rescan and report an empty snapshot.
+
+        // Push the truthful outcome to subscribers (GUI). Carries the
+        // input-fallback case (success=true, inputUnavailable=true)
+        // distinctly from a top-level failure (success=false).
+        sendSwitchDone(result, devName, inputDevName);
     }
 
     mDebounceSwitchRunning.store(false);

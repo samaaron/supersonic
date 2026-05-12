@@ -9,7 +9,9 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 #ifdef __APPLE__
 #include <CoreAudio/CoreAudio.h>
@@ -145,8 +147,29 @@ public:
 
     // --- Audio driver management ---
     std::vector<std::string> listDrivers() const;
+    // The driver type of whichever device JUCE actually has open (or
+    // the active type if no device is open). Does NOT reflect the
+    // user's pending choice — see intendedDriver().
     std::string              currentDriver() const;
+    // The user's last switchDriver() pick when it wasn't followed by
+    // an immediate device transition (no saved preference + ASIO, or
+    // no devices visible for the type). Empty otherwise. The GUI uses
+    // this to keep its driver dropdown sticky on the user's choice
+    // while the info display continues to report the actual audio path.
+    std::string              intendedDriver() const;
     SwapResult               switchDriver(const std::string& driverName);
+
+    // True iff JUCE rejected the (outputName, inputName) pair on a
+    // previous swap. The pair is remembered in mUngatableInputPairs
+    // and filtered out of subsequent device-list pushes — "don't show
+    // options we can't honour." Cleared by hotplug rescans.
+    bool isInputKnownBadFor(const std::string& outputName,
+                            const std::string& inputName) const;
+
+    // Increments on every cold-swap rebuild of the World. Emitted on
+    // /supersonic/setup so clients (Spider) can detect that a swap they
+    // were waiting on has completed and abort stale waits.
+    uint32_t                 setupGeneration() const { return mSetupGeneration.load(); }
 
     // --- Recording (JUCE-side output tap) ---
     struct RecordResult {
@@ -410,6 +433,33 @@ private:
     std::string              mDeviceMode;   // empty = system/auto, non-empty = manual device name
     bool                     mWorldRebuilt{false};
     std::map<std::string, int> mDeviceRateMemory; // per-device remembered sample rate
+
+    // Cold-swap generation. Cross-thread: write from setEngineState on
+    // the audio-management thread, read from the OSC server thread.
+    std::atomic<uint32_t>    mSetupGeneration{1};
+
+    // Per-driver-type remembered device name. Written by
+    // recordSwapPreferences after a successful open; read by
+    // switchDriver to delegate "change driver" to "open the device
+    // the user last opened on that driver." Closes the
+    // alphabetical-first-auto-pick hazard.
+    std::map<std::string, std::string> mPreferredDeviceByDriver;
+
+    // User's pending driver pick when no per-driver preference exists
+    // yet (ASIO with no remembered device, or any driver with no
+    // visible devices). currentDriver() stays truthful — this field
+    // is only exposed via intendedDriver(). Cleared in
+    // recordSwapPreferences on the next successful open.
+    std::string              mIntendedDriver;
+
+    // (output, input) pairs that JUCE rejected. Populated from
+    // switchDevice's input-fallback branch when setAudioDeviceSetup
+    // returns "Couldn't open the input device!" — typically WASAPI
+    // Shared / DirectSound combiner refusing a full-duplex hardware
+    // combination. Queried by sendDeviceReport to hide known-bad
+    // inputs from the dropdown while the matching output is active.
+    mutable std::mutex                                mUngatableInputPairsMutex;
+    std::set<std::pair<std::string, std::string>>    mUngatableInputPairs;
 
     // Shared memory — owned by the engine, survives across cold swaps.
     std::unique_ptr<server_shared_memory_creator> mShmemCreator;

@@ -114,4 +114,10 @@ struct SwapResult {
     // why their mic isn't live.
     bool        inputUnavailable = false;
     std::string inputUnavailableReason;
+    // Set by switchDriver when the driver was selected but no device
+    // was opened — the caller (GUI) must follow up with switchDevice
+    // naming a specific device. Used on ASIO and on any driver with
+    // no remembered preferred device, where letting JUCE auto-pick
+    // the alphabetical-first device of the new type is unsafe.
+    bool        requiresDeviceSelection = false;
 };
