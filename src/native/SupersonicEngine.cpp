@@ -576,105 +576,8 @@ void SupersonicEngine::init(const Config& cfg) {
                 mLastSelfTriggeredChange = std::chrono::steady_clock::now();
                 initError = mDeviceManager->initialiseWithDefaultDevices(0, 0);
             }
-            if (initError.isEmpty() && cfg.numInputChannels != 0) {
-                auto* dev = mDeviceManager->getCurrentAudioDevice();
-                if (dev) {
-                    std::string outName = dev->getName().toStdString();
-                    std::string inName;
-                    AudioObjectPropertyAddress pa = {
-                        kAudioHardwarePropertyDefaultInputDevice,
-                        kAudioObjectPropertyScopeGlobal,
-                        kAudioObjectPropertyElementMain
-                    };
-                    AudioDeviceID inputDevId = 0;
-                    UInt32 sz = sizeof(inputDevId);
-                    if (AudioObjectGetPropertyData(kAudioObjectSystemObject,
-                            &pa, 0, nullptr, &sz, &inputDevId) == noErr
-                            && inputDevId != 0) {
-                        CFStringRef cfName = nullptr;
-                        UInt32 nsz = sizeof(cfName);
-                        AudioObjectPropertyAddress nameAddr = {
-                            kAudioDevicePropertyDeviceNameCFString,
-                            kAudioObjectPropertyScopeGlobal,
-                            kAudioObjectPropertyElementMain
-                        };
-                        if (AudioObjectGetPropertyData(inputDevId, &nameAddr,
-                                0, nullptr, &nsz, &cfName) == noErr && cfName) {
-                            char buf[256];
-                            CFStringGetCString(cfName, buf, sizeof(buf),
-                                               kCFStringEncodingUTF8);
-                            CFRelease(cfName);
-                            inName = buf;
-                        }
-                    }
-                    // Skip aggregate for wireless (Bluetooth/AirPlay) or virtual
-                    // (Loopback/Blackhole) outputs — same rule as switchDevice.
-                    // Boot with output-only instead so we don't crash JUCE's
-                    // Combiner fallback when sample-rate negotiation fails.
-                    bool outputSuitable = true;
-                    if (!inName.empty() && inName != outName) {
-                        for (auto& d : listDevices()) {
-                            if (d.name == outName && !d.isSuitableForAggregate()) {
-                                outputSuitable = false;
-                                fprintf(stderr, "[audio-device] boot: skipping aggregate — "
-                                        "'%s' is %s; input disabled\n",
-                                        outName.c_str(),
-                                        d.isVirtualTransport() ? "virtual" : "wireless");
-                                fflush(stderr);
-                                break;
-                            }
-                        }
-                    }
-                    if (!inName.empty() && inName != outName && outputSuitable) {
-                        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
-                        auto aggName = AggregateDeviceHelper::createOrUpdate(
-                            outName, inName,
-                            static_cast<double>(mCurrentConfig.sampleRate));
-                        if (!aggName.empty()) {
-                            juce::Thread::sleep(300);
-                            if (auto* dt = mDeviceManager->getCurrentDeviceTypeObject())
-                                dt->scanForDevices();
-                            mRealOutputDeviceName = outName;
-                            mRealInputDeviceName  = inName;
-                            mLastInputDeviceName  = inName;
-                            juce::AudioDeviceManager::AudioDeviceSetup setup;
-                            mDeviceManager->getAudioDeviceSetup(setup);
-                            setup.outputDeviceName = juce::String(aggName);
-                            setup.inputDeviceName  = juce::String(aggName);
-                            setup.useDefaultInputChannels = false;
-                            clampAggregateBufferIfNeeded(setup.bufferSize);
-                            juce::BigInteger inputBits;
-                            inputBits.setRange(0, reqIn, true);
-                            setup.inputChannels = inputBits;
-                            mLastSelfTriggeredChange = std::chrono::steady_clock::now();
-                            auto aggErr = mDeviceManager->setAudioDeviceSetup(setup, true);
-                            if (aggErr.isNotEmpty()) {
-                                fprintf(stderr, "[audio-device] aggregate setup failed: %s — "
-                                        "falling back to Combiner\n", aggErr.toRawUTF8());
-                                AggregateDeviceHelper::destroy();
-                                mRealOutputDeviceName.clear();
-                                mRealInputDeviceName.clear();
-                                // Fall back to Combiner
-                                mLastSelfTriggeredChange = std::chrono::steady_clock::now();
-                                mDeviceManager->initialiseWithDefaultDevices(
-                                    reqIn, reqOut);
-                            } else {
-                                fprintf(stderr, "[audio-device] booted with aggregate: "
-                                        "out='%s' in='%s'\n", outName.c_str(), inName.c_str());
-                                // Suppress CFRunLoop until Spider has finished
-                                // cold_swap_reinit — queued audioDeviceListChanged
-                                // messages would trigger a second cold swap and
-                                // crash ScopeOut2 during the rebuild.
-                                mSuppressRunLoop.store(true);
-                            }
-                        }
-                    } else if (inName == outName) {
-                        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
-                        initError = mDeviceManager->initialiseWithDefaultDevices(
-                            reqIn, reqOut);
-                    }
-                }
-            }
+            // Aggregate-device creation moved below — applies to both the
+            // -H path and this default-device path.
 #else
             mLastSelfTriggeredChange = std::chrono::steady_clock::now();
             initError = mDeviceManager->initialiseWithDefaultDevices(
@@ -698,6 +601,113 @@ void SupersonicEngine::init(const Config& cfg) {
                         initError.toRawUTF8());
             }
         }
+
+#ifdef __APPLE__
+        // Aggregate-promotion runs after both open paths (-H match and
+        // default-device fallback). Without it, the -H path leaves the
+        // engine on an output-only device while the config requests
+        // inputs — some Macs never deliver callbacks on that mismatch,
+        // stalling boot until an external swap arrives.
+        if (initError.isEmpty() && cfg.numInputChannels != 0) {
+            auto* dev = mDeviceManager->getCurrentAudioDevice();
+            if (dev) {
+                std::string outName = dev->getName().toStdString();
+                std::string inName;
+                AudioObjectPropertyAddress pa = {
+                    kAudioHardwarePropertyDefaultInputDevice,
+                    kAudioObjectPropertyScopeGlobal,
+                    kAudioObjectPropertyElementMain
+                };
+                AudioDeviceID inputDevId = 0;
+                UInt32 sz = sizeof(inputDevId);
+                if (AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                        &pa, 0, nullptr, &sz, &inputDevId) == noErr
+                        && inputDevId != 0) {
+                    CFStringRef cfName = nullptr;
+                    UInt32 nsz = sizeof(cfName);
+                    AudioObjectPropertyAddress nameAddr = {
+                        kAudioDevicePropertyDeviceNameCFString,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+                    if (AudioObjectGetPropertyData(inputDevId, &nameAddr,
+                            0, nullptr, &nsz, &cfName) == noErr && cfName) {
+                        char buf[256];
+                        CFStringGetCString(cfName, buf, sizeof(buf),
+                                           kCFStringEncodingUTF8);
+                        CFRelease(cfName);
+                        inName = buf;
+                    }
+                }
+                // Skip aggregate for wireless (Bluetooth/AirPlay) or virtual
+                // (Loopback/Blackhole) outputs — same rule as switchDevice.
+                // Boot with output-only instead so we don't crash JUCE's
+                // Combiner fallback when sample-rate negotiation fails.
+                bool outputSuitable = true;
+                if (!inName.empty() && inName != outName) {
+                    for (auto& d : listDevices()) {
+                        if (d.name == outName && !d.isSuitableForAggregate()) {
+                            outputSuitable = false;
+                            fprintf(stderr, "[audio-device] boot: skipping aggregate — "
+                                    "'%s' is %s; input disabled\n",
+                                    outName.c_str(),
+                                    d.isVirtualTransport() ? "virtual" : "wireless");
+                            fflush(stderr);
+                            break;
+                        }
+                    }
+                }
+                if (!inName.empty() && inName != outName && outputSuitable) {
+                    mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                    auto aggName = AggregateDeviceHelper::createOrUpdate(
+                        outName, inName,
+                        static_cast<double>(mCurrentConfig.sampleRate));
+                    if (!aggName.empty()) {
+                        juce::Thread::sleep(300);
+                        if (auto* dt = mDeviceManager->getCurrentDeviceTypeObject())
+                            dt->scanForDevices();
+                        mRealOutputDeviceName = outName;
+                        mRealInputDeviceName  = inName;
+                        mLastInputDeviceName  = inName;
+                        juce::AudioDeviceManager::AudioDeviceSetup setup;
+                        mDeviceManager->getAudioDeviceSetup(setup);
+                        setup.outputDeviceName = juce::String(aggName);
+                        setup.inputDeviceName  = juce::String(aggName);
+                        setup.useDefaultInputChannels = false;
+                        clampAggregateBufferIfNeeded(setup.bufferSize);
+                        juce::BigInteger inputBits;
+                        inputBits.setRange(0, reqIn, true);
+                        setup.inputChannels = inputBits;
+                        mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                        auto aggErr = mDeviceManager->setAudioDeviceSetup(setup, true);
+                        if (aggErr.isNotEmpty()) {
+                            fprintf(stderr, "[audio-device] aggregate setup failed: %s — "
+                                    "falling back to Combiner\n", aggErr.toRawUTF8());
+                            AggregateDeviceHelper::destroy();
+                            mRealOutputDeviceName.clear();
+                            mRealInputDeviceName.clear();
+                            // Fall back to Combiner
+                            mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                            mDeviceManager->initialiseWithDefaultDevices(
+                                reqIn, reqOut);
+                        } else {
+                            fprintf(stderr, "[audio-device] booted with aggregate: "
+                                    "out='%s' in='%s'\n", outName.c_str(), inName.c_str());
+                            // Suppress CFRunLoop until Spider has finished
+                            // cold_swap_reinit — queued audioDeviceListChanged
+                            // messages would trigger a second cold swap and
+                            // crash ScopeOut2 during the rebuild.
+                            mSuppressRunLoop.store(true);
+                        }
+                    }
+                } else if (inName == outName) {
+                    mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                    initError = mDeviceManager->initialiseWithDefaultDevices(
+                        reqIn, reqOut);
+                }
+            }
+        }
+#endif
 
         // Negotiate sample rate and buffer size.
         // scsynth processes in fixed 128-sample blocks, so a hardware buffer
