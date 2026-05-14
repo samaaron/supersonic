@@ -21,14 +21,15 @@ HeadlessDriver::HeadlessDriver()
 void HeadlessDriver::configure(JuceAudioCallback* callback,
                                 SampleLoader* sampleLoader,
                                 int sampleRate,
+                                int blockSize,
                                 int numOutputChannels,
                                 int numInputChannels) {
     mCallback          = callback;
     mSampleLoader      = sampleLoader;
     mSampleRate        = (sampleRate > 0) ? sampleRate : 48000;
+    mBlockSize         = (blockSize  > 0) ? blockSize  : 128;
     mNumOutputChannels = numOutputChannels;
     mNumInputChannels  = numInputChannels;
-    if (callback) mBlockSize = callback->bufferLength();
 }
 
 // Shared loop body — called once per block from the platform-specific run() loop.

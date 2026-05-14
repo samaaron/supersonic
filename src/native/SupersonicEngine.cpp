@@ -1597,6 +1597,7 @@ void SupersonicEngine::startAudioSource() {
         }
         mHeadlessDriver.configure(&mAudioCallback, &mSampleLoader,
                                    mCurrentConfig.sampleRate,
+                                   mCurrentConfig.bufferSize,
                                    mCurrentConfig.numOutputChannels,
                                    mCurrentConfig.numInputChannels);
         mHeadlessDriver.startThread(juce::Thread::Priority::highest);

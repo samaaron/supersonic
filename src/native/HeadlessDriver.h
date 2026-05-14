@@ -28,6 +28,7 @@ public:
     void configure(JuceAudioCallback* callback,
                    SampleLoader* sampleLoader,
                    int sampleRate,
+                   int blockSize,
                    int numOutputChannels,
                    int numInputChannels);
 
@@ -38,9 +39,10 @@ private:
     // Called once per block from the platform-specific run() loop.
     void processBlock(double& baseNTP, double& samplePos);
 
-    // Ticks the engine at this block size. Populated in configure() from
-    // the audio callback's current block length so headless runs match
-    // whatever native path the engine booted with.
+    // Ticks the engine at this block size. Set explicitly from
+    // SupersonicEngine::Config so the tick rate is deterministic and
+    // independent of whatever buffer size a transient real device may
+    // have left on the audio callback (e.g. failed-init fallback path).
     int mBlockSize = 128;
 
     JuceAudioCallback* mCallback         = nullptr;
