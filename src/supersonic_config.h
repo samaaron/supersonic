@@ -14,7 +14,7 @@
 // Updated by scripts/bump-version.sh.
 #define SUPERSONIC_VERSION_MAJOR 0
 #define SUPERSONIC_VERSION_MINOR 67
-#define SUPERSONIC_VERSION_PATCH 1
+#define SUPERSONIC_VERSION_PATCH 2
 
 // String form for CLI / banners (e.g. "0.64.0")
 #define SUPERSONIC_STRINGIFY2(x) #x
