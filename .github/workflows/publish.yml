@@ -24,7 +24,8 @@ jobs:
 
       - name: Upgrade npm for OIDC support
         run: |
-          npm install -g npm@latest
+          corepack enable
+          corepack prepare npm@latest --activate
           npm --version
 
       - name: Setup esbuild
