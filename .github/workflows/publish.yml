@@ -19,14 +19,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '22.x'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-
-      - name: Upgrade npm for OIDC support
-        run: |
-          corepack enable
-          corepack prepare npm@latest --activate
-          npm --version
+          package-manager-cache: false
 
       - name: Setup esbuild
         run: npm install -g esbuild
@@ -56,23 +51,23 @@ jobs:
         run: cp README.npm.md README.md
 
       - name: Publish supersonic-scsynth
-        run: npm publish --provenance --access public
+        run: npm publish
 
       - name: Publish supersonic-scsynth-core
         working-directory: packages/supersonic-scsynth-core
-        run: npm publish --provenance --access public
+        run: npm publish
 
       - name: Publish supersonic-scsynth-synthdefs
         working-directory: packages/supersonic-scsynth-synthdefs
-        run: npm publish --provenance --access public
+        run: npm publish
 
       - name: Publish supersonic-scsynth-samples
         working-directory: packages/supersonic-scsynth-samples
-        run: npm publish --provenance --access public
+        run: npm publish
 
       - name: Publish supersonic-scsynth-bundle
         working-directory: packages/supersonic-scsynth-bundle
-        run: npm publish --provenance --access public
+        run: npm publish
 
       - name: Replace symlinks with actual files for distribution
         run: |
