@@ -289,8 +289,11 @@ private:
     // partially-failed init can leave mDeviceManager non-null with no
     // current device, neither driver firing, and process_audio silently
     // never called.
+public:
     enum class AudioSource { None, RealCallback, Headless };
+    AudioSource audioSource() const { return mActiveSource; }
 
+private:
     AudioSource mActiveSource = AudioSource::None;
 
     AudioSource desiredAudioSource() const;
