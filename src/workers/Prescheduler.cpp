@@ -10,6 +10,7 @@
  * queue and are re-attempted on the next dispatch cycle.
  */
 #include "Prescheduler.h"
+#include "src/SuperClock.h"
 #include <algorithm>
 
 Prescheduler::Prescheduler() : juce::Thread("SuperSonic-Prescheduler") {}
@@ -110,7 +111,7 @@ void Prescheduler::checkAndDispatch() {
             juce::ScopedLock sl(mLock);
             if (mHeap.empty()) break;
             double dispatchTime = mHeap.top().ntpTimeSec - mLookaheadS;
-            if (wallClockNTP() < dispatchTime) break;
+            if (mSuperClock->wallNow() < dispatchTime) break;
             event = mHeap.pop_move();
 
             if (mMetrics) {
@@ -122,7 +123,7 @@ void Prescheduler::checkAndDispatch() {
         // Track timing relative to scheduled execution time. Mirrors JS:
         // headroom on on-time, lateness on late. Mutually exclusive per dispatch.
         if (mMetrics) {
-            double timeUntilExec = event.ntpTimeSec - wallClockNTP();
+            double timeUntilExec = event.ntpTimeSec - mSuperClock->wallNow();
             if (timeUntilExec < 0.0) {
                 int32_t lateMs = static_cast<int32_t>(std::round(-timeUntilExec * 1000.0));
                 mMetrics->prescheduler_lates.fetch_add(1, std::memory_order_relaxed);
@@ -244,7 +245,7 @@ void Prescheduler::run() {
             retryActive = !mRetryQueue.empty();
             if (!mHeap.empty()) {
                 double dispatchTime = mHeap.top().ntpTimeSec - mLookaheadS;
-                double diff = dispatchTime - wallClockNTP();
+                double diff = dispatchTime - mSuperClock->wallNow();
                 if (diff > 0.0) {
                     sleepMs = juce::jmin(diff * 1000.0, 50.0);
                 } else {

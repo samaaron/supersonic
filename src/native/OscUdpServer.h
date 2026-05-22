@@ -36,6 +36,7 @@
 
 class Prescheduler;
 class SupersonicEngine;
+class SuperClock;
 struct SwapResult;  // declared in DeviceInfo.h, carried into sendSwitchDone
 
 class OscUdpServer : public juce::Thread {
@@ -54,6 +55,10 @@ public:
                     PerformanceMetrics*   metrics,
                     double lookaheadS = 0.500,
                     const std::string& bindAddress = "");
+
+    // Wire the engine's SuperClock — single source of NTP "now" for the
+    // OSC-receive thread. Must be set before initialise() / startThread().
+    void setSuperClock(SuperClock* sc) { mSuperClock = sc; }
 
     void sendInProcess(const uint8_t* data, uint32_t size);
 
@@ -104,6 +109,7 @@ private:
     int                   mPort          = 57110;
     std::string           mBindAddress;
     Prescheduler*         mPrescheduler  = nullptr;
+    SuperClock*           mSuperClock    = nullptr;
     SupersonicEngine*     mEngine        = nullptr;
     uint8_t*              mInBufferStart = nullptr;
     uint32_t              mInBufferSize  = 0;

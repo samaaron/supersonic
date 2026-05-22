@@ -23,6 +23,7 @@
 #include "OscUdpServer.h"
 #include "JuceAudioCallback.h"
 #include "SampleLoader.h"
+#include "SuperClock.h"
 #include "DeviceInfo.h"
 #include "StateCache.h"
 #include "OscBuilder.h"
@@ -366,6 +367,10 @@ private:
     bool mDefaultDevicePropertyListenerInstalled = false;
 #endif
 
+    // Engine-wide SuperClock owns all NTP-time derivation. Constructed
+    // first; JuceAudioCallback and other audio-thread NTP consumers receive
+    // a pointer via setSuperClock() during init.
+    SuperClock        mSuperClock;
     JuceAudioCallback mAudioCallback;
     Prescheduler      mPrescheduler;
     ReplyReader       mReplyReader;

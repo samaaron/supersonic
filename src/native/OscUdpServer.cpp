@@ -1075,7 +1075,9 @@ void OscUdpServer::handlePacket(const uint8_t* data, uint32_t size,
         mMetrics->osc_out_bytes_sent.fetch_add(size, std::memory_order_relaxed);
     }
 
-    double wallNow = wallClockNTP();
+    // SuperClock is the single source of wall-clock NTP for OSC ingress
+    // classification (the "is this bundle past/future" decision).
+    double wallNow = mSuperClock->wallNow();
     OscCategory cat = mClassifier.classify(data, size, wallNow);
 
     switch (cat) {

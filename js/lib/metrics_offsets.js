@@ -18,6 +18,7 @@
  * - [38-41] Bypass category metrics (main thread / PM transport)
  * - [42-44] scsynth late timing diagnostics (WASM writes)
  * - [45]    Ring buffer direct write failures (OscChannel SAB mode)
+ * - [46-54] SuperClock session state (superclock.js writer, WASM C++ reader)
  */
 
 // =============================================================================
@@ -134,7 +135,7 @@ export const CTX_DEBUG_BUFFER_CAPACITY = 57;        // Static from bufferConstan
 export const CTX_MODE = 58;                         // Enum: 0=sab, 1=postMessage
 
 // =============================================================================
-// Audio diagnostics [59-63] (written by main thread into merged array only)
+// Audio diagnostics [59-65] (written by main thread into merged array only)
 // =============================================================================
 export const CTX_GLITCH_COUNT = 59;          // Chrome only: playbackStats.fallbackFramesEvents
 export const CTX_GLITCH_DURATION_MS = 60;    // Chrome only: playbackStats.fallbackFramesDuration * 1000 (ms int)

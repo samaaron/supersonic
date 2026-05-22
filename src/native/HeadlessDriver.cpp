@@ -4,6 +4,7 @@
 #include "HeadlessDriver.h"
 #include "JuceAudioCallback.h"
 #include "SampleLoader.h"
+#include "SuperClock.h"
 
 #if defined(__linux__)
   #include <time.h>
@@ -32,17 +33,13 @@ void HeadlessDriver::configure(JuceAudioCallback* callback,
     mNumInputChannels  = numInputChannels;
 }
 
-// Shared loop body — called once per block from the platform-specific run() loop.
-// Installs pending buffers, derives jitter-free NTP from sample position with
-// slow drift correction, calls process_audio, and wakes worker threads.
-void HeadlessDriver::processBlock(double& baseNTP, double& samplePos) {
+// Shared per-block loop body — installs pending buffers, derives NTP via
+// SuperClock, calls process_audio, wakes workers.
+void HeadlessDriver::processBlock(double& samplePos) {
     if (mSampleLoader)
         mSampleLoader->installPendingBuffers();
 
-    double wallNow = wallClockNTP();
-    double sampleNTP = baseNTP + samplePos / mSampleRate;
-    baseNTP += (wallNow - sampleNTP) * 0.01;
-    double ntp = baseNTP + samplePos / mSampleRate;
+    const double ntp = mSuperClock->updateAudioThreadNTP(samplePos, mSampleRate);
 
     process_audio(ntp,
                   static_cast<uint32_t>(mNumOutputChannels),
@@ -62,11 +59,11 @@ void HeadlessDriver::run() {
     const int64_t blockNs = 1'000'000'000LL * mBlockSize / mSampleRate;
     struct timespec next;
     clock_gettime(CLOCK_MONOTONIC, &next);
-    double baseNTP = wallClockNTP();
     double samplePos = 0.0;
+    mSuperClock->resetAudioThreadTime(samplePos, mSampleRate);
 
     while (!threadShouldExit()) {
-        processBlock(baseNTP, samplePos);
+        processBlock(samplePos);
         next.tv_nsec += blockNs;
         while (next.tv_nsec >= 1'000'000'000L) {
             next.tv_nsec -= 1'000'000'000L;
@@ -84,11 +81,11 @@ void HeadlessDriver::run() {
     const uint64_t blockNs    = 1'000'000'000ULL * mBlockSize / mSampleRate;
     const uint64_t blockTicks = blockNs * tbi.denom / tbi.numer;
     uint64_t nextWake = mach_absolute_time();
-    double baseNTP = wallClockNTP();
     double samplePos = 0.0;
+    mSuperClock->resetAudioThreadTime(samplePos, mSampleRate);
 
     while (!threadShouldExit()) {
-        processBlock(baseNTP, samplePos);
+        processBlock(samplePos);
         nextWake += blockTicks;
         mach_wait_until(nextWake);
     }
@@ -109,11 +106,11 @@ void HeadlessDriver::run() {
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     LONGLONG nextWake = now.QuadPart;
-    double baseNTP = wallClockNTP();
     double samplePos = 0.0;
+    mSuperClock->resetAudioThreadTime(samplePos, mSampleRate);
 
     while (!threadShouldExit()) {
-        processBlock(baseNTP, samplePos);
+        processBlock(samplePos);
         nextWake += blockTicks;
         QueryPerformanceCounter(&now);
         LONGLONG remaining = nextWake - now.QuadPart;

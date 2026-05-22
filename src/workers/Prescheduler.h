@@ -15,8 +15,15 @@
 #include "RingBufferWriter.h"
 #include "src/shared_memory.h"
 
+class SuperClock;
+
 class Prescheduler : public juce::Thread {
 public:
+    // Wire the engine's SuperClock — single source of wall-clock NTP for
+    // the prescheduler thread's dispatch-timing decisions. Must be set
+    // before startThread().
+    void setSuperClock(SuperClock* sc) { mSuperClock = sc; }
+
     // Backpressure cap on combined heap + retry queue. Mirrors JS
     // osc_out_prescheduler_worker.js maxPendingMessages.
     static constexpr uint32_t kMaxPendingMessages = 65536;
@@ -81,6 +88,7 @@ private:
     std::atomic<int32_t>* mInSequence    = nullptr;
     std::atomic<int32_t>* mInWriteLock   = nullptr;
     PerformanceMetrics*   mMetrics       = nullptr;
+    SuperClock*           mSuperClock    = nullptr;
     double                mLookaheadS    = 0.500;
 
     juce::CriticalSection mLock;

@@ -17,7 +17,7 @@ import { OSCRewriter } from "./lib/osc_rewriter.js";
 import { extractSynthDefName } from "./lib/synthdef_parser.js";
 import { EventEmitter } from "./lib/event_emitter.js";
 import { MetricsReader } from "./lib/metrics_reader.js";
-import { NTPTiming } from "./lib/ntp_timing.js";
+import { SuperClock } from "./lib/superclock.js";
 import { AudioHealthMonitor } from "./lib/audio_health_monitor.js";
 import { AudioCapture } from "./lib/audio_capture.js";
 import { parseNodeTree } from "./lib/node_tree_parser.js";
@@ -210,6 +210,10 @@ export class SuperSonic {
         // Ring buffer direct write failures [45]
         ringBufferDirectWriteFails:   { offset: 45, type: 'counter',  unit: 'count', description: 'SAB mode only: optimistic direct writes attempted but failed due to ring buffer lock not being available (delivered via prescheduler instead)' },
 
+        // SuperClock session state lives in its own SAB region (SuperClockState),
+        // not in PerformanceMetrics. Owned by engine.superClock — not exposed
+        // as user-visible metrics here.
+
         // Context metrics [46+] (main thread only)
         driftOffsetMs:                { offset: 46, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock drift between AudioContext and wall clock' },
         clockOffsetMs:                { offset: 47, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock offset for multi-system sync' },
@@ -225,7 +229,7 @@ export class SuperSonic {
         debugBufferCapacity:          { offset: 57, type: 'constant', unit: 'bytes', description: 'DEBUG ring buffer capacity' },
         mode:                         { offset: 58, type: 'enum',     values: ['sab', 'postMessage'], description: 'Transport mode' },
 
-        // Audio diagnostics [59-66] (main thread, Chrome playbackStats + cross-browser health)
+        // Audio diagnostics [59-65] (main thread, Chrome playbackStats + cross-browser health)
         glitchCount:                  { offset: 59, type: 'counter',  unit: 'count', description: 'Chrome only: audio underrun/glitch events' },
         glitchDurationMs:             { offset: 60, type: 'gauge',    unit: 'ms',    description: 'Chrome only: total silence from audio underruns' },
         averageLatencyUs:             { offset: 61, type: 'gauge',    unit: 'us',    description: 'Chrome only: average audio output latency' },
@@ -410,7 +414,7 @@ export class SuperSonic {
   // Extracted modules
   #eventEmitter;
   #metricsReader;
-  #ntpTiming;
+  #superClock;
   #audioCapture;
   #audioHealthMonitor;
 
@@ -632,6 +636,9 @@ export class SuperSonic {
     return 'stopped';
   }
   get audioContext() { return this.#audioContext; }
+  // SuperClock — engine-wide session-state + time authority.
+  // Available after init() resolves. Read-only reference.
+  get superClock() { return this.#superClock; }
   get mode() { return this.#config.mode; }
   get bufferConstants() { return this.#metricsReader.bufferConstants; }
   get ringBufferBase() { return this.#metricsReader.ringBufferBase; }
@@ -639,8 +646,15 @@ export class SuperSonic {
   get node() { return this.#node; }
   get osc() { return this.#osc; }
 
-  /** NTP time (seconds since 1900) when the AudioContext started. Use to compute relative times: `event.timestamp - sonic.initTime`. */
-  get initTime() { return this.#ntpTiming?.getNTPStartTime() ?? 0; }
+  /**
+   * NTP time (seconds since 1900) when the AudioContext started.
+   *
+   * @deprecated Use `sonic.superClock.getNTPStartTime()` for the same value, or
+   *   `sonic.superClock.now()` to get the current audio-thread NTP. This getter
+   *   stays for backward compatibility with older callers that did
+   *   `event.timestamp - sonic.initTime`.
+   */
+  get initTime() { return this.#superClock?.getNTPStartTime() ?? 0; }
 
   // ============================================================================
   // EVENT EMITTER DELEGATION
@@ -858,7 +872,7 @@ export class SuperSonic {
    */
   setClockOffset(offsetS) {
     this.#ensureInitialized('set clock offset');
-    this.#ntpTiming?.setClockOffset(offsetS);
+    this.#superClock?.setClockOffset(offsetS);
   }
 
   // ============================================================================
@@ -903,14 +917,14 @@ export class SuperSonic {
       // Resume may fail
     }
 
-    this.#ntpTiming?.startDriftTimer();
+    this.#superClock?.startDriftTimer();
 
     const count1 = this.#readProcessCount();
     if (count1 === null) {
       // No metrics available yet — check AudioContext state instead
       const isRunning = this.#audioContext.state === 'running';
       if (isRunning) {
-        this.#ntpTiming?.resync();
+        this.#superClock?.resync();
         this.#eventEmitter.emit('resumed');
       }
       return isRunning;
@@ -921,7 +935,7 @@ export class SuperSonic {
 
     const isRunning = count2 !== null && count2 > count1;
     if (isRunning) {
-      this.#ntpTiming?.resync();
+      this.#superClock?.resync();
       this.#eventEmitter.emit('resumed');
     }
 
@@ -935,7 +949,7 @@ export class SuperSonic {
    */
   async suspend() {
     if (!this.#initialized) return;
-    this.#ntpTiming?.stopDriftTimer();
+    this.#superClock?.stopDriftTimer();
     try {
       await this.#audioContext?.suspend();
     } catch (e) {
@@ -994,7 +1008,7 @@ export class SuperSonic {
   }
 
   async #partialShutdown() {
-    this.#ntpTiming?.stopDriftTimer();
+    this.#superClock?.stopDriftTimer();
     this.#syncListeners?.clear();
     this.#syncListeners = null;
 
@@ -1019,7 +1033,7 @@ export class SuperSonic {
     this.loadedSynthDefs.clear();
     this.#initPromise = null;
     this.#oscChannel = null;
-    this.#ntpTiming?.reset();
+    this.#superClock?.reset();
     this.#audioHealthMonitor?.reset();
   }
 
@@ -1659,7 +1673,7 @@ export class SuperSonic {
     if (!this.#initialized && !this.#initializing) return;
 
     this.#eventEmitter.emit("shutdown");
-    this.#ntpTiming?.stopDriftTimer();
+    this.#superClock?.stopDriftTimer();
     this.#audioHealthMonitor?.reset();
     this.#audioHealthMonitor = null;
     this.#syncListeners?.clear();
@@ -1694,7 +1708,7 @@ export class SuperSonic {
     this.loadedSynthDefs.clear();
     this.#initPromise = null;
     this.#wasmMemory = null;
-    this.#ntpTiming?.reset();
+    this.#superClock?.reset();
     this.bootStats = { initStartTime: null, initDuration: null };
   }
 
@@ -1782,7 +1796,7 @@ export class SuperSonic {
       this.#previousAudioContextState = state;
 
       if (state === 'running' && (previousState === 'suspended' || previousState === 'interrupted')) {
-        this.#ntpTiming?.resync();
+        this.#superClock?.resync();
       }
 
       this.#eventEmitter.emit('audiocontext:statechange', { state });
@@ -1937,7 +1951,7 @@ export class SuperSonic {
       snapshotIntervalMs: this.#config.snapshotIntervalMs,
       bypassLookaheadS: this.#config.bypassLookaheadMs / 1000,
       getAudioContextTime: () => this.#audioContext?.currentTime ?? 0,
-      getNTPStartTime: () => this.#ntpTiming?.getNTPStartTime() ?? 0,
+      getNTPStartTime: () => this.#superClock?.getNTPStartTime() ?? 0,
     };
 
     if (mode === 'sab') {
@@ -2114,6 +2128,14 @@ export class SuperSonic {
   }
 
   async #finishInitialization() {
+    // Single source of truth for the engine's wall-clock NTP: the OSC
+    // classifier routes through SuperClock rather than its default
+    // `getCurrentNTPFromPerformance`. Wired here because #oscChannel is
+    // created in #initializeOSC, which runs after #initializeAudioWorklet.
+    if (this.#oscChannel && this.#superClock) {
+      this.#oscChannel.getCurrentNTP = () => this.#superClock.wallNow();
+    }
+
     this.#initialized = true;
     this.#initializing = false;
     this.bootStats.initDuration = performance.now() - this.bootStats.initStartTime;
@@ -2178,14 +2200,14 @@ export class SuperSonic {
             }
 
             // Initialize NTP timing
-            this.#ntpTiming = new NTPTiming({
+            this.#superClock = new SuperClock({
               mode: this.#config.mode,
               audioContext: this.#audioContext,
               workletPort: this.#workletNode.port,
             });
-            this.#ntpTiming.initSharedViews(sharedBuffer, ringBufferBase, bufferConstants);
-            await this.#ntpTiming.initialize();
-            this.#ntpTiming.startDriftTimer();
+            this.#superClock.initSharedViews(sharedBuffer, ringBufferBase, bufferConstants);
+            await this.#superClock.initialize();
+            this.#superClock.startDriftTimer();
 
             // Initialize audio capture (SAB mode only)
             if (this.#config.mode === 'sab') {
@@ -2267,9 +2289,9 @@ export class SuperSonic {
     return {
       preschedulerMetrics: this.#osc?.getPreschedulerMetrics(),
       transportMetrics: this.#osc?.getMetrics(),
-      driftOffsetMs: this.#ntpTiming?.getDriftOffset() ?? 0,
-      ntpStartTime: this.#ntpTiming?.getNTPStartTime() ?? 0,
-      clockOffsetMs: this.#ntpTiming?.getClockOffset() ?? 0,
+      driftOffsetMs: this.#superClock?.getDriftOffset() ?? 0,
+      ntpStartTime: this.#superClock?.getNTPStartTime() ?? 0,
+      clockOffsetMs: this.#superClock?.getClockOffset() ?? 0,
       audioContextState: this.#audioContext?.state || "unknown",
       bufferPoolStats: this.#bufferManager?.getStats(),
       bufferPoolGrowthStats: this.#bufferManager?.getGrowthStats(),

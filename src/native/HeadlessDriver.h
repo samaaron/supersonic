@@ -20,6 +20,7 @@
 
 class JuceAudioCallback;
 class SampleLoader;
+class SuperClock;
 
 class HeadlessDriver : public juce::Thread {
 public:
@@ -32,12 +33,15 @@ public:
                    int numOutputChannels,
                    int numInputChannels);
 
+    // Must be set before run() is called.
+    void setSuperClock(SuperClock* sc) { mSuperClock = sc; }
+
     void run() override;
 
 private:
-    // Shared loop body: install buffers, derive NTP, process audio, wake workers.
-    // Called once per block from the platform-specific run() loop.
-    void processBlock(double& baseNTP, double& samplePos);
+    // Shared loop body: install buffers, derive NTP via SuperClock,
+    // process audio, wake workers. Called once per block.
+    void processBlock(double& samplePos);
 
     // Ticks the engine at this block size. Set explicitly from
     // SupersonicEngine::Config so the tick rate is deterministic and
@@ -47,6 +51,7 @@ private:
 
     JuceAudioCallback* mCallback         = nullptr;
     SampleLoader*      mSampleLoader     = nullptr;
+    SuperClock*        mSuperClock       = nullptr;
     int                mSampleRate        = 48000;
     int                mNumOutputChannels = 2;
     int                mNumInputChannels  = 0;

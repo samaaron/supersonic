@@ -8,7 +8,7 @@
 
 * [osc](#osc)
 
-* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [SendOSCOptions](#sendoscoptions) · [Snapshot](#snapshot) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
+* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [SendOSCOptions](#sendoscoptions) · [Snapshot](#snapshot) · [SuperClock](#superclock-1) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
 
 * **Type Aliases** — [AddAction](#addaction) · [BlockedCommand](#blockedcommand) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscCategory](#osccategory) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
 
@@ -100,20 +100,21 @@ scsynth with low latency inside a web page.
 
 **Advanced**
 
-| Member                                    | Description                                                                                |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [`bufferConstants`](#bufferconstants)     | Buffer layout constants from the WASM build.                                               |
-| [`initTime`](#inittime)                   | NTP time (seconds since 1900) when the AudioContext started.                               |
-| [`mode`](#mode)                           | Active transport mode ('sab' or 'postMessage').                                            |
-| [`ringBufferBase`](#ringbufferbase)       | Ring buffer base offset in SharedArrayBuffer.                                              |
-| [`sharedBuffer`](#sharedbuffer)           | The SharedArrayBuffer (SAB mode) or null (postMessage mode).                               |
-| [`getEngineState()`](#getenginestate)     | Returns the current engine lifecycle state.                                                |
-| [`getLoadedBuffers()`](#getloadedbuffers) | Get info about all loaded audio buffers.                                                   |
-| [`getSystemReport()`](#getsystemreport)   | Get a comprehensive system performance report.                                             |
-| [`isRunning()`](#isrunning)               | Returns true if the engine has finished booting and is ready to send and receive messages. |
-| [`nextNodeId()`](#nextnodeid)             | Get the next unique node ID.                                                               |
-| [`getRawTreeSchema()`](#getrawtreeschema) | Get schema describing the raw flat node tree structure.                                    |
-| [`getTreeSchema()`](#gettreeschema)       | Get schema describing the hierarchical node tree structure.                                |
+| Member                                    | Description                                                                                                  |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [`bufferConstants`](#bufferconstants)     | Buffer layout constants from the WASM build.                                                                 |
+| [`initTime`](#inittime)                   | NTP time (seconds since 1900) when the AudioContext started.                                                 |
+| [`mode`](#mode)                           | Active transport mode ('sab' or 'postMessage').                                                              |
+| [`ringBufferBase`](#ringbufferbase)       | Ring buffer base offset in SharedArrayBuffer.                                                                |
+| [`sharedBuffer`](#sharedbuffer)           | The SharedArrayBuffer (SAB mode) or null (postMessage mode).                                                 |
+| [`superClock`](#superclock)               | Session-timeline service: tempo, beat origin, transport, NTP "now." See SuperClock for the full API surface. |
+| [`getEngineState()`](#getenginestate)     | Returns the current engine lifecycle state.                                                                  |
+| [`getLoadedBuffers()`](#getloadedbuffers) | Get info about all loaded audio buffers.                                                                     |
+| [`getSystemReport()`](#getsystemreport)   | Get a comprehensive system performance report.                                                               |
+| [`isRunning()`](#isrunning)               | Returns true if the engine has finished booting and is ready to send and receive messages.                   |
+| [`nextNodeId()`](#nextnodeid)             | Get the next unique node ID.                                                                                 |
+| [`getRawTreeSchema()`](#getrawtreeschema) | Get schema describing the raw flat node tree structure.                                                      |
+| [`getTreeSchema()`](#gettreeschema)       | Get schema describing the hierarchical node tree structure.                                                  |
 
 #### Examples
 
@@ -396,6 +397,19 @@ The SharedArrayBuffer (SAB mode) or null (postMessage mode). Internal.
 ###### Returns
 
 `SharedArrayBuffer`
+
+##### superClock
+
+###### Get Signature
+
+> **get** **superClock**(): [`SuperClock`](#superclock-1)
+
+Session-timeline service: tempo, beat origin, transport, NTP "now."
+See [SuperClock](#superclock-1) for the full API surface.
+
+###### Returns
+
+[`SuperClock`](#superclock-1)
 
 ***
 
@@ -945,11 +959,7 @@ Subscribe to an event.
 
 Unsubscribe function — call it to remove the listener
 
-> (): `void`
-
-###### Returns
-
-`void`
+() => `void`
 
 ###### Example
 
@@ -986,11 +996,7 @@ Returns an unsubscribe function (matching [on](#on)).
 
 Unsubscribe function — call it to remove the listener before it fires
 
-> (): `void`
-
-###### Returns
-
-`void`
+() => `void`
 
 ##### purge()
 
@@ -2778,9 +2784,9 @@ this for you.
 
 ###### Parameters
 
-| Parameter  | Type                                                                                    | Description                          |
-| ---------- | --------------------------------------------------------------------------------------- | ------------------------------------ |
-| `handler?` | (`view`, `offset`, `length`, `sequence`) => `void` \| (`oscData`, `sequence`) => `void` | Optional override for this call only |
+| Parameter  | Type                                                                                        | Description                          |
+| ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `handler?` | ((`view`, `offset`, `length`, `sequence`) => `void`) \| ((`oscData`, `sequence`) => `void`) | Optional override for this call only |
 
 ###### Returns
 
@@ -2865,9 +2871,9 @@ PM mode: handler receives `(oscData, sequence)` where `oscData` is a copy.
 
 ###### Parameters
 
-| Parameter | Type                                                                                    |
-| --------- | --------------------------------------------------------------------------------------- |
-| `handler` | (`view`, `offset`, `length`, `sequence`) => `void` \| (`oscData`, `sequence`) => `void` |
+| Parameter | Type                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------- |
+| `handler` | ((`view`, `offset`, `length`, `sequence`) => `void`) \| ((`oscData`, `sequence`) => `void`) |
 
 ###### Returns
 
@@ -3240,6 +3246,355 @@ memory info. Useful for bug reports and debugging timing issues.
 | <a id="metrics-1"></a> `metrics`   | `Record`<`string`, { `description?`: `string`; `value`: `number`; }> | All metrics with their current values and descriptions.    |
 | <a id="nodetree"></a> `nodeTree`   | [`RawTree`](#rawtree)                                                | Current node tree in flat format.                          |
 | <a id="timestamp"></a> `timestamp` | `string`                                                             | ISO 8601 timestamp when the snapshot was taken.            |
+
+***
+
+### SuperClock
+
+Engine session-timeline service. Tempo, beat origin, transport, and
+NTP-derived "now." Accessed via [SuperSonic.superClock](#superclock).
+
+Each field is read/written independently — no multi-field coherence
+guarantee. Link-specific methods are no-ops on builds without a Link
+backing (see individual method docs).
+
+| Member                                      | Description                                                       |
+| ------------------------------------------- | ----------------------------------------------------------------- |
+| [`beatAtTime()`](#beatattime)               |                                                                   |
+| [`forceBeatAtTime()`](#forcebeatattime)     | Identical to requestBeatAtTime in session-of-one.                 |
+| [`getBeatOriginNtp()`](#getbeatoriginntp)   |                                                                   |
+| [`getBpm()`](#getbpm)                       |                                                                   |
+| [`getClockOffset()`](#getclockoffset)       |                                                                   |
+| [`getDriftOffset()`](#getdriftoffset)       |                                                                   |
+| [`getIsPlayingAtNtp()`](#getisplayingatntp) |                                                                   |
+| [`getNTPStartTime()`](#getntpstarttime)     |                                                                   |
+| [`initialize()`](#initialize)               |                                                                   |
+| [`isLinkEnabled()`](#islinkenabled)         | Always false on no-Link builds.                                   |
+| [`isPlaying()`](#isplaying)                 |                                                                   |
+| [`now()`](#now)                             | Current NTP time as seen by the audio thread.                     |
+| [`nowAt()`](#nowat)                         | Compute audio-thread NTP for a specific AudioContext.currentTime. |
+| [`numPeers()`](#numpeers)                   | Always 0 on no-Link builds.                                       |
+| [`phaseAtTime()`](#phaseattime)             |                                                                   |
+| [`requestBeatAtTime()`](#requestbeatattime) |                                                                   |
+| [`reset()`](#reset)                         |                                                                   |
+| [`resync()`](#resync)                       |                                                                   |
+| [`setBpm()`](#setbpm)                       |                                                                   |
+| [`setClockOffset()`](#setclockoffset)       |                                                                   |
+| [`setIsPlaying()`](#setisplaying)           |                                                                   |
+| [`setLinkEnabled()`](#setlinkenabled)       | No-op without a Link backing.                                     |
+| [`startDriftTimer()`](#startdrifttimer)     |                                                                   |
+| [`stopDriftTimer()`](#stopdrifttimer)       |                                                                   |
+| [`timeAtBeat()`](#timeatbeat)               |                                                                   |
+| [`updateDriftOffset()`](#updatedriftoffset) |                                                                   |
+| [`wallNow()`](#wallnow)                     | Current NTP time from the system wall clock.                      |
+
+#### Methods
+
+##### beatAtTime()
+
+> **beatAtTime**(`ntpSeconds`, `quantum`): `number`
+
+###### Parameters
+
+| Parameter    | Type     |
+| ------------ | -------- |
+| `ntpSeconds` | `number` |
+| `quantum`    | `number` |
+
+###### Returns
+
+`number`
+
+##### forceBeatAtTime()
+
+> **forceBeatAtTime**(`beat`, `atNtpSeconds`, `quantum`): `void`
+
+Identical to [requestBeatAtTime](#requestbeatattime) in session-of-one.
+
+###### Parameters
+
+| Parameter      | Type     |
+| -------------- | -------- |
+| `beat`         | `number` |
+| `atNtpSeconds` | `number` |
+| `quantum`      | `number` |
+
+###### Returns
+
+`void`
+
+##### getBeatOriginNtp()
+
+> **getBeatOriginNtp**(): `number`
+
+###### Returns
+
+`number`
+
+##### getBpm()
+
+> **getBpm**(): `number`
+
+###### Returns
+
+`number`
+
+##### getClockOffset()
+
+> **getClockOffset**(): `number`
+
+###### Returns
+
+`number`
+
+##### getDriftOffset()
+
+> **getDriftOffset**(): `number`
+
+###### Returns
+
+`number`
+
+##### getIsPlayingAtNtp()
+
+> **getIsPlayingAtNtp**(): `number`
+
+###### Returns
+
+`number`
+
+##### getNTPStartTime()
+
+> **getNTPStartTime**(): `number`
+
+###### Returns
+
+`number`
+
+##### initialize()
+
+> **initialize**(): `Promise`<`void`>
+
+###### Returns
+
+`Promise`<`void`>
+
+##### isLinkEnabled()
+
+> **isLinkEnabled**(): `boolean`
+
+Always `false` on no-Link builds.
+
+###### Returns
+
+`boolean`
+
+##### isPlaying()
+
+> **isPlaying**(): `boolean`
+
+###### Returns
+
+`boolean`
+
+##### now()
+
+> **now**(): `number`
+
+Current NTP time as seen by the audio thread. Use this for scheduling:
+`sonic.superClock.now() + 0.05` gives a timestamp 50ms in audio-clock
+future, which the audio thread reaches in 50ms of audio time —
+independent of any wall-clock-vs-audio-clock skew.
+
+###### Returns
+
+`number`
+
+##### nowAt()
+
+> **nowAt**(`audioCurrentTime`): `number`
+
+Compute audio-thread NTP for a specific `AudioContext.currentTime`.
+Lower-level than [now](#now) — pass a value obtained from
+`audioContext.getOutputTimestamp()` for sample-aligned scheduling.
+
+###### Parameters
+
+| Parameter          | Type     |
+| ------------------ | -------- |
+| `audioCurrentTime` | `number` |
+
+###### Returns
+
+`number`
+
+##### numPeers()
+
+> **numPeers**(): `number`
+
+Always `0` on no-Link builds.
+
+###### Returns
+
+`number`
+
+##### phaseAtTime()
+
+> **phaseAtTime**(`ntpSeconds`, `quantum`): `number`
+
+###### Parameters
+
+| Parameter    | Type     |
+| ------------ | -------- |
+| `ntpSeconds` | `number` |
+| `quantum`    | `number` |
+
+###### Returns
+
+`number`
+
+##### requestBeatAtTime()
+
+> **requestBeatAtTime**(`beat`, `atNtpSeconds`, `quantum`): `void`
+
+###### Parameters
+
+| Parameter      | Type     |
+| -------------- | -------- |
+| `beat`         | `number` |
+| `atNtpSeconds` | `number` |
+| `quantum`      | `number` |
+
+###### Returns
+
+`void`
+
+##### reset()
+
+> **reset**(): `void`
+
+###### Returns
+
+`void`
+
+##### resync()
+
+> **resync**(): `void`
+
+###### Returns
+
+`void`
+
+##### setBpm()
+
+> **setBpm**(`bpm`, `atNtpSeconds?`): `void`
+
+###### Parameters
+
+| Parameter       | Type     | Description                                                     |
+| --------------- | -------- | --------------------------------------------------------------- |
+| `bpm`           | `number` | -                                                               |
+| `atNtpSeconds?` | `number` | honoured by a Link backing; takes effect now in session-of-one. |
+
+###### Returns
+
+`void`
+
+##### setClockOffset()
+
+> **setClockOffset**(`offsetS`): `void`
+
+###### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `offsetS` | `number` |
+
+###### Returns
+
+`void`
+
+##### setIsPlaying()
+
+> **setIsPlaying**(`playing`, `atNtpSeconds?`): `void`
+
+###### Parameters
+
+| Parameter       | Type      |
+| --------------- | --------- |
+| `playing`       | `boolean` |
+| `atNtpSeconds?` | `number`  |
+
+###### Returns
+
+`void`
+
+##### setLinkEnabled()
+
+> **setLinkEnabled**(`enabled`): `void`
+
+No-op without a Link backing.
+
+###### Parameters
+
+| Parameter | Type      |
+| --------- | --------- |
+| `enabled` | `boolean` |
+
+###### Returns
+
+`void`
+
+##### startDriftTimer()
+
+> **startDriftTimer**(): `void`
+
+###### Returns
+
+`void`
+
+##### stopDriftTimer()
+
+> **stopDriftTimer**(): `void`
+
+###### Returns
+
+`void`
+
+##### timeAtBeat()
+
+> **timeAtBeat**(`beat`, `quantum`): `number`
+
+###### Parameters
+
+| Parameter | Type     |
+| --------- | -------- |
+| `beat`    | `number` |
+| `quantum` | `number` |
+
+###### Returns
+
+`number`
+
+##### updateDriftOffset()
+
+> **updateDriftOffset**(): `void`
+
+###### Returns
+
+`void`
+
+##### wallNow()
+
+> **wallNow**(): `number`
+
+Current NTP time from the system wall clock. Use only when matching
+against external wall-clock events; prefer [now](#now) for scheduling
+engine events.
+
+###### Returns
+
+`number`
 
 ### SuperSonicInfo
 

@@ -11,8 +11,30 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 
 #include "scsynth/common/shm_audio_buffer.hpp"
+
+namespace supersonic {
+
+// Double ↔ uint64 bit-pattern conversion. Centralised so the C++ mirror of
+// SuperClockState (and any future SAB struct storing a double in a 64-bit
+// atomic) has one bit-cast spelling. Compiles to the same code as
+// std::bit_cast on any recent compiler; uses memcpy so it works under
+// C++17 (the emcc default here) as well as C++20.
+inline uint64_t doubleToBits(double v) {
+    uint64_t bits;
+    std::memcpy(&bits, &v, sizeof(double));
+    return bits;
+}
+
+inline double bitsToDouble(uint64_t bits) {
+    double v;
+    std::memcpy(&v, &bits, sizeof(double));
+    return v;
+}
+
+}  // namespace supersonic
 
 // ============================================================================
 // BUFFER LAYOUT CONFIGURATION
@@ -37,6 +59,7 @@ constexpr uint32_t METRICS_SIZE       = 184;   // Performance metrics: 46 fields
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in microseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
+constexpr uint32_t SUPERCLOCK_STATE_SIZE = 32; // SuperClock session state: 3 atomic uint64 + 1 atomic uint32 + 4 padding = 32 bytes
 
 // Node tree mirror configuration (for observing synth/group hierarchy via polling)
 // This is a MIRROR of the actual scsynth node tree - the real tree can exceed this limit,
@@ -66,10 +89,11 @@ constexpr uint32_t NODE_TREE_START = METRICS_START + METRICS_SIZE;  // Contiguou
 constexpr uint32_t NTP_START_TIME_START = NODE_TREE_START + NODE_TREE_SIZE;
 constexpr uint32_t DRIFT_OFFSET_START = NTP_START_TIME_START + NTP_START_TIME_SIZE;
 constexpr uint32_t GLOBAL_OFFSET_START = DRIFT_OFFSET_START + DRIFT_OFFSET_SIZE;
+constexpr uint32_t SUPERCLOCK_STATE_START = GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE;
 // shm_audio_buffer is alignas(16); round up so slots stay aligned as
 // preceding region sizes change.
 constexpr uint32_t SHM_AUDIO_START       =
-    (GLOBAL_OFFSET_START + GLOBAL_OFFSET_SIZE + 15u) & ~15u;
+    (SUPERCLOCK_STATE_START + SUPERCLOCK_STATE_SIZE + 15u) & ~15u;
 static_assert(SHM_AUDIO_START % 16 == 0,
               "SHM_AUDIO_START must be 16-byte aligned for shm_audio_buffer");
 constexpr uint32_t NODE_ID_COUNTER_SIZE  = 4;     // Int32, atomic — for nextNodeId() range allocation
@@ -168,7 +192,7 @@ struct alignas(4) ControlPointers {
 // - [35-37] Ring buffer peak usage (WASM writes)
 // - [38-41] Bypass category metrics (JS main thread / PM transport)
 // - [42-44] scsynth late timing diagnostics (WASM writes)
-// - [45]    padding
+// - [45]    Ring buffer direct write failures (OscChannel SAB mode, JS-only)
 struct alignas(4) PerformanceMetrics {
     // The same struct is written from native (binary + NIF) and web (WASM/JS).
     // Each group below identifies its writers by runtime. "shared C++" means
@@ -259,9 +283,38 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<int32_t> scheduler_last_late_ms;    // 43: Most recent late magnitude (ms)
     std::atomic<uint32_t> scheduler_last_late_tick; // 44: Process count when last late occurred
 
-    // Padding [45]
-    uint32_t _padding[1];
+    // Ring buffer direct write failures [45]
+    // Writer: JS-only — OscChannel in SAB mode increments when an optimistic
+    // direct ring write fails and the bundle is delivered via prescheduler.
+    // C++ side reserves the slot but doesn't read or write it.
+    std::atomic<uint32_t> ring_buffer_direct_write_fails; // 45
 };
+
+// SuperClock session state. Has its own SAB region because it's engine
+// state (load-bearing on WASM for JS↔worklet transport), not observability
+// — separating it from PerformanceMetrics keeps that struct honest as a
+// dashboard-only surface. Native builds don't use this region; their
+// SuperClock owns the same struct as a private member.
+//
+// Each field is a single 64-bit atomic (doubles stored as IEEE 754 bit-
+// pattern). Single-atomic-per-field is enough on its own — no seqlock,
+// because no current reader needs multi-field coherence.
+struct alignas(8) SuperClockState {
+    std::atomic<uint64_t> bpm;                  // 0-7:  BPM as IEEE 754 bit-pattern
+    std::atomic<uint64_t> beat_origin_ntp;      // 8-15: NTP seconds as bit-pattern
+    std::atomic<uint64_t> is_playing_at_ntp;    // 16-23: NTP seconds as bit-pattern
+    std::atomic<uint32_t> is_playing;           // 24-27: 0 = stopped, 1 = playing
+    uint32_t _padding;                          // 28-31
+
+    static void initDefaults(SuperClockState& s) {
+        s.bpm.store(supersonic::doubleToBits(120.0), std::memory_order_relaxed);
+        s.beat_origin_ntp.store(0u,                  std::memory_order_relaxed);
+        s.is_playing_at_ntp.store(0u,                std::memory_order_relaxed);
+        s.is_playing.store(0u,                       std::memory_order_relaxed);
+    }
+};
+static_assert(sizeof(SuperClockState) == SUPERCLOCK_STATE_SIZE,
+              "SuperClockState size must match SUPERCLOCK_STATE_SIZE");
 
 // Status flags
 enum StatusFlags : uint32_t {
@@ -341,6 +394,8 @@ struct BufferLayout {
     uint32_t drift_offset_size;
     uint32_t global_offset_start;
     uint32_t global_offset_size;
+    uint32_t superclock_state_start;
+    uint32_t superclock_state_size;
     uint32_t shm_audio_start;
     uint32_t shm_audio_total_size;
     uint32_t shm_audio_header_size;
@@ -401,6 +456,8 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     DRIFT_OFFSET_SIZE,
     GLOBAL_OFFSET_START,
     GLOBAL_OFFSET_SIZE,
+    SUPERCLOCK_STATE_START,
+    SUPERCLOCK_STATE_SIZE,
     SHM_AUDIO_START,
     SHM_AUDIO_TOTAL_SIZE,
     SHM_AUDIO_HEADER_SIZE,

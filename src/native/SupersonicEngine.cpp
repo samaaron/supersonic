@@ -921,6 +921,7 @@ void SupersonicEngine::init(const Config& cfg) {
 
     // Pass engine reference for /supersonic/* command handling
     mUdpServer.setEngine(this);
+    mUdpServer.setSuperClock(&mSuperClock);
 
     // Test hook for issue #3526: close the device before the source
     // decision so startAudioSource() sees no current device and falls
@@ -939,6 +940,8 @@ void SupersonicEngine::init(const Config& cfg) {
     // fully-configured callback the first time it fires.
     mSampleLoader.initialise();
     mAudioCallback.setSampleLoader(&mSampleLoader);
+    mAudioCallback.setSuperClock(&mSuperClock);
+    mPrescheduler.setSuperClock(&mSuperClock);
     mAudioCallback.onWake = [this]() { purge(); };
 
     // -- Start worker threads ----------------------------------------------
@@ -1600,6 +1603,7 @@ void SupersonicEngine::startAudioSource() {
                                    mCurrentConfig.bufferSize,
                                    mCurrentConfig.numOutputChannels,
                                    mCurrentConfig.numInputChannels);
+        mHeadlessDriver.setSuperClock(&mSuperClock);
         mHeadlessDriver.startThread(juce::Thread::Priority::highest);
         mActiveSource = AudioSource::Headless;
     }

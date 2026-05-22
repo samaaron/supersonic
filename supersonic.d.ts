@@ -720,6 +720,83 @@ export interface BootStats {
 }
 
 // ============================================================================
+// SuperClock — session-timeline service
+// ============================================================================
+
+/**
+ * Engine session-timeline service. Tempo, beat origin, transport, and
+ * NTP-derived "now." Accessed via {@link SuperSonic.superClock}.
+ *
+ * Each field is read/written independently — no multi-field coherence
+ * guarantee. Link-specific methods are no-ops on builds without a Link
+ * backing (see individual method docs).
+ */
+export interface SuperClock {
+  // ── Time / drift ─────────────────────────────────────────────────────
+
+  initialize(): Promise<void>;
+  resync(): void;
+  startDriftTimer(): void;
+  stopDriftTimer(): void;
+  updateDriftOffset(): void;
+  getDriftOffset(): number;
+  getNTPStartTime(): number;
+  getClockOffset(): number;
+  setClockOffset(offsetS: number): void;
+  reset(): void;
+
+  // ── Session mutators ─────────────────────────────────────────────────
+
+  /** @param atNtpSeconds honoured by a Link backing; takes effect now in session-of-one. */
+  setBpm(bpm: number, atNtpSeconds?: number): void;
+  setIsPlaying(playing: boolean, atNtpSeconds?: number): void;
+  /** No-op without a Link backing. */
+  setLinkEnabled(enabled: boolean): void;
+  requestBeatAtTime(beat: number, atNtpSeconds: number, quantum: number): void;
+  /** Identical to {@link requestBeatAtTime} in session-of-one. */
+  forceBeatAtTime(beat: number, atNtpSeconds: number, quantum: number): void;
+
+  // ── Session getters ──────────────────────────────────────────────────
+
+  getBpm(): number;
+  isPlaying(): boolean;
+  getBeatOriginNtp(): number;
+  getIsPlayingAtNtp(): number;
+  /** Always `false` on no-Link builds. */
+  isLinkEnabled(): boolean;
+  /** Always `0` on no-Link builds. */
+  numPeers(): number;
+
+  /**
+   * Current NTP time as seen by the audio thread. Use this for scheduling:
+   * `sonic.superClock.now() + 0.05` gives a timestamp 50ms in audio-clock
+   * future, which the audio thread reaches in 50ms of audio time —
+   * independent of any wall-clock-vs-audio-clock skew.
+   */
+  now(): number;
+
+  /**
+   * Compute audio-thread NTP for a specific `AudioContext.currentTime`.
+   * Lower-level than {@link now} — pass a value obtained from
+   * `audioContext.getOutputTimestamp()` for sample-aligned scheduling.
+   */
+  nowAt(audioCurrentTime: number): number;
+
+  /**
+   * Current NTP time from the system wall clock. Use only when matching
+   * against external wall-clock events; prefer {@link now} for scheduling
+   * engine events.
+   */
+  wallNow(): number;
+
+  // ── Beat math ────────────────────────────────────────────────────────
+
+  beatAtTime(ntpSeconds: number, quantum: number): number;
+  phaseAtTime(ntpSeconds: number, quantum: number): number;
+  timeAtBeat(beat: number, quantum: number): number;
+}
+
+// ============================================================================
 // Event Types
 // ============================================================================
 
@@ -1295,6 +1372,12 @@ export class SuperSonic {
 
   /** NTP time (seconds since 1900) when the AudioContext started. Use to compute relative times: `event.timestamp - sonic.initTime`. */
   get initTime(): number;
+
+  /**
+   * Session-timeline service: tempo, beat origin, transport, NTP "now."
+   * See {@link SuperClock} for the full API surface.
+   */
+  get superClock(): SuperClock;
 
   /**
    * AudioWorkletNode wrapper for custom audio routing.

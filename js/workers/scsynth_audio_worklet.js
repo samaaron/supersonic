@@ -9,6 +9,14 @@
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
 import { writeMessageToBuffer, calculateAvailableSpace, readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
 import { calculateAllControlIndices } from '../lib/control_offsets.js';
+import {
+  SC_BPM_I64,
+  SC_BEAT_ORIGIN_NTP_I64,
+  SC_IS_PLAYING_AT_NTP_I64,
+  SC_IS_PLAYING_I32,
+  SuperClockMessageType,
+  doubleToBits,
+} from '../lib/superclock_protocol.js';
 
 // Lazy-initialized TextEncoder for js_debug() — can't construct at module scope
 // in AudioWorkletGlobalScope, but cached after first use to avoid per-call allocation
@@ -173,9 +181,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             throw new Error('WASM memory not available');
         }
 
-        // Read the struct (54 uint32_t fields + 1 uint8_t + 3 padding bytes = 220 bytes)
-        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 54);
-        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 220);
+        // Read the struct (56 uint32_t fields + 1 uint8_t + 3 padding bytes = 228 bytes)
+        const uint32View = new Uint32Array(memory.buffer, layoutPtr, 56);
+        const uint8View = new Uint8Array(memory.buffer, layoutPtr, 228);
 
         // Extract constants (order matches BufferLayout struct in shared_memory.h)
         // NOTE: NODE_TREE is now contiguous with METRICS for efficient postMessage copying
@@ -203,39 +211,41 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             DRIFT_OFFSET_SIZE: uint32View[19],
             GLOBAL_OFFSET_START: uint32View[20],
             GLOBAL_OFFSET_SIZE: uint32View[21],
-            SHM_AUDIO_START: uint32View[22],
-            SHM_AUDIO_TOTAL_SIZE: uint32View[23],
-            SHM_AUDIO_HEADER_SIZE: uint32View[24],
-            SHM_AUDIO_FRAMES: uint32View[25],
-            SHM_AUDIO_CHANNELS: uint32View[26],
-            SHM_AUDIO_SAMPLE_RATE: uint32View[27],
-            NODE_ID_COUNTER_START: uint32View[28],
-            NODE_ID_COUNTER_SIZE: uint32View[29],
-            WORLD_OPTIONS_START: uint32View[30],
-            WORLD_OPTIONS_SIZE: uint32View[31],
-            REPLY_CHANNELS_CONTROL_START: uint32View[32],
-            REPLY_CHANNELS_CONTROL_SIZE: uint32View[33],
-            REPLY_CHANNELS_BUFFER_START: uint32View[34],
-            REPLY_CHANNEL_BUFFER_SIZE: uint32View[35],
-            REPLY_CHANNEL_CONTROL_SIZE: uint32View[36],
-            REPLY_CHANNEL_COUNT: uint32View[37],
+            SUPERCLOCK_STATE_START: uint32View[22],
+            SUPERCLOCK_STATE_SIZE: uint32View[23],
+            SHM_AUDIO_START: uint32View[24],
+            SHM_AUDIO_TOTAL_SIZE: uint32View[25],
+            SHM_AUDIO_HEADER_SIZE: uint32View[26],
+            SHM_AUDIO_FRAMES: uint32View[27],
+            SHM_AUDIO_CHANNELS: uint32View[28],
+            SHM_AUDIO_SAMPLE_RATE: uint32View[29],
+            NODE_ID_COUNTER_START: uint32View[30],
+            NODE_ID_COUNTER_SIZE: uint32View[31],
+            WORLD_OPTIONS_START: uint32View[32],
+            WORLD_OPTIONS_SIZE: uint32View[33],
+            REPLY_CHANNELS_CONTROL_START: uint32View[34],
+            REPLY_CHANNELS_CONTROL_SIZE: uint32View[35],
+            REPLY_CHANNELS_BUFFER_START: uint32View[36],
+            REPLY_CHANNEL_BUFFER_SIZE: uint32View[37],
+            REPLY_CHANNEL_CONTROL_SIZE: uint32View[38],
+            REPLY_CHANNEL_COUNT: uint32View[39],
             // Scope buffer region (ScopeOut2 → SAB triple-buffer)
-            SHM_SCOPE_START: uint32View[38],
-            SHM_SCOPE_TOTAL_SIZE: uint32View[39],
-            SHM_SCOPE_HEADER_SIZE: uint32View[40],
-            SHM_SCOPE_SLOT_SIZE: uint32View[41],
-            SHM_SCOPE_SLOT_HEADER_SIZE: uint32View[42],
-            SHM_SCOPE_REGION_SIZE: uint32View[43],
-            SHM_SCOPE_MAX_SCOPES: uint32View[44],
-            SHM_SCOPE_FRAMES_PER_SCOPE: uint32View[45],
-            SHM_SCOPE_CHANNELS: uint32View[46],
-            TOTAL_BUFFER_SIZE: uint32View[47],
-            MAX_MESSAGE_SIZE: uint32View[48],
-            MESSAGE_MAGIC: uint32View[49],
-            PADDING_MAGIC: uint32View[50],
-            scheduler_data_pool_size: uint32View[51],
-            scheduler_slot_count: uint32View[52],
-            DEBUG_PADDING_MARKER: uint8View[212],  // After 53 uint32s = 212 bytes
+            SHM_SCOPE_START: uint32View[40],
+            SHM_SCOPE_TOTAL_SIZE: uint32View[41],
+            SHM_SCOPE_HEADER_SIZE: uint32View[42],
+            SHM_SCOPE_SLOT_SIZE: uint32View[43],
+            SHM_SCOPE_SLOT_HEADER_SIZE: uint32View[44],
+            SHM_SCOPE_REGION_SIZE: uint32View[45],
+            SHM_SCOPE_MAX_SCOPES: uint32View[46],
+            SHM_SCOPE_FRAMES_PER_SCOPE: uint32View[47],
+            SHM_SCOPE_CHANNELS: uint32View[48],
+            TOTAL_BUFFER_SIZE: uint32View[49],
+            MAX_MESSAGE_SIZE: uint32View[50],
+            MESSAGE_MAGIC: uint32View[51],
+            PADDING_MAGIC: uint32View[52],
+            scheduler_data_pool_size: uint32View[53],
+            scheduler_slot_count: uint32View[54],
+            DEBUG_PADDING_MARKER: uint8View[220],  // After 55 uint32s = 220 bytes
             MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, sourceId)
         };
 
@@ -254,11 +264,17 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
         const CONTROL_START = this.bufferConstants.CONTROL_START;
         const METRICS_START = this.bufferConstants.METRICS_START;
+        const SUPERCLOCK_STATE_START = this.bufferConstants.SUPERCLOCK_STATE_START;
+        const SUPERCLOCK_STATE_SIZE  = this.bufferConstants.SUPERCLOCK_STATE_SIZE;
 
         // Calculate Int32Array indices (divide byte offsets by 4)
         this.CONTROL_INDICES = calculateAllControlIndices(ringBufferBase, CONTROL_START);
 
         // Create views - source depends on mode
+        const superclockBuf = (this.mode === 'sab') ? this.sharedBuffer : this.wasmMemory.buffer;
+        const superclockBase = ringBufferBase + SUPERCLOCK_STATE_START;
+        this.superclockStateBigInt = new BigInt64Array(superclockBuf, superclockBase, SUPERCLOCK_STATE_SIZE / 8);
+        this.superclockStateInt32  = new Int32Array(superclockBuf, superclockBase, SUPERCLOCK_STATE_SIZE / 4);
         if (this.mode === 'sab') {
             // SAB mode: views into SharedArrayBuffer
             const metricsBase = ringBufferBase + METRICS_START;
@@ -1312,6 +1328,24 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     const view = new Int32Array(this.wasmMemory.buffer, offset, 1);
                     view[0] = data.clockOffsetMs;
                 }
+            }
+
+            // SuperClock session-state writes (PM mode). The worklet's
+            // SuperClockState region is private memory in PM mode; these
+            // handlers apply main-thread mutations into it. SAB mode
+            // bypasses this entirely — JS writes the shared region.
+
+            if (data.type === SuperClockMessageType.SET_SESSION_BPM && this.superclockStateBigInt) {
+                Atomics.store(this.superclockStateBigInt, SC_BPM_I64, doubleToBits(data.bpm));
+            }
+
+            if (data.type === SuperClockMessageType.SET_SESSION_IS_PLAYING && this.superclockStateBigInt) {
+                Atomics.store(this.superclockStateBigInt, SC_IS_PLAYING_AT_NTP_I64, doubleToBits(data.atNtpSeconds));
+                Atomics.store(this.superclockStateInt32,  SC_IS_PLAYING_I32, data.isPlaying ? 1 : 0);
+            }
+
+            if (data.type === SuperClockMessageType.SET_SESSION_BEAT_ORIGIN_NTP && this.superclockStateBigInt) {
+                Atomics.store(this.superclockStateBigInt, SC_BEAT_ORIGIN_NTP_I64, doubleToBits(data.beatOriginNtp));
             }
 
             if (data.type === 'getMetrics') {

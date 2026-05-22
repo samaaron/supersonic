@@ -66,7 +66,7 @@ test.describe('Audio Health Diagnostics', () => {
 
       return {
         objectValue: metrics.audioHealthPct,
-        arrayValue: arr[63],
+        arrayValue: arr[63],  // audioHealthPct offset
       };
     }, sonicConfig);
 

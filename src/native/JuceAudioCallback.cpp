@@ -4,6 +4,7 @@
 #include "JuceAudioCallback.h"
 #include "WallClock.h"
 #include "SampleLoader.h"
+#include "SuperClock.h"
 #include "shared_memory.h"
 #include "audio_config.h"
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -81,7 +82,7 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
     mSamplePosition = 0.0;
     mPrefetchCount  = 0;
     mInputAccumCount = 0;
-    mBaseNTP        = wallClockNTP();
+    mSuperClock->resetAudioThreadTime(mSamplePosition, mSampleRate);
     std::fill(mPrefetchBuf.begin(), mPrefetchBuf.end(), 0.0f);
 
     // Sync our internal channel counts from what the device actually opened.
@@ -199,7 +200,7 @@ void JuceAudioCallback::resume() {
     mSamplePosition = 0.0;
     mPrefetchCount  = 0;
     mInputAccumCount = 0;      // discard stale mic samples from before pause
-    mBaseNTP        = wallClockNTP();
+    mSuperClock->resetAudioThreadTime(mSamplePosition, mSampleRate);
     mCallbackCount  = 0;       // re-arm warmup for new device
     mLastCbTime     = {};      // clear gap detector baseline
     mOverrunCount   = 0;
@@ -263,7 +264,7 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
             fprintf(stderr, "  [wake] gap=%.0fs — re-anchoring NTP, purging stale messages\n",
                     gapUs / 1e6);
             fflush(stderr);
-            mBaseNTP = wallClockNTP() - mSamplePosition / mSampleRate;
+            mSuperClock->resetAudioThreadTime(mSamplePosition, mSampleRate);
             if (onWake) onWake();
         }
     }
@@ -336,19 +337,7 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     }
 
     // ── 2. Generate 128-sample scsynth blocks until the JUCE buffer is full ──
-    // Derive NTP from sample position for jitter-free timing.  The sample
-    // counter advances by exactly mBufLen per block, so NTP progresses
-    // perfectly smoothly — immune to OS scheduling jitter and clock
-    // quantisation (juce::Time::currentTimeMillis() is only 1ms precision).
-    //
-    // A slow drift correction (~1% per callback) keeps long-term sync with
-    // the wall clock, compensating for sample-rate/wall-clock drift (ppm-level).
-    double wallNow = wallClockNTP();
-    double sampleNTP = mBaseNTP + mSamplePosition / mSampleRate;
-    double drift = wallNow - sampleNTP;
-    mBaseNTP += drift * 0.01;  // low-pass filter: converge ~1% per callback
-
-    double wallNTP = mBaseNTP + mSamplePosition / mSampleRate;
+    double wallNTP = mSuperClock->updateAudioThreadNTP(mSamplePosition, mSampleRate);
 
 
     while (outputFilled < numSamples) {

@@ -92,8 +92,10 @@ test.describe("Big bundle FX setup", () => {
       const revBass = fxChain(panBass.synthGroup, "sonic-pi-fx_reverb", 110, 112, { mix: 0.75 });
       packets.push(...revBass.packets);
 
-      // Wrap all 24 packets into one timed bundle
-      const ntpNow = sonic.initTime + (performance.now() / 1000) + 0.05;
+      // Wrap all 24 packets into one timed bundle — scheduling in audio
+      // time so headless test environments where AudioContext lags wall
+      // clock still reliably reach the timestamp.
+      const ntpNow = sonic.superClock.now() + 0.05;
       const bundle = osc.encodeBundle(ntpNow, packets);
 
       // Send the bundle. Use sonic.sendOSC which takes raw bytes

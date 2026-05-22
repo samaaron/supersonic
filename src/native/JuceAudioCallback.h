@@ -12,6 +12,7 @@
 #include <vector>
 
 class SampleLoader;
+class SuperClock;
 
 extern "C" {
     bool process_audio(double current_time, uint32_t active_output_channels, uint32_t active_input_channels);
@@ -47,6 +48,11 @@ public:
 
     // Wire the SampleLoader so installPendingBuffers() runs on the audio thread
     void setSampleLoader(SampleLoader* loader) { mSampleLoader = loader; }
+
+    // Wire the engine-owned SuperClock. SuperClock owns audio-thread NTP
+    // derivation (the IIR previously inlined here, now in SuperClockNative).
+    // Must be called before any audio callback or initialiseWorld.
+    void setSuperClock(SuperClock* sc) { mSuperClock = sc; }
 
     // C++20 atomic wait — equivalent of JS Atomics.wait()/notify()
     std::atomic<uint32_t> processCount{0};
@@ -104,6 +110,7 @@ private:
     int mBufLen = 128;
 
     SampleLoader* mSampleLoader = nullptr;
+    SuperClock*   mSuperClock   = nullptr;
     uint8_t*   mRingBufferStorage  = nullptr;
     int        mSampleRate         = 48000;
     int        mNumOutputChannels  = 2;
@@ -126,13 +133,6 @@ private:
     int   mAccumPerChanCap = 0;
 
     std::atomic<bool> mPaused{false};
-
-    // Sample-position-based NTP clock.
-    // We capture a high-resolution wall-clock baseline at device start, then
-    // derive NTP purely from sample counting: ntp = mBaseNTP + samples/rate.
-    // This eliminates jitter from OS scheduling and millisecond-precision clocks.
-    // A slow drift correction keeps long-term sync with wall clock.
-    double mBaseNTP = 0.0;   // NTP time corresponding to mSamplePosition == 0
 
     // Audio thread timing stats (accessed only from audio thread, no atomics needed)
     uint32_t mCallbackCount = 0;

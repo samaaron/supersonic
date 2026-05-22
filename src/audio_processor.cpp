@@ -8,6 +8,19 @@
 
 #include "audio_processor.h"
 #include "audio_config.h"
+#include "SuperClock.h"
+
+#ifdef __EMSCRIPTEN__
+extern "C" void superclock_wasm_init(SuperClockState* superclock_state,
+                                      const double* ntp_start_time_ptr,
+                                      const std::atomic<int32_t>* drift_offset_ptr,
+                                      const std::atomic<int32_t>* global_offset_ptr);
+
+static SuperClock& superClock() {
+    static SuperClock instance;
+    return instance;
+}
+#endif
 #include <emscripten/webaudio.h>
 #include <algorithm>
 #include <atomic>
@@ -306,6 +319,15 @@ extern "C" {
         drift_offset->store(0, std::memory_order_relaxed);
         global_offset->store(0, std::memory_order_relaxed);
 
+#ifdef __EMSCRIPTEN__
+        // Hand SAB pointers to SuperClockWasm at boot.
+        SuperClockState* superclock_state =
+            reinterpret_cast<SuperClockState*>(shared_memory + SUPERCLOCK_STATE_START);
+        SuperClockState::initDefaults(*superclock_state);
+
+        superclock_wasm_init(superclock_state, ntp_start_time, drift_offset, global_offset);
+#endif
+
         // Initialize all atomics to 0
         control->in_head.store(0, std::memory_order_relaxed);
         control->in_tail.store(0, std::memory_order_relaxed);
@@ -593,14 +615,14 @@ extern "C" {
         // currentNTP = audioContextTime + ntp_start + (drift_us/1000000) + (global_ms/1000)
         // Read ntp_start_time directly from shared memory every frame
         // (no caching - ensures immediate response to timing resync after resume)
-        // Read drift with acquire — this fences the non-atomic ntp_start_time read below.
-        // JS writes ntp_start_time (float64, non-atomic) then does Atomics.store on drift
-        // (release). Our acquire here ensures we see the complete float64.
-        double drift_seconds = drift_offset ? (drift_offset->load(std::memory_order_acquire) / 1000000.0) : 0.0;
-        double ntp_start = (ntp_start_time && *ntp_start_time != 0.0) ? *ntp_start_time : 0.0;
-        double global_seconds = global_offset ? (global_offset->load(std::memory_order_relaxed) / 1000.0) : 0.0;
+        // WASM derives NTP via SuperClock; on native, current_time is
+        // already the SuperClock-derived NTP from JuceAudioCallback.
+#ifdef __EMSCRIPTEN__
+        const double current_ntp = superClock().nowAt(current_time);
+#else
+        const double current_ntp = current_time;
+#endif
 
-        double current_ntp = current_time + ntp_start + drift_seconds + global_seconds;
 
         metrics->process_count.fetch_add(1, std::memory_order_relaxed);
 

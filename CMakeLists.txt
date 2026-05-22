@@ -176,6 +176,8 @@ set(ENGINE_SOURCES
     ${NATIVE_SRC}/OscUdpServer.cpp
     ${NATIVE_SRC}/SampleLoader.cpp
     ${NATIVE_SRC}/SupersonicEngine.cpp
+    ${CMAKE_SOURCE_DIR}/src/SuperClock.cpp
+    ${NATIVE_SRC}/SuperClockNative.cpp
     ${NATIVE_SRC}/DevicePolicy.cpp
     ${NATIVE_SRC}/AggregateDeviceHelper.cpp
     ${NATIVE_SRC}/StateCache.cpp
