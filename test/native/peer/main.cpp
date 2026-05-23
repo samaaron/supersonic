@@ -8,6 +8,12 @@
 //
 // Built only when SUPERSONIC_ENABLE_LINK is ON.
 
+// MSVC's <cmath> doesn't expose M_PI unless _USE_MATH_DEFINES is set
+// before the include — define it ourselves to keep portability simple.
+#ifndef M_PI
+#  define M_PI 3.14159265358979323846
+#endif
+
 #include <ableton/LinkAudio.hpp>
 #if !defined(_WIN32)
 #  include <ableton/platforms/posix/ScanIpIfAddrs.hpp>
