@@ -347,11 +347,12 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
          << " max=" << pmax);
 
     // Tolerance relative to block period. Headless DSP has near-zero
-    // jitter; real drivers add some. Loose enough that one slow CI run
-    // doesn't flake but tight enough that a regression of a few blocks
-    // is caught.
+    // jitter; real drivers add some. Loose enough that a slow CI run
+    // doesn't flake but tight enough that a regression of many blocks
+    // is caught. macOS GitHub Actions runners can hit ~10 ms p99 on
+    // 2.67 ms blocks under contention.
     CHECK(p50  < blockMs * 1);   // half within one block
-    CHECK(p90  < blockMs * 2);   // 90% within two blocks
-    CHECK(p99  < blockMs * 3);   // tail within three blocks
-    CHECK(pmax < blockMs * 4);   // worst within four blocks
+    CHECK(p90  < blockMs * 3);   // 90% within three blocks
+    CHECK(p99  < blockMs * 5);   // tail within five blocks
+    CHECK(pmax < blockMs * 8);   // worst within eight blocks
 }
