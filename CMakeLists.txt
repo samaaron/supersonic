@@ -464,6 +464,12 @@ target_link_libraries(supersonic_engine PUBLIC
 if(SUPERSONIC_ENABLE_LINK)
     target_link_libraries(supersonic_engine PUBLIC Ableton::Link)
     target_compile_definitions(supersonic_engine PUBLIC SUPERSONIC_LINK=1)
+    # Link's Windows ThreadPriority uses AvSetMmThreadCharacteristicsW /
+    # AvSetMmThreadPriority / AvRevertMmThreadCharacteristics (Windows
+    # Multimedia Class Scheduler) — those resolve via avrt.lib.
+    if(WIN32)
+        target_link_libraries(supersonic_engine PUBLIC avrt)
+    endif()
 endif()
 
 if(WIN32)
