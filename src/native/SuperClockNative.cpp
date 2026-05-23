@@ -222,11 +222,9 @@ void SuperClock::setBpm(double bpm, double atNtpSeconds) {
     auto st = mImpl->link.captureAppSessionState();
     st.setTempo(bpm, mImpl->link.clock().micros());
     mImpl->link.commitAppSessionState(st);
-    // Mirror Link's internally-clamped value (~20..999 BPM) so SAB
-    // readers and getBpm() agree.
-    bpm = mImpl->link.captureAppSessionState().tempo();
-    if (!(bpm >= 1.0)) bpm = 1.0;
 #endif
+    // Mirror the input. Link's tempo callback re-syncs the mirror to
+    // Link's converged value when peers exist.
     SuperClockState* s = state();
     if (!s) return;
     s->bpm.store(doubleToBits(bpm), std::memory_order_relaxed);

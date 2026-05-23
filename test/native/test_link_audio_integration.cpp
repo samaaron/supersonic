@@ -521,19 +521,26 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
                               std::chrono::seconds(30)).state == kStateConnected);
     REQUIRE(waitForConnected(fx, "FakeLive", "ChanB",
                               std::chrono::seconds(30)).state == kStateConnected);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
+    // Poll bus contents — slow CI runners need time for drain to
+    // populate both bus pairs after Connected. ChanA carries sine440
+    // (peak near 1.0), ChanB carries dc:0.5 (peak ~0.5).
     constexpr uint32_t kBlockSize = 128;
     std::vector<float> bus64, bus66;
-    REQUIRE(snapshotBus(64, kBlockSize, bus64));   // ChanA
-    REQUIRE(snapshotBus(66, kBlockSize, bus66));   // ChanB
-
-    // ChanA carries oscillating sine440 — peak should be near 1.0
-    // (the peer commits floatToInt16 unmodified). ChanB carries
-    // dc:0.5 — every sample ≈ 0.5, peak ≈ 0.5.
-    const float p64 = peakAbs(bus64);
-    const float p66 = peakAbs(bus66);
-    const float diff = maxAbsDiff(bus64, bus66);
+    float p64 = 0.0f, p66 = 0.0f, diff = 0.0f;
+    {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (std::chrono::steady_clock::now() < deadline) {
+            REQUIRE(snapshotBus(64, kBlockSize, bus64));
+            REQUIRE(snapshotBus(66, kBlockSize, bus66));
+            p64  = peakAbs(bus64);
+            p66  = peakAbs(bus66);
+            diff = maxAbsDiff(bus64, bus66);
+            if (p64 > 0.1f && p66 > 0.3f && diff > 0.1f) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
     INFO("peak64(sine)=" << p64 << " peak66(dc)=" << p66
          << " maxAbsDiff=" << diff);
     CHECK(p64 > 0.1f);              // sine present
@@ -640,12 +647,22 @@ TEST_CASE("LinkAudio: /link/audio/input/remove silences the bus",
                               std::chrono::seconds(30)).state
             == kStateConnected);
 
-    // Confirm audio is on the bus before removal.
+    // Confirm audio is on the bus before removal — poll rather than
+    // fixed sleep so slow CI runners have time for the drain to
+    // populate bus 64.
     constexpr uint32_t kBlockSize = 128;
     std::vector<float> busL;
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    REQUIRE(snapshotBus(64, kBlockSize, busL));
-    REQUIRE(peakAbs(busL) > 0.01f);
+    {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        bool sawAudio = false;
+        while (std::chrono::steady_clock::now() < deadline) {
+            REQUIRE(snapshotBus(64, kBlockSize, busL));
+            if (peakAbs(busL) > 0.01f) { sawAudio = true; break; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        REQUIRE(sawAudio);
+    }
 
     // Explicit remove.
     {

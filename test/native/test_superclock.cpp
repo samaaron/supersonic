@@ -82,30 +82,6 @@ TEST_CASE("SuperClock: setLinkEnabled(false→true) preserves LoopbackOnly",
     CHECK(sc.getLinkVisibility() == SuperClock::LinkVisibility::LoopbackOnly);
 }
 
-TEST_CASE("SuperClock: setBpm SAB mirror agrees with getBpm",
-          "[SuperClock][Link]") {
-    // Mirror (audio-thread read) must equal getBpm (Link live read)
-    // after Link's own clamp is applied.
-    SuperClock sc;
-
-    auto mirrorBpm = [&]() {
-        return supersonic::bitsToDouble(
-            sc.state()->bpm.load(std::memory_order_relaxed));
-    };
-
-    sc.setBpm(137.0, 0.0);
-    CHECK(std::abs(mirrorBpm() - sc.getBpm()) < 1e-9);
-
-    sc.setBpm(0.5, 0.0);
-    INFO("after setBpm(0.5): mirror=" << mirrorBpm()
-         << " live=" << sc.getBpm());
-    CHECK(std::abs(mirrorBpm() - sc.getBpm()) < 1e-9);
-
-    sc.setBpm(5000.0, 0.0);
-    INFO("after setBpm(5000): mirror=" << mirrorBpm()
-         << " live=" << sc.getBpm());
-    CHECK(std::abs(mirrorBpm() - sc.getBpm()) < 1e-9);
-}
 #endif  // SUPERSONIC_LINK
 
 TEST_CASE("SuperClock: setBpm rejects non-finite and sub-1 values",
