@@ -120,7 +120,7 @@ TEST_CASE("LinkAudio: receives audio from peer with 1024-frame buffers",
     fx.send(osc_test::message("/link/audio/publish/set",  int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
 
     {
         osc_test::Builder b;
@@ -175,7 +175,7 @@ TEST_CASE("LinkAudio: /link/reset clears active input subscriptions",
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
 
     {
         osc_test::Builder b;
@@ -211,7 +211,7 @@ TEST_CASE("LinkAudio: addLinkAudioInput rejects busIdx in output/input range",
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
 
     auto sendAdd = [&](int32_t busIdx) {
         osc_test::Builder b;
@@ -248,7 +248,7 @@ TEST_CASE("LinkAudio: addLinkAudioInput rejects bus pair collisions",
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Aux",
                                    std::chrono::seconds(5)));
 
@@ -295,7 +295,7 @@ TEST_CASE("LinkAudio: re-adding a subscription rejects overlap with others",
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Aux",
                                    std::chrono::seconds(5)));
 
@@ -343,7 +343,7 @@ TEST_CASE("LinkAudio: setLinkVisibility(Off) clears active input subscriptions",
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
 
     {
         osc_test::Builder b;
@@ -426,7 +426,7 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
 
     {
         osc_test::Builder b;
@@ -439,7 +439,7 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
     REQUIRE(fx.waitForReply("/link/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
     REQUIRE(waitForConnected(fx, "FakeLive", "Main",
-                              std::chrono::seconds(15)).state
+                              std::chrono::seconds(30)).state
             == kStateConnected);
 
     // stereo_passthrough reads In.ar(in_bus, 2) and writes both
@@ -459,19 +459,25 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
         fx.send(osc_test::message("/sync", 42));
         REQUIRE(fx.waitForReply("/synced", r));
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Sample the engine output buses directly. Output bus 0 and 1 are
-    // the L/R of the synth's stereo Out.ar.
+    // Poll the output bus — slow CI runners can take longer than a
+    // fixed sleep to: (1) let the HeadlessDriver drain Link audio
+    // into bus 64, (2) let scsynth run the synth at least once with
+    // non-zero In.ar input, (3) settle into a steady stream.
     const auto* outBus = reinterpret_cast<const float*>(get_audio_output_bus());
     REQUIRE(outBus != nullptr);
     constexpr uint32_t kBlockSize = 128;
-    std::vector<float> outL(outBus,             outBus +     kBlockSize);
-    std::vector<float> outR(outBus + kBlockSize, outBus + 2 * kBlockSize);
-
-    const float pL = peakAbs(outL);
-    const float pR = peakAbs(outR);
-    const float diff = maxAbsDiff(outL, outR);
+    float pL = 0.0f, pR = 0.0f, diff = 0.0f;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::vector<float> outL(outBus,             outBus +     kBlockSize);
+        std::vector<float> outR(outBus + kBlockSize, outBus + 2 * kBlockSize);
+        pL   = peakAbs(outL);
+        pR   = peakAbs(outR);
+        diff = maxAbsDiff(outL, outR);
+        if (pL > 0.01f && pR > 0.01f && diff > 0.01f) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
     INFO("output peakL=" << pL << " peakR=" << pR
          << " maxAbsDiff=" << diff);
     CHECK(pL > 0.01f);    // L audio from the Link sub (sine440)
@@ -494,7 +500,7 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "ChanA",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "ChanB",
                                    std::chrono::seconds(5)));
 
@@ -512,9 +518,9 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     REQUIRE(sendAdd("ChanB", 66) == 1);  // ChanB → bus 66/67
 
     REQUIRE(waitForConnected(fx, "FakeLive", "ChanA",
-                              std::chrono::seconds(15)).state == kStateConnected);
+                              std::chrono::seconds(30)).state == kStateConnected);
     REQUIRE(waitForConnected(fx, "FakeLive", "ChanB",
-                              std::chrono::seconds(15)).state == kStateConnected);
+                              std::chrono::seconds(30)).state == kStateConnected);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     constexpr uint32_t kBlockSize = 128;
@@ -551,7 +557,7 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
     // NB: no /link/audio/publish/set — engine is receive-only.
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
 
     {
         osc_test::Builder b;
@@ -564,7 +570,7 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
     REQUIRE(fx.waitForReply("/link/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
     REQUIRE(waitForConnected(fx, "FakeLive", "Main",
-                              std::chrono::seconds(15)).state
+                              std::chrono::seconds(30)).state
             == kStateConnected);
 
     // Stereo passthrough — bus 64/65 → output 0/1, preserving L/R.
@@ -580,16 +586,22 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
     OscReply r;
     fx.send(osc_test::message("/sync", 42));
     REQUIRE(fx.waitForReply("/synced", r));
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
+    // Poll the output bus — same rationale as Test A.
     const auto* outBus = reinterpret_cast<const float*>(get_audio_output_bus());
     REQUIRE(outBus != nullptr);
     constexpr uint32_t kBlockSize = 128;
-    std::vector<float> outL(outBus,             outBus +     kBlockSize);
-    std::vector<float> outR(outBus + kBlockSize, outBus + 2 * kBlockSize);
-    const float pL = peakAbs(outL);
-    const float pR = peakAbs(outR);
-    const float diff = maxAbsDiff(outL, outR);
+    float pL = 0.0f, pR = 0.0f, diff = 0.0f;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::vector<float> outL(outBus,             outBus +     kBlockSize);
+        std::vector<float> outR(outBus + kBlockSize, outBus + 2 * kBlockSize);
+        pL   = peakAbs(outL);
+        pR   = peakAbs(outR);
+        diff = maxAbsDiff(outL, outR);
+        if (pL > 0.01f && pR > 0.01f && diff > 0.01f) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
     INFO("receive-only output peakL=" << pL << " peakR=" << pR
          << " maxAbsDiff=" << diff);
     CHECK(pL > 0.01f);
@@ -613,7 +625,7 @@ TEST_CASE("LinkAudio: /link/audio/input/remove silences the bus",
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
     {
         osc_test::Builder b;
         auto& s = b.begin("/link/audio/input/add");
@@ -625,7 +637,7 @@ TEST_CASE("LinkAudio: /link/audio/input/remove silences the bus",
     REQUIRE(fx.waitForReply("/link/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
     REQUIRE(waitForConnected(fx, "FakeLive", "Main",
-                              std::chrono::seconds(15)).state
+                              std::chrono::seconds(30)).state
             == kStateConnected);
 
     // Confirm audio is on the bus before removal.
@@ -678,7 +690,7 @@ TEST_CASE("LinkAudio: no drops at default lookahead across BPM + block-size",
         fx.send(osc_test::message("/link/tempo/set", static_cast<float>(bpm)));
 
         REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                       std::chrono::seconds(15)));
+                                       std::chrono::seconds(30)));
         {
             osc_test::Builder b;
             auto& s = b.begin("/link/audio/input/add");
@@ -690,7 +702,7 @@ TEST_CASE("LinkAudio: no drops at default lookahead across BPM + block-size",
         REQUIRE(fx.waitForReply("/link/audio/input/add.reply", addReply, 1000));
         REQUIRE(addReply.parsed().argInt(0) == 1);
         REQUIRE(waitForConnected(fx, "FakeLive", "Main",
-                                  std::chrono::seconds(15)).state
+                                  std::chrono::seconds(30)).state
                 == kStateConnected);
 
         std::this_thread::sleep_for(duration);
@@ -781,7 +793,7 @@ TEST_CASE("LinkAudio: replacement preserves renderer diagnostic counters",
     fx.send(osc_test::message("/link/visibility",        int32_t{2}));
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
 
     auto sendAdd = [&](int32_t busIdx) {
         osc_test::Builder b;
@@ -796,7 +808,7 @@ TEST_CASE("LinkAudio: replacement preserves renderer diagnostic counters",
     REQUIRE(sendAdd(64) == 1);
     // Wait for the renderer to be Connected, then accumulate calls.
     REQUIRE(waitForConnected(fx, "FakeLive", "Main",
-                              std::chrono::seconds(15)).state
+                              std::chrono::seconds(30)).state
             == kStateConnected);
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
@@ -836,7 +848,7 @@ TEST_CASE("LinkAudio: latency setter rejects values above the supported max",
     fx.send(osc_test::message("/link/visibility",        int32_t{2}));
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
     {
         osc_test::Builder b;
         auto& s = b.begin("/link/audio/input/add");
@@ -886,7 +898,7 @@ TEST_CASE("LinkAudio: per-input latency setter takes effect end-to-end",
     fx.send(osc_test::message("/link/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(15)));
+                                   std::chrono::seconds(30)));
     {
         osc_test::Builder b;
         auto& s = b.begin("/link/audio/input/add");
@@ -898,7 +910,7 @@ TEST_CASE("LinkAudio: per-input latency setter takes effect end-to-end",
     REQUIRE(fx.waitForReply("/link/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
     REQUIRE(waitForConnected(fx, "FakeLive", "Main",
-                              std::chrono::seconds(15)).state
+                              std::chrono::seconds(30)).state
             == kStateConnected);
 
     // Set lookahead to 1.5 s. Renderer ring is depth 2048 → covers

@@ -1326,7 +1326,7 @@ bool OscUdpServer::handleLinkCommand(const uint8_t* data, uint32_t size) {
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/link/transport/time.reply")
-              << static_cast<int64_t>(mSuperClock->timeForIsPlayingMicros())
+              << static_cast<osc::int64>(mSuperClock->timeForIsPlayingMicros())
               << osc::EndMessage;
             sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
@@ -1355,7 +1355,7 @@ bool OscUdpServer::handleLinkCommand(const uint8_t* data, uint32_t size) {
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/link/time/now.reply")
-              << static_cast<int64_t>(mSuperClock->linkClockMicros())
+              << static_cast<osc::int64>(mSuperClock->linkClockMicros())
               << osc::EndMessage;
             sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
@@ -1430,7 +1430,7 @@ bool OscUdpServer::handleLinkCommand(const uint8_t* data, uint32_t size) {
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/link/rpc/time_at_beat.reply")
-              << static_cast<int64_t>(mSuperClock->timeAtBeatLinkMicros(b, q))
+              << static_cast<osc::int64>(mSuperClock->timeAtBeatLinkMicros(b, q))
               << osc::EndMessage;
             sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));

@@ -992,7 +992,7 @@ void SupersonicEngine::init(const Config& cfg) {
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/link/notify/transport")
               << static_cast<int32_t>(playing ? 1 : 0)
-              << static_cast<int64_t>(t)
+              << static_cast<osc::int64>(t)
               << osc::EndMessage;
             udp->broadcastLinkNotify(
                 reinterpret_cast<const uint8_t*>(s.Data()),

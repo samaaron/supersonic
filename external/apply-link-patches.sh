@@ -16,16 +16,21 @@
 # this script avoids.
 set -eu
 
+# --ignore-whitespace: on Windows runners, git-for-Windows often
+# checks Link's source out with CRLF (core.autocrlf=true) while the
+# patches are LF. Context lines won't match without this flag.
+# No-op on macOS / Linux where line endings already agree.
+
 # Quick check: are all patches already applied? (reversible means applied.)
-if git apply --reverse --check "$@" 2>/dev/null; then
+if git apply --ignore-whitespace --reverse --check "$@" 2>/dev/null; then
     echo "[supersonic-link-patches] already applied — skipping"
     exit 0
 fi
 
 # Not applied yet: try the forward direction.
-if git apply --check "$@" 2>/dev/null; then
+if git apply --ignore-whitespace --check "$@" 2>/dev/null; then
     echo "[supersonic-link-patches] applying $#"
-    git apply --whitespace=nowarn "$@"
+    git apply --ignore-whitespace --whitespace=nowarn "$@"
     exit 0
 fi
 

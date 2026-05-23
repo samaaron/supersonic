@@ -1,0 +1,6 @@
+# Force LF on patch + shell scripts. Without this, Windows git with
+# core.autocrlf=true rewrites these files to CRLF on checkout — which
+# breaks `git apply` (the patches no longer match LF-line-ended Link
+# source) and `sh` invocation (CRLF in shell scripts trips up sh.exe).
+*.patch text eol=lf
+*.sh    text eol=lf
