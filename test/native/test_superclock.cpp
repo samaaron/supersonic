@@ -32,12 +32,98 @@ TEST_CASE("SuperClock: setIsPlaying round-trips", "[SuperClock]") {
     CHECK(sc.isPlaying() == false);
 }
 
-TEST_CASE("SuperClock: setLinkEnabled is a no-op without a Link backing",
+TEST_CASE("SuperClock: setLinkEnabled toggles Link state",
           "[SuperClock]") {
     SuperClock sc;
+    // Fresh SuperClock starts with Link disabled.
+    CHECK(sc.isLinkEnabled() == false);
+
+#ifdef SUPERSONIC_LINK
+    // On Link builds the setter delegates to ableton::Link::enable.
+    sc.setLinkEnabled(true);
+    CHECK(sc.isLinkEnabled() == true);
+    sc.setLinkEnabled(false);
+    CHECK(sc.isLinkEnabled() == false);
+#else
+    // No-Link builds: setter has no underlying backend; capability stays
+    // false regardless of the requested state.
     sc.setLinkEnabled(true);
     CHECK(sc.isLinkEnabled() == false);
+#endif
+
+    // No peers ever discovered in a standalone SuperClock (no event loop
+    // attached to discover anything).
     CHECK(sc.numPeers() == 0);
+}
+
+#ifdef SUPERSONIC_LINK
+TEST_CASE("SuperClock: setLinkEnabled(true) on fresh state stays loopback-only",
+          "[SuperClock][Link]") {
+    // Privacy: bare enable on a fresh SuperClock must not promote to
+    // NetworkWide LAN advertising.
+    SuperClock sc;
+    REQUIRE(sc.getLinkVisibility() == SuperClock::LinkVisibility::Off);
+    sc.setLinkEnabled(true);
+    CHECK(sc.getLinkVisibility() == SuperClock::LinkVisibility::LoopbackOnly);
+}
+
+TEST_CASE("SuperClock: setLinkEnabled(false→true) preserves LoopbackOnly",
+          "[SuperClock][Link]") {
+    // A disable/enable cycle must not silently upgrade a prior
+    // LoopbackOnly choice to NetworkWide.
+    SuperClock sc;
+    sc.setLinkVisibility(SuperClock::LinkVisibility::LoopbackOnly);
+    REQUIRE(sc.getLinkVisibility() == SuperClock::LinkVisibility::LoopbackOnly);
+
+    sc.setLinkEnabled(false);
+    REQUIRE(sc.getLinkVisibility() == SuperClock::LinkVisibility::Off);
+
+    sc.setLinkEnabled(true);
+    CHECK(sc.getLinkVisibility() == SuperClock::LinkVisibility::LoopbackOnly);
+}
+
+TEST_CASE("SuperClock: setBpm SAB mirror agrees with getBpm",
+          "[SuperClock][Link]") {
+    // Mirror (audio-thread read) must equal getBpm (Link live read)
+    // after Link's own clamp is applied.
+    SuperClock sc;
+
+    auto mirrorBpm = [&]() {
+        return supersonic::bitsToDouble(
+            sc.state()->bpm.load(std::memory_order_relaxed));
+    };
+
+    sc.setBpm(137.0, 0.0);
+    CHECK(std::abs(mirrorBpm() - sc.getBpm()) < 1e-9);
+
+    sc.setBpm(0.5, 0.0);
+    INFO("after setBpm(0.5): mirror=" << mirrorBpm()
+         << " live=" << sc.getBpm());
+    CHECK(std::abs(mirrorBpm() - sc.getBpm()) < 1e-9);
+
+    sc.setBpm(5000.0, 0.0);
+    INFO("after setBpm(5000): mirror=" << mirrorBpm()
+         << " live=" << sc.getBpm());
+    CHECK(std::abs(mirrorBpm() - sc.getBpm()) < 1e-9);
+}
+#endif  // SUPERSONIC_LINK
+
+TEST_CASE("SuperClock: setBpm rejects non-finite and sub-1 values",
+          "[SuperClock]") {
+    // Guards beat math (timeAtBeat divides by bpm).
+    SuperClock sc;
+    sc.setBpm(120.0, 0.0);
+
+    sc.setBpm(0.0, 0.0);
+    CHECK(sc.getBpm() >= 1.0);
+    CHECK(std::isfinite(sc.getBpm()));
+
+    sc.setBpm(std::nan(""), 0.0);
+    CHECK(sc.getBpm() >= 1.0);
+    CHECK(std::isfinite(sc.getBpm()));
+
+    sc.setBpm(-5.0, 0.0);
+    CHECK(sc.getBpm() >= 1.0);
 }
 
 TEST_CASE("SuperClock: beatAtTime at non-integer-ratio BPM", "[SuperClock]") {

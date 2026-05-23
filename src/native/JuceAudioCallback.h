@@ -21,6 +21,11 @@ extern "C" {
     uintptr_t get_audio_output_bus();
     uintptr_t get_audio_input_bus();
     int get_audio_buffer_samples();
+    uintptr_t get_audio_bus_pool();
+    int get_audio_bus_count();
+    int get_audio_first_private_bus_idx();
+    void touch_audio_bus(uint32_t busIdx);
+    void touch_audio_bus_for_next_block(uint32_t busIdx);
 }
 
 class JuceAudioCallback : public juce::AudioIODeviceCallback {

@@ -158,10 +158,15 @@ void EngineFixture::stopHeadlessDriver() {
 // ── Synthdef helpers ─────────────────────────────────────────────────────────
 
 bool EngineFixture::loadSynthDef(const std::string& name) {
-    std::string path = std::string(SUPERSONIC_SYNTHDEFS_DIR) + "/" + name + ".scsyndef";
-
-    // Normalise path separators for the platform
-    std::filesystem::path fsPath(path);
+    // Look in the shipped synthdef dir first, then the test-only dir
+    // (where test fixtures can drop synthdefs that don't belong in the
+    // npm package — e.g. stereo_passthrough used by Link Audio tests).
+    std::filesystem::path fsPath =
+        std::filesystem::path(SUPERSONIC_SYNTHDEFS_DIR) / (name + ".scsyndef");
+    if (!std::filesystem::exists(fsPath)) {
+        fsPath = std::filesystem::path(SUPERSONIC_TEST_SYNTHDEFS_DIR)
+                 / (name + ".scsyndef");
+    }
     if (!std::filesystem::exists(fsPath)) return false;
 
     std::ifstream f(fsPath, std::ios::binary);

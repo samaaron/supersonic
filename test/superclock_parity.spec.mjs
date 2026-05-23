@@ -233,6 +233,41 @@ test.describe('SuperClock parity (cross-build)', () => {
     expect(elapsed).toBeLessThan(0.5);
   });
 
+  // Proves the audio thread (scsynth's OSC dispatcher) observes
+  // JS-side setBpm/setIsPlaying. Implicit in SAB mode (shared memory)
+  // but only verifiable in PM mode via this OSC round-trip.
+  test('audio thread observes JS setBpm via /superclock_get',
+        async ({ page, sonicConfig }) => {
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      const replies = [];
+      sonic.on('in', (msg) => {
+        if (msg[0] === '/superclock_get.reply') replies.push(msg);
+      });
+      await sonic.init();
+
+      sonic.superClock.setBpm(137.5, 0);
+      sonic.superClock.setIsPlaying(true, 0);
+
+      // Drain the worklet's message queue and any in-flight OSC before
+      // querying. /sync waits for scsynth to reach the synced point, by
+      // which time prior postMessage state updates have been applied.
+      await sonic.sync(1);
+      sonic.send('/superclock_get');
+      await sonic.sync(1);
+
+      await sonic.destroy();
+      return { replies };
+    }, sonicConfig);
+
+    expect(result.replies.length).toBeGreaterThanOrEqual(1);
+    const reply = result.replies[result.replies.length - 1];
+    // reply = ['/superclock_get.reply', bpm, isPlaying, beatOriginNtp,
+    //          isPlayingAtNtp, flags, numPeers]
+    expect(reply[1]).toBeCloseTo(137.5, 6);
+    expect(reply[2]).toBe(1);
+  });
+
   test('forceBeatAtTime is identical to requestBeatAtTime in session-of-one',
         async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {

@@ -1,0 +1,83 @@
+Strictly-monotonic commit timestamps for Link client-state writes.
+
+Bug: two commit*SessionState calls within the same wall-clock
+microsecond produce identical IncomingClientState timestamps. Link's
+selectPreferredStartStopState uses `>` (strict greater-than), so on a
+timestamp tie the OLD state wins and the NEW state is silently dropped.
+
+Symptom in SuperSonic: rapid setIsPlaying(true)/setIsPlaying(false)
+sequences silently drop the second call — observable as a unit-test
+failure (test_superclock.cpp:53 setIsPlaying round-trips) but the
+same race can hit any application code that issues multiple state
+mutations between audio callbacks.
+
+Fix: bump the commit timestamp through a process-wide atomic monotonic
+counter, so every commit's timestamp is strictly greater than every
+prior commit's. Conceptually equivalent to
+  max(mClock.micros(), lastCommitMicros + 1).
+
+Targets both code paths: commitAppSessionState (app thread, called by
+setIsPlaying/setTempo/etc.) and commitAudioSessionState (audio thread,
+RT-safe — atomic CAS is lock-free with bounded retries).
+
+Compatibility: timestamps remain in mClock's micros domain (at most
+~N microseconds ahead of wall clock if a burst of N writes lands in
+one microsecond, then re-converges on the next tick). Wire protocol
+unchanged. Single-write-per-microsecond case is unaffected.
+
+Pinned to Link-4.0.
+
+--- a/include/ableton/Link.ipp
++++ b/include/ableton/Link.ipp
+@@ -20,12 +20,31 @@
+ #pragma once
+ 
+ #include <ableton/link/Phase.hpp>
++#include <algorithm>
++#include <atomic>
+ 
+ namespace ableton
+ {
+ namespace detail
+ {
+ 
++// SUPERSONIC PATCH: monotonically-advancing commit timestamps. Ensures
++// rapid-succession client-state writes don't tie on integer-microsecond
++// rounding, which would let selectPreferredStartStopState drop the
++// later write. Process-wide because timestamps are in mClock's domain
++// (mach_absolute_time on macOS) which is itself process-wide.
++inline std::chrono::microseconds monotonicCommitTimestamp(
++  const std::chrono::microseconds now)
++{
++  static std::atomic<int64_t> sLastCommitMicros{0};
++  int64_t cur = sLastCommitMicros.load(std::memory_order_relaxed);
++  int64_t want;
++  do { want = std::max(now.count(), cur + 1); }
++  while (!sLastCommitMicros.compare_exchange_weak(
++      cur, want, std::memory_order_relaxed));
++  return std::chrono::microseconds(want);
++}
++
+ template <typename Clock>
+ inline typename BasicLink<Clock>::SessionState toSessionState(
+   const link::ClientState& state, const bool isConnected)
+@@ -150,7 +169,8 @@
+   const typename BasicLink<Clock>::SessionState state)
+ {
+   mController.setClientStateRtSafe(
+-    detail::toIncomingClientState(state.mState, state.mOriginalState, mClock.micros()));
++    detail::toIncomingClientState(state.mState, state.mOriginalState,
++      detail::monotonicCommitTimestamp(mClock.micros())));
+ }
+ 
+ template <typename Clock>
+@@ -165,7 +185,8 @@
+   const typename BasicLink<Clock>::SessionState state)
+ {
+   mController.setClientState(
+-    detail::toIncomingClientState(state.mState, state.mOriginalState, mClock.micros()));
++    detail::toIncomingClientState(state.mState, state.mOriginalState,
++      detail::monotonicCommitTimestamp(mClock.micros())));
+ }
+ 
+ // Link::SessionState

@@ -8,8 +8,10 @@
 #include "osc/OscReceivedElements.h"
 #ifdef __APPLE__
 #include "AggregateDeviceHelper.h"
+#include "JuceAudioCallback.h"  // get_audio_first_private_bus_idx()
 #endif
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <set>
@@ -72,17 +74,60 @@ void OscUdpServer::sendReply(const uint8_t* data, uint32_t size) {
         ip   = mLastSenderIP;
         port = mLastSenderPort;
     }
-    if (mSocket && ip.isNotEmpty() && port > 0)
+    if (mSocket && ip.isNotEmpty() && port > 0) {
+        juce::ScopedLock sl(mSocketWriteLock);
         mSocket->write(ip, port, data, static_cast<int>(size));
+        return;
+    }
+    // In-process sender (sendInProcess sets port=0). Route the reply
+    // via the engine callback so embedders + the test fixture can
+    // observe it without a UDP round-trip.
+    if (mEngine && mEngine->onReply) mEngine->onReply(data, size);
 }
+
+// Cap on subscriber lists to prevent unbounded growth from clients that
+// reconnect with fresh ephemeral ports (restart loops, etc). The oldest
+// entry is evicted first — clients normally re-subscribe on reconnect
+// so they reappear at the tail.
+static constexpr std::size_t kMaxNotifyTargets = 32;
 
 bool OscUdpServer::setNotifyTarget(const juce::String& ip, int port) {
     juce::ScopedLock sl(mSenderLock);
     // Add to list if not already registered
     for (auto& t : mNotifyTargets)
         if (t.ip == ip && t.port == port) return false;
+    if (mNotifyTargets.size() >= kMaxNotifyTargets) mNotifyTargets.erase(mNotifyTargets.begin());
     mNotifyTargets.push_back({ip, port});
     return true;
+}
+
+void OscUdpServer::addLinkNotifyTarget(const juce::String& ip, int port) {
+    juce::ScopedLock sl(mLinkNotifyLock);
+    for (auto& t : mLinkNotifyTargets)
+        if (t.ip == ip && t.port == port) return;
+    if (mLinkNotifyTargets.size() >= kMaxNotifyTargets) mLinkNotifyTargets.erase(mLinkNotifyTargets.begin());
+    mLinkNotifyTargets.push_back({ip, port});
+}
+
+void OscUdpServer::removeLinkNotifyTarget(const juce::String& ip, int port) {
+    juce::ScopedLock sl(mLinkNotifyLock);
+    mLinkNotifyTargets.erase(
+        std::remove_if(mLinkNotifyTargets.begin(), mLinkNotifyTargets.end(),
+            [&](const NotifyTarget& t) { return t.ip == ip && t.port == port; }),
+        mLinkNotifyTargets.end());
+}
+
+void OscUdpServer::broadcastLinkNotify(const uint8_t* data, uint32_t size) {
+    // Snapshot the target list under the lock, then send outside it.
+    std::vector<NotifyTarget> targets;
+    {
+        juce::ScopedLock sl(mLinkNotifyLock);
+        targets = mLinkNotifyTargets;
+    }
+    if (!mSocket) return;
+    juce::ScopedLock sl(mSocketWriteLock);
+    for (auto& t : targets)
+        mSocket->write(t.ip, t.port, data, static_cast<int>(size));
 }
 
 void OscUdpServer::sendDeviceReport() {
@@ -426,6 +471,7 @@ void OscUdpServer::sendDeviceReport() {
     infoMsg << osc::EndMessage;
 
     // Send to all registered targets
+    juce::ScopedLock sl(mSocketWriteLock);
     for (auto& t : targets) {
         mSocket->write(t.ip, t.port, devMsg.Data(), static_cast<int>(devMsg.Size()));
         mSocket->write(t.ip, t.port, inDevMsg.Data(), static_cast<int>(inDevMsg.Size()));
@@ -441,6 +487,7 @@ void OscUdpServer::broadcastToTargets(const uint8_t* data, uint32_t size) {
     }
     if (targets.empty() || !mSocket) return;
 
+    juce::ScopedLock sl(mSocketWriteLock);
     for (auto& t : targets)
         mSocket->write(t.ip, t.port, data, static_cast<int>(size));
 }
@@ -460,6 +507,7 @@ void OscUdpServer::sendStateChange(const char* state, const char* reason) {
       << reason
       << osc::EndMessage;
 
+    juce::ScopedLock sl(mSocketWriteLock);
     for (auto& t : targets)
         mSocket->write(t.ip, t.port, s.Data(), static_cast<int>(s.Size()));
 }
@@ -494,6 +542,7 @@ void OscUdpServer::sendSwitchDone(const SwapResult& result,
       << result.inputUnavailableReason.c_str()
       << osc::EndMessage;
 
+    juce::ScopedLock sl(mSocketWriteLock);
     for (auto& t : targets)
         mSocket->write(t.ip, t.port, s.Data(), static_cast<int>(s.Size()));
 }
@@ -514,6 +563,7 @@ void OscUdpServer::sendSetup(int sampleRate, int bufferSize, uint32_t generation
       << static_cast<osc::int32>(generation)
       << osc::EndMessage;
 
+    juce::ScopedLock sl(mSocketWriteLock);
     for (auto& t : targets)
         mSocket->write(t.ip, t.port, s.Data(), static_cast<int>(s.Size()));
 }
@@ -927,6 +977,558 @@ bool OscUdpServer::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
 
     return false;
 }
+bool OscUdpServer::handleLinkCommand(const uint8_t* data, uint32_t size) {
+    if (!mSuperClock || size < 16) return false;
+    if (std::memcmp(data, "/link/", 6) != 0) return false;
+    try {
+        osc::ReceivedPacket pkt(reinterpret_cast<const char*>(data),
+                                static_cast<osc::osc_bundle_element_size_t>(size));
+        osc::ReceivedMessage msg(pkt);
+        const char* addr = msg.AddressPattern();
+
+        if (std::strcmp(addr, "/link/visibility") == 0) {
+            // Write: /link/visibility <int 0|1|2> = Off | LoopbackOnly | NetworkWide.
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsInt32()) return false;
+            const int32_t mode = it->AsInt32Unchecked();
+            using V = SuperClock::LinkVisibility;
+            switch (mode) {
+            case 0: mSuperClock->setLinkVisibility(V::Off); break;
+            case 1: mSuperClock->setLinkVisibility(V::LoopbackOnly); break;
+            case 2: mSuperClock->setLinkVisibility(V::NetworkWide); break;
+            default: return false;
+            }
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/visibility/get") == 0) {
+            // Read: reply /link/visibility.reply <int> to the sender.
+            char buf[128];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/visibility.reply")
+              << static_cast<int32_t>(mSuperClock->getLinkVisibility())
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/publish/set") == 0) {
+            // Write: /link/audio/publish/set <int 0|1>.
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsInt32()) return false;
+            mSuperClock->setLinkAudioPublish(it->AsInt32Unchecked() != 0);
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/publish/get") == 0) {
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/audio/publish.reply")
+              << static_cast<int32_t>(mSuperClock->isLinkAudioPublishEnabled() ? 1 : 0)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/peer_name/set") == 0) {
+            // Write: /link/peer_name/set <string>. Identifies us to other
+            // Link peers (replaces the default engine name).
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsString()) return false;
+            mSuperClock->setPeerName(it->AsStringUnchecked());
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/peer_name/get") == 0) {
+            char buf[512];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/peer_name.reply")
+              << mSuperClock->peerName()
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/channels/get") == 0) {
+            // Reply /link/audio/channels.reply <count> [channelId channelName
+            //   peerId peerName] * count.
+            auto chs = mSuperClock->listLinkAudioChannels();
+            std::vector<char> buf(8192);
+            osc::OutboundPacketStream s(buf.data(), buf.size());
+            s << osc::BeginMessage("/link/audio/channels.reply")
+              << static_cast<int32_t>(chs.size());
+            for (const auto& c : chs) {
+                s << c.channelId.c_str() << c.channelName.c_str()
+                  << c.peerId.c_str() << c.peerName.c_str();
+            }
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/input/add") == 0) {
+            // /link/audio/input/add <peerName:string> <channelName:string>
+            //   <busIdx:int32>
+            // Reply /link/audio/input/add.reply <success:int 0|1>.
+            // One Link channel into one bus; multiple subscriptions
+            // run concurrently. Adding (peerName, channelName) twice
+            // replaces the prior entry.
+            // busIdx must point into the PRIVATE region of scsynth's
+            // bus pool — the audio thread writes (busIdx, busIdx+1)
+            // unconditionally, so a low busIdx would clobber the
+            // engine's hardware output / input buses.
+            auto it = msg.ArgumentsBegin();
+            const char* peerName = nullptr;
+            const char* channelName = nullptr;
+            int32_t busIdx = -1;
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                peerName = it->AsStringUnchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                channelName = it->AsStringUnchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsInt32()) {
+                busIdx = it->AsInt32Unchecked(); ++it;
+            }
+            const int firstPrivate = get_audio_first_private_bus_idx();
+            const int busCount     = get_audio_bus_count();
+            // Each sub claims (busIdx, busIdx+1); reject below the
+            // private region and reject if either bus is out of range.
+            const bool inRange = busCount > 0 && busIdx >= firstPrivate
+                              && busIdx + 1 < busCount;
+            const bool ok = peerName && channelName && inRange
+                && mSuperClock->addLinkAudioInput(peerName, channelName,
+                                                  static_cast<uint32_t>(busIdx));
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/audio/input/add.reply")
+              << static_cast<int32_t>(ok ? 1 : 0)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/input/remove") == 0) {
+            // /link/audio/input/remove <peerName:string> <channelName:string>
+            auto it = msg.ArgumentsBegin();
+            const char* peerName = nullptr;
+            const char* channelName = nullptr;
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                peerName = it->AsStringUnchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                channelName = it->AsStringUnchecked(); ++it;
+            }
+            if (peerName && channelName) {
+                mSuperClock->removeLinkAudioInput(peerName, channelName);
+            }
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/input/clear") == 0) {
+            mSuperClock->clearLinkAudioInputs();
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/input/latency/set") == 0) {
+            // /link/audio/input/latency/set <peer:str> <chan:str> <seconds:float>
+            // Equivalent to Live's per-track latency slider (0..2 s).
+            // Reply /link/audio/input/latency/set.reply <success:int 0|1>.
+            auto it = msg.ArgumentsBegin();
+            const char* peerName = nullptr;
+            const char* channelName = nullptr;
+            float seconds = -1.0f;
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                peerName = it->AsStringUnchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                channelName = it->AsStringUnchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsFloat()) {
+                seconds = it->AsFloatUnchecked(); ++it;
+            }
+            const bool ok = peerName && channelName && seconds >= 0.0f
+                && mSuperClock->setLinkAudioInputLatencySeconds(
+                       peerName, channelName, seconds);
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/audio/input/latency/set.reply")
+              << static_cast<int32_t>(ok ? 1 : 0)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/sink/add") == 0) {
+            // /link/audio/sink/add <name:string> <busIdx:int> <numChannels:int>
+            // → /link/audio/sink/add.reply <success:int 0|1>
+            auto it = msg.ArgumentsBegin();
+            const char* name = nullptr;
+            int32_t busIdx = -1;
+            int32_t numChans = -1;
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                name = it->AsStringUnchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsInt32()) {
+                busIdx = it->AsInt32Unchecked(); ++it;
+            }
+            if (it != msg.ArgumentsEnd() && it->IsInt32()) {
+                numChans = it->AsInt32Unchecked(); ++it;
+            }
+            const bool ok = name && busIdx >= 0 && numChans > 0
+                && mSuperClock->addLinkAudioSink(name,
+                                                  static_cast<uint32_t>(busIdx),
+                                                  static_cast<uint32_t>(numChans));
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/audio/sink/add.reply")
+              << static_cast<int32_t>(ok ? 1 : 0)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/sink/remove") == 0) {
+            auto it = msg.ArgumentsBegin();
+            if (it != msg.ArgumentsEnd() && it->IsString()) {
+                mSuperClock->removeLinkAudioSink(it->AsStringUnchecked());
+            }
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/sinks/get") == 0) {
+            // Reply /link/audio/sinks.reply <count>
+            //   [name busIdx numChans hasSubscriber:int 0|1]*
+            auto sinks = mSuperClock->listLinkAudioSinks();
+            std::vector<char> buf(4096);
+            osc::OutboundPacketStream s(buf.data(), buf.size());
+            s << osc::BeginMessage("/link/audio/sinks.reply")
+              << static_cast<int32_t>(sinks.size());
+            for (const auto& as : sinks) {
+                s << as.name.c_str()
+                  << static_cast<int32_t>(as.busIdx)
+                  << static_cast<int32_t>(as.numChannels)
+                  << static_cast<int32_t>(as.hasSubscriber ? 1 : 0);
+            }
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/audio/inputs/get") == 0) {
+            // Reply /link/audio/inputs.reply <count>
+            //   [peerName:s channelName:s busIdx:i sampleRate:i
+            //    sourceNumChannels:i (1 or 2, 0 until first buffer)
+            //    bufferedMs:f connectionState:i (0..3)
+            //    droppedSourceBuffers:i networkGapBuffers:i
+            //    totalSourceBufferCalls:i duplicateCountCalls:i
+            //    latencySeconds:f]*
+            auto inputs = mSuperClock->listLinkAudioInputs();
+            // Pre-size for the actual reply; 512 B/entry is a generous
+            // upper bound (two ≤64-char strings + 7 int32 + 2 floats +
+            // tag/alignment). Avoids overflow when many subs or long
+            // peer/channel names are present.
+            constexpr size_t kBytesPerInputEntry = 512;
+            const size_t bufSize = 1024 + inputs.size() * kBytesPerInputEntry;
+            std::vector<char> buf(bufSize);
+            osc::OutboundPacketStream s(buf.data(), buf.size());
+            s << osc::BeginMessage("/link/audio/inputs.reply")
+              << static_cast<int32_t>(inputs.size());
+            for (const auto& st : inputs) {
+                s << st.peerName.c_str()
+                  << st.channelName.c_str()
+                  << static_cast<int32_t>(st.busIdx)
+                  << static_cast<int32_t>(st.sampleRate)
+                  << static_cast<int32_t>(st.sourceNumChannels)
+                  << (st.bufferedSeconds * 1000.0f)
+                  << static_cast<int32_t>(st.state)
+                  << static_cast<int32_t>(std::min<uint64_t>(
+                         st.droppedSourceBuffers,
+                         static_cast<uint64_t>(INT32_MAX)))
+                  << static_cast<int32_t>(std::min<uint64_t>(
+                         st.networkGapBuffers,
+                         static_cast<uint64_t>(INT32_MAX)))
+                  << static_cast<int32_t>(std::min<uint64_t>(
+                         st.totalSourceBufferCalls,
+                         static_cast<uint64_t>(INT32_MAX)))
+                  << static_cast<int32_t>(std::min<uint64_t>(
+                         st.duplicateCountCalls,
+                         static_cast<uint64_t>(INT32_MAX)))
+                  << static_cast<float>(st.latencySeconds);
+            }
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        // ── Tempo + transport (replaces sp_link NIF surface) ─────────────
+
+        if (std::strcmp(addr, "/link/enabled/get") == 0) {
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/enabled.reply")
+              << static_cast<int32_t>(mSuperClock->isLinkEnabled() ? 1 : 0)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/tempo/get") == 0) {
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/tempo.reply")
+              << mSuperClock->getBpm()
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/tempo/set") == 0) {
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsFloat()) return false;
+            mSuperClock->setBpm(it->AsFloatUnchecked(), 0.0);
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/transport/get") == 0) {
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/transport.reply")
+              << static_cast<int32_t>(mSuperClock->isPlaying() ? 1 : 0)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/transport/set") == 0) {
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsInt32()) return false;
+            // Stamp the mirror with wallNow — verb has no timestamp
+            // arg; 0.0 would mean "transitioned at NTP epoch 1900".
+            mSuperClock->setIsPlaying(it->AsInt32Unchecked() != 0,
+                                       mSuperClock->wallNow());
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/transport/time/get") == 0) {
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/transport/time.reply")
+              << static_cast<int64_t>(mSuperClock->timeForIsPlayingMicros())
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/start_stop_sync/get") == 0) {
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/start_stop_sync.reply")
+              << static_cast<int32_t>(mSuperClock->isStartStopSyncEnabled() ? 1 : 0)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/start_stop_sync/set") == 0) {
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsInt32()) return false;
+            mSuperClock->setStartStopSyncEnabled(it->AsInt32Unchecked() != 0);
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/time/now/get") == 0) {
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/time/now.reply")
+              << static_cast<int64_t>(mSuperClock->linkClockMicros())
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/peers/count/get") == 0) {
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/peers/count.reply")
+              << static_cast<int32_t>(mSuperClock->numPeers())
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/reset") == 0) {
+            // Cycle through setLinkVisibility so the full Link Audio
+            // teardown (inputSubs, auxSinks, main sink, threadPriority,
+            // enableLinkAudio) runs — setLinkEnabled alone leaves all
+            // of those wired to the old session.
+            const auto prev = mSuperClock->getLinkVisibility();
+            mSuperClock->setLinkVisibility(SuperClock::LinkVisibility::Off);
+            if (prev != SuperClock::LinkVisibility::Off) {
+                mSuperClock->setLinkVisibility(prev);
+            }
+            return true;
+        }
+
+        // ── RPC: beat ↔ time conversions in Link's clock domain ──────────
+        // All take Link-clock micros (int64) where applicable.
+
+        if (std::strcmp(addr, "/link/rpc/beat_at_time") == 0) {
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsInt64()) return false;
+            const int64_t t = it->AsInt64Unchecked(); ++it;
+            if (it == msg.ArgumentsEnd() || !it->IsFloat()) return false;
+            const float q = it->AsFloatUnchecked();
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/rpc/beat_at_time.reply")
+              << mSuperClock->beatAtLinkTime(t, q)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/rpc/phase_at_time") == 0) {
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsInt64()) return false;
+            const int64_t t = it->AsInt64Unchecked(); ++it;
+            if (it == msg.ArgumentsEnd() || !it->IsFloat()) return false;
+            const float q = it->AsFloatUnchecked();
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/rpc/phase_at_time.reply")
+              << mSuperClock->phaseAtLinkTime(t, q)
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/rpc/time_at_beat") == 0) {
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsFloat()) return false;
+            const float b = it->AsFloatUnchecked(); ++it;
+            if (it == msg.ArgumentsEnd() || !it->IsFloat()) return false;
+            const float q = it->AsFloatUnchecked();
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/rpc/time_at_beat.reply")
+              << static_cast<int64_t>(mSuperClock->timeAtBeatLinkMicros(b, q))
+              << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/notify/subscribe") == 0) {
+            // Adds the OSC sender as a Link-event notify target.
+            // Sender's IP/port already set by handlePacket for /link/*.
+            juce::String ip;
+            int port = 0;
+            {
+                juce::ScopedLock sl(mSenderLock);
+                ip = mLastSenderIP;
+                port = mLastSenderPort;
+            }
+            if (port <= 0) return true;
+            addLinkNotifyTarget(ip, port);
+            if (!mSocket) return true;  // tear-down race; no socket to push through
+            // Push a tempo + peers snapshot immediately so the new
+            // subscriber starts in sync. Link's change-callbacks only
+            // fire on actual deltas — without this, joining a session
+            // at the same tempo as our local default leaves the
+            // subscriber stuck on its own default until something
+            // moves.
+            const double initTempo = mSuperClock->getBpm();
+            const int32_t initPeers = static_cast<int32_t>(mSuperClock->numPeers());
+            {
+                char buf[64];
+                osc::OutboundPacketStream s(buf, sizeof(buf));
+                s << osc::BeginMessage("/link/notify/tempo") << initTempo
+                  << osc::EndMessage;
+                juce::ScopedLock lk(mSocketWriteLock);
+                mSocket->write(ip, port,
+                               reinterpret_cast<const char*>(s.Data()),
+                               static_cast<int>(s.Size()));
+            }
+            {
+                char buf[64];
+                osc::OutboundPacketStream s(buf, sizeof(buf));
+                s << osc::BeginMessage("/link/notify/peers") << initPeers
+                  << osc::EndMessage;
+                juce::ScopedLock lk(mSocketWriteLock);
+                mSocket->write(ip, port,
+                               reinterpret_cast<const char*>(s.Data()),
+                               static_cast<int>(s.Size()));
+            }
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/notify/unsubscribe") == 0) {
+            juce::String ip;
+            int port = 0;
+            {
+                juce::ScopedLock sl(mSenderLock);
+                ip = mLastSenderIP;
+                port = mLastSenderPort;
+            }
+            if (port > 0) removeLinkNotifyTarget(ip, port);
+            return true;
+        }
+
+        if (std::strcmp(addr, "/link/peers/get") == 0) {
+            // Read: reply /link/peers.reply <count> [<nodeId> <gatewayIp>
+            //   <isLoopback:int 0|1> <measurementIp> <measurementPort>
+            //   <audioIp> <audioPort>] * count.
+            // audioIp is "" when peer has no Link Audio capability.
+            auto peers = mSuperClock->listPeers();
+            // IPv6 peers cost ~200 bytes per entry (four address strings
+            // + 16-hex nodeId + two ports + isLoopback + alignment).
+            // 32 KiB covers ~150 peers.
+            std::vector<char> buf(32768);
+            osc::OutboundPacketStream s(buf.data(), buf.size());
+            s << osc::BeginMessage("/link/peers.reply")
+              << static_cast<int32_t>(peers.size());
+            for (const auto& p : peers) {
+                s << p.nodeId.c_str()
+                  << p.gatewayIp.c_str()
+                  << static_cast<int32_t>(p.isLoopback ? 1 : 0)
+                  << p.measurementIp.c_str()
+                  << static_cast<int32_t>(p.measurementPort)
+                  << p.audioIp.c_str()
+                  << static_cast<int32_t>(p.audioPort);
+            }
+            s << osc::EndMessage;
+            sendReply(reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
+    } catch (...) {
+        // The packet was /link/* but reply generation threw (typically
+        // OutboundPacketStream overflow). Return true to consume it
+        // rather than letting handlePacket forward to scsynth's input
+        // ring buffer.
+        return true;
+    }
+    return false;
+}
 
 void OscUdpServer::executePendingSwitch() {
     // Wait for rapid clicks to settle (500ms quiet period)
@@ -1049,6 +1651,31 @@ void OscUdpServer::handlePacket(const uint8_t* data, uint32_t size,
         bool handled = handleSupersonicCommand(data, size);
 
         // Restore so async ring-buffer replies still go to the correct client
+        {
+            juce::ScopedLock sl(mSenderLock);
+            mLastSenderIP   = savedIP;
+            mLastSenderPort = savedPort;
+        }
+
+        if (handled) return;
+    }
+
+    // Same direct-dispatch pattern for /link/* commands. These talk to
+    // SuperClock and reply synchronously; nothing goes through the
+    // audio ring buffer.
+    if (size >= 16 && data[0] == '/' && std::memcmp(data, "/link/", 6) == 0) {
+        juce::String savedIP;
+        int savedPort;
+        {
+            juce::ScopedLock sl(mSenderLock);
+            savedIP  = mLastSenderIP;
+            savedPort = mLastSenderPort;
+            mLastSenderIP   = senderIP;
+            mLastSenderPort = senderPort;
+        }
+
+        bool handled = handleLinkCommand(data, size);
+
         {
             juce::ScopedLock sl(mSenderLock);
             mLastSenderIP   = savedIP;

@@ -65,6 +65,8 @@ add_executable(SuperSonicNativeTests
     test_superclock.cpp
     OscTestUtils.cpp
     EngineFixture.cpp
+    FakeLinkPeerProcess.cpp
+    test_link_audio_integration.cpp
 )
 
 target_link_libraries(SuperSonicNativeTests PRIVATE
@@ -87,6 +89,23 @@ target_compile_definitions(SuperSonicNativeTests PRIVATE
 if(MSVC)
     target_compile_options(SuperSonicNativeTests PRIVATE /W1 /wd4244 /wd4267 /wd4305 /permissive-)
     target_link_options(SuperSonicNativeTests PRIVATE /FORCE:MULTIPLE)
+endif()
+
+# ─── Out-of-process Link peer used by integration tests ────────────────────
+# Minimal Link Audio publisher with CLI-configurable channels and
+# deterministic audio generators. Tests spawn it via FakeLinkPeerProcess
+# and assert on what the engine receives. Only built when Link is on.
+if(SUPERSONIC_ENABLE_LINK)
+    add_executable(supersonic_test_link_peer
+        peer/main.cpp
+    )
+    target_link_libraries(supersonic_test_link_peer PRIVATE
+        Ableton::Link
+    )
+    target_compile_definitions(SuperSonicNativeTests PRIVATE
+        SUPERSONIC_TEST_LINK_PEER_BINARY="$<TARGET_FILE:supersonic_test_link_peer>"
+    )
+    add_dependencies(SuperSonicNativeTests supersonic_test_link_peer)
 endif()
 
 include(CTest)

@@ -16,7 +16,7 @@
  *   [8-15]  beat_origin_ntp    (uint64 bit-pattern of double)
  *   [16-23] is_playing_at_ntp  (uint64 bit-pattern of double)
  *   [24-27] is_playing         (uint32: 0 or 1)
- *   [28-31] padding
+ *   [28-31] flags              (uint32: bit-packed SC_FLAG_*)
  */
 
 // BigInt64Array indices (8-byte stride).
@@ -24,8 +24,14 @@ export const SC_BPM_I64                = 0;
 export const SC_BEAT_ORIGIN_NTP_I64    = 1;
 export const SC_IS_PLAYING_AT_NTP_I64  = 2;
 
-// Int32Array index (4-byte stride) — byte offset 24 / 4.
-export const SC_IS_PLAYING_I32         = 6;
+// Int32Array indices (4-byte stride) — byte offset / 4.
+export const SC_IS_PLAYING_I32         = 6;   // byte 24
+export const SC_FLAGS_I32              = 7;   // byte 28
+
+// Flag bit positions — must match src/shared_memory.h.
+export const SC_FLAG_LINK_ENABLED       = 1 << 0;
+export const SC_FLAG_START_STOP_SYNC    = 1 << 1;
+export const SC_FLAG_LINK_AUDIO_PUBLISH = 1 << 2;
 
 // PM-mode worklet message types. The main thread posts these and the
 // worklet's onmessage handler dispatches on them.

@@ -105,6 +105,19 @@ private:
     void handlePacket(const uint8_t* data, uint32_t size,
                       const juce::String& senderIP, int senderPort);
     bool handleSupersonicCommand(const uint8_t* data, uint32_t size);
+    bool handleLinkCommand(const uint8_t* data, uint32_t size);
+
+public:
+    // Link-event notify subscription (separate from /supersonic/notify
+    // targets — different consumer audience). Called from OSC handlers
+    // and from SuperClock callback wiring in SupersonicEngine.
+    void addLinkNotifyTarget(const juce::String& ip, int port);
+    void removeLinkNotifyTarget(const juce::String& ip, int port);
+    // Sends `data` to every registered Link notify target. Safe to call
+    // from Link's network thread (uses mSocket->write under a brief lock).
+    void broadcastLinkNotify(const uint8_t* data, uint32_t size);
+
+private:
 
     int                   mPort          = 57110;
     std::string           mBindAddress;
@@ -123,6 +136,12 @@ private:
     std::unique_ptr<juce::DatagramSocket> mSocket;
     std::vector<uint8_t>                  mRecvBuf;
 
+    // Serialises ALL mSocket->write calls. JUCE's DatagramSocket::write
+    // is not concurrent-write safe (internal getaddrinfo/freeaddrinfo
+    // state races otherwise). Writers: OSC receive thread (replies),
+    // Link network thread (broadcastLinkNotify), device-report path.
+    juce::CriticalSection mSocketWriteLock;
+
     // Last sender — replies go back here
     juce::CriticalSection mSenderLock;
     juce::String          mLastSenderIP;
@@ -134,6 +153,13 @@ private:
         int port;
     };
     std::vector<NotifyTarget> mNotifyTargets;
+
+    // Separate list for Link-event notify subscribers (tempo / peer
+    // count / transport-state pushes). Separate from mNotifyTargets so
+    // device-only consumers (the GUI) aren't spammed with Link events
+    // and Link-only consumers (Sonic Pi) aren't spammed with device events.
+    juce::CriticalSection     mLinkNotifyLock;
+    std::vector<NotifyTarget> mLinkNotifyTargets;
 
     // Debounced device switch — rapid clicks settle into one final switch
     struct PendingSwitch {

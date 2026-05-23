@@ -326,6 +326,7 @@ extern "C" {
         SuperClockState::initDefaults(*superclock_state);
 
         superclock_wasm_init(superclock_state, ntp_start_time, drift_offset, global_offset);
+        g_active_superclock.store(&superClock(), std::memory_order_release);
 #endif
 
         // Initialize all atomics to 0
@@ -1074,6 +1075,50 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     uint32_t get_status_flags() {
         return control ? control->status_flags.load(std::memory_order_relaxed) : 0;
+    }
+
+    // Whole audio-bus pool — base + count — so Link Audio sinks/sources
+    // can tap arbitrary bus indices the user picks (publishAuxSinks /
+    // drainLinkAudioInputsToBuses).
+    EMSCRIPTEN_KEEPALIVE
+    uintptr_t get_audio_bus_pool() {
+        if (!memory_initialized || !g_world) return 0;
+        return reinterpret_cast<uintptr_t>(g_world->mAudioBus);
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    int get_audio_bus_count() {
+        return g_world ? g_world->mNumAudioBusChannels : 0;
+    }
+
+    // Index of the first PRIVATE bus. scsynth's bus pool layout is
+    // [outputs][inputs][private]; Link Audio inputs must target a
+    // private bus. Returns INT_MAX pre-init so any busIdx fails the
+    // caller's `>= firstPrivate` check (fail-closed during boot).
+    EMSCRIPTEN_KEEPALIVE
+    int get_audio_first_private_bus_idx() {
+        if (!g_world) return std::numeric_limits<int>::max();
+        return g_world->mNumOutputs + g_world->mNumInputs;
+    }
+
+    // Mark an audio bus "touched" so In.ar reads it. Callers from
+    // INSIDE process_audio (after the per-block mBufCounter++) write
+    // the current counter; pre-process_audio callers (e.g. Link Audio
+    // drain wired from the audio callback before process_audio runs)
+    // write counter+1 so the synth's In.ar check passes in the
+    // upcoming block.
+    EMSCRIPTEN_KEEPALIVE
+    void touch_audio_bus(uint32_t busIdx) {
+        if (!g_world || !g_world->mAudioBusTouched) return;
+        if (busIdx >= static_cast<uint32_t>(g_world->mNumAudioBusChannels)) return;
+        g_world->mAudioBusTouched[busIdx] = g_world->mBufCounter;
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    void touch_audio_bus_for_next_block(uint32_t busIdx) {
+        if (!g_world || !g_world->mAudioBusTouched) return;
+        if (busIdx >= static_cast<uint32_t>(g_world->mNumAudioBusChannels)) return;
+        g_world->mAudioBusTouched[busIdx] = g_world->mBufCounter + 1;
     }
 
     // scsynth audio output accessors

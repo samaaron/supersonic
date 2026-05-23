@@ -34,6 +34,7 @@
 #include "scsynthsend.h"
 #include "SC_WorldOptions.h"
 #include "SC_Version.hpp"
+#include "../../SuperClock.h"
 
 extern int gMissingNodeID;
 
@@ -1373,6 +1374,53 @@ SCErr meth_dumpOSC(World* inWorld, int inSize, char* inData, ReplyAddress* inRep
     return kSCErr_None;
 }
 
+// Reply: /superclock_get.reply bpm:d isPlaying:i beatOriginNtp:d
+//        isPlayingAtNtp:d flags:i numPeers:i
+//
+// Runs on the audio thread (PerformOSCMessage is dispatched inline
+// from process_audio). Reads SAB atomics directly rather than going
+// via SuperClock's public getters — on native+Link the getters route
+// through Link::captureAppSessionState() which is documented
+// "Realtime-safe: no". The mirror is kept current by the tempo /
+// start-stop callbacks on native+Link, and is the canonical store on
+// WASM and native-no-Link.
+SCErr meth_superclock_get(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
+SCErr meth_superclock_get(World* inWorld, int /*inSize*/, char* /*inData*/, ReplyAddress* inReply) {
+    SuperClock* sc = g_active_superclock.load(std::memory_order_acquire);
+    if (!sc) {
+        SendFailure(inReply, "/superclock_get", "active SuperClock not published yet");
+        return kSCErr_Failed;
+    }
+    const SuperClockState* s = sc->state();
+    if (!s) {
+        SendFailure(inReply, "/superclock_get", "SuperClockState not initialised");
+        return kSCErr_Failed;
+    }
+
+    const double   bpm        = supersonic::bitsToDouble(s->bpm.load(std::memory_order_relaxed));
+    const double   beatOrigin = supersonic::bitsToDouble(s->beat_origin_ntp.load(std::memory_order_relaxed));
+    const double   playAtNtp  = supersonic::bitsToDouble(s->is_playing_at_ntp.load(std::memory_order_relaxed));
+    const uint32_t playing    = s->is_playing.load(std::memory_order_relaxed);
+    const uint32_t flags      = s->flags.load(std::memory_order_relaxed);
+    // numPeers isn't mirrored in SAB and reading it live needs a Link
+    // RPC (not RT-safe). App-thread consumers should use /link/peers/get.
+    const uint32_t numPeers   = 0;
+
+    small_scpacket packet;
+    packet.adds("/superclock_get.reply");
+    packet.maketags(7);
+    packet.addtag(',');
+    packet.addtag('d'); packet.addd(bpm);
+    packet.addtag('i'); packet.addi(static_cast<int>(playing != 0u ? 1 : 0));
+    packet.addtag('d'); packet.addd(beatOrigin);
+    packet.addtag('d'); packet.addd(playAtNtp);
+    packet.addtag('i'); packet.addi(static_cast<int>(flags));
+    packet.addtag('i'); packet.addi(static_cast<int>(numPeers));
+
+    CallSequencedCommand(SendReplyCmd, inWorld, packet.size(), packet.data(), inReply);
+    return kSCErr_None;
+}
+
 SCErr meth_version(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_version(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
     sc_msg_iter msg(inSize, inData);
@@ -1924,6 +1972,10 @@ void initMiscCommands() {
     NEW_COMMAND(clearSched);
     NEW_COMMAND(version);
     NEW_COMMAND(rtMemoryStatus);
+
+#ifdef SUPERSONIC
+    NEW_COMMAND(superclock_get);
+#endif
 
     NEW_COMMAND(d_recv);
 #ifndef __EMSCRIPTEN__

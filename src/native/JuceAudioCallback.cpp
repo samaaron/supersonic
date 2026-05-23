@@ -219,10 +219,25 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     float* const* outputChannelData,
     int numOutputChannels,
     int numSamples,
-    const juce::AudioIODeviceCallbackContext& /*context*/)
+    const juce::AudioIODeviceCallbackContext& context)
 {
     int nIn  = juce::jmin(numInputChannels,  mNumInputChannels);
     int nOut = juce::jmin(numOutputChannels, mNumOutputChannels);
+
+    // hostTimeNs is the audio framework's "this buffer plays at T"
+    // (mach_absolute_time domain on macOS, same as Link's clock()).
+    // Used for jitter-free Link Audio buffer-begin timestamps. Fall
+    // back to link.clock().micros() at callback start when the driver
+    // doesn't supply hostTimeNs (headless test driver, some ALSA
+    // configs) so each sub-block within this callback gets a
+    // correctly-spaced stamp.
+    uint64_t linkAudioBlockHostMicros =
+        context.hostTimeNs != nullptr
+            ? (*context.hostTimeNs) / 1000ULL
+            : static_cast<uint64_t>(mSuperClock->linkClockMicros());
+    const uint64_t scsynthBlockMicros = mSampleRate > 0
+        ? static_cast<uint64_t>((static_cast<double>(mBufLen) * 1e6) / mSampleRate)
+        : 0ULL;
 
     // Zero any extra output channels that scsynth won't fill
     for (int ch = nOut; ch < numOutputChannels; ++ch)
@@ -374,6 +389,17 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
         if (preTick)
             preTick(mSamplePosition, wallNTP * 1000.0 - NTP_EPOCH_OFFSET * 1000.0);
 
+        // Drain pending Link Audio input into the listen bus before
+        // scsynth's In.ar reads it. No-op without an active subscription.
+        if (auto* busPool = reinterpret_cast<float*>(get_audio_bus_pool())) {
+            mSuperClock->drainLinkAudioInputsToBuses(
+                busPool,
+                static_cast<uint32_t>(mBufLen),
+                static_cast<uint32_t>(get_audio_bus_count()),
+                static_cast<uint32_t>(mSampleRate),
+                linkAudioBlockHostMicros);
+        }
+
         // Native timing: pass wall clock NTP time directly.
         // process_audio computes: current_ntp = current_time + ntp_start + drift + global
         // With ntp_start=0 and drift=0, this becomes: wallNTP + global_offset
@@ -386,6 +412,38 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
 
         auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus());
         if (outputBus) {
+            // Publish this scsynth block to Link Audio. Main sink:
+            // stereo when nOut >= 2, mono fallback for nOut == 1.
+            // hostMicros is the audio-framework's playback timestamp
+            // for THIS sub-block; advanced after each publish so
+            // consecutive sub-blocks within one JUCE callback get
+            // correctly-spaced timestamps. No-op when LinkAudio off /
+            // no subscriber.
+            if (nOut >= 2) {
+                mSuperClock->publishAudioBlock(
+                    outputBus, outputBus + mBufLen,
+                    static_cast<size_t>(mBufLen),
+                    static_cast<uint32_t>(mSampleRate),
+                    linkAudioBlockHostMicros);
+            } else if (nOut == 1) {
+                mSuperClock->publishAudioBlock(
+                    outputBus, nullptr,
+                    static_cast<size_t>(mBufLen),
+                    static_cast<uint32_t>(mSampleRate),
+                    linkAudioBlockHostMicros);
+            }
+            // Any user-added aux sinks tapping arbitrary bus ranges.
+            // No-op when none registered (lock-free fast path).
+            if (auto* busPool = reinterpret_cast<float*>(get_audio_bus_pool())) {
+                mSuperClock->publishAuxSinks(
+                    busPool,
+                    static_cast<uint32_t>(mBufLen),
+                    static_cast<uint32_t>(get_audio_bus_count()),
+                    static_cast<uint32_t>(mSampleRate),
+                    linkAudioBlockHostMicros);
+            }
+            linkAudioBlockHostMicros += scsynthBlockMicros;
+
             int needed  = numSamples - outputFilled;
             int toCopy  = std::min(needed, mBufLen);
 

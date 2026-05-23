@@ -10,6 +10,7 @@
 #define SCSYNTH_SHARED_MEMORY_H
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
@@ -304,15 +305,23 @@ struct alignas(8) SuperClockState {
     std::atomic<uint64_t> beat_origin_ntp;      // 8-15: NTP seconds as bit-pattern
     std::atomic<uint64_t> is_playing_at_ntp;    // 16-23: NTP seconds as bit-pattern
     std::atomic<uint32_t> is_playing;           // 24-27: 0 = stopped, 1 = playing
-    uint32_t _padding;                          // 28-31
+    std::atomic<uint32_t> flags;                // 28-31: bit-packed session flags
 
     static void initDefaults(SuperClockState& s) {
         s.bpm.store(supersonic::doubleToBits(120.0), std::memory_order_relaxed);
         s.beat_origin_ntp.store(0u,                  std::memory_order_relaxed);
         s.is_playing_at_ntp.store(0u,                std::memory_order_relaxed);
         s.is_playing.store(0u,                       std::memory_order_relaxed);
+        s.flags.store(0u,                            std::memory_order_relaxed);
     }
 };
+
+// Bit positions inside SuperClockState::flags. Single atomic uint32 so
+// readers can snapshot all flags in one load; writers use fetch_or /
+// fetch_and to mutate individual bits without stomping siblings.
+constexpr uint32_t SC_FLAG_LINK_ENABLED         = 1u << 0;
+constexpr uint32_t SC_FLAG_START_STOP_SYNC      = 1u << 1;
+constexpr uint32_t SC_FLAG_LINK_AUDIO_PUBLISH   = 1u << 2;
 static_assert(sizeof(SuperClockState) == SUPERCLOCK_STATE_SIZE,
               "SuperClockState size must match SUPERCLOCK_STATE_SIZE");
 
@@ -492,5 +501,110 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     DEBUG_PADDING_MARKER,
     {0, 0, 0}  // padding
 };
+
+// ─── SAB layout cross-language assertions ──────────────────────────────────
+// JS reads these structs via hand-mirrored offset constants in
+// js/lib/*. Encode the expected indices here so the build fails if a
+// C++ field moves without the JS mirror following. One-directional —
+// editing the JS file alone won't trip these.
+//
+// offsetof on classes containing std::atomic<integral> is conditionally
+// supported by C++17/20 but accepted by clang/gcc/MSVC; suppress the
+// pedantic warning around the block.
+
+#if defined(__clang__) || defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
+
+#define SS_ASSERT_OFFSET(StructName, field, expectedBytes, jsRef)            \
+    static_assert(offsetof(StructName, field) == (expectedBytes),            \
+                  #StructName "::" #field " offset drifted from " jsRef)
+
+#define SS_ASSERT_METRIC(field, jsIdx)                                       \
+    SS_ASSERT_OFFSET(PerformanceMetrics, field,                              \
+                     (jsIdx) * sizeof(uint32_t),                             \
+                     "js/lib/metrics_offsets.js")
+
+// SuperClockState ↔ js/lib/superclock_protocol.js
+SS_ASSERT_OFFSET(SuperClockState, bpm,               0,
+                 "js/lib/superclock_protocol.js SC_BPM_I64");
+SS_ASSERT_OFFSET(SuperClockState, beat_origin_ntp,   8,
+                 "js/lib/superclock_protocol.js SC_BEAT_ORIGIN_NTP_I64");
+SS_ASSERT_OFFSET(SuperClockState, is_playing_at_ntp, 16,
+                 "js/lib/superclock_protocol.js SC_IS_PLAYING_AT_NTP_I64");
+SS_ASSERT_OFFSET(SuperClockState, is_playing,        24,
+                 "js/lib/superclock_protocol.js SC_IS_PLAYING_I32");
+SS_ASSERT_OFFSET(SuperClockState, flags,             28,
+                 "js/lib/superclock_protocol.js SC_FLAGS_I32");
+
+// ControlPointers ↔ js/lib/control_offsets.js (JS exports byte offsets directly)
+SS_ASSERT_OFFSET(ControlPointers, in_head,        0,  "js/lib/control_offsets.js IN_HEAD");
+SS_ASSERT_OFFSET(ControlPointers, in_tail,        4,  "js/lib/control_offsets.js IN_TAIL");
+SS_ASSERT_OFFSET(ControlPointers, out_head,       8,  "js/lib/control_offsets.js OUT_HEAD");
+SS_ASSERT_OFFSET(ControlPointers, out_tail,       12, "js/lib/control_offsets.js OUT_TAIL");
+SS_ASSERT_OFFSET(ControlPointers, debug_head,     16, "js/lib/control_offsets.js DEBUG_HEAD");
+SS_ASSERT_OFFSET(ControlPointers, debug_tail,     20, "js/lib/control_offsets.js DEBUG_TAIL");
+SS_ASSERT_OFFSET(ControlPointers, in_sequence,    24, "js/lib/control_offsets.js IN_SEQUENCE");
+SS_ASSERT_OFFSET(ControlPointers, out_sequence,   28, "js/lib/control_offsets.js OUT_SEQUENCE");
+SS_ASSERT_OFFSET(ControlPointers, debug_sequence, 32, "js/lib/control_offsets.js DEBUG_SEQUENCE");
+SS_ASSERT_OFFSET(ControlPointers, status_flags,   36, "js/lib/control_offsets.js STATUS_FLAGS");
+SS_ASSERT_OFFSET(ControlPointers, in_write_lock,  40, "js/lib/control_offsets.js IN_WRITE_LOCK");
+SS_ASSERT_OFFSET(ControlPointers, _padding,       44, "js/lib/control_offsets.js IN_LOG_TAIL");
+
+// PerformanceMetrics ↔ js/lib/metrics_offsets.js (all fields uint32; JS uses array index)
+SS_ASSERT_METRIC(process_count,                   0);
+SS_ASSERT_METRIC(messages_processed,              1);
+SS_ASSERT_METRIC(messages_dropped,                2);
+SS_ASSERT_METRIC(scheduler_queue_depth,           3);
+SS_ASSERT_METRIC(scheduler_queue_max,             4);
+SS_ASSERT_METRIC(scheduler_queue_dropped,         5);
+SS_ASSERT_METRIC(messages_sequence_gaps,          6);
+SS_ASSERT_METRIC(wasm_errors,                     7);
+SS_ASSERT_METRIC(scheduler_lates,                 8);
+SS_ASSERT_METRIC(prescheduler_pending,            9);
+SS_ASSERT_METRIC(prescheduler_pending_peak,       10);
+SS_ASSERT_METRIC(prescheduler_bundles_scheduled,  11);
+SS_ASSERT_METRIC(prescheduler_dispatched,         12);
+SS_ASSERT_METRIC(prescheduler_events_cancelled,   13);
+SS_ASSERT_METRIC(prescheduler_min_headroom_ms,    14);
+SS_ASSERT_METRIC(prescheduler_lates,              15);
+SS_ASSERT_METRIC(prescheduler_retries_succeeded,  16);
+SS_ASSERT_METRIC(prescheduler_retries_failed,     17);
+SS_ASSERT_METRIC(prescheduler_retry_queue_size,   18);
+SS_ASSERT_METRIC(prescheduler_retry_queue_peak,   19);
+SS_ASSERT_METRIC(prescheduler_messages_retried,   20);
+SS_ASSERT_METRIC(prescheduler_total_dispatches,   21);
+SS_ASSERT_METRIC(prescheduler_bypassed,           22);
+SS_ASSERT_METRIC(prescheduler_max_late_ms,        23);
+SS_ASSERT_METRIC(osc_out_messages_sent,           24);
+SS_ASSERT_METRIC(osc_out_bytes_sent,              25);
+SS_ASSERT_METRIC(osc_in_messages_received,        26);
+SS_ASSERT_METRIC(osc_in_bytes_received,           27);
+SS_ASSERT_METRIC(osc_in_dropped_messages,         28);
+SS_ASSERT_METRIC(osc_in_corrupted,                29);
+SS_ASSERT_METRIC(debug_messages_received,         30);
+SS_ASSERT_METRIC(debug_bytes_received,            31);
+SS_ASSERT_METRIC(in_buffer_used_bytes,            32);
+SS_ASSERT_METRIC(out_buffer_used_bytes,           33);
+SS_ASSERT_METRIC(debug_buffer_used_bytes,         34);
+SS_ASSERT_METRIC(in_buffer_peak_bytes,            35);
+SS_ASSERT_METRIC(out_buffer_peak_bytes,           36);
+SS_ASSERT_METRIC(debug_buffer_peak_bytes,         37);
+SS_ASSERT_METRIC(bypass_non_bundle,               38);
+SS_ASSERT_METRIC(bypass_immediate,                39);
+SS_ASSERT_METRIC(bypass_near_future,              40);
+SS_ASSERT_METRIC(bypass_late,                     41);
+SS_ASSERT_METRIC(scheduler_max_late_ms,           42);
+SS_ASSERT_METRIC(scheduler_last_late_ms,          43);
+SS_ASSERT_METRIC(scheduler_last_late_tick,        44);
+SS_ASSERT_METRIC(ring_buffer_direct_write_fails,  45);
+
+#undef SS_ASSERT_METRIC
+#undef SS_ASSERT_OFFSET
+
+#if defined(__clang__) || defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif
 
 #endif // SCSYNTH_SHARED_MEMORY_H

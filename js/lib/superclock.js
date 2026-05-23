@@ -102,6 +102,10 @@ export class SuperClock {
    * @param {number} [atNtpSeconds=0] — honoured by a Link backing
    */
   setBpm(bpm, atNtpSeconds = 0) {
+    // Clamp to a safe positive minimum. requestBeatAtTime / timeAtBeat
+    // both divide by bpm; 0 or NaN would write ±Infinity / NaN into
+    // the SAB beat_origin slot, poisoning every subsequent read.
+    if (!Number.isFinite(bpm) || bpm < 1) bpm = 1;
     this.#localBpm = bpm;
     if (this.#sabBigInt) {
       Atomics.store(this.#sabBigInt, SC_BPM_I64, doubleToBits(bpm));
@@ -131,8 +135,22 @@ export class SuperClock {
     }
   }
 
-  /** @param {boolean} enabled */
-  setLinkEnabled(enabled) {}
+  /**
+   * Link integration (peer discovery, tempo sync, audio sharing) is
+   * native-only — the browser AudioWorklet can't host Link's network
+   * thread or do UDP multicast. On native, set via OSC:
+   * /link/visibility (int 0|1|2). On web this is a no-op.
+   *
+   * @param {boolean} enabled
+   */
+  setLinkEnabled(enabled) {
+    if (enabled) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[SuperClock] setLinkEnabled(true) ignored on web — Link is ' +
+        'native-only. Use the native build + /link/visibility.');
+    }
+  }
 
   /**
    * @param {number} beat

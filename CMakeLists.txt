@@ -13,6 +13,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ─── Options ─────────────────────────────────────────────────────────────────
 option(BUILD_TESTS "Build native Catch2 test suite" OFF)
 option(BUILD_NIF   "Build BEAM NIF shared library"  OFF)
+# SUPERSONIC_ENABLE_LINK: integrate the Ableton Link library on native.
+# When ON, SuperClockNative wraps an ableton::LinkAudio instance (real
+# cross-machine session sync + audio sharing). When OFF, SuperClockNative
+# falls back to its local-state backing (session-of-one). Always OFF on
+# WASM — the worklet can't host Link's asio thread or do UDP multicast.
+option(SUPERSONIC_ENABLE_LINK "Integrate Ableton Link on native builds" ON)
 # NIF target requires all static libraries to be built with -fPIC
 if(BUILD_NIF)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -161,6 +167,47 @@ if(TARGET opus AND NOT TARGET Opus::opus)
 endif()
 
 FetchContent_MakeAvailable(libsndfile)
+
+# ─── Ableton Link ────────────────────────────────────────────────────────────
+# Header-only library — consumes asio in standalone header-only mode via
+# Link's ConfigureAsioStandalone.cmake. No .cpp files compiled from Link
+# itself; everything Link does (asio thread spawning, UDP discovery, the
+# clock platform abstraction) is templated and inlined at the use site.
+# Pulled via FetchContent so the dependency is reproducible across
+# machines without submodules. Exposes the Ableton::Link IMPORTED
+# INTERFACE target via AbletonLinkConfig.cmake. Only loaded when
+# SUPERSONIC_ENABLE_LINK is ON.
+if(SUPERSONIC_ENABLE_LINK)
+    FetchContent_Declare(
+        AbletonLink
+        GIT_REPOSITORY https://github.com/Ableton/link.git
+        GIT_TAG        Link-4.0
+        GIT_SHALLOW    TRUE
+        # SuperSonic-specific Link patches. See each patch header for
+        # rationale + compatibility analysis. Wrapped in a helper script
+        # so reruns of the patch step (which CMake invalidates whenever
+        # this command line changes) detect already-applied patches and
+        # skip them silently. The script also fails cleanly with a
+        # cache-clear hint when patches drift mid-stream.
+        PATCH_COMMAND  sh ${CMAKE_CURRENT_LIST_DIR}/external/apply-link-patches.sh
+                       ${CMAKE_CURRENT_LIST_DIR}/external/link-loopback-mode.patch
+                       ${CMAKE_CURRENT_LIST_DIR}/external/link-peer-enumeration.patch
+                       ${CMAKE_CURRENT_LIST_DIR}/external/link-monotonic-commit-timestamp.patch
+    )
+    FetchContent_GetProperties(AbletonLink)
+    if(NOT abletonlink_POPULATED)
+        FetchContent_Populate(AbletonLink)
+    endif()
+    # AbletonLinkConfig.cmake hard-sets CMAKE_CXX_STANDARD 17 in the calling
+    # scope — save/restore so we keep our C++20 (needed for std::atomic::wait
+    # / notify_all used throughout the worker threads).
+    set(_supersonic_saved_cxx_standard ${CMAKE_CXX_STANDARD})
+    include(${abletonlink_SOURCE_DIR}/AbletonLinkConfig.cmake)
+    set(CMAKE_CXX_STANDARD ${_supersonic_saved_cxx_standard})
+    message(STATUS "Ableton Link enabled (SUPERSONIC_LINK=1)")
+else()
+    message(STATUS "Ableton Link disabled — SuperClock uses local-state backing")
+endif()
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 set(SUPERSONIC_SRC  "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -413,6 +460,11 @@ target_link_libraries(supersonic_engine PUBLIC
     SndFile::sndfile
     tlsf
 )
+
+if(SUPERSONIC_ENABLE_LINK)
+    target_link_libraries(supersonic_engine PUBLIC Ableton::Link)
+    target_compile_definitions(supersonic_engine PUBLIC SUPERSONIC_LINK=1)
+endif()
 
 if(WIN32)
     target_link_libraries(supersonic_engine PUBLIC Ws2_32 winmm)

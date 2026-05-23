@@ -8,6 +8,7 @@
 #include "audio_config.h"
 #include "src/shared_memory.h"
 #include "osc/OscReceivedElements.h"
+#include "osc/OscOutboundPacketStream.h"
 #include "RingBufferWriter.h"
 #include "scsynth/server/SC_Prototypes.h"  // zfree
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -923,6 +924,22 @@ void SupersonicEngine::init(const Config& cfg) {
     mUdpServer.setEngine(this);
     mUdpServer.setSuperClock(&mSuperClock);
 
+    // Single-engine-per-process: g_active_superclock has no per-engine
+    // routing, so a second publisher would steer /superclock_get to
+    // whichever was last initialised. CAS to detect; warn and overwrite.
+    {
+        SuperClock* expected = nullptr;
+        if (!g_active_superclock.compare_exchange_strong(
+                expected, &mSuperClock, std::memory_order_release)) {
+            fprintf(stderr,
+                "[supersonic] WARNING: another SupersonicEngine has already "
+                "published a SuperClock; multi-engine native is not "
+                "supported. /superclock_get will reflect this engine.\n");
+            fflush(stderr);
+            g_active_superclock.store(&mSuperClock, std::memory_order_release);
+        }
+    }
+
     // Test hook for issue #3526: close the device before the source
     // decision so startAudioSource() sees no current device and falls
     // back to the headless driver.
@@ -943,6 +960,45 @@ void SupersonicEngine::init(const Config& cfg) {
     mAudioCallback.setSuperClock(&mSuperClock);
     mPrescheduler.setSuperClock(&mSuperClock);
     mAudioCallback.onWake = [this]() { purge(); };
+
+    // Wire SuperClock's Link-event callbacks → OSC notify push.
+    // Callbacks fire on Link's network thread; broadcastLinkNotify
+    // serialises socket writes via mSocketWriteLock.
+    {
+        OscUdpServer* udp = &mUdpServer;
+        std::atomic<bool>* alive = &mLinkCallbacksAlive;
+        mSuperClock.setTempoChangedCallback([udp, alive](double bpm) {
+            if (!alive->load(std::memory_order_acquire)) return;
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/notify/tempo") << bpm << osc::EndMessage;
+            udp->broadcastLinkNotify(
+                reinterpret_cast<const uint8_t*>(s.Data()),
+                static_cast<uint32_t>(s.Size()));
+        });
+        mSuperClock.setNumPeersChangedCallback([udp, alive](std::size_t n) {
+            if (!alive->load(std::memory_order_acquire)) return;
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/notify/peers")
+              << static_cast<int32_t>(n) << osc::EndMessage;
+            udp->broadcastLinkNotify(
+                reinterpret_cast<const uint8_t*>(s.Data()),
+                static_cast<uint32_t>(s.Size()));
+        });
+        mSuperClock.setStartStopChangedCallback([udp, alive](bool playing, int64_t t) {
+            if (!alive->load(std::memory_order_acquire)) return;
+            char buf[64];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/link/notify/transport")
+              << static_cast<int32_t>(playing ? 1 : 0)
+              << static_cast<int64_t>(t)
+              << osc::EndMessage;
+            udp->broadcastLinkNotify(
+                reinterpret_cast<const uint8_t*>(s.Data()),
+                static_cast<uint32_t>(s.Size()));
+        });
+    }
 
     // -- Start worker threads ----------------------------------------------
     // Workers must be running before the audio source starts, otherwise
@@ -1005,6 +1061,17 @@ void SupersonicEngine::shutdown() {
     if (isRecording())
         stopRecording();
 
+    // Order: signal alive=false, then disable Link (this joins the
+    // network thread synchronously inside link.enable(false), so
+    // in-flight callbacks complete), then clear the callback wrappers.
+    // Clearing earlier leaves the wrapper closure installed during the
+    // brief window before Link quiesces.
+    mLinkCallbacksAlive.store(false, std::memory_order_release);
+    mSuperClock.setLinkVisibility(SuperClock::LinkVisibility::Off);
+    mSuperClock.setTempoChangedCallback({});
+    mSuperClock.setNumPeersChangedCallback({});
+    mSuperClock.setStartStopChangedCallback({});
+
     mHeadlessDriver.signalThreadShouldExit();
     mUdpServer.signalThreadShouldExit();
     mPrescheduler.signalThreadShouldExit();
@@ -1049,6 +1116,14 @@ void SupersonicEngine::shutdown() {
     mPrescheduler.stopThread(2000);
     mReplyReader.stopThread(2000);
     mDebugReader.stopThread(2000);
+
+    // Unpublish from /superclock_get only if we're the current
+    // publisher — never stomp another engine's pointer.
+    {
+        SuperClock* expected = &mSuperClock;
+        g_active_superclock.compare_exchange_strong(
+            expected, nullptr, std::memory_order_release);
+    }
 
     // Destroy engine-owned shared memory (after World is gone)
     g_external_shared_memory = nullptr;

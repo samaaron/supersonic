@@ -1,0 +1,60 @@
+Peer enumeration for Ableton Link.
+
+Exposes the per-session peer list (already maintained internally by
+Link) via a public method on the controller and BasicLink. Each entry
+carries the peer's NodeState (NodeId, SessionId, Timeline, etc.) plus
+the local gateway IP it was discovered on and its measurement/audio
+endpoints.
+
+Used by SuperClock::listPeers / OSC `/link/peers/get` for diagnostic
+visibility into who's in our Link session and which IPs they came
+from.
+
+Two-file patch:
+  - include/ableton/link/Controller.hpp  (add Controller::sessionPeers)
+  - include/ableton/Link.hpp             (add BasicLink::sessionPeers)
+
+Wire protocol unchanged. No existing API behaviour changes. Public
+surface gains one read-only method; existing callers unaffected.
+
+Pinned to Link-4.0.
+
+--- a/include/ableton/link/Controller.hpp
++++ b/include/ableton/link/Controller.hpp
+@@ -198,6 +198,15 @@
+
+   std::size_t numPeers() const { return mSessionPeerCounter.mSessionPeerCount; }
+
++  // SUPERSONIC PATCH: expose the set of peers in our current session,
++  // including each peer's gateway IP (the local interface they were
++  // discovered on) and their NodeState/measurement/audio endpoints.
++  // Returned by value so the caller owns a stable snapshot. Not RT-safe.
++  std::vector<std::pair<PeerState, discovery::IpAddress>> sessionPeers() const
++  {
++    return mPeers.sessionPeers(mSessionId);
++  }
++
+   // Get the current Link client state. Thread-safe but may block, so
+   // it cannot be used from audio thread.
+   ClientState clientState() const { return mClientState.get(); }
+--- a/include/ableton/Link.hpp
++++ b/include/ableton/Link.hpp
+@@ -119,6 +119,18 @@
+    *  Realtime-safe: yes
+    */
+   std::size_t numPeers() const;
++
++  /*! @brief SUPERSONIC PATCH: enumerate currently-known peers in our
++   *  Link session with their IP addresses and NodeState info.
++   *  Returns by value (stable snapshot). Not RT-safe.
++   *  Thread-safe: yes
++   *  Realtime-safe: no
++   */
++  std::vector<std::pair<link::PeerState, discovery::IpAddress>>
++    sessionPeers() const
++  {
++    return this->mController.sessionPeers();
++  }
+
+   /*! @brief Register a callback to be notified when the number of
+    *  peers in the Link session changes.

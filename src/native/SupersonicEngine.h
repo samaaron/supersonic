@@ -370,15 +370,17 @@ private:
     bool mDefaultDevicePropertyListenerInstalled = false;
 #endif
 
-    // Engine-wide SuperClock owns all NTP-time derivation. Constructed
-    // first; JuceAudioCallback and other audio-thread NTP consumers receive
-    // a pointer via setSuperClock() during init.
-    SuperClock        mSuperClock;
+    // Declaration order matters: mSuperClock owns Link's network
+    // thread which calls broadcastLinkNotify on mUdpServer; declared
+    // AFTER mUdpServer so the Link thread joins before the socket is
+    // destroyed. NTP consumers receive the SuperClock pointer via
+    // setSuperClock() during init(), so construction order is fine.
     JuceAudioCallback mAudioCallback;
     Prescheduler      mPrescheduler;
     ReplyReader       mReplyReader;
     DebugReader       mDebugReader;
     OscUdpServer      mUdpServer;
+    SuperClock        mSuperClock;
     SampleLoader      mSampleLoader;
     StateCache        mStateCache;
 
@@ -387,6 +389,12 @@ private:
     PerformanceMetrics*          mMetrics = nullptr;  // points into ring_buffer_storage; null before init()
     std::atomic<bool>        mRunning{false};
     std::atomic<EngineState> mEngineState{EngineState::Stopped};
+    // Read by Link network-thread callbacks before they touch
+    // mUdpServer. Cleared early in shutdown() so in-flight callbacks
+    // skip broadcastLinkNotify. Narrows the window; shutdown's
+    // setLinkVisibility(Off) call that follows joins the Link thread
+    // and closes the race fully.
+    std::atomic<bool>        mLinkCallbacksAlive{true};
     bool                     mHeadless{false};
     Config                   mCurrentConfig;
     int                      mBootInputChannels = 2;  // original -i value, for re-enabling inputs
