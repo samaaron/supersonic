@@ -269,6 +269,19 @@ private:
     // path, init post-setup negotiate step, switchDevice
     // aggregate branch) so the floor is uniformly applied.
     void clampAggregateBufferIfNeeded(int& bufferSize);
+
+    // When running on an aggregate, CoreAudio concatenates each
+    // sub-device's input streams in sub-device-list order. We add
+    // the output sub-device first (so its outputs occupy aggregate
+    // output channels 0..N), which means any input streams that
+    // sub-device also exposes (e.g. Loopback Audio's loopback
+    // returns) claim the FIRST positions of the aggregate's input
+    // map. Returns how many positions to skip so the input bitmask
+    // lands on the actual input sub-device's channels. Returns 0
+    // when not aggregated or when the output sub-device has no
+    // input streams.
+    int aggregateInputChannelOffsetFor(const std::string& outputDeviceName) const;
+
     juce::String reinitialiseWithDefaultsPreservingConfig();
 
     // ── Audio source state machine ──────────────────────────────────────────

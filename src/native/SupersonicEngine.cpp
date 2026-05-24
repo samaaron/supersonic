@@ -254,6 +254,15 @@ void SupersonicEngine::clampAggregateBufferIfNeeded(int& bufferSize) {
 #endif
 }
 
+int SupersonicEngine::aggregateInputChannelOffsetFor(
+        const std::string& outputDeviceName) const {
+    if (outputDeviceName.empty()) return 0;
+    for (auto& d : listDevices(false)) {
+        if (d.name == outputDeviceName) return d.maxInputChannels;
+    }
+    return 0;
+}
+
 void SupersonicEngine::setEngineState(EngineState state, const std::string& reason) {
     EngineState prev = mEngineState.exchange(state);
     if (prev == state) return;  // no transition
@@ -676,9 +685,18 @@ void SupersonicEngine::init(const Config& cfg) {
                         setup.inputDeviceName  = juce::String(aggName);
                         setup.useDefaultInputChannels = false;
                         clampAggregateBufferIfNeeded(setup.bufferSize);
+                        const int inOffset = aggregateInputChannelOffsetFor(outName);
                         juce::BigInteger inputBits;
-                        inputBits.setRange(0, reqIn, true);
+                        inputBits.setRange(inOffset, reqIn, true);
                         setup.inputChannels = inputBits;
+                        if (inOffset > 0) {
+                            fprintf(stderr, "[audio-device] aggregate input bits offset by %d "
+                                    "(output sub-device '%s' contributes %d input channels) — "
+                                    "active input range = [%d..%d]\n",
+                                    inOffset, outName.c_str(), inOffset,
+                                    inOffset, inOffset + reqIn - 1);
+                            fflush(stderr);
+                        }
                         mLastSelfTriggeredChange = std::chrono::steady_clock::now();
                         auto aggErr = mDeviceManager->setAudioDeviceSetup(setup, true);
                         if (aggErr.isNotEmpty()) {
@@ -2365,6 +2383,27 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                 setup.outputDeviceName = juce::String(aggName);
                 setup.inputDeviceName  = juce::String(aggName);
                 clampAggregateBufferIfNeeded(setup.bufferSize);
+
+                // Re-issue the input bitmask with an offset past the
+                // output sub-device's own input streams (e.g. Loopback
+                // Audio exposes 4 loopback-return inputs; without this
+                // offset JUCE activates those silent returns instead of
+                // the user's intended input device's channels).
+                if (mCurrentConfig.numInputChannels > 0) {
+                    const int inOffset = aggregateInputChannelOffsetFor(mRealOutputDeviceName);
+                    if (inOffset > 0) {
+                        juce::BigInteger inputBits;
+                        inputBits.setRange(inOffset,
+                                           mCurrentConfig.numInputChannels, true);
+                        setup.inputChannels = inputBits;
+                        fprintf(stderr, "[audio-device] aggregate input bits offset by %d "
+                                "(output sub-device '%s' contributes %d input channels) — "
+                                "active input range = [%d..%d]\n",
+                                inOffset, mRealOutputDeviceName.c_str(), inOffset,
+                                inOffset, inOffset + mCurrentConfig.numInputChannels - 1);
+                        fflush(stderr);
+                    }
+                }
 
                 // Let CoreAudio settle then rescan so JUCE sees the new aggregate
                 juce::Thread::sleep(200);
