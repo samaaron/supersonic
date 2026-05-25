@@ -649,7 +649,7 @@ bool nextOSCPacket(FILE* file, OSC_Packet* packet, int64& outTime) {
 }
 
 
-void World_NonRealTimeSynthesis(struct World* world, WorldOptions* inOptions) {
+void World_NonRealTimeSynthesis(struct World* world, WorldOptions* inOptions) noexcept(false) {
     if (inOptions->mLoadGraphDefs) {
         World_LoadGraphDefs(world);
     }

@@ -99,6 +99,13 @@ struct BundleBytes {
     uint32_t       size() const { return static_cast<uint32_t>(data.size()); }
 };
 
+// GCC's -Wstringop-overflow mis-analyses the writes below as targeting a
+// zero-sized object at address zero — it can't see that out.data.resize()
+// made data() valid and large enough. False positive; silence it for GCC.
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
 static BundleBytes bundleOf(uint64_t timeTag,
                             std::initializer_list<osc_test::Packet> msgs) {
     size_t total = 8 + 8;                              // "#bundle\0" + timetag
@@ -124,6 +131,9 @@ static BundleBytes bundleOf(uint64_t timeTag,
     }
     return out;
 }
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic pop
+#endif
 
 static void sendBundle(EngineFixture& fx, const BundleBytes& pkt) {
     fx.send(pkt.ptr(), pkt.size());

@@ -112,7 +112,10 @@ struct SndBuf;
 SCSYNTH_DLLEXPORT_C void SetPrintFunc(PrintFunc func);
 SCSYNTH_DLLEXPORT_C struct World* World_New(struct WorldOptions* inOptions);
 SCSYNTH_DLLEXPORT_C void World_Cleanup(struct World* inWorld, bool unload_plugins = false);
-SCSYNTH_DLLEXPORT_C void World_NonRealTimeSynthesis(struct World* inWorld, struct WorldOptions* inOptions);
+// noexcept(false): the body throws on bad NRT options, but MSVC assumes
+// extern "C" functions never throw (/EHsc) and warns C4297 — make the
+// throwing contract explicit so it doesn't.
+SCSYNTH_DLLEXPORT_C void World_NonRealTimeSynthesis(struct World* inWorld, struct WorldOptions* inOptions) noexcept(false);
 SCSYNTH_DLLEXPORT_C int World_OpenUDP(struct World* inWorld, const char* bindTo, int inPort);
 SCSYNTH_DLLEXPORT_C int World_OpenTCP(struct World* inWorld, const char* bindTo, int inPort, int inMaxConnections,
                                       int inBacklog);

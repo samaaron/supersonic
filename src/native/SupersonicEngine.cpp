@@ -14,6 +14,8 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "FuzzyMatch.h"
 #include <chrono>
+#include <cstdarg>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 #ifdef __linux__
@@ -263,15 +265,36 @@ int SupersonicEngine::aggregateInputChannelOffsetFor(
     return 0;
 }
 
+// Routine lifecycle logging (state transitions, block size, callback start) is
+// handy when bringing a device up by hand but is pure noise in CI test runs —
+// printed on every boot/shutdown of every test. Route it through here so a
+// single SUPERSONIC_QUIET=1 (set in CI) silences it; warnings and errors keep
+// using fprintf(stderr) directly and are never gated.
+//
+// Native-only host logging to the terminal/CI — deliberately NOT ss_log(),
+// which feeds the debug ring buffer (consumed by JS/Tau5) and no-ops until
+// memory is initialised, so it would drop these early-boot lines.
+static void ssLifecycleLog(const char* fmt, ...) {
+    static const bool quiet = [] {
+        const char* v = std::getenv("SUPERSONIC_QUIET");
+        return v != nullptr && v[0] != '\0' && v[0] != '0';
+    }();
+    if (quiet) return;
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    va_end(args);
+    fflush(stderr);
+}
+
 void SupersonicEngine::setEngineState(EngineState state, const std::string& reason) {
     EngineState prev = mEngineState.exchange(state);
     if (prev == state) return;  // no transition
 
     const char* stateStr = engineStateToString(state);
-    fprintf(stderr, "[supersonic] state: %s -> %s (%s)\n",
-            engineStateToString(prev), stateStr,
-            reason.empty() ? "-" : reason.c_str());
-    fflush(stderr);
+    ssLifecycleLog("[supersonic] state: %s -> %s (%s)\n",
+                   engineStateToString(prev), stateStr,
+                   reason.empty() ? "-" : reason.c_str());
 
     mUdpServer.sendStateChange(stateStr, reason.c_str());
 
@@ -859,8 +882,7 @@ void SupersonicEngine::init(const Config& cfg) {
     // smaller block buys us a finer OSC-bundle scheduling grid (~3 ms at
     // 48 kHz) without paying any latency cost on the audio thread.
     int chosenBufLen = sonicpi::kDefaultBlockSize;
-    fprintf(stderr, "[supersonic] scsynth block size = %d samples\n", chosenBufLen);
-    fflush(stderr);
+    ssLifecycleLog("[supersonic] scsynth block size = %d samples\n", chosenBufLen);
 
     // Use actual device sample rate and channel counts (may differ from requested)
     mAudioCallback.initialiseWorld(
@@ -1755,9 +1777,8 @@ void SupersonicEngine::waitForFirstAudioTick(uint32_t before) {
     } else {
         auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count();
-        fprintf(stderr, "[supersonic] audio callbacks started (%lld ms)\n",
-                static_cast<long long>(elapsedMs));
-        fflush(stderr);
+        ssLifecycleLog("[supersonic] audio callbacks started (%lld ms)\n",
+                       static_cast<long long>(elapsedMs));
     }
 }
 

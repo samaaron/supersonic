@@ -168,6 +168,13 @@ endif()
 
 FetchContent_MakeAvailable(libsndfile)
 
+# libsndfile's file_io.c trips GCC's -Wformat-truncation, and GitHub's GCC
+# problem matcher mis-tags the accompanying `note:` line as an ##[error] —
+# painting passing Linux jobs red in the UI. Silence the vendored warning.
+if(TARGET sndfile AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(sndfile PRIVATE -Wno-format-truncation)
+endif()
+
 # ─── Ableton Link ────────────────────────────────────────────────────────────
 # Header-only library — consumes asio in standalone header-only mode via
 # Link's ConfigureAsioStandalone.cmake. No .cpp files compiled from Link

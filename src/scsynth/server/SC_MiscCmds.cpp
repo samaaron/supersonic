@@ -226,8 +226,12 @@ SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* in
     float sampleRate = msg.getf();
     const char* uuid = msg.gets();  // UUID for correlation
 
-    // Convert offset to pointer
-    float* data = (float*)dataPtr;
+    // Convert offset to pointer. dataPtr is a 32-bit SharedArrayBuffer offset
+    // on WASM (pointers are 32-bit there); on native this OSC path is unused
+    // (SampleLoader calls buffer_set_data directly). Round-trip through a
+    // pointer-width integer so the cast doesn't warn/truncate on 64-bit native.
+    float* data = reinterpret_cast<float*>(
+        static_cast<uintptr_t>(static_cast<uint32_t>(dataPtr)));
 
     // Call buffer_set_data to configure the buffer (with guard samples)
     int result = buffer_set_data(inWorld, bufnum, data, numFrames, numChannels, sampleRate, true);

@@ -73,6 +73,8 @@ jobs:
         run: cmake --build build/native --config Release --parallel 2 --target SuperSonicNativeTests
 
       - name: Run tests
+        env:
+          SUPERSONIC_QUIET: "1"   # silence per-boot lifecycle logging in CI
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             ./build/native/test/native/Release/SuperSonicNativeTests.exe "~[benchmark]"
@@ -100,7 +102,7 @@ jobs:
 
       - name: Upload release artifact
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.binary.outputs.artifact }}
           path: ${{ steps.binary.outputs.artifact }}
@@ -173,6 +175,7 @@ jobs:
         env:
           SUPERSONIC_NIF_PATH: ${{ github.workspace }}/build/nif
           SUPERSONIC_HEADLESS: ${{ matrix.headless }}
+          SUPERSONIC_QUIET: "1"   # silence per-boot lifecycle logging in CI
         shell: bash
         run: |
           mix local.hex --force
@@ -186,7 +189,7 @@ jobs:
 
       - name: Upload release artifact
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}
           path: supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}
@@ -240,6 +243,7 @@ jobs:
           ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_leaks=0:symbolize=1"
           UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1:symbolize=1"
           TSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:second_deadlock_stack=1:history_size=4"
+          SUPERSONIC_QUIET: "1"   # silence per-boot lifecycle logging in CI
         run: ./build/native-sanitize/test/native/SuperSonicNativeTests "~[benchmark]"
 
   # ── Attach artifacts to GitHub Release ──────────────────────────────────────
@@ -252,7 +256,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
 

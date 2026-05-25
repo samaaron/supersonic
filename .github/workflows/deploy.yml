@@ -90,13 +90,13 @@ jobs:
           cp supersonic-dist.zip dist/
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
 
       - name: Upload zip artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zip
           path: supersonic-dist.zip

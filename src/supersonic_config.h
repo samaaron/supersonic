@@ -34,8 +34,10 @@
 extern "C" {
 #endif
 
-// Debug logging — available on both WASM (writes to debug ring buffer) and
-// native (forwards to JUCE logger / stderr). printf-compatible signature.
+// Debug logging — writes to the debug ring buffer (DEBUG_BUFFER) on both WASM
+// and native; the consumer drains it via the debug channel. No-ops until
+// memory is initialised. printf-compatible signature. Note: this does NOT go
+// to stderr — native host logging uses fprintf(stderr) directly.
 int ss_log(const char* fmt, ...);
 
 // Table initialization — must be called explicitly before World_New.

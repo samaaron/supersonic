@@ -1017,6 +1017,9 @@ export class SuperSonic {
       this.#osc.dispose();
       this.#osc = null;
     }
+    // Stop forwarding worklet debug batches — the transport is gone. A live
+    // handler here would deref the null #osc when a late batch arrives.
+    this.#debugRawHandler = null;
 
     if (this.#workletNode) {
       this.#workletNode.disconnect();
@@ -1684,6 +1687,9 @@ export class SuperSonic {
       this.#osc.dispose();
       this.#osc = null;
     }
+    // Stop forwarding worklet debug batches — the transport is gone. A live
+    // handler here would deref the null #osc when a late batch arrives.
+    this.#debugRawHandler = null;
 
     if (this.#workletNode) {
       this.#workletNode.disconnect();
@@ -2118,7 +2124,9 @@ export class SuperSonic {
           this.#osc.handleDebugRaw(data);
         }
       }
-      this.#debugRawHandler = (data) => this.#osc.handleDebugRaw(data);
+      // Optional-chain #osc: a debugRawBatch queued from the old worklet can
+      // be dispatched during reload()/teardown after #osc has been nulled.
+      this.#debugRawHandler = (data) => this.#osc?.handleDebugRaw(data);
       this.#earlyDebugMessages = [];
     }
 
@@ -2270,7 +2278,7 @@ export class SuperSonic {
         case "debugRawBatch":
           if (this.#debugRawHandler) {
             this.#debugRawHandler(data);
-          } else {
+          } else if (this.#earlyDebugMessages) {
             this.#earlyDebugMessages.push(data);
           }
           break;
