@@ -1,21 +1,22 @@
 // LinkTempo / LinkPhase / LinkJump — upstream-compatible Link UGens
 // backed by SuperClock's LinkAudio. Tempo I/O is CPS (BPM / 60).
 
-#include "SuperClock.h"
-#include "SC_InterfaceTable.h"
-#include "SC_Unit.h"
-#include "SC_PlugIn.hpp"
-
+// Ableton's asio dependency transitively includes <imm.h> on Windows,
+// which uses the bare Win32 SAL keyword macros 'IN' and 'OUT'.
+// SC_Unit.h (included via SC_PlugIn.hpp below) redefines those names
+// as function-like buffer-access macros, so we have to pull in
+// <windows.h> + <ableton/LinkAudio.hpp> BEFORE the scsynth headers.
 #ifdef SUPERSONIC_LINK
-// On MSVC, asio (pulled in by LinkAudio.hpp) drags in <imm.h>, which
-// expects the SAL IN/OUT macros from <windows.h>. The scsynth headers
-// above don't bring in any stdlib header that MSVC implements via
-// <windows.h>, so we have to include it explicitly here.
 #  ifdef _WIN32
 #    include <windows.h>
 #  endif
 #  include <ableton/LinkAudio.hpp>
 #endif
+
+#include "SuperClock.h"
+#include "SC_InterfaceTable.h"
+#include "SC_Unit.h"
+#include "SC_PlugIn.hpp"
 
 #include <algorithm>
 #include <atomic>
