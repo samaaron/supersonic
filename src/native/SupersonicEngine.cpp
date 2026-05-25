@@ -324,6 +324,7 @@ void SupersonicEngine::init(const Config& cfg) {
     setEngineState(EngineState::Booting, "init");
 
     mHeadless = cfg.headless;
+    mSuperClock.setFreewheelClock(cfg.freewheelClock);
     mCurrentConfig = cfg;
     // mBootInputChannels may be kAutoChannelCount (-1) here — resolved to a
     // concrete count when enableInputChannels() is eventually called.

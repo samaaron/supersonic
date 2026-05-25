@@ -47,6 +47,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     cfg.maxNodes     = 1024;
     cfg.maxGraphDefs = 512;
     cfg.maxWireBufs  = 64;
+    cfg.freewheelClock = true;   // deterministic sample clock — see test header
     const char* device = std::getenv("SUPERSONIC_TEST_DEVICE");
     if (device && device[0] != '\0') {
         cfg.headless = false;
@@ -188,10 +189,13 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     INFO("Mean spacing error: " << meanAbsError << " ms");
     INFO("Max spacing error:  " << maxAbsError << " ms");
 
-    // Tolerance relative to block period — real audio drivers add some
-    // jitter beyond the engine's scheduling quantum
-    CHECK(meanAbsError < blockMs * 2);   // mean within 2 blocks
-    CHECK(maxAbsError  < blockMs * 3);   // worst case within 3 blocks
+    // The freewheel clock makes dispatch sample-deterministic, so the only
+    // error is block-quantization of the 37.5-block spacing (±0.5 block =
+    // 1.33 ms here). Verified stable even under full CPU load, so these
+    // bounds are tight enough to catch a ≥1-block scheduling regression
+    // without flaking on contended CI runners.
+    CHECK(meanAbsError < blockMs * 1);    // mean within one block
+    CHECK(maxAbsError  < blockMs * 1.5);  // worst case within 1.5 blocks
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -213,6 +217,7 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     cfg.maxNodes     = 2048;
     cfg.maxGraphDefs = 512;
     cfg.maxWireBufs  = 64;
+    cfg.freewheelClock = true;   // deterministic sample clock — see test header
     const char* device = std::getenv("SUPERSONIC_TEST_DEVICE");
     if (device && device[0] != '\0') {
         cfg.headless = false;
@@ -346,13 +351,13 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
          << " p50=" << p50 << " p90=" << p90 << " p99=" << p99
          << " max=" << pmax);
 
-    // Tolerance relative to block period. Headless DSP has near-zero
-    // jitter; real drivers add some. Loose enough that a slow CI run
-    // doesn't flake but tight enough that a regression of many blocks
-    // is caught. macOS GitHub Actions runners can hit ~10 ms p99 on
-    // 2.67 ms blocks under contention.
-    CHECK(p50  < blockMs * 1);   // half within one block
-    CHECK(p90  < blockMs * 3);   // 90% within three blocks
-    CHECK(p99  < blockMs * 5);   // tail within five blocks
-    CHECK(pmax < blockMs * 8);   // worst within eight blocks
+    // The freewheel clock makes dispatch sample-deterministic (no wall-clock
+    // drift), so jitter is just block-quantization and stays put under CPU
+    // contention instead of spiking on a busy CI runner. Tightened well below
+    // the old contention-driven bounds while still catching a multi-block
+    // regression.
+    CHECK(p50  < blockMs * 1);    // half within one block
+    CHECK(p90  < blockMs * 1.5);  // 90% within 1.5 blocks
+    CHECK(p99  < blockMs * 2);    // tail within two blocks
+    CHECK(pmax < blockMs * 3);    // worst within three blocks
 }

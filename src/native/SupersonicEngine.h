@@ -73,6 +73,9 @@ public:
                                                    // on its own thread. Implies headless.
                                                    // Prevents a second autonomous audio
                                                    // thread racing the manual caller.
+        bool   freewheelClock           = false;   // deterministic sample-derived
+                                                   // NTP (no wall-clock drift IIR);
+                                                   // for offline/accuracy tests.
         std::string bindAddress       = "127.0.0.1"; // localhost only; use -B to override
         std::string hardwareDevice;                // -H flag: fuzzy match on "Driver : Device"
     };

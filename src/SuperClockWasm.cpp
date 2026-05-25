@@ -223,3 +223,9 @@ void SuperClock::resetAudioThreadTime(double samplePosition, double sampleRate) 
     (void)samplePosition;
     (void)sampleRate;
 }
+
+void SuperClock::setFreewheelClock(bool enabled) {
+    // No-op: WASM evaluates the SAB time formula in nowAt() and has no
+    // headless driver / drift IIR to bypass.
+    (void)enabled;
+}

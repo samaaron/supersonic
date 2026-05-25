@@ -215,6 +215,15 @@ public:
                                 double audioCurrentTime = 0.0);
     void   resetAudioThreadTime(double samplePosition, double sampleRate);
 
+    // Freewheel clock mode: derive the audio-thread NTP purely from sample
+    // position, skipping the wall-clock drift IIR in updateAudioThreadNTP.
+    // For deterministic offline/test rendering — the headless driver thread
+    // can be preempted by the OS on a busy machine, and chasing that as
+    // "drift" injects scheduling jitter that real hardware (driven by the
+    // device callback) never sees. Off by default; real devices and the
+    // headless fallback keep drift compensation.
+    void   setFreewheelClock(bool enabled);
+
     // ─── Link Audio audio-thread API (RT-safe) ───────────────────────────
 
     // Drain each active input subscription's receive renderer (one

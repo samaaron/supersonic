@@ -78,6 +78,9 @@ struct SuperClock::Impl {
     // std::atomic<double> isn't lock-free everywhere.
     std::atomic<uint64_t> baseNTPBits{0};
     std::atomic<uint64_t> currentAudioThreadNTPBits{0};
+    // When true, updateAudioThreadNTP skips the wall-clock drift IIR and
+    // returns a pure sample-derived NTP (deterministic; see setFreewheelClock).
+    std::atomic<bool>     freewheelClock{false};
 
 #ifdef SUPERSONIC_LINK
     // Link starts disabled; setLinkVisibility(non-Off) flips peer
@@ -1078,11 +1081,25 @@ double SuperClock::updateAudioThreadNTP(double samplePosition,
                                          double sampleRate,
                                          double audioCurrentTime) {
     (void)audioCurrentTime;
+    const double sampleOffsetSec = samplePosition / sampleRate;
+
+    // Freewheel: pure sample-derived NTP, no wall-clock drift IIR. The
+    // headless driver thread can be preempted on a busy machine; chasing that
+    // as "drift" injects scheduling jitter a real device callback never sees.
+    // Deterministic for offline/accuracy tests.
+    if (mImpl->freewheelClock.load(std::memory_order_relaxed)) {
+        const double wallNTP =
+            bitsToDouble(mImpl->baseNTPBits.load(std::memory_order_relaxed))
+            + sampleOffsetSec;
+        mImpl->currentAudioThreadNTPBits.store(doubleToBits(wallNTP),
+                                                std::memory_order_release);
+        return wallNTP;
+    }
+
     //   sampleNTP = mBaseNTP + samplePosition / sampleRate
     //   drift     = wallNow - sampleNTP
     //   mBaseNTP += drift * 0.01   (low-pass converge ~1% per call)
     //   result    = mBaseNTP + samplePosition / sampleRate
-    const double sampleOffsetSec = samplePosition / sampleRate;
     const double wallNow = wallClockNTP();
     const double baseNTP = bitsToDouble(
         mImpl->baseNTPBits.load(std::memory_order_relaxed));
@@ -1102,4 +1119,8 @@ void SuperClock::resetAudioThreadTime(double samplePosition, double sampleRate) 
     mImpl->currentAudioThreadNTPBits.store(
         doubleToBits(newBaseNTP + sampleOffsetSec),
         std::memory_order_release);
+}
+
+void SuperClock::setFreewheelClock(bool enabled) {
+    mImpl->freewheelClock.store(enabled, std::memory_order_relaxed);
 }
