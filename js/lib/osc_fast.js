@@ -46,6 +46,8 @@ const TAG_INT64 = 0x68;  // 'h'
 const TAG_DOUBLE = 0x64; // 'd'
 const TAG_TIMETAG = 0x74; // 't'
 const TAG_UUID = 0x75;    // 'u'
+const TAG_ARRAY_OPEN = 0x5B;  // '['
+const TAG_ARRAY_CLOSE = 0x5D; // ']'
 
 // ============================================================================
 // ENCODING
@@ -58,30 +60,38 @@ const TAG_UUID = 0x75;    // 'u'
 function estimateMessageSize(address, args, argsStart = 0) {
   // Address: length + null + padding (up to 3)
   let size = address.length + 4;
-  // Type tags: comma + tags + null + padding
-  size += (args.length - argsStart) + 4;
-  // Arguments
+  // Type tag string: leading ',' + null + up-to-3 pad. Per-arg tag
+  // chars are charged inside estimateArgSize, which also recurses
+  // into Arrays (each '['/']' contributes one tag byte).
+  size += 1 + 4;
   for (let ai = argsStart; ai < args.length; ai++) {
-    const arg = args[ai];
-    if (arg instanceof Uint8Array) {
-      size += 4 + arg.length + 3; // size + data + padding
-    } else if (arg instanceof ArrayBuffer) {
-      size += 4 + arg.byteLength + 3;
-    } else if (typeof arg === 'string') {
-      size += arg.length * 3 + 4; // UTF-8 worst case + null + padding
-    } else if (arg && arg.type === 'string') {
-      size += arg.value.length * 3 + 4; // tagged string: UTF-8 worst case + null + padding
-    } else if (arg && arg.type === 'blob') {
-      const blobVal = arg.value;
-      const blobLen = blobVal instanceof Uint8Array ? blobVal.length : blobVal.byteLength;
-      size += 4 + blobLen + 3; // size + data + padding
-    } else if (arg && arg.type === 'uuid') {
-      size += 16; // 16 bytes, already 4-byte aligned
-    } else {
-      size += 8; // numbers, booleans, etc.
-    }
+    size += estimateArgSize(args[ai]);
   }
   return size;
+}
+
+// Upper bound on the encoded size of a single argument: one tag byte
+// plus its data section (with padding slack). Arrays return 2 bytes
+// for the bracket tags plus the recursive sum of element sizes.
+function estimateArgSize(arg) {
+  if (arg instanceof Uint8Array)  return 1 + 4 + arg.length    + 3;
+  if (arg instanceof ArrayBuffer) return 1 + 4 + arg.byteLength + 3;
+  if (typeof arg === 'string')    return 1 + arg.length * 3 + 4;
+  if (Array.isArray(arg)) {
+    let s = 2;  // '[' + ']'
+    for (let k = 0; k < arg.length; k++) s += estimateArgSize(arg[k]);
+    return s;
+  }
+  if (arg && arg.type === 'string') return 1 + arg.value.length * 3 + 4;
+  if (arg && arg.type === 'blob') {
+    const v = arg.value;
+    const len = v instanceof Uint8Array ? v.length : v.byteLength;
+    return 1 + 4 + len + 3;
+  }
+  if (arg && arg.type === 'uuid') return 1 + 16;
+  // numbers, booleans, int64/double/timetag — 8-byte upper bound
+  // covers the heaviest scalar.
+  return 1 + 8;
 }
 
 /**
@@ -352,40 +362,7 @@ function writeTypeTags(args, pos, argsStart = 0) {
   encodeBuffer[pos++] = TAG_COMMA;
 
   for (let i = argsStart; i < args.length; i++) {
-    const arg = args[i];
-    const type = typeof arg;
-
-    if (type === 'number') {
-      encodeBuffer[pos++] = Number.isInteger(arg) ? TAG_INT : TAG_FLOAT;
-    } else if (type === 'string') {
-      encodeBuffer[pos++] = TAG_STRING;
-    } else if (type === 'boolean') {
-      encodeBuffer[pos++] = arg ? TAG_TRUE : TAG_FALSE;
-    } else if (arg instanceof Uint8Array || arg instanceof ArrayBuffer) {
-      encodeBuffer[pos++] = TAG_BLOB;
-    } else if (arg && arg.type === 'int') {
-      encodeBuffer[pos++] = TAG_INT;
-    } else if (arg && arg.type === 'float') {
-      encodeBuffer[pos++] = TAG_FLOAT;
-    } else if (arg && arg.type === 'string') {
-      encodeBuffer[pos++] = TAG_STRING;
-    } else if (arg && arg.type === 'blob') {
-      encodeBuffer[pos++] = TAG_BLOB;
-    } else if (arg && arg.type === 'bool') {
-      encodeBuffer[pos++] = arg.value ? TAG_TRUE : TAG_FALSE;
-    } else if (arg && arg.type === 'int64') {
-      encodeBuffer[pos++] = TAG_INT64;
-    } else if (arg && arg.type === 'double') {
-      encodeBuffer[pos++] = TAG_DOUBLE;
-    } else if (arg && arg.type === 'timetag') {
-      encodeBuffer[pos++] = TAG_TIMETAG;
-    } else if (arg && arg.type === 'uuid') {
-      encodeBuffer[pos++] = TAG_UUID;
-    } else if (arg === null || arg === undefined) {
-      throw new Error(`OSC argument at index ${i} is ${arg}`);
-    } else {
-      throw new Error(`Unknown OSC argument type at index ${i}: ${type}`);
-    }
+    pos = writeTagFor(args[i], pos, i);
   }
 
   // Null terminator
@@ -396,6 +373,53 @@ function writeTypeTags(args, pos, argsStart = 0) {
     encodeBuffer[pos++] = 0;
   }
 
+  return pos;
+}
+
+// Write the type tag(s) for a single argument. Recurses on Arrays so a
+// nested [a, b, c] argument becomes '[<a-tag><b-tag><c-tag>]' in the
+// tag string (OSC array tags, used by scsynth's n_setn-style controls).
+// `i` is the top-level index used only for error messages.
+function writeTagFor(arg, pos, i) {
+  const type = typeof arg;
+
+  if (type === 'number') {
+    encodeBuffer[pos++] = Number.isInteger(arg) ? TAG_INT : TAG_FLOAT;
+  } else if (type === 'string') {
+    encodeBuffer[pos++] = TAG_STRING;
+  } else if (type === 'boolean') {
+    encodeBuffer[pos++] = arg ? TAG_TRUE : TAG_FALSE;
+  } else if (arg instanceof Uint8Array || arg instanceof ArrayBuffer) {
+    encodeBuffer[pos++] = TAG_BLOB;
+  } else if (Array.isArray(arg)) {
+    encodeBuffer[pos++] = TAG_ARRAY_OPEN;
+    for (let k = 0; k < arg.length; k++) {
+      pos = writeTagFor(arg[k], pos, i);
+    }
+    encodeBuffer[pos++] = TAG_ARRAY_CLOSE;
+  } else if (arg && arg.type === 'int') {
+    encodeBuffer[pos++] = TAG_INT;
+  } else if (arg && arg.type === 'float') {
+    encodeBuffer[pos++] = TAG_FLOAT;
+  } else if (arg && arg.type === 'string') {
+    encodeBuffer[pos++] = TAG_STRING;
+  } else if (arg && arg.type === 'blob') {
+    encodeBuffer[pos++] = TAG_BLOB;
+  } else if (arg && arg.type === 'bool') {
+    encodeBuffer[pos++] = arg.value ? TAG_TRUE : TAG_FALSE;
+  } else if (arg && arg.type === 'int64') {
+    encodeBuffer[pos++] = TAG_INT64;
+  } else if (arg && arg.type === 'double') {
+    encodeBuffer[pos++] = TAG_DOUBLE;
+  } else if (arg && arg.type === 'timetag') {
+    encodeBuffer[pos++] = TAG_TIMETAG;
+  } else if (arg && arg.type === 'uuid') {
+    encodeBuffer[pos++] = TAG_UUID;
+  } else if (arg === null || arg === undefined) {
+    throw new Error(`OSC argument at index ${i} is ${arg}`);
+  } else {
+    throw new Error(`Unknown OSC argument type at index ${i}: ${type}`);
+  }
   return pos;
 }
 
@@ -441,6 +465,15 @@ function writeArg(arg, pos) {
 
   if (arg instanceof ArrayBuffer) {
     return writeArg(new Uint8Array(arg), pos);
+  }
+
+  // Array tags '['/']' carry no data themselves; the inner elements
+  // each write their own value inline.
+  if (Array.isArray(arg)) {
+    for (let i = 0; i < arg.length; i++) {
+      pos = writeArg(arg[i], pos);
+    }
+    return pos;
   }
 
   if (arg && arg.type === 'int') {
@@ -595,64 +628,80 @@ export function decodeMessage(data) {
   const [tags, tagsEnd] = readString(data, pos);
   pos = tagsEnd;
 
-  // Parse args based on tags (skip the leading ',')
+  // Parse args based on tags (skip the leading ',').
+  // `target` is where the next decoded value goes — the top-level
+  // result array, or the most recently-opened sub-array (OSC '['/']').
   const result = [address];
+  let target = result;
+  const stack = [];
   for (let i = 1; i < tags.length; i++) {
     const tag = tags.charCodeAt(i);
 
     switch (tag) {
       case TAG_INT: // 'i' - int32
-        result.push(view.getInt32(pos, false));
+        target.push(view.getInt32(pos, false));
         pos += 4;
         break;
 
       case TAG_FLOAT: // 'f' - float32
-        result.push(view.getFloat32(pos, false));
+        target.push(view.getFloat32(pos, false));
         pos += 4;
         break;
 
       case TAG_STRING: // 's' - string
         const [str, strEnd] = readString(data, pos);
-        result.push(str);
+        target.push(str);
         pos = strEnd;
         break;
 
       case TAG_BLOB: // 'b' - blob
         const blobSize = view.getUint32(pos, false);
         pos += 4;
-        result.push(data.slice(pos, pos + blobSize));
+        target.push(data.slice(pos, pos + blobSize));
         pos += blobSize;
         pos = (pos + 3) & ~3; // Pad to 4
         break;
 
       case TAG_INT64: // 'h' - int64
-        result.push(view.getBigInt64(pos, false));
+        target.push(view.getBigInt64(pos, false));
         pos += 8;
         break;
 
       case TAG_DOUBLE: // 'd' - double
-        result.push(view.getFloat64(pos, false));
+        target.push(view.getFloat64(pos, false));
         pos += 8;
         break;
 
       case TAG_TRUE: // 'T' - true
-        result.push(true);
+        target.push(true);
         break;
 
       case TAG_FALSE: // 'F' - false
-        result.push(false);
+        target.push(false);
         break;
 
       case TAG_TIMETAG: // 't' - timetag
         const seconds = view.getUint32(pos, false);
         const fraction = view.getUint32(pos + 4, false);
-        result.push(seconds + fraction / TWO_POW_32);
+        target.push(seconds + fraction / TWO_POW_32);
         pos += 8;
         break;
 
       case TAG_UUID: // 'u' - uuid (16 bytes)
-        result.push({ type: 'uuid', value: data.slice(pos, pos + 16) });
+        target.push({ type: 'uuid', value: data.slice(pos, pos + 16) });
         pos += 16;
+        break;
+
+      case TAG_ARRAY_OPEN: { // '[' - array start
+        const sub = [];
+        target.push(sub);
+        stack.push(target);
+        target = sub;
+        break;
+      }
+
+      case TAG_ARRAY_CLOSE: // ']' - array end
+        target = stack.pop() || result;
         break;
     }
   }

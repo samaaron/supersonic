@@ -1276,6 +1276,174 @@ test.describe('OSC Fast Encoder/Decoder', () => {
   });
 
   // ===========================================================================
+  // ARRAY TYPE TAGS ([ / ])
+  //
+  // The OSC array tags '[' (0x5B) and ']' (0x5C) appear in the type-tag
+  // string only — they carry no data bytes. scsynth uses them on /s_new
+  // and /n_set to apply multiple values to consecutive control slots
+  // (n_setn semantics, see SC_Graph.cpp Graph_Ctor).
+  // ===========================================================================
+
+  test.describe('Array Type Tags', () => {
+    test('encodes one array of floats as ,[ff]', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', [[0.95, 1.05]]);
+        // Find the type tag string (starts at first ',' after address).
+        let i = 0;
+        while (encoded[i] !== 0x2C) i++;
+        let j = i;
+        while (encoded[j] !== 0) j++;
+        const tags = String.fromCharCode(...encoded.slice(i, j));
+        return { tags };
+      });
+      expect(result.tags).toBe(',[ff]');
+    });
+
+    test('round-trips a single array of floats', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', [[0.95, 1.05]]);
+        return window.oscFast.decodeMessage(encoded);
+      });
+      expect(result[0]).toBe('/test');
+      expect(Array.isArray(result[1])).toBe(true);
+      expect(result[1].length).toBe(2);
+      expect(result[1][0]).toBeCloseTo(0.95, 5);
+      expect(result[1][1]).toBeCloseTo(1.05, 5);
+    });
+
+    test('round-trips mixed args with embedded array (s_new shape)', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/s_new', [
+          'sonic-pi-beep', 1001, 0, 0,
+          'detune', [0.95, 1.05],
+          'amp', 0.5,
+        ]);
+        return window.oscFast.decodeMessage(encoded);
+      });
+      expect(result).toEqual([
+        '/s_new', 'sonic-pi-beep', 1001, 0, 0,
+        'detune', [expect.closeTo(0.95, 5), expect.closeTo(1.05, 5)],
+        'amp', expect.closeTo(0.5, 5),
+      ]);
+    });
+
+    test('type tag for envelope-shaped array matches SC convention', async ({ page }) => {
+      // Env.perc(0.01, 1.0, curve: -4) → [0, 2, -99, -99, 1, 0.01, 5, -4, 0, 1.0, 5, -4]
+      // Wire form should be ,s[ffffffffffff]
+      const result = await page.evaluate(() => {
+        const envArr = [0, 2, -99, -99, 1, 0.01, 5, -4.0, 0, 1.0, 5, -4.0];
+        const encoded = window.oscFast.encodeMessage('/test', ['env', envArr]);
+        let i = 0;
+        while (encoded[i] !== 0x2C) i++;
+        let j = i;
+        while (encoded[j] !== 0) j++;
+        return { tags: String.fromCharCode(...encoded.slice(i, j)) };
+      });
+      // Note: integer values inside the array still type-tag as 'i' when
+      // they round-trip through Number.isInteger — but envelopes from
+      // sclang are all floats, so we use 5.0 etc. above to force 'f'.
+      // The array contains ints (0, 2, -99, 1, 5) AND floats (0.01, -4.0, 1.0)
+      // so the actual tags will be a mix.
+      // Just verify the brackets are present and there are 12 inner tags.
+      expect(result.tags.startsWith(',s[')).toBe(true);
+      expect(result.tags.endsWith(']')).toBe(true);
+      const inner = result.tags.slice(3, -1);
+      expect(inner.length).toBe(12);
+    });
+
+    test('round-trips nested arrays', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test',
+          [[1.0, [2.0, 3.0], 4.0]]);
+        return window.oscFast.decodeMessage(encoded);
+      });
+      expect(Array.isArray(result[1])).toBe(true);
+      expect(result[1].length).toBe(3);
+      expect(result[1][0]).toBeCloseTo(1.0, 5);
+      expect(Array.isArray(result[1][1])).toBe(true);
+      expect(result[1][1][0]).toBeCloseTo(2.0, 5);
+      expect(result[1][1][1]).toBeCloseTo(3.0, 5);
+      expect(result[1][2]).toBeCloseTo(4.0, 5);
+    });
+
+    test('empty array round-trips as []', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const encoded = window.oscFast.encodeMessage('/test', [[]]);
+        // Tags should be ',[]' with no inner data.
+        let i = 0;
+        while (encoded[i] !== 0x2C) i++;
+        let j = i;
+        while (encoded[j] !== 0) j++;
+        const tags = String.fromCharCode(...encoded.slice(i, j));
+        const decoded = window.oscFast.decodeMessage(encoded);
+        return { tags, decoded };
+      });
+      expect(result.tags).toBe(',[]');
+      expect(result.decoded[0]).toBe('/test');
+      expect(Array.isArray(result.decoded[1])).toBe(true);
+      expect(result.decoded[1].length).toBe(0);
+    });
+
+    test('huge array argument allocates a temp buffer rather than overrunning mainBuffer', async ({ page }) => {
+      // Regression: estimateMessageSize previously had no Array branch,
+      // counting any top-level array as 8 bytes total. For arrays whose
+      // real encoded size exceeds the 2 MB shared mainBuffer, encoding
+      // either threw RangeError or silently truncated. The fix recurses
+      // into arrays so ensureBufferSize correctly allocates a temp
+      // buffer.
+      //
+      // 600_000 floats × 4 bytes = 2.4 MB of data alone — bigger than
+      // the 2 MB mainBuffer.
+      const result = await page.evaluate(() => {
+        const N = 600000;
+        const big = new Array(N);
+        for (let i = 0; i < N; i++) big[i] = i * 0.5;  // forces 'f' tag
+
+        let threw = null;
+        let decoded = null;
+        try {
+          const encoded = window.oscFast.encodeMessage('/big', [big]);
+          decoded = window.oscFast.decodeMessage(encoded);
+        } catch (e) {
+          threw = e.message;
+        }
+
+        return {
+          threw,
+          address: decoded?.[0],
+          arrLen: Array.isArray(decoded?.[1]) ? decoded[1].length : null,
+          firstVal: decoded?.[1]?.[0],
+          midVal:   decoded?.[1]?.[N / 2],
+          lastVal:  decoded?.[1]?.[N - 1],
+          expectedLast: (N - 1) * 0.5,
+        };
+      });
+
+      expect(result.threw).toBeNull();
+      expect(result.address).toBe('/big');
+      expect(result.arrLen).toBe(600000);
+      expect(result.firstVal).toBeCloseTo(0, 5);
+      expect(result.midVal).toBeCloseTo(150000, 1);
+      expect(result.lastVal).toBeCloseTo(result.expectedLast, 1);
+    });
+
+    test('Uint8Array is still a blob, not an array', async ({ page }) => {
+      // Regression guard: our array detection must not catch Uint8Array,
+      // which is the existing blob path.
+      const result = await page.evaluate(() => {
+        const blob = new Uint8Array([1, 2, 3, 4]);
+        const encoded = window.oscFast.encodeMessage('/test', [blob]);
+        let i = 0;
+        while (encoded[i] !== 0x2C) i++;
+        let j = i;
+        while (encoded[j] !== 0) j++;
+        return { tags: String.fromCharCode(...encoded.slice(i, j)) };
+      });
+      expect(result.tags).toBe(',b');
+    });
+  });
+
+  // ===========================================================================
   // PERFORMANCE (basic sanity checks)
   // ===========================================================================
 

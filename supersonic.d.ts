@@ -49,6 +49,7 @@ export type OscArg =
   | boolean
   | Uint8Array
   | ArrayBuffer
+  | OscArg[]
   | { type: 'int'; value: number }
   | { type: 'float'; value: number }
   | { type: 'string'; value: string }
