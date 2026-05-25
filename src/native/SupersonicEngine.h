@@ -67,6 +67,12 @@ public:
         int    realTimeMemorySize       = 8192;    // KB — World_New multiplies by 1024
         int    numRGens                 = 64;
         bool   headless                 = false;   // skip audio device (for tests)
+        bool   manualAudioPump          = false;   // skip the audio source entirely
+                                                   // (no device, no headless driver):
+                                                   // the caller drives process_audio()
+                                                   // on its own thread. Implies headless.
+                                                   // Prevents a second autonomous audio
+                                                   // thread racing the manual caller.
         std::string bindAddress       = "127.0.0.1"; // localhost only; use -B to override
         std::string hardwareDevice;                // -H flag: fuzzy match on "Driver : Device"
     };

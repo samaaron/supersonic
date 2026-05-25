@@ -11,6 +11,8 @@
 #include <chrono>
 #include <filesystem>
 #include <cstring>
+#include <algorithm>
+#include <cmath>
 
 extern "C" {
     bool process_audio(double current_time, uint32_t active_output_channels,
@@ -108,30 +110,41 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
     SupersonicEngine::Config cfg;
     cfg.headless          = true;
     cfg.udpPort           = 0;
+    // Manual pump: this test drives process_audio() directly on the test
+    // thread, so the engine must NOT start its own headless driver thread —
+    // otherwise both threads call process_audio() concurrently (data race).
+    cfg.manualAudioPump   = true;
     cfg.numOutputChannels = outCh;
     cfg.numInputChannels  = inCh;
     engine.init(cfg);
 
     REQUIRE(engine.isRunning());
 
-    // Pump one block
+    auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus());
+    REQUIRE(outputBus != nullptr);
+
+    // Poison the entire channel-major output region with a sentinel. A
+    // correctly-striding process_audio() must overwrite every channel's full
+    // 128-sample (QUANTUM_SIZE) span; with no synths running it produces exact
+    // silence, so any surviving sentinel would expose a clearing/layout gap.
+    // Exact equality is sound here: this thread is the only process_audio()
+    // caller, so nothing races writes to the bus.
+    constexpr float kSentinel = 1234.5f;
+    for (int i = 0; i < outCh * 128; ++i) outputBus[i] = kSentinel;
+
+    // Pump one block (this thread is the sole caller of process_audio).
     static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
     double baseNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
                      + NTP_EPOCH_OFFSET;
     process_audio(baseNTP, static_cast<uint32_t>(outCh), static_cast<uint32_t>(inCh));
 
-    // Check output bus pointer is valid and layout is channel-major
-    auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus());
-    REQUIRE(outputBus != nullptr);
-
-    // Each channel should have 128 contiguous samples (QUANTUM_SIZE)
-    // Verify we can read all channels without crash (memory is valid)
+    // Every channel's full span must read exact silence.
     for (int ch = 0; ch < outCh; ++ch) {
-        float sum = 0.0f;
+        float maxAbs = 0.0f;
         for (int s = 0; s < 128; ++s)
-            sum += outputBus[ch * 128 + s];
-        // Sum should be finite (not NaN/Inf)
-        CHECK(std::isfinite(sum));
+            maxAbs = std::max(maxAbs, std::fabs(outputBus[ch * 128 + s]));
+        INFO("output channel " << ch << " maxAbs=" << maxAbs);
+        CHECK(maxAbs == 0.0f);
     }
 
     engine.shutdown();
@@ -149,26 +162,58 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
     SupersonicEngine::Config cfg;
     cfg.headless          = true;
     cfg.udpPort           = 0;
+    // Manual pump: this test drives process_audio() directly on the test
+    // thread, so the engine must NOT start its own headless driver thread —
+    // otherwise both threads call process_audio() concurrently (data race).
+    cfg.manualAudioPump   = true;
     cfg.numOutputChannels = outCh;
     cfg.numInputChannels  = inCh;
     engine.init(cfg);
 
     REQUIRE(engine.isRunning());
 
-    // Check input bus pointer is valid
     auto* inputBus = reinterpret_cast<float*>(get_audio_input_bus());
     REQUIRE(inputBus != nullptr);
+    auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus());
+    REQUIRE(outputBus != nullptr);
 
-    // Write test pattern to input bus (simulating JUCE input copy)
+    // Distinct per-channel pattern in the input region (simulating JUCE's
+    // input copy), so a channel-major layout error would surface as a wrong
+    // or zero value in the readback below.
+    auto inVal = [](int ch) { return static_cast<float>(ch + 1) * 0.1f; };
     for (int ch = 0; ch < inCh; ++ch)
         for (int s = 0; s < 128; ++s)
-            inputBus[ch * 128 + s] = static_cast<float>(ch + 1) * 0.1f;
+            inputBus[ch * 128 + s] = inVal(ch);
 
-    // Pump a block — should not crash with input data present
+    // Poison the output region: no synth routes input->output, so the block
+    // must leave exact silence.
+    constexpr float kSentinel = 1234.5f;
+    for (int i = 0; i < outCh * 128; ++i) outputBus[i] = kSentinel;
+
+    // Pump one block (this thread is the sole caller of process_audio).
     static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
     double baseNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
                      + NTP_EPOCH_OFFSET;
     process_audio(baseNTP, static_cast<uint32_t>(outCh), static_cast<uint32_t>(inCh));
+
+    // Output is exact silence across every channel.
+    for (int ch = 0; ch < outCh; ++ch) {
+        float maxAbs = 0.0f;
+        for (int s = 0; s < 128; ++s)
+            maxAbs = std::max(maxAbs, std::fabs(outputBus[ch * 128 + s]));
+        INFO("output channel " << ch << " maxAbs=" << maxAbs);
+        CHECK(maxAbs == 0.0f);
+    }
+
+    // Input region is read but not clobbered: each channel still holds its
+    // distinct value across its full contiguous span (channel-major).
+    for (int ch = 0; ch < inCh; ++ch) {
+        bool intact = true;
+        for (int s = 0; s < 128; ++s)
+            if (inputBus[ch * 128 + s] != inVal(ch)) { intact = false; break; }
+        INFO("input channel " << ch << " expected " << inVal(ch));
+        CHECK(intact);
+    }
 
     engine.shutdown();
 }

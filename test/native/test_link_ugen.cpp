@@ -197,13 +197,14 @@ TEST_CASE("LinkUGen: LinkJump.kr forces beat-at-time on trigger",
         REQUIRE(fx.waitForReply("/synced", r));
     }
 
-    // Natural phase advance at 120 BPM / quantum=4 spends only ~10%
-    // of its cycle in [1.8, 2.2]; if jump is re-pinning every block,
-    // the vast majority of samples will be in-band. A >=50% rate
-    // separates the two regimes with plenty of headroom for K2A
-    // transients across the jump discontinuity and CI scheduling
-    // jitter (consecutive checks were too fragile under jitter — a
-    // single bus-K2A interpolation block can land out-of-band).
+    // Natural phase advance at 120 BPM / quantum=4 spends only ~10% of its
+    // cycle in [1.8, 2.2]; if the jump is re-pinning every block, the vast
+    // majority of samples land in-band, so a >=50% in-band rate cleanly
+    // separates the two regimes with headroom for K2A transients across the
+    // jump discontinuity and for CI scheduling jitter. The assertion is on
+    // that window fraction, never a single snapshot: snapshotOutputBus() reads
+    // the bus unsynchronized against the HeadlessDriver's clear-then-fill, so
+    // any isolated block (the trailing one included) can read torn or all-zero.
     int totalSamples = 0;
     int inBandSamples = 0;
     float lastMean = 0.0f;
@@ -219,7 +220,6 @@ TEST_CASE("LinkUGen: LinkJump.kr forces beat-at-time on trigger",
     INFO("inBand=" << inBandSamples << "/" << totalSamples
          << " lastMean=" << lastMean);
     CHECK(inBandSamples * 2 >= totalSamples);
-    CHECK(std::fabs(lastMean - kJumpTarget) < 0.2f);
 
     fx.send(osc_test::message("/n_free", 2402));
     fx.send(osc_test::message("/n_free", 2403));

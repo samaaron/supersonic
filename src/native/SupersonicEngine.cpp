@@ -1676,6 +1676,21 @@ void SupersonicEngine::startAudioSource() {
         return;
     }
 
+    // Manual-pump mode (tests): start no audio source at all. The caller
+    // owns process_audio() on its own thread; starting an autonomous audio
+    // thread (real callback or headless driver) here would give two
+    // concurrent callers of process_audio() — a data race on the whole
+    // engine world. Leave mActiveSource == None so shutdown's
+    // stopAudioSource() no-ops; mRunning is still set by init() afterwards.
+    if (mCurrentConfig.manualAudioPump) {
+        fprintf(stderr,
+                "[supersonic] manual audio pump — no audio source started; "
+                "caller drives process_audio()\n");
+        fflush(stderr);
+        mActiveSource = AudioSource::None;
+        return;
+    }
+
     uint32_t before = mAudioCallback.processCount.load(std::memory_order_acquire);
 
     if (desiredAudioSource() == AudioSource::RealCallback) {
