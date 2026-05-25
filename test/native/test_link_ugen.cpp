@@ -197,24 +197,29 @@ TEST_CASE("LinkUGen: LinkJump.kr forces beat-at-time on trigger",
         REQUIRE(fx.waitForReply("/synced", r));
     }
 
-    constexpr int kRequiredSamples = 5;
-    int inBand = 0;
+    // Natural phase advance at 120 BPM / quantum=4 spends only ~10%
+    // of its cycle in [1.8, 2.2]; if jump is re-pinning every block,
+    // the vast majority of samples will be in-band. A >=50% rate
+    // separates the two regimes with plenty of headroom for K2A
+    // transients across the jump discontinuity and CI scheduling
+    // jitter (consecutive checks were too fragile under jitter — a
+    // single bus-K2A interpolation block can land out-of-band).
+    int totalSamples = 0;
+    int inBandSamples = 0;
     float lastMean = 0.0f;
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < deadline) {
         REQUIRE(snapshotOutputBus(kBlockSize, bus));
         lastMean = mean(bus);
-        if (std::fabs(lastMean - kJumpTarget) < 0.2f) {
-            if (++inBand >= kRequiredSamples) break;
-        } else {
-            inBand = 0;
-        }
+        ++totalSamples;
+        if (std::fabs(lastMean - kJumpTarget) < 0.2f) ++inBandSamples;
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    INFO("inBand=" << inBand << "/" << kRequiredSamples
+    INFO("inBand=" << inBandSamples << "/" << totalSamples
          << " lastMean=" << lastMean);
-    CHECK(inBand >= kRequiredSamples);
+    CHECK(inBandSamples * 2 >= totalSamples);
+    CHECK(std::fabs(lastMean - kJumpTarget) < 0.2f);
 
     fx.send(osc_test::message("/n_free", 2402));
     fx.send(osc_test::message("/n_free", 2403));
