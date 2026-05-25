@@ -7,7 +7,14 @@
 #include "SC_PlugIn.hpp"
 
 #ifdef SUPERSONIC_LINK
-#include <ableton/LinkAudio.hpp>
+// On MSVC, asio (pulled in by LinkAudio.hpp) drags in <imm.h>, which
+// expects the SAL IN/OUT macros from <windows.h>. The scsynth headers
+// above don't bring in any stdlib header that MSVC implements via
+// <windows.h>, so we have to include it explicitly here.
+#  ifdef _WIN32
+#    include <windows.h>
+#  endif
+#  include <ableton/LinkAudio.hpp>
 #endif
 
 #include <algorithm>
