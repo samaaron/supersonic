@@ -14,7 +14,7 @@
 #include <stdio.h>
 
 extern "C" {
-    int worklet_debug(const char* fmt, ...);
+    int ss_log(const char* fmt, ...);
 }
 
 // Calculate mask for power-of-2 buffer operations (delay lines)
@@ -39,18 +39,18 @@ int buffer_set_data(
 ) {
     // Validate parameters
     if (!world || !data) {
-        worklet_debug("[buffer_set_data] Error: NULL world or data pointer\n");
+        ss_log("[buffer_set_data] Error: NULL world or data pointer\n");
         return -1;
     }
 
     if (bufnum < 0 || bufnum >= world->mNumSndBufs) {
-        worklet_debug("[buffer_set_data] Error: Invalid buffer number %d (max: %d)\n",
+        ss_log("[buffer_set_data] Error: Invalid buffer number %d (max: %d)\n",
                bufnum, world->mNumSndBufs - 1);
         return -1;
     }
 
     if (numFrames <= 0 || numChannels <= 0) {
-        worklet_debug("[buffer_set_data] Error: Invalid dimensions (frames: %d, channels: %d)\n",
+        ss_log("[buffer_set_data] Error: Invalid dimensions (frames: %d, channels: %d)\n",
                numFrames, numChannels);
         return -1;
     }
@@ -58,7 +58,7 @@ int buffer_set_data(
     // Get NRT buffer first (commands execute in NRT context)
     SndBuf* nrtBuf = World_GetNRTBuf(world, bufnum);
     if (!nrtBuf) {
-        worklet_debug("[buffer_set_data] Error: Failed to get NRT buffer %d\n", bufnum);
+        ss_log("[buffer_set_data] Error: Failed to get NRT buffer %d\n", bufnum);
         return -1;
     }
 
@@ -96,7 +96,7 @@ int buffer_set_data(
         *rtBuf = *nrtBuf;
         world->mSndBufUpdates[bufnum].writes++;
     } else {
-        worklet_debug("[buffer_set_data] Warning: Could not get RT buffer %d\n", bufnum);
+        ss_log("[buffer_set_data] Warning: Could not get RT buffer %d\n", bufnum);
     }
 
     return 0;
@@ -113,38 +113,38 @@ int buffer_read_data(
 ) {
     // Validate parameters
     if (!world || !data) {
-        worklet_debug("[buffer_read_data] Error: NULL world or data pointer\n");
+        ss_log("[buffer_read_data] Error: NULL world or data pointer\n");
         return -1;
     }
 
     if (bufnum < 0 || bufnum >= world->mNumSndBufs) {
-        worklet_debug("[buffer_read_data] Error: Invalid buffer number %d\n", bufnum);
+        ss_log("[buffer_read_data] Error: Invalid buffer number %d\n", bufnum);
         return -1;
     }
 
     // Get buffer
     SndBuf* buf = World_GetNRTBuf(world, bufnum);
     if (!buf) {
-        worklet_debug("[buffer_read_data] Error: Failed to get buffer %d\n", bufnum);
+        ss_log("[buffer_read_data] Error: Failed to get buffer %d\n", bufnum);
         return -1;
     }
 
     // Check if buffer has been allocated
     if (!buf->data) {
-        worklet_debug("[buffer_read_data] Error: Buffer %d has no data allocated\n", bufnum);
+        ss_log("[buffer_read_data] Error: Buffer %d has no data allocated\n", bufnum);
         return -1;
     }
 
     // Validate buffer start frame
     if (bufStartFrame < 0 || bufStartFrame >= buf->frames) {
-        worklet_debug("[buffer_read_data] Error: bufStartFrame %d out of range (0-%d)\n",
+        ss_log("[buffer_read_data] Error: bufStartFrame %d out of range (0-%d)\n",
                bufStartFrame, buf->frames - 1);
         return -1;
     }
 
     // Check if channels match
     if (numChannels != buf->channels) {
-        worklet_debug("[buffer_read_data] Error: Channel mismatch (source: %d, buffer: %d)\n",
+        ss_log("[buffer_read_data] Error: Channel mismatch (source: %d, buffer: %d)\n",
                numChannels, buf->channels);
         return -1;
     }
@@ -153,7 +153,7 @@ int buffer_read_data(
     int framesToWrite = numFrames;
     int framesAvailable = buf->frames - bufStartFrame;
     if (framesToWrite > framesAvailable) {
-        worklet_debug("[buffer_read_data] Warning: Truncating write from %d to %d frames\n",
+        ss_log("[buffer_read_data] Warning: Truncating write from %d to %d frames\n",
                framesToWrite, framesAvailable);
         framesToWrite = framesAvailable;
     }
@@ -173,19 +173,19 @@ int buffer_get_info(
 ) {
     // Validate parameters
     if (!world || !info) {
-        worklet_debug("[buffer_get_info] Error: NULL world or info pointer\n");
+        ss_log("[buffer_get_info] Error: NULL world or info pointer\n");
         return -1;
     }
 
     if (bufnum < 0 || bufnum >= world->mNumSndBufs) {
-        worklet_debug("[buffer_get_info] Error: Invalid buffer number %d\n", bufnum);
+        ss_log("[buffer_get_info] Error: Invalid buffer number %d\n", bufnum);
         return -1;
     }
 
     // Get buffer
     SndBuf* buf = World_GetNRTBuf(world, bufnum);
     if (!buf) {
-        worklet_debug("[buffer_get_info] Error: Failed to get buffer %d\n", bufnum);
+        ss_log("[buffer_get_info] Error: Failed to get buffer %d\n", bufnum);
         return -1;
     }
 

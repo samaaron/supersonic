@@ -237,6 +237,6 @@ SCErr PerformAsyncUnitCommand(
 
 // WASM-safe debug logging (defined in audio_processor.cpp)
 extern "C" {
-int worklet_debug(const char* fmt, ...);
-int worklet_debug_va(const char* fmt, va_list args);
+int ss_log(const char* fmt, ...);
+int ss_log_va(const char* fmt, va_list args);
 }

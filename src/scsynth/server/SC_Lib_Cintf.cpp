@@ -41,7 +41,7 @@
 
 // From audio_processor.cpp
 extern "C" {
-    int worklet_debug(const char* fmt, ...);
+    int ss_log(const char* fmt, ...);
 }
 
 Malloc gMalloc;

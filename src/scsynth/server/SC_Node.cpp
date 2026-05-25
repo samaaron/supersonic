@@ -38,7 +38,7 @@
 // When merging upstream changes, preserve this block.
 // =============================================================================
 extern "C" {
-    int worklet_debug(const char* fmt, ...);
+    int ss_log(const char* fmt, ...);
     extern uint8_t* shared_memory;
 }
 #include "../../node_tree.h"
@@ -55,20 +55,20 @@ int Node_New(World* inWorld, NodeDef* def, int32 inID, Node** outNode) {
             HiddenWorld* hw = inWorld->hw;
             inID = hw->mHiddenID = (hw->mHiddenID - 8) | 0x80000000;
         } else {
-            worklet_debug("[Node_New] ERROR: Reserved node ID: %d", inID);
+            ss_log("[Node_New] ERROR: Reserved node ID: %d", inID);
             return kSCErr_ReservedNodeID;
         }
     }
 
     if (World_GetNode(inWorld, inID)) {
-        worklet_debug("[Node_New] ERROR: Duplicate node ID: %d", inID);
+        ss_log("[Node_New] ERROR: Duplicate node ID: %d", inID);
         return kSCErr_DuplicateNodeID;
     }
 
     Node* node = (Node*)World_Alloc(inWorld, def->mAllocSize);
 
     if (!node) {
-        worklet_debug("[Node_New] FATAL: World_Alloc returned NULL - OUT OF MEMORY!");
+        ss_log("[Node_New] FATAL: World_Alloc returned NULL - OUT OF MEMORY!");
         return kSCErr_OutOfRealTimeMemory;
     }
     node->mWorld = inWorld;
@@ -81,7 +81,7 @@ int Node_New(World* inWorld, NodeDef* def, int32 inID, Node** outNode) {
     node->mID = inID;
     node->mHash = Hash(inID);
     if (!World_AddNode(inWorld, node)) {
-        worklet_debug("[Node_New] ERROR: World_AddNode failed - too many nodes");
+        ss_log("[Node_New] ERROR: World_AddNode failed - too many nodes");
         World_Free(inWorld, node);
         return kSCErr_TooManyNodes;
     }
@@ -144,7 +144,7 @@ void Node_RemoveID(Node* inNode) {
     inNode->mID = id;
     inNode->mHash = Hash(id);
     if (!World_AddNode(world, inNode)) {
-        worklet_debug("mysterious failure in Node_RemoveID\n");
+        ss_log("mysterious failure in Node_RemoveID\n");
         Node_Delete(inNode);
         // enums are uncatchable. must throw an int.
         int err = kSCErr_Failed; // shouldn't happen..
@@ -197,7 +197,7 @@ void Node_AddBefore(Node* s, Node* beforeThisOne) {
 }
 
 void Node_Replace(Node* s, Node* replaceThisOne) {
-    // worklet_debug("->Node_Replace\n");
+    // ss_log("->Node_Replace\n");
     Group* group = replaceThisOne->mParent;
     if (!group)
         return; // failed
@@ -222,7 +222,7 @@ void Node_Replace(Node* s, Node* replaceThisOne) {
     replaceThisOne->mParent = nullptr;
 
     Node_Delete(replaceThisOne);
-    // worklet_debug("<-Node_Replace\n");
+    // ss_log("<-Node_Replace\n");
 }
 
 // set a node's control so that it reads from a control bus - index argument

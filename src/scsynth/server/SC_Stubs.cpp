@@ -45,13 +45,13 @@ int64 oscTimeNow() {
 
 // From audio_processor.cpp (WASM) or native layer
 extern "C" {
-    int worklet_debug(const char* fmt, ...);
-    int worklet_debug_va(const char* fmt, va_list args);
-    int worklet_debug_raw(const char* msg, uint32_t len);
+    int ss_log(const char* fmt, ...);
+    int ss_log_va(const char* fmt, va_list args);
+    int ss_log_raw(const char* msg, uint32_t len);
 }
 
 // ============================================================================
-// OSC dump for /dumpOSC command - uses worklet_debug instead of scprintf
+// OSC dump for /dumpOSC command - uses ss_log instead of scprintf
 // ============================================================================
 
 static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefix = "dumpOSC: ") {
@@ -93,7 +93,7 @@ static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefi
             }
         }
         pos += snprintf(buf + pos, sizeof(buf) - pos, " ]\n");
-        worklet_debug_raw(buf, pos);
+        ss_log_raw(buf, pos);
     }
 
     if (mode & 2) {
@@ -109,7 +109,7 @@ static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefi
             pos += snprintf(buf + pos, sizeof(buf) - pos, "...");
         }
         pos += snprintf(buf + pos, sizeof(buf) - pos, "\n");
-        worklet_debug_raw(buf, pos);
+        ss_log_raw(buf, pos);
     }
 }
 
@@ -118,21 +118,21 @@ static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefi
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
     // Validate inputs
     if (!inWorld) {
-        worklet_debug("ERROR: PerformOSCMessage called with null World");
+        ss_log("ERROR: PerformOSCMessage called with null World");
         return kSCErr_Failed;
     }
     if (!inData) {
-        worklet_debug("ERROR: PerformOSCMessage called with null data");
+        ss_log("ERROR: PerformOSCMessage called with null data");
         return kSCErr_Failed;
     }
     if (inSize <= 0 || inSize > 65536) {
-        worklet_debug("ERROR: PerformOSCMessage invalid size: %d", inSize);
+        ss_log("ERROR: PerformOSCMessage invalid size: %d", inSize);
         return kSCErr_Failed;
     }
 
     // Safety check: ensure command library is initialized
     if (!gCmdLib) {
-        worklet_debug("ERROR: gCmdLib not initialized");
+        ss_log("ERROR: gCmdLib not initialized");
         return kSCErr_Failed;
     }
 
@@ -148,7 +148,7 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
         // Integer command (first byte is 0)
         cmdNameLen = 4;
         if (inSize < 4) {
-            worklet_debug("ERROR: Integer command too short: %d bytes", inSize);
+            ss_log("ERROR: Integer command too short: %d bytes", inSize);
             return kSCErr_Failed;
         }
         uint32 index = inData[3];
@@ -160,7 +160,7 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
         // String command (like "/status")
         cmdNameLen = OSCstrlen(inData);
         if (cmdNameLen <= 0 || cmdNameLen > inSize) {
-            worklet_debug("ERROR: Invalid command name length: %d (data size: %d)", cmdNameLen, inSize);
+            ss_log("ERROR: Invalid command name length: %d (data size: %d)", cmdNameLen, inSize);
             return kSCErr_Failed;
         }
         cmdObj = gCmdLib->Get((int32*)inData);
@@ -174,7 +174,7 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
     // Validate arguments size
     int argSize = inSize - cmdNameLen;
     if (argSize < 0) {
-        worklet_debug("ERROR: Negative argument size: %d (cmd=%d, total=%d)", argSize, cmdNameLen, inSize);
+        ss_log("ERROR: Negative argument size: %d (cmd=%d, total=%d)", argSize, cmdNameLen, inSize);
         return kSCErr_Failed;
     }
 
@@ -192,26 +192,26 @@ static constexpr int MAX_BUNDLE_DEPTH = 8;
 static void PerformOSCBundleWithDepth(World* inWorld, OSC_Packet* inPacket, int depth) {
     // Depth limit check - prevents stack overflow from deeply nested bundles
     if (depth > MAX_BUNDLE_DEPTH) {
-        worklet_debug("ERROR: Bundle nesting too deep (%d > %d), skipping",
+        ss_log("ERROR: Bundle nesting too deep (%d > %d), skipping",
                      depth, MAX_BUNDLE_DEPTH);
         return;
     }
 
     // Validate inputs
     if (!inWorld) {
-        worklet_debug("ERROR: PerformOSCBundle called with null World");
+        ss_log("ERROR: PerformOSCBundle called with null World");
         return;
     }
     if (!inPacket || !inPacket->mData) {
-        worklet_debug("ERROR: PerformOSCBundle called with null packet/data");
+        ss_log("ERROR: PerformOSCBundle called with null packet/data");
         return;
     }
     if (inPacket->mSize < 16) {
-        worklet_debug("ERROR: Bundle too small: %d bytes (min 16)", inPacket->mSize);
+        ss_log("ERROR: Bundle too small: %d bytes (min 16)", inPacket->mSize);
         return;
     }
     if (inPacket->mSize > 65536) {
-        worklet_debug("ERROR: Bundle too large: %d bytes", inPacket->mSize);
+        ss_log("ERROR: Bundle too large: %d bytes", inPacket->mSize);
         return;
     }
 
@@ -223,7 +223,7 @@ static void PerformOSCBundleWithDepth(World* inWorld, OSC_Packet* inPacket, int 
     while (data < dataEnd && msgCount < maxMessages) {
         // Check we have at least 4 bytes for size
         if (data + 4 > dataEnd) {
-            worklet_debug("ERROR: Bundle truncated at message %d (need 4 bytes, have %ld)",
+            ss_log("ERROR: Bundle truncated at message %d (need 4 bytes, have %ld)",
                          msgCount, (long)(dataEnd - data));
             break;
         }
@@ -237,15 +237,15 @@ static void PerformOSCBundleWithDepth(World* inWorld, OSC_Packet* inPacket, int 
 
         // Validate message size
         if (msgSize <= 0) {
-            worklet_debug("ERROR: Invalid message size %d at message %d", msgSize, msgCount);
+            ss_log("ERROR: Invalid message size %d at message %d", msgSize, msgCount);
             break;
         }
         if (msgSize > 65536) {
-            worklet_debug("ERROR: Message %d too large: %d bytes", msgCount, msgSize);
+            ss_log("ERROR: Message %d too large: %d bytes", msgCount, msgSize);
             break;
         }
         if (data + msgSize > dataEnd) {
-            worklet_debug("ERROR: Message %d overflows bundle (size=%d, avail=%ld)",
+            ss_log("ERROR: Message %d overflows bundle (size=%d, avail=%ld)",
                          msgCount, msgSize, (long)(dataEnd - data));
             break;
         }
@@ -268,7 +268,7 @@ static void PerformOSCBundleWithDepth(World* inWorld, OSC_Packet* inPacket, int 
     }
 
     if (msgCount >= maxMessages) {
-        worklet_debug("WARNING: Bundle hit message limit (%d)", maxMessages);
+        ss_log("WARNING: Bundle hit message limit (%d)", maxMessages);
     }
 
     // Reset error notification state for next command
@@ -285,17 +285,17 @@ void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket) {
 // Based on SC_CoreAudio.cpp:179-198, but simplified for NRT (no FIFO/threading)
 bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket) {
     if (!inWorld || !inPacket || !inPacket->mData) {
-        worklet_debug("ERROR: ProcessOSCPacket called with null pointers");
+        ss_log("ERROR: ProcessOSCPacket called with null pointers");
         return false;
     }
 
     // Validate World structure
     if (!inWorld->hw) {
-        worklet_debug("ERROR: World->hw is null");
+        ss_log("ERROR: World->hw is null");
         return false;
     }
     if (!inWorld->hw->mAllocPool) {
-        worklet_debug("ERROR: World->hw->mAllocPool is null");
+        ss_log("ERROR: World->hw->mAllocPool is null");
         return false;
     }
 
@@ -304,7 +304,7 @@ bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket) {
     // if (cmdName[0] == '/') {
     //     char msg[128];
     //     snprintf(msg, sizeof(msg), "ProcessOSCPacket: %s (size=%d)", cmdName, inPacket->mSize);
-    //     worklet_debug(msg);
+    //     ss_log(msg);
     // }
 
     // In NRT mode, directly call PerformOSCMessage (no FIFO/threading needed)
@@ -315,10 +315,10 @@ bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket) {
     if (err != kSCErr_None) {
         char msg[128];
         snprintf(msg, sizeof(msg), "ProcessOSCPacket: Command returned error %d, continuing", err);
-        worklet_debug(msg);
+        ss_log(msg);
     }
 
-    // worklet_debug("ProcessOSCPacket: Returning true (continue processing)");
+    // ss_log("ProcessOSCPacket: Returning true (continue processing)");
 
     // IMPORTANT: Return true even on error - we've reported the error, now continue processing
     // Returning false would stop the audio processing loop
@@ -330,7 +330,7 @@ bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket) {
 // In NRT mode we execute synchronously and return PacketPerformed
 PacketStatus PerformCompletionMsg(World* inWorld, const OSC_Packet& inPacket) {
     if (!inPacket.mData || inPacket.mSize <= 0) {
-        worklet_debug("PerformCompletionMsg: empty completion message");
+        ss_log("PerformCompletionMsg: empty completion message");
         return PacketPerformed;
     }
 
@@ -370,7 +370,7 @@ bool asioThreadStarted() { return false; }
 int scprintf(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    int ret = worklet_debug_va(fmt, args);
+    int ret = ss_log_va(fmt, args);
     va_end(args);
     return ret;
 }

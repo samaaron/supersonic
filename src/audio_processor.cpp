@@ -207,7 +207,7 @@ extern "C" {
     void set_time_offset(double offset) {
         g_time_zero_osc = offset;
         g_time_initialized = true;
-        worklet_debug("Time offset set from JavaScript: %.6f", offset);
+        ss_log("Time offset set from JavaScript: %.6f", offset);
     }
 
     // Convert NTP double (seconds since 1900) to OSC timetag (int64)
@@ -283,7 +283,7 @@ extern "C" {
     bool schedule_bundle(World* world, int64_t ntp_time, int64_t current_osc_time,
                         const char* data, int32_t size, const ReplyAddress& reply_addr) {
         if (!g_scheduler.Add(world, ntp_time, data, size, reply_addr)) {
-            worklet_debug("ERROR: Scheduler full — queue=%d pool=%u/%u bytes, bundle=%d bytes",
+            ss_log("ERROR: Scheduler full — queue=%d pool=%u/%u bytes, bundle=%d bytes",
                          g_scheduler.Size(), g_scheduler.DataPoolUsed(),
                          g_scheduler.DataPoolCapacity(), size);
             increment_scheduler_drop_metric();
@@ -372,7 +372,7 @@ extern "C" {
         // Initialize free list and hash table for O(1) node tree operations
         NodeTree_InitIndices();
 
-        worklet_debug("[NodeTree] Initialized at offset %u, size %u bytes",
+        ss_log("[NodeTree] Initialized at offset %u, size %u bytes",
                      NODE_TREE_START, NODE_TREE_SIZE);
 
         // Audio buffer slot array. Slot 0 carries the master output mix
@@ -402,7 +402,7 @@ extern "C" {
             *framesPerScope = SHM_SCOPE_FRAMES_PER_SCOPE;
         }
 
-        // Enable worklet_debug
+        // Enable ss_log
         memory_initialized = true;
 
         // Boot message shown after ASCII art below
@@ -443,7 +443,7 @@ extern "C" {
                 g_rt_pool_ptr = (void*)(shared_memory + rtPoolOffset);
                 g_rt_pool_size = rtPoolBytes;
                 memset(g_rt_pool_ptr, 0, g_rt_pool_size);
-                worklet_debug("RT_POOL: pre-allocated at offset %u (%uMB) size %uMB",
+                ss_log("RT_POOL: pre-allocated at offset %u (%uMB) size %uMB",
                     rtPoolOffset, rtPoolOffset / (1024*1024), rtPoolBytes / (1024*1024));
             }
         }
@@ -469,12 +469,12 @@ extern "C" {
             uintptr_t rt_end = rt_start + g_rt_pool_size;
 
             if (rt_start > 0 && heap_end > rt_start) {
-                worklet_debug("FATAL: WASM heap (sbrk=0x%x) overlaps RT pool (start=0x%x) — reduce heap usage or increase rtPoolOffset",
+                ss_log("FATAL: WASM heap (sbrk=0x%x) overlaps RT pool (start=0x%x) — reduce heap usage or increase rtPoolOffset",
                     (uint32_t)heap_end, (uint32_t)rt_start);
                 control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
                 return;
             }
-            worklet_debug("MEMORY OK: heap<0x%x rt=[0x%x,0x%x) buf=0x%x+",
+            ss_log("MEMORY OK: heap<0x%x rt=[0x%x,0x%x) buf=0x%x+",
                 (uint32_t)heap_end, (uint32_t)rt_start, (uint32_t)rt_end, (uint32_t)rt_end);
         }
 #endif
@@ -486,17 +486,17 @@ extern "C" {
         try {
             g_world = World_New(&options);
         } catch (const std::exception& e) {
-            worklet_debug("ERROR: World_New threw exception: %s", e.what());
+            ss_log("ERROR: World_New threw exception: %s", e.what());
             control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
             return;
         } catch (...) {
-            worklet_debug("ERROR: World_New threw unknown exception");
+            ss_log("ERROR: World_New threw unknown exception");
             control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
             return;
         }
 
         if (!g_world) {
-            worklet_debug("ERROR: Failed to create World");
+            ss_log("ERROR: Failed to create World");
             control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
             return;
         }
@@ -505,13 +505,13 @@ extern "C" {
         World_SetSampleRate(g_world, sample_rate);
 
         if (!g_world->mAudioBusTouched) {
-            worklet_debug("ERROR: mAudioBusTouched is NULL");
+            ss_log("ERROR: mAudioBusTouched is NULL");
             control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
             return;
         }
 
         if (!g_world->mControlBusTouched) {
-            worklet_debug("ERROR: mControlBusTouched is NULL");
+            ss_log("ERROR: mControlBusTouched is NULL");
             control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
             return;
         }
@@ -521,7 +521,7 @@ extern "C" {
 
         // Start the World (equivalent to server.boot() in SuperCollider)
         if (!g_world->mAudioBusTouched || !g_world->mControlBusTouched) {
-            worklet_debug("ERROR: NULL pointer before World_Start");
+            ss_log("ERROR: NULL pointer before World_Start");
             control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
             return;
         }
@@ -530,7 +530,7 @@ extern "C" {
 
         // Verify critical allocations succeeded
         if (!g_world->hw->mWireBufSpace) {
-            worklet_debug("ERROR: Wire buffer allocation failed");
+            ss_log("ERROR: Wire buffer allocation failed");
             control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
             return;
         }
@@ -555,20 +555,20 @@ extern "C" {
 
 
 #ifdef __EMSCRIPTEN__
-        worklet_debug(R"(
+        ss_log(R"(
 ░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀
 ░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░
 ░▀▀▀░▀▀▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀)");
-        worklet_debug("v%d.%d.%d (scsynth %d.%d.%d)",
+        ss_log("v%d.%d.%d (scsynth %d.%d.%d)",
                      SUPERSONIC_VERSION_MAJOR, SUPERSONIC_VERSION_MINOR, SUPERSONIC_VERSION_PATCH,
                      SC_VersionMajor, SC_VersionMinor, SC_VersionPatch);
         {
             const char* transport_mode = worldOptionsPtr[17] ? "PM" : "SAB";
-            worklet_debug("%.0fkHz %dch [%s]",
+            ss_log("%.0fkHz %dch [%s]",
                          sample_rate / 1000, options.mNumOutputBusChannels, transport_mode);
         }
-        worklet_debug("");
-        worklet_debug("> scsynth ready...");
+        ss_log("");
+        ss_log("> scsynth ready...");
 #endif
     }
 
@@ -692,7 +692,7 @@ extern "C" {
                 // Validate message
                 if (header.magic != MESSAGE_MAGIC) {
                     if (corruption_count.load(std::memory_order_relaxed) < 5) {
-                        worklet_debug("ERROR: Invalid magic at tail=%d head=%d: got 0x%08X expected 0x%08X (len=%u seq=%u)",
+                        ss_log("ERROR: Invalid magic at tail=%d head=%d: got 0x%08X expected 0x%08X (len=%u seq=%u)",
                                      in_tail, in_head, header.magic, MESSAGE_MAGIC, header.length, header.sequence);
                         corruption_count.fetch_add(1, std::memory_order_relaxed);
                     }
@@ -731,7 +731,7 @@ extern "C" {
                         if (gap_size > 0 && gap_size < 1000) {  // Sanity check - ignore huge gaps (likely reset)
                             metrics->messages_sequence_gaps.fetch_add(gap_size, std::memory_order_relaxed);
                             if (gap_log_count.load(std::memory_order_relaxed) < 5) {
-                                worklet_debug("WARNING: Sequence gap detected: expected %d, got %u (gap of %d)",
+                                ss_log("WARNING: Sequence gap detected: expected %d, got %u (gap of %d)",
                                              expected, header.sequence, gap_size);
                                 gap_log_count.fetch_add(1, std::memory_order_relaxed);
                             }
@@ -786,7 +786,7 @@ extern "C" {
                             // Scheduler full - leave message in ring buffer for next callback
                             // Reset sequence tracking so next iteration processes this message correctly
                             last_in_sequence.store((header.sequence > 0) ? (int32_t)(header.sequence - 1) : -1, std::memory_order_relaxed);
-                            worklet_debug("INFO: Scheduler full (%d events), backpressure - message stays in ring buffer",
+                            ss_log("INFO: Scheduler full (%d events), backpressure - message stays in ring buffer",
                                          g_scheduler.Size());
                             break;  // Exit message processing loop
                         }
@@ -796,7 +796,7 @@ extern "C" {
 
                         if (!schedule_bundle(g_world, (int64_t)timetag, current_osc_time, osc_buffer, payload_size, reply_addr)) {
                             // This shouldn't happen now since we check IsFull() first
-                            worklet_debug("ERROR: Failed to schedule bundle (unexpected)");
+                            ss_log("ERROR: Failed to schedule bundle (unexpected)");
                         }
                     }
                 } else {
@@ -895,7 +895,7 @@ extern "C" {
                         if (bundle->mSize > 20) {
                             addr = reinterpret_cast<const char*>(bdata + 20);
                         }
-                        worklet_debug("LATE: %.1fms %s (count=%d)", -time_diff_ms, addr, late_now);
+                        ss_log("LATE: %.1fms %s (count=%d)", -time_diff_ms, addr, late_now);
                     }
                 }
 
@@ -985,7 +985,7 @@ extern "C" {
     }
 
     // Core implementation - write formatted message to ring buffer
-    static int worklet_debug_impl(const char* fmt, va_list args) {
+    static int ss_log_impl(const char* fmt, va_list args) {
         if (!memory_initialized) return 0;
 
         // Format the message
@@ -1021,24 +1021,24 @@ extern "C" {
 
     // Variadic version - for direct C++ calls
     extern "C" EMSCRIPTEN_KEEPALIVE
-    int worklet_debug(const char* fmt, ...) {
+    int ss_log(const char* fmt, ...) {
         va_list args;
         va_start(args, fmt);
-        int result = worklet_debug_impl(fmt, args);
+        int result = ss_log_impl(fmt, args);
         va_end(args);
         return result;
     }
 
     // va_list version - for function pointers (matches PrintFunc signature)
     extern "C" EMSCRIPTEN_KEEPALIVE
-    int worklet_debug_va(const char* fmt, va_list args) {
-        return worklet_debug_impl(fmt, args);
+    int ss_log_va(const char* fmt, va_list args) {
+        return ss_log_impl(fmt, args);
     }
 
     // Raw version - writes pre-formatted message directly to ring buffer
     // Use this when you already have a formatted string (avoids double-copy)
     extern "C" EMSCRIPTEN_KEEPALIVE
-    int worklet_debug_raw(const char* msg, uint32_t len) {
+    int ss_log_raw(const char* msg, uint32_t len) {
         if (!memory_initialized || !msg || len == 0) return 0;
 
         // Use unified ring buffer write with full protection (:: for global scope)

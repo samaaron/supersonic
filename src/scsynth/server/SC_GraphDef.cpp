@@ -57,7 +57,7 @@ namespace fs = std::filesystem;
 // =============================================================================
 // This file has the following changes from upstream SuperCollider:
 //
-// 1. worklet_debug: Replaces scprintf throughout (declaration from SC_InterfaceTable.h)
+// 1. ss_log: Replaces scprintf throughout (declaration from SC_InterfaceTable.h)
 // 2. Filesystem functions guarded with #ifndef __EMSCRIPTEN__ (GraphDef_Load,
 //    GraphDef_LoadDir, GraphDef_LoadGlob, load_file — not available in WASM)
 // 3. GraphDef_Recv: Extra std::string* outErrorMsg parameter for WASM error reporting
@@ -148,7 +148,7 @@ void UnitSpec_Read(UnitSpec* inUnitSpec, const char*& buffer, const char* end, i
     if (!inUnitSpec->mUnitDef) {
         char str[ERR_BUF_SIZE];
         snprintf(str, ERR_BUF_SIZE, "UGen '%s' not installed.", (char*)name);
-        worklet_debug("ERROR: UGen '%s' not installed", (char*)name);
+        ss_log("ERROR: UGen '%s' not installed", (char*)name);
         g_lastGraphDefError = str;
         throw std::runtime_error(str);
     }
@@ -477,7 +477,7 @@ GraphDef* GraphDef_Recv(World* inWorld, const char* buffer, size_t size, GraphDe
     try {
         inList = GraphDefLib_Read(inWorld, buffer, size, inList);
     } catch (std::exception& exc) {
-        worklet_debug("exception in GraphDef_Recv: %s\n", exc.what());
+        ss_log("exception in GraphDef_Recv: %s\n", exc.what());
         if (outErrorMsg) {
             *outErrorMsg = exc.what();
         }
@@ -485,12 +485,12 @@ GraphDef* GraphDef_Recv(World* inWorld, const char* buffer, size_t size, GraphDe
         // Emscripten WASM exception handling may not preserve std::exception type info,
         // so use g_lastGraphDefError which was set before throwing
         if (!g_lastGraphDefError.empty()) {
-            worklet_debug("exception in GraphDef_Recv: %s\n", g_lastGraphDefError.c_str());
+            ss_log("exception in GraphDef_Recv: %s\n", g_lastGraphDefError.c_str());
             if (outErrorMsg) {
                 *outErrorMsg = g_lastGraphDefError;
             }
         } else {
-            worklet_debug("unknown exception in GraphDef_Recv\n");
+            ss_log("unknown exception in GraphDef_Recv\n");
             if (outErrorMsg) {
                 *outErrorMsg = "unknown exception";
             }
@@ -603,21 +603,21 @@ void GraphDef_Free(GraphDef* inGraphDef) {
 }
 
 void NodeDef_Dump(NodeDef* inNodeDef) {
-    worklet_debug("mName '%s'\n", (char*)inNodeDef->mName);
-    worklet_debug("mHash %d\n", inNodeDef->mHash);
-    worklet_debug("mAllocSize %lu\n", inNodeDef->mAllocSize);
+    ss_log("mName '%s'\n", (char*)inNodeDef->mName);
+    ss_log("mHash %d\n", inNodeDef->mHash);
+    ss_log("mAllocSize %lu\n", inNodeDef->mAllocSize);
 }
 
 void GraphDef_Dump(GraphDef* inGraphDef) {
     NodeDef_Dump(&inGraphDef->mNodeDef);
 
-    worklet_debug("mNumControls %d\n", inGraphDef->mNumControls);
-    worklet_debug("mNumWires %d\n", inGraphDef->mNumWires);
-    worklet_debug("mNumUnitSpecs %d\n", inGraphDef->mNumUnitSpecs);
-    worklet_debug("mNumWireBufs %d\n", inGraphDef->mNumWireBufs);
+    ss_log("mNumControls %d\n", inGraphDef->mNumControls);
+    ss_log("mNumWires %d\n", inGraphDef->mNumWires);
+    ss_log("mNumUnitSpecs %d\n", inGraphDef->mNumUnitSpecs);
+    ss_log("mNumWireBufs %d\n", inGraphDef->mNumWireBufs);
 
     for (uint32 i = 0; i < inGraphDef->mNumControls; ++i) {
-        worklet_debug("   %d mInitialControlValues %g\n", i, inGraphDef->mInitialControlValues[i]);
+        ss_log("   %d mInitialControlValues %g\n", i, inGraphDef->mInitialControlValues[i]);
     }
 
     for (uint32 i = 0; i < inGraphDef->mNumWires; ++i) {

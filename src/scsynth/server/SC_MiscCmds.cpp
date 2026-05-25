@@ -40,7 +40,7 @@ extern int gMissingNodeID;
 
 // From audio_processor.cpp
 extern "C" {
-    int worklet_debug(const char* fmt, ...);
+    int ss_log(const char* fmt, ...);
     extern uint8_t* shared_memory;
 }
 
@@ -865,7 +865,7 @@ SCErr meth_s_do_new(World* inWorld, int inSize, char* inData, bool argtype) {
 
     GraphDef* def = World_GetGraphDef(inWorld, defname);
     if (!def) {
-        worklet_debug("*** ERROR: SynthDef %s not found\n", (char*)defname);
+        ss_log("*** ERROR: SynthDef %s not found\n", (char*)defname);
         return kSCErr_SynthDefNotFound;
     }
 

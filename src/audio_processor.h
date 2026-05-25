@@ -37,8 +37,8 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE const BufferLayout* get_buffer_layout();
     EMSCRIPTEN_KEEPALIVE void init_memory(double sample_rate);
     EMSCRIPTEN_KEEPALIVE bool process_audio(double current_time, uint32_t active_output_channels, uint32_t active_input_channels);
-    EMSCRIPTEN_KEEPALIVE int worklet_debug(const char* fmt, ...);
-    EMSCRIPTEN_KEEPALIVE int worklet_debug_va(const char* fmt, va_list args);
+    EMSCRIPTEN_KEEPALIVE int ss_log(const char* fmt, ...);
+    EMSCRIPTEN_KEEPALIVE int ss_log_va(const char* fmt, va_list args);
     EMSCRIPTEN_KEEPALIVE uint32_t get_process_count();
     EMSCRIPTEN_KEEPALIVE uint32_t get_messages_processed();
     EMSCRIPTEN_KEEPALIVE uint32_t get_messages_dropped();

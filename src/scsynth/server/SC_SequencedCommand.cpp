@@ -41,7 +41,7 @@
 // =============================================================================
 // This file has the following changes from upstream SuperCollider:
 //
-// 1. worklet_debug: All scprintf calls replaced with worklet_debug for WASM
+// 1. ss_log: All scprintf calls replaced with ss_log for WASM
 // 2. GET_COMPLETION_MSG: Removed optional integer skip (upstream commit b06dc8b4f)
 //    - The upstream version skips an optional integer-tagged value after the completion message
 //    - This affects all commands using GET_COMPLETION_MSG, not just /b_alloc
@@ -53,12 +53,12 @@
 // 5. AudioQuitCmd: Excludes mShmem and mQuitProgram (no SHM/semaphores in WASM)
 // 6. RecvSynthDefCmd::Stage2: Null check for mDefs to prevent null pointer crash
 // 7. RecvSynthDefCmd::Stage4: Sends /supersonic/synthdef/loaded messages
-// 8. RecvSynthDefCmd::Init: Added worklet_debug for empty synthdef error
+// 8. RecvSynthDefCmd::Init: Added ss_log for empty synthdef error
 // =============================================================================
 
 // From audio_processor.cpp
 extern "C" {
-    int worklet_debug(const char* fmt, ...);
+    int ss_log(const char* fmt, ...);
 }
 
 const size_t ERR_BUF_SIZE(512);
@@ -320,7 +320,7 @@ bool BufAllocCmd::Stage2() {
     mFreeData = buf->data;
     SCErr err = bufAlloc(buf, mNumChannels, mNumFrames, mWorld->mSampleRate);
     if (err) {
-        worklet_debug("/b_alloc: memory allocation failed\n");
+        ss_log("/b_alloc: memory allocation failed\n");
         return false;
     }
     mSndBuf = *buf;
@@ -530,7 +530,7 @@ void BufAllocReadCmd::CallDestructor() { this->~BufAllocReadCmd(); }
 bool BufAllocReadCmd::Stage2() {
 #ifdef NO_LIBSNDFILE
     SendFailure(&mReplyAddress, "/b_allocRead", "scsynth compiled without libsndfile\n");
-    worklet_debug("scsynth compiled without libsndfile\n");
+    ss_log("scsynth compiled without libsndfile\n");
     return false;
 #else
     SndBuf* buf = World_GetNRTBuf(mWorld, mBufIndex);
@@ -542,7 +542,7 @@ bool BufAllocReadCmd::Stage2() {
         snprintf(str, ERR_BUF_SIZE, "File '%s' could not be opened: %s\n", mFilename, sf_strerror(nullptr));
         SendFailureWithIntValue(&mReplyAddress, "/b_allocRead", str,
                                 mBufIndex); // SendFailure(&mReplyAddress, "/b_allocRead", str);
-        worklet_debug(str);
+        ss_log(str);
         return false;
     }
     if (mFileOffset < 0)
@@ -622,7 +622,7 @@ void BufReadCmd::CallDestructor() { this->~BufReadCmd(); }
 bool BufReadCmd::Stage2() {
 #ifdef NO_LIBSNDFILE
     SendFailure(&mReplyAddress, "/b_read", "scsynth compiled without libsndfile\n");
-    worklet_debug("scsynth compiled without libsndfile\n");
+    ss_log("scsynth compiled without libsndfile\n");
     return false;
 #else
     SF_INFO fileinfo;
@@ -639,7 +639,7 @@ bool BufReadCmd::Stage2() {
         snprintf(str, ERR_BUF_SIZE, "File '%s' could not be opened: %s\n", mFilename, sf_strerror(nullptr));
         SendFailureWithIntValue(&mReplyAddress, "/b_read", str,
                                 mBufIndex); // SendFailure(&mReplyAddress, "/b_read", str);
-        worklet_debug(str);
+        ss_log(str);
         return false;
     }
     if (fileinfo.channels != buf->channels) {
@@ -649,7 +649,7 @@ bool BufReadCmd::Stage2() {
                  fileinfo.channels, buf->channels);
         SendFailureWithIntValue(&mReplyAddress, "/b_read", str,
                                 mBufIndex); // SendFailure(&mReplyAddress, "/b_read", str);
-        worklet_debug(str);
+        ss_log(str);
         return false;
     }
 
@@ -779,7 +779,7 @@ void BufAllocReadChannelCmd::CallDestructor() { this->~BufAllocReadChannelCmd();
 bool BufAllocReadChannelCmd::Stage2() {
 #ifdef NO_LIBSNDFILE
     SendFailure(&mReplyAddress, "/b_allocReadChannel", "scsynth compiled without libsndfile\n");
-    worklet_debug("scsynth compiled without libsndfile\n");
+    ss_log("scsynth compiled without libsndfile\n");
     return false;
 #else
     SndBuf* buf = World_GetNRTBuf(mWorld, mBufIndex);
@@ -792,7 +792,7 @@ bool BufAllocReadChannelCmd::Stage2() {
         snprintf(str, ERR_BUF_SIZE, "File '%s' could not be opened: %s\n", mFilename, sf_strerror(nullptr));
         SendFailureWithIntValue(&mReplyAddress, "/b_allocReadChannel", str,
                                 mBufIndex); // SendFailure(&mReplyAddress, "/b_allocRead", str);
-        worklet_debug(str);
+        ss_log(str);
         return false;
     }
     if (mFileOffset < 0)
@@ -817,7 +817,7 @@ bool BufAllocReadChannelCmd::Stage2() {
             const char* str = "Channel index out of range.\n";
             SendFailureWithIntValue(&mReplyAddress, "/b_allocReadChannel", str,
                                     mBufIndex); // SendFailure(&mReplyAddress, "/b_allocRead", str);
-            worklet_debug(str);
+            ss_log(str);
             sf_close(sf);
             return false;
         }
@@ -901,7 +901,7 @@ void BufReadChannelCmd::CallDestructor() { this->~BufReadChannelCmd(); }
 bool BufReadChannelCmd::Stage2() {
 #ifdef NO_LIBSNDFILE
     SendFailure(&mReplyAddress, "/b_readChannel", "scsynth compiled without libsndfile\n");
-    worklet_debug("scsynth compiled without libsndfile\n");
+    ss_log("scsynth compiled without libsndfile\n");
     return false;
 #else
     SF_INFO fileinfo;
@@ -918,7 +918,7 @@ bool BufReadChannelCmd::Stage2() {
         snprintf(str, ERR_BUF_SIZE, "File '%s' could not be opened: %s\n", mFilename, sf_strerror(nullptr));
         SendFailureWithIntValue(&mReplyAddress, "/b_readChannel", str,
                                 mBufIndex); // SendFailure(&mReplyAddress, "/b_read", str);
-        worklet_debug(str);
+        ss_log(str);
         return false;
     }
 
@@ -929,7 +929,7 @@ bool BufReadChannelCmd::Stage2() {
             const char* str = "Channel index out of range.\n";
             SendFailureWithIntValue(&mReplyAddress, "/b_readChannel", str,
                                     mBufIndex); // SendFailure(&mReplyAddress, "/b_allocRead", str);
-            worklet_debug(str);
+            ss_log(str);
             sf_close(sf);
             return false;
         }
@@ -940,7 +940,7 @@ bool BufReadChannelCmd::Stage2() {
         // 		sprintf(str, "Channel mismatch. File '%s' has %d channels. Buffer has %d channels.\n",
         // 				mFilename, fileinfo.channels, buf->channels);
         // 		SendFailure(&mReplyAddress, "/b_read", str);
-        // 		worklet_debug(str);
+        // 		ss_log(str);
         // 		return false;
     }
 
@@ -1015,7 +1015,7 @@ struct SF_INFO {};
 int BufWriteCmd::Init(char* inData, int inSize) {
 #ifdef NO_LIBSNDFILE
     SendFailure(&mReplyAddress, "/b_write", "scsynth compiled without libsndfile\n");
-    worklet_debug("scsynth compiled without libsndfile\n");
+    ss_log("scsynth compiled without libsndfile\n");
     return false;
 #else
     sc_msg_iter msg(inSize, inData);
@@ -1068,7 +1068,7 @@ bool BufWriteCmd::Stage2() {
         snprintf(str, ERR_BUF_SIZE, "File '%s' could not be opened: %s\n", mFilename, sf_strerror(nullptr));
         SendFailureWithIntValue(&mReplyAddress, "/b_write", str,
                                 mBufIndex); // SendFailure(&mReplyAddress, "/b_write", str);
-        worklet_debug(str);
+        ss_log(str);
         return false;
     }
 
@@ -1124,7 +1124,7 @@ void BufCloseCmd::CallDestructor() { this->~BufCloseCmd(); }
 bool BufCloseCmd::Stage2() {
 #ifdef NO_LIBSNDFILE
     SendFailure(&mReplyAddress, "/b_close", "scsynth compiled without libsndfile\n");
-    worklet_debug("scsynth compiled without libsndfile\n");
+    ss_log("scsynth compiled without libsndfile\n");
     return false;
 #else
     SndBuf* buf = World_GetNRTBuf(mWorld, mBufIndex);
@@ -1158,7 +1158,7 @@ bool AudioQuitCmd::Stage2() {
 bool AudioQuitCmd::Stage3() {
 #if SC_AUDIO_API == SC_AUDIO_API_AUDIOUNITS
     SendFailure(&mReplyAddress, "/quit", "not allowed in AU host\n");
-    worklet_debug("/quit : quit not allowed in AU host\n");
+    ss_log("/quit : quit not allowed in AU host\n");
     return false;
 #else
 #ifndef __EMSCRIPTEN__
@@ -1302,14 +1302,14 @@ bool NotifyCmd::Stage2() {
                 // already in table - don't fail though..
                 SendFailureWithIntValue(&mReplyAddress, "/notify", "notify: already registered\n",
                                         hw->mClientIDdict->at(mReplyAddress));
-                worklet_debug("/notify : already registered\n");
+                ss_log("/notify : already registered\n");
                 return false;
             }
         }
 
         if (hw->mUsers->size() >= hw->mMaxUsers) {
             SendFailure(&mReplyAddress, "/notify", "too many users\n");
-            worklet_debug("too many users\n");
+            ss_log("too many users\n");
             return false;
         }
 
@@ -1331,7 +1331,7 @@ bool NotifyCmd::Stage2() {
         }
 
         SendFailure(&mReplyAddress, "/notify", "not registered\n");
-        worklet_debug("not registered\n");
+        ss_log("not registered\n");
     }
     return false;
 }
@@ -1378,7 +1378,7 @@ int RecvSynthDefCmd::Init(char* inData, int inSize) {
 
     mSize = msg.getbsize();
     if (!mSize) {
-        worklet_debug("ERROR /d_recv: synthdef data is empty");
+        ss_log("ERROR /d_recv: synthdef data is empty");
         throw kSCErr_WrongArgType;
     }
 
@@ -1693,7 +1693,7 @@ SCErr PerformAsyncUnitCommand(
         // happen if DoAsyncUnitCommand() is called in a Unit destructor (which is not allowed).
         // This check is important because it makes sure that we don't increment a reference count
         // that has already gone to zero!
-        worklet_debug("ERROR: cannot call DoAsyncUnitCommand() in a Unit destructor!\n");
+        ss_log("ERROR: cannot call DoAsyncUnitCommand() in a Unit destructor!\n");
         return kSCErr_Failed;
     }
 

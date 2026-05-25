@@ -218,7 +218,7 @@ typedef struct InterfaceTable InterfaceTable;
 
 #ifdef SUPERSONIC
 #    ifdef __cplusplus
-extern "C" int worklet_debug(const char* fmt, ...);
+extern "C" int ss_log(const char* fmt, ...);
 #    endif
 #    define DefineSimpleUnit(name) (*ft->fDefineUnit)(#name, sizeof(name), (UnitCtorFunc)&name##_Ctor, 0, 0)
 #else

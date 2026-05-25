@@ -178,7 +178,7 @@ typedef struct SndBufUpdates SndBufUpdates;
 enum { coord_None, coord_Complex, coord_Polar };
 
 #ifdef SUPERSONIC
-extern "C" int worklet_debug(const char* fmt, ...);
+extern "C" int ss_log(const char* fmt, ...);
 #endif
 
 inline float PhaseFrac(uint32_t inPhase) {

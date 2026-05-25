@@ -36,7 +36,7 @@ For speed we keep this global, although this makes the code non-thread-safe.
 #include "malloc_aligned.hpp"
 
 #ifdef SUPERSONIC
-extern "C" int worklet_debug(const char* fmt, ...);
+extern "C" int ss_log(const char* fmt, ...);
 #endif
 
 #ifdef NOVA_SIMD

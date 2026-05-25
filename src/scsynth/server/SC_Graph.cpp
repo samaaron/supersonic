@@ -42,14 +42,14 @@
 // =============================================================================
 // This file has the following changes from upstream SuperCollider:
 //
-// 1. worklet_debug declaration: For WASM debugging output
-// 2. Graph_CalcTrace: Uses worklet_debug instead of scprintf
-// 3. Graph_New error logging: Added worklet_debug call on error
+// 1. ss_log declaration: For WASM debugging output
+// 2. Graph_CalcTrace: Uses ss_log instead of scprintf
+// 3. Graph_New error logging: Added ss_log call on error
 // =============================================================================
 
 #ifdef SUPERSONIC
 extern "C" {
-    int worklet_debug(const char* fmt, ...);
+    int ss_log(const char* fmt, ...);
 }
 #endif
 
@@ -160,7 +160,7 @@ int Graph_New(World* inWorld, GraphDef* inGraphDef, int32 inID, sc_msg_iter* arg
     Graph* graph;
     int err = Node_New(inWorld, &inGraphDef->mNodeDef, inID, (Node**)&graph);
     if (err) {
-        worklet_debug("[Graph_New] ERROR: Node_New failed with error code %d", err);
+        ss_log("[Graph_New] ERROR: Node_New failed with error code %d", err);
         return err;
     }
 
@@ -452,7 +452,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
         if (index < graph->mNumControls) {
             blockSize = graph->mMapControls[index][0];
         } else {
-            worklet_debug("ERROR: block size control index %d out of range!\n", index);
+            ss_log("ERROR: block size control index %d out of range!\n", index);
             blockSize = 0;
         }
     }
@@ -465,7 +465,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
         if (index < graph->mNumControls) {
             upsample = graph->mMapControls[index][0];
         } else {
-            worklet_debug("ERROR: resample control index %d out of range!\n", index);
+            ss_log("ERROR: resample control index %d out of range!\n", index);
             upsample = 1.0;
         }
     }
@@ -488,27 +488,27 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
                 upsample = (int)upsample;
                 graph->mFlags |= kGraph_Resample; // ok
             } else {
-                worklet_debug("WARNING: Synth: upsample factor (%f) not a power of two\n", upsample);
+                ss_log("WARNING: Synth: upsample factor (%f) not a power of two\n", upsample);
                 upsample = 1.0;
             }
         } else if (upsample < 0.0) {
-            worklet_debug("WARNING: Synth: bad resample factor (%f)\n", upsample);
+            ss_log("WARNING: Synth: bad resample factor (%f)\n", upsample);
             upsample = 1.0;
         } else if (upsample < 1.0) {
-            worklet_debug("WARNING: Synth: downsampling (%f) not supported (yet)\n", upsample);
+            ss_log("WARNING: Synth: downsampling (%f) not supported (yet)\n", upsample);
             upsample = 1.0;
         }
 
         if (blockSize != 0) {
             // block size cannot be larger than wire buffer size (yet)!
             if (blockSize > inWorld->mBufLength) {
-                worklet_debug("WARNING: Synth: block size (%d) cannot be larger than Server "
+                ss_log("WARNING: Synth: block size (%d) cannot be larger than Server "
                          "block size (%d)\n",
                          blockSize, inWorld->mBufLength);
                 // use Server block size
                 blockSize = inWorld->mBufLength;
             } else if (!ISPOWEROFTWO(blockSize)) {
-                worklet_debug("WARNING: Synth: block size (%d) not a power of two\n", blockSize);
+                ss_log("WARNING: Synth: block size (%d) not a power of two\n", blockSize);
                 // use Server block size
                 blockSize = inWorld->mBufLength;
             } else {
@@ -808,34 +808,34 @@ void Graph_CalcTrace(Graph* inGraph) {
     Unit** calcUnits = inGraph->mCalcUnits;
 
     if (inGraph->mFlags & kGraph_ReblockOrResample) {
-        worklet_debug("\nTRACE %d  %s    #units: %d, block size: %d, sr: %d\n", inGraph->mNode.mID,
+        ss_log("\nTRACE %d  %s    #units: %d, block size: %d, sr: %d\n", inGraph->mNode.mID,
                       inGraph->mNode.mDef->mName, numCalcUnits, inGraph->mFullRate->mBufLength,
                       (int)inGraph->mFullRate->mSampleRate);
     } else {
-        worklet_debug("\nTRACE %d  %s    #units: %d\n", inGraph->mNode.mID, inGraph->mNode.mDef->mName, numCalcUnits);
+        ss_log("\nTRACE %d  %s    #units: %d\n", inGraph->mNode.mID, inGraph->mNode.mDef->mName, numCalcUnits);
     }
 
     int numTicks = inGraph->mNumTicks;
 
     for (int k = 0; k < numTicks; ++k) {
         if (numTicks > 1)
-            worklet_debug("tick %d of %d:\n", k + 1, numTicks);
+            ss_log("tick %d of %d:\n", k + 1, numTicks);
 
         inGraph->mTickCounter = k;
 
         for (uint32 i = 0; i < numCalcUnits; ++i) {
             Unit* unit = calcUnits[i];
-            worklet_debug("  unit %d %s\n    in ", i, (char*)unit->mUnitDef->mUnitDefName);
+            ss_log("  unit %d %s\n    in ", i, (char*)unit->mUnitDef->mUnitDefName);
             for (uint32 j = 0; j < unit->mNumInputs; ++j) {
-                worklet_debug(" %g", ZIN0(j));
+                ss_log(" %g", ZIN0(j));
             }
-            worklet_debug("\n");
+            ss_log("\n");
             (unit->mCalcFunc)(unit, unit->mBufLength);
-            worklet_debug("    out");
+            ss_log("    out");
             for (uint32 j = 0; j < unit->mNumOutputs; ++j) {
-                worklet_debug(" %g", ZOUT0(j));
+                ss_log(" %g", ZOUT0(j));
             }
-            worklet_debug("\n");
+            ss_log("\n");
         }
     }
 

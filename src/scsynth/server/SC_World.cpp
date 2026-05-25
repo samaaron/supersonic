@@ -109,7 +109,7 @@ extern HashTable<PlugInCmd, Malloc>* gPlugInCmds;
 extern "C" {
 
 #ifdef SUPERSONIC
-int worklet_debug(const char* fmt, ...);
+int ss_log(const char* fmt, ...);
 #endif
 
 #ifdef NO_LIBSNDFILE
@@ -242,7 +242,7 @@ void InterfaceTable_Init() {
     ft->mSineWavetable = gSineWavetable;
 
 #ifdef SUPERSONIC
-    ft->fPrint = &worklet_debug;
+    ft->fPrint = &ss_log;
 #else
     ft->fPrint = &scprintf;
 #endif
@@ -791,7 +791,7 @@ void World_NonRealTimeSynthesis(struct World* world, WorldOptions* inOptions) {
                     printf("nextOSCPacket %g\n", schedTime * oscToSeconds);
                 }
                 if (schedTime < prevTime) {
-                    worklet_debug("ERROR: Packet time stamps out-of-order.\n");
+                    ss_log("ERROR: Packet time stamps out-of-order.\n");
                     run = false;
                     goto Bail;
                 }
@@ -876,7 +876,7 @@ void* World_Alloc(World* inWorld, size_t inByteSize) {
             uintptr_t pool_start = (uintptr_t)g_rt_pool_ptr;
             uintptr_t pool_end = pool_start + g_rt_pool_size;
             if (alloc_start < pool_start || alloc_end > pool_end) {
-                worklet_debug("FATAL: World_Alloc returned %p+%zu, outside RT pool [%p,%p)",
+                ss_log("FATAL: World_Alloc returned %p+%zu, outside RT pool [%p,%p)",
                     ptr, inByteSize, g_rt_pool_ptr, (void*)pool_end);
             }
         }
@@ -906,14 +906,14 @@ int32 GetHash(GraphDef* inGraphDef) { return inGraphDef->mNodeDef.mHash; }
 void World_AddGraphDef(World* inWorld, GraphDef* inGraphDef) {
     bool added = inWorld->hw->mGraphDefLib->Add(inGraphDef);
     if (!added)
-        worklet_debug(
+        ss_log(
             "ERROR: Could not add SynthDef %s.\nTry adjusting ServerOptions:maxSynthDefs or the -d cmdline flag.\n",
             (char*)inGraphDef->mNodeDef.mName);
     for (uint32 i = 0; i < inGraphDef->mNumVariants; ++i) {
         GraphDef* var = inGraphDef->mVariants + i;
         added = inWorld->hw->mGraphDefLib->Add(var);
         if (!added)
-            worklet_debug(
+            ss_log(
                 "ERROR: Could not add SynthDef %s.\nTry adjusting ServerOptions:maxSynthDefs or the -d cmdline flag.\n",
                 (char*)var->mNodeDef.mName);
     }
@@ -1012,24 +1012,24 @@ Group* World_GetGroup(World* inWorld, int32 inID) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Forward declare worklet_debug
-extern "C" int worklet_debug(const char* fmt, ...);
+// Forward declare ss_log
+extern "C" int ss_log(const char* fmt, ...);
 
 void World_Run(World* inWorld) {
     // Validate world before running
     if (!inWorld) {
-        worklet_debug("ERROR: World_Run called with null World");
+        ss_log("ERROR: World_Run called with null World");
         return;
     }
     if (!inWorld->mTopGroup) {
-        worklet_debug("ERROR: World_Run: mTopGroup is null");
+        ss_log("ERROR: World_Run: mTopGroup is null");
         return;
     }
 
     // run top group
     Node* node = (Node*)inWorld->mTopGroup;
     if (!node->mCalcFunc) {
-        worklet_debug("ERROR: World_Run: TopGroup has null mCalcFunc");
+        ss_log("ERROR: World_Run: TopGroup has null mCalcFunc");
         return;
     }
 

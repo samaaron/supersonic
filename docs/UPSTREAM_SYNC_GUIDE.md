@@ -22,7 +22,7 @@ When syncing with upstream:
 - [ ] Filter out non-applicable changes (sclang, supernova, threads, tests)
 - [ ] Check if changes are already applied
 - [ ] Cherry-pick or manually apply changes
-- [ ] Adapt for WASM (worklet_debug, no threads)
+- [ ] Adapt for WASM (ss_log, no threads)
 - [ ] Commit with proper attribution
 - [ ] Update this guide with new sync date
 
@@ -217,7 +217,7 @@ SuperSonic has three build targets (WASM, native, NIF) with a shared engine. Use
 
 ```cpp
 #ifdef SUPERSONIC
-    worklet_debug("debug message\n");
+    ss_log("debug message\n");
 #else
     scprintf("debug message\n");
 #endif
@@ -335,7 +335,7 @@ https://github.com/supercollider/supercollider/commit/66b74c05f9056acf9fc94f81bc
 Original PR: https://github.com/supercollider/supercollider/pull/7039
 
 Adds END NODE TREE delimiter to both Group_DumpNodeTree and
-Group_DumpNodeTreeAndControls functions. Adapted to use worklet_debug
+Group_DumpNodeTreeAndControls functions. Adapted to use ss_log
 instead of scprintf for WASM AudioWorklet compatibility.
 ```
 
@@ -348,7 +348,7 @@ After applying changes:
 - [ ] Code compiles on all targets (`scripts/build-web.sh`, `scripts/build-native.sh`)
 - [ ] SuperSonic-specific changes wrapped in `#ifdef SUPERSONIC` with upstream code in `#else`
 - [ ] Platform guards use `#ifndef __EMSCRIPTEN__` (not `#ifdef SUPERSONIC`)
-- [ ] No bare `scprintf` in shared code — use `worklet_debug` inside `#ifdef SUPERSONIC`
+- [ ] No bare `scprintf` in shared code — use `ss_log` inside `#ifdef SUPERSONIC`
 - [ ] No malloc/free on audio thread paths
 - [ ] Git commit includes upstream hash and link
 - [ ] Commit message explains adaptations (if any)
@@ -487,7 +487,7 @@ git status
 # 8. Adapt for WASM if needed (check diff)
 git diff --cached
 
-# 9. Edit files if needed to replace scprintf with worklet_debug
+# 9. Edit files if needed to replace scprintf with ss_log
 # Use Edit tool here
 
 # 10. Commit with proper message
@@ -598,12 +598,12 @@ Applied SuperCollider PR #7402 (commit a27ec6c01).
 
 **Applied:**
 - **SC_Graph.h** (header): added `mFlags`, `mNumTicks`, `mTickCounter`, `mFullRate*`, `mBufRate*` fields. Moved `mSubsampleOffset` next to `mSampleOffset`. Preserved SuperSonic's `int` typedef preference (instead of upstream's `int32`).
-- **SC_InterfaceTable.h**: bumped `sc_api_version` 5 → 6 with upstream's transitional comment. SuperSonic's `worklet_debug` decl and `DefineSimpleUnit` macro variant preserved (different region).
+- **SC_InterfaceTable.h**: bumped `sc_api_version` 5 → 6 with upstream's transitional comment. SuperSonic's `ss_log` decl and `DefineSimpleUnit` macro variant preserved (different region).
 - **SC_Unit.h**: `FULLRATE`/`FULLBUFLENGTH`/`FULLSAMPLEDUR` macros now read from `mParent->mFullRate->...` (per-Graph rate) instead of `mWorld->mFullRate.X`. Added `REBLOCK_OR_RESAMPLE` macro. Required for reblock/resample correctness — UGens must use these macros to pick up the local rate.
 - **ErrorMessage.hpp**: added API version 4 → "3.15" entry.
 - **SC_GraphDef.cpp/.h**: read 4 new fields when `inVersion > 2`, default to `(0, 0, 1.0, 0)` for older versions.
 - **SC_Prototypes.h** + **SC_Unit.cpp**: `Unit_New` now takes `Graph* graph`. The unit's `mRate` is now `graph->mFullRate` or `graph->mBufRate` (per-Graph) instead of `inUnitSpec->mRateInfo` (global). Note `mRateInfo` is still set up in `SC_GraphDef.cpp` but is now effectively dead code.
-- **SC_Graph.cpp**: new `Graph_Ctor` block (~100 lines) reads `mBlockSize`/`mResampleFactor` from the GraphDef (or from a Synth Control if they're negative), allocates per-Graph `Rate*` via `World_Alloc` only when reblock/resample is requested, otherwise points to `inWorld->mFullRate`/`mBufRate`. `Graph_Dtor` frees the allocated rates if non-shared. `Graph_Calc` and `Graph_CalcTrace` wrap their existing loops in an outer `for k < numTicks` to drive sub-block ticks. `Graph_New` reformatted (signature on one line, comment moved out). SuperSonic's `Graph_InitUnits` split, `worklet_debug` substitutions, and `[Graph_New] ERROR` log all preserved.
+- **SC_Graph.cpp**: new `Graph_Ctor` block (~100 lines) reads `mBlockSize`/`mResampleFactor` from the GraphDef (or from a Synth Control if they're negative), allocates per-Graph `Rate*` via `World_Alloc` only when reblock/resample is requested, otherwise points to `inWorld->mFullRate`/`mBufRate`. `Graph_Dtor` frees the allocated rates if non-shared. `Graph_Calc` and `Graph_CalcTrace` wrap their existing loops in an outer `for k < numTicks` to drive sub-block ticks. `Graph_New` reformatted (signature on one line, comment moved out). SuperSonic's `Graph_InitUnits` split, `ss_log` substitutions, and `[Graph_New] ERROR` log all preserved.
 - **SC_MiscCmds.cpp**: factored `meth_s_new` and `meth_s_newargs` into a shared `meth_s_do_new(...)` per upstream. SuperSonic's eager `Graph_InitUnits(graph)` call (commit `7438a8fe2`) moved into the unified function — both `s_new` and `s_newargs` still get eager init, now from a single call site. Note: upstream removed the `Node_RemoveID(replaceThisNode)` call from case 4 (replace) — `Node_Replace → Node_Delete → Graph_Dtor → Node_Dtor` still emits `kNode_End` with the original node ID, which is what the SAB mirror expects.
 - **DelayUGens.cpp**: `RadiansPerSample_Ctor` now reads `unit->mParent->mFullRate->mRadiansPerSample` instead of `mWorld->mFullRate.mRadiansPerSample`. SuperSonic's ctor signature (no `inNumSamples`) preserved.
 - **IOUGens.cpp**: 1091-line rewrite — every IO UGen (`In`, `Out`, `XOut`, `OffsetOut`, `ReplaceOut`, `LocalIn`, `LocalOut`, `AudioControl`, `LagControl`, `LagIn`, `InFeedback`, `InTrig`, `SharedIn`, `SharedOut`) gains a `_reblock` variant and per-channel `m_busTouchedCache` for first-tick buffer state. AudioBusGuard improved (privatised + `isValid()`). SuperSonic's `extern "C"` before `PluginLoad(IO)` preserved.
@@ -617,8 +617,8 @@ Applied SuperCollider PR #7402 (commit a27ec6c01).
 Each gained 16 bytes per def: `00 00 00 00` (mBlockSize=0) + `00 00 00 00` (mBlockSizeIndex=0) + `3F 80 00 00` (mResampleFactor=1.0 BE) + `00 00 00 00` (mResampleIndex=0). The v3 per-def size header was bumped accordingly. Compiled with sclang built from supercollider commit `a27ec6c01`.
 
 **WASM Adaptations:**
-- New error/warning prints in `Graph_Ctor` (block size out of range, resample factor not power-of-two, etc.) use `worklet_debug` instead of upstream's `scprintf`.
-- `Graph_CalcTrace` debug output uses `worklet_debug`.
+- New error/warning prints in `Graph_Ctor` (block size out of range, resample factor not power-of-two, etc.) use `ss_log` instead of upstream's `scprintf`.
+- `Graph_CalcTrace` debug output uses `ss_log`.
 
 **Skipped (not applicable):**
 - `SCClassLibrary/Common/Audio/SynthDef.sc`, `Reblock.sc`, `Resample.sc` — sclang only.
@@ -699,7 +699,7 @@ Applied SuperCollider PR #7405 (commit 613f26f9) which adds extended plugin comm
 - **DemoUGens.cpp**: Updated to match upstream — uses `DoAsynchronousCommandEx`, adds `UnitCmdDemo` with async `testCommand`, `DefineDtorUnit`, destructor with `SendMsgFromRT`
 
 **WASM Adaptations:**
-- `worklet_debug` used for error messages in `PerformAsyncUnitCommand` (instead of upstream `scprintf`)
+- `ss_log` used for error messages in `PerformAsyncUnitCommand` (instead of upstream `scprintf`)
 - `DemoUGens_Load` declared outside `extern "C"` block in `SC_Lib_Cintf.cpp` to match C++ linkage of `PluginLoad()` macro
 - In WASM NRT mode (`mRealTime=false`), `CallEveryStage()` processes all async command stages synchronously — no RT/NRT thread interleaving. This means concurrent synth free during async commands cannot happen
 
@@ -743,13 +743,13 @@ Applied SuperCollider PR #7395 (commit 99be55460) which introduces SynthDef vers
 - **js/lib/synthdef_parser.js**: `extractSynthDefName` updated to handle v3 format (name offset is 14 instead of 10 due to size field prefix)
 
 **WASM Adaptations:**
-- Kept `worklet_debug` instead of upstream `scprintf`
+- Kept `ss_log` instead of upstream `scprintf`
 - Kept `g_lastGraphDefError` static for Emscripten exception handling
 - Kept `std::string* outErrorMsg` parameter on `GraphDef_Recv` for error reporting to JS
 
 **Filesystem code guarded:**
 - Wrapped filesystem-based synthdef loading in `#ifndef __EMSCRIPTEN__`: `load_file`, `GraphDef_Load`, `GraphDef_LoadDir`, `GraphDef_LoadGlob` (SC_GraphDef.cpp/.h), `LoadSynthDefCmd`, `LoadSynthDefDirCmd` (SC_SequencedCommand.h/.cpp), `meth_d_load`, `meth_d_loadDir` (SC_MiscCmds.cpp), `World_LoadGraphDefs` body (SC_World.cpp)
-- Code inside guards matches upstream exactly (uses `scprintf`, not `worklet_debug`) for easy future syncing
+- Code inside guards matches upstream exactly (uses `scprintf`, not `ss_log`) for easy future syncing
 
 **Bug Fix:**
 - Bounds checking on all buffer reads now prevents server crashes from truncated/corrupted synthdef data. Previously, truncated v2 synthdefs could crash the WASM server by reading past buffer boundaries.
@@ -834,7 +834,7 @@ Verified SuperSonic is aligned with SuperCollider 3.14.1 (released 2025-11-23):
 - Found 3 server directory commits:
   1. fdd4db02f1 - portaudio CMake cleanup (build system only - skipped)
   2. 04a9350261 - Boost CMake integration (build system only - skipped)
-  3. 66b74c05f9 - /g_dumpTree end delimiter (already applied with worklet_debug adaptation)
+  3. 66b74c05f9 - /g_dumpTree end delimiter (already applied with ss_log adaptation)
 
 **3.14.1 Release Content:**
 - Single sclang fix: keyword arguments crash (PR #7206)
@@ -864,7 +864,7 @@ See `BACKPORT_COMPLETION_SUMMARY.md` for full details.
 
 1. **Batch related fixes together** - Apply all initialization fixes in one session
 2. **Trust but verify** - Even if commit message matches, check the actual code
-3. **Document WASM changes** - Note every `scprintf→worklet_debug` replacement
+3. **Document WASM changes** - Note every `scprintf→ss_log` replacement
 4. **Test critical fixes** - EnvGen, triggers, delays are high-risk areas
 5. **Keep upstream links** - Future maintainers need to trace back to original PRs
 6. **Update this guide** - Add new patterns, pitfalls, or workflow improvements
@@ -899,13 +899,13 @@ grep -rn "ifdef SUPERSONIC\|ifndef SUPERSONIC" src/scsynth/
 Current `SUPERSONIC` sites in upstream files:
 
 - **SC_Constants.h**: `constexpr` constants (upstream uses runtime `const` with `std::acos` etc.)
-- **SC_World.cpp**: `worklet_debug` declaration, `fPrint` assignment, `InitializeSynthTables`/`InitializeFFTTables` declarations and calls
-- **SC_fftlib.cpp**: `worklet_debug` declaration, idempotency guard in `scfft_global_initialization`, `InitializeFFTTables` entry point
+- **SC_World.cpp**: `ss_log` declaration, `fPrint` assignment, `InitializeSynthTables`/`InitializeFFTTables` declarations and calls
+- **SC_fftlib.cpp**: `ss_log` declaration, idempotency guard in `scfft_global_initialization`, `InitializeFFTTables` entry point
 - **Samp.cpp**: Idempotency guard in `FillTables`, `InitializeSynthTables` entry point
-- **SC_InterfaceTable.h**: `worklet_debug` declaration, `DefineSimpleUnit` macro (without trailing semicolon)
-- **SC_SndBuf.h**: `worklet_debug` declaration
-- **SC_Graph.cpp**: `worklet_debug` declaration
-- **SC_Lib.cpp**: `worklet_debug` declaration, direct `SendFailure` error reporting (upstream uses staged `CallSendFailureCommand`)
+- **SC_InterfaceTable.h**: `ss_log` declaration, `DefineSimpleUnit` macro (without trailing semicolon)
+- **SC_SndBuf.h**: `ss_log` declaration
+- **SC_Graph.cpp**: `ss_log` declaration
+- **SC_Lib.cpp**: `ss_log` declaration, direct `SendFailure` error reporting (upstream uses staged `CallSendFailureCommand`)
 - **SC_ReplyImpl.hpp**: `kWeb` protocol enum value
 - **SC_OSC_Commands.h**: `cmd_b_allocPtr` command number
 - **SC_World.cpp**: `supersonic_heap_alloc`/`supersonic_heap_free` for `sc_malloc`/`sc_free` (uses `SUPERSONIC` not `__EMSCRIPTEN__`)
@@ -919,7 +919,7 @@ Guards upstream code that requires APIs unavailable in WASM (filesystem, boost h
 grep -rn "ifdef __EMSCRIPTEN__\|ifndef __EMSCRIPTEN__" src/scsynth/
 ```
 
-**During upstream syncs:** Update the guarded code to match upstream exactly (uses `scprintf`, not `worklet_debug`). Don't skip these blocks — they contain the upstream code that native builds use.
+**During upstream syncs:** Update the guarded code to match upstream exactly (uses `scprintf`, not `ss_log`). Don't skip these blocks — they contain the upstream code that native builds use.
 
 Current `__EMSCRIPTEN__` sites in upstream files:
 

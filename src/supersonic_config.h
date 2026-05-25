@@ -36,7 +36,7 @@ extern "C" {
 
 // Debug logging — available on both WASM (writes to debug ring buffer) and
 // native (forwards to JUCE logger / stderr). printf-compatible signature.
-int worklet_debug(const char* fmt, ...);
+int ss_log(const char* fmt, ...);
 
 // Table initialization — must be called explicitly before World_New.
 // In WASM --no-entry builds, static constructors don't run.

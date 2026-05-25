@@ -32,7 +32,7 @@
 #include "osc/OscOutboundPacketStream.h"
 
 extern "C" {
-    int worklet_debug(const char* fmt, ...);
+    int ss_log(const char* fmt, ...);
 
     // Globals from audio_processor.cpp — needed for ring buffer writes
     extern uint8_t ring_buffer_storage[];
@@ -161,7 +161,7 @@ void SampleLoader::processRequest(const Request& req) {
     SF_INFO info = {};
     SNDFILE* sf = openSndfile(req.path, SFM_READ, &info);
     if (!sf) {
-        worklet_debug("[SampleLoader] sf_open failed: %s — %s",
+        ss_log("[SampleLoader] sf_open failed: %s — %s",
                       req.path, sf_strerror(nullptr));
         enqueueCompleted({ req.world, req.bufnum, nullptr, 0, 0, 0, false, req.generation });
         return;
@@ -183,7 +183,7 @@ void SampleLoader::processRequest(const Request& req) {
     float* data = static_cast<float*>(zalloc(numSamples, sizeof(float)));
     if (!data) {
         sf_close(sf);
-        worklet_debug("[SampleLoader] zalloc failed for %d samples", numSamples);
+        ss_log("[SampleLoader] zalloc failed for %d samples", numSamples);
         enqueueCompleted({ req.world, req.bufnum, nullptr, 0, 0, 0, false, req.generation });
         return;
     }
@@ -195,12 +195,12 @@ void SampleLoader::processRequest(const Request& req) {
 
     if (framesRead <= 0) {
         zfree(data);
-        worklet_debug("[SampleLoader] sf_readf_float returned %lld", (long long)framesRead);
+        ss_log("[SampleLoader] sf_readf_float returned %lld", (long long)framesRead);
         enqueueCompleted({ req.world, req.bufnum, nullptr, 0, 0, 0, false, req.generation });
         return;
     }
 
-    worklet_debug("[SampleLoader] decoded buf %d: %s (%lld frames, %d ch, %d Hz)",
+    ss_log("[SampleLoader] decoded buf %d: %s (%lld frames, %d ch, %d Hz)",
                   req.bufnum, req.path, (long long)framesRead,
                   numChannels, info.samplerate);
 
@@ -222,7 +222,7 @@ void SampleLoader::enqueueCompleted(CompletedLoad&& load) {
     if (next == mCompTail.load(std::memory_order_acquire)) {
         // Queue full — drop the load and free data
         if (load.data) zfree(load.data);
-        worklet_debug("[SampleLoader] completed queue full, dropped buf %d", load.bufnum);
+        ss_log("[SampleLoader] completed queue full, dropped buf %d", load.bufnum);
         return;
     }
 
@@ -273,7 +273,7 @@ void SampleLoader::installBuffer(const CompletedLoad& load) {
 
     zfree(oldData);
 
-    worklet_debug("[SampleLoader] installed buf %d (%d frames, %d ch, %d Hz)",
+    ss_log("[SampleLoader] installed buf %d (%d frames, %d ch, %d Hz)",
                   load.bufnum, load.numFrames, load.numChannels, load.sampleRate);
 }
 

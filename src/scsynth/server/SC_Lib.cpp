@@ -31,7 +31,7 @@
 
 #ifdef SUPERSONIC
 extern "C" {
-    int worklet_debug(const char* fmt, ...);
+    int ss_log(const char* fmt, ...);
 }
 #endif
 
@@ -194,14 +194,14 @@ SCErr SC_LibCmd::Perform(struct World* inWorld, int inSize, char* inData, ReplyA
         err = (mFunc)(inWorld, inSize, inData, inReply);
     } catch (int iexc) {
         err = iexc;
-        worklet_debug("ERROR: %s threw int exception: %d", (char*)Name(), iexc);
+        ss_log("ERROR: %s threw int exception: %d", (char*)Name(), iexc);
     } catch (std::exception& exc) {
-        worklet_debug("ERROR: %s threw std::exception: %s", (char*)Name(), exc.what());
+        ss_log("ERROR: %s threw std::exception: %s", (char*)Name(), exc.what());
         if (inWorld->mLocalErrorNotification <= 0 && inWorld->mErrorNotification) {
 #ifdef SUPERSONIC
             // Direct synchronous error reporting — SuperSonic runs NRT (single-threaded)
             SendFailure(inReply, (char*)Name(), exc.what());
-            worklet_debug("FAILURE IN SERVER %s %s", (char*)Name(), exc.what());
+            ss_log("FAILURE IN SERVER %s %s", (char*)Name(), exc.what());
 #else
             CallSendFailureCommand(inWorld, (char*)Name(), exc.what(), inReply);
             scprintf("FAILURE IN SERVER %s %s\n", (char*)Name(), exc.what());
@@ -214,7 +214,7 @@ SCErr SC_LibCmd::Perform(struct World* inWorld, int inSize, char* inData, ReplyA
         SC_ErrorString(err, errstr);
 #ifdef SUPERSONIC
         SendFailure(inReply, (char*)Name(), errstr);
-        worklet_debug("FAILURE IN SERVER %s %s", (char*)Name(), errstr);
+        ss_log("FAILURE IN SERVER %s %s", (char*)Name(), errstr);
 #else
         CallSendFailureCommand(inWorld, (char*)Name(), errstr, inReply);
         scprintf("FAILURE IN SERVER %s %s\n", (char*)Name(), errstr);
