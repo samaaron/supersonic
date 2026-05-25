@@ -22,7 +22,9 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <condition_variable>
 #include <mutex>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -158,6 +160,14 @@ struct SuperClock::Impl {
     static constexpr size_t kDrainScratchFrames = 4096;
     double drainScratchL[kDrainScratchFrames]{};
     double drainScratchR[kDrainScratchFrames]{};
+
+    // Deferred Link enable/disable for audio-thread callers.
+    // -1 = no request, 0 = disable, 1 = enable.
+    std::thread             deferredWorker;
+    std::mutex              deferredMtx;
+    std::condition_variable deferredCv;
+    std::atomic<int>        deferredLinkEnableReq{-1};
+    std::atomic<bool>       deferredQuit{false};
 #endif
 
     Impl() { SuperClockState::initDefaults(ownedState); }
@@ -206,8 +216,34 @@ inline void interleaveFloatToInt16(const float* L, const float* R,
 
 // ─── ctor/dtor + state accessor ─────────────────────────────────────────
 
-SuperClock::SuperClock() : mImpl(std::make_unique<Impl>()) {}
-SuperClock::~SuperClock() = default;
+SuperClock::SuperClock() : mImpl(std::make_unique<Impl>()) {
+#ifdef SUPERSONIC_LINK
+    mImpl->deferredWorker = std::thread([this] {
+        for (;;) {
+            std::unique_lock<std::mutex> lk(mImpl->deferredMtx);
+            mImpl->deferredCv.wait(lk, [this] {
+                return mImpl->deferredQuit.load(std::memory_order_acquire)
+                    || mImpl->deferredLinkEnableReq.load(
+                           std::memory_order_acquire) != -1;
+            });
+            if (mImpl->deferredQuit.load(std::memory_order_acquire)) return;
+            const int req = mImpl->deferredLinkEnableReq.exchange(
+                -1, std::memory_order_acq_rel);
+            lk.unlock();
+            if (req == 1)      setLinkEnabled(true);
+            else if (req == 0) setLinkEnabled(false);
+        }
+    });
+#endif
+}
+
+SuperClock::~SuperClock() {
+#ifdef SUPERSONIC_LINK
+    mImpl->deferredQuit.store(true, std::memory_order_release);
+    mImpl->deferredCv.notify_all();
+    if (mImpl->deferredWorker.joinable()) mImpl->deferredWorker.join();
+#endif
+}
 
 SuperClockState*       SuperClock::state()       { return &mImpl->ownedState; }
 const SuperClockState* SuperClock::state() const { return &mImpl->ownedState; }
@@ -312,6 +348,24 @@ void SuperClock::forceBeatAtTime(double beat, double atNtpSeconds, double quantu
 }
 
 // ─── Getters (app-thread) ───────────────────────────────────────────────
+
+void SuperClock::requestSetLinkEnabledAsync(bool enabled) {
+#ifdef SUPERSONIC_LINK
+    mImpl->deferredLinkEnableReq.store(enabled ? 1 : 0,
+                                       std::memory_order_release);
+    mImpl->deferredCv.notify_all();
+#else
+    (void)enabled;
+#endif
+}
+
+void* SuperClock::audioThreadLinkAudioPtr() {
+#ifdef SUPERSONIC_LINK
+    return &mImpl->link;
+#else
+    return nullptr;
+#endif
+}
 
 double SuperClock::getBpm() const {
 #ifdef SUPERSONIC_LINK

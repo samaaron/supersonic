@@ -319,6 +319,7 @@ set(SCSYNTH_PLUGIN_SOURCES
     ${SUPERSONIC_SRC}/scsynth/plugins/GrainUGens.cpp
     ${SUPERSONIC_SRC}/scsynth/plugins/IOUGens.cpp
     ${SUPERSONIC_SRC}/scsynth/plugins/LFUGens.cpp
+    ${SUPERSONIC_SRC}/scsynth/plugins/LinkUGen.cpp
     ${SUPERSONIC_SRC}/scsynth/plugins/MulAddUGens.cpp
     ${SUPERSONIC_SRC}/scsynth/plugins/NoiseUGens.cpp
     ${SUPERSONIC_SRC}/scsynth/plugins/OscUGens.cpp

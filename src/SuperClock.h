@@ -37,6 +37,10 @@ public:
     void setBpm(double bpm, double atNtpSeconds);
     void setIsPlaying(bool playing, double atNtpSeconds);
     void setLinkEnabled(bool enabled);
+
+    // Audio-thread-safe variant of setLinkEnabled; defers the
+    // blocking work to a SuperClock-owned worker thread.
+    void requestSetLinkEnabledAsync(bool enabled);
     void setStartStopSyncEnabled(bool enabled);
     void requestBeatAtTime(double beat, double atNtpSeconds, double quantum);
     void forceBeatAtTime(double beat, double atNtpSeconds, double quantum);
@@ -254,6 +258,13 @@ public:
     // (documented "Realtime-safe: no").
     SuperClockState*       state();
     const SuperClockState* state() const;
+
+    // Audio-thread accessor for the underlying LinkAudio instance.
+    // Used by scsynth plugins (LinkTempo / LinkPhase / LinkJump
+    // UGens) that need captureAudioSessionState from the audio
+    // thread. Returns nullptr on no-Link builds. The void* return
+    // keeps this header free of ableton headers; callers cast.
+    void* audioThreadLinkAudioPtr();
 
 private:
     struct Impl;

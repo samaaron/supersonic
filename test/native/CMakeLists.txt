@@ -67,6 +67,7 @@ add_executable(SuperSonicNativeTests
     EngineFixture.cpp
     FakeLinkPeerProcess.cpp
     test_link_audio_integration.cpp
+    test_link_ugen.cpp
 )
 
 target_link_libraries(SuperSonicNativeTests PRIVATE

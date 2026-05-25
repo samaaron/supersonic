@@ -87,6 +87,10 @@ extern "C" {
 // demo plugins (for testing plugin/unit commands)
 // Note: NOT extern "C" - must match C++ linkage of PluginLoad() macro
 void DemoUGens_Load(InterfaceTable* table);
+// LinkUGen plugin (LinkTempo / LinkPhase / LinkJump UGens). C++ linkage
+// to match the PluginLoad() macro. Empty body on no-Link builds — the
+// PluginLoad function still exists, just registers nothing.
+void LinkUGen_Load(InterfaceTable* table);
 
 extern void DiskIO_Unload(void);
 extern void UIUGens_Unload(void);
@@ -138,5 +142,6 @@ void initialize_library(const char* uGensPluginPath) {
     // Mda_Load(&gInterfaceTable);  // Excluded from build (see build.sh)
     // demo plugins (for testing plugin/unit commands)
     DemoUGens_Load(&gInterfaceTable);
+    LinkUGen_Load(&gInterfaceTable);
 #endif // STATIC_PLUGINS
 }

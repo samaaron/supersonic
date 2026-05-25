@@ -98,6 +98,12 @@ void SuperClock::forceBeatAtTime(double beat, double atNtpSeconds, double quantu
 
 // ─── Getters ────────────────────────────────────────────────────────────
 
+void* SuperClock::audioThreadLinkAudioPtr() { return nullptr; }
+
+void SuperClock::requestSetLinkEnabledAsync(bool enabled) {
+    setLinkEnabled(enabled);
+}
+
 double SuperClock::getBpm() const {
     const SuperClockState* s = state();
     if (!s) return 120.0;
