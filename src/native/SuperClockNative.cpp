@@ -37,27 +37,25 @@
 #include <algorithm>
 #include <optional>
 
-// Loopback-only interface filtering. On POSIX builds the flag is the
-// one our link-loopback-mode.patch adds to posix/ScanIpIfAddrs.hpp.
-// On Windows the patch doesn't target windows/ScanIpIfAddrs.hpp yet,
-// so the flag is stored locally — getLinkVisibility() reports the
-// requested mode correctly, but Link's outbound traffic isn't yet
-// constrained on Windows (follow-up patch).
-#ifdef _WIN32
-namespace {
-inline std::atomic<bool>& linkLoopbackOnlyFlag() {
-    static std::atomic<bool> flag{false};
-    return flag;
-}
-}  // namespace
+// Loopback-only interface filtering. The flag is the one our
+// link-loopback-mode.patch adds to the platform's ScanIpIfAddrs.hpp;
+// setLinkVisibility toggles it and Link's InterfaceScanner constrains
+// discovery/multicast/unicast to loopback on its next scan. Same flag on
+// both platforms — keep the include and the accessor switched in lockstep.
+#if defined(_WIN32)
+#include <ableton/platforms/windows/ScanIpIfAddrs.hpp>
 #else
 #include <ableton/platforms/posix/ScanIpIfAddrs.hpp>
+#endif
 namespace {
 inline std::atomic<bool>& linkLoopbackOnlyFlag() {
+#if defined(_WIN32)
+    return ableton::platforms::windows::loopbackOnly();
+#else
     return ableton::platforms::posix::loopbackOnly();
+#endif
 }
 }  // namespace
-#endif
 #endif
 
 // touch_audio_bus is declared by JuceAudioCallback.h (extern "C"

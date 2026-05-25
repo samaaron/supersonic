@@ -15,7 +15,9 @@
 #endif
 
 #include <ableton/LinkAudio.hpp>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#  include <ableton/platforms/windows/ScanIpIfAddrs.hpp>
+#else
 #  include <ableton/platforms/posix/ScanIpIfAddrs.hpp>
 #endif
 #include <ableton/util/FloatIntConversion.hpp>
@@ -145,11 +147,12 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, handleSignal);
     std::signal(SIGINT, handleSignal);
 
-#if !defined(_WIN32)
-    ableton::platforms::posix::loopbackOnly().store(
+#if defined(_WIN32)
+    ableton::platforms::windows::loopbackOnly().store(
         loopbackOnly, std::memory_order_relaxed);
 #else
-    (void)loopbackOnly;  // No Windows ScanIp patch yet; flag ignored.
+    ableton::platforms::posix::loopbackOnly().store(
+        loopbackOnly, std::memory_order_relaxed);
 #endif
 
     ableton::LinkAudio link{bpm, peerName};

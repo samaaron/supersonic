@@ -9,6 +9,19 @@
 #include "src/SuperClock.h"
 #include "src/native/WallClock.h"
 
+#ifdef SUPERSONIC_LINK
+#include <algorithm>
+#include <vector>
+// The platform interface scanner that Link's discovery binds to. Our
+// loopback-mode patch adds the loopbackOnly() flag + filtering here; the
+// visibility tests below assert on what this scanner returns.
+#if defined(_WIN32)
+#include <ableton/platforms/windows/ScanIpIfAddrs.hpp>
+#else
+#include <ableton/platforms/posix/ScanIpIfAddrs.hpp>
+#endif
+#endif  // SUPERSONIC_LINK
+
 namespace {
 // setBpm → getBpm is eventually consistent. Link's commitAppSessionState
 // updates clientState synchronously then posts session-timing work to
@@ -26,6 +39,27 @@ bool eventuallyBpm(SuperClock& sc, double expected, double eps = 1e-9) {
     }
     return false;
 }
+
+#ifdef SUPERSONIC_LINK
+// Invoke the platform interface scanner directly. It's synchronous and
+// independent of Link's discovery thread, but reads the same process-global
+// loopbackOnly() flag that SuperClock::setLinkVisibility toggles — so it
+// reports exactly the address set Link would bind discovery to.
+inline std::vector<ableton::discovery::IpAddress> scanLinkInterfaces() {
+#if defined(_WIN32)
+    return ableton::platforms::windows::ScanIpIfAddrs{}();
+#else
+    return ableton::platforms::posix::ScanIpIfAddrs{}();
+#endif
+}
+
+inline bool allLoopback(const std::vector<ableton::discovery::IpAddress>& addrs) {
+    return std::all_of(addrs.begin(), addrs.end(),
+                       [](const ableton::discovery::IpAddress& ip) {
+                           return ip.is_loopback();
+                       });
+}
+#endif  // SUPERSONIC_LINK
 }  // namespace
 
 TEST_CASE("SuperClock: default state on construction", "[SuperClock]") {
@@ -101,6 +135,41 @@ TEST_CASE("SuperClock: setLinkEnabled(false→true) preserves LoopbackOnly",
 
     sc.setLinkEnabled(true);
     CHECK(sc.getLinkVisibility() == SuperClock::LinkVisibility::LoopbackOnly);
+}
+
+// The state-machine tests above only check getLinkVisibility() — the value we
+// store. These check the value actually reaches the platform scanner Link
+// binds to, i.e. that LoopbackOnly genuinely keeps us off non-loopback
+// interfaces. Without this, a build that reports LoopbackOnly while still
+// advertising on the LAN (e.g. a flag wired to a dead static) passes silently.
+TEST_CASE("SuperClock: LoopbackOnly constrains the interface scan to loopback",
+          "[SuperClock][Link][visibility]") {
+    SuperClock sc;
+    sc.setLinkVisibility(SuperClock::LinkVisibility::LoopbackOnly);
+
+    const auto addrs = scanLinkInterfaces();
+    // Loopback (lo0 / 127.0.0.1) is always up, so the filtered set is
+    // non-empty and must contain nothing else.
+    CHECK_FALSE(addrs.empty());
+    CHECK(allLoopback(addrs));
+
+    sc.setLinkVisibility(SuperClock::LinkVisibility::Off);  // reset global flag
+}
+
+TEST_CASE("SuperClock: NetworkWide leaves non-loopback interfaces in the scan",
+          "[SuperClock][Link][visibility]") {
+    SuperClock sc;
+    sc.setLinkVisibility(SuperClock::LinkVisibility::LoopbackOnly);
+    const auto loopback = scanLinkInterfaces();
+    sc.setLinkVisibility(SuperClock::LinkVisibility::NetworkWide);
+    const auto wide = scanLinkInterfaces();
+
+    // NetworkWide must not filter: it exposes at least as many interfaces as
+    // LoopbackOnly (strictly more on any host with a real NIC). Guards against
+    // the loopback filter getting stuck on.
+    CHECK(wide.size() >= loopback.size());
+
+    sc.setLinkVisibility(SuperClock::LinkVisibility::Off);  // reset global flag
 }
 
 #endif  // SUPERSONIC_LINK

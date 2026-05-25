@@ -10,7 +10,9 @@ to unmodified Link. Wire protocol unchanged. Public Link / LinkAudio
 API surface unchanged. SuperSonic toggles the flag via
 SuperClock::setLinkVisibility.
 
-Target: include/ableton/platforms/posix/ScanIpIfAddrs.hpp (macOS, Linux).
+Targets the platform interface scanners so every platform honours the flag:
+  include/ableton/platforms/posix/ScanIpIfAddrs.hpp   (macOS, Linux)
+  include/ableton/platforms/windows/ScanIpIfAddrs.hpp (Windows)
 Pinned to Link-4.0.
 
 --- a/include/ableton/platforms/posix/ScanIpIfAddrs.hpp
@@ -59,4 +61,52 @@ Pinned to Link-4.0.
 +
      return addrs;
    };
+ };
+
+--- a/include/ableton/platforms/windows/ScanIpIfAddrs.hpp
++++ b/include/ableton/platforms/windows/ScanIpIfAddrs.hpp
+@@ -20,6 +20,8 @@
+ #pragma once
+
+ #include <ableton/discovery/AsioTypes.hpp>
++#include <algorithm>
++#include <atomic>
+ #include <iphlpapi.h>
+ #include <map>
+ #include <stdio.h>
+@@ -99,6 +101,18 @@ private:
+
+ } // namespace detail
+
++// SUPERSONIC PATCH: runtime flag to constrain Link discovery to loopback only.
++// When true, ScanIpIfAddrs filters returned address list to loopback only, so
++// Link rebinds discovery/multicast/unicast sockets to lo0 (127.0.0.1). Default
++// false = upstream behaviour. Toggled by SuperClock::setLinkVisibility; takes
++// effect on the next InterfaceScanner tick (or immediately if Link is
++// disabled/re-enabled around the toggle).
++inline std::atomic<bool>& loopbackOnly()
++{
++  static std::atomic<bool> flag{false};
++  return flag;
++}
++
+ struct ScanIpIfAddrs
+ {
+   // Scan active network interfaces and return corresponding addresses
+@@ -171,6 +185,16 @@ struct ScanIpIfAddrs
+         }
+       });
+
++    // SUPERSONIC PATCH: filter to loopback only if requested. No-op (addrs
++    // unchanged) when flag is false.
++    if (loopbackOnly().load(std::memory_order_relaxed))
++    {
++      addrs.erase(std::remove_if(addrs.begin(), addrs.end(),
++                                 [](const discovery::IpAddress& a)
++                                 { return !a.is_loopback(); }),
++                  addrs.end());
++    }
++
+     return addrs;
+   }
  };
