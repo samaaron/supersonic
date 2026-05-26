@@ -3,6 +3,7 @@
  */
 #include "OscUdpServer.h"
 #include "SupersonicEngine.h"
+#include "DevicePolicy.h"
 #include "Prescheduler.h"
 #include "osc/OscOutboundPacketStream.h"
 #include "osc/OscReceivedElements.h"
@@ -362,8 +363,23 @@ void OscUdpServer::sendDeviceReport() {
     std::vector<double> usableRates = current.availableSampleRates;
     bool onAggregate = !mEngine->realOutputDeviceName().empty();
     if (onAggregate) {
-        if (current.activeSampleRate > 0)
-            usableRates = { current.activeSampleRate };
+        // Offer the rates BOTH sub-devices natively support — not just the
+        // current one — so the rate is selectable on macOS. A rate only one
+        // side supports would force aggregate-internal SRC, so it's excluded.
+        std::vector<int> outRates, inRates;
+        const std::string ro = mEngine->realOutputDeviceName();
+        const std::string ri = mEngine->realInputDeviceName();
+        for (auto& dev : allDevices) {
+            if (dev.name == ro)
+                for (auto r : dev.availableSampleRates)
+                    outRates.push_back(static_cast<int>(r));
+            if (!ri.empty() && dev.name == ri)
+                for (auto r : dev.availableSampleRates)
+                    inRates.push_back(static_cast<int>(r));
+        }
+        auto offered = sonicpi::device::usableAggregateRates(outRates, inRates);
+        if (!offered.empty())
+            usableRates.assign(offered.begin(), offered.end());
     } else if (!current.inputDeviceName.empty()) {
         for (auto& dev : allDevices) {
             if (dev.name == current.inputDeviceName) {

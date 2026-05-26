@@ -43,6 +43,72 @@ double resolveWirelessExitRate(double requestedRate,
                                bool currentIsWireless,
                                bool targetIsWireless);
 
+// Decide the rate to run a CoreAudio aggregate at, after the caller has
+// TRIED to set both sub-devices to `desired` and read back what they
+// actually settled at (`actualIn` / `actualOut`). The output sub-device
+// is the aggregate's clock master and carries playback, so the engine
+// must run at the OUTPUT's actual rate — running it at a rate the output
+// doesn't share makes CoreAudio resample inside the IOProc (audible
+// distortion) and changes the system device rate for nothing.
+//
+// This implements "try the remembered rate, else use the device's rate":
+// actualOut == desired when the output accepted it, or the output's own
+// rate when it refused. A disagreeing input (e.g. a Bluetooth HFP mic
+// pinned to 16 kHz against a 48 kHz output) is resampled to match — that
+// only affects the input path, which is unavoidable for such a device.
+//   - actualOut readable (>0) → actualOut
+//   - else actualIn readable  → actualIn
+//   - else                    → desired
+double resolveAggregateRate(double desired, double actualIn, double actualOut);
+
+// Decide whether to follow a macOS system-default-output change (the
+// CoreAudio default-device listener fired). We auto-follow the default so
+// playback tracks where the user sends sound — but only onto a *real*
+// device. Following the wrong thing here is what storms the device list:
+// each follow cold-swaps + rebuilds the aggregate, which itself perturbs
+// the device list, re-firing the listener.
+//
+// Returns false (don't follow) when:
+//   - newDefault is empty (couldn't read it)
+//   - newDefault is one of our own "SuperSonic" aggregates — creating an
+//     aggregate briefly elevates it to system default; following that
+//     nests aggregation and spirals
+//   - newDefault == currentOutput (already there)
+//   - newDefault is a virtual device (NDI Audio, Loopback, BlackHole, …):
+//     apps spawn these and macOS may make one the default, but chasing it
+//     cold-swaps onto a device the user never chose and storms the device
+//     list. Explicit selection of a virtual output goes through
+//     setDeviceMode(name), not this auto-follow, so it's unaffected.
+bool shouldFollowDefaultOutputChange(const std::string& newDefault,
+                                     const std::string& currentOutput,
+                                     bool newDefaultIsVirtual);
+
+// True if `name` (or its JUCE "<name> (N)" disambiguated form) currently
+// appears in `visibleNames`. After creating a CoreAudio aggregate, JUCE's
+// device list only shows it once it rescans — which can take longer than a
+// fixed sleep. The engine polls scanForDevices() and uses this to know when
+// the aggregate is safe to open: opening it before JUCE can see it errors
+// "No such device" and forces a fallback that drops the aggregate (losing
+// the mic). Same "<base> (N)" tolerance as resolveJuceDeviceName.
+bool deviceNameVisible(const std::string& name,
+                       const std::vector<std::string>& visibleNames);
+
+// Sample rates an aggregate can run *cleanly*, given its two sub-devices'
+// available-rate lists: the rates BOTH support. A rate only one side
+// supports forces CoreAudio to resample inside the aggregate (distortion),
+// so it isn't offered. This is what the macOS rate dropdown should show
+// when on an aggregate — not just the current rate. Fallbacks keep the
+// list usable:
+//   - outputRates empty                  → inputRates
+//   - inputRates empty (output-only)     → outputRates
+//   - both present but disjoint (e.g. a  → outputRates (output is the
+//     16 kHz Bluetooth HFP mic vs a         aggregate's clock master and
+//     48 kHz output)                        the audible path; the input is
+//                                            resampled to match)
+// Order follows outputRates (already device-sorted).
+std::vector<int> usableAggregateRates(const std::vector<int>& outputRates,
+                                      const std::vector<int>& inputRates);
+
 // Hot-plug decision. Given the user's preferred output/input device
 // names, the currently-active output, the currently-active input
 // channel count, and the list of devices now visible to CoreAudio,

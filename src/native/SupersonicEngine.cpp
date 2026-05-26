@@ -693,18 +693,27 @@ void SupersonicEngine::init(const Config& cfg) {
                 }
                 if (!inName.empty() && inName != outName && outputSuitable) {
                     mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                    double aggRate = 0;
                     auto aggName = AggregateDeviceHelper::createOrUpdate(
                         outName, inName,
-                        static_cast<double>(mCurrentConfig.sampleRate));
+                        static_cast<double>(mCurrentConfig.sampleRate),
+                        &aggRate);
                     if (!aggName.empty()) {
-                        juce::Thread::sleep(300);
-                        if (auto* dt = mDeviceManager->getCurrentDeviceTypeObject())
-                            dt->scanForDevices();
+                        // Wait until JUCE can actually see the new aggregate
+                        // before opening it — a fixed sleep races CoreAudio's
+                        // device-list refresh, and opening too early errors
+                        // "No such device" → fallback that drops the mic.
+                        waitForDeviceVisible(aggName, 2000);
                         mRealOutputDeviceName = outName;
                         mRealInputDeviceName  = inName;
                         mLastInputDeviceName  = inName;
                         juce::AudioDeviceManager::AudioDeviceSetup setup;
                         mDeviceManager->getAudioDeviceSetup(setup);
+                        // Open at the rate the aggregate actually settled on
+                        // (the helper adopts the sub-devices' rate if they
+                        // refused the desired one) — don't force the rejected
+                        // rate and re-introduce aggregate SRC.
+                        if (aggRate > 0) setup.sampleRate = aggRate;
                         setup.outputDeviceName = juce::String(aggName);
                         setup.inputDeviceName  = juce::String(aggName);
                         setup.useDefaultInputChannels = false;
@@ -761,8 +770,21 @@ void SupersonicEngine::init(const Config& cfg) {
             mDeviceManager->getAudioDeviceSetup(setup);
             bool changed = false;
 
-            // Clamp sample rate to what the device actually supports
-            if (static_cast<int>(setup.sampleRate) != cfg.sampleRate) {
+            // Clamp sample rate to what the device actually supports.
+            // EXCEPTION: when running our managed CoreAudio aggregate, it is
+            // already at the sub-devices' native rate (the helper adopts that
+            // when they refuse the desired rate). Forcing cfg.sampleRate here
+            // would make CoreAudio resample inside the aggregate IOProc
+            // (audible distortion) and needlessly change the system rate, so
+            // honour the aggregate's rate instead. (Aggregates also falsely
+            // report cfg.sampleRate as "supported" via that very SRC, so the
+            // getAvailableSampleRates check below can't catch this.)
+            bool onManagedAggregate = false;
+#ifdef __APPLE__
+            onManagedAggregate = AggregateDeviceHelper::exists();
+#endif
+            if (!onManagedAggregate &&
+                static_cast<int>(setup.sampleRate) != cfg.sampleRate) {
                 auto rates = dev->getAvailableSampleRates();
                 bool supported = false;
                 for (auto r : rates) {
@@ -2413,9 +2435,15 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             double wantedRate = sampleRate > 0
                 ? sampleRate
                 : static_cast<double>(mCurrentConfig.sampleRate);
+            double aggRate = 0;
             auto aggName = AggregateDeviceHelper::createOrUpdate(
-                mRealOutputDeviceName, mRealInputDeviceName, wantedRate);
+                mRealOutputDeviceName, mRealInputDeviceName, wantedRate, &aggRate);
             if (!aggName.empty()) {
+                // Open the aggregate at the rate it actually settled on. If
+                // the sub-devices refused wantedRate the helper adopted their
+                // current rate; forcing wantedRate here would re-introduce the
+                // SRC mismatch (distortion).
+                if (aggRate > 0) setup.sampleRate = aggRate;
                 // Use the aggregate as a single device for both I/O
                 setup.outputDeviceName = juce::String(aggName);
                 setup.inputDeviceName  = juce::String(aggName);
@@ -2442,10 +2470,10 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                     }
                 }
 
-                // Let CoreAudio settle then rescan so JUCE sees the new aggregate
-                juce::Thread::sleep(200);
-                if (auto* type = mDeviceManager->getCurrentDeviceTypeObject())
-                    type->scanForDevices();
+                // Wait until JUCE can actually see the new aggregate before
+                // the setAudioDeviceSetup below opens it — a fixed sleep races
+                // CoreAudio's device-list refresh and errors "No such device".
+                waitForDeviceVisible(aggName, 2000);
             }
         } else {
             // Same device for both I/O, or no input — no aggregate needed.
@@ -3209,6 +3237,35 @@ OSStatus SupersonicEngine::defaultDevicePropertyListenerProc(
     return noErr;
 }
 
+bool SupersonicEngine::waitForDeviceVisible(const std::string& name, int timeoutMs) {
+    if (name.empty() || !mDeviceManager) return false;
+    auto* dt = mDeviceManager->getCurrentDeviceTypeObject();
+    if (!dt) return false;
+    // A freshly-created CoreAudio aggregate isn't in JUCE's list until it
+    // rescans, and that can take longer than any fixed sleep. Poll until it
+    // shows up so we never open it before JUCE can find it ("No such device").
+    constexpr int kStepMs = 50;
+    for (int waited = 0; ; waited += kStepMs) {
+        dt->scanForDevices();
+        std::vector<std::string> names;
+        for (auto& n : dt->getDeviceNames(false)) names.push_back(n.toStdString());
+        if (sonicpi::device::deviceNameVisible(name, names)) {
+            if (waited > 0) {
+                fprintf(stderr, "[audio-device] aggregate '%s' visible after %d ms\n",
+                        name.c_str(), waited);
+                fflush(stderr);
+            }
+            return true;
+        }
+        if (waited >= timeoutMs) break;
+        juce::Thread::sleep(kStepMs);
+    }
+    fprintf(stderr, "[audio-device] aggregate '%s' still not visible after %d ms — "
+            "aborting open\n", name.c_str(), timeoutMs);
+    fflush(stderr);
+    return false;
+}
+
 void SupersonicEngine::handleSystemDefaultOutputChanged() {
     if (!mDeviceMode.empty()) {
         fprintf(stderr, "[default-output-handler] bail: mDeviceMode='%s' (not empty — not in system mode)\n",
@@ -3256,18 +3313,36 @@ void SupersonicEngine::handleSystemDefaultOutputChanged() {
     CFRelease(nameCF);
     std::string newDefault(buf);
 
-    // Ignore if CoreAudio reports one of our own aggregates as the new
-    // default — creating the aggregate can briefly elevate it to default,
-    // and treating that as a "change" would trigger a nested aggregation.
-    if (newDefault.compare(0, 10, "SuperSonic") == 0) return;
-
     // If we're on an aggregate, compare the new default against the real
     // (underlying) output we're aggregating, not the aggregate's own name.
     std::string currentOutput = mRealOutputDeviceName.empty()
         ? (mDeviceManager->getCurrentAudioDevice()
            ? mDeviceManager->getCurrentAudioDevice()->getName().toStdString() : "")
         : mRealOutputDeviceName;
-    if (newDefault == currentOutput) return;
+
+    // Is the new default a virtual device (NDI Audio, Loopback, …)? Read its
+    // transport type straight off the device we already resolved.
+    uint32_t transport = 0;
+    UInt32 tSz = sizeof(transport);
+    AudioObjectPropertyAddress tAddr = {
+        kAudioDevicePropertyTransportType,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+    AudioObjectGetPropertyData(defaultID, &tAddr, 0, nullptr, &tSz, &transport);
+    const bool newIsVirtual = CoreAudioTransport::isVirtual(transport);
+
+    // Don't chase our own aggregates, no-ops, or virtual devices: chasing a
+    // virtual device an app spawned cold-swaps onto something the user never
+    // chose and storms the device list.
+    if (!sonicpi::device::shouldFollowDefaultOutputChange(
+            newDefault, currentOutput, newIsVirtual)) {
+        fprintf(stderr, "[audio-device] system default → '%s' (virtual=%d); "
+                "not following (staying on '%s')\n",
+                newDefault.c_str(), newIsVirtual ? 1 : 0, currentOutput.c_str());
+        fflush(stderr);
+        return;
+    }
 
     fprintf(stderr, "[audio-device] system default output changed: '%s' -> '%s'\n",
             currentOutput.c_str(), newDefault.c_str());

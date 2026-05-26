@@ -18,6 +18,7 @@
 
 #include "AggregateDeviceHelper.h"
 #include "DeviceInfo.h"
+#include "DevicePolicy.h"
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <atomic>
@@ -188,7 +189,8 @@ void cleanupOrphaned() {
 
 std::string createOrUpdate(const std::string& outputDeviceName,
                            const std::string& inputDeviceName,
-                           double desiredSampleRate) {
+                           double desiredSampleRate,
+                           double* achievedSampleRate) {
     // Don't destroy the existing aggregate here: JUCE's CoreAudioIODevice
     // still holds a reference to it, and its later AudioComponentInstance-
     // Dispose would hit a dangling CoreAudio id and crash. Stash the old
@@ -301,12 +303,21 @@ std::string createOrUpdate(const std::string& outputDeviceName,
             kAudioObjectPropertyElementMain
         };
         AudioObjectGetPropertyData(outputID, &outRateAddr, 0, nullptr, &sz, &actualOut);
+        // Don't force the desired rate when a sub-device won't take it:
+        // running the aggregate at a rate its (clock-master) output doesn't
+        // share makes CoreAudio resample inside the IOProc (audible
+        // distortion) and needlessly changes the system device rate. Run at
+        // the rate the output actually settled at.
+        const double resolved = sonicpi::device::resolveAggregateRate(
+            masterRate, actualIn, actualOut);
         fprintf(stderr, "[aggregate] actual rates: in=%.0f out=%.0f (requested %.0f)%s\n",
                 actualIn, actualOut, masterRate,
-                (int)actualIn != (int)masterRate || (int)actualOut != (int)masterRate
-                    ? " — MISMATCH, expect aggregate-level SRC distortion" : "");
+                (int)resolved != (int)masterRate
+                    ? " — sub-device refused; running at device rate" : "");
         fflush(stderr);
+        masterRate = resolved;
     }
+    if (achievedSampleRate) *achievedSampleRate = masterRate;
 
     // Orphan cleanup now runs at boot via SupersonicEngine::init()
 

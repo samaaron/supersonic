@@ -390,6 +390,10 @@ private:
     static OSStatus defaultDevicePropertyListenerProc(
         AudioObjectID, UInt32, const AudioObjectPropertyAddress*, void* inClientData);
     bool mDefaultDevicePropertyListenerInstalled = false;
+    // Poll scanForDevices() until a just-created aggregate `name` appears in
+    // JUCE's device list (or timeoutMs elapses). Returns true once visible.
+    // Avoids the "No such device" race from opening it after only a fixed sleep.
+    bool waitForDeviceVisible(const std::string& name, int timeoutMs);
 #endif
 
     // Declaration order matters: mSuperClock owns Link's network

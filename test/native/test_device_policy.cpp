@@ -660,3 +660,180 @@ TEST_CASE("PlanDeviceSwitch: tolerates JUCE '<base> (N)' suffix under current dr
     REQUIRE(plan.targetDriver == "DirectSound");
     REQUIRE(plan.targetDevice == "USB Audio (2)");
 }
+
+// =============================================================================
+// resolveAggregateRate
+//
+// After the engine TRIES to set both aggregate sub-devices to the desired
+// (remembered) rate, this decides the rate to actually run at. The output
+// is the clock master / audible path, so we run at the rate it settled on;
+// forcing a rate the output doesn't share causes aggregate-level SRC
+// distortion (and changes the system rate for nothing).
+// =============================================================================
+
+static double aggRate(double desired, double in, double out) {
+    return sonicpi::device::resolveAggregateRate(desired, in, out);
+}
+
+TEST_CASE("AggregateRate: output accepted the desired rate → use it",
+          "[AggregateRate]") {
+    // Remembered 44.1k, both sub-devices took it. Honour it.
+    REQUIRE(aggRate(44100, 44100, 44100) == 44100);
+}
+
+TEST_CASE("AggregateRate: both refused but agree → adopt their shared rate",
+          "[AggregateRate]") {
+    // Built-in Speakers+Mic pinned at 48k, remembered pref 44.1k. Don't
+    // force 44.1k over 48k (SRC); run 48k.
+    REQUIRE(aggRate(44100, 48000, 48000) == 48000);
+}
+
+TEST_CASE("AggregateRate: sub-devices disagree → output (clock master) wins",
+          "[AggregateRate]") {
+    // Bluetooth HFP mic forced to 16k while the output is 48k. Run at the
+    // output's 48k (no output-side SRC); the 16k input is resampled to match
+    // — unavoidable for such a device, and only affects the input path.
+    REQUIRE(aggRate(48000, 16000, 48000) == 48000);
+    // Even if the input happened to take the desired rate, the output is
+    // the master: a 44.1k input against a 48k output still runs at 48k.
+    REQUIRE(aggRate(44100, 44100, 48000) == 48000);
+}
+
+TEST_CASE("AggregateRate: output rate unreadable → fall back to input",
+          "[AggregateRate]") {
+    REQUIRE(aggRate(44100, 44100, 0) == 44100);
+}
+
+TEST_CASE("AggregateRate: nothing readable → fall back to desired",
+          "[AggregateRate]") {
+    REQUIRE(aggRate(44100, 0, 0) == 44100);
+}
+
+// =============================================================================
+// shouldFollowDefaultOutputChange
+//
+// The CoreAudio default-output listener fires whenever the system default
+// changes — including changes our own aggregate create/destroy provokes.
+// Following the wrong target cold-swaps + rebuilds the aggregate, which
+// perturbs the device list and re-fires the listener: the storm/freeze.
+// These cases lock in what we will and won't chase.
+// =============================================================================
+
+static bool follow(const std::string& nd, const std::string& cur, bool virt) {
+    return sonicpi::device::shouldFollowDefaultOutputChange(nd, cur, virt);
+}
+
+TEST_CASE("FollowDefault: real hardware device, not current → follow",
+          "[FollowDefault]") {
+    REQUIRE(follow("External Headphones", "MacBook Pro Speakers", false));
+}
+
+TEST_CASE("FollowDefault: virtual device (NDI/Loopback) → do NOT follow",
+          "[FollowDefault]") {
+    // NDI Audio (virtual) became the system default — must not be chased.
+    REQUIRE_FALSE(follow("NDI Audio", "MacBook Pro Speakers", true));
+    REQUIRE_FALSE(follow("Loopback Audio", "iRig USB", true));
+}
+
+TEST_CASE("FollowDefault: new default is already the current output → no-op",
+          "[FollowDefault]") {
+    REQUIRE_FALSE(follow("MacBook Pro Speakers", "MacBook Pro Speakers", false));
+}
+
+TEST_CASE("FollowDefault: our own SuperSonic aggregate elevated to default → ignore",
+          "[FollowDefault]") {
+    // Creating an aggregate can briefly make it the system default.
+    REQUIRE_FALSE(follow("SuperSonic#7", "MacBook Pro Speakers", false));
+}
+
+TEST_CASE("FollowDefault: empty new-default name → ignore",
+          "[FollowDefault]") {
+    REQUIRE_FALSE(follow("", "MacBook Pro Speakers", false));
+}
+
+// =============================================================================
+// deviceNameVisible
+//
+// A just-created CoreAudio aggregate isn't in JUCE's device list until it
+// rescans; opening it before then errors "No such device". The engine polls
+// scanForDevices() and uses this to gate the open. These lock in the
+// match/suffix/absent rules the poll depends on.
+// =============================================================================
+
+static bool visible(const std::string& n, std::vector<std::string> names) {
+    return sonicpi::device::deviceNameVisible(n, names);
+}
+
+TEST_CASE("DeviceVisible: exact match present → visible (safe to open)",
+          "[DeviceVisible]") {
+    REQUIRE(visible("SuperSonic#7", {"MacBook Pro Speakers", "SuperSonic#7"}));
+}
+
+TEST_CASE("DeviceVisible: absent → not visible (keep polling, don't open)",
+          "[DeviceVisible]") {
+    REQUIRE_FALSE(visible("SuperSonic#7", {"MacBook Pro Speakers"}));
+}
+
+TEST_CASE("DeviceVisible: tolerates JUCE '<name> (N)' disambiguation suffix",
+          "[DeviceVisible]") {
+    REQUIRE(visible("USB Audio", {"USB Audio (2)"}));
+}
+
+TEST_CASE("DeviceVisible: empty list or empty name → not visible",
+          "[DeviceVisible]") {
+    REQUIRE_FALSE(visible("SuperSonic#1", {}));
+    REQUIRE_FALSE(visible("", {"SuperSonic#1"}));
+}
+
+TEST_CASE("DeviceVisible: does not false-match a longer base name",
+          "[DeviceVisible]") {
+    // "USB Audio" must NOT be considered visible just because "USB Audio Pro"
+    // is present (same stricter rule resolveJuceDeviceName enforces).
+    REQUIRE_FALSE(visible("USB Audio", {"USB Audio Pro"}));
+}
+
+// =============================================================================
+// usableAggregateRates
+//
+// The macOS rate dropdown collapses to the current rate when on an aggregate.
+// This decides what it *should* offer: the rates both sub-devices support,
+// so we never offer a rate that forces aggregate-internal SRC. These lock in
+// the intersection + fallbacks.
+// =============================================================================
+
+static std::vector<int> aggRates(std::vector<int> out, std::vector<int> in) {
+    return sonicpi::device::usableAggregateRates(out, in);
+}
+
+TEST_CASE("UsableAggRates: both support the same set → that set",
+          "[UsableAggRates]") {
+    REQUIRE(aggRates({44100, 48000, 88200, 96000},
+                     {44100, 48000, 88200, 96000})
+            == std::vector<int>{44100, 48000, 88200, 96000});
+}
+
+TEST_CASE("UsableAggRates: intersection when input supports fewer",
+          "[UsableAggRates]") {
+    // Built-in speakers do 44.1–96k; a mic that only does 44.1/48 →
+    // offer just the shared 44.1/48.
+    REQUIRE(aggRates({44100, 48000, 88200, 96000}, {44100, 48000})
+            == std::vector<int>{44100, 48000});
+}
+
+TEST_CASE("UsableAggRates: disjoint (BT 16k mic vs 48k out) → output rates",
+          "[UsableAggRates]") {
+    // The output is the clock master / audible path; offer its rates and let
+    // the odd-rate input be resampled (unavoidable for a 16k HFP mic).
+    REQUIRE(aggRates({44100, 48000}, {16000})
+            == std::vector<int>{44100, 48000});
+}
+
+TEST_CASE("UsableAggRates: no input sub-device → output rates",
+          "[UsableAggRates]") {
+    REQUIRE(aggRates({44100, 48000}, {}) == std::vector<int>{44100, 48000});
+}
+
+TEST_CASE("UsableAggRates: output list empty → fall back to input",
+          "[UsableAggRates]") {
+    REQUIRE(aggRates({}, {44100, 48000}) == std::vector<int>{44100, 48000});
+}

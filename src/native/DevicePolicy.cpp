@@ -43,6 +43,49 @@ double resolveWirelessExitRate(double requestedRate,
     return static_cast<double>(preWirelessRate);
 }
 
+double resolveAggregateRate(double desired, double actualIn, double actualOut) {
+    // Output is the aggregate's clock master and the audible path — run at
+    // whatever rate it actually settled on (== desired if it accepted that,
+    // its own rate if it refused). Fall back to the input rate, then the
+    // desired rate, only when the output rate is unreadable.
+    if (static_cast<int>(actualOut) > 0) return actualOut;
+    if (static_cast<int>(actualIn)  > 0) return actualIn;
+    return desired;
+}
+
+bool shouldFollowDefaultOutputChange(const std::string& newDefault,
+                                     const std::string& currentOutput,
+                                     bool newDefaultIsVirtual) {
+    if (newDefault.empty())                           return false;
+    if (newDefault.compare(0, 10, "SuperSonic") == 0) return false;
+    if (newDefault == currentOutput)                  return false;
+    if (newDefaultIsVirtual)                          return false;
+    return true;
+}
+
+bool deviceNameVisible(const std::string& name,
+                       const std::vector<std::string>& visibleNames) {
+    if (name.empty()) return false;
+    // resolveJuceDeviceName returns the exact name, the "<name> (N)" form if
+    // that's what's present, or `name` unchanged when nothing matches. So a
+    // genuine match is exactly "the resolved name is actually in the list".
+    const std::string resolved = resolveJuceDeviceName(name, visibleNames);
+    for (const auto& n : visibleNames)
+        if (n == resolved) return true;
+    return false;
+}
+
+std::vector<int> usableAggregateRates(const std::vector<int>& outputRates,
+                                      const std::vector<int>& inputRates) {
+    if (outputRates.empty()) return inputRates;
+    if (inputRates.empty())  return outputRates;
+    std::vector<int> isect;
+    for (int o : outputRates)
+        for (int i : inputRates)
+            if (o == i) { isect.push_back(o); break; }
+    return isect.empty() ? outputRates : isect;
+}
+
 std::string resolveJuceDeviceName(const std::string& rawName,
                                   const std::vector<std::string>& visibleDevices) {
     if (rawName.empty()) return rawName;

@@ -30,9 +30,15 @@ namespace AggregateDeviceHelper {
 // input device's current rate" — legacy behaviour, but risks
 // aggregate-level SRC distortion when sub-devices end up at a rate
 // the engine isn't expecting.
+// achievedSampleRate (optional out): the rate the aggregate actually runs
+// at. Normally == desiredSampleRate, but if a sub-device refuses that rate
+// the helper adopts the rate the devices settled at rather than forcing a
+// resampling mismatch. Callers should open the device at this rate (not the
+// desired one) so they don't re-force the rejected rate.
 std::string createOrUpdate(const std::string& outputDeviceName,
                            const std::string& inputDeviceName,
-                           double desiredSampleRate = 0);
+                           double desiredSampleRate = 0,
+                           double* achievedSampleRate = nullptr);
 
 // Destroy the managed Aggregate Device if one exists.
 void destroy();
