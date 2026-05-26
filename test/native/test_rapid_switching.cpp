@@ -17,6 +17,7 @@
 #include "OscBuilder.h"
 #include <thread>
 #include <chrono>
+#include <atomic>
 #include <vector>
 
 // =============================================================================
@@ -474,8 +475,10 @@ TEST_CASE("RapidSwitch: concurrent swap rejected during cold swap",
           "[RapidSwitch]") {
     EngineFixture fix;
 
-    // Slow down the swap with a delay hook
-    fix.engine().testSwapFailure = [](bool) -> std::string {
+    // Slow the swap with a delay hook that signals once it holds mSwapMutex.
+    std::atomic<bool> swapEntered{false};
+    fix.engine().testSwapFailure = [&swapEntered](bool) -> std::string {
+        swapEntered.store(true, std::memory_order_release);
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         return "slow failure";
     };
@@ -486,8 +489,10 @@ TEST_CASE("RapidSwitch: concurrent swap rejected during cold swap",
         firstResult = fix.engine().switchDevice("", 44100);
     });
 
-    // Give the first swap time to acquire the mutex
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait until the first swap is inside the critical section (holds
+    // mSwapMutex) before issuing competing swaps — a fixed sleep races the
+    // lock acquisition on a loaded runner.
+    REQUIRE(fix.pollUntil([&] { return swapEntered.load(std::memory_order_acquire); }));
 
     // Three rapid attempts should all be rejected
     for (int i = 0; i < 3; ++i) {
@@ -515,7 +520,9 @@ TEST_CASE("RapidSwitch: concurrent switchDriver rejected during switchDevice",
           "[RapidSwitch]") {
     EngineFixture fix;
 
-    fix.engine().testSwapFailure = [](bool) -> std::string {
+    std::atomic<bool> swapEntered{false};
+    fix.engine().testSwapFailure = [&swapEntered](bool) -> std::string {
+        swapEntered.store(true, std::memory_order_release);
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         return "slow failure";
     };
@@ -525,7 +532,7 @@ TEST_CASE("RapidSwitch: concurrent switchDriver rejected during switchDevice",
         deviceResult = fix.engine().switchDevice("", 44100);
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    REQUIRE(fix.pollUntil([&] { return swapEntered.load(std::memory_order_acquire); }));
 
     // switchDriver shares mSwapMutex — should be rejected
     auto driverResult = fix.engine().switchDriver("ALSA");

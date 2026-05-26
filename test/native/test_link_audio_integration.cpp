@@ -190,9 +190,9 @@ TEST_CASE("LinkAudio: /link/reset clears active input subscriptions",
     REQUIRE(countInputs(fx) == 1);
 
     fx.send(osc_test::message("/link/reset"));
-    // Allow a moment for the reset to land before re-querying.
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    CHECK(countInputs(fx) == 0);
+    // Poll until the async reset has cleared the subscription, rather than
+    // guessing a fixed delay a loaded runner may overrun.
+    CHECK(fx.pollUntil([&] { return countInputs(fx) == 0; }));
 }
 
 TEST_CASE("LinkAudio: addLinkAudioInput rejects busIdx in output/input range",
@@ -358,8 +358,7 @@ TEST_CASE("LinkAudio: setLinkVisibility(Off) clears active input subscriptions",
     REQUIRE(countInputs(fx) == 1);
 
     fx.send(osc_test::message("/link/visibility", int32_t{0}));  // Off
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    CHECK(countInputs(fx) == 0);
+    CHECK(fx.pollUntil([&] { return countInputs(fx) == 0; }));
 }
 
 namespace {
@@ -671,8 +670,7 @@ TEST_CASE("LinkAudio: /link/audio/input/remove silences the bus",
         s << "FakeLive" << "Main";
         fx.send(b.end());
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    CHECK(countInputs(fx) == 0);
+    CHECK(fx.pollUntil([&] { return countInputs(fx) == 0; }));
 
     // After remove + a few audio blocks, drainLinkAudioInputsToBuses
     // no longer writes the pair — and nothing else is writing here,

@@ -200,10 +200,11 @@ TEST_CASE("metrics: prescheduler_pending_peak grows with concurrent FAR_FUTURE s
         fx.engine().sendBundle(wallClockNTP() + 60.0 + i,
                                { OscBuilder::message("/status") });
     }
-    // Give the prescheduler thread a moment to register the schedules
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    // Peak must have at some point reached at least the pending count
-    CHECK(metrics(fx).prescheduler_pending_peak.load() >= before + N);
+    // Wait until the prescheduler thread has registered all N schedules,
+    // rather than guessing a fixed delay that a loaded runner may overrun.
+    CHECK(fx.pollUntil([&] {
+        return metrics(fx).prescheduler_pending_peak.load() >= before + N;
+    }));
 }
 
 TEST_CASE("metrics: prescheduler_bundles_scheduled increments on FAR_FUTURE",
@@ -212,9 +213,9 @@ TEST_CASE("metrics: prescheduler_bundles_scheduled increments on FAR_FUTURE",
     uint32_t before = metrics(fx).prescheduler_bundles_scheduled.load();
     fx.engine().sendBundle(wallClockNTP() + 60.0,
                            { OscBuilder::message("/status") });
-    // Give the prescheduler thread a moment to register the schedule
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    CHECK(metrics(fx).prescheduler_bundles_scheduled.load() > before);
+    CHECK(fx.pollUntil([&] {
+        return metrics(fx).prescheduler_bundles_scheduled.load() > before;
+    }));
 }
 
 TEST_CASE("metrics: prescheduler_bypassed increments on FAR_FUTURE",
@@ -234,7 +235,11 @@ TEST_CASE("metrics: prescheduler_dispatched increments after scheduled fire",
     // prescheduler, but close enough that we can wait it out.
     fx.engine().sendBundle(wallClockNTP() + 0.7,
                            { OscBuilder::message("/status") });
-    std::this_thread::sleep_for(std::chrono::milliseconds(900));
+    // The scheduled /status emits a /status.reply when it dispatches — wait on
+    // that instead of a fixed sleep (the prescheduler fires off wall time, so a
+    // loaded runner can wake late).
+    OscReply r;
+    REQUIRE(fx.waitForReply("/status.reply", r, 3000));
     CHECK(metrics(fx).prescheduler_dispatched.load() > before);
 }
 
@@ -244,20 +249,26 @@ TEST_CASE("metrics: prescheduler_total_dispatches increments after fire",
     uint32_t before = metrics(fx).prescheduler_total_dispatches.load();
     fx.engine().sendBundle(wallClockNTP() + 0.7,
                            { OscBuilder::message("/status") });
-    std::this_thread::sleep_for(std::chrono::milliseconds(900));
+    OscReply r;
+    REQUIRE(fx.waitForReply("/status.reply", r, 3000));
     CHECK(metrics(fx).prescheduler_total_dispatches.load() > before);
 }
 
 TEST_CASE("metrics: prescheduler_events_cancelled increments on purge",
           "[metrics][prescheduler]") {
     EngineFixture fx;
+    uint32_t schedBefore = metrics(fx).prescheduler_bundles_scheduled.load();
     fx.engine().sendBundle(wallClockNTP() + 60.0,
                            { OscBuilder::message("/status") });
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Ensure the bundle is registered in the prescheduler before we purge.
+    REQUIRE(fx.pollUntil([&] {
+        return metrics(fx).prescheduler_bundles_scheduled.load() > schedBefore;
+    }));
     uint32_t before = metrics(fx).prescheduler_events_cancelled.load();
     fx.engine().purge();
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    CHECK(metrics(fx).prescheduler_events_cancelled.load() > before);
+    CHECK(fx.pollUntil([&] {
+        return metrics(fx).prescheduler_events_cancelled.load() > before;
+    }));
 }
 
 TEST_CASE("metrics: prescheduler_min_headroom_ms initialised to sentinel",
@@ -274,10 +285,15 @@ TEST_CASE("metrics: prescheduler_min_headroom_ms recorded after FAR_FUTURE dispa
     // Dispatch fires at ~ now + 0.2s with ~500ms remaining until exec.
     fx.engine().sendBundle(wallClockNTP() + 0.7,
                            { OscBuilder::message("/status") });
-    std::this_thread::sleep_for(std::chrono::milliseconds(900));
-    uint32_t headroom = metrics(fx).prescheduler_min_headroom_ms.load();
-    CHECK(headroom != 0xFFFFFFFFu);
-    CHECK(headroom < 1000);  // sanity bound: well under 1 second
+    // Most timing-sensitive metrics assertion: headroom is recorded only on an
+    // on-time dispatch. The reply barrier guarantees the dispatch happened;
+    // poll in case the relaxed store lags on weak-memory hosts.
+    OscReply r;
+    REQUIRE(fx.waitForReply("/status.reply", r, 3000));
+    CHECK(fx.pollUntil([&] {
+        return metrics(fx).prescheduler_min_headroom_ms.load() != 0xFFFFFFFFu;
+    }));
+    CHECK(metrics(fx).prescheduler_min_headroom_ms.load() < 1000);  // sanity bound
 }
 
 TEST_CASE("metrics: prescheduler_lates is 0 at idle",
@@ -301,7 +317,8 @@ TEST_CASE("metrics: prescheduler_retries_failed is 0 at idle",
     EngineFixture fx;
     fx.engine().sendBundle(wallClockNTP() + 0.7,
                            { OscBuilder::message("/status") });
-    std::this_thread::sleep_for(std::chrono::milliseconds(900));
+    OscReply r;
+    REQUIRE(fx.waitForReply("/status.reply", r, 3000));
     CHECK(metrics(fx).prescheduler_retries_failed.load() == 0);
 }
 
@@ -451,7 +468,12 @@ TEST_CASE("metrics: out_buffer_peak_bytes > 0 after replies",
     fx.send(osc_test::message("/status"));
     OscReply r;
     REQUIRE(fx.waitForReply("/status.reply", r));
-    CHECK(metrics(fx).out_buffer_peak_bytes.load() > 0);
+    // The reply guarantees a reply was written to the OUT buffer, but the peak
+    // is stored by the audio thread with memory_order_relaxed (unordered with
+    // the reply), so on weak-memory arm64 it can lag. Poll until visible.
+    CHECK(fx.pollUntil([&] {
+        return metrics(fx).out_buffer_peak_bytes.load() > 0;
+    }));
 }
 
 TEST_CASE("metrics: debug_buffer_peak_bytes is readable",

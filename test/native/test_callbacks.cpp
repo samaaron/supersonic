@@ -150,24 +150,22 @@ TEST_CASE("Sending invalid OSC command generates debug output", "[callback]") {
     OscReply syncReply;
     fx.waitForReply("/synced", syncReply);
 
-    auto msgs = fx.debugMessages();
-    // The engine should produce at least some debug output (dumpOSC echo
-    // and/or "Command not found" error). If headless mode suppresses it,
-    // we just verify the mechanism does not crash.
-    // On most configurations dumpOSC generates output for every received message.
-    if (!msgs.empty()) {
-        bool found = false;
-        for (auto& m : msgs) {
+    // Debug output is drained by a separate worker thread, so the /synced
+    // reply (which travels the reply ring) doesn't guarantee the dumpOSC echo
+    // has landed in debugMessages() yet — and the shared debug ring can still
+    // carry non-matching lines from a prior test. Poll for the echo rather
+    // than reading once, so a single early read can't catch a partial state.
+    bool found = fx.pollUntil([&] {
+        for (auto& m : fx.debugMessages()) {
             if (m.find("nonexistent") != std::string::npos ||
-                m.find("Command") != std::string::npos ||
-                m.find("OSC") != std::string::npos) {
-                found = true;
-                break;
+                m.find("Command")     != std::string::npos ||
+                m.find("OSC")         != std::string::npos) {
+                return true;
             }
         }
-        CHECK(found);
-    }
-    SUCCEED();
+        return false;
+    });
+    CHECK(found);
 }
 
 // =============================================================================

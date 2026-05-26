@@ -14,7 +14,7 @@
 #include <thread>
 #include <filesystem>
 
-static SupersonicEngine::Config defaultConfig() {
+SupersonicEngine::Config EngineFixture::defaultConfig() {
     SupersonicEngine::Config cfg;
     cfg.sampleRate        = 48000;
     cfg.bufferSize        = 128;
@@ -123,6 +123,17 @@ bool EngineFixture::sendAndExpectDone(const osc_test::Packet& pkt,
     send(pkt);
     OscReply r;
     return waitForReply("/done", r, timeoutMs);
+}
+
+bool EngineFixture::waitForBlocks(uint32_t n, int timeoutMs) {
+    const uint32_t start =
+        mEngine.audioCallback().processCount.load(std::memory_order_acquire);
+    // Unsigned wrap is fine: (now - start) is the number of blocks rendered
+    // since the snapshot regardless of counter wraparound.
+    return pollUntil([&] {
+        return mEngine.audioCallback().processCount.load(
+                   std::memory_order_acquire) - start >= n;
+    }, timeoutMs);
 }
 
 std::vector<OscReply> EngineFixture::allReplies() const {

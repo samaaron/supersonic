@@ -14,6 +14,9 @@
 #include <mutex>
 #include <condition_variable>
 #include <string>
+#include <chrono>
+#include <thread>
+#include <cstdint>
 
 struct OscReply {
     std::string          address;
@@ -45,6 +48,28 @@ public:
     bool sendAndExpectDone(const osc_test::Packet& pkt,
                            int timeoutMs = 2000);
 
+    // ── Progress waits (robust alternative to fixed sleeps) ────────────
+    // Wait until the audio thread has rendered `n` more blocks than now,
+    // or timeout. Anchors reads of live audio/state to actual DSP progress
+    // instead of wall-clock, which a loaded CI runner can't honour — a
+    // fixed sleep_for elapses while the audio thread was preempted.
+    bool waitForBlocks(uint32_t n, int timeoutMs = 2000);
+
+    // Poll `pred()` (every ~2 ms) until it returns true, or timeout.
+    // Generic deadline loop for non-block conditions: a metric atomic
+    // reaching a value, a counter draining to zero. Returns the final
+    // pred() value (true = condition met before the deadline).
+    template <typename Pred>
+    bool pollUntil(Pred pred, int timeoutMs = 2000) {
+        const auto deadline = std::chrono::steady_clock::now()
+                            + std::chrono::milliseconds(timeoutMs);
+        while (true) {
+            if (pred()) return true;
+            if (std::chrono::steady_clock::now() >= deadline) return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+
     // Get all collected replies so far
     std::vector<OscReply> allReplies() const;
     void clearReplies();
@@ -60,6 +85,11 @@ public:
 
     // ── Engine access ──────────────────────────────────────────────────
     SupersonicEngine& engine() { return mEngine; }
+
+    // The headless config the default constructor uses. Exposed so tests
+    // can tweak one field (e.g. freewheelClock) and pass it to the
+    // Config-taking constructor without replicating the whole struct.
+    static SupersonicEngine::Config defaultConfig();
 
     // Stop the HeadlessDriver so callers can own process_audio exclusively
     void stopHeadlessDriver();

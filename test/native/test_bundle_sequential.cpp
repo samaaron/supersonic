@@ -141,9 +141,10 @@ static void sendBundle(EngineFixture& fx, const BundleBytes& pkt) {
 
 // ──────────────────────────────────────────────────────────────────────────
 // Audio capture helpers — peak amplitude over the most-recently-written
-// scsynth output block. The HeadlessDriver ticks process_audio() at real
-// audio rate; sampling the output bus after a sleep gives us "peak in the
-// block around timepoint T".
+// scsynth output block. Capture windows are measured in *rendered blocks*
+// (via the HeadlessDriver's processCount), not wall-clock time, so a slide's
+// captured ramp position is deterministic even when a loaded CI runner
+// schedules the audio thread erratically.
 // ──────────────────────────────────────────────────────────────────────────
 
 static float capturePeak() {
@@ -161,18 +162,36 @@ static float capturePeak() {
     return peak;
 }
 
-// Average of several peak samples taken 2ms apart — smooths out single-block
-// zero-crossing dips.
-static float peakOverMs(int durationMs) {
+// Audio blocks per millisecond of sample time (128-sample blocks @ 48 kHz).
+static uint32_t blocksForMs(int ms) {
+    return static_cast<uint32_t>(static_cast<int64_t>(ms) * 48000 / 1000 / 128);
+}
+
+// Peak |sample| over a window measured in *rendered blocks*, not wall-clock.
+// Anchoring to processCount makes the captured ramp position deterministic
+// regardless of how slowly the audio thread is scheduled on a loaded runner
+// (a fixed wall sleep would catch the ramp at a different point under load).
+static float peakOverBlocks(EngineFixture& fx, uint32_t numBlocks) {
+    auto& pc = fx.engine().audioCallback().processCount;
+    const uint32_t start = pc.load(std::memory_order_acquire);
     float maxPeak = 0.0f;
-    auto deadline = std::chrono::steady_clock::now()
-                  + std::chrono::milliseconds(durationMs);
-    while (std::chrono::steady_clock::now() < deadline) {
+    do {
         float p = capturePeak();
         if (p > maxPeak) maxPeak = p;
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
+    } while (pc.load(std::memory_order_acquire) - start < numBlocks);
     return maxPeak;
+}
+
+// Probe the amp ramp at a deterministic early point (~50 ms of sample time in)
+// and a late point (~1450 ms in), both measured in rendered blocks so the
+// captured ramp positions don't drift under CI load. The long late wait gets a
+// generous timeout — it must wait for ~525 real blocks however slowly they tick.
+static void probeSlide(EngineFixture& fx, float& earlyPeak, float& latePeak) {
+    fx.waitForBlocks(blocksForMs(50));
+    earlyPeak = peakOverBlocks(fx, blocksForMs(150));
+    fx.waitForBlocks(blocksForMs(1400), /*timeoutMs*/ 20000);
+    latePeak  = peakOverBlocks(fx, blocksForMs(200));
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -304,10 +323,8 @@ TEST_CASE("Bundle /s_new + /n_set(amp_slide=2): amplitude slides from quiet to l
         nSetAmpSlide(/*nodeId*/2200, /*slide*/2.0f, /*amp*/1.0f),
     }));
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    float earlyPeak = peakOverMs(150);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
-    float latePeak  = peakOverMs(200);
+    float earlyPeak = 0.0f, latePeak = 0.0f;
+    probeSlide(fx, earlyPeak, latePeak);
 
     INFO("earlyPeak=" << earlyPeak << " latePeak=" << latePeak);
 
@@ -331,8 +348,8 @@ TEST_CASE("Bundle /s_new + /n_set(amp_slide=0): amplitude is immediately loud (n
         nSetAmpSlide(2201, 0.0f, 1.0f),
     }));
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    float earlyPeak = peakOverMs(150);
+    fx.waitForBlocks(blocksForMs(50));
+    float earlyPeak = peakOverBlocks(fx, blocksForMs(150));
 
     INFO("earlyPeak=" << earlyPeak);
     CHECK(earlyPeak > 0.4f);
@@ -347,10 +364,8 @@ TEST_CASE("/s_new alone (no /n_set): amp=0.02 stays quiet throughout",
 
     fx.send(sNewDsaw(2202, 1, 50.0f, 0.02f, 120.0f, 6.0f));
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    float earlyPeak  = peakOverMs(150);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
-    float laterPeak  = peakOverMs(200);
+    float earlyPeak = 0.0f, laterPeak = 0.0f;
+    probeSlide(fx, earlyPeak, laterPeak);
 
     INFO("earlyPeak=" << earlyPeak << " laterPeak=" << laterPeak);
 
@@ -373,10 +388,8 @@ TEST_CASE("Non-bundle: /s_new and /n_set as two back-to-back messages",
     fx.send(sNewDsaw(2300, 1, 50.0f, 0.02f, 120.0f, 6.0f));
     fx.send(nSetAmpSlide(2300, 2.0f, 1.0f));
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    float earlyPeak = peakOverMs(150);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
-    float latePeak  = peakOverMs(200);
+    float earlyPeak = 0.0f, latePeak = 0.0f;
+    probeSlide(fx, earlyPeak, latePeak);
 
     INFO("earlyPeak=" << earlyPeak << " latePeak=" << latePeak);
     CHECK(earlyPeak < 0.15f);
@@ -396,10 +409,8 @@ TEST_CASE("Immediate bundle (timetag=0): /s_new + /n_set slides correctly",
         nSetAmpSlide(2301, 2.0f, 1.0f),
     }));
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    float earlyPeak = peakOverMs(150);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
-    float latePeak  = peakOverMs(200);
+    float earlyPeak = 0.0f, latePeak = 0.0f;
+    probeSlide(fx, earlyPeak, latePeak);
 
     INFO("earlyPeak=" << earlyPeak << " latePeak=" << latePeak);
     CHECK(earlyPeak < 0.15f);
@@ -411,7 +422,9 @@ TEST_CASE("Immediate bundle (timetag=0): /s_new + /n_set slides correctly",
 
 TEST_CASE("Near-future scheduled bundle: /s_new + /n_set slides correctly",
           "[bundle_sequential][category]") {
-    EngineFixture fx;
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.freewheelClock = true;   // deterministic future-bundle dispatch under load
+    EngineFixture fx(cfg);
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     // ~50ms in the future — past the bypass-lookahead threshold in practice,
@@ -422,10 +435,10 @@ TEST_CASE("Near-future scheduled bundle: /s_new + /n_set slides correctly",
         nSetAmpSlide(2302, 2.0f, 1.0f),
     }));
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));  // wait for fire
-    float earlyPeak = peakOverMs(150);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
-    float latePeak  = peakOverMs(200);
+    fx.waitForBlocks(blocksForMs(100));   // wait for the future bundle to fire
+    float earlyPeak = peakOverBlocks(fx, blocksForMs(150));
+    fx.waitForBlocks(blocksForMs(1400), /*timeoutMs*/ 20000);
+    float latePeak  = peakOverBlocks(fx, blocksForMs(200));
 
     INFO("earlyPeak=" << earlyPeak << " latePeak=" << latePeak);
     CHECK(earlyPeak < 0.15f);
@@ -437,7 +450,9 @@ TEST_CASE("Near-future scheduled bundle: /s_new + /n_set slides correctly",
 
 TEST_CASE("Two same-timetag bundles (/s_new then /n_set in separate bundles)",
           "[bundle_sequential][category]") {
-    EngineFixture fx;
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.freewheelClock = true;   // deterministic future-bundle dispatch under load
+    EngineFixture fx(cfg);
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     // Two bundles targeting the same future timetag. They'll be drained
@@ -449,10 +464,10 @@ TEST_CASE("Two same-timetag bundles (/s_new then /n_set in separate bundles)",
     sendBundle(fx, bundleOf(when, { sNewDsaw(2303, 1, 50.0f, 0.02f, 120.0f, 6.0f) }));
     sendBundle(fx, bundleOf(when, { nSetAmpSlide(2303, 2.0f, 1.0f) }));
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    float earlyPeak = peakOverMs(150);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
-    float latePeak  = peakOverMs(200);
+    fx.waitForBlocks(blocksForMs(100));   // wait for the future bundles to fire
+    float earlyPeak = peakOverBlocks(fx, blocksForMs(150));
+    fx.waitForBlocks(blocksForMs(1400), /*timeoutMs*/ 20000);
+    float latePeak  = peakOverBlocks(fx, blocksForMs(200));
 
     INFO("earlyPeak=" << earlyPeak << " latePeak=" << latePeak);
     CHECK(earlyPeak < 0.15f);
@@ -478,10 +493,8 @@ TEST_CASE("Late bundle (modest NTP past): /s_new + /n_set still slides",
         nSetAmpSlide(2304, 2.0f, 1.0f),
     }));
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    float earlyPeak = peakOverMs(150);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
-    float latePeak  = peakOverMs(200);
+    float earlyPeak = 0.0f, latePeak = 0.0f;
+    probeSlide(fx, earlyPeak, latePeak);
 
     INFO("earlyPeak=" << earlyPeak << " latePeak=" << latePeak);
     CHECK(earlyPeak < 0.15f);
@@ -512,15 +525,15 @@ TEST_CASE("Bundle /s_new + /n_run=0: node is paused immediately (not waiting for
         osc_test::message("/n_run", 2400, 0),
     }));
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    float pausedPeak = peakOverMs(100);
+    fx.waitForBlocks(blocksForMs(100));
+    float pausedPeak = peakOverBlocks(fx, blocksForMs(100));
     INFO("pausedPeak=" << pausedPeak);
     CHECK(pausedPeak < 0.02f);             // paused synth = near-silent
 
     // Resume: now audio should flow.
     fx.send(osc_test::message("/n_run", 2400, 1));
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    float resumedPeak = peakOverMs(150);
+    fx.waitForBlocks(blocksForMs(100));
+    float resumedPeak = peakOverBlocks(fx, blocksForMs(150));
     INFO("resumedPeak=" << resumedPeak);
     CHECK(resumedPeak > 0.05f);
 
@@ -609,8 +622,8 @@ TEST_CASE("/s_new alone still emits /n_go and produces audio at /s_new-time cuto
     REQUIRE(fx.waitForReply("/n_go", go));
     CHECK(go.parsed().argInt(0) == 2600);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    float peak = peakOverMs(100);
+    fx.waitForBlocks(blocksForMs(100));
+    float peak = peakOverBlocks(fx, blocksForMs(100));
     CHECK(peak > 0.05f);
 
     fx.send(osc_test::message("/n_free", 2600));
@@ -670,8 +683,8 @@ TEST_CASE("/s_new + long sustain: output is finite (no NaN / Inf from eager Ctor
         sNewDsaw(2800, 1, 50.0f, 1.0f, 110.0f, 5.0f),
     }));
 
-    // Let audio run a while, then scan the whole output buffer for sanity.
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    // Let audio render some blocks, then scan the whole output buffer for sanity.
+    fx.waitForBlocks(blocksForMs(200));
 
     auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
     REQUIRE(bus != nullptr);
@@ -707,8 +720,8 @@ TEST_CASE("Stress: 50 back-to-back bundles of /s_new + /n_set, all free cleanly"
     fx.send(osc_test::message("/sync", 2999));
     OscReply s; REQUIRE(fx.waitForReply("/synced", s, 5000));
 
-    // Let synths finish via their 0.2s sustain + 0.01s release.
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    // Let synths finish via their 0.2s sustain + 0.01s release (~188 blocks).
+    fx.waitForBlocks(blocksForMs(500), /*timeoutMs*/ 10000);
 
     // Output should still be finite.
     auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());

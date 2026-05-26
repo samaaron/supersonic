@@ -15,6 +15,7 @@
 #include "OscBuilder.h"
 #include <thread>
 #include <chrono>
+#include <atomic>
 
 // ── Successful cold swap ─────────────────────────────────────────────────────
 
@@ -189,8 +190,10 @@ TEST_CASE("ColdSwap: no rate specified triggers hot swap", "[ColdSwap]") {
 TEST_CASE("ColdSwap: concurrent swap is rejected", "[ColdSwap]") {
     EngineFixture fix;
 
-    // Use a slow failure hook to hold the swap mutex
-    fix.engine().testSwapFailure = [](bool) -> std::string {
+    // Slow failure hook that signals once it holds mSwapMutex.
+    std::atomic<bool> swapEntered{false};
+    fix.engine().testSwapFailure = [&swapEntered](bool) -> std::string {
+        swapEntered.store(true, std::memory_order_release);
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         return "slow failure";
     };
@@ -201,8 +204,9 @@ TEST_CASE("ColdSwap: concurrent swap is rejected", "[ColdSwap]") {
         firstResult = fix.engine().switchDevice("", 44100);
     });
 
-    // Give the first swap time to acquire the mutex
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait until the first swap holds mSwapMutex before issuing the competing
+    // swap — a fixed sleep races the lock acquisition on a loaded runner.
+    REQUIRE(fix.pollUntil([&] { return swapEntered.load(std::memory_order_acquire); }));
 
     // Second swap should be rejected immediately
     auto secondResult = fix.engine().switchDevice("", 22050);
