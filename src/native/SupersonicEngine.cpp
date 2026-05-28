@@ -3565,10 +3565,11 @@ SupersonicEngine::RecordResult SupersonicEngine::startRecording(
     auto* dev = mDeviceManager ? mDeviceManager->getCurrentAudioDevice() : nullptr;
     double sampleRate = dev ? dev->getCurrentSampleRate()
                             : static_cast<double>(mCurrentConfig.sampleRate);
-    // Use the actual device output channel count, not the scsynth internal bus count.
-    // ThreadedWriter::write() receives JUCE's outputChannelData which has device channels.
-    int numChannels = dev ? dev->getActiveOutputChannels().countNumberOfSetBits()
-                          : mCurrentConfig.numOutputChannels;
+    // Record only the stereo mix (outputs 0/1), not every device channel.
+    // Clamped to the device count so a mono device can't over-read outputChannelData.
+    int deviceOut = dev ? dev->getActiveOutputChannels().countNumberOfSetBits()
+                        : mCurrentConfig.numOutputChannels;
+    int numChannels = deviceOut > 2 ? 2 : deviceOut;
 
     juce::File file{juce::String(path)};
     file.getParentDirectory().createDirectory();
