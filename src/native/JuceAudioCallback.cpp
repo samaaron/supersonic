@@ -32,6 +32,7 @@ void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
     mSampleRate        = sampleRate;
     mNumOutputChannels = numOutputChannels;
     mNumInputChannels  = numInputChannels;
+    mWorldInputBusChannels = numInputChannels;  // immutable World input-bus width
 
     // Choose the scsynth block size. bufLen == 0 means "use platform
     // default" (always 128 on web due to AudioWorklet; starting value on
@@ -368,7 +369,11 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
         auto* inputBus = reinterpret_cast<float*>(get_audio_input_bus());
         if (inputBus && nIn > 0) {
             int usable = std::min(mInputAccumCount, mBufLen);
-            for (int ch = 0; ch < nIn; ++ch) {
+            // Clamp to the World's input bus width: mNumInputChannels tracks the
+            // live device and can exceed it after a device swap, which would copy
+            // past the input region into the private bus pool. Mirrors process_audio().
+            int inCh = std::min(nIn, mWorldInputBusChannels);
+            for (int ch = 0; ch < inCh; ++ch) {
                 if (usable > 0)
                     std::memcpy(inputBus + ch * mBufLen,
                                 accumBase + ch * accumPerChanCap,

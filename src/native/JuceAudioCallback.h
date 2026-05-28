@@ -120,6 +120,9 @@ private:
     int        mSampleRate         = 48000;
     int        mNumOutputChannels  = 2;
     int        mNumInputChannels   = 2;
+    // Input bus width the World was built with (immutable). mNumInputChannels
+    // tracks the live device and can exceed it; the input-feed loop clamps to this.
+    int        mWorldInputBusChannels = 0;
     double     mSamplePosition     = 0.0;   // cumulative samples (increments by mBufLen)
 
     // Prefetch buffer: channel-major, mBufLen samples per channel. Only
