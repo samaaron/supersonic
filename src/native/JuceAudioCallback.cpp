@@ -221,6 +221,11 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     int numSamples,
     const juce::AudioIODeviceCallbackContext& context)
 {
+    // Denormal flush-to-zero is a per-thread flag, and scsynth only arms it on
+    // the boot thread (sc_SetDenormalFlags in World_New). Arm it on this audio
+    // thread too, else denormal reverb tails take the slow path and spike CPU.
+    const juce::ScopedNoDenormals scopedNoDenormals;
+
     int nIn  = juce::jmin(numInputChannels,  mNumInputChannels);
     int nOut = juce::jmin(numOutputChannels, mNumOutputChannels);
 
