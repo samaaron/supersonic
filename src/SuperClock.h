@@ -215,6 +215,11 @@ public:
                                 double audioCurrentTime = 0.0);
     void   resetAudioThreadTime(double samplePosition, double sampleRate);
 
+    // Drift-corrected host time (Link clock domain, µs) for the Link Audio
+    // receive resampler; rejects audio-thread wake jitter. Audio-thread only,
+    // returns 0 on Link-off builds.
+    int64_t linkAudioHostMicros(double samplePosition, double sampleRate);
+
     // Freewheel clock mode: derive the audio-thread NTP purely from sample
     // position, skipping the wall-clock drift IIR in updateAudioThreadNTP.
     // For deterministic offline/test rendering — the headless driver thread

@@ -82,6 +82,12 @@ struct SuperClock::Impl {
     // returns a pure sample-derived NTP (deterministic; see setFreewheelClock).
     std::atomic<bool>     freewheelClock{false};
 
+    // Audio-thread anchor for Link Audio receive, kept in Link's clock domain
+    // (steady_clock) not the NTP/wall clock — that's the domain beatAtTime()
+    // needs. Same sample-counter + slow-IIR scheme as baseNTPBits.
+    double linkAudioHostBaseMicros{0.0};
+    bool   linkAudioHostAnchored{false};
+
 #ifdef SUPERSONIC_LINK
     // Link starts disabled; setLinkVisibility(non-Off) flips peer
     // discovery on. While disabled the instance still hosts session
@@ -1119,6 +1125,34 @@ void SuperClock::resetAudioThreadTime(double samplePosition, double sampleRate) 
     mImpl->currentAudioThreadNTPBits.store(
         doubleToBits(newBaseNTP + sampleOffsetSec),
         std::memory_order_release);
+    // Re-anchor the Link-domain audio host clock on the next call.
+    mImpl->linkAudioHostAnchored = false;
+}
+
+// Drift-corrected host time (Link clock domain, µs) for the Link Audio receive
+// resampler: derived from the monotonic sample counter (jitter-free) and
+// slow-IIR-corrected toward link.clock().micros(). Reading link.clock() at
+// audio-thread wake is jittery; the IIR rejects that while tracking real drift.
+int64_t SuperClock::linkAudioHostMicros(double samplePosition, double sampleRate) {
+#ifdef SUPERSONIC_LINK
+    if (sampleRate <= 0.0) return mImpl->link.clock().micros().count();
+    const double sampleOffsetMicros = (samplePosition / sampleRate) * 1e6;
+    const double linkNow = static_cast<double>(mImpl->link.clock().micros().count());
+
+    if (!mImpl->linkAudioHostAnchored) {
+        mImpl->linkAudioHostBaseMicros = linkNow - sampleOffsetMicros;
+        mImpl->linkAudioHostAnchored = true;
+    } else {
+        // baseMicros += (linkNow - (base + sampleOffset)) * 0.01
+        const double drift =
+            linkNow - (mImpl->linkAudioHostBaseMicros + sampleOffsetMicros);
+        mImpl->linkAudioHostBaseMicros += drift * 0.01;
+    }
+    return static_cast<int64_t>(mImpl->linkAudioHostBaseMicros + sampleOffsetMicros);
+#else
+    (void)samplePosition; (void)sampleRate;
+    return 0;
+#endif
 }
 
 void SuperClock::setFreewheelClock(bool enabled) {

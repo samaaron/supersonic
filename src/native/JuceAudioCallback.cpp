@@ -230,17 +230,15 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     int nIn  = juce::jmin(numInputChannels,  mNumInputChannels);
     int nOut = juce::jmin(numOutputChannels, mNumOutputChannels);
 
-    // hostTimeNs is the audio framework's "this buffer plays at T"
-    // (mach_absolute_time domain on macOS, same as Link's clock()).
-    // Used for jitter-free Link Audio buffer-begin timestamps. Fall
-    // back to link.clock().micros() at callback start when the driver
-    // doesn't supply hostTimeNs (headless test driver, some ALSA
-    // configs) so each sub-block within this callback gets a
-    // correctly-spaced stamp.
+    // hostTimeNs is the framework's "this buffer plays at T" timestamp
+    // (CoreAudio supplies it on macOS). When absent — JUCE's Windows backends,
+    // the headless driver, some ALSA configs — fall back to SuperClock's
+    // jitter-free host time rather than reading the jittery link.clock() here.
     uint64_t linkAudioBlockHostMicros =
         context.hostTimeNs != nullptr
             ? (*context.hostTimeNs) / 1000ULL
-            : static_cast<uint64_t>(mSuperClock->linkClockMicros());
+            : static_cast<uint64_t>(
+                  mSuperClock->linkAudioHostMicros(mSamplePosition, mSampleRate));
     const uint64_t scsynthBlockMicros = mSampleRate > 0
         ? static_cast<uint64_t>((static_cast<double>(mBufLen) * 1e6) / mSampleRate)
         : 0ULL;
