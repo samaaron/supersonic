@@ -190,16 +190,11 @@ if(SUPERSONIC_ENABLE_LINK)
         GIT_REPOSITORY https://github.com/Ableton/link.git
         GIT_TAG        Link-4.0
         GIT_SHALLOW    TRUE
-        # SuperSonic-specific Link patches. See each patch header for
-        # rationale + compatibility analysis. Wrapped in a helper script
-        # so reruns of the patch step (which CMake invalidates whenever
-        # this command line changes) detect already-applied patches and
-        # skip them silently. The script also fails cleanly with a
-        # cache-clear hint when patches drift mid-stream.
-        PATCH_COMMAND  sh ${CMAKE_CURRENT_LIST_DIR}/external/apply-link-patches.sh
-                       ${CMAKE_CURRENT_LIST_DIR}/external/link-loopback-mode.patch
-                       ${CMAKE_CURRENT_LIST_DIR}/external/link-peer-enumeration.patch
-                       ${CMAKE_CURRENT_LIST_DIR}/external/link-monotonic-commit-timestamp.patch
+        # SuperSonic-specific Link patches, applied via cmake -P so the
+        # build needs no Unix shell. See each patch header for rationale.
+        PATCH_COMMAND  ${CMAKE_COMMAND}
+                       -DLINK_PATCH_DIR=${CMAKE_CURRENT_LIST_DIR}/external
+                       -P ${CMAKE_CURRENT_LIST_DIR}/external/apply-link-patches.cmake
     )
     FetchContent_GetProperties(AbletonLink)
     if(NOT abletonlink_POPULATED)
