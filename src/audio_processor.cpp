@@ -795,15 +795,12 @@ extern "C" {
             // typically equal to the hardware callback buffer size.
             const int QUANTUM_SIZE = g_world->mBufLength;
 
-            // Zero OUTPUT audio buses for this render cycle
-            uint32_t output_bus_bytes = g_world->mNumOutputs * g_world->mBufLength * sizeof(float);
-            memset(g_world->mAudioBus, 0, output_bus_bytes);
+            // Open the render block: zero the output buses (so output channels
+            // nothing writes this block are silent) and advance the block counter.
+            EngineCore_BeginBlock(g_world);
 
             // CRITICAL: Also zero static_audio_bus to prevent accumulation across frames
             memset(static_audio_bus, 0, QUANTUM_SIZE * g_world->mNumOutputs * sizeof(float));
-
-            // Increment buffer counter once per audio frame
-            g_world->mBufCounter++;
 
             // EXECUTE SCHEDULED BUNDLES (from SC_CoreAudio.cpp:1388-1401)
             int64_t currentOscTime = ntp_to_osc_timetag(current_ntp);
@@ -880,39 +877,22 @@ extern "C" {
                 g_scheduler.ReleaseSlot(bundle);          // Return slot + maybe reset pool
             }
 
-            // Reset offset
-            g_world->mSampleOffset = 0;
-            g_world->mSubsampleOffset = 0.0;
-
-            // Mark input buses as "touched" so In.ar UGen reads them
-            // The JS worklet copies audio to input bus area before calling process_audio()
-            // Without this, In.ar will output silence (it checks mAudioBusTouched)
-            if (active_input_channels > 0) {
-                uint32_t active_in = std::min(active_input_channels, static_cast<uint32_t>(g_world->mNumInputs));
-                // Input buses start after output buses in mAudioBusTouched
-                int32_t* inputTouched = g_world->mAudioBusTouched + g_world->mNumOutputs;
-                const int32_t bufCounter = g_world->mBufCounter;
-                for (uint32_t i = 0; i < active_in; i++) {
-                    inputTouched[i] = bufCounter;
-                }
-            }
-
-            // Run scsynth to generate audio (128 samples). Guarded so the
-            // test binary's new/delete hooks count any allocation in the
-            // DSP pass — UGen Calc functions must not allocate. Scoped
-            // tightly to World_Run; synthdef parsing (/d_recv), synth
-            // construction (/s_new), and reply formatting (FIFO Performs
-            // below) are not covered. Dedicated [rt_alloc] tests exercise
-            // those paths explicitly.
+            // Run the graph (DSP pass): resets the event-time offset, marks the
+            // live input buses touched so In.ar reads them (the JS worklet copies
+            // input into the input-bus region before this call), and runs scsynth.
+            // rt_dsp_guard marks the DSP pass as RT scope — always on, so the
+            // suite-wide listener in test_main.cpp reports any global new/delete in
+            // the graph pass. Scoped to World_Run (not the whole callback) because
+            // that is the region with the hard no-alloc rule; the [rt_alloc] tests
+            // add their own guard over the whole process_audio() and assert
+            // construction, teardown and steady state allocate nothing.
             {
                 rt_alloc::Guard rt_dsp_guard;
-                World_Run(g_world);
+                EngineCore_RunBlock(g_world, active_input_channels);
             }
 
-            // Process notification FIFOs to send /tr, /n_end, /n_go, etc. messages
-            g_world->hw->mTriggers.Perform();
-            g_world->hw->mNodeMsgs.Perform();
-            g_world->hw->mNodeEnds.Perform();
+            // Deliver /tr, /n_end, /n_go, etc. produced by this block's graph pass.
+            EngineCore_FlushNotifications(g_world);
 
             // Fast copy audio from g_world->mAudioBus to static_audio_bus
             // Layout: Both buffers are channel-by-channel, 128 samples per channel

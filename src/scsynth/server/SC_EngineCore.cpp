@@ -3,10 +3,12 @@
  */
 #include "SC_EngineCore.h"
 
-#include "SC_World.h"          // World: mRunning, mAudioBusTouched, hw...
-#include "SC_HiddenWorld.h"    // HiddenWorld: mWireBufSpace
-#include "SC_WorldOptions.h"   // WorldOptions, World_New / World_Start
-#include "SC_Prototypes.h"     // World_SetSampleRate
+#include <cstring>             // memset
+
+#include "SC_World.h"          // World: mRunning, mAudioBus(Touched), hw...
+#include "SC_HiddenWorld.h"    // HiddenWorld: mWireBufSpace, notification FIFOs
+#include "SC_WorldOptions.h"   // WorldOptions, World_New
+#include "SC_Prototypes.h"     // World_Start, World_SetSampleRate, World_Run
 
 World* EngineCore_New(const WorldOptions* options, const char** outError) {
     auto fail = [&](const char* msg) -> World* {
@@ -38,4 +40,40 @@ World* EngineCore_New(const WorldOptions* options, const char** outError) {
         return fail("wire buffer allocation failed");
 
     return world;
+}
+
+void EngineCore_BeginBlock(World* world) {
+    // Zero the output buses so output channels no synth writes this block read as
+    // silence (the host copies them straight out). Channels that ARE written don't
+    // rely on this: advancing mBufCounter makes Out overwrite on the first write
+    // to a bus this block and accumulate only on later writes.
+    memset(world->mAudioBus, 0,
+           (size_t)world->mNumOutputs * (size_t)world->mBufLength * sizeof(float));
+    world->mBufCounter++;
+}
+
+void EngineCore_RunBlock(World* world, unsigned int activeInputChannels) {
+    world->mSampleOffset = 0;
+    world->mSubsampleOffset = 0.f;
+
+    // Mark live input buses "touched" for the current block so In.ar reads them
+    // (the caller copies external input into the input-bus region beforehand).
+    // Clamp to the World's input width — a device can report more channels.
+    if (activeInputChannels > 0) {
+        unsigned int n = activeInputChannels < (unsigned int)world->mNumInputs
+                             ? activeInputChannels
+                             : (unsigned int)world->mNumInputs;
+        int32* inputTouched = world->mAudioBusTouched + world->mNumOutputs;
+        const int32 bufCounter = world->mBufCounter;
+        for (unsigned int i = 0; i < n; ++i)
+            inputTouched[i] = bufCounter;
+    }
+
+    World_Run(world);
+}
+
+void EngineCore_FlushNotifications(World* world) {
+    world->hw->mTriggers.Perform();
+    world->hw->mNodeMsgs.Perform();
+    world->hw->mNodeEnds.Perform();
 }
