@@ -230,6 +230,7 @@ set(ENGINE_SOURCES
     ${NATIVE_SRC}/DevicePolicy.cpp
     ${NATIVE_SRC}/AggregateDeviceHelper.cpp
     ${NATIVE_SRC}/StateCache.cpp
+    ${WORKERS_SRC}/PreschedulerCore.cpp
     ${WORKERS_SRC}/Prescheduler.cpp
     ${WORKERS_SRC}/ReplyReader.cpp
     ${WORKERS_SRC}/DebugReader.cpp

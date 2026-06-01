@@ -1,17 +1,36 @@
 /*
- * Prescheduler.cpp
+ * Prescheduler.cpp — native host around PreschedulerCore. See Prescheduler.h.
  *
- * Mirrors js/workers/osc_out_prescheduler_worker.js — see that file for
- * the canonical algorithm. Both implementations share the same metric
- * struct (PerformanceMetrics in src/shared_memory.h) and the same
- * scheduling semantics: events with NTP timestamps go into a min-heap,
- * dispatch fires when (event.ntpTimeSec - lookaheadS) <= now. On
- * RingBufferWriter::write failure (buffer full) events go into a retry
- * queue and are re-attempted on the next dispatch cycle.
+ * The min-heap, ordering, backpressure and cancellation semantics all live in
+ * PreschedulerCore (pinned by test/vectors/prescheduler.json). This file owns
+ * the native concerns: the dispatch thread, wall-clock timing from SuperClock,
+ * ring-buffer writes, the retry queue for a full buffer, and the metrics.
+ *
+ * Locking: the core is not internally synchronised, so every core call is made
+ * under mLock. Ring-buffer writes can block on the audio thread, so they are
+ * done OUTSIDE mLock — checkAndDispatch() stages the due events under the lock
+ * and writes them after releasing it.
  */
 #include "Prescheduler.h"
 #include "src/SuperClock.h"
 #include <algorithm>
+#include <cmath>
+
+using supersonic::PreschedulerConfig;
+using supersonic::PreschedulerEvent;
+using supersonic::PreschedulerRequest;
+using supersonic::PreschedulerStatus;
+
+namespace {
+// Core callback: stage a due event for dispatch outside the lock.
+void stageSink(const PreschedulerEvent& ev, void* ctx) {
+    static_cast<std::vector<PreschedulerEvent>*>(ctx)->push_back(ev);
+}
+// Core callback: free a cancelled event's payload buffer.
+void freePayload(const PreschedulerEvent& ev, void*) {
+    delete static_cast<std::vector<uint8_t>*>(ev.payload);
+}
+} // namespace
 
 Prescheduler::Prescheduler() : juce::Thread("SuperSonic-Prescheduler") {}
 
@@ -19,6 +38,11 @@ Prescheduler::~Prescheduler() {
     signalThreadShouldExit();
     mNewEventSignal.signal();
     stopThread(2000);
+
+    // Reclaim any payloads still queued at teardown.
+    mCore.cancelAll(freePayload, nullptr);
+    for (auto* buf : mRetryQueue) delete buf;
+    mRetryQueue.clear();
 }
 
 void Prescheduler::initialise(uint8_t*              inBufferStart,
@@ -39,7 +63,12 @@ void Prescheduler::initialise(uint8_t*              inBufferStart,
     mMetrics       = metrics;
     mLookaheadS    = lookaheadS;
 
-    // Initialise min-headroom sentinel (mirrors JS init path).
+    PreschedulerConfig cfg;
+    cfg.lookaheadS = lookaheadS;
+    cfg.maxPending = kMaxPendingMessages;
+    mCore.setConfig(cfg);
+
+    // Initialise the min-headroom sentinel.
     if (mMetrics) {
         mMetrics->prescheduler_min_headroom_ms.store(
             kHeadroomUnsetSentinel, std::memory_order_relaxed);
@@ -47,10 +76,9 @@ void Prescheduler::initialise(uint8_t*              inBufferStart,
 }
 
 void Prescheduler::updatePendingPeak() {
-    // Call under mLock. Mirrors JS updateMetrics(): peak tracks heap size
-    // only, not heap + retry queue.
+    // Call under mLock. Peak tracks heap size only, not heap + retry queue.
     if (!mMetrics) return;
-    auto current = static_cast<uint32_t>(mHeap.size());
+    auto current = mCore.size();
     auto peak = mMetrics->prescheduler_pending_peak.load(std::memory_order_relaxed);
     while (current > peak) {
         if (mMetrics->prescheduler_pending_peak.compare_exchange_weak(
@@ -59,40 +87,53 @@ void Prescheduler::updatePendingPeak() {
     }
 }
 
-void Prescheduler::schedule(const uint8_t* data, uint32_t size, double ntpTimeSec) {
-    Event e;
-    e.ntpTimeSec = ntpTimeSec;
-    e.size       = size;
-    e.id         = mNextId.fetch_add(1, std::memory_order_relaxed);
-    e.data.assign(data, data + size);
+bool Prescheduler::writeToRing(const PayloadBuffer& buf) {
+    return RingBufferWriter::write(
+        mInBufferStart, mInBufferSize, mInHead, mInTail, mInSequence, mInWriteLock,
+        buf.data(), static_cast<uint32_t>(buf.size()));
+}
 
+void Prescheduler::schedule(const uint8_t* data, uint32_t size, double ntpTimeSec) {
+    // Native only ever schedules far-future bundles (the OscClassifier splits
+    // off immediate / near / late), so every request carries a time. Session
+    // and tag default to 0 — native does not yet route tagged cancellation.
+    auto* buf = new PayloadBuffer(data, data + size);
+
+    PreschedulerRequest req;
+    req.hasTime = true;
+    req.ntpTime = ntpTimeSec;
+    req.bytes   = size;
+    req.payload = buf;
+
+    bool scheduled = false;
     {
         juce::ScopedLock sl(mLock);
-
-        // Backpressure: combined heap + retry queue cap. Mirrors JS
-        // scheduleEvent backpressure path. Drop silently — JS posts an error
-        // to its parent; native has no symmetric channel and the OscUdpServer
-        // call site doesn't await a return value.
-        if (mHeap.size() + mRetryQueue.size() >= kMaxPendingMessages)
-            return;
-
-        mHeap.push(std::move(e));
-
-        if (mMetrics) {
-            mMetrics->prescheduler_pending.store(
-                static_cast<uint32_t>(mHeap.size()), std::memory_order_relaxed);
-            mMetrics->prescheduler_bundles_scheduled.fetch_add(1, std::memory_order_relaxed);
-            updatePendingPeak();
+        mCore.retryCount = static_cast<uint32_t>(mRetryQueue.size());
+        if (mCore.schedule(req, mSuperClock->wallNow()) == PreschedulerStatus::Scheduled) {
+            scheduled = true;
+            if (mMetrics) {
+                mMetrics->prescheduler_pending.store(mCore.size(), std::memory_order_relaxed);
+                mMetrics->prescheduler_bundles_scheduled.fetch_add(1, std::memory_order_relaxed);
+                updatePendingPeak();
+            }
         }
     }
 
-    mNewEventSignal.signal();
+    if (scheduled) {
+        mNewEventSignal.signal();
+    } else {
+        // Rejected (backpressure / too large / too far future): drop. Native has
+        // no symmetric error channel back to the sender.
+        delete buf;
+    }
 }
 
 void Prescheduler::cancelAll() {
     juce::ScopedLock sl(mLock);
-    uint32_t cancelled = static_cast<uint32_t>(mHeap.size() + mRetryQueue.size());
-    mHeap.clear();
+    uint32_t cancelled = mCore.size() + static_cast<uint32_t>(mRetryQueue.size());
+
+    mCore.cancelAll(freePayload, nullptr);
+    for (auto* buf : mRetryQueue) delete buf;
     mRetryQueue.clear();
 
     if (mMetrics) {
@@ -105,25 +146,23 @@ void Prescheduler::cancelAll() {
 void Prescheduler::checkAndDispatch() {
     if (!mInBufferStart) return;
 
-    while (true) {
-        Event event;
-        {
-            juce::ScopedLock sl(mLock);
-            if (mHeap.empty()) break;
-            double dispatchTime = mHeap.top().ntpTimeSec - mLookaheadS;
-            if (mSuperClock->wallNow() < dispatchTime) break;
-            event = mHeap.pop_move();
+    // Stage every due event under the lock; do the ring-buffer I/O afterwards
+    // so writes never block other threads on mLock.
+    std::vector<PreschedulerEvent> due;
+    {
+        juce::ScopedLock sl(mLock);
+        mCore.dispatchDue(mSuperClock->wallNow(), stageSink, &due);
+        if (mMetrics)
+            mMetrics->prescheduler_pending.store(mCore.size(), std::memory_order_relaxed);
+    }
 
-            if (mMetrics) {
-                mMetrics->prescheduler_pending.store(
-                    static_cast<uint32_t>(mHeap.size()), std::memory_order_relaxed);
-            }
-        }
+    for (const PreschedulerEvent& event : due) {
+        auto* buf = static_cast<PayloadBuffer*>(event.payload);
 
-        // Track timing relative to scheduled execution time. Mirrors JS:
-        // headroom on on-time, lateness on late. Mutually exclusive per dispatch.
+        // Track timing relative to scheduled execution time: headroom when
+        // on-time, lateness when late. Mutually exclusive per dispatch.
         if (mMetrics) {
-            double timeUntilExec = event.ntpTimeSec - mSuperClock->wallNow();
+            double timeUntilExec = event.ntpTime - mSuperClock->wallNow();
             if (timeUntilExec < 0.0) {
                 int32_t lateMs = static_cast<int32_t>(std::round(-timeUntilExec * 1000.0));
                 mMetrics->prescheduler_lates.fetch_add(1, std::memory_order_relaxed);
@@ -146,36 +185,28 @@ void Prescheduler::checkAndDispatch() {
             }
         }
 
-        bool ok = RingBufferWriter::write(
-            mInBufferStart,
-            mInBufferSize,
-            mInHead,
-            mInTail,
-            mInSequence,
-            mInWriteLock,
-            event.data.data(),
-            event.size
-        );
+        bool ok = writeToRing(*buf);
 
-        if (mMetrics) {
+        if (mMetrics)
             mMetrics->prescheduler_total_dispatches.fetch_add(1, std::memory_order_relaxed);
-        }
 
         if (ok) {
             if (mMetrics)
                 mMetrics->prescheduler_dispatched.fetch_add(1, std::memory_order_relaxed);
+            delete buf;
             continue;
         }
 
-        // Buffer full — push to retry queue. Mirrors JS queueForRetry.
+        // Buffer full — hand the payload to the retry queue.
         juce::ScopedLock sl(mLock);
-        if (mHeap.size() + mRetryQueue.size() >= kMaxPendingMessages) {
+        if (mCore.size() + mRetryQueue.size() >= kMaxPendingMessages) {
             // Combined backpressure cap exceeded; can't queue. Drop.
             if (mMetrics)
                 mMetrics->prescheduler_retries_failed.fetch_add(1, std::memory_order_relaxed);
+            delete buf;
             continue;
         }
-        mRetryQueue.push_back(std::move(event));
+        mRetryQueue.push_back(buf);
         if (mMetrics) {
             mMetrics->prescheduler_messages_retried.fetch_add(1, std::memory_order_relaxed);
             auto rq = static_cast<uint32_t>(mRetryQueue.size());
@@ -191,15 +222,14 @@ void Prescheduler::checkAndDispatch() {
 }
 
 void Prescheduler::processRetryQueue() {
-    // Drains the retry queue head-first. Mirrors JS processRetryQueue:
-    // stop on first failure (buffer still full); the next dispatch cycle
-    // will try again.
+    // Drains the retry queue head-first: stop on the first failure (buffer
+    // still full); the next dispatch cycle will try again.
     while (true) {
-        Event event;
+        PayloadBuffer* buf = nullptr;
         {
             juce::ScopedLock sl(mLock);
             if (mRetryQueue.empty()) return;
-            event = std::move(mRetryQueue.front());
+            buf = mRetryQueue.front();
             mRetryQueue.pop_front();
             if (mMetrics) {
                 mMetrics->prescheduler_retry_queue_size.store(
@@ -207,26 +237,16 @@ void Prescheduler::processRetryQueue() {
             }
         }
 
-        bool ok = RingBufferWriter::write(
-            mInBufferStart,
-            mInBufferSize,
-            mInHead,
-            mInTail,
-            mInSequence,
-            mInWriteLock,
-            event.data.data(),
-            event.size
-        );
-
-        if (ok) {
+        if (writeToRing(*buf)) {
             if (mMetrics)
                 mMetrics->prescheduler_retries_succeeded.fetch_add(1, std::memory_order_relaxed);
+            delete buf;
             continue;
         }
 
         // Still full — put it back at the head of the queue and stop.
         juce::ScopedLock sl(mLock);
-        mRetryQueue.push_front(std::move(event));
+        mRetryQueue.push_front(buf);
         if (mMetrics) {
             mMetrics->prescheduler_retry_queue_size.store(
                 static_cast<uint32_t>(mRetryQueue.size()), std::memory_order_relaxed);
@@ -243,21 +263,16 @@ void Prescheduler::run() {
         {
             juce::ScopedLock sl(mLock);
             retryActive = !mRetryQueue.empty();
-            if (!mHeap.empty()) {
-                double dispatchTime = mHeap.top().ntpTimeSec - mLookaheadS;
-                double diff = dispatchTime - mSuperClock->wallNow();
-                if (diff > 0.0) {
-                    sleepMs = juce::jmin(diff * 1000.0, 50.0);
-                } else {
-                    sleepMs = 0.0;
-                }
+            double dueAt;
+            if (mCore.nextDueTime(&dueAt)) {  // already lookahead-adjusted
+                double diff = dueAt - mSuperClock->wallNow();
+                sleepMs = (diff > 0.0) ? juce::jmin(diff * 1000.0, 50.0) : 0.0;
             }
         }
 
-        // When the retry queue is non-empty we want a faster wake to flush
-        // it once the audio thread advances tail. C++ has no equivalent of
-        // the JS Atomics.waitAsync(IN_TAIL) edge-trigger, so we poll with
-        // a short timeout. 5 ms is ~2 audio blocks at 48 kHz / 128 frames.
+        // When the retry queue is non-empty, wake sooner to flush it once the
+        // audio thread advances tail. There is no edge-trigger on tail here, so
+        // poll with a short timeout — 5 ms is ~2 audio blocks at 48 kHz / 128 frames.
         if (retryActive) sleepMs = juce::jmin(sleepMs, 5.0);
 
         if (sleepMs > 0.5) {

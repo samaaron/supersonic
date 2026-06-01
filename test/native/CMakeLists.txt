@@ -56,6 +56,8 @@ add_executable(SuperSonicNativeTests
     test_scope_race.cpp
     test_heap_growth.cpp
     test_priority_queue.cpp
+    test_prescheduler_core.cpp
+    test_prescheduler.cpp
     test_ring_buffer_write.cpp
     test_benchmark.cpp
     test_bundle_sequential.cpp
@@ -83,6 +85,7 @@ target_compile_definitions(SuperSonicNativeTests PRIVATE
     SUPERSONIC_SYNTHDEFS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../packages/supersonic-scsynth-synthdefs/synthdefs"
     SUPERSONIC_TEST_SYNTHDEFS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../synthdefs"
     SUPERSONIC_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../packages/supersonic-scsynth-samples/samples"
+    SUPERSONIC_PRESCHEDULER_VECTORS="${CMAKE_CURRENT_SOURCE_DIR}/../vectors/prescheduler.json"
     JUCE_APPLICATION_NAME_STRING="supersonic-tests"
     JUCE_APPLICATION_VERSION_STRING="0.1.0"
 )

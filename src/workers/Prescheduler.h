@@ -1,5 +1,16 @@
 /*
- * Prescheduler.h — NTP min-heap scheduler thread
+ * Prescheduler.h — native host around the portable PreschedulerCore.
+ *
+ * The scheduling algorithm (NTP min-heap + cancellation) lives in
+ * PreschedulerCore, shared with the web worker and the ESP32 build and pinned
+ * by test/vectors/prescheduler.json. This class is the native host: a
+ * juce::Thread that feeds the core wall-clock NTP from SuperClock, writes due
+ * events to the engine's ring buffer, and retries on a full buffer.
+ *
+ * Payload ownership: the core stores opaque payload pointers. Native owns the
+ * OSC bytes as heap buffers (it has an allocator) and frees them when an event
+ * is dispatched or cancelled; the ESP32 host instead backs payloads with a
+ * fixed pool. Same core, different payload strategy.
  */
 #pragma once
 
@@ -7,15 +18,19 @@
 #include <atomic>
 #include <cstdint>
 #include <deque>
-#include <functional>
 #include <vector>
-#include <queue>
 
+#include "PreschedulerCore.h"
 #include "src/native/WallClock.h"
 #include "RingBufferWriter.h"
 #include "src/shared_memory.h"
 
 class SuperClock;
+
+// Test seam: lets the native unit test drive the dispatch cycle directly
+// (no thread, no sleeps) and inspect queue depths / shrink the cap. Defined in
+// test/native/test_prescheduler.cpp.
+struct PreschedulerTestAccess;
 
 class Prescheduler : public juce::Thread {
 public:
@@ -24,12 +39,11 @@ public:
     // before startThread().
     void setSuperClock(SuperClock* sc) { mSuperClock = sc; }
 
-    // Backpressure cap on combined heap + retry queue. Mirrors JS
-    // osc_out_prescheduler_worker.js maxPendingMessages.
+    // Backpressure cap on the combined heap + retry queue.
     static constexpr uint32_t kMaxPendingMessages = 65536;
 
-    // Sentinel value meaning "min headroom never recorded yet". Mirrors JS
-    // HEADROOM_UNSET_SENTINEL. Required because 0 is a valid headroom value.
+    // Sentinel meaning "min headroom never recorded yet" — 0 is a valid headroom
+    // value, so it can't double as "unset".
     static constexpr uint32_t kHeadroomUnsetSentinel = 0xFFFFFFFFu;
 
     void schedule(const uint8_t* data, uint32_t size, double ntpTimeSec);
@@ -48,38 +62,19 @@ public:
     ~Prescheduler() override;
 
 private:
+    friend struct PreschedulerTestAccess;
+
     void run() override;
     void checkAndDispatch();
     void processRetryQueue();
     void updatePendingPeak();   // call under mLock
 
-    struct Event {
-        double   ntpTimeSec;
-        uint32_t size;
-        uint32_t id;
-        std::vector<uint8_t> data;
+    // Native payload buffer: the OSC bytes for one scheduled event. The core
+    // holds these by opaque pointer; this host owns and frees them.
+    using PayloadBuffer = std::vector<uint8_t>;
 
-        bool operator>(const Event& rhs) const { return ntpTimeSec > rhs.ntpTimeSec; }
-    };
-
-    // Min-heap that supports move-pop (avoids copying Event's vector data)
-    struct MinHeap {
-        std::vector<Event> c;
-        bool empty() const { return c.empty(); }
-        size_t size() const { return c.size(); }
-        const Event& top() const { return c.front(); }
-        void push(Event e) {
-            c.push_back(std::move(e));
-            std::push_heap(c.begin(), c.end(), std::greater<Event>());
-        }
-        Event pop_move() {
-            std::pop_heap(c.begin(), c.end(), std::greater<Event>());
-            Event e = std::move(c.back());
-            c.pop_back();
-            return e;
-        }
-        void clear() { c.clear(); }
-    };
+    // Write one buffer to the ring buffer. Shared by dispatch and retry.
+    bool writeToRing(const PayloadBuffer& buf);
 
     uint8_t*              mInBufferStart = nullptr;
     uint32_t              mInBufferSize  = 0;
@@ -93,7 +88,13 @@ private:
 
     juce::CriticalSection mLock;
     juce::WaitableEvent   mNewEventSignal;
-    MinHeap               mHeap;
-    std::deque<Event>     mRetryQueue;   // guarded by mLock
-    std::atomic<uint32_t> mNextId{0};
+
+    // Heap storage and the core that orders it. Storage is sized to the
+    // backpressure cap so the core's array can never overflow. Both are
+    // guarded by mLock (the core is not internally synchronised).
+    std::vector<supersonic::PreschedulerEvent> mStorage{kMaxPendingMessages};
+    supersonic::PreschedulerCore               mCore{mStorage.data(), kMaxPendingMessages,
+                                                     supersonic::PreschedulerConfig{}};
+
+    std::deque<PayloadBuffer*> mRetryQueue;   // owned buffers, guarded by mLock
 };

@@ -6,6 +6,7 @@ import { writeToRingBuffer } from '../lib/ring_buffer_core.js';
 import { calculateInControlIndices } from '../lib/control_offsets.js';
 import { getCurrentNTPFromPerformance, isBundle as isBundleCheck } from '../lib/osc_classifier.js';
 import { getBundleTimeTag } from '../lib/osc_fast.js';
+import { PreschedulerCore } from '../lib/prescheduler_core.js';
 
 // Transport mode: 'sab' or 'postMessage'
 let mode = 'sab';
@@ -129,12 +130,13 @@ const stopMetricsSending = () => {
     }
 };
 
-// Priority queue implemented as binary min-heap
-// Entries: { ntpTime, seq, sessionId, runTag, oscData, sourceId }
-let eventHeap = [];
+// The scheduling algorithm (NTP min-heap + cancellation) lives in the shared,
+// language-neutral PreschedulerCore (js/lib/prescheduler_core.js), pinned by
+// test/vectors/prescheduler.json. This worker is the web host around it: timer,
+// SAB ring-buffer I/O, retry queue, metrics. Each event's payload carries
+// { oscData, sourceId } for dispatch.
 let dispatchTimer = null;      // Demand-driven dispatch timer
 let nextDispatchAt = Infinity; // NTP time the current timer targets
-let sequenceCounter = 0;
 let isDispatching = false;  // Prevent reentrancy into dispatch loop
 
 // Message sequence counter now lives in SAB at CONTROL_INDICES.IN_SEQUENCE
@@ -150,6 +152,14 @@ let maxPendingMessages = 65536;
 
 // Timing constants
 let lookaheadS = 0.500;                // Lookahead window (configurable via init)
+
+// The shared scheduling core. Config is synced from the worker's vars at init().
+const core = new PreschedulerCore({
+    lookaheadS,
+    maxPending: maxPendingMessages,
+    maxFutureS: MAX_FUTURE_SCHEDULE_SECONDS,
+    poolBytes: schedulerPoolSize,
+});
 
 const schedulerLog = (...args) => {
     if (__DEV__) {
@@ -213,10 +223,10 @@ const updateMetrics = () => {
     if (!metricsView) return;
 
     // Update current values
-    metricsStore(MetricsOffsets.PRESCHEDULER_PENDING, eventHeap.length);
+    metricsStore(MetricsOffsets.PRESCHEDULER_PENDING, core.size());
 
     // Update max if current exceeds it
-    const currentPending = eventHeap.length;
+    const currentPending = core.size();
     const currentMax = metricsLoad(MetricsOffsets.PRESCHEDULER_PENDING_PEAK);
     if (currentPending > currentMax) {
         metricsStore(MetricsOffsets.PRESCHEDULER_PENDING_PEAK, currentPending);
@@ -299,7 +309,7 @@ const dispatchOSCMessage = (oscMessage, isRetry, sourceId = 0, useWait = false) 
  */
 const queueForRetry = (oscData, context, sourceId = 0) => {
     // Use same holistic limit as scheduleEvent
-    const totalPending = eventHeap.length + retryQueue.length;
+    const totalPending = core.size() + retryQueue.length;
     if (totalPending >= maxPendingMessages) {
         console.error('[PreScheduler] Backpressure: dropping retry (' + totalPending + ' pending)');
         metricsAdd(MetricsOffsets.PRESCHEDULER_RETRIES_FAILED, 1);
@@ -382,19 +392,37 @@ const processRetryQueue = () => {
  * Returns false if rejected due to backpressure
  */
 const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
-    // Backpressure: reject if total pending work exceeds limit
-    const totalPending = eventHeap.length + retryQueue.length;
-    if (totalPending >= maxPendingMessages) {
-        const errorMsg = `Prescheduler queue full (${totalPending} >= ${maxPendingMessages} max)`;
+    const ntpTime = extractNTPFromBundle(oscData);
+    const now = getCurrentNTP();
+
+    // Mirror output-retry pressure into the core so it counts toward the same
+    // holistic backpressure limit as queued events.
+    core.retryCount = retryQueue.length;
+
+    const result = core.schedule({
+        ntpTime,
+        bytes: oscData.length,
+        sessionId,
+        runTag,
+        payload: { oscData, sourceId },
+    }, now);
+
+    if (!result.ok) {
+        const [code, errorMsg] = {
+            queue_full: ['PRESCHEDULER_QUEUE_FULL',
+                `Prescheduler queue full (${core.size() + retryQueue.length} >= ${maxPendingMessages} max)`],
+            too_large: ['BUNDLE_TOO_LARGE',
+                `Bundle too large for scheduler pool (${oscData.length} > ${schedulerPoolSize} bytes)`],
+            too_far_future: ['BUNDLE_TOO_FAR_FUTURE',
+                `Bundle scheduled too far in future (${(ntpTime - now).toFixed(0)}s > ${MAX_FUTURE_SCHEDULE_SECONDS}s max)`],
+        }[result.reason];
         console.error('[PreScheduler]', errorMsg);
-        self.postMessage({ type: 'error', error: errorMsg, code: 'PRESCHEDULER_QUEUE_FULL' });
+        self.postMessage({ type: 'error', error: errorMsg, code });
         return false;
     }
 
-    const ntpTime = extractNTPFromBundle(oscData);
-
-    if (ntpTime === null) {
-        // Not a bundle - dispatch immediately to ring buffer
+    if (result.immediate) {
+        // Not a bundle - dispatch immediately to ring buffer.
         // Use useWait: true for guaranteed delivery (no lock contention drops)
         schedulerLog('[PreScheduler] Non-bundle message, dispatching immediately');
         const success = dispatchOSCMessage(oscData, false, sourceId, true);
@@ -405,123 +433,28 @@ const scheduleEvent = (oscData, sessionId, runTag, sourceId = 0) => {
         return true;
     }
 
-    const currentNTP = getCurrentNTP();
-    const timeUntilExec = ntpTime - currentNTP;
-
-    // Reject bundles too large for scheduler slot (WASM has fixed slot size)
-    if (oscData.length > schedulerPoolSize) {
-        const errorMsg = `Bundle too large for scheduler pool (${oscData.length} > ${schedulerPoolSize} bytes)`;
-        console.error('[PreScheduler]', errorMsg);
-        self.postMessage({ type: 'error', error: errorMsg, code: 'BUNDLE_TOO_LARGE' });
-        return false;
-    }
-
-    // Reject bundles scheduled too far in the future (prevents queue buildup)
-    if (timeUntilExec > MAX_FUTURE_SCHEDULE_SECONDS) {
-        const errorMsg = `Bundle scheduled too far in future (${timeUntilExec.toFixed(0)}s > ${MAX_FUTURE_SCHEDULE_SECONDS}s max)`;
-        console.error('[PreScheduler]', errorMsg);
-        self.postMessage({ type: 'error', error: errorMsg, code: 'BUNDLE_TOO_FAR_FUTURE' });
-        return false;
-    }
-
-    // Create event with NTP timestamp
-    const event = {
-        ntpTime,
-        seq: sequenceCounter++,
-        sessionId: sessionId || 0,
-        runTag: runTag || '',
-        oscData,
-        sourceId
-    };
-
-    heapPush(event);
-
     metricsAdd(MetricsOffsets.PRESCHEDULER_BUNDLES_SCHEDULED, 1);
     updateMetrics();  // Update buffer with current queue depth and peak
 
     schedulerLog('[PreScheduler] Scheduled bundle:',
                  'NTP=' + ntpTime.toFixed(3),
-                 'current=' + currentNTP.toFixed(3),
-                 'wait=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
-                 'pending=' + eventHeap.length);
+                 'current=' + now.toFixed(3),
+                 'wait=' + ((ntpTime - now) * 1000).toFixed(1) + 'ms',
+                 'pending=' + core.size());
 
     rescheduleDispatch();
     return true;
 };
 
-const heapPush = (event) => {
-    eventHeap.push(event);
-    siftUp(eventHeap.length - 1);
-};
-
-const heapPeek = () => eventHeap.length > 0 ? eventHeap[0] : null;
-
-const heapPop = () => {
-    if (eventHeap.length === 0) {
-        return null;
-    }
-    const top = eventHeap[0];
-    const last = eventHeap.pop();
-    if (eventHeap.length > 0) {
-        eventHeap[0] = last;
-        siftDown(0);
-    }
-    return top;
-};
-
-const siftUp = (index) => {
-    while (index > 0) {
-        const parent = Math.floor((index - 1) / 2);
-        if (compareEvents(eventHeap[index], eventHeap[parent]) >= 0) {
-            break;
-        }
-        swap(index, parent);
-        index = parent;
-    }
-};
-
-const siftDown = (index) => {
-    const length = eventHeap.length;
-    while (true) {
-        const left = 2 * index + 1;
-        const right = 2 * index + 2;
-        let smallest = index;
-
-        if (left < length && compareEvents(eventHeap[left], eventHeap[smallest]) < 0) {
-            smallest = left;
-        }
-        if (right < length && compareEvents(eventHeap[right], eventHeap[smallest]) < 0) {
-            smallest = right;
-        }
-        if (smallest === index) {
-            break;
-        }
-        swap(index, smallest);
-        index = smallest;
-    }
-};
-
-const compareEvents = (a, b) => {
-    if (a.ntpTime === b.ntpTime) {
-        return a.seq - b.seq;
-    }
-    return a.ntpTime - b.ntpTime;
-};
-
-const swap = (i, j) => {
-    const tmp = eventHeap[i];
-    eventHeap[i] = eventHeap[j];
-    eventHeap[j] = tmp;
-};
-
 /**
  * Reschedule the dispatch timer to target the next needed dispatch time.
- * Called after any state change (heap push/pop, cancel).
+ * Called after any state change (schedule, dispatch, cancel).
  * Retry queue is handled separately via Atomics.waitAsync notifications.
  * When idle (nothing pending), no timer runs.
  */
 const rescheduleDispatch = () => {
-    if (eventHeap.length === 0) {
+    const targetNTP = core.nextDueTime();  // already lookahead-adjusted, or null when idle
+    if (targetNTP === null) {
         if (dispatchTimer !== null) {
             clearTimeout(dispatchTimer);
             dispatchTimer = null;
@@ -530,14 +463,11 @@ const rescheduleDispatch = () => {
         return;
     }
 
-    const targetNTP = heapPeek().ntpTime - lookaheadS;
-    const nowNTP = getCurrentNTP();
-
     if (targetNTP < nextDispatchAt) {
         if (dispatchTimer !== null) {
             clearTimeout(dispatchTimer);
         }
-        const delayMs = Math.max(0, (targetNTP - nowNTP) * 1000);
+        const delayMs = Math.max(0, (targetNTP - getCurrentNTP()) * 1000);
         nextDispatchAt = targetNTP;
         dispatchTimer = setTimeout(checkAndDispatch, delayMs);
     }
@@ -577,66 +507,60 @@ const checkAndDispatch = () => {
     isDispatching = true;
 
     const currentNTP = getCurrentNTP();
-    const lookaheadTime = currentNTP + lookaheadS;
     let dispatchCount = 0;
 
-    // Dispatch all bundles that are ready
-    while (eventHeap.length > 0) {
-        const nextEvent = heapPeek();
+    // The core releases every due event in order; the host does the I/O,
+    // metrics, and retry handling for each.
+    const sink = (event) => {
+        updateMetrics();  // Update buffer with current queue depth
 
-        if (nextEvent.ntpTime <= lookaheadTime) {
-            // Ready to dispatch
-            heapPop();
-            updateMetrics();  // Update buffer with current queue depth
+        const { oscData, sourceId } = event.payload;
+        const timeUntilExec = event.ntpTime - currentNTP;
+        metricsAdd(MetricsOffsets.PRESCHEDULER_TOTAL_DISPATCHES, 1);
 
-            const timeUntilExec = nextEvent.ntpTime - currentNTP;
-            metricsAdd(MetricsOffsets.PRESCHEDULER_TOTAL_DISPATCHES, 1);
+        // Track timing: headroom (ms before execution) or lates (dispatched after execution time)
+        if (timeUntilExec < 0) {
+            // Late dispatch - bundle arrived after its scheduled execution time
+            const lateMs = Math.round(-timeUntilExec * 1000);
+            metricsAdd(MetricsOffsets.PRESCHEDULER_LATES, 1);
 
-            // Track timing: headroom (ms before execution) or lates (dispatched after execution time)
-            if (timeUntilExec < 0) {
-                // Late dispatch - bundle arrived after its scheduled execution time
-                const lateMs = Math.round(-timeUntilExec * 1000);
-                metricsAdd(MetricsOffsets.PRESCHEDULER_LATES, 1);
-
-                // Track max lateness
-                const currentMaxLate = metricsGet(MetricsOffsets.PRESCHEDULER_MAX_LATE_MS);
-                if (lateMs > currentMaxLate) {
-                    metricsSet(MetricsOffsets.PRESCHEDULER_MAX_LATE_MS, lateMs);
-                }
-            } else {
-                // On-time dispatch - track min headroom
-                const headroomMs = Math.round(timeUntilExec * 1000);
-
-                // Track min headroom
-                const currentMin = metricsGet(MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS);
-                if (currentMin === HEADROOM_UNSET_SENTINEL || headroomMs < currentMin) {
-                    metricsSet(MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS, headroomMs);
-                }
+            // Track max lateness
+            const currentMaxLate = metricsGet(MetricsOffsets.PRESCHEDULER_MAX_LATE_MS);
+            if (lateMs > currentMaxLate) {
+                metricsSet(MetricsOffsets.PRESCHEDULER_MAX_LATE_MS, lateMs);
             }
-
-            schedulerLog('[PreScheduler] Dispatching bundle:',
-                        'NTP=' + nextEvent.ntpTime.toFixed(3),
-                        'current=' + currentNTP.toFixed(3),
-                        'early=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
-                        'remaining=' + eventHeap.length);
-
-            // Use useWait: true for guaranteed delivery (no lock contention drops)
-            const success = dispatchOSCMessage(nextEvent.oscData, false, nextEvent.sourceId, true);
-            if (!success) {
-                // Queue for retry (only fails if buffer genuinely full)
-                queueForRetry(nextEvent.oscData, 'scheduled bundle NTP=' + nextEvent.ntpTime.toFixed(3), nextEvent.sourceId);
-            }
-            dispatchCount++;
         } else {
-            // Rest aren't ready yet (heap is sorted)
-            break;
-        }
-    }
+            // On-time dispatch - track min headroom
+            const headroomMs = Math.round(timeUntilExec * 1000);
 
-    if (dispatchCount > 0 || eventHeap.length > 0 || retryQueue.length > 0) {
+            // Track min headroom
+            const currentMin = metricsGet(MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS);
+            if (currentMin === HEADROOM_UNSET_SENTINEL || headroomMs < currentMin) {
+                metricsSet(MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS, headroomMs);
+            }
+        }
+
+        schedulerLog('[PreScheduler] Dispatching bundle:',
+                    'NTP=' + event.ntpTime.toFixed(3),
+                    'current=' + currentNTP.toFixed(3),
+                    'early=' + (timeUntilExec * 1000).toFixed(1) + 'ms',
+                    'remaining=' + core.size());
+
+        // Use useWait: true for guaranteed delivery (no lock contention drops)
+        const success = dispatchOSCMessage(oscData, false, sourceId, true);
+        if (!success) {
+            // Queue for retry (only fails if buffer genuinely full)
+            queueForRetry(oscData, 'scheduled bundle NTP=' + event.ntpTime.toFixed(3), sourceId);
+        }
+        dispatchCount++;
+    };
+
+    core.dispatchDue(currentNTP, sink);
+
+    if (dispatchCount > 0 || core.size() > 0 || retryQueue.length > 0) {
         schedulerLog('[PreScheduler] Dispatch cycle complete:',
                     'dispatched=' + dispatchCount,
-                    'pending=' + eventHeap.length,
+                    'pending=' + core.size(),
                     'retrying=' + retryQueue.length);
     }
 
@@ -648,58 +572,30 @@ const checkAndDispatch = () => {
     rescheduleDispatch();
 };
 
-const cancelBy = (predicate) => {
-    if (eventHeap.length === 0) {
-        return;
-    }
-
-    const before = eventHeap.length;
-    const remaining = [];
-
-    for (let i = 0; i < eventHeap.length; i++) {
-        const event = eventHeap[i];
-        if (!predicate(event)) {
-            remaining.push(event);
-        }
-    }
-
-    const removed = before - remaining.length;
+// Apply the bookkeeping shared by every targeted cancel: metrics, buffer
+// refresh, and a dispatch reschedule — but only when something was removed.
+const applyCancel = (removed) => {
     if (removed > 0) {
-        eventHeap = remaining;
-        heapify();
         metricsAdd(MetricsOffsets.PRESCHEDULER_EVENTS_CANCELLED, removed);
         updateMetrics();  // Update buffer with current queue depth
-        schedulerLog('[PreScheduler] Cancelled ' + removed + ' events, ' + eventHeap.length + ' remaining');
+        schedulerLog('[PreScheduler] Cancelled ' + removed + ' events, ' + core.size() + ' remaining');
         rescheduleDispatch();
     }
 };
 
-const heapify = () => {
-    for (let i = Math.floor(eventHeap.length / 2) - 1; i >= 0; i--) {
-        siftDown(i);
-    }
-};
+const cancelSessionTag = (sessionId, runTag) => applyCancel(core.cancelSessionTag(sessionId, runTag));
 
-const cancelSessionTag = (sessionId, runTag) => {
-    cancelBy((event) => event.sessionId === sessionId && event.runTag === runTag);
-};
+const cancelSession = (sessionId) => applyCancel(core.cancelSession(sessionId));
 
-const cancelSession = (sessionId) => {
-    cancelBy((event) => event.sessionId === sessionId);
-};
-
-const cancelTag = (runTag) => {
-    cancelBy((event) => event.runTag === runTag);
-};
+const cancelTag = (runTag) => applyCancel(core.cancelTag(runTag));
 
 const cancelAllTags = () => {
-    const cancelled = eventHeap.length;
+    const cancelled = core.cancelAll();
     const retried = retryQueue.length;
     if (cancelled === 0 && retried === 0) {
         return;
     }
     metricsAdd(MetricsOffsets.PRESCHEDULER_EVENTS_CANCELLED, cancelled + retried);
-    eventHeap = [];
     retryQueue = [];
     metricsStore(MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE, 0);
     updateMetrics();  // Update buffer (sets eventsPending to 0)
@@ -806,6 +702,12 @@ self.addEventListener('message', (event) => {
 
                 // Initialize max late to 0 (any late value will exceed)
                 metricsSet(MetricsOffsets.PRESCHEDULER_MAX_LATE_MS, 0);
+
+                // Push the resolved config into the scheduling core (it was
+                // constructed with defaults before these overrides were known).
+                core.maxPending = maxPendingMessages;
+                core.lookaheadS = lookaheadS;
+                core.poolBytes = schedulerPoolSize;
 
                 // Start demand-driven dispatching
                 startDispatching();
