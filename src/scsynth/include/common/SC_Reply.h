@@ -21,5 +21,13 @@
 
 #pragma once
 
+// A "lean" target has no boost::asio networking: the WASM/AudioWorklet build
+// and embedded (ESP-IDF) builds. On lean targets ReplyAddress carries a
+// trivially-copyable placeholder instead of a boost::asio::ip::address, and the
+// reply comparison paths avoid boost. Desktop/native keeps boost.
+#if defined(__EMSCRIPTEN__) || defined(ESP_PLATFORM)
+#define SC_LEAN_TARGET 1
+#endif
+
 struct ReplyAddress;
 typedef void (*ReplyFunc)(struct ReplyAddress* inReplyAddr, char* inBuf, int inSize);

@@ -28,6 +28,8 @@
 
 #pragma once
 
+#include <string>  // mErrorMsg; was pulled in transitively via boost until lean targets dropped it
+
 #include "SC_World.h"
 #include "SC_Command.h"
 #include "sc_msg_iter.h"

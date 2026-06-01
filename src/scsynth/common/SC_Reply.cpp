@@ -26,7 +26,7 @@
 void null_reply_func(struct ReplyAddress* addr, char* msg, int size) {}
 
 bool operator==(const ReplyAddress& a, const ReplyAddress& b) {
-#ifdef __EMSCRIPTEN__
+#ifdef SC_LEAN_TARGET
     return std::memcmp(a.mAddressPlaceholder, b.mAddressPlaceholder, sizeof(a.mAddressPlaceholder)) == 0
         && a.mProtocol == b.mProtocol && a.mPort == b.mPort && a.mSocket == b.mSocket;
 #else
@@ -35,7 +35,7 @@ bool operator==(const ReplyAddress& a, const ReplyAddress& b) {
 }
 
 bool operator<(const ReplyAddress& a, const ReplyAddress& b) {
-#ifdef __EMSCRIPTEN__
+#ifdef SC_LEAN_TARGET
     int cmp = std::memcmp(a.mAddressPlaceholder, b.mAddressPlaceholder, sizeof(a.mAddressPlaceholder));
     if (cmp != 0) {
         return cmp < 0;

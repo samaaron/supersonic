@@ -21,9 +21,13 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "SC_Reply.h"
 
+#ifndef SC_LEAN_TARGET
 #include <boost/asio.hpp>
+#endif
 
 enum Protocol {
     kUDP,
@@ -34,8 +38,8 @@ enum Protocol {
 };
 
 struct ReplyAddress {
-#ifdef __EMSCRIPTEN__
-    uint32_t mAddressPlaceholder[4];  // Trivially copyable placeholder (no network in WASM)
+#ifdef SC_LEAN_TARGET
+    uint32_t mAddressPlaceholder[4];  // Trivially copyable placeholder (no network on lean targets)
 #else
     boost::asio::ip::address mAddress;
 #endif
