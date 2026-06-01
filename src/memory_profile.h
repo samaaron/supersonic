@@ -39,8 +39,10 @@
  *   Scheduler pool ....................... shared_memory.h / scheduler/BundleScheduler.h
  *     SCHEDULER_DATA_POOL_SIZE             bundle data pool bytes
  *     SCHEDULER_SLOT_COUNT                 max scheduled bundles
- *   RT heap (AllocPool) .................. supersonic_config.h
- *     SUPERSONIC_HEAP_SIZE                 initial pool bytes
+ *   RT heap (AllocPool) .................. supersonic_config.h / supersonic_heap.cpp
+ *     SUPERSONIC_HEAP_SIZE                 nominal pool bytes
+ *     SUPERSONIC_HEAP_GROWTH_SIZE          growth-area bytes when exhausted (Bulk tier)
+ *     SUPERSONIC_HEAP_FAST_SIZE            Fast-tier initial area (== HEAP_SIZE off-device)
  *   Audio graph caps ..................... audio_config.h
  *     SUPERSONIC_MAX_BLOCK_SIZE            static_audio_bus block cap (non-WASM)
  *     SUPERSONIC_DEFAULT_BLOCK_SIZE        default control block size (non-WASM)
@@ -104,6 +106,12 @@
   #ifndef SUPERSONIC_HEAP_SIZE
   #define SUPERSONIC_HEAP_SIZE 786432              // 768 KB nominal pool budget
   #endif
+  #ifndef SUPERSONIC_HEAP_GROWTH_SIZE
+  #define SUPERSONIC_HEAP_GROWTH_SIZE 262144       // 256 KB growth (into Bulk/PSRAM)
+  #endif
+  #ifndef SUPERSONIC_HEAP_FAST_SIZE
+  #define SUPERSONIC_HEAP_FAST_SIZE 49152          // 48 KB internal-SRAM initial area
+  #endif
   #ifndef SUPERSONIC_MAX_BLOCK_SIZE
   #define SUPERSONIC_MAX_BLOCK_SIZE 64
   #endif
@@ -163,6 +171,16 @@
 // RT heap (AllocPool)
 #ifndef SUPERSONIC_HEAP_SIZE
 #define SUPERSONIC_HEAP_SIZE (64 * 1024 * 1024)    // 64 MB
+#endif
+#ifndef SUPERSONIC_HEAP_GROWTH_SIZE
+#define SUPERSONIC_HEAP_GROWTH_SIZE (16 * 1024 * 1024) // 16 MB growth area when exhausted
+#endif
+// The initial pool area drawn from the Fast tier (mem_region.h). On desktop/WASM
+// this equals SUPERSONIC_HEAP_SIZE, so the pool is one region and behaviour is
+// unchanged; an embedded profile shrinks it so only the boot-time hot set lands
+// in fast internal SRAM and later/large buffers grow into Bulk (PSRAM).
+#ifndef SUPERSONIC_HEAP_FAST_SIZE
+#define SUPERSONIC_HEAP_FAST_SIZE SUPERSONIC_HEAP_SIZE
 #endif
 
 // Audio graph caps (non-WASM; the WASM render quantum is fixed at 128)

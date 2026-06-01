@@ -130,6 +130,19 @@ inline void* sc_malloc(size_t size) { return supersonic_heap_alloc(size); }
 inline void* sc_malloc(size_t size) { return nova::malloc_aligned(size); }
 #endif
 
+#if defined(SUPERSONIC) && !defined(__EMSCRIPTEN__)
+#include "mem_region.h"
+// Backing-area callbacks for scsynth's real-time AllocPool (world->hw->mAllocPool,
+// the per-block-hot graph state: Nodes, Graphs, per-synth wire buffers, Units).
+// Drawn from mem::Tier::Fast — internal SRAM on embedded, plain std::malloc on
+// desktop/NIF (identical to upstream). WASM uses its own pre-allocated SAB pool,
+// so this is native-only.
+static void* supersonic_rt_pool_area_alloc(size_t size) {
+    return supersonic::mem::alloc(supersonic::mem::Tier::Fast, size);
+}
+static void supersonic_rt_pool_area_free(void* ptr) { supersonic::mem::free(ptr); }
+#endif
+
 void* sc_dbg_malloc(size_t size, const char* tag, int line) {
     void* ptr = sc_malloc(size);
     fprintf(stderr, "sc_dbg_malloc [%s:%d] %p %zu\n", tag, line, ptr, size);
@@ -399,6 +412,14 @@ World* World_New(WorldOptions* inOptions) {
                 throw std::runtime_error("RT pool not pre-allocated — cannot use malloc (would overlap buffer pool)");
             }
         }
+#elif defined(SUPERSONIC)
+        // RT pool backed by Tier::Fast (internal SRAM on embedded; std::malloc on
+        // desktop/NIF — identical to the upstream malloc path below). Fixed size
+        // (growth = 0): no system allocation on the audio thread once booted;
+        // exhaustion fails the command gracefully rather than allocating
+        // mid-render.
+        world->hw->mAllocPool = new AllocPool(supersonic_rt_pool_area_alloc, supersonic_rt_pool_area_free,
+                                              inOptions->mRealTimeMemorySize * 1024, 0);
 #else
         world->hw->mAllocPool = new AllocPool(malloc, free, inOptions->mRealTimeMemorySize * 1024, 0);
 #endif

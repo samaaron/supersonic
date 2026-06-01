@@ -480,8 +480,11 @@ extern "C" {
         }
 #endif
 
-        // Initialize pre-allocated heap (no-op on WASM, creates AllocPool on native)
-        supersonic_heap_init(SUPERSONIC_HEAP_SIZE);
+        // Initialize pre-allocated heap (no-op on WASM, creates AllocPool on
+        // native). The argument sizes the Fast (internal-SRAM) initial area; on
+        // desktop SUPERSONIC_HEAP_FAST_SIZE == SUPERSONIC_HEAP_SIZE, so the pool
+        // is one region as before (see memory_profile.h).
+        supersonic_heap_init(SUPERSONIC_HEAP_FAST_SIZE);
 
         // Create + start the World via the shared engine-core bring-up: World_New,
         // sample rate, wire buffers, and the bus/wire-buffer sanity checks (see

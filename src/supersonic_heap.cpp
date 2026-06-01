@@ -1,9 +1,11 @@
 /*
  * supersonic_heap.cpp — Native growable heap using AllocPool
  *
- * Creates an AllocPool from a system-malloc'd block at init time. When the
- * initial block is exhausted, AllocPool automatically requests more memory
- * via the heap_new_area callback (growth increments of HEAP_GROWTH_SIZE).
+ * Creates an AllocPool whose backing memory comes from the tiered placement
+ * allocator (mem_region.h): the initial area from Tier::Fast, growth areas from
+ * Tier::Bulk. On desktop/WASM/NIF both tiers are plain std::malloc, so the pool
+ * is one region and behaviour is unchanged; an embedded build maps Fast to
+ * internal SRAM (the boot-time hot set) and grows into Bulk (PSRAM).
  *
  * All allocations via supersonic_heap_alloc/free use this pool instead of
  * system malloc, making them RT-safe once allocated.
@@ -15,13 +17,16 @@
 
 #include "supersonic_heap.h"
 #include "SC_AllocPool.h"
+#include "memory_profile.h"
+#include "mem_region.h"
 #include <atomic>
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
 
-// Growth increment when the pool is exhausted (16MB)
-static constexpr size_t HEAP_GROWTH_SIZE = 16 * 1024 * 1024;
+// Growth increment when the pool is exhausted. Default 16MB; sized per device
+// via memory_profile.h (the ESP32-S3 profile shrinks it to 256KB).
+static constexpr size_t HEAP_GROWTH_SIZE = SUPERSONIC_HEAP_GROWTH_SIZE;
 
 static AllocPool* g_heap_pool = nullptr;
 static void*      g_heap_backing = nullptr;
@@ -47,8 +52,8 @@ static void* heap_new_area(size_t size) {
         return ptr;
     }
 
-    // Growth allocation — malloc a new area
-    void* ptr = std::malloc(size);
+    // Growth allocation — Bulk tier (PSRAM on embedded, malloc on desktop)
+    void* ptr = supersonic::mem::alloc(supersonic::mem::Tier::Bulk, size);
     if (ptr) {
         g_extra_areas.push_back(ptr);
         g_total_allocated += size;
@@ -66,7 +71,7 @@ static void heap_free_area(void* ptr) {
     // Free growth areas and remove from tracking
     for (auto it = g_extra_areas.begin(); it != g_extra_areas.end(); ++it) {
         if (*it == ptr) {
-            std::free(ptr);
+            supersonic::mem::free(ptr);
             g_extra_areas.erase(it);
             return;
         }
@@ -84,7 +89,8 @@ void supersonic_heap_init(size_t bytes) {
     // AllocPool::NewArea requests areaInitSize + kAreaOverhead from the callback,
     // so we must allocate enough to cover both the usable pool and the overhead.
     size_t total = bytes + kAreaOverhead;
-    g_heap_backing = std::malloc(total);
+    // Initial area — Fast tier (internal SRAM on embedded, malloc on desktop)
+    g_heap_backing = supersonic::mem::alloc(supersonic::mem::Tier::Fast, total);
     if (!g_heap_backing) {
         fprintf(stderr, "supersonic_heap_init: failed to allocate %zu bytes\n", total);
         return;
@@ -137,12 +143,12 @@ void supersonic_heap_destroy() {
     }
     // Free growth areas
     for (void* area : g_extra_areas) {
-        std::free(area);
+        supersonic::mem::free(area);
     }
     g_extra_areas.clear();
     // Free initial backing block
     if (g_heap_backing) {
-        std::free(g_heap_backing);
+        supersonic::mem::free(g_heap_backing);
         g_heap_backing = nullptr;
     }
     g_total_allocated = 0;
