@@ -14,6 +14,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "memory_profile.h"
+
 namespace sonicpi {
 
 // Runtime-gated deep diagnostic logging. A few hard-to-reach issues
@@ -40,16 +42,18 @@ inline bool devLogEnabled() {
 inline constexpr int kMaxBlockSize     = 128;
 inline constexpr int kDefaultBlockSize = 128;
 #else
-// Native desktop build — no platform cap. 1024 covers every HW buffer
-// we've seen on macOS/Windows/Linux drivers (typically 64–512). Sizing
-// static_audio_bus to the cap costs kMaxBlockSize * kMaxChannels * 4 B
-// in .bss; at 1024 × 128 that's 512 KB, negligible on desktop RAM.
-inline constexpr int kMaxBlockSize     = 1024;
-inline constexpr int kDefaultBlockSize = 128;
+// Non-WASM build — block size comes from memory_profile.h (default max 1024,
+// which covers every HW buffer we've seen on macOS/Windows/Linux drivers,
+// typically 64–512). Embedded profiles shrink this hard: static_audio_bus
+// costs kMaxBlockSize * kMaxChannels * 4 B in .bss, so 1024 × 128 = 512 KB on
+// desktop but e.g. 64 × 2 = 512 B on the ESP32-S3 profile.
+inline constexpr int kMaxBlockSize     = SUPERSONIC_MAX_BLOCK_SIZE;
+inline constexpr int kDefaultBlockSize = SUPERSONIC_DEFAULT_BLOCK_SIZE;
 #endif
 
-// Scsynth's per-world max output channels. Not platform-dependent.
-inline constexpr int kMaxChannels = 128;
+// Scsynth's per-world max output channels (default 128); sized per device via
+// memory_profile.h. Not platform-dependent.
+inline constexpr int kMaxChannels = SUPERSONIC_MAX_CHANNELS;
 
 // Named indices into the uint32_t opts[] array at
 // ring_buffer_storage + WORLD_OPTIONS_START. audio_processor.cpp

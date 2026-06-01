@@ -25,10 +25,9 @@
     SUPERSONIC_STRINGIFY(SUPERSONIC_VERSION_PATCH)
 
 // Pre-allocated heap size for RT-safe allocations (used by supersonic_heap).
-// 64MB heap for native builds (unused in WASM where emscripten manages memory).
-#ifndef SUPERSONIC_HEAP_SIZE
-#define SUPERSONIC_HEAP_SIZE (64 * 1024 * 1024)
-#endif
+// Default 64MB for native builds (unused in WASM where emscripten manages
+// memory); sized per device via memory_profile.h.
+#include "memory_profile.h"
 
 #ifdef __cplusplus
 extern "C" {

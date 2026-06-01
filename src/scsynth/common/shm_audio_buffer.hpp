@@ -29,24 +29,26 @@
 #include <cstdint>
 #include <cstring>
 
+// memory_profile.h is a pure-macro leaf header with no further dependencies,
+// so including it here keeps this header standalone while ensuring every
+// translation unit — whether it reaches this header via shared_memory.h or
+// directly (native server_shm, C++ tests) — sees the same capture-ring sizing.
+#include "../../memory_profile.h"
+
 namespace detail_shm_audio {
 
-// Slot count. Must be small enough that the inline data arrays fit
-// inside ring_buffer_storage / server_shm at the configured ring size.
-inline constexpr uint32_t MAX_SHM_AUDIO_BUFFERS = 4;
+// Slot count and per-slot ring sizing come from memory_profile.h. Slots must
+// be small enough that the inline data arrays fit inside ring_buffer_storage /
+// server_shm at the configured ring size. SUPERSONIC_SHM_AUDIO_SECONDS sets the
+// duration (1s in production; test builds bump it so windows don't wrap);
+// SUPERSONIC_SHM_AUDIO_FRAMES can override the frame count directly to express
+// sub-second rings that the integer seconds knob cannot.
+inline constexpr uint32_t MAX_SHM_AUDIO_BUFFERS = SUPERSONIC_MAX_SHM_AUDIO_BUFFERS;
 inline constexpr uint32_t SHM_AUDIO_MASTER_SLOT = 0;
 
-// Per-slot ring capacity in frames (interleaved float).
-// SUPERSONIC_SHM_AUDIO_SECONDS sets the duration: 1s in production, the
-// test build bumps it so test windows don't wrap. The macro lives in
-// this header (not shared_memory.h) so the header has no upstream
-// dependencies and can be included by shared_memory.h itself.
-#ifndef SUPERSONIC_SHM_AUDIO_SECONDS
-#define SUPERSONIC_SHM_AUDIO_SECONDS 1
-#endif
-inline constexpr uint32_t SHM_AUDIO_SAMPLE_RATE = 48000;
+inline constexpr uint32_t SHM_AUDIO_SAMPLE_RATE = SUPERSONIC_SHM_AUDIO_SAMPLE_RATE;
 inline constexpr uint32_t SHM_AUDIO_SECONDS     = SUPERSONIC_SHM_AUDIO_SECONDS;
-inline constexpr uint32_t SHM_AUDIO_FRAMES      = SHM_AUDIO_SAMPLE_RATE * SHM_AUDIO_SECONDS;
+inline constexpr uint32_t SHM_AUDIO_FRAMES      = SUPERSONIC_SHM_AUDIO_FRAMES;
 inline constexpr uint32_t SHM_AUDIO_CHANNELS    = 2;
 // Per-slot header bytes (atomics + sizes + 64-bit write_position +
 // padding). Guaranteed 32 by the static_assert on offsetof(..., data).

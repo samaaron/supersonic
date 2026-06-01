@@ -16,20 +16,16 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include "../memory_profile.h"
 #include "../scsynth/server/OSC_Packet.h"
 
 // Forward declarations
 struct World;
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
 
-// Scheduler configuration - can be overridden via -D flags at compile time
-#ifndef SCHEDULER_DATA_POOL_SIZE
-#define SCHEDULER_DATA_POOL_SIZE (512 * 1024)  // 512KB — variable-size bundle data
-#endif
-
-#ifndef SCHEDULER_SLOT_COUNT
-#define SCHEDULER_SLOT_COUNT 512
-#endif
+// Scheduler configuration is sized per device via memory_profile.h
+// (defaults: SCHEDULER_DATA_POOL_SIZE 512KB, SCHEDULER_SLOT_COUNT 512) and is
+// shared with shared_memory.h; override with -D flags or a device profile.
 
 // Maximum scheduled events (RT-safe, statically allocated)
 constexpr int MAX_SCHEDULED_BUNDLES = SCHEDULER_SLOT_COUNT;

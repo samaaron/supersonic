@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "memory_profile.h"
 #include "scsynth/common/shm_audio_buffer.hpp"
 
 namespace supersonic {
@@ -50,11 +51,12 @@ inline double bitsToDouble(uint64_t bits) {
 // All offsets are calculated automatically using constexpr.
 // ============================================================================
 
-// User-configurable buffer sizes
-// Balanced to prevent message drops in audioworklet
-constexpr uint32_t IN_BUFFER_SIZE     = 786432; // 768KB - OSC messages from JS to scsynth (large for SynthDefs)
-constexpr uint32_t OUT_BUFFER_SIZE    = 131072; // 128KB - OSC replies from scsynth to JS (prevent drops)
-constexpr uint32_t DEBUG_BUFFER_SIZE  = 65536;  // 64KB - Debug messages from scsynth
+// User-configurable buffer sizes.
+// Balanced to prevent message drops in the audioworklet; sized per device via
+// memory_profile.h (defaults: IN 768KB, OUT 128KB, DEBUG 64KB).
+constexpr uint32_t IN_BUFFER_SIZE     = SUPERSONIC_IN_BUFFER_SIZE;    // OSC messages from host to scsynth (large for SynthDefs)
+constexpr uint32_t OUT_BUFFER_SIZE    = SUPERSONIC_OUT_BUFFER_SIZE;   // OSC replies from scsynth to host (prevent drops)
+constexpr uint32_t DEBUG_BUFFER_SIZE  = SUPERSONIC_DEBUG_BUFFER_SIZE; // Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 48;    // Atomic control pointers & flags (11 fields × 4 bytes + 4 padding for 8-byte alignment)
 constexpr uint32_t METRICS_SIZE       = 184;   // Performance metrics: 46 fields * 4 bytes = 184 bytes
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
@@ -65,10 +67,8 @@ constexpr uint32_t SUPERCLOCK_STATE_SIZE = 32; // SuperClock session state: 3 at
 // Node tree mirror configuration (for observing synth/group hierarchy via polling)
 // This is a MIRROR of the actual scsynth node tree - the real tree can exceed this limit,
 // but only this many nodes will be visible to JavaScript. Audio continues working regardless.
-// Can be overridden at build time with -DNODE_TREE_MIRROR_MAX_NODES=N
-#ifndef NODE_TREE_MIRROR_MAX_NODES
-#define NODE_TREE_MIRROR_MAX_NODES 1024
-#endif
+// Sized per device via memory_profile.h (default 1024); override at build time
+// with -DNODE_TREE_MIRROR_MAX_NODES=N or a device profile.
 constexpr uint32_t NODE_TREE_HEADER_SIZE = 16; // node_count (4) + version (4) + dropped_count (4) + padding (4) for 8-byte alignment
 constexpr uint32_t NODE_TREE_DEF_NAME_SIZE = 32; // Max synthdef name length (including null terminator)
 constexpr uint32_t NODE_TREE_ENTRY_SIZE = 72;  // 6 x int32 (24) + def_name (32) + uuid_hi (8) + uuid_lo (8) = 72 bytes per entry
@@ -109,8 +109,8 @@ constexpr uint32_t WORLD_OPTIONS_START = NODE_ID_COUNTER_START + NODE_ID_COUNTER
 // Each channel gets a small ring buffer (16KB) with its own head/tail/active control words.
 // Active flag is set atomically by the OscChannel when onReply() is called.
 // The osc_in_worker (SAB) or AudioWorklet (PM) fans out replies to all active channels.
-constexpr uint32_t REPLY_CHANNEL_COUNT = 8;
-constexpr uint32_t REPLY_CHANNEL_BUFFER_SIZE = 16384;  // 16KB per channel
+constexpr uint32_t REPLY_CHANNEL_COUNT = SUPERSONIC_REPLY_CHANNEL_COUNT;
+constexpr uint32_t REPLY_CHANNEL_BUFFER_SIZE = SUPERSONIC_REPLY_CHANNEL_BUFFER_SIZE;  // bytes per channel (default 16KB)
 constexpr uint32_t REPLY_CHANNEL_CONTROL_SIZE = 16;    // head(4) + tail(4) + active(4) + drops(4) per channel
 constexpr uint32_t REPLY_CHANNELS_CONTROL_START = WORLD_OPTIONS_START + WORLD_OPTIONS_SIZE;
 constexpr uint32_t REPLY_CHANNELS_CONTROL_SIZE = REPLY_CHANNEL_COUNT * REPLY_CHANNEL_CONTROL_SIZE;  // 96 bytes
@@ -124,12 +124,8 @@ constexpr uint32_t REPLY_CHANNELS_BUFFER_SIZE = REPLY_CHANNEL_COUNT * REPLY_CHAN
 // Each scope slot: header (16B) + 3 triple-buffer regions of audio data.
 // ScopeOut2 UGen writes here; main thread reads via getScope(n).
 // In PM mode, scope snapshots are included in the heartbeat postMessage.
-#ifndef SHM_SCOPE_MAX_SCOPES
-#define SHM_SCOPE_MAX_SCOPES 32
-#endif
-#ifndef SHM_SCOPE_FRAMES_PER_SCOPE
-#define SHM_SCOPE_FRAMES_PER_SCOPE 1024
-#endif
+// SHM_SCOPE_MAX_SCOPES / SHM_SCOPE_FRAMES_PER_SCOPE are sized per device via
+// memory_profile.h (defaults 32 / 1024).
 constexpr uint32_t SHM_SCOPE_CHANNELS = 2;  // Always stereo (ScopeOut2 writes 2 channels)
 constexpr uint32_t SHM_SCOPE_HEADER_SIZE = 32;  // Global header (16-aligned)
 constexpr uint32_t SHM_SCOPE_SLOT_HEADER_SIZE = 16;  // Per-slot metadata
@@ -363,15 +359,9 @@ constexpr uint32_t MESSAGE_MAGIC = 0xDEADBEEF;
 constexpr uint32_t PADDING_MAGIC = 0xBADDCAFE;  // Marks padding at end of buffer (OSC buffers)
 constexpr uint8_t DEBUG_PADDING_MARKER = 0xFF;  // Marks padding at end of debug buffer (skip to position 0)
 
-// Scheduler configuration - can be overridden via -D flags at compile time
-// These must match the values in BundleScheduler.h
-#ifndef SCHEDULER_DATA_POOL_SIZE
-#define SCHEDULER_DATA_POOL_SIZE (512 * 1024)  // 512KB variable-size data pool
-#endif
-
-#ifndef SCHEDULER_SLOT_COUNT
-#define SCHEDULER_SLOT_COUNT 512
-#endif
+// Scheduler configuration is sized per device via memory_profile.h
+// (defaults: SCHEDULER_DATA_POOL_SIZE 512KB, SCHEDULER_SLOT_COUNT 512) and is
+// shared with scheduler/BundleScheduler.h, which includes the same profile.
 
 // ============================================================================
 // BUFFER LAYOUT EXPORT (for JavaScript)
