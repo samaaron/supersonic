@@ -39,6 +39,7 @@ static SuperClock& superClock() {
 #include "SC_World.h"              // from scsynth/include/plugin_interface/
 #include "SC_WorldOptions.h"       // from scsynth/include/server/
 #include "SC_Prototypes.h"         // from scsynth/server/
+#include "SC_EngineCore.h"         // from scsynth/server/ - shared self-driven bring-up
 #include "OSC_Packet.h"            // from scsynth/server/
 #include "SC_Reply.h"              // from scsynth/include/common/
 #include "SC_ReplyImpl.hpp"        // from scsynth/common/ - for ReplyAddress
@@ -482,58 +483,34 @@ extern "C" {
         // Initialize pre-allocated heap (no-op on WASM, creates AllocPool on native)
         supersonic_heap_init(SUPERSONIC_HEAP_SIZE);
 
-        // Create World
+        // Create + start the World via the shared engine-core bring-up: World_New,
+        // sample rate, wire buffers, and the bus/wire-buffer sanity checks (see
+        // SC_EngineCore.h). options.mPreferredSampleRate was set above.
         try {
-            g_world = World_New(&options);
+            const char* err = nullptr;
+            g_world = EngineCore_New(&options, &err);
+            if (!g_world) {
+                ss_log("ERROR: engine bring-up failed: %s", err ? err : "unknown");
+                control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
+                return;
+            }
         } catch (const std::exception& e) {
-            ss_log("ERROR: World_New threw exception: %s", e.what());
+            ss_log("ERROR: engine bring-up threw exception: %s", e.what());
             control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
             return;
         } catch (...) {
-            ss_log("ERROR: World_New threw unknown exception");
+            ss_log("ERROR: engine bring-up threw unknown exception");
             control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
             return;
         }
 
-        if (!g_world) {
-            ss_log("ERROR: Failed to create World");
-            control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
-            return;
-        }
-
-        // Initialize sample rate and rates (FullRate, BufRate)
+        // Re-assert the running sample rate from the AudioContext rate. EngineCore
+        // sets it from options.mPreferredSampleRate (normally identical); this keeps
+        // the AudioContext rate authoritative regardless of the options value.
         World_SetSampleRate(g_world, sample_rate);
-
-        if (!g_world->mAudioBusTouched) {
-            ss_log("ERROR: mAudioBusTouched is NULL");
-            control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
-            return;
-        }
-
-        if (!g_world->mControlBusTouched) {
-            ss_log("ERROR: mControlBusTouched is NULL");
-            control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
-            return;
-        }
 
         // Zero the static audio bus
         memset(static_audio_bus, 0, sizeof(static_audio_bus));
-
-        // Start the World (equivalent to server.boot() in SuperCollider)
-        if (!g_world->mAudioBusTouched || !g_world->mControlBusTouched) {
-            ss_log("ERROR: NULL pointer before World_Start");
-            control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
-            return;
-        }
-
-        World_Start(g_world);
-
-        // Verify critical allocations succeeded
-        if (!g_world->hw->mWireBufSpace) {
-            ss_log("ERROR: Wire buffer allocation failed");
-            control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
-            return;
-        }
 
         // Initialize scheduler time constants (from SC_CoreAudio.cpp:426-428)
         int buf_length = g_world->mBufLength;  // 128 samples

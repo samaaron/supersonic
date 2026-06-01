@@ -250,6 +250,7 @@ set(SUPERSONIC_CORE_SOURCES
 # scsynth server (excludes WASM-only and platform-specific driver files)
 set(SCSYNTH_SERVER_SOURCES
     ${SUPERSONIC_SRC}/scsynth/server/SC_BufGen.cpp
+    ${SUPERSONIC_SRC}/scsynth/server/SC_EngineCore.cpp
     ${SUPERSONIC_SRC}/scsynth/server/SC_Graph.cpp
     ${SUPERSONIC_SRC}/scsynth/server/SC_GraphDef.cpp
     ${SUPERSONIC_SRC}/scsynth/server/SC_Group.cpp
