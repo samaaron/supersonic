@@ -23,6 +23,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// A "lean" target builds without boost::asio networking, cross-process shared
+// memory, or host-filesystem synthdef loading: the WASM/AudioWorklet build and
+// embedded (ESP-IDF) builds. They drive the render themselves and exchange OSC
+// in-process. Desktop/native is the full target. Defined here, in the universal
+// types leaf, so every TU sees the same answer (SC_Reply.h, SC_HiddenWorld.h,
+// SC_MiscCmds.cpp, ... all key feature guards off this single macro).
+#if defined(__EMSCRIPTEN__) || defined(ESP_PLATFORM)
+#    define SC_LEAN_TARGET 1
+#endif
+
 #if __cplusplus
 #    define SC_INLINE inline
 #else
@@ -41,13 +51,17 @@ typedef uint8_t SCBool;
 
 enum { kSCTrue = 1, kSCFalse = 0 };
 
-typedef int32_t SCErr;
+// Use plain int/unsigned, not int32_t/uint32_t. On Xtensa (ESP32) newlib
+// int32_t is `long` — still 32-bit, but a *distinct* type from int, which breaks
+// the many scsynth signatures written with plain `int`/`SCErr`. int == int32_t
+// on desktop/WASM, so this is a no-op there and a portability fix on Xtensa.
+typedef int SCErr;
 
 typedef int64_t int64;
 typedef uint64_t uint64;
 
-typedef int32_t int32;
-typedef uint32_t uint32;
+typedef int int32;
+typedef unsigned int uint32;
 
 typedef int16_t int16;
 typedef uint16_t uint16;
