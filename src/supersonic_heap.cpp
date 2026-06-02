@@ -30,7 +30,27 @@ static constexpr size_t HEAP_GROWTH_SIZE = SUPERSONIC_HEAP_GROWTH_SIZE;
 
 static AllocPool* g_heap_pool = nullptr;
 static void*      g_heap_backing = nullptr;
+
+// Spinlock protecting AllocPool operations. The Xtensa toolchain provides
+// 32-bit atomics (S32C1I) but not std::atomic_flag's byte test-and-set
+// (__atomic_test_and_set), so embedded uses a 4-byte atomic. Desktop/WASM keep
+// std::atomic_flag, byte-for-byte as before.
+#ifdef ESP_PLATFORM
+static std::atomic<uint32_t> g_heap_lock{0};
+static inline void heap_lock() {
+    uint32_t expected = 0;
+    while (!g_heap_lock.compare_exchange_weak(expected, 1u, std::memory_order_acquire,
+                                              std::memory_order_relaxed))
+        expected = 0;
+}
+static inline void heap_unlock() { g_heap_lock.store(0, std::memory_order_release); }
+#else
 static std::atomic_flag g_heap_lock = ATOMIC_FLAG_INIT;
+static inline void heap_lock() {
+    while (g_heap_lock.test_and_set(std::memory_order_acquire)) { /* spin */ }
+}
+static inline void heap_unlock() { g_heap_lock.clear(std::memory_order_release); }
+#endif
 
 // Track dynamically allocated growth areas for cleanup
 static std::vector<void*> g_extra_areas;
@@ -112,13 +132,11 @@ void* supersonic_heap_alloc(size_t bytes) {
         return nullptr;
 
     // Spinlock — contention is minimal (buffer ops only)
-    while (g_heap_lock.test_and_set(std::memory_order_acquire)) {
-        // spin
-    }
+    heap_lock();
 
     void* ptr = g_heap_pool->Alloc(bytes);
 
-    g_heap_lock.clear(std::memory_order_release);
+    heap_unlock();
 
     return ptr;
 }
@@ -127,13 +145,11 @@ void supersonic_heap_free(void* ptr) {
     if (!ptr || !g_heap_pool)
         return;
 
-    while (g_heap_lock.test_and_set(std::memory_order_acquire)) {
-        // spin
-    }
+    heap_lock();
 
     g_heap_pool->Free(ptr);
 
-    g_heap_lock.clear(std::memory_order_release);
+    heap_unlock();
 }
 
 void supersonic_heap_destroy() {

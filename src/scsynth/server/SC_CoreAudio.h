@@ -46,7 +46,7 @@
 #        define SC_AUDIO_API SC_AUDIO_API_PORTAUDIO
 #    elif defined(__APPLE__)
 #        define SC_AUDIO_API SC_AUDIO_API_COREAUDIO
-#    elif defined(__EMSCRIPTEN__)
+#    elif defined(__EMSCRIPTEN__) || defined(ESP_PLATFORM)
 #        define SC_AUDIO_API SC_AUDIO_API_WEBAUDIO
 #    else
 #        error SC_AUDIO_API undefined, cannot determine audio backend

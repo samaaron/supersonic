@@ -22,10 +22,21 @@
 #include "SC_Constants.h"
 #include <cmath>
 
-float32 gSine[kSineSize + 1];
-float32 gPMSine[kSineSize + 1];
-float32 gInvSine[kSineSize + 1];
-float32 gSineWavetable[2 * kSineSize];
+// On embedded, keep the hot sine table (gSine — read every sample by SinOsc/Osc)
+// in fast internal SRAM, and push the cold, large tables (gPMSine, gInvSine, the
+// 64 KB gSineWavetable — only touched by PMOsc / wavetable oscillators) to PSRAM
+// via EXT_RAM_BSS_ATTR. No-op off embedded. See docs/EMBEDDED_MEMORY.md.
+#if defined(ESP_PLATFORM)
+#include "esp_attr.h"
+#define SC_COLD_BSS EXT_RAM_BSS_ATTR
+#else
+#define SC_COLD_BSS
+#endif
+
+float32 gSine[kSineSize + 1]; // hot -> internal SRAM
+float32 SC_COLD_BSS gPMSine[kSineSize + 1];
+float32 SC_COLD_BSS gInvSine[kSineSize + 1];
+float32 SC_COLD_BSS gSineWavetable[2 * kSineSize];
 
 void SignalAsWavetable(float32* signal, float32* wavetable, long inSize) {
     float32 val1, val2;

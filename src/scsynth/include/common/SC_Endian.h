@@ -56,6 +56,16 @@
 #    include <endian.h>
 #    include <netinet/in.h>
 
+#elif defined(ESP_PLATFORM)
+
+// Xtensa (ESP32 family) is little-endian. Define the endian macros and use the
+// self-contained byte-swap implementations below rather than pulling in lwIP's
+// htonl/ntohl (which would drag networking headers into the engine).
+#    define LITTLE_ENDIAN 1234
+#    define BIG_ENDIAN 4321
+#    define BYTE_ORDER LITTLE_ENDIAN
+#    define SC_NO_ENDIAN_FUNCTIONS
+
 #else
 
 #    error cannot find endianess on this platform

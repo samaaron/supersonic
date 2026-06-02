@@ -34,6 +34,20 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// These FFT/polar lookup tables are defined in an anonymous namespace, so every
+// including TU (the FFT/PV objects) gets its own ~48 KB copy. They're cold for
+// basic synthesis, so on embedded push them to PSRAM to free internal SRAM.
+#if defined(ESP_PLATFORM)
+#include "esp_attr.h"
+#ifndef SC_COLD_BSS
+#define SC_COLD_BSS EXT_RAM_BSS_ATTR
+#endif
+#else
+#ifndef SC_COLD_BSS
+#define SC_COLD_BSS
+#endif
+#endif
+
 namespace detail {
 
 const int kSineSize = 8192;
@@ -46,9 +60,9 @@ const int32 kPolarLUTSize2 = kPolarLUTSize >> 1;
 /* each object file that is including this header will have separate lookup tables */
 namespace {
 
-float gMagLUT[kPolarLUTSize];
-float gPhaseLUT[kPolarLUTSize];
-float gSine[kSineSize + 1];
+float SC_COLD_BSS gMagLUT[kPolarLUTSize];
+float SC_COLD_BSS gPhaseLUT[kPolarLUTSize];
+float SC_COLD_BSS gSine[kSineSize + 1];
 
 static bool initTables(void) {
     double sineIndexToPhase = twopi / kSineSize;
