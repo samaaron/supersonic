@@ -87,13 +87,17 @@ extern "C" {
 #    include <sys/mman.h>
 #endif
 
-// Shared memory is not supported in Emscripten/WebAssembly builds
+// server_shm.hpp (native) also pulls in shared_memory.h; on WASM we include it
+// directly. Either way the unified fixed-inline scope constants (SHM_SCOPE_*)
+// are in scope on both runtimes.
 #ifndef __EMSCRIPTEN__
 #include "server_shm.hpp"
 #else
-#include "shared_memory.h"  // For SCOPE_ constants (SAB-backed scope buffers)
-extern "C" int get_ring_buffer_base();  // from audio_processor.cpp — returns WASM pointer as int
+#include "shared_memory.h"
 #endif
+// Real-pointer arena base, valid on native + WASM (from audio_processor.cpp).
+// Backs the unified fixed-inline scope path below.
+extern "C" void* get_shared_memory_base();
 
 #include <filesystem>
 
@@ -464,21 +468,19 @@ World* World_New(WorldOptions* inOptions) {
             // Reuse caller-owned shared memory (survives cold swaps)
             hw->mShmem = static_cast<server_shared_memory_creator*>(inOptions->mExternalSharedMemory);
             hw->mOwnsShmem = false;
-            world->mControlBus = hw->mShmem->get_control_busses();
         } else if (inOptions->mSharedMemoryID) {
             server_shared_memory_creator::cleanup(inOptions->mSharedMemoryID);
             hw->mShmem =
                 new server_shared_memory_creator(inOptions->mSharedMemoryID, inOptions->mNumControlBusChannels);
             hw->mOwnsShmem = true;
-            world->mControlBus = hw->mShmem->get_control_busses();
         } else {
             hw->mShmem = nullptr;
-            world->mControlBus = (float*)zalloc(world->mNumControlBusChannels, sizeof(float));
         }
-#else
-        // Emscripten: Always use plain memory allocation (no shared memory support)
-        world->mControlBus = (float*)zalloc(world->mNumControlBusChannels, sizeof(float));
 #endif
+        // Control busses are process-local on every runtime (not observed
+        // cross-process), so they are heap-allocated rather than placed in the
+        // shm arena.
+        world->mControlBus = (float*)zalloc(world->mNumControlBusChannels, sizeof(float));
 
         world->mNumSharedControls = 0;
         world->mSharedControls = inOptions->mSharedControls;
@@ -582,9 +584,12 @@ World* World_New(WorldOptions* inOptions) {
         }
 
     } catch (std::exception& exc) {
+        fprintf(stderr, "[World_New] EXCEPTION: %s\n", exc.what()); fflush(stderr);
         World_Cleanup(world, true);
         return nullptr;
-    } catch (...) {}
+    } catch (...) {
+        fprintf(stderr, "[World_New] UNKNOWN EXCEPTION\n"); fflush(stderr);
+    }
     return world;
 }
 
@@ -1173,65 +1178,27 @@ void World_NRTUnlock(World* world) { reinterpret_cast<SC_Lock*>(world->mNRTLock)
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Unified fixed-inline scope (native + WASM). Backed by the SHM_SCOPE region of
+// the shared arena (SAB on WASM, public segment on native). Offsets only — no
+// relative_ptr, no TLSF — so the layout is identical and inherently
+// cross-process-safe on every runtime. Triple-buffered: the writer publishes by
+// swapping its region index (_in) with the atomic `stage`.
+//
+// Slot layout (at SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE + index * SHM_SCOPE_SLOT_SIZE):
+//   [0..3]   u32 state (0=free, 1=active)
+//   [4..7]   u32 channels
+//   [8..11]  i32 stage (atomic triple-buffer swap index)
+//   [12..15] u32 _in (writer's current region)
+//   [16..]   float data[3][SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS]
 SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, ScopeBufferHnd* hnd) {
-#ifndef __EMSCRIPTEN__
-    if (!inWorld) {
-        fprintf(stderr, "  [scope] getScopeBuffer: inWorld is NULL!\n"); fflush(stderr);
-        hnd->internalData = nullptr;
-        return kSCFalse;
-    }
-    if (!inWorld->hw) {
-        fprintf(stderr, "  [scope] getScopeBuffer: inWorld->hw is NULL!\n"); fflush(stderr);
-        hnd->internalData = nullptr;
-        return kSCFalse;
-    }
-    server_shared_memory_creator* shm = inWorld->hw->mShmem;
-
-    if (!shm) {
-        DEV_LOG("[scope-diag] getScopeBuffer(idx=%d ch=%d maxFrames=%d): "
-                "shm is NULL\n", index, channels, maxFrames);
-        hnd->internalData = nullptr;
-        return kSCFalse;
-    }
-
-    shm_scope_buffer_writer writer = shm->get_scope_buffer_writer(index, channels, maxFrames);
-
-    if (writer.valid()) {
-        hnd->internalData = writer.buffer;
-        hnd->data = writer.data();
-        hnd->channels = channels;
-        hnd->maxFrames = maxFrames;
-        DEV_LOG("[scope-diag] getScopeBuffer(idx=%d ch=%d maxFrames=%d): "
-                "OK buffer=%p data=%p shm=%p\n",
-                index, channels, maxFrames,
-                hnd->internalData, hnd->data, (void*)shm);
-        return kSCTrue;
-    } else {
-        DEV_LOG("[scope-diag] getScopeBuffer(idx=%d ch=%d maxFrames=%d): "
-                "writer INVALID (pool full or slot busy) shm=%p\n",
-                index, channels, maxFrames, (void*)shm);
-        hnd->internalData = nullptr;
-        return kSCFalse;
-    }
-#else
-    // Emscripten (WASM): scope buffers are backed by a fixed region in the
-    // SharedArrayBuffer, using the same triple-buffer algorithm as native
-    // shm_scope_buffer.hpp but with flat offsets instead of relative_ptr + TLSF.
-    //
-    // SAB layout per slot (at SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE + index * SHM_SCOPE_SLOT_SIZE):
-    //   [0..3]   u32 state (0=free, 1=active)
-    //   [4..7]   u32 channels
-    //   [8..11]  i32 stage (atomic triple-buffer swap index)
-    //   [12..15] u32 _in (writer's current region)
-    //   [16..]   float data[3][maxFrames * channels]
-
-    uint8_t* base = reinterpret_cast<uint8_t*>(get_ring_buffer_base());
+    (void)inWorld;
+    uint8_t* base = reinterpret_cast<uint8_t*>(get_shared_memory_base());
     if (!base) {
         hnd->internalData = nullptr;
         return kSCFalse;
     }
 
-    if (index < 0 || index >= SHM_SCOPE_MAX_SCOPES) {
+    if (index < 0 || index >= (int)SHM_SCOPE_MAX_SCOPES) {
         hnd->internalData = nullptr;
         return kSCFalse;
     }
@@ -1247,11 +1214,15 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
     auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slotBase + 8);
     auto* writerIn = reinterpret_cast<uint32_t*>(slotBase + 12);
 
-    // Initialize slot
+    // Initialize slot. Triple-buffer: the writer fills `writerIn`, publishes it
+    // into `stage`, then advances round-robin through all 3 regions (see
+    // pushScopeBuffer). Start the reader's `stage` on region 2 (a different,
+    // already-zeroed region) so it never observes the region the writer fills
+    // first.
     state->store(1, std::memory_order_relaxed);  // active
     *slotChannels = channels;
-    stage->store(0, std::memory_order_relaxed);  // stage = region 0
-    *writerIn = 1;  // writer starts at region 1
+    *writerIn = 0;                               // writer fills region 0 first
+    stage->store(2, std::memory_order_relaxed);  // reader starts on region 2
 
     // Update global header
     auto* activeCount = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 4);
@@ -1259,7 +1230,7 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
     auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 12);
     version->fetch_add(1, std::memory_order_relaxed);
 
-    // Point hnd->data at writer's current region (region 1)
+    // Point hnd->data at the writer's current region (region 0)
     float* dataBase = reinterpret_cast<float*>(slotBase + SHM_SCOPE_SLOT_HEADER_SIZE);
     uint32_t regionSamples = SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS;
     hnd->data = dataBase + (*writerIn) * regionSamples;
@@ -1267,56 +1238,38 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
     hnd->channels = channels;
     hnd->maxFrames = maxFrames;
     return kSCTrue;
-#endif
 }
 
 void pushScopeBuffer(World* inWorld, ScopeBufferHnd* hnd, int frames) {
-#ifndef __EMSCRIPTEN__
-    shm_scope_buffer_writer writer(reinterpret_cast<shm_scope_buffer*>(hnd->internalData));
-    writer.push(frames);
-    hnd->data = writer.data();
-#else
-    // Emscripten: triple-buffer push on SAB scope slot.
-    // Swap writer's region (_in) with stage (atomic).
+    (void)inWorld;
+    (void)frames;  // fixed-inline regions are full-width; reader takes the whole region
     if (!hnd->internalData) return;
     uint8_t* slotBase = reinterpret_cast<uint8_t*>(hnd->internalData);
     auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slotBase + 8);
     auto* writerIn = reinterpret_cast<uint32_t*>(slotBase + 12);
 
-    // Publish: swap _in with stage
-    int oldStage = stage->exchange((int)*writerIn, std::memory_order_release);
-    *writerIn = (uint32_t)oldStage;  // Reclaim old stage as new write region
+    // Publish the just-filled region into `stage`, then advance the write cursor
+    // round-robin through all 3 regions. Round-robin (rather than swapping with
+    // the old stage, which only ever cycles 2 regions) keeps two full regions
+    // between the writer and the reader's published `stage`, so the reader never
+    // reads a region the writer is mid-write on — true triple buffering.
+    stage->store((int)*writerIn, std::memory_order_release);
+    *writerIn = (*writerIn + 1u) % 3u;
 
     // Update hnd->data to point at new write region
     float* dataBase = reinterpret_cast<float*>(slotBase + SHM_SCOPE_SLOT_HEADER_SIZE);
     uint32_t regionSamples = SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS;
     hnd->data = dataBase + (*writerIn) * regionSamples;
-#endif
 }
 
 void releaseScopeBuffer(World* inWorld, ScopeBufferHnd* hnd) {
-#ifndef __EMSCRIPTEN__
-    DEV_LOG("[scope-diag] releaseScopeBuffer: buffer=%p data=%p\n",
-            hnd->internalData, hnd->data);
-    shm_scope_buffer_writer writer(reinterpret_cast<shm_scope_buffer*>(hnd->internalData));
-    server_shared_memory_creator* shm = inWorld->hw->mShmem;
-    if (shm) {
-        shm->release_scope_buffer_writer(writer);
-    }
-    // Null out the handle so anyone holding a stale reference sees NULL
-    // instead of dangling pointers. The UGen's check (!m_buffer) relies
-    // on internalData being nullable; we zero data too for the defensive
-    // NULL checks we added in ScopeOut2_next.
-    hnd->internalData = nullptr;
-    hnd->data = nullptr;
-#else
-    // Emscripten: mark slot as free
+    (void)inWorld;
     if (!hnd->internalData) return;
     uint8_t* slotBase = reinterpret_cast<uint8_t*>(hnd->internalData);
     auto* state = reinterpret_cast<std::atomic<uint32_t>*>(slotBase + 0);
     state->store(0, std::memory_order_relaxed);  // free
 
-    uint8_t* base = reinterpret_cast<uint8_t*>(get_ring_buffer_base());
+    uint8_t* base = reinterpret_cast<uint8_t*>(get_shared_memory_base());
     if (base) {
         auto* activeCount = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 4);
         if (activeCount->load(std::memory_order_relaxed) > 0)
@@ -1324,8 +1277,41 @@ void releaseScopeBuffer(World* inWorld, ScopeBufferHnd* hnd) {
         auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 12);
         version->fetch_add(1, std::memory_order_relaxed);
     }
+    // Null the handle so a stale holder sees NULL, not a dangling pointer. The
+    // ScopeOut2_next defensive checks rely on both being nullable.
     hnd->internalData = nullptr;
-#endif
+    hnd->data = nullptr;
+}
+
+// Publish live native-only engine stats (loaded synthdef count, allocated
+// sample buffers + their bytes) into the NATIVE_STATS region of the arena, for
+// the SuperSonic observability panel. Called at a low rate from the audio
+// process loop. Writes are plain relaxed atomics — best-effort display values.
+// extern "C" so audio_processor.cpp can forward-declare + call it from inside
+// its own extern "C" block (matching linkage).
+extern "C" void World_UpdateNativeStats(World* inWorld) {
+    if (!inWorld || !inWorld->hw) return;
+    uint8_t* base = reinterpret_cast<uint8_t*>(get_shared_memory_base());
+    if (!base) return;
+    uint8_t* ns = base + NATIVE_STATS_START;
+
+    uint32_t synthdefs = inWorld->hw->mGraphDefLib
+                       ? static_cast<uint32_t>(inWorld->hw->mGraphDefLib->NumItems()) : 0;
+    uint32_t bufCount = 0;
+    uint64_t bufBytes = 0;
+    for (uint32_t i = 0; i < inWorld->mNumSndBufs; ++i) {
+        const SndBuf& b = inWorld->mSndBufs[i];
+        if (b.data && b.samples > 0) {
+            ++bufCount;
+            bufBytes += static_cast<uint64_t>(b.samples) * sizeof(float);
+        }
+    }
+    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_SYNTHDEFS)
+        ->store(synthdefs, std::memory_order_relaxed);
+    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_BUFFERS)
+        ->store(bufCount, std::memory_order_relaxed);
+    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_BUFFER_BYTES)
+        ->store(static_cast<uint32_t>(bufBytes), std::memory_order_relaxed);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

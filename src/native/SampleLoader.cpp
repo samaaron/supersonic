@@ -34,8 +34,12 @@
 extern "C" {
     int ss_log(const char* fmt, ...);
 
-    // Globals from audio_processor.cpp — needed for ring buffer writes
-    extern uint8_t ring_buffer_storage[];
+    // Globals from audio_processor.cpp — needed for ring buffer writes.
+    // Use `shared_memory` (the arena: public segment when present, else
+    // ring_buffer_storage) as the OUT-ring base, consistent with `control`/
+    // `metrics` which are derived from the same arena. Writing via
+    // ring_buffer_storage directly would target the wrong buffer under a segment.
+    extern uint8_t* shared_memory;
     extern ControlPointers* control;
     extern PerformanceMetrics* metrics;
 }
@@ -287,7 +291,7 @@ void SampleLoader::writeDoneReply(int bufnum) {
       << osc::EndMessage;
 
     ring_buffer_write(
-        ring_buffer_storage,
+        shared_memory,
         OUT_BUFFER_SIZE,
         OUT_BUFFER_START,
         &control->out_head,
@@ -308,7 +312,7 @@ void SampleLoader::writeFailReply(int bufnum, const char* cmdName) {
       << osc::EndMessage;
 
     ring_buffer_write(
-        ring_buffer_storage,
+        shared_memory,
         OUT_BUFFER_SIZE,
         OUT_BUFFER_START,
         &control->out_head,

@@ -150,8 +150,21 @@ constexpr uint32_t SHM_SCOPE_START = REPLY_CHANNELS_BUFFER_START + REPLY_CHANNEL
 //   [12..15] u32  _in (writer's current triple-buffer region index)
 //   [16..]   float data[3][framesPerScope * channels]  — triple-buffered audio
 
+// Native-only live engine stats (loaded synthdef count, allocated sample
+// buffers + their bytes). Appended at the very END of the layout on purpose:
+// adding it shifts NO existing offset, so the WASM metric layout / JS offset
+// map is completely untouched (the web build never reads this region — it has
+// its own JS-context equivalents). The native engine writes it; the GUI reads
+// it via the self-describing segment header.
+constexpr uint32_t NATIVE_STATS_SIZE  = 16;  // u32 x4: synthdefs, buffers, buffer_bytes, reserved
+constexpr uint32_t NATIVE_STATS_START = SHM_SCOPE_START + SHM_SCOPE_TOTAL_SIZE;
+// Field byte offsets within the native-stats region.
+constexpr uint32_t NATIVE_STAT_SYNTHDEFS    = 0;
+constexpr uint32_t NATIVE_STAT_BUFFERS      = 4;
+constexpr uint32_t NATIVE_STAT_BUFFER_BYTES = 8;
+
 // Total buffer size (for validation)
-constexpr uint32_t TOTAL_BUFFER_SIZE  = SHM_SCOPE_START + SHM_SCOPE_TOTAL_SIZE;
+constexpr uint32_t TOTAL_BUFFER_SIZE  = NATIVE_STATS_START + NATIVE_STATS_SIZE;
 
 // Message structure
 struct alignas(4) Message {

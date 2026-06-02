@@ -138,19 +138,13 @@ extern "C" {
     void* g_rt_pool_ptr = nullptr;
     size_t g_rt_pool_size = 0;
 
-    // Optional override for the metrics pointer. When set (native backend with
-    // a public POSIX shm segment), init_memory() uses this address instead of
-    // the in-band slot inside ring_buffer_storage. Lets Sonic Pi observe
-    // metrics directly via the public shared segment without OSC roundtrips.
-    PerformanceMetrics* g_external_metrics = nullptr;
-
-    // Mirror of g_external_metrics for the audio-buffer slot array. When
-    // non-null (native, cross-process shm), the post-block hook and any
-    // AudioOut2 UGens write into this segment-resident array so external
-    // readers (e.g. the Sonic Pi GUI recorder) see the frames. On WASM
-    // and no-shm native init_memory() falls back to the in-band slots
-    // inside ring_buffer_storage.
-    shm_audio_buffer* g_external_audio_buffers = nullptr;
+    // Optional override for the whole shared-memory arena base. When set
+    // (native backend with a public POSIX shm segment), init_memory() points
+    // `shared_memory` here instead of the process-local ring_buffer_storage, so
+    // the entire shared_memory.h blob — rings, control, metrics, node-tree,
+    // audio taps and scope — lives in the segment and is observable
+    // cross-process. One pointer replaces the former per-region redirects.
+    uint8_t* g_external_segment = nullptr;
 
     uint8_t* shared_memory = nullptr;
     ControlPointers* control = nullptr;
@@ -193,6 +187,15 @@ extern "C" {
         return reinterpret_cast<int>(ring_buffer_storage);
     }
 #endif
+
+    // Real-pointer base of the unified shared-memory arena, valid on every
+    // runtime (the int-returning get_ring_buffer_base() above is WASM-only and
+    // would truncate a 64-bit native pointer). Returns the arena base set by
+    // init_memory(): ring_buffer_storage locally, or the public segment when an
+    // external arena was supplied. Used by the shared fixed-inline scope path.
+    void* get_shared_memory_base() {
+        return shared_memory;
+    }
 
     // Return the buffer layout configuration
     // JavaScript calls this once at initialization to get all buffer constants
@@ -297,18 +300,18 @@ extern "C" {
         return true;
     }
 
-    // Initialize memory pointers using the static ring buffer
+    // Initialize memory pointers. The arena is the public POSIX segment when
+    // the native backend supplied one (g_external_segment), else the in-band
+    // ring_buffer_storage (WASM, and headless native with no shm). Either way
+    // every region is addressed by its shared_memory.h offset from this base.
     EMSCRIPTEN_KEEPALIVE
     void init_memory(double sample_rate) {
-        shared_memory = ring_buffer_storage;
+        shared_memory = g_external_segment ? g_external_segment : ring_buffer_storage;
         control = reinterpret_cast<ControlPointers*>(shared_memory + CONTROL_START);
-        // Metrics: prefer the external-shm slot when one was set by the host
-        // (native engine with public POSIX shm segment). Falls back to the
-        // in-band slot inside ring_buffer_storage on web (and on native if no
-        // shm creator was constructed, e.g. headless tests with udpPort = 0).
-        metrics = g_external_metrics
-                ? g_external_metrics
-                : reinterpret_cast<PerformanceMetrics*>(shared_memory + METRICS_START);
+        // Metrics live in the arena at their fixed offset — which is the public
+        // segment when one was supplied, so external observers read them with
+        // no redirect.
+        metrics = reinterpret_cast<PerformanceMetrics*>(shared_memory + METRICS_START);
 
         // Timing pointers
         ntp_start_time = reinterpret_cast<double*>(shared_memory + NTP_START_TIME_START);
@@ -379,19 +382,31 @@ extern "C" {
         // Audio buffer slot array. Slot 0 carries the master output mix
         // and is written by the post-block hook below when `enabled` is
         // set; slots 1..N-1 are written by AudioOut2 UGens (each calls
-        // activate() from its Ctor). Native cross-process mode supplies
-        // an override into the POSIX shm segment so external readers see
-        // the writes; otherwise the slots live in ring_buffer_storage.
-        shm_audio_buffer* slots = g_external_audio_buffers
-            ? g_external_audio_buffers
-            : reinterpret_cast<shm_audio_buffer*>(
-                  shared_memory + SHM_AUDIO_START);
+        // activate() from its Ctor). The slots live in the arena at their
+        // fixed offset — the public segment when present, so the Sonic Pi
+        // recorder reads them with no redirect.
+        shm_audio_buffer* slots = reinterpret_cast<shm_audio_buffer*>(
+            shared_memory + SHM_AUDIO_START);
         memset(static_cast<void*>(slots), 0,
                MAX_SHM_AUDIO_BUFFERS * sizeof(shm_audio_buffer));
         slots[SHM_AUDIO_MASTER_SLOT].sample_rate = static_cast<uint32_t>(sample_rate);
         slots[SHM_AUDIO_MASTER_SLOT].channels = SHM_AUDIO_CHANNELS;
         slots[SHM_AUDIO_MASTER_SLOT].capacity_frames = SHM_AUDIO_FRAMES;
         g_shm_audio_buffers = slots;
+
+        // Scope global header (fixed-inline scope). The per-slot writer
+        // (SC_World.cpp) sets up its own slot on demand; here we just publish
+        // the layout so cross-process observers know the geometry. Slots
+        // themselves start zeroed (state=free) from the segment memset.
+        uint8_t* scope_hdr = shared_memory + SHM_SCOPE_START;
+        reinterpret_cast<std::atomic<uint32_t>*>(scope_hdr + 0)->store(
+            SHM_SCOPE_MAX_SCOPES, std::memory_order_relaxed);     // maxScopes
+        reinterpret_cast<std::atomic<uint32_t>*>(scope_hdr + 4)->store(
+            0, std::memory_order_relaxed);                        // activeCount
+        reinterpret_cast<std::atomic<uint32_t>*>(scope_hdr + 8)->store(
+            SHM_SCOPE_FRAMES_PER_SCOPE, std::memory_order_relaxed); // framesPerScope
+        reinterpret_cast<std::atomic<uint32_t>*>(scope_hdr + 12)->store(
+            0, std::memory_order_relaxed);                        // version
 
         // Initialize scope buffers
         {
@@ -408,9 +423,13 @@ extern "C" {
 
         // Boot message shown after ASCII art below
 
-        // Read worldOptions from ring_buffer_storage at WORLD_OPTIONS_START.
-        // This offset is outside the ring buffers, so OSC traffic cannot overwrite it.
-        uint32_t* worldOptionsPtr = (uint32_t*)((uint8_t*)ring_buffer_storage + WORLD_OPTIONS_START);
+        // Read worldOptions from the arena at WORLD_OPTIONS_START. Must use
+        // `shared_memory` (the arena — the public segment when one was supplied,
+        // else ring_buffer_storage), NOT ring_buffer_storage directly: the host
+        // (initialiseWorld) writes the options into the same arena base, so
+        // reading from ring_buffer_storage would see zeros when a segment is in
+        // use. This offset is outside the ring buffers, so OSC can't overwrite it.
+        uint32_t* worldOptionsPtr = (uint32_t*)(shared_memory + WORLD_OPTIONS_START);
 
         // Configure World for NRT mode (externally driven by AudioWorklet)
         // Values come from JS (scsynth_options.js) via SharedArrayBuffer
@@ -605,7 +624,14 @@ extern "C" {
 #endif
 
 
-        metrics->process_count.fetch_add(1, std::memory_order_relaxed);
+        uint32_t pc = metrics->process_count.fetch_add(1, std::memory_order_relaxed) + 1;
+
+        // Publish native-only engine stats (synthdef count, allocated buffers)
+        // at a low rate — the synthdef count is O(1) but the SndBuf scan is
+        // O(numBufs), so throttle to ~every 64 blocks to keep the audio thread
+        // light. Declared in SC_World.cpp.
+        extern void World_UpdateNativeStats(World*);
+        if (g_world && (pc & 63u) == 0u) World_UpdateNativeStats(g_world);
 
         // Calculate and write ring buffer usage to metrics BEFORE consuming messages
         // so the metric reflects actual queue depth as seen by the audio thread

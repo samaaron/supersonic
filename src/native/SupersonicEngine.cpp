@@ -31,19 +31,27 @@ extern "C" {
     // Declared extern "C" because init_memory() references it from an extern "C" block.
     void* g_external_shared_memory = nullptr;
 
-    // Override for the metrics pointer. When non-null, init_memory() uses
-    // this address for the global metrics pointer instead of the in-band slot
-    // inside ring_buffer_storage. Set by the engine after creating its public
-    // POSIX shm segment so Sonic Pi can observe metrics directly.
-    extern PerformanceMetrics* g_external_metrics;
+    // Unified-arena base. When non-null, init_memory() points the engine's
+    // whole shared_memory.h blob (rings, control, metrics, node-tree, audio
+    // taps, scope) at this address — the public POSIX segment — instead of the
+    // process-local ring_buffer_storage. One pointer replaces the former
+    // per-region metrics/audio redirects; everything is observable for free.
+    extern uint8_t* g_external_segment;
 
-    // Same pattern for the audio-buffer slot array: points into the
-    // POSIX shm segment so external readers (Sonic Pi session recorder)
-    // see the master mix and any AudioOut2-driven stems.
-    extern shm_audio_buffer* g_external_audio_buffers;
+    // Real-pointer arena base (== init_memory's `shared_memory`): the public
+    // segment when present, else ring_buffer_storage. Use for any engine region
+    // (world-options, rings, timing) so native glue stays consistent with the
+    // unified arena instead of hardcoding ring_buffer_storage.
+    void* get_shared_memory_base();
 
     void destroy_world();
     void rebuild_world(double sample_rate);
+}
+
+namespace {
+// Arena base for engine-region access in this file. Valid after init_memory()
+// (i.e. once the World has booted), which all callers below satisfy.
+inline uint8_t* sp_arena() { return static_cast<uint8_t*>(get_shared_memory_base()); }
 }
 
 namespace {
@@ -879,23 +887,18 @@ void SupersonicEngine::init(const Config& cfg) {
                 cfg.udpPort, cfg.numControlBusChannels);
             // Tell init_memory()/World_New to reuse this instead of creating its own
             g_external_shared_memory = mShmemCreator.get();
-            // Redirect the metrics pointer into the public segment so external
-            // observers (Sonic Pi) can read it directly via shm.
-            g_external_metrics = mShmemCreator->get_metrics();
-            // Same for the audio-buffer slot array. Without this override
-            // the audio thread writes into ring_buffer_storage (process-
-            // local) and the GUI reader sees only zeros.
-            g_external_audio_buffers = mShmemCreator->get_audio_buffers();
+            // Point the engine's whole shared_memory.h arena at the public
+            // segment: rings, control, metrics, node-tree, audio taps and
+            // scope all live there, observable cross-process for free.
+            g_external_segment = mShmemCreator->get_base();
         } catch (const std::exception& e) {
             fprintf(stderr, "[supersonic] shared memory creation failed: %s\n", e.what());
             fflush(stderr);
             mShmemCreator.reset();
-            g_external_metrics = nullptr;
-            g_external_audio_buffers = nullptr;
+            g_external_segment = nullptr;
         }
     } else {
-        g_external_metrics = nullptr;
-        g_external_audio_buffers = nullptr;
+        g_external_segment = nullptr;
     }
 
     // -- Initialise scsynth World ------------------------------------------
@@ -907,9 +910,15 @@ void SupersonicEngine::init(const Config& cfg) {
     int chosenBufLen = sonicpi::kDefaultBlockSize;
     ssLifecycleLog("[supersonic] scsynth block size = %d samples\n", chosenBufLen);
 
+    // The arena is the public segment when one exists (so the whole
+    // shared_memory.h blob — WorldOptions, rings, metrics, scope … — lives
+    // cross-process), else the process-local ring_buffer_storage. init_memory()
+    // resolves the same base from g_external_segment, so both agree.
+    uint8_t* arena = g_external_segment ? g_external_segment : ring_buffer_storage;
+
     // Use actual device sample rate and channel counts (may differ from requested)
     mAudioCallback.initialiseWorld(
-        ring_buffer_storage,
+        arena,
         mCurrentConfig.sampleRate,
         mCurrentConfig.numOutputChannels,
         mCurrentConfig.numInputChannels,
@@ -925,15 +934,19 @@ void SupersonicEngine::init(const Config& cfg) {
         chosenBufLen
     );
 
-    // Derive pointers into ring_buffer_storage for worker threads
-    uint8_t* base = ring_buffer_storage;
+    // The arena is populated by init_memory() (run synchronously inside
+    // initialiseWorld). Publish the segment — store MAGIC last — so a
+    // cross-process reader that observes MAGIC sees fully-initialised regions
+    // (e.g. node-tree 0xFF empty markers), never the half-zeroed boot state.
+    if (mShmemCreator)
+        mShmemCreator->publish();
+
+    // Derive worker pointers from the arena. With the unified layout the rings,
+    // control words and metrics all live in the arena (the public segment when
+    // present), so external observers read the same structs with no redirect.
+    uint8_t* base = arena;
     ControlPointers*    ctrl = reinterpret_cast<ControlPointers*>(base + CONTROL_START);
-    // Workers write metrics into the public POSIX shm segment when one was
-    // created, so external observers (Sonic Pi) read the same struct without
-    // OSC roundtrips. Falls back to the in-band slot for headless tests.
-    mMetrics                 = mShmemCreator
-                             ? mShmemCreator->get_metrics()
-                             : reinterpret_cast<PerformanceMetrics*>(base + METRICS_START);
+    mMetrics                 = reinterpret_cast<PerformanceMetrics*>(base + METRICS_START);
     PerformanceMetrics* met  = mMetrics;
 
     // -- Prescheduler -------------------------------------------------------
@@ -1190,7 +1203,7 @@ void SupersonicEngine::shutdown() {
 
     // Destroy engine-owned shared memory (after World is gone)
     g_external_shared_memory = nullptr;
-    g_external_audio_buffers = nullptr;
+    g_external_segment = nullptr;
     mShmemCreator.reset();
 }
 
@@ -2181,7 +2194,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                     reEnableCount, inputDeviceName.c_str());
         }
         mCurrentConfig.numInputChannels = reEnableCount;
-        uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
+        uint32_t* opts = reinterpret_cast<uint32_t*>(sp_arena() + WORLD_OPTIONS_START);
         opts[sonicpi::WorldOpts::kNumInputBusChannels] = static_cast<uint32_t>(reEnableCount);
         forceCold = true;
     }
@@ -2658,7 +2671,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                     // re-enable inputs explicitly afterward.
                     mCurrentConfig.numInputChannels = 0;
                     uint32_t* opts = reinterpret_cast<uint32_t*>(
-                        ring_buffer_storage + WORLD_OPTIONS_START);
+                        sp_arena() + WORLD_OPTIONS_START);
                     opts[sonicpi::WorldOpts::kNumInputBusChannels] = 0;
                 }
             }
@@ -2680,7 +2693,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         }
         mCurrentConfig.sampleRate = static_cast<int>(newRate);
 
-        uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
+        uint32_t* opts = reinterpret_cast<uint32_t*>(sp_arena() + WORLD_OPTIONS_START);
         opts[sonicpi::WorldOpts::kSampleRate] = static_cast<uint32_t>(newRate);
 
         // Update the world's input/output bus counts to match the new
@@ -2922,7 +2935,7 @@ SwapResult SupersonicEngine::enableInputChannels(int numChannels) {
 
     // Save old values for rollback on failure
     int oldNumInputChannels = mCurrentConfig.numInputChannels;
-    uint32_t* opts = reinterpret_cast<uint32_t*>(ring_buffer_storage + WORLD_OPTIONS_START);
+    uint32_t* opts = reinterpret_cast<uint32_t*>(sp_arena() + WORLD_OPTIONS_START);
     uint32_t oldNumInputBusChannelsOpt =
         opts[sonicpi::WorldOpts::kNumInputBusChannels];
 
@@ -3646,7 +3659,7 @@ bool SupersonicEngine::isRecording() const {
 // --- Purge ---
 
 void SupersonicEngine::purge() {
-    uint8_t* base = ring_buffer_storage;
+    uint8_t* base = sp_arena();
     ControlPointers* ctrl = reinterpret_cast<ControlPointers*>(base + CONTROL_START);
 
     // Reset IN ring buffer
@@ -3664,13 +3677,13 @@ void SupersonicEngine::purge() {
 
 void SupersonicEngine::setClockOffset(double offsetSeconds) {
     auto* globalOffset = reinterpret_cast<std::atomic<int32_t>*>(
-        ring_buffer_storage + GLOBAL_OFFSET_START);
+        sp_arena() + GLOBAL_OFFSET_START);
     globalOffset->store(static_cast<int32_t>(offsetSeconds * 1000.0),
                         std::memory_order_relaxed);
 }
 
 double SupersonicEngine::getClockOffset() const {
     auto* globalOffset = reinterpret_cast<const std::atomic<int32_t>*>(
-        ring_buffer_storage + GLOBAL_OFFSET_START);
+        sp_arena() + GLOBAL_OFFSET_START);
     return globalOffset->load(std::memory_order_relaxed) / 1000.0;
 }

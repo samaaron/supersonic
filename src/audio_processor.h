@@ -34,6 +34,8 @@ extern "C" {
 
     // Exported functions
     EMSCRIPTEN_KEEPALIVE int get_ring_buffer_base();
+    // Real-pointer arena base, valid on every runtime (native + WASM).
+    void* get_shared_memory_base();
     EMSCRIPTEN_KEEPALIVE const BufferLayout* get_buffer_layout();
     EMSCRIPTEN_KEEPALIVE void init_memory(double sample_rate);
     EMSCRIPTEN_KEEPALIVE bool process_audio(double current_time, uint32_t active_output_channels, uint32_t active_input_channels);

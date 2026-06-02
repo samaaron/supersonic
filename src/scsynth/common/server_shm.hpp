@@ -11,7 +11,6 @@
 #pragma once
 
 #include "shm_audio_buffer.hpp"
-#include "shm_scope_buffer.hpp"
 #include "src/shared_memory.h"
 
 #include <algorithm>
@@ -41,11 +40,14 @@ namespace detail_server_shm {
 
 using std::string;
 
-static constexpr int    MAX_SHM_SCOPE_BUFFERS = 128;
-// 8 MB base for scope/control-bus/metrics/node-tree/TLSF, plus the
-// audio-buffer region (which scales with SUPERSONIC_SHM_AUDIO_SECONDS).
-static constexpr size_t SEGMENT_SIZE      =
-    8192 * 1024 + SHM_AUDIO_TOTAL_SIZE;
+static constexpr int    MAX_SHM_SCOPE_BUFFERS = 128;  // retained for compat; scope is fixed-inline (SHM_SCOPE_MAX_SCOPES)
+
+// The public segment is a small handshake header followed by the unified
+// shared_memory.h arena blob — the SAME layout the engine uses in
+// ring_buffer_storage (native) / the WASM SAB. One layout, one source of
+// truth; no separate native layout to drift.
+static constexpr size_t SHM_BLOB_OFFSET = 128;  // aligned, >= sizeof(shm_segment_header)
+static constexpr size_t SEGMENT_SIZE    = SHM_BLOB_OFFSET + TOTAL_BUFFER_SIZE;
 
 static inline string make_shmem_name(unsigned int port_number) {
     return string("SuperSonic_") + std::to_string(port_number);
@@ -149,184 +151,243 @@ inline void shm_remove(const string& name) {
 #endif
 }
 
-// ──── Fixed-layout shared memory header ─────────────────────────────────
+// ──── Segment handshake header ──────────────────────────────────────────
 //
-// Segment layout:
+// Segment layout (unified, MAGIC 0x5C09E004):
 //
-//   shm_segment_header                          (16 bytes, 16-aligned)
-//   shm_scope_buffer[MAX_SHM_SCOPE_BUFFERS]            (128 scope slots)
-//   float[control_bus_count]                   (control bus values)
-//   PerformanceMetrics                         (engine perf metrics — observable)
-//   NodeTreeHeader + NodeEntry[NODE_TREE_MIRROR_MAX_NODES]  (node tree mirror)
-//   shm_audio_buffer[MAX_SHM_AUDIO_BUFFERS]    (PCM tap ring slots:
-//                                               master capture + AudioOut2
-//                                               UGens; fixed inline data
-//                                               array per slot)
-//   char[remaining]                            (TLSF pool for scope buffer
-//                                               dynamic allocations)
+//   shm_segment_header        (16 B handshake: MAGIC + sanity sizes)
+//   <pad to SHM_BLOB_OFFSET>
+//   shared_memory.h arena blob (TOTAL_BUFFER_SIZE) — the *same* layout the
+//   engine uses in ring_buffer_storage / the WASM SAB. The engine points its
+//   `shared_memory` base at this blob, so rings, control pointers, metrics,
+//   node-tree, audio taps and (fixed-inline) scope are all addressed by their
+//   shared_memory.h offsets and observable cross-process for free.
 //
 // MAGIC history:
 //   0x5C09E001  initial (scope + control busses only)
 //   0x5C09E002  added metrics + node tree mirror
 //   0x5C09E003  added shm_audio_buffer multi-slot ring
+//   0x5C09E004  unified: segment == shared_memory.h arena blob (rings in
+//               segment; scope fixed-inline; TLSF pool + control busses removed)
 //
-// Publication: writer stores MAGIC last with a release fence preceding
-// it; the reader places an acquire fence after observing MAGIC. Once
-// MAGIC is visible the whole header is, regardless of the OSC ready
-// handshake.
+// Publication: the creator zeroes the whole segment and writes the header
+// geometry, but defers the MAGIC store. The engine then populates the arena
+// (init_memory(): node-tree empty-slot markers = 0xFF, metrics, scope headers,
+// …) and only afterwards calls publish(), which stores MAGIC last behind a
+// release fence. So a reader that observes MAGIC (after an acquire fence) sees
+// both the geometry AND a fully-populated arena — never a half-zeroed one where
+// e.g. node entries read id == 0 (aliasing the real root group) instead of the
+// id == -1 empty marker. MAGIC visible ⇒ segment ready.
 
+// Self-describing handshake: the creator publishes every region's offset and
+// geometry, so a reader (e.g. Sonic Pi) needs no compile-time knowledge of the
+// arena layout — it locates metrics, rings, node-tree, audio taps and scope
+// purely from these fields. This makes the consumer drift-proof: layout/size
+// changes propagate through the header rather than requiring a hand-synced copy.
+// All offsets are relative to the arena blob base (segment + blob_offset).
 struct shm_segment_header {
-    static constexpr uint32_t MAGIC = 0x5C09E003;
+    static constexpr uint32_t MAGIC = 0x5C09E005;
 
     uint32_t magic;
-    uint32_t num_shm_scope_buffers;
-    uint32_t control_bus_count;
-    uint32_t num_audio_buffers;
-};
+    uint32_t blob_offset;          // segment base → arena blob
+    uint32_t blob_size;            // == TOTAL_BUFFER_SIZE
 
-// shm_audio_buffer types come from shm_audio_buffer.hpp. The same
-// struct shape is laid out here on native and in ring_buffer_storage
-// (the SAB) on web.
+    uint32_t in_ring_offset;       // OSC host→engine ring
+    uint32_t in_ring_size;
+    uint32_t out_ring_offset;      // OSC engine→host (replies) ring
+    uint32_t out_ring_size;
+    uint32_t debug_ring_offset;    // debug/log text ring
+    uint32_t debug_ring_size;
+    uint32_t control_offset;       // ControlPointers (ring head/tail/seq + cursors)
+
+    uint32_t metrics_offset;       // PerformanceMetrics
+    uint32_t metrics_field_count;  // contiguous u32 fields
+
+    uint32_t node_tree_offset;     // NodeTreeHeader, then NodeEntry[]
+    uint32_t node_tree_header_bytes;
+    uint32_t node_tree_entry_bytes;
+    uint32_t node_tree_max_nodes;
+
+    uint32_t audio_offset;         // shm_audio_buffer[0]
+    uint32_t audio_slot_count;
+    uint32_t audio_slot_bytes;     // sizeof(shm_audio_buffer)
+
+    uint32_t scope_offset;         // scope global header, then slots
+    uint32_t scope_max;            // SHM_SCOPE_MAX_SCOPES
+    uint32_t scope_header_bytes;   // SHM_SCOPE_HEADER_SIZE (global header)
+    uint32_t scope_slot_bytes;     // SHM_SCOPE_SLOT_SIZE
+    uint32_t scope_slot_header;    // SHM_SCOPE_SLOT_HEADER_SIZE
+    uint32_t scope_frames;         // SHM_SCOPE_FRAMES_PER_SCOPE
+    uint32_t scope_channels;       // SHM_SCOPE_CHANNELS
+
+    uint32_t native_stats_offset;  // native-only live stats (synthdefs, buffers, buffer_bytes)
+};
+static_assert(sizeof(shm_segment_header) <= SHM_BLOB_OFFSET,
+              "shm_segment_header must fit within SHM_BLOB_OFFSET");
 
 // ──── server_shared_memory ──────────────────────────────────────────────
 //
-// Process-local view of the segment.  Each side constructs its own
-// instance from the mapped pointer — this object is NOT in shared memory.
+// Process-local view: holds the arena blob base and exposes the observable
+// regions by their shared_memory.h offsets. NOT itself in shared memory.
 
 class server_shared_memory {
 public:
-    server_shared_memory(void* segment_base, int control_busses, bool init) {
-        char* base = static_cast<char*>(segment_base);
-
-        header_ = reinterpret_cast<shm_segment_header*>(base);
-
-        // Scope buffers after header (16-aligned)
-        size_t off = (sizeof(shm_segment_header) + 15) & ~size_t(15);
-        scope_buffers_ = reinterpret_cast<shm_scope_buffer*>(base + off);
-
-        // Control busses after scope buffers (16-aligned)
-        off += MAX_SHM_SCOPE_BUFFERS * sizeof(shm_scope_buffer);
-        off = (off + 15) & ~size_t(15);
-        control_busses_ = reinterpret_cast<float*>(base + off);
-
-        // PerformanceMetrics after control busses (16-aligned). Observable
-        // by other processes — Sonic Pi reads this without OSC roundtrips.
-        off += static_cast<size_t>(control_busses) * sizeof(float);
-        off = (off + 15) & ~size_t(15);
-        metrics_ = reinterpret_cast<PerformanceMetrics*>(base + off);
-
-        // Node tree mirror after metrics (16-aligned, then 8-aligned for entries)
-        off += sizeof(PerformanceMetrics);
-        off = (off + 15) & ~size_t(15);
-        node_tree_header_ = reinterpret_cast<NodeTreeHeader*>(base + off);
-        off += NODE_TREE_HEADER_SIZE;
-        node_tree_entries_ = reinterpret_cast<NodeEntry*>(base + off);
-        off += static_cast<size_t>(NODE_TREE_MIRROR_MAX_NODES) * NODE_TREE_ENTRY_SIZE;
-
-        // Audio tap slot array (16-aligned). Each slot is fully self-
-        // contained: header + inline data ring, no TLSF involvement.
-        off = (off + 15) & ~size_t(15);
-        audio_buffers_ = reinterpret_cast<shm_audio_buffer*>(base + off);
-        off += MAX_SHM_AUDIO_BUFFERS * sizeof(shm_audio_buffer);
-
-        // TLSF pool after the audio buffer slots (16-aligned). Pool
-        // size shrinks by the metrics + node tree + audio buffer
-        // footprint but stays ample within the 8MB segment.
-        off = (off + 15) & ~size_t(15);
-        pool_base_ = base + off;
-        pool_size_ = SEGMENT_SIZE - off;
+    server_shared_memory(void* segment_base, bool init) {
+        char* seg = static_cast<char*>(segment_base);
+        header_ = reinterpret_cast<shm_segment_header*>(seg);
+        blob_   = reinterpret_cast<uint8_t*>(seg) + SHM_BLOB_OFFSET;
 
         if (init) {
-            header_->num_shm_scope_buffers = MAX_SHM_SCOPE_BUFFERS;
-            header_->control_bus_count = static_cast<uint32_t>(control_busses);
-            header_->num_audio_buffers = MAX_SHM_AUDIO_BUFFERS;
+            header_->blob_offset = static_cast<uint32_t>(SHM_BLOB_OFFSET);
+            header_->blob_size   = static_cast<uint32_t>(TOTAL_BUFFER_SIZE);
 
-            memset(control_busses_, 0,
-                   static_cast<size_t>(control_busses) * sizeof(float));
+            header_->in_ring_offset    = IN_BUFFER_START;
+            header_->in_ring_size      = IN_BUFFER_SIZE;
+            header_->out_ring_offset   = OUT_BUFFER_START;
+            header_->out_ring_size     = OUT_BUFFER_SIZE;
+            header_->debug_ring_offset = DEBUG_BUFFER_START;
+            header_->debug_ring_size   = DEBUG_BUFFER_SIZE;
+            header_->control_offset    = CONTROL_START;
 
-            for (int i = 0; i < MAX_SHM_SCOPE_BUFFERS; ++i)
-                new (&scope_buffers_[i]) shm_scope_buffer();
+            header_->metrics_offset      = METRICS_START;
+            header_->metrics_field_count = METRICS_SIZE / 4;
 
-            // Zero the metrics struct (all atomics start at 0).
-            // PerformanceMetrics has no constructor — placement-new isn't
-            // necessary. atomic<uint32_t> has trivial init from zero memory
-            // per [atomics.types.generic]/4 (init via default constructor
-            // produces an unspecified value; zero memory is well-defined).
-            memset(metrics_, 0, sizeof(PerformanceMetrics));
+            header_->node_tree_offset       = NODE_TREE_START;
+            header_->node_tree_header_bytes = NODE_TREE_HEADER_SIZE;
+            header_->node_tree_entry_bytes  = NODE_TREE_ENTRY_SIZE;
+            header_->node_tree_max_nodes    = NODE_TREE_MIRROR_MAX_NODES;
 
-            // Zero the node tree mirror — empty header + empty-slot entries.
-            memset(node_tree_header_, 0, NODE_TREE_HEADER_SIZE);
-            memset(node_tree_entries_, 0xFF,
-                   static_cast<size_t>(NODE_TREE_MIRROR_MAX_NODES) * NODE_TREE_ENTRY_SIZE);
+            header_->audio_offset     = SHM_AUDIO_START;
+            header_->audio_slot_count = MAX_SHM_AUDIO_BUFFERS;
+            header_->audio_slot_bytes = static_cast<uint32_t>(sizeof(shm_audio_buffer));
 
-            // Audio buffer slot headers all start disabled with no data.
-            // Same atomic-zero-init reasoning as PerformanceMetrics; the
-            // void* cast silences -Wnontrivial-memcall.
-            memset(static_cast<void*>(audio_buffers_), 0,
-                   MAX_SHM_AUDIO_BUFFERS * sizeof(shm_audio_buffer));
+            header_->scope_offset       = SHM_SCOPE_START;
+            header_->scope_max          = SHM_SCOPE_MAX_SCOPES;
+            header_->scope_header_bytes = SHM_SCOPE_HEADER_SIZE;
+            header_->scope_slot_bytes   = SHM_SCOPE_SLOT_SIZE;
+            header_->scope_slot_header  = SHM_SCOPE_SLOT_HEADER_SIZE;
+            header_->scope_frames       = SHM_SCOPE_FRAMES_PER_SCOPE;
+            header_->scope_channels     = SHM_SCOPE_CHANNELS;
 
-            // MAGIC is the publication store: it must be the last write
-            // into the header, fenced behind a release so a reader that
-            // sees MAGIC sees every preceding field too. An aligned u32
-            // store is atomic on every supported platform.
-            std::atomic_thread_fence(std::memory_order_release);
-            header_->magic = shm_segment_header::MAGIC;
+            header_->native_stats_offset = NATIVE_STATS_START;
+
+            // NOTE: MAGIC is deliberately NOT stored here. The geometry fields
+            // above are written now (before init_memory()), but the arena blob
+            // is still zeroed — and zero is NOT a safe default for every region
+            // (the node-tree empty-slot marker is id == -1, i.e. 0xFF, not 0).
+            // Publishing MAGIC now would expose a window where a reader observes
+            // MAGIC but sees an unpopulated arena (e.g. node entries with id == 0
+            // aliasing the real root group). The creator publishes MAGIC via
+            // publish() only after the engine's init_memory() has populated the
+            // arena, so "MAGIC visible ⇒ fully-populated segment" holds.
         }
     }
 
-    float* get_control_busses() { return control_busses_; }
-    PerformanceMetrics* get_metrics() { return metrics_; }
-    NodeTreeHeader*     get_node_tree_header()  { return node_tree_header_; }
-    NodeEntry*          get_node_tree_entries() { return node_tree_entries_; }
+    // Publish the segment: release-fence, then store MAGIC last. Called once the
+    // arena has been populated (after init_memory()). A reader that observes
+    // MAGIC behind an acquire fence then sees both the header geometry and the
+    // live arena structures — no publish-before-populate window.
+    void publish() {
+        std::atomic_thread_fence(std::memory_order_release);
+        header_->magic = shm_segment_header::MAGIC;
+    }
 
-    // Pointer to the cross-process slot array. Used by the audio thread
-    // (via the global g_shm_audio_buffers) so writes land in the segment
-    // visible to external readers, not in the in-band ring_buffer_storage.
-    shm_audio_buffer* get_audio_buffers() { return audio_buffers_; }
+    // Arena blob base. The engine points `shared_memory` here; observers
+    // address every region by its shared_memory.h offset from this pointer.
+    uint8_t* get_base() const { return blob_; }
 
+    PerformanceMetrics* get_metrics() {
+        return reinterpret_cast<PerformanceMetrics*>(blob_ + METRICS_START);
+    }
+    NodeTreeHeader* get_node_tree_header() {
+        return reinterpret_cast<NodeTreeHeader*>(blob_ + NODE_TREE_START);
+    }
+    NodeEntry* get_node_tree_entries() {
+        return reinterpret_cast<NodeEntry*>(blob_ + NODE_TREE_START + NODE_TREE_HEADER_SIZE);
+    }
+    shm_audio_buffer* get_audio_buffers() {
+        return reinterpret_cast<shm_audio_buffer*>(blob_ + SHM_AUDIO_START);
+    }
     shm_audio_buffer* get_audio_buffer(unsigned int index) {
         if (index < MAX_SHM_AUDIO_BUFFERS)
-            return &audio_buffers_[index];
+            return get_audio_buffers() + index;
         return nullptr;
     }
 
-    shm_scope_buffer* get_scope_buffer(unsigned int index) {
-        if (index < MAX_SHM_SCOPE_BUFFERS) {
-            if (!scope_buffers_)
-                return nullptr;
-            return &scope_buffers_[index];
-        }
-        return nullptr;
+    // Base of a fixed-inline scope slot, or nullptr if out of range.
+    uint8_t* get_scope_slot(unsigned int index) {
+        if (index >= SHM_SCOPE_MAX_SCOPES)
+            return nullptr;
+        return blob_ + SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE
+             + static_cast<size_t>(index) * SHM_SCOPE_SLOT_SIZE;
     }
-
-    void* pool_base() const { return pool_base_; }
-    size_t pool_size() const { return pool_size_; }
 
 private:
-    shm_segment_header*   header_;
-    shm_scope_buffer*       scope_buffers_;
-    float*              control_busses_;
-    PerformanceMetrics* metrics_           = nullptr;
-    NodeTreeHeader*     node_tree_header_  = nullptr;
-    NodeEntry*          node_tree_entries_ = nullptr;
-    shm_audio_buffer*   audio_buffers_ = nullptr;
-    void*               pool_base_;
-    size_t              pool_size_;
+    shm_segment_header* header_;
+    uint8_t*            blob_;
+};
+
+// ──── Fixed-inline scope reader ─────────────────────────────────────────
+//
+// Reads the triple-buffered scope slot written by SC_World.cpp's unified
+// fixed-inline scope path (offsets only, no relative_ptr). Best-effort: it
+// tracks the last-published region and reports new data when `stage` advances.
+
+class shm_scope_buffer_reader {
+public:
+    shm_scope_buffer_reader(uint8_t* slot = nullptr): slot_(slot) {}
+
+    bool valid() {
+        if (!slot_) return false;
+        auto* state = reinterpret_cast<std::atomic<uint32_t>*>(slot_ + 0);
+        return state->load(std::memory_order_acquire) == 1;
+    }
+
+    unsigned int channels() {
+        if (!slot_) return 0;
+        return *reinterpret_cast<uint32_t*>(slot_ + 4);
+    }
+
+    unsigned int max_frames() { return SHM_SCOPE_FRAMES_PER_SCOPE; }
+
+    bool pull(unsigned int& frames) {
+        if (!valid()) return false;
+        auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slot_ + 8);
+        int s = stage->load(std::memory_order_acquire);
+        if (s == last_stage_)
+            return false;            // nothing newly published since last pull
+        last_stage_ = s;
+        frames = SHM_SCOPE_FRAMES_PER_SCOPE;
+        return true;
+    }
+
+    float* data() {
+        if (!slot_) return nullptr;
+        auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slot_ + 8);
+        int s = stage->load(std::memory_order_acquire);
+        float* base = reinterpret_cast<float*>(slot_ + SHM_SCOPE_SLOT_HEADER_SIZE);
+        return base + static_cast<size_t>(s)
+             * (SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS);
+    }
+
+private:
+    uint8_t* slot_;
+    int      last_stage_ = -1;
 };
 
 // ──── Creator (audio engine side) ───────────────────────────────────────
 
 class server_shared_memory_creator {
 public:
-    server_shared_memory_creator(unsigned int port_number, unsigned int control_busses):
+    // control_busses is accepted for call-site compatibility but unused: the
+    // unified arena is fixed-size and control busses are process-local (heap),
+    // so they don't live in the segment.
+    server_shared_memory_creator(unsigned int port_number, unsigned int /*control_busses*/):
         shmem_name(make_shmem_name(port_number)),
         handle(shm_create(shmem_name, SEGMENT_SIZE))
     {
         memset(handle.ptr, 0, SEGMENT_SIZE);
-
-        shm = new server_shared_memory(handle.ptr, control_busses, true);
-
-        scope_pool.init(shm->pool_base(), shm->pool_size());
+        shm = new server_shared_memory(handle.ptr, true);
     }
 
     static void cleanup(unsigned int port_number) {
@@ -345,26 +406,18 @@ public:
         shm = nullptr;
     }
 
-    float* get_control_busses() { return shm->get_control_busses(); }
+    // Arena blob base — the engine points `shared_memory` here.
+    uint8_t* get_base() { return shm ? shm->get_base() : nullptr; }
+
+    // Store MAGIC, making the segment visible to readers. Call once the engine
+    // has populated the arena (after init_memory()) so observers never see a
+    // published-but-unpopulated segment.
+    void publish() { if (shm) shm->publish(); }
+
     PerformanceMetrics* get_metrics() { return shm ? shm->get_metrics() : nullptr; }
     NodeTreeHeader*     get_node_tree_header()  { return shm ? shm->get_node_tree_header()  : nullptr; }
     NodeEntry*          get_node_tree_entries() { return shm ? shm->get_node_tree_entries() : nullptr; }
     shm_audio_buffer*   get_audio_buffers()     { return shm ? shm->get_audio_buffers()     : nullptr; }
-
-    shm_scope_buffer_writer get_scope_buffer_writer(
-            unsigned int index, unsigned int channels, unsigned int size) {
-        if (!shm)
-            return shm_scope_buffer_writer();
-        shm_scope_buffer* buf = shm->get_scope_buffer(index);
-        if (buf)
-            return shm_scope_buffer_writer(buf, scope_pool, channels, size);
-        else
-            return shm_scope_buffer_writer();
-    }
-
-    void release_scope_buffer_writer(shm_scope_buffer_writer& writer) {
-        writer.release(scope_pool);
-    }
 
     shm_audio_buffer* get_audio_buffer(unsigned int index) {
         return shm ? shm->get_audio_buffer(index) : nullptr;
@@ -378,7 +431,6 @@ private:
     string                shmem_name;
     shm_handle            handle;
     server_shared_memory* shm = nullptr;
-    shm_scope_buffer_pool     scope_pool;
 };
 
 
@@ -395,16 +447,11 @@ public:
             throw std::runtime_error(
                 "Invalid shared memory magic — is the audio engine running?");
 
-        // Acquire pairs with the writer's release before the MAGIC
-        // store. control_bus_count is read just below — without the
-        // fence the reader could observe MAGIC while still seeing a
-        // zeroed control_bus_count.
+        // Acquire pairs with the creator's release before the MAGIC store, so
+        // observing MAGIC implies a fully-published header.
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        shm = new server_shared_memory(
-            handle.ptr,
-            static_cast<int>(header->control_bus_count),
-            false);
+        shm = new server_shared_memory(handle.ptr, false);
     }
 
     ~server_shared_memory_client() {
@@ -412,14 +459,13 @@ public:
         delete shm;
     }
 
-    float* get_control_busses() { return shm->get_control_busses(); }
+    uint8_t*            get_base() { return shm->get_base(); }
     PerformanceMetrics* get_metrics() { return shm->get_metrics(); }
     NodeTreeHeader*     get_node_tree_header()  { return shm->get_node_tree_header();  }
     NodeEntry*          get_node_tree_entries() { return shm->get_node_tree_entries(); }
 
     shm_scope_buffer_reader get_scope_buffer_reader(unsigned int index) {
-        shm_scope_buffer* buf = shm->get_scope_buffer(index);
-        return shm_scope_buffer_reader(buf);
+        return shm_scope_buffer_reader(shm->get_scope_slot(index));
     }
 
     shm_audio_buffer* get_audio_buffer(unsigned int index) {
@@ -438,9 +484,7 @@ private:
 
 } /* namespace detail_server_shm */
 
-using detail_server_shm::shm_scope_buffer;
 using detail_server_shm::shm_scope_buffer_reader;
-using detail_server_shm::shm_scope_buffer_writer;
 using detail_server_shm::server_shared_memory_client;
 using detail_server_shm::server_shared_memory_creator;
 // shm_audio_buffer + AUDIO_* names are exported by shm_audio_buffer.hpp.
