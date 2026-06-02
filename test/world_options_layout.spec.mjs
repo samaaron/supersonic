@@ -71,8 +71,11 @@ test("WORLD_OPTIONS_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicP
     };
   }, sonicConfig);
 
-  // Scope buffers are the last region before TOTAL_BUFFER_SIZE
-  expect(result.scopeStart + result.scopeTotalSize).toBe(result.totalBufferSize);
+  // Scope is the last large region; the arena ends with a small fixed-size
+  // NATIVE_STATS tail (synthdef/buffer counters, written only by the native
+  // backend — see shared_memory.h NATIVE_STATS_SIZE). Update this if it changes.
+  const NATIVE_STATS_SIZE = 16;
+  expect(result.scopeStart + result.scopeTotalSize).toBe(result.totalBufferSize - NATIVE_STATS_SIZE);
   // WORLD_OPTIONS comes before the end of the buffer
   expect(result.worldOptionsStart + result.worldOptionsSize).toBeLessThan(result.totalBufferSize);
 });
