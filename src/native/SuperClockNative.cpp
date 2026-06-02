@@ -246,7 +246,14 @@ SuperClock::SuperClock() : mImpl(std::make_unique<Impl>()) {
 
 SuperClock::~SuperClock() {
 #ifdef SUPERSONIC_LINK
-    mImpl->deferredQuit.store(true, std::memory_order_release);
+    // Set the quit flag under the same mutex the worker waits on: a notify_all()
+    // issued in the window between the worker's predicate check and its park in
+    // wait() would otherwise be lost, leaving the worker asleep forever and this
+    // join() hung.
+    {
+        std::lock_guard<std::mutex> lk(mImpl->deferredMtx);
+        mImpl->deferredQuit.store(true, std::memory_order_release);
+    }
     mImpl->deferredCv.notify_all();
     if (mImpl->deferredWorker.joinable()) mImpl->deferredWorker.join();
 #endif
@@ -358,8 +365,13 @@ void SuperClock::forceBeatAtTime(double beat, double atNtpSeconds, double quantu
 
 void SuperClock::requestSetLinkEnabledAsync(bool enabled) {
 #ifdef SUPERSONIC_LINK
-    mImpl->deferredLinkEnableReq.store(enabled ? 1 : 0,
-                                       std::memory_order_release);
+    // Under the worker's mutex (see ~SuperClock) so the request can't be lost to
+    // a notify that races the worker's park in wait().
+    {
+        std::lock_guard<std::mutex> lk(mImpl->deferredMtx);
+        mImpl->deferredLinkEnableReq.store(enabled ? 1 : 0,
+                                           std::memory_order_release);
+    }
     mImpl->deferredCv.notify_all();
 #else
     (void)enabled;
