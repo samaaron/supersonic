@@ -149,7 +149,7 @@ SCErr meth_b_close(World* inWorld, int inSize, char* inData, ReplyAddress* inRep
 }
 
 SCErr meth_b_allocRead(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
 // Native backend: async sample loader hook (defined in native/SampleLoader.cpp)
 extern bool native_sample_load(World*, int, const char*, int, int);
 
@@ -805,14 +805,14 @@ SCErr meth_b_query(World* inWorld, int inSize, char* inData, ReplyAddress* inRep
 }
 
 
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
 SCErr meth_d_load(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_load(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
     CallSequencedCommand(LoadSynthDefCmd, inWorld, inSize, inData, inReply);
 
     return kSCErr_None;
 }
-#endif // !__EMSCRIPTEN__
+#endif // !SC_LEAN_TARGET
 
 SCErr meth_d_recv(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_recv(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
@@ -821,14 +821,14 @@ SCErr meth_d_recv(World* inWorld, int inSize, char* inData, ReplyAddress* inRepl
     return kSCErr_None;
 }
 
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
 SCErr meth_d_loadDir(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_loadDir(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
     CallSequencedCommand(LoadSynthDefDirCmd, inWorld, inSize, inData, inReply);
 
     return kSCErr_None;
 }
-#endif // !__EMSCRIPTEN__
+#endif // !SC_LEAN_TARGET
 
 SCErr meth_d_freeAll(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_freeAll(World* inWorld, int /*inSize*/, char* /*inData*/, ReplyAddress* /*inReply*/) {
@@ -1353,7 +1353,7 @@ SCErr meth_rtMemoryStatus(World* inWorld, int inSize, char* inData, ReplyAddress
 
 SCErr meth_quit(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_quit(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
-#ifdef __EMSCRIPTEN__
+#ifdef SC_LEAN_TARGET
     // /quit is not supported in SuperSonic - use destroy() instead
     SendFailure(inReply, "/quit", "not supported in SuperSonic - use destroy() instead");
     return kSCErr_Failed;
@@ -1982,7 +1982,7 @@ void initMiscCommands() {
 #endif
 
     NEW_COMMAND(d_recv);
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
     NEW_COMMAND(d_load);
     NEW_COMMAND(d_loadDir);
 #endif

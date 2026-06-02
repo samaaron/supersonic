@@ -87,10 +87,10 @@ extern "C" {
 #    include <sys/mman.h>
 #endif
 
-// server_shm.hpp (native) also pulls in shared_memory.h; on WASM we include it
-// directly. Either way the unified fixed-inline scope constants (SHM_SCOPE_*)
-// are in scope on both runtimes.
-#ifndef __EMSCRIPTEN__
+// server_shm.hpp (native) also pulls in shared_memory.h; on lean targets
+// (WASM/embedded) we include it directly — no boost cross-process SHM. Either
+// way the unified fixed-inline scope constants (SHM_SCOPE_*) are in scope.
+#ifndef SC_LEAN_TARGET
 #include "server_shm.hpp"
 #else
 #include "shared_memory.h"
@@ -325,7 +325,7 @@ void initializeScheduler();
 
 static void World_LoadGraphDefs(World* world);
 void World_LoadGraphDefs(World* world) {
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
     GraphDef* list = nullptr;
     using DirName = SC_Filesystem::DirName;
 
@@ -342,7 +342,7 @@ void World_LoadGraphDefs(World* world) {
         list = GraphDef_LoadDir(world, path, list);
         GraphDef_Define(world, list);
     }
-#endif // !__EMSCRIPTEN__
+#endif // !SC_LEAN_TARGET
 }
 
 namespace scsynth {
@@ -427,7 +427,7 @@ World* World_New(WorldOptions* inOptions) {
 #else
         world->hw->mAllocPool = new AllocPool(malloc, free, inOptions->mRealTimeMemorySize * 1024, 0);
 #endif
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
         world->hw->mQuitProgram = new boost::sync::semaphore(0);
 #endif
         world->hw->mTerminating = false;
@@ -463,7 +463,7 @@ World* World_New(WorldOptions* inOptions) {
         world->mErrorNotification = 1; // i.e., 0x01 | 0x02
         world->mLocalErrorNotification = 0;
 
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
         if (inOptions->mExternalSharedMemory) {
             // Reuse caller-owned shared memory (survives cold swaps)
             hw->mShmem = static_cast<server_shared_memory_creator*>(inOptions->mExternalSharedMemory);
@@ -871,7 +871,7 @@ void World_NonRealTimeSynthesis(struct World* world, WorldOptions* inOptions) no
 
 void World_WaitForQuit(struct World* inWorld, bool unload_plugins) {
     try {
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
         inWorld->hw->mQuitProgram->wait();
 #endif
         World_Cleanup(inWorld, unload_plugins);
@@ -1138,7 +1138,7 @@ void World_Cleanup(World* world, bool unload_plugins) {
 
     free_alig(world->mControlBusTouched);
     free_alig(world->mAudioBusTouched);
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
     if (hw->mShmem) {
         if (hw->mOwnsShmem)
             delete hw->mShmem;
@@ -1162,7 +1162,7 @@ void World_Cleanup(World* world, bool unload_plugins) {
         delete hw->mClientIDdict;
         delete hw->mNodeLib;
         delete hw->mGraphDefLib;
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
         delete hw->mQuitProgram;
 #endif
         delete hw->mAllocPool;

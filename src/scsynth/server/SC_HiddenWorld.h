@@ -33,7 +33,7 @@
 #include <deque>
 #include <set>
 
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
 #include "boost/sync/semaphore.hpp"
 #include "../../common/server_shm.hpp"
 #endif
@@ -119,7 +119,7 @@ struct HiddenWorld {
     NodeEndsFifo mNodeEnds;
     DeleteGraphDefsFifo mDeleteGraphDefs;
 
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
     boost::sync::semaphore* mQuitProgram;
 #endif
     bool mTerminating;
@@ -154,7 +154,7 @@ struct HiddenWorld {
 
     const char* mInDeviceName;
     const char* mOutDeviceName;
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
     class server_shared_memory_creator* mShmem;
     bool mOwnsShmem = true;  // false when external shared memory was provided
 #endif

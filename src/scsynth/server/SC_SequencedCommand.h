@@ -434,7 +434,7 @@ protected:
 
 ///////////////////////////////////////////////////////////////////////////
 
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
 class LoadSynthDefCmd : public SC_SequencedCommand {
 public:
     LoadSynthDefCmd(World* inWorld, ReplyAddress* inReplyAddress);
@@ -452,7 +452,7 @@ protected:
 
     virtual void CallDestructor();
 };
-#endif // !__EMSCRIPTEN__
+#endif // !SC_LEAN_TARGET
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -478,7 +478,7 @@ protected:
 
 ///////////////////////////////////////////////////////////////////////////
 
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
 class LoadSynthDefDirCmd : public SC_SequencedCommand {
 public:
     LoadSynthDefDirCmd(World* inWorld, ReplyAddress* inReplyAddress);
@@ -496,7 +496,7 @@ protected:
 
     virtual void CallDestructor();
 };
-#endif // !__EMSCRIPTEN__
+#endif // !SC_LEAN_TARGET
 
 ///////////////////////////////////////////////////////////////////////////
 

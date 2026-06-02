@@ -1161,7 +1161,7 @@ bool AudioQuitCmd::Stage3() {
     ss_log("/quit : quit not allowed in AU host\n");
     return false;
 #else
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
     // Honor host ownership of the segment: World_Cleanup gates segment
     // deletion on mOwnsShmem (SC_World.cpp:1117); the same rule applies
     // here. When the host supplies its own SHM via mExternalSharedMemory,
@@ -1176,7 +1176,7 @@ bool AudioQuitCmd::Stage3() {
 
 void AudioQuitCmd::Stage4() {
     SendDone("/quit");
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
     mWorld->hw->mQuitProgram->post();
 #endif
 }
@@ -1421,7 +1421,7 @@ bool RecvSynthDefCmd::Stage3() {
 void RecvSynthDefCmd::Stage4() {
     SendDone("/d_recv");
 
-#ifdef __EMSCRIPTEN__
+#ifdef SC_LEAN_TARGET
     // SUPERSONIC: Send /supersonic/synthdef/loaded for each synthdef that was loaded
     // This allows JavaScript to track which synthdefs are available
     // A synthdef file can contain multiple definitions (linked list via mNext)
@@ -1441,7 +1441,7 @@ void RecvSynthDefCmd::Stage4() {
 
 ///////////////////////////////////////////////////////////////////////////
 
-#ifndef __EMSCRIPTEN__
+#ifndef SC_LEAN_TARGET
 LoadSynthDefCmd::LoadSynthDefCmd(World* inWorld, ReplyAddress* inReplyAddress):
     SC_SequencedCommand(inWorld, inReplyAddress),
     mFilename(nullptr) {}
@@ -1553,7 +1553,7 @@ bool LoadSynthDefDirCmd::Stage3() {
 }
 
 void LoadSynthDefDirCmd::Stage4() { SendDone("/d_loadDir"); }
-#endif // !__EMSCRIPTEN__
+#endif // !SC_LEAN_TARGET
 
 ///////////////////////////////////////////////////////////////////////////
 
