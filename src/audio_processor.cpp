@@ -463,8 +463,9 @@ extern "C" {
                 g_rt_pool_ptr = (void*)(shared_memory + rtPoolOffset);
                 g_rt_pool_size = rtPoolBytes;
                 memset(g_rt_pool_ptr, 0, g_rt_pool_size);
-                ss_log("RT_POOL: pre-allocated at offset %u (%uMB) size %uMB",
-                    rtPoolOffset, rtPoolOffset / (1024*1024), rtPoolBytes / (1024*1024));
+                if (options.mVerbosity > 0)
+                    ss_log("RT_POOL: pre-allocated at offset %u (%uMB) size %uMB",
+                        rtPoolOffset, rtPoolOffset / (1024*1024), rtPoolBytes / (1024*1024));
             }
         }
 #endif
@@ -494,8 +495,9 @@ extern "C" {
                 control->status_flags.fetch_or(STATUS_WASM_ERROR, std::memory_order_relaxed);
                 return;
             }
-            ss_log("MEMORY OK: heap<0x%x rt=[0x%x,0x%x) buf=0x%x+",
-                (uint32_t)heap_end, (uint32_t)rt_start, (uint32_t)rt_end, (uint32_t)rt_end);
+            if (options.mVerbosity > 0)
+                ss_log("MEMORY OK: heap<0x%x rt=[0x%x,0x%x) buf=0x%x+",
+                    (uint32_t)heap_end, (uint32_t)rt_start, (uint32_t)rt_end, (uint32_t)rt_end);
         }
 #endif
 
