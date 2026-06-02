@@ -590,16 +590,17 @@ void AllocPool::DoCheckChunk(AllocChunkPtr p) {
     // assert(size < maxsize);
 
     AllocChunkPtr next = p->ChunkAtOffset(size);
-#endif
+    // assert kept inside the NDEBUG guard: ESP-IDF's disabled assert(x) expands
+    // to ((void)(x)), which still references `next`/`size`/`room`.
     assert(p->mSize == next->mPrevSize);
+#endif
 }
 
 
 void AllocPool::DoCheckFreeChunk(AllocChunkPtr p) {
-    size_t size = p->Size();
 #ifndef NDEBUG
+    size_t size = p->Size();
     AllocChunkPtr next = p->ChunkAtOffset(size);
-#endif
     DoCheckChunk(p);
 
     /* Check whether it claims to be free ... */
@@ -618,6 +619,7 @@ void AllocPool::DoCheckFreeChunk(AllocChunkPtr p) {
         assert(p->Prev()->Next() == p);
     } else /* end markers are always of size 0 */
         assert(size == 0);
+#endif
 }
 
 void AllocPool::DoCheckInUseChunk(AllocChunkPtr p) {
@@ -650,7 +652,6 @@ void AllocPool::DoCheckAllocedChunk(AllocChunkPtr p, size_t s) {
 #ifndef NDEBUG
     size_t size = p->Size();
     long room = size - s;
-#endif
 
     DoCheckInUseChunk(p);
 
@@ -666,6 +667,7 @@ void AllocPool::DoCheckAllocedChunk(AllocChunkPtr p, size_t s) {
 
     /* ... and was allocated at front of an available chunk */
     assert(p->PrevInUse()); // huh??  - jmc
+#endif
 }
 
 void AllocPool::DoGarbageFill(AllocChunkPtr p) {
