@@ -11,6 +11,10 @@
 #include <algorithm>
 #include <cstring>
 
+// The engine's segment-resident metrics block (defined in audio_processor.cpp,
+// C linkage). Used to mirror Link clock + stream-health into the dashboard.
+extern "C" PerformanceMetrics* metrics;
+
 JuceAudioCallback::JuceAudioCallback() = default;
 
 void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
@@ -357,6 +361,11 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
 
     // ── 2. Generate 128-sample scsynth blocks until the JUCE buffer is full ──
     double wallNTP = mSuperClock->updateAudioThreadNTP(mSamplePosition, mSampleRate);
+
+    // Mirror Link clock + stream-health into the dashboard metrics (cheap
+    // relaxed atomics; reads the running counters, so once per callback is
+    // plenty). `metrics` is the engine's segment-resident metrics block.
+    mSuperClock->publishLinkMetrics(metrics, wallNTP, 4.0);
 
 
     while (outputFilled < numSamples) {

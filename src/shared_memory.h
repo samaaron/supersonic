@@ -58,7 +58,7 @@ constexpr uint32_t IN_BUFFER_SIZE     = SUPERSONIC_IN_BUFFER_SIZE;    // OSC mes
 constexpr uint32_t OUT_BUFFER_SIZE    = SUPERSONIC_OUT_BUFFER_SIZE;   // OSC replies from scsynth to host (prevent drops)
 constexpr uint32_t DEBUG_BUFFER_SIZE  = SUPERSONIC_DEBUG_BUFFER_SIZE; // Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 48;    // Atomic control pointers & flags (11 fields × 4 bytes + 4 padding for 8-byte alignment)
-constexpr uint32_t METRICS_SIZE       = 184;   // Performance metrics: 46 fields * 4 bytes = 184 bytes
+constexpr uint32_t METRICS_SIZE       = 232;   // Performance metrics: 58 fields * 4 bytes = 232 bytes
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in microseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
@@ -298,6 +298,24 @@ struct alignas(4) PerformanceMetrics {
     // direct ring write fails and the bundle is delivered via prescheduler.
     // C++ side reserves the slot but doesn't read or write it.
     std::atomic<uint32_t> ring_buffer_direct_write_fails; // 45
+
+    // ─── Link (native-only; 0 on WASM) ──────────────────────────────────
+    // Clock readouts mirrored from SuperClock each block; floats stored as
+    // fixed-point (decoded by the panel's display formats).
+    std::atomic<uint32_t> link_peers;              // 46: connected Link peers
+    std::atomic<uint32_t> link_tempo_mbpm;         // 47: tempo, milli-BPM (bpm * 1000)
+    std::atomic<uint32_t> link_beat_centi;         // 48: beat position * 100
+    std::atomic<uint32_t> link_phase_centi;        // 49: phase within quantum * 100
+    std::atomic<uint32_t> link_playing;            // 50: transport 0/1
+
+    // ─── Link Audio stream health (native-only; 0 on WASM) ──────────────
+    std::atomic<uint32_t> link_audio_in_channels;  // 51: active received channels
+    std::atomic<uint32_t> link_audio_stream_rate;  // 52: received stream sample rate (Hz)
+    std::atomic<uint32_t> link_audio_underruns;    // 53: receiver queue underrun events
+    std::atomic<uint32_t> link_audio_buffered_ms;  // 54: receiver queue depth (ms)
+    std::atomic<int32_t>  link_audio_drift_ppm;    // 55: read-rate deviation from 1.0 (ppm, signed)
+    std::atomic<uint32_t> link_audio_publish;      // 56: publishing enabled 0/1
+    std::atomic<uint32_t> link_audio_sinks;        // 57: active output sinks
 };
 
 // SuperClock session state. Has its own SAB region because it's engine

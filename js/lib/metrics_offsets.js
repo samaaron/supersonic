@@ -112,8 +112,25 @@ export const SCSYNTH_SCHEDULER_LAST_LATE_TICK = 44; // Process count when last l
 // =============================================================================
 export const RING_BUFFER_DIRECT_WRITE_FAILS = 45;   // SAB mode only: optimistic direct writes that failed (delivered via prescheduler)
 
-// Number of metric slots in the SAB/snapshot buffer (indices 0 through RING_BUFFER_DIRECT_WRITE_FAILS)
-export const SAB_METRICS_COUNT = RING_BUFFER_DIRECT_WRITE_FAILS + 1;  // 46
+// =============================================================================
+// Link [46-57] — native-only; the web build never writes these (always 0).
+// Mirror of PerformanceMetrics in shared_memory.h.
+// =============================================================================
+export const LINK_PEERS              = 46;  // connected Link peers
+export const LINK_TEMPO_MBPM         = 47;  // tempo, milli-BPM (bpm * 1000)
+export const LINK_BEAT_CENTI         = 48;  // beat position * 100
+export const LINK_PHASE_CENTI        = 49;  // phase within quantum * 100
+export const LINK_PLAYING            = 50;  // transport 0/1
+export const LINK_AUDIO_IN_CHANNELS  = 51;  // active received channels
+export const LINK_AUDIO_STREAM_RATE  = 52;  // received stream sample rate (Hz)
+export const LINK_AUDIO_UNDERRUNS    = 53;  // receiver queue underrun events
+export const LINK_AUDIO_BUFFERED_MS  = 54;  // receiver queue depth (ms)
+export const LINK_AUDIO_DRIFT_PPM    = 55;  // read-rate deviation from 1.0 (ppm, signed)
+export const LINK_AUDIO_PUBLISH      = 56;  // publishing enabled 0/1
+export const LINK_AUDIO_SINKS        = 57;  // active output sinks
+
+// Number of metric slots in the SAB/snapshot buffer (indices 0 through LINK_AUDIO_SINKS)
+export const SAB_METRICS_COUNT = LINK_AUDIO_SINKS + 1;  // 58
 
 // =============================================================================
 // Context metrics [46-58] (written by main thread into merged array only)

@@ -186,7 +186,7 @@ inline void shm_remove(const string& name) {
 // changes propagate through the header rather than requiring a hand-synced copy.
 // All offsets are relative to the arena blob base (segment + blob_offset).
 struct shm_segment_header {
-    static constexpr uint32_t MAGIC = 0x5C09E005;
+    static constexpr uint32_t MAGIC = 0x5C09E006;  // E006: + Link metrics fields (METRICS_SIZE 184→232)
 
     uint32_t magic;
     uint32_t blob_offset;          // segment base → arena blob

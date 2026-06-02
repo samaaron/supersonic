@@ -175,6 +175,10 @@ struct SuperClock::Impl {
     std::condition_variable deferredCv;
     std::atomic<int>        deferredLinkEnableReq{-1};
     std::atomic<bool>       deferredQuit{false};
+
+    // Cumulative Link Audio receive underruns (a block the renderer couldn't
+    // fully fill). Bumped in drainLinkAudioInputsToBuses, mirrored to metrics.
+    std::atomic<uint32_t>   linkAudioUnderruns{0};
 #endif
 
     Impl() { SuperClockState::initDefaults(ownedState); }
@@ -1025,6 +1029,10 @@ void SuperClock::drainLinkAudioInputsToBuses(float* busPool,
             scratchL, scratchR, framesToRender, sessionState,
             static_cast<double>(sampleRate), hostTime, /*quantum=*/4.0);
 
+        // Couldn't fill the whole block → the queue ran dry: an underrun.
+        if (framesFilled < framesToRender)
+            mImpl->linkAudioUnderruns.fetch_add(1, std::memory_order_relaxed);
+
         float* dstL = busPool +  sub.busIdx      * blockSize;
         float* dstR = busPool + (sub.busIdx + 1) * blockSize;
         for (size_t i = 0; i < framesFilled; ++i) {
@@ -1074,6 +1082,62 @@ bool SuperClock::publishAudioBlock(const float* leftChannel,
     (void)leftChannel; (void)rightChannel; (void)numFrames;
     (void)sampleRate; (void)hostMicrosForBufferBegin; (void)quantum;
     return false;
+#endif
+}
+
+void SuperClock::publishLinkMetrics(PerformanceMetrics* m, double ntpSeconds, double quantum) {
+#ifdef SUPERSONIC_LINK
+    if (!m) return;
+
+    // Clock readouts — always written so the LINK card is live even with no
+    // Link Audio subscriptions.
+    m->link_peers.store(static_cast<uint32_t>(mImpl->link.numPeers()),
+                        std::memory_order_relaxed);
+    const double bpm = bitsToDouble(mImpl->ownedState.bpm.load(std::memory_order_relaxed));
+    m->link_tempo_mbpm.store(bpm > 0.0 ? static_cast<uint32_t>(bpm * 1000.0 + 0.5) : 0u,
+                             std::memory_order_relaxed);
+    const double beat = beatAtTime(ntpSeconds, quantum);
+    m->link_beat_centi.store(beat > 0.0 ? static_cast<uint32_t>(beat * 100.0) : 0u,
+                             std::memory_order_relaxed);
+    const double phase = phaseAtTime(ntpSeconds, quantum);
+    m->link_phase_centi.store(phase > 0.0 ? static_cast<uint32_t>(phase * 100.0) : 0u,
+                              std::memory_order_relaxed);
+    m->link_playing.store(isPlaying() ? 1u : 0u, std::memory_order_relaxed);
+
+    // Link Audio — output.
+    m->link_audio_publish.store(mImpl->audioPublishEnabled ? 1u : 0u,
+                                std::memory_order_relaxed);
+    {
+        std::unique_lock<std::mutex> lk(mImpl->auxSinksMutex, std::try_to_lock);
+        if (lk.owns_lock())
+            m->link_audio_sinks.store(static_cast<uint32_t>(mImpl->auxSinks.size()),
+                                      std::memory_order_relaxed);
+    }
+
+    // Link Audio — receive health (aggregated across input subscriptions).
+    m->link_audio_underruns.store(mImpl->linkAudioUnderruns.load(std::memory_order_relaxed),
+                                  std::memory_order_relaxed);
+    {
+        std::unique_lock<std::mutex> lk(mImpl->inputSubMutex, std::try_to_lock);
+        if (lk.owns_lock()) {
+            uint32_t inCh = 0, rate = 0;
+            int32_t  drift = 0;
+            float    bufMs = 0.0f;
+            for (auto& sub : mImpl->inputSubs) {
+                inCh += sub.renderer->lastNumChannels();
+                rate  = sub.renderer->lastSampleRate();
+                drift = sub.renderer->lastDriftPpm();
+                bufMs = std::max(bufMs, sub.renderer->bufferedSeconds() * 1000.0f);
+            }
+            m->link_audio_in_channels.store(inCh, std::memory_order_relaxed);
+            m->link_audio_stream_rate.store(rate, std::memory_order_relaxed);
+            m->link_audio_drift_ppm.store(drift, std::memory_order_relaxed);
+            m->link_audio_buffered_ms.store(static_cast<uint32_t>(bufMs),
+                                            std::memory_order_relaxed);
+        }
+    }
+#else
+    (void)m; (void)ntpSeconds; (void)quantum;
 #endif
 }
 

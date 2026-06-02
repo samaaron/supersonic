@@ -126,6 +126,11 @@ public:
   float bufferedSeconds() const {
       return mBufferedSeconds.load(std::memory_order_relaxed);
   }
+  // Last read-rate deviation from 1.0, in ppm (signed): how hard the two
+  // machines' clocks are pulling the resampler. ~0 when perfectly synced.
+  int32_t lastDriftPpm() const {
+      return mLastDriftPpm.load(std::memory_order_relaxed);
+  }
   // True if we've received at least one buffer.
   bool everReceived() const {
       return mLastSampleRate.load(std::memory_order_relaxed) > 0;
@@ -302,6 +307,8 @@ public:
     }
 
     const auto frameIncrement = totalFrames / double(numFrames);
+    mLastDriftPpm.store(static_cast<int32_t>((frameIncrement - 1.0) * 1e6),
+                        std::memory_order_relaxed);
     auto readPos = startFramePos;
 
     auto getSample = [&](size_t idx, size_t ch) -> double {
@@ -441,6 +448,7 @@ private:
   std::atomic<uint32_t> mLastSampleRate{0};
   std::atomic<uint32_t> mLastNumChannels{0};
   std::atomic<float>    mBufferedSeconds{0.0f};
+  std::atomic<int32_t>  mLastDriftPpm{0};
   std::atomic<uint64_t> mDroppedSourceBuffers{0};
   std::atomic<uint64_t> mNetworkGapBuffers{0};
   std::atomic<uint64_t> mLastSeenCount{0};
