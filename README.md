@@ -16,15 +16,16 @@ This then led to a suite of powerful new live coding languages using **scsynth**
 
 _What if you didn't just bring your language to scsynth? What if you brought scsynth to your environment?_
 
-This is SuperSonic. All the synthesis power of **scsynth** - rearchitected to reach new places.
+This is SuperSonic. All the synthesis power of the original **scsynth** - rearchitected to reach new places.
 
 # Welcome to SuperSonic
 
-**SuperSonic** is a reworking of [SuperCollider](https://supercollider.github.io/)'s audio synthesis engine **scsynth** designed to run in new places - in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), as a standalone native backend using [JUCE](https://juce.com), or embedded directly into the [BEAM](https://www.erlang.org/) via a NIF. Currently it has the following features:
+**SuperSonic** is a complete reworking of [SuperCollider](https://supercollider.github.io/)'s audio synthesis engine **scsynth** designed to run in new places - in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), as a standalone native server using [JUCE](https://juce.com), on embedded hardware such as the ESP32-S3, or as a native shared library running directly in the [BEAM](https://www.erlang.org/) via a NIF. Currently it has the following features:
 
 ### Core
 
 - **scsynth compatible** - *full OSC command compatibility with SuperCollider's scsynth. See the [command reference](docs/SCSYNTH_COMMAND_REFERENCE.md).*
+- **Live metrics** - *cheap, zero-copy telemetry in both transport modes: OSC throughput, scheduler depth and lateness, ring buffer fill and a live node-tree mirror. See [metrics](docs/METRICS.md).*
 - **Malloc-free audio path** - *zero allocation or blocking on the audio thread.*
 - **Pre-scheduler** - *dynamically growing holding bay for future OSC bundles with cancellation support.*
 - **Cold-swap recovery** - *multiple restart levels with automatic synthdef and buffer restoration.*
@@ -42,9 +43,15 @@ This is SuperSonic. All the synthesis power of **scsynth** - rearchitected to re
 
 ### Native
 
+- **Ableton Link v4** - *tempo sync across the network plus streaming Link Audio in and out.*
 - **Live device and driver switching** - *hot-swap at runtime with automatic cold swap on rate mismatch.*
 - **Headless mode** - *high-resolution timer-driven processing for CI and containers.*
 - **UDP OSC server** - *drop-in scsynth replacement with `/supersonic/*` device and recording commands.*
+
+### Embedded
+
+- **Two-tiered memory** - *a placement allocator routes audio-hot allocations to fast internal SRAM and bulk data to external PSRAM with graceful spillover; a zero-overhead passthrough on single-region platforms.*
+- **ESP32-S3** - *memory profile and tiered allocator in place for the ESP32-S3R8 (512 KiB SRAM + 8 MiB PSRAM); on-device build and tuning still in progress.*
 
 ### NIF
 
