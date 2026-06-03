@@ -686,4 +686,156 @@ test.describe("Prescheduler Cancellation", () => {
     // All 5 bundles should be counted as late (JS and WASM both use 0ms threshold)
     expect(totalLatesAfter - totalLatesBefore).toBe(5);
   });
+
+  // Regression guard for the OSC buffer-ownership / reset-race hazard class.
+  //
+  // Upstream's WASM scsynth PR (#7428) hit a bug where replaying a SynthDef
+  // *after* a CmdPeriod produced corrupted audio: a packet buffer whose
+  // ownership crossed the send->process->free boundary was reused/freed while
+  // still referenced. SuperSonic copies bytes into the ring on enqueue (no
+  // aliasing), but the reset path — cancelAll() racing in-flight dispatch and
+  // a non-empty retry queue — is exactly where such a hazard would surface.
+  //
+  // This drives that race hard and asserts: (1) no uncaught exception (a
+  // use-after-free in the worker would throw / crash it), (2) the retry queue
+  // is fully cleared and its pending packets folded into the cancelled count,
+  // (3) every heap-scheduled bundle is cancelled and none leak to the server,
+  // and (4) the engine is still healthy afterwards — a fresh OSC round-trip
+  // completes and new messages dispatch and are processed (the cg-analog: the
+  // "second play" after a reset must work, not degrade).
+  test("cancelAll racing in-flight dispatch leaves no corruption and a healthy engine", async ({ page, sonicConfig, sonicMode }) => {
+    // A use-after-free in the OSC-out worker would surface as an uncaught
+    // exception; capture any so we can assert there were none.
+    const pageErrors = [];
+    page.on("pageerror", (err) => pageErrors.push(err.message));
+
+    const result = await page.evaluate(async ({ config }) => {
+      const NTP_EPOCH_OFFSET = 2208988800;
+      const getCurrentNTP = () => {
+        const perfTimeMs = performance.timeOrigin + performance.now();
+        return (perfTimeMs / 1000) + NTP_EPOCH_OFFSET;
+      };
+
+      const createTimedBundle = (ntpTime, nodeId) => {
+        const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", 60, "amp", 0.0, "release", 0.01]);
+        const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
+        const bundle = new Uint8Array(bundleSize);
+        const view = new DataView(bundle.buffer);
+
+        bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], 0);
+        const ntpSeconds = Math.floor(ntpTime);
+        const ntpFraction = Math.floor((ntpTime % 1) * 0x100000000);
+        view.setUint32(8, ntpSeconds, false);
+        view.setUint32(12, ntpFraction, false);
+        view.setInt32(16, encodedMessage.byteLength, false);
+        bundle.set(encodedMessage, 20);
+
+        return bundle;
+      };
+
+      // Immediate (non-bundle) message: drives the out-path / retry queue.
+      const encodeImmediate = (nodeId) =>
+        window.SuperSonic.osc.encodeMessage("/s_new", ["sonic-pi-beep", nodeId, 0, 0, "note", 60, "amp", 0.0, "release", 0.01]);
+
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await sonic.loadSynthDefs(["sonic-pi-beep"]);
+      await sonic.sync(1);
+
+      const before = sonic.getMetrics();
+      const pendingBefore = before.preschedulerPending || 0;
+      const cancelledBefore = before.preschedulerEventsCancelled || 0;
+
+      // (a) Park 30 bundles in the prescheduler heap, 5s out so they stay
+      //     pending. These give cancelAll a deterministic, countable workload.
+      const HEAP_BUNDLES = 30;
+      const baseNTP = getCurrentNTP() + 5.0;
+      for (let i = 0; i < HEAP_BUNDLES; i++) {
+        sonic.sendOSC(createTimedBundle(baseNTP + (i * 0.001), 80000 + i), { sessionId: 0, runTag: "race" });
+      }
+
+      // (b) Flood the out-path with immediate messages in a tight synchronous
+      //     loop, so dispatch is actively in flight (and, in SAB mode, the
+      //     retry queue may engage) at the exact moment we reset.
+      const BURST = 4000;
+      for (let i = 0; i < BURST; i++) {
+        sonic.sendOSC(encodeImmediate(81000 + i));
+      }
+
+      // (c) The reset, racing all of the above.
+      sonic.cancelAll();
+
+      // Let retry-drain microtasks and dispatch timers settle.
+      await new Promise((r) => setTimeout(r, 400));
+
+      const afterRace = sonic.getMetrics();
+
+      // --- Post-reset health check (the cg-analog) ---
+      // A corrupted OSC pipeline would fail to round-trip /sync.
+      let roundTripHealthy = false;
+      try {
+        await Promise.race([
+          sonic.sync(424242),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("sync timeout")), 3000)),
+        ]);
+        roundTripHealthy = true;
+      } catch (_) {
+        roundTripHealthy = false;
+      }
+
+      const healthBaseline = sonic.getMetrics();
+      const dispatchedBaseline = healthBaseline.preschedulerDispatched || 0;
+      const processedBaseline = healthBaseline.scsynthMessagesProcessed || 0;
+
+      const HEALTH_BATCH = 5;
+      for (let i = 0; i < HEALTH_BATCH; i++) {
+        sonic.sendOSC(encodeImmediate(90000 + i));
+      }
+      await new Promise((r) => setTimeout(r, 400));
+
+      const afterHealth = sonic.getMetrics();
+
+      await sonic.destroy();
+
+      return {
+        pendingBefore,
+        pendingAfterRace: afterRace.preschedulerPending || 0,
+        cancelledDelta: (afterRace.preschedulerEventsCancelled || 0) - cancelledBefore,
+        retryQueuePeak: afterRace.preschedulerRetryQueuePeak || 0,
+        retryQueueSizeAfter: afterRace.preschedulerRetryQueueSize || 0,
+        heapBundles: HEAP_BUNDLES,
+        healthBatch: HEALTH_BATCH,
+        roundTripHealthy,
+        dispatchedDelta: (afterHealth.preschedulerDispatched || 0) - dispatchedBaseline,
+        processedDelta: (afterHealth.scsynthMessagesProcessed || 0) - processedBaseline,
+      };
+    }, { config: sonicConfig });
+
+    console.log(`\ncancelAll reset-race test (mode: ${sonicMode}):`);
+    console.log(`  pending: ${result.pendingBefore} -> ${result.pendingAfterRace}`);
+    console.log(`  cancelled (incl. cleared retries): ${result.cancelledDelta}`);
+    console.log(`  retry queue peak/after: ${result.retryQueuePeak}/${result.retryQueueSizeAfter}`);
+    console.log(`  post-reset roundTrip=${result.roundTripHealthy} dispatched=${result.dispatchedDelta} processed=${result.processedDelta}`);
+
+    // (1) No use-after-free: nothing threw during the race.
+    expect(pageErrors).toEqual([]);
+
+    // (2) The retry queue is fully cleared by cancelAll (regardless of mode).
+    expect(result.retryQueueSizeAfter).toBe(0);
+
+    // (3) Every heap-scheduled bundle was cancelled, and none leaked: pending
+    //     returns to its starting level and the cancelled count covers the heap
+    //     (plus any pending retries that cancelAll folded in).
+    expect(result.pendingAfterRace).toBe(result.pendingBefore);
+    expect(result.cancelledDelta).toBeGreaterThanOrEqual(result.heapBundles);
+
+    // (4) The engine is still healthy after the reset race: a fresh OSC
+    //     round-trip completes and a new batch is processed by the server (no
+    //     silent corruption of post-reset state). Immediate messages take the
+    //     DirectWriter / within-lookahead fast path and bypass the prescheduler,
+    //     so server-side `processed` — not `preschedulerDispatched` — is the
+    //     mode-robust signal that the pipeline still carries OSC end to end.
+    expect(result.roundTripHealthy).toBe(true);
+    expect(result.processedDelta).toBeGreaterThanOrEqual(result.healthBatch);
+  });
 });
