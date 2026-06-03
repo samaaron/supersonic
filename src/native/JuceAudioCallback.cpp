@@ -362,10 +362,10 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     // ── 2. Generate 128-sample scsynth blocks until the JUCE buffer is full ──
     double wallNTP = mSuperClock->updateAudioThreadNTP(mSamplePosition, mSampleRate);
 
-    // Mirror Link clock + stream-health into the dashboard metrics (cheap
-    // relaxed atomics; reads the running counters, so once per callback is
-    // plenty). `metrics` is the engine's segment-resident metrics block.
-    mSuperClock->publishLinkMetrics(metrics, wallNTP, 4.0);
+    // Mirror Link clock + stream-health into the dashboard metrics from one
+    // lock-free session capture. `metrics` is the engine's segment-resident
+    // metrics block.
+    mSuperClock->publishLinkMetrics(metrics, 4.0);
 
 
     while (outputFilled < numSamples) {

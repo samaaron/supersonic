@@ -188,7 +188,7 @@ void SuperClock::publishAuxSinks(const float*, uint32_t, uint32_t, uint32_t, uin
 bool SuperClock::publishAudioBlock(const float*, const float*, size_t, uint32_t, uint64_t, double) {
     return false;
 }
-void SuperClock::publishLinkMetrics(PerformanceMetrics*, double, double) {}
+void SuperClock::publishLinkMetrics(PerformanceMetrics*, double) {}
 
 // ─── Audio-thread NTP ────────────────────────────────────────────────────
 

@@ -265,9 +265,9 @@ public:
                            double quantum = 4.0);
 
     // Mirror the current Link clock + Link Audio stream-health into the
-    // dashboard metrics (relaxed atomics). RT-safe; called once per block.
+    // dashboard metrics (relaxed atomics). RT-safe; called once per callback.
     // No-op on WASM. `m` may be null (skipped).
-    void publishLinkMetrics(PerformanceMetrics* m, double ntpSeconds, double quantum = 4.0);
+    void publishLinkMetrics(PerformanceMetrics* m, double quantum = 4.0);
 
     // ─── SAB mirror accessor (RT-safe reads) ─────────────────────────────
     // Underlying SuperClockState — SAB region on WASM, private mirror

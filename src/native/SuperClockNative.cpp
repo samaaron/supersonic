@@ -1085,24 +1085,34 @@ bool SuperClock::publishAudioBlock(const float* leftChannel,
 #endif
 }
 
-void SuperClock::publishLinkMetrics(PerformanceMetrics* m, double ntpSeconds, double quantum) {
+void SuperClock::publishLinkMetrics(PerformanceMetrics* m, double quantum) {
 #ifdef SUPERSONIC_LINK
     if (!m) return;
+
+    // One realtime-safe, lock-free capture, read coherently for every Link
+    // field below. This MUST use captureAudioSessionState() (the audio-thread
+    // variant): the convenience getters tempo()/isPlaying() and the NTP-domain
+    // beatAtTime()/phaseAtTime() each reach for captureAppSessionState(), which
+    // takes a lock and must never run on the audio thread. Beat/phase are
+    // queried in Link's own clock domain at "now", mirroring
+    // drainLinkAudioInputsToBuses / the tempo-changed callback.
+    const auto st = mImpl->link.captureAudioSessionState();
+    const auto nowMicros = mImpl->link.clock().micros();
 
     // Clock readouts — always written so the LINK card is live even with no
     // Link Audio subscriptions.
     m->link_peers.store(static_cast<uint32_t>(mImpl->link.numPeers()),
                         std::memory_order_relaxed);
-    const double bpm = bitsToDouble(mImpl->ownedState.bpm.load(std::memory_order_relaxed));
+    const double bpm = st.tempo();
     m->link_tempo_mbpm.store(bpm > 0.0 ? static_cast<uint32_t>(bpm * 1000.0 + 0.5) : 0u,
                              std::memory_order_relaxed);
-    const double beat = beatAtTime(ntpSeconds, quantum);
+    const double beat = st.beatAtTime(nowMicros, quantum);
     m->link_beat_centi.store(beat > 0.0 ? static_cast<uint32_t>(beat * 100.0) : 0u,
                              std::memory_order_relaxed);
-    const double phase = phaseAtTime(ntpSeconds, quantum);
+    const double phase = st.phaseAtTime(nowMicros, quantum);
     m->link_phase_centi.store(phase > 0.0 ? static_cast<uint32_t>(phase * 100.0) : 0u,
                               std::memory_order_relaxed);
-    m->link_playing.store(isPlaying() ? 1u : 0u, std::memory_order_relaxed);
+    m->link_playing.store(st.isPlaying() ? 1u : 0u, std::memory_order_relaxed);
 
     // Link Audio — output.
     m->link_audio_publish.store(mImpl->audioPublishEnabled ? 1u : 0u,
