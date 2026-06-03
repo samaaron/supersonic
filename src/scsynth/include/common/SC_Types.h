@@ -23,15 +23,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// A "lean" target builds without boost::asio networking, cross-process shared
-// memory, or host-filesystem synthdef loading: the WASM/AudioWorklet build and
-// embedded (ESP-IDF) builds. They drive the render themselves and exchange OSC
-// in-process. Desktop/native is the full target. Defined here, in the universal
-// types leaf, so every TU sees the same answer (SC_Reply.h, SC_HiddenWorld.h,
-// SC_MiscCmds.cpp, ... all key feature guards off this single macro).
-#if defined(__EMSCRIPTEN__) || defined(ESP_PLATFORM)
-#    define SC_LEAN_TARGET 1
-#endif
+// Platform capabilities (SC_HAS_*) and the derived SC_LEAN_TARGET live in
+// SC_Platform.h. Included here, in the universal types leaf, so every TU sees the
+// same answer (SC_Reply.h, SC_HiddenWorld.h, SC_MiscCmds.cpp, ... all key their
+// feature guards off SC_LEAN_TARGET).
+#include "SC_Platform.h"
 
 #if __cplusplus
 #    define SC_INLINE inline

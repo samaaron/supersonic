@@ -19,6 +19,7 @@
 #include "SC_AllocPool.h"
 #include "memory_profile.h"
 #include "mem_region.h"
+#include "SC_Platform.h"
 #include <atomic>
 #include <cstdlib>
 #include <cstdio>
@@ -35,7 +36,7 @@ static void*      g_heap_backing = nullptr;
 // 32-bit atomics (S32C1I) but not std::atomic_flag's byte test-and-set
 // (__atomic_test_and_set), so embedded uses a 4-byte atomic. Desktop/WASM keep
 // std::atomic_flag, byte-for-byte as before.
-#ifdef ESP_PLATFORM
+#if !SC_HAS_BYTE_ATOMICS
 static std::atomic<uint32_t> g_heap_lock{0};
 static inline void heap_lock() {
     uint32_t expected = 0;

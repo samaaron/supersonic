@@ -26,12 +26,7 @@
 // in fast internal SRAM, and push the cold, large tables (gPMSine, gInvSine, the
 // 64 KB gSineWavetable — only touched by PMOsc / wavetable oscillators) to PSRAM
 // via EXT_RAM_BSS_ATTR. No-op off embedded. See docs/EMBEDDED_MEMORY.md.
-#if defined(ESP_PLATFORM)
-#include "esp_attr.h"
-#define SC_COLD_BSS EXT_RAM_BSS_ATTR
-#else
-#define SC_COLD_BSS
-#endif
+#include "SC_Platform.h"  // SC_COLD_BSS: cold tables -> PSRAM on embedded, no-op elsewhere
 
 float32 gSine[kSineSize + 1]; // hot -> internal SRAM
 float32 SC_COLD_BSS gPMSine[kSineSize + 1];

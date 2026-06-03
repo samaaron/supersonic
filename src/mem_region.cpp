@@ -12,10 +12,11 @@
  * an inline pass-through and its RT pool uses the SAB pool callbacks).
  */
 #include "mem_region.h"
+#include "SC_Platform.h"
 
 #include <cstdlib>
 
-#if defined(ESP_PLATFORM)
+#if SC_HAS_TIERED_MEMORY
 
 #include <atomic>
 #include <cstdint>

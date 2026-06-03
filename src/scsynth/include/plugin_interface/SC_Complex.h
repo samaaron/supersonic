@@ -36,17 +36,9 @@
 
 // These FFT/polar lookup tables are defined in an anonymous namespace, so every
 // including TU (the FFT/PV objects) gets its own ~48 KB copy. They're cold for
-// basic synthesis, so on embedded push them to PSRAM to free internal SRAM.
-#if defined(ESP_PLATFORM)
-#include "esp_attr.h"
-#ifndef SC_COLD_BSS
-#define SC_COLD_BSS EXT_RAM_BSS_ATTR
-#endif
-#else
-#ifndef SC_COLD_BSS
-#define SC_COLD_BSS
-#endif
-#endif
+// basic synthesis, so on embedded SC_COLD_BSS pushes them to PSRAM to free
+// internal SRAM (a no-op on single-tier targets). See SC_Platform.h.
+#include "SC_Platform.h"
 
 namespace detail {
 
