@@ -14,6 +14,7 @@ add_executable(SuperSonicNativeTests
     test_boot.cpp
     test_osc_commands.cpp
     test_synthdef.cpp
+    test_embedded_pools.cpp
     test_synth_lifecycle.cpp
     test_group_commands.cpp
     test_node_tree.cpp
