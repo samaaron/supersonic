@@ -89,7 +89,8 @@ struct DeviceInfo {
 
 struct CurrentDeviceInfo : DeviceInfo {
     double activeSampleRate    = 0.0;
-    int    activeBufferSize    = 0;
+    int    activeBufferSize    = 0;   // hardware callback buffer
+    int    controlBlockSize    = 0;   // scsynth control block (decoupled from the HW buffer)
     int    activeOutputChannels = 0;
     int    activeInputChannels  = 0;
     int    outputLatencySamples = 0;

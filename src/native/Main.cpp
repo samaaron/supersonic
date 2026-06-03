@@ -92,9 +92,9 @@ static void printBanner(const char* version, const CurrentDeviceInfo& dev, int u
             snprintf(inStr, sizeof(inStr), "%d", dev.activeInputChannels);
         fprintf(stderr,
             "  %s (%s)\n"
-            "  %d Hz | buffer %d | out %s | in %s\n",
+            "  %d Hz | block %d | buffer %d | out %s | in %s\n",
             dev.name.c_str(), dev.typeName.c_str(),
-            static_cast<int>(dev.activeSampleRate), dev.activeBufferSize,
+            static_cast<int>(dev.activeSampleRate), dev.controlBlockSize, dev.activeBufferSize,
             outStr, inStr);
     } else {
         fprintf(stderr, "  headless (no audio device)\n");
@@ -164,7 +164,8 @@ int main(int argc, char* argv[]) {
                 "Usage: supersonic [options]\n\n"
                 "  -u <port>    UDP port (default: 57110)\n"
                 "  -S <rate>    Sample rate (default: 48000)\n"
-                "  -Z <size>    Buffer size (default: auto)\n"
+                "  -Z <size>    Hardware buffer size (default: auto)\n"
+                "  -z <size>    scsynth control block size, 32-1024 (default: 128)\n"
                 "  -i <num>     Input channels (default: device max; 0 = disable)\n"
                 "  -o <num>     Output channels (default: device max)\n"
                 "  -n <num>     Max nodes (default: 1024)\n"
@@ -249,7 +250,7 @@ int main(int argc, char* argv[]) {
             case 'Z': cfg.bufferSize           = std::atoi(val); ++i; break;
             case 'n': cfg.maxNodes             = std::atoi(val); ++i; break;
             case 'w': cfg.maxWireBufs          = std::atoi(val); ++i; break;
-            case 'z': cfg.bufferSize           = std::atoi(val); ++i; break;
+            case 'z': cfg.blockSize            = std::atoi(val); ++i; break;
             case 'H': cfg.hardwareDevice = val; ++i; break;
 
             // Accepted for scsynth compatibility (ignored):

@@ -54,6 +54,11 @@ public:
     struct Config {
         int    sampleRate               = 48000;
         int    bufferSize               = 0;   // 0 = auto (smallest multiple of 128)
+        int    blockSize                = 0;   // scsynth control block size (SC's -z);
+                                               // 0 = platform default (kDefaultBlockSize,
+                                               // 128). Decoupled from the HW buffer above;
+                                               // clamped to [32, kMaxBlockSize]. WASM ignores
+                                               // it (must equal the 128-sample render quantum).
         int    udpPort                  = 57110;
         double preschedulerLookaheadS   = 0.500;
         int    maxNodes                 = 1024;

@@ -902,12 +902,13 @@ void SupersonicEngine::init(const Config& cfg) {
     }
 
     // -- Initialise scsynth World ------------------------------------------
-    // scsynth's block size is fixed at kDefaultBlockSize (128) regardless
-    // of the hardware callback buffer. JuceAudioCallback's accumulator +
-    // prefetch decoupling handles HW-buffer ≠ scsynth-block, so the
-    // smaller block buys us a finer OSC-bundle scheduling grid (~3 ms at
-    // 48 kHz) without paying any latency cost on the audio thread.
-    int chosenBufLen = sonicpi::kDefaultBlockSize;
+    // scsynth's control block size. It's decoupled from the hardware callback
+    // buffer (JuceAudioCallback's accumulator + prefetch span the difference),
+    // so it's a free knob on native: cfg.blockSize (scsynth's -z) overrides the
+    // platform default; 0 keeps kDefaultBlockSize (128). initialiseWorld clamps
+    // it to [32, kMaxBlockSize]. WASM has no such knob — its block must equal the
+    // 128-sample AudioWorklet render quantum.
+    int chosenBufLen = (cfg.blockSize > 0) ? cfg.blockSize : sonicpi::kDefaultBlockSize;
     ssLifecycleLog("[supersonic] scsynth block size = %d samples\n", chosenBufLen);
 
     // The arena is the public segment when one exists (so the whole
@@ -1614,6 +1615,7 @@ CurrentDeviceInfo SupersonicEngine::currentDevice() const {
     info.typeName = dev->getTypeName().toStdString();
     info.activeSampleRate    = dev->getCurrentSampleRate();
     info.activeBufferSize    = dev->getCurrentBufferSizeSamples();
+    info.controlBlockSize    = mAudioCallback.bufferLength();
     info.activeOutputChannels = dev->getActiveOutputChannels().countNumberOfSetBits();
     info.activeInputChannels  = dev->getActiveInputChannels().countNumberOfSetBits();
     info.outputLatencySamples = dev->getOutputLatencyInSamples();
