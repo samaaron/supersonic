@@ -542,6 +542,18 @@ extern "C" {
         g_osc_increment = (int64_t)(g_osc_increment_numerator / sample_rate * 4294967296.0);
         g_osc_to_samples = sample_rate / 4294967296.0;
 
+        // Publish cross-platform system info into the metrics struct (slots
+        // 58-64). Constant for the session; written once now that the World
+        // exists. Runs on every runtime — native's initialiseWorld() also
+        // routes through init_memory().
+        metrics->supersonic_version_major.store(SUPERSONIC_VERSION_MAJOR, std::memory_order_relaxed);
+        metrics->supersonic_version_minor.store(SUPERSONIC_VERSION_MINOR, std::memory_order_relaxed);
+        metrics->supersonic_version_patch.store(SUPERSONIC_VERSION_PATCH, std::memory_order_relaxed);
+        metrics->audio_sample_rate.store(static_cast<uint32_t>(sample_rate + 0.5), std::memory_order_relaxed);
+        metrics->audio_block_size.store(static_cast<uint32_t>(buf_length), std::memory_order_relaxed);
+        metrics->audio_output_channels.store(options.mNumOutputBusChannels, std::memory_order_relaxed);
+        metrics->audio_input_channels.store(options.mNumInputBusChannels, std::memory_order_relaxed);
+
         // Clear scheduler
         g_scheduler.Clear();
         update_scheduler_depth_metric(0);
@@ -621,6 +633,10 @@ extern "C" {
         // already the SuperClock-derived NTP from JuceAudioCallback.
 #ifdef __EMSCRIPTEN__
         const double current_ntp = superClock().nowAt(current_time);
+        // Mirror the SuperClock readout into the cross-platform clock metrics
+        // (slots 65-68) each block. Native publishes via mSuperClock in
+        // JuceAudioCallback, which owns the Link-driven SuperClock instance.
+        superClock().publishClockMetrics(metrics, current_ntp, 4.0);
 #else
         const double current_ntp = current_time;
 #endif

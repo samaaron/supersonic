@@ -43,12 +43,22 @@ function formatLatencyUs(val) {
   return (val / 1000).toFixed(1);
 }
 
+function formatMilliBpm(val) {
+  return (val / 1000).toFixed(1);
+}
+
+function formatCenti(val) {
+  return (val / 100).toFixed(2);
+}
+
 function makeFormatter(cell, metricDef, metrics) {
   if (cell.format === 'bytes') return (v) => formatBytes(v);
   if (cell.format === 'headroom') return (v) => formatHeadroom(v);
   if (cell.format === 'signed') return (v) => formatSigned(v);
   if (cell.format === 'percent') return (v) => String(v);
   if (cell.format === 'latencyUs') return (v) => formatLatencyUs(v);
+  if (cell.format === 'milliBpm') return (v) => formatMilliBpm(v);
+  if (cell.format === 'centi') return (v) => formatCenti(v);
   if (cell.format === 'enum' && metricDef?.values) {
     const values = metricDef.values;
     return (v) => formatEnum(v, values);

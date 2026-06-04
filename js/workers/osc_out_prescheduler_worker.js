@@ -686,10 +686,11 @@ self.addEventListener('message', (event) => {
                     // postMessage mode: store worklet port
                     workletPort = data.workletPort;
 
-                    // postMessage mode: create local metrics buffer with same layout as SAB
-                    // Size matches METRICS_SIZE (184 bytes = 46 uint32s)
-                    const METRICS_SIZE = 184;
-                    localMetricsBuffer = new ArrayBuffer(METRICS_SIZE);
+                    // postMessage mode: create local metrics buffer with same layout as SAB.
+                    // Sized from SAB_METRICS_COUNT so it always matches the struct; only
+                    // the prescheduler slots (9-23) are actually written here and overlaid
+                    // downstream, but keeping full width avoids layout drift.
+                    localMetricsBuffer = new ArrayBuffer(MetricsOffsets.SAB_METRICS_COUNT * 4);
                     metricsView = new Uint32Array(localMetricsBuffer);
 
                     // Start periodic sending of metrics

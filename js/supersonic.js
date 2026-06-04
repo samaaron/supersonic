@@ -210,39 +210,54 @@ export class SuperSonic {
         // Ring buffer direct write failures [45]
         ringBufferDirectWriteFails:   { offset: 45, type: 'counter',  unit: 'count', description: 'SAB mode only: optimistic direct writes attempted but failed due to ring buffer lock not being available (delivered via prescheduler instead)' },
 
+        // Link [46-57] is native-only (always 0 on web) and not exposed here.
         // SuperClock session state lives in its own SAB region (SuperClockState),
-        // not in PerformanceMetrics. Owned by engine.superClock — not exposed
-        // as user-visible metrics here.
+        // not in PerformanceMetrics. Owned by engine.superClock.
 
-        // Context metrics [46+] (main thread only)
-        driftOffsetMs:                { offset: 46, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock drift between AudioContext and wall clock' },
-        clockOffsetMs:                { offset: 47, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock offset for multi-system sync' },
-        audioContextState:            { offset: 48, type: 'enum',     values: ['unknown', 'running', 'suspended', 'closed', 'interrupted'], description: 'AudioContext state' },
-        bufferPoolUsedBytes:          { offset: 49, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes used' },
-        bufferPoolAvailableBytes:     { offset: 50, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes available' },
-        bufferPoolAllocations:        { offset: 51, type: 'counter',  unit: 'count', description: 'Total buffer allocations' },
-        loadedSynthDefs:              { offset: 52, type: 'gauge',    unit: 'count', description: 'Number of loaded synthdefs' },
-        scsynthSchedulerCapacity:     { offset: 53, type: 'constant', unit: 'count', description: 'Maximum scheduler queue size' },
-        preschedulerCapacity:         { offset: 54, type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler' },
-        inBufferCapacity:             { offset: 55, type: 'constant', unit: 'bytes', description: 'IN ring buffer capacity' },
-        outBufferCapacity:            { offset: 56, type: 'constant', unit: 'bytes', description: 'OUT ring buffer capacity' },
-        debugBufferCapacity:          { offset: 57, type: 'constant', unit: 'bytes', description: 'DEBUG ring buffer capacity' },
-        mode:                         { offset: 58, type: 'enum',     values: ['sab', 'postMessage'], description: 'Transport mode' },
+        // System info [58-64] — cross-platform; written by shared C++ at init.
+        supersonicVersionMajor:       { offset: 58, type: 'constant', unit: 'count', description: 'SuperSonic major version' },
+        supersonicVersionMinor:       { offset: 59, type: 'constant', unit: 'count', description: 'SuperSonic minor version' },
+        supersonicVersionPatch:       { offset: 60, type: 'constant', unit: 'count', description: 'SuperSonic patch version' },
+        audioSampleRate:              { offset: 61, type: 'constant', unit: 'Hz',    description: 'Output sample rate' },
+        audioBlockSize:               { offset: 62, type: 'constant', unit: 'count', description: 'Audio block size in frames (128 on web)' },
+        audioOutputChannels:          { offset: 63, type: 'constant', unit: 'count', description: 'Output bus channels' },
+        audioInputChannels:           { offset: 64, type: 'constant', unit: 'count', description: 'Input bus channels' },
 
-        // Audio diagnostics [59-65] (main thread, Chrome playbackStats + cross-browser health)
-        glitchCount:                  { offset: 59, type: 'counter',  unit: 'count', description: 'Chrome only: audio underrun/glitch events' },
-        glitchDurationMs:             { offset: 60, type: 'gauge',    unit: 'ms',    description: 'Chrome only: total silence from audio underruns' },
-        averageLatencyUs:             { offset: 61, type: 'gauge',    unit: 'us',    description: 'Chrome only: average audio output latency' },
-        maxLatencyUs:                 { offset: 62, type: 'gauge',    unit: 'us',    description: 'Chrome only: maximum audio output latency' },
-        audioHealthPct:               { offset: 63, type: 'gauge',    unit: '%',     description: 'Cross-browser: fraction of expected audio frames delivered (100% = no issues)' },
-        totalFramesDurationMs:        { offset: 64, type: 'counter',  unit: 'ms',    description: 'Chrome only: total audio rendered duration' },
-        hasPlaybackStats:             { offset: 65, type: 'gauge',    unit: 'bool',  description: '1 if Chrome playbackStats API is available, 0 otherwise' },
+        // SuperClock readouts [65-68] — cross-platform; written per block.
+        clockTempoMbpm:               { offset: 65, type: 'gauge',    unit: 'milliBpm', description: 'Tempo in milli-BPM (bpm * 1000)' },
+        clockBeatCenti:               { offset: 66, type: 'gauge',    unit: 'centi',    description: 'Beat position * 100' },
+        clockPhaseCenti:              { offset: 67, type: 'gauge',    unit: 'centi',    description: 'Phase within quantum * 100' },
+        clockPlaying:                 { offset: 68, type: 'gauge',    unit: 'bool',     description: 'Transport playing (0/1)' },
 
-        // Buffer pool growth metrics [66-69] (main thread)
-        bufferPoolTotalCapacity:      { offset: 66, type: 'gauge',    unit: 'bytes', description: 'Buffer pool committed capacity (grows on demand)' },
-        bufferPoolMaxCapacity:        { offset: 67, type: 'gauge',    unit: 'bytes', description: 'Buffer pool hard ceiling' },
-        bufferPoolGrowthCount:        { offset: 68, type: 'counter',  unit: 'count', description: 'Number of buffer pool growth events' },
-        bufferPoolPoolCount:          { offset: 69, type: 'gauge',    unit: 'count', description: 'Number of buffer pool segments' },
+        // Context metrics [69+] (main thread only)
+        driftOffsetMs:                { offset: 69, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock drift between AudioContext and wall clock' },
+        clockOffsetMs:                { offset: 70, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock offset for multi-system sync' },
+        audioContextState:            { offset: 71, type: 'enum',     values: ['unknown', 'running', 'suspended', 'closed', 'interrupted'], description: 'AudioContext state' },
+        bufferPoolUsedBytes:          { offset: 72, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes used' },
+        bufferPoolAvailableBytes:     { offset: 73, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes available' },
+        bufferPoolAllocations:        { offset: 74, type: 'counter',  unit: 'count', description: 'Total buffer allocations' },
+        loadedSynthDefs:              { offset: 75, type: 'gauge',    unit: 'count', description: 'Number of loaded synthdefs' },
+        scsynthSchedulerCapacity:     { offset: 76, type: 'constant', unit: 'count', description: 'Maximum scheduler queue size' },
+        preschedulerCapacity:         { offset: 77, type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler' },
+        inBufferCapacity:             { offset: 78, type: 'constant', unit: 'bytes', description: 'IN ring buffer capacity' },
+        outBufferCapacity:            { offset: 79, type: 'constant', unit: 'bytes', description: 'OUT ring buffer capacity' },
+        debugBufferCapacity:          { offset: 80, type: 'constant', unit: 'bytes', description: 'DEBUG ring buffer capacity' },
+        mode:                         { offset: 81, type: 'enum',     values: ['sab', 'postMessage'], description: 'Transport mode' },
+
+        // Audio diagnostics [82-88] (main thread, Chrome playbackStats + cross-browser health)
+        glitchCount:                  { offset: 82, type: 'counter',  unit: 'count', description: 'Chrome only: audio underrun/glitch events' },
+        glitchDurationMs:             { offset: 83, type: 'gauge',    unit: 'ms',    description: 'Chrome only: total silence from audio underruns' },
+        averageLatencyUs:             { offset: 84, type: 'gauge',    unit: 'us',    description: 'Chrome only: average audio output latency' },
+        maxLatencyUs:                 { offset: 85, type: 'gauge',    unit: 'us',    description: 'Chrome only: maximum audio output latency' },
+        audioHealthPct:               { offset: 86, type: 'gauge',    unit: '%',     description: 'Cross-browser: fraction of expected audio frames delivered (100% = no issues)' },
+        totalFramesDurationMs:        { offset: 87, type: 'counter',  unit: 'ms',    description: 'Chrome only: total audio rendered duration' },
+        hasPlaybackStats:             { offset: 88, type: 'gauge',    unit: 'bool',  description: '1 if Chrome playbackStats API is available, 0 otherwise' },
+
+        // Buffer pool growth metrics [89-92] (main thread)
+        bufferPoolTotalCapacity:      { offset: 89, type: 'gauge',    unit: 'bytes', description: 'Buffer pool committed capacity (grows on demand)' },
+        bufferPoolMaxCapacity:        { offset: 90, type: 'gauge',    unit: 'bytes', description: 'Buffer pool hard ceiling' },
+        bufferPoolGrowthCount:        { offset: 91, type: 'counter',  unit: 'count', description: 'Number of buffer pool growth events' },
+        bufferPoolPoolCount:          { offset: 92, type: 'gauge',    unit: 'count', description: 'Number of buffer pool segments' },
       },
 
       layout: {
@@ -336,6 +351,24 @@ export class SuperSonic {
               { label: 'glitches',    tooltip: 'Chrome only: audio underrun/glitch events and total silence duration', cells: [{ key: 'glitchCount', kind: 'error', format: 'chromeOnly' }, { sep: ' (' }, { key: 'glitchDurationMs', kind: 'error', format: 'chromeOnly' }, { text: ' ms)', kind: 'muted' }] },
               { label: 'latency',     tooltip: 'Chrome only: avg | max audio output latency in ms', cells: [{ key: 'averageLatencyUs', kind: 'dim', format: 'chromeLatencyUs' }, { sep: ' | ' }, { key: 'maxLatencyUs', kind: 'dim', format: 'chromeLatencyUs' }, { text: ' ms', kind: 'muted' }] },
               { label: 'WASM errors', cells: [{ key: 'scsynthWasmErrors', kind: 'error' }] },
+            ]
+          },
+          {
+            title: 'Engine',
+            rows: [
+              { label: 'version',  cells: [{ key: 'supersonicVersionMajor' }, { text: '.' }, { key: 'supersonicVersionMinor' }, { text: '.' }, { key: 'supersonicVersionPatch' }] },
+              { label: 'rate',     cells: [{ key: 'audioSampleRate' }, { text: ' Hz', kind: 'muted' }] },
+              { label: 'block',    cells: [{ key: 'audioBlockSize' }, { text: ' frames', kind: 'muted' }] },
+              { label: 'channels', tooltip: 'output | input bus channels', cells: [{ key: 'audioOutputChannels' }, { sep: ' | ' }, { key: 'audioInputChannels', kind: 'muted' }] },
+            ]
+          },
+          {
+            title: 'Clock',
+            rows: [
+              { label: 'tempo',   cells: [{ key: 'clockTempoMbpm', format: 'milliBpm' }, { text: ' bpm', kind: 'muted' }] },
+              { label: 'beat',    cells: [{ key: 'clockBeatCenti', kind: 'dim', format: 'centi' }] },
+              { label: 'phase',   cells: [{ key: 'clockPhaseCenti', kind: 'dim', format: 'centi' }] },
+              { label: 'playing', cells: [{ key: 'clockPlaying', kind: 'muted' }] },
             ]
           },
         ]
@@ -711,7 +744,8 @@ export class SuperSonic {
   /**
    * Get metrics as a flat Uint32Array for zero-allocation reading.
    * Returns the same array reference every call — values are updated in-place.
-   * Slots 0-45: SAB/snapshot metrics, 46+: context metrics.
+   * Slots 0-68: SAB/snapshot metrics (slot 69 is struct alignment padding),
+   * 69+: main-thread context metrics.
    * Use getMetricsSchema().metrics for offset mappings.
    * @returns {Uint32Array}
    */

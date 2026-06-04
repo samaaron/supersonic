@@ -52,3 +52,34 @@ double SuperClock::timeAtBeat(double beat, double quantum) const {
     (void)quantum;
     return getBeatOriginNtp() + beat * 60.0 / getBpm();
 }
+
+// ── Cross-platform clock metrics ────────────────────────────────────────
+// Reads the SuperClockState SAB mirror directly (relaxed atomics) rather than
+// getBpm()/isPlaying(), which on native+Link route through the locking
+// captureAppSessionState() (not RT-safe). The mirror is the SAB region on WASM
+// and a Link-callback-synced private mirror on native, so a direct read is
+// RT-safe and consistent on both builds. Fixed-point encoding matches the
+// link_* clock slots so the same display formats apply.
+
+void SuperClock::publishClockMetrics(PerformanceMetrics* m, double ntpNow, double quantum) {
+    if (!m) return;
+
+    const SuperClockState* s = state();
+    if (!s) return;
+
+    const double bpm = bitsToDouble(s->bpm.load(std::memory_order_relaxed));
+    const double beatOrigin = bitsToDouble(s->beat_origin_ntp.load(std::memory_order_relaxed));
+    const bool playing = s->is_playing.load(std::memory_order_relaxed) != 0u;
+
+    const double beat = (bpm > 0.0) ? (ntpNow - beatOrigin) * bpm / 60.0 : 0.0;
+    double phase = (quantum > 0.0) ? std::fmod(beat, quantum) : 0.0;
+    if (phase < 0.0) phase += quantum;
+
+    m->clock_tempo_mbpm.store(bpm > 0.0 ? static_cast<uint32_t>(bpm * 1000.0 + 0.5) : 0u,
+                              std::memory_order_relaxed);
+    m->clock_beat_centi.store(beat > 0.0 ? static_cast<uint32_t>(beat * 100.0) : 0u,
+                              std::memory_order_relaxed);
+    m->clock_phase_centi.store(phase > 0.0 ? static_cast<uint32_t>(phase * 100.0) : 0u,
+                               std::memory_order_relaxed);
+    m->clock_playing.store(playing ? 1u : 0u, std::memory_order_relaxed);
+}

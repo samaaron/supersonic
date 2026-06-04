@@ -367,6 +367,11 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     // metrics block.
     mSuperClock->publishLinkMetrics(metrics, 4.0);
 
+    // Mirror the cross-platform SuperClock readout (tempo/beat/phase/playing,
+    // slots 65-68) from the same Link-driven clock instance. Reads the SAB
+    // mirror — RT-safe and live even on no-Link builds.
+    mSuperClock->publishClockMetrics(metrics, wallNTP, 4.0);
+
 
     while (outputFilled < numSamples) {
         // Feed scsynth one full mBufLen block of input from the accumulator.

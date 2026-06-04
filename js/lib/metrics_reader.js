@@ -195,6 +195,22 @@ export class MetricsReader {
       bypassNearFuture: m[MetricsOffsets.BYPASS_NEAR_FUTURE],
       bypassLate: m[MetricsOffsets.BYPASS_LATE],
 
+      // System info (cross-platform; written by shared C++ at init)
+      supersonicVersionMajor: m[MetricsOffsets.SUPERSONIC_VERSION_MAJOR],
+      supersonicVersionMinor: m[MetricsOffsets.SUPERSONIC_VERSION_MINOR],
+      supersonicVersionPatch: m[MetricsOffsets.SUPERSONIC_VERSION_PATCH],
+      audioSampleRate: m[MetricsOffsets.AUDIO_SAMPLE_RATE],
+      audioBlockSize: m[MetricsOffsets.AUDIO_BLOCK_SIZE],
+      audioOutputChannels: m[MetricsOffsets.AUDIO_OUTPUT_CHANNELS],
+      audioInputChannels: m[MetricsOffsets.AUDIO_INPUT_CHANNELS],
+
+      // SuperClock readouts (cross-platform; written per block). Fixed-point:
+      // tempo is milli-BPM (÷1000), beat/phase are ×100.
+      clockTempoMbpm: m[MetricsOffsets.CLOCK_TEMPO_MBPM],
+      clockBeatCenti: m[MetricsOffsets.CLOCK_BEAT_CENTI],
+      clockPhaseCenti: m[MetricsOffsets.CLOCK_PHASE_CENTI],
+      clockPlaying: m[MetricsOffsets.CLOCK_PLAYING],
+
       // Mode
       mode: this.#mode,
     };

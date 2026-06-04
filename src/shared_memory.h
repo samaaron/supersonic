@@ -58,7 +58,7 @@ constexpr uint32_t IN_BUFFER_SIZE     = SUPERSONIC_IN_BUFFER_SIZE;    // OSC mes
 constexpr uint32_t OUT_BUFFER_SIZE    = SUPERSONIC_OUT_BUFFER_SIZE;   // OSC replies from scsynth to host (prevent drops)
 constexpr uint32_t DEBUG_BUFFER_SIZE  = SUPERSONIC_DEBUG_BUFFER_SIZE; // Debug messages from scsynth
 constexpr uint32_t CONTROL_SIZE       = 48;    // Atomic control pointers & flags (11 fields × 4 bytes + 4 padding for 8-byte alignment)
-constexpr uint32_t METRICS_SIZE       = 232;   // Performance metrics: 58 fields * 4 bytes = 232 bytes
+constexpr uint32_t METRICS_SIZE       = 280;   // Performance metrics: 70 fields * 4 bytes = 280 bytes (multiple of 8)
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in microseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
@@ -203,6 +203,9 @@ struct alignas(4) ControlPointers {
 // - [38-41] Bypass category metrics (JS main thread / PM transport)
 // - [42-44] scsynth late timing diagnostics (WASM writes)
 // - [45]    Ring buffer direct write failures (OscChannel SAB mode, JS-only)
+// - [46-57] Link (native-only)
+// - [58-64] System info: version + audio config (shared C++, write-once)
+// - [65-68] SuperClock readouts: tempo/beat/phase/playing (shared C++, per block)
 struct alignas(4) PerformanceMetrics {
     // The same struct is written from native (binary + NIF) and web (WASM/JS).
     // Each group below identifies its writers by runtime. "shared C++" means
@@ -316,6 +319,32 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<int32_t>  link_audio_drift_ppm;    // 55: read-rate deviation from 1.0 (ppm, signed)
     std::atomic<uint32_t> link_audio_publish;      // 56: publishing enabled 0/1
     std::atomic<uint32_t> link_audio_sinks;        // 57: active output sinks
+
+    // ─── System info (cross-platform; written by shared C++ on every runtime) ─
+    // Engine identity + audio connection details. Written once at init by
+    // init_memory() (audio_processor.cpp). Constant for the session.
+    std::atomic<uint32_t> supersonic_version_major; // 58: SUPERSONIC_VERSION_MAJOR
+    std::atomic<uint32_t> supersonic_version_minor; // 59: SUPERSONIC_VERSION_MINOR
+    std::atomic<uint32_t> supersonic_version_patch; // 60: SUPERSONIC_VERSION_PATCH
+    std::atomic<uint32_t> audio_sample_rate;        // 61: output sample rate (Hz)
+    std::atomic<uint32_t> audio_block_size;         // 62: block size (frames; 128 on web)
+    std::atomic<uint32_t> audio_output_channels;    // 63: output bus channels
+    std::atomic<uint32_t> audio_input_channels;     // 64: input bus channels
+
+    // ─── SuperClock readouts (cross-platform; written per block) ─────────────
+    // Mirrored from SuperClock each block by publishClockMetrics() — sourced
+    // from the SuperClockState SAB mirror, so live on web and native alike
+    // (independent of Link). Floats stored as fixed-point (see web schema /
+    // panel display formats). Supersedes the native-only link_* clock slots.
+    std::atomic<uint32_t> clock_tempo_mbpm;         // 65: tempo, milli-BPM (bpm * 1000)
+    std::atomic<uint32_t> clock_beat_centi;         // 66: beat position * 100
+    std::atomic<uint32_t> clock_phase_centi;        // 67: phase within quantum * 100
+    std::atomic<uint32_t> clock_playing;            // 68: transport 0/1
+
+    // Reserved padding so METRICS_SIZE stays a multiple of 8 bytes — the
+    // regions that follow in the arena (NTP time, SuperClockState) are
+    // 8-byte-aligned and read via Float64/BigInt64 views, which require it.
+    std::atomic<uint32_t> _metrics_reserved;        // 69: reserved (alignment)
 };
 
 // SuperClock session state. Has its own SAB region because it's engine
@@ -620,6 +649,31 @@ SS_ASSERT_METRIC(scheduler_max_late_ms,           42);
 SS_ASSERT_METRIC(scheduler_last_late_ms,          43);
 SS_ASSERT_METRIC(scheduler_last_late_tick,        44);
 SS_ASSERT_METRIC(ring_buffer_direct_write_fails,  45);
+// Link [46-57] is native-only and intentionally unasserted (the web merged
+// array never reads those slots). The cross-platform system-info block [58-68]
+// is written by shared C++ on every runtime and IS asserted against the JS
+// mirror in js/lib/metrics_offsets.js.
+SS_ASSERT_METRIC(supersonic_version_major,        58);
+SS_ASSERT_METRIC(supersonic_version_minor,        59);
+SS_ASSERT_METRIC(supersonic_version_patch,        60);
+SS_ASSERT_METRIC(audio_sample_rate,               61);
+SS_ASSERT_METRIC(audio_block_size,                62);
+SS_ASSERT_METRIC(audio_output_channels,           63);
+SS_ASSERT_METRIC(audio_input_channels,            64);
+SS_ASSERT_METRIC(clock_tempo_mbpm,                65);
+SS_ASSERT_METRIC(clock_beat_centi,                66);
+SS_ASSERT_METRIC(clock_phase_centi,               67);
+SS_ASSERT_METRIC(clock_playing,                   68);
+SS_ASSERT_METRIC(_metrics_reserved,               69);
+
+// METRICS_SIZE must cover the whole struct and stay a multiple of 8: the arena
+// regions that follow (NTP time, SuperClockState) are 8-byte aligned and read
+// via Float64/BigInt64 views. _metrics_reserved exists solely to satisfy this;
+// these asserts make removing it (or any odd field count) a build error.
+static_assert(sizeof(PerformanceMetrics) == METRICS_SIZE,
+              "METRICS_SIZE must equal sizeof(PerformanceMetrics)");
+static_assert(METRICS_SIZE % 8 == 0,
+              "METRICS_SIZE must be a multiple of 8 to keep following regions 8-byte aligned");
 
 #undef SS_ASSERT_METRIC
 #undef SS_ASSERT_OFFSET

@@ -389,6 +389,32 @@ export interface SuperSonicMetrics {
   /** SAB mode only: optimistic direct writes that fell back to prescheduler. */
   ringBufferDirectWriteFails: number;
 
+  // System info (cross-platform; written by shared C++ at init)
+  /** SuperSonic major version. */
+  supersonicVersionMajor: number;
+  /** SuperSonic minor version. */
+  supersonicVersionMinor: number;
+  /** SuperSonic patch version. */
+  supersonicVersionPatch: number;
+  /** Output sample rate in Hz. */
+  audioSampleRate: number;
+  /** Audio block size in frames (128 on web). */
+  audioBlockSize: number;
+  /** Number of output bus channels. */
+  audioOutputChannels: number;
+  /** Number of input bus channels. */
+  audioInputChannels: number;
+
+  // SuperClock readouts (cross-platform; written per audio block)
+  /** Tempo in milli-BPM (bpm * 1000). Divide by 1000 for BPM. */
+  clockTempoMbpm: number;
+  /** Beat position * 100. Divide by 100 for the beat. */
+  clockBeatCenti: number;
+  /** Phase within the quantum * 100. Divide by 100 for the phase. */
+  clockPhaseCenti: number;
+  /** Transport playing (0 = stopped, 1 = playing). */
+  clockPlaying: number;
+
   // Context metrics (main thread only)
   /** Clock drift between AudioContext and wall clock (ms, signed). */
   driftOffsetMs: number;

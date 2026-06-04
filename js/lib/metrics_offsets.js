@@ -18,7 +18,10 @@
  * - [38-41] Bypass category metrics (main thread / PM transport)
  * - [42-44] scsynth late timing diagnostics (WASM writes)
  * - [45]    Ring buffer direct write failures (OscChannel SAB mode)
- * - [46-54] SuperClock session state (superclock.js writer, WASM C++ reader)
+ * - [46-57] Link (native-only; always 0 on web)
+ * - [58-64] System info: version + audio config (shared C++, write-once)
+ * - [65-68] SuperClock readouts: tempo/beat/phase/playing (shared C++, per block)
+ * - [69+]   Context metrics (JS main-thread only; above the SAB region)
  */
 
 // =============================================================================
@@ -129,46 +132,77 @@ export const LINK_AUDIO_DRIFT_PPM    = 55;  // read-rate deviation from 1.0 (ppm
 export const LINK_AUDIO_PUBLISH      = 56;  // publishing enabled 0/1
 export const LINK_AUDIO_SINKS        = 57;  // active output sinks
 
-// Number of metric slots in the SAB/snapshot buffer (indices 0 through LINK_AUDIO_SINKS)
-export const SAB_METRICS_COUNT = LINK_AUDIO_SINKS + 1;  // 58
+// =============================================================================
+// System info [58-64] — cross-platform; written by shared C++ (init_memory),
+// so these are real values on web AND native. Mirror of PerformanceMetrics
+// in shared_memory.h; asserted via SS_ASSERT_METRIC.
+// =============================================================================
+export const SUPERSONIC_VERSION_MAJOR = 58;  // SUPERSONIC_VERSION_MAJOR
+export const SUPERSONIC_VERSION_MINOR = 59;  // SUPERSONIC_VERSION_MINOR
+export const SUPERSONIC_VERSION_PATCH = 60;  // SUPERSONIC_VERSION_PATCH
+export const AUDIO_SAMPLE_RATE        = 61;  // output sample rate (Hz)
+export const AUDIO_BLOCK_SIZE         = 62;  // block size (frames; 128 on web)
+export const AUDIO_OUTPUT_CHANNELS    = 63;  // output bus channels
+export const AUDIO_INPUT_CHANNELS     = 64;  // input bus channels
 
 // =============================================================================
-// Context metrics [46-58] (written by main thread into merged array only)
-// These are NOT in the C++ PerformanceMetrics struct or SAB —
-// MetricsReader writes them into the local merged Uint32Array.
+// SuperClock readouts [65-68] — cross-platform; written per block by
+// publishClockMetrics() (SuperClock.cpp). Live on web and native alike.
 // =============================================================================
-export const CTX_DRIFT_OFFSET_MS = 46;             // Clock drift (int32, ms)
-export const CTX_CLOCK_OFFSET_MS = 47;             // Clock offset for multi-system sync (int32, ms)
-export const CTX_AUDIO_CONTEXT_STATE = 48;          // Enum: 0=unknown,1=running,2=suspended,3=closed,4=interrupted
-export const CTX_BUFFER_POOL_USED_BYTES = 49;       // Buffer pool bytes used
-export const CTX_BUFFER_POOL_AVAILABLE_BYTES = 50;  // Buffer pool bytes available
-export const CTX_BUFFER_POOL_ALLOCATIONS = 51;      // Total buffer allocations
-export const CTX_LOADED_SYNTH_DEFS = 52;            // Number of loaded synthdefs
-export const CTX_SCSYNTH_SCHEDULER_CAPACITY = 53;   // Static from bufferConstants
-export const CTX_PRESCHEDULER_CAPACITY = 54;        // Static from config
-export const CTX_IN_BUFFER_CAPACITY = 55;           // Static from bufferConstants
-export const CTX_OUT_BUFFER_CAPACITY = 56;          // Static from bufferConstants
-export const CTX_DEBUG_BUFFER_CAPACITY = 57;        // Static from bufferConstants
-export const CTX_MODE = 58;                         // Enum: 0=sab, 1=postMessage
+export const CLOCK_TEMPO_MBPM  = 65;  // tempo, milli-BPM (bpm * 1000)
+export const CLOCK_BEAT_CENTI  = 66;  // beat position * 100
+export const CLOCK_PHASE_CENTI = 67;  // phase within quantum * 100
+export const CLOCK_PLAYING     = 68;  // transport 0/1
+
+// Slot 69 is reserved padding in the C++ struct so METRICS_SIZE stays a
+// multiple of 8 (the following arena regions are 8-byte aligned). The merged
+// array reuses index 69 for the first context metric (CTX_DRIFT_OFFSET_MS),
+// which is written after the SAB copy, mirroring how context reuses the
+// native-only Link slots.
+export const METRICS_RESERVED  = 69;
+
+// Number of metric slots in the SAB/snapshot buffer == METRICS_SIZE / 4.
+export const SAB_METRICS_COUNT = METRICS_RESERVED + 1;  // 70
 
 // =============================================================================
-// Audio diagnostics [59-65] (written by main thread into merged array only)
+// Context metrics [69-81] (written by main thread into merged array only)
+// These are NOT in the C++ PerformanceMetrics struct or SAB — MetricsReader
+// writes them into the local merged Uint32Array. They start at index 69,
+// reusing the reserved padding slot (the last meaningful SAB metric is
+// CLOCK_PLAYING at 68); context is written after the SAB copy so it wins.
 // =============================================================================
-export const CTX_GLITCH_COUNT = 59;          // Chrome only: playbackStats.fallbackFramesEvents
-export const CTX_GLITCH_DURATION_MS = 60;    // Chrome only: playbackStats.fallbackFramesDuration * 1000 (ms int)
-export const CTX_AVERAGE_LATENCY_US = 61;    // Chrome only: playbackStats.averageLatency * 1_000_000 (us int)
-export const CTX_MAX_LATENCY_US = 62;        // Chrome only: playbackStats.maximumLatency * 1_000_000 (us int)
-export const CTX_AUDIO_HEALTH_PCT = 63;      // Cross-browser: audio health percentage 0-100
-export const CTX_TOTAL_FRAMES_DURATION_MS = 64; // Chrome only: playbackStats.totalFramesDuration * 1000 (ms int)
-export const CTX_HAS_PLAYBACK_STATS = 65;    // 1 if Chrome playbackStats available, 0 otherwise
+export const CTX_DRIFT_OFFSET_MS = 69;             // Clock drift (int32, ms)
+export const CTX_CLOCK_OFFSET_MS = 70;             // Clock offset for multi-system sync (int32, ms)
+export const CTX_AUDIO_CONTEXT_STATE = 71;          // Enum: 0=unknown,1=running,2=suspended,3=closed,4=interrupted
+export const CTX_BUFFER_POOL_USED_BYTES = 72;       // Buffer pool bytes used
+export const CTX_BUFFER_POOL_AVAILABLE_BYTES = 73;  // Buffer pool bytes available
+export const CTX_BUFFER_POOL_ALLOCATIONS = 74;      // Total buffer allocations
+export const CTX_LOADED_SYNTH_DEFS = 75;            // Number of loaded synthdefs
+export const CTX_SCSYNTH_SCHEDULER_CAPACITY = 76;   // Static from bufferConstants
+export const CTX_PRESCHEDULER_CAPACITY = 77;        // Static from config
+export const CTX_IN_BUFFER_CAPACITY = 78;           // Static from bufferConstants
+export const CTX_OUT_BUFFER_CAPACITY = 79;          // Static from bufferConstants
+export const CTX_DEBUG_BUFFER_CAPACITY = 80;        // Static from bufferConstants
+export const CTX_MODE = 81;                         // Enum: 0=sab, 1=postMessage
 
 // =============================================================================
-// Buffer pool growth metrics [66-69] (written by main thread into merged array only)
+// Audio diagnostics [82-88] (written by main thread into merged array only)
 // =============================================================================
-export const CTX_BUFFER_POOL_TOTAL_CAPACITY = 66;  // Current committed capacity across all pools (bytes)
-export const CTX_BUFFER_POOL_MAX_CAPACITY = 67;    // Hard ceiling from maxBufferMemory config (bytes)
-export const CTX_BUFFER_POOL_GROWTH_COUNT = 68;    // Number of times the pool has grown (counter)
-export const CTX_BUFFER_POOL_POOL_COUNT = 69;      // Number of pool segments (1 = no growth yet)
+export const CTX_GLITCH_COUNT = 82;          // Chrome only: playbackStats.fallbackFramesEvents
+export const CTX_GLITCH_DURATION_MS = 83;    // Chrome only: playbackStats.fallbackFramesDuration * 1000 (ms int)
+export const CTX_AVERAGE_LATENCY_US = 84;    // Chrome only: playbackStats.averageLatency * 1_000_000 (us int)
+export const CTX_MAX_LATENCY_US = 85;        // Chrome only: playbackStats.maximumLatency * 1_000_000 (us int)
+export const CTX_AUDIO_HEALTH_PCT = 86;      // Cross-browser: audio health percentage 0-100
+export const CTX_TOTAL_FRAMES_DURATION_MS = 87; // Chrome only: playbackStats.totalFramesDuration * 1000 (ms int)
+export const CTX_HAS_PLAYBACK_STATS = 88;    // 1 if Chrome playbackStats available, 0 otherwise
 
-// Merged array size (slots 0-45 from SAB/snapshot, 46-58 context, 59-65 audio, 66-69 buffer growth)
-export const MERGED_ARRAY_SIZE = 70;
+// =============================================================================
+// Buffer pool growth metrics [89-92] (written by main thread into merged array only)
+// =============================================================================
+export const CTX_BUFFER_POOL_TOTAL_CAPACITY = 89;  // Current committed capacity across all pools (bytes)
+export const CTX_BUFFER_POOL_MAX_CAPACITY = 90;    // Hard ceiling from maxBufferMemory config (bytes)
+export const CTX_BUFFER_POOL_GROWTH_COUNT = 91;    // Number of times the pool has grown (counter)
+export const CTX_BUFFER_POOL_POOL_COUNT = 92;      // Number of pool segments (1 = no growth yet)
+
+// Merged array size (slots 0-68 from SAB/snapshot, 69-81 context, 82-88 audio, 89-92 buffer growth)
+export const MERGED_ARRAY_SIZE = 93;

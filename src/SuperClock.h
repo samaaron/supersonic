@@ -269,6 +269,14 @@ public:
     // No-op on WASM. `m` may be null (skipped).
     void publishLinkMetrics(PerformanceMetrics* m, double quantum = 4.0);
 
+    // Mirror the current SuperClock readout (tempo/beat/phase/playing) into the
+    // cross-platform clock metrics (slots 65-68). Reads the SuperClockState SAB
+    // mirror directly (relaxed atomics) + inline beat math — RT-safe and
+    // identical on web and native, independent of Link. Called once per audio
+    // callback with the audio-thread NTP. `m` may be null (skipped). Shared
+    // implementation in SuperClock.cpp (no platform override).
+    void publishClockMetrics(PerformanceMetrics* m, double ntpNow, double quantum = 4.0);
+
     // ─── SAB mirror accessor (RT-safe reads) ─────────────────────────────
     // Underlying SuperClockState — SAB region on WASM, private mirror
     // on native. Atomic loads through this pointer are RT-safe; the

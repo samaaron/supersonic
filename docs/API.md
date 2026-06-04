@@ -959,11 +959,7 @@ Subscribe to an event.
 
 Unsubscribe function — call it to remove the listener
 
-> (): `void`
-
-###### Returns
-
-`void`
+() => `void`
 
 ###### Example
 
@@ -1000,11 +996,7 @@ Returns an unsubscribe function (matching [on](#on)).
 
 Unsubscribe function — call it to remove the listener before it fires
 
-> (): `void`
-
-###### Returns
-
-`void`
+() => `void`
 
 ##### purge()
 
@@ -2792,9 +2784,9 @@ this for you.
 
 ###### Parameters
 
-| Parameter  | Type                                                                                    | Description                          |
-| ---------- | --------------------------------------------------------------------------------------- | ------------------------------------ |
-| `handler?` | (`view`, `offset`, `length`, `sequence`) => `void` \| (`oscData`, `sequence`) => `void` | Optional override for this call only |
+| Parameter  | Type                                                                                        | Description                          |
+| ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `handler?` | ((`view`, `offset`, `length`, `sequence`) => `void`) \| ((`oscData`, `sequence`) => `void`) | Optional override for this call only |
 
 ###### Returns
 
@@ -2879,9 +2871,9 @@ PM mode: handler receives `(oscData, sequence)` where `oscData` is a copy.
 
 ###### Parameters
 
-| Parameter | Type                                                                                    |
-| --------- | --------------------------------------------------------------------------------------- |
-| `handler` | (`view`, `offset`, `length`, `sequence`) => `void` \| (`oscData`, `sequence`) => `void` |
+| Parameter | Type                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------- |
+| `handler` | ((`view`, `offset`, `length`, `sequence`) => `void`) \| ((`oscData`, `sequence`) => `void`) |
 
 ###### Returns
 
@@ -3641,8 +3633,12 @@ descriptions, units, and UI layout metadata.
 
 | Property                                                                 | Type     | Description                                                                                   |
 | ------------------------------------------------------------------------ | -------- | --------------------------------------------------------------------------------------------- |
+| <a id="audioblocksize"></a> `audioBlockSize`                             | `number` | Audio block size in frames (128 on web).                                                      |
 | <a id="audiocontextstate"></a> `audioContextState`                       | `number` | AudioContext state as enum index: 0=unknown, 1=running, 2=suspended, 3=closed, 4=interrupted. |
 | <a id="audiohealthpct"></a> `audioHealthPct`                             | `number` | Audio health: fraction of expected audio frames delivered, 0-100 (cross-browser).             |
+| <a id="audioinputchannels"></a> `audioInputChannels`                     | `number` | Number of input bus channels.                                                                 |
+| <a id="audiooutputchannels"></a> `audioOutputChannels`                   | `number` | Number of output bus channels.                                                                |
+| <a id="audiosamplerate"></a> `audioSampleRate`                           | `number` | Output sample rate in Hz.                                                                     |
 | <a id="averagelatencyus"></a> `averageLatencyUs`                         | `number` | Average audio output latency in microseconds (Chrome playbackStats, 0 on other browsers).     |
 | <a id="bufferpoolallocations"></a> `bufferPoolAllocations`               | `number` | Total buffer pool allocations.                                                                |
 | <a id="bufferpoolavailablebytes"></a> `bufferPoolAvailableBytes`         | `number` | Buffer pool bytes available.                                                                  |
@@ -3655,7 +3651,11 @@ descriptions, units, and UI layout metadata.
 | <a id="bypasslate"></a> `bypassLate`                                     | `number` | Late bundles that bypassed prescheduler.                                                      |
 | <a id="bypassnearfuture"></a> `bypassNearFuture`                         | `number` | Bundles within lookahead threshold that bypassed prescheduler.                                |
 | <a id="bypassnonbundle"></a> `bypassNonBundle`                           | `number` | Plain OSC messages (not bundles) that bypassed prescheduler.                                  |
+| <a id="clockbeatcenti"></a> `clockBeatCenti`                             | `number` | Beat position \* 100. Divide by 100 for the beat.                                             |
 | <a id="clockoffsetms"></a> `clockOffsetMs`                               | `number` | Clock offset for multi-system sync (ms, signed).                                              |
+| <a id="clockphasecenti"></a> `clockPhaseCenti`                           | `number` | Phase within the quantum \* 100. Divide by 100 for the phase.                                 |
+| <a id="clockplaying"></a> `clockPlaying`                                 | `number` | Transport playing (0 = stopped, 1 = playing).                                                 |
+| <a id="clocktempombpm"></a> `clockTempoMbpm`                             | `number` | Tempo in milli-BPM (bpm \* 1000). Divide by 1000 for BPM.                                     |
 | <a id="debugbuffercapacity"></a> `debugBufferCapacity`                   | `number` | DEBUG ring buffer capacity (bytes).                                                           |
 | <a id="debugbufferpeakbytes"></a> `debugBufferPeakBytes`                 | `number` | Peak bytes used in DEBUG ring buffer.                                                         |
 | <a id="debugbufferusedbytes"></a> `debugBufferUsedBytes`                 | `number` | Bytes used in DEBUG ring buffer.                                                              |
@@ -3709,6 +3709,9 @@ descriptions, units, and UI layout metadata.
 | <a id="scsynthschedulerpeakdepth"></a> `scsynthSchedulerPeakDepth`       | `number` | Peak scsynth scheduler queue depth (high water mark).                                         |
 | <a id="scsynthsequencegaps"></a> `scsynthSequenceGaps`                   | `number` | Messages lost in transit from JS to scsynth.                                                  |
 | <a id="scsynthwasmerrors"></a> `scsynthWasmErrors`                       | `number` | WASM execution errors in audio worklet.                                                       |
+| <a id="supersonicversionmajor"></a> `supersonicVersionMajor`             | `number` | SuperSonic major version.                                                                     |
+| <a id="supersonicversionminor"></a> `supersonicVersionMinor`             | `number` | SuperSonic minor version.                                                                     |
+| <a id="supersonicversionpatch"></a> `supersonicVersionPatch`             | `number` | SuperSonic patch version.                                                                     |
 
 ### SystemReport
 
