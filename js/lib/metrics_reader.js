@@ -7,11 +7,6 @@ import { calculateAllControlIndices } from './control_offsets.js';
 const ADD_METRIC_OFFSETS = {
   oscOutMessagesSent: MetricsOffsets.OSC_OUT_MESSAGES_SENT,
   oscOutBytesSent: MetricsOffsets.OSC_OUT_BYTES_SENT,
-  preschedulerBypassed: MetricsOffsets.PRESCHEDULER_BYPASSED,
-  bypassNonBundle: MetricsOffsets.BYPASS_NON_BUNDLE,
-  bypassImmediate: MetricsOffsets.BYPASS_IMMEDIATE,
-  bypassNearFuture: MetricsOffsets.BYPASS_NEAR_FUTURE,
-  bypassLate: MetricsOffsets.BYPASS_LATE,
 };
 
 /**
@@ -114,26 +109,6 @@ export class MetricsReader {
   }
 
   /**
-   * Overlay prescheduler metrics into the snapshot buffer
-   * @param {Uint32Array} preschedulerMetrics - Metrics from prescheduler
-   */
-  overlayPreschedulerMetrics(preschedulerMetrics) {
-    if (!this.#cachedSnapshotBuffer || !preschedulerMetrics) return;
-
-    const metricsView = new Uint32Array(this.#cachedSnapshotBuffer, 0, MetricsOffsets.SAB_METRICS_COUNT);
-
-    // Copy prescheduler metrics (offsets 9-21), excluding BYPASSED (22) and MAX_LATE_MS (23).
-    // The worklet is source of truth for PRESCHEDULER_BYPASSED.
-    const start = MetricsOffsets.PRESCHEDULER_START;
-    const count = MetricsOffsets.PRESCHEDULER_COUNT - 2;
-    metricsView.set(preschedulerMetrics.subarray(start, start + count), start);
-
-    // Copy PRESCHEDULER_MAX_LATE_MS (tracked by prescheduler worker)
-    metricsView[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS] =
-      preschedulerMetrics[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS];
-  }
-
-  /**
    * Gather all metrics as a named object.
    * Uses updateMergedArray() as the single read path, then builds named properties.
    * @param {Object} context - Context with additional metric sources
@@ -158,23 +133,6 @@ export class MetricsReader {
       scsynthSchedulerLastLateMs: m[MetricsOffsets.SCSYNTH_SCHEDULER_LAST_LATE_MS],
       scsynthSchedulerLastLateTick: m[MetricsOffsets.SCSYNTH_SCHEDULER_LAST_LATE_TICK],
 
-      // Prescheduler metrics
-      preschedulerPending: m[MetricsOffsets.PRESCHEDULER_PENDING],
-      preschedulerPendingPeak: m[MetricsOffsets.PRESCHEDULER_PENDING_PEAK],
-      preschedulerDispatched: m[MetricsOffsets.PRESCHEDULER_DISPATCHED],
-      preschedulerRetriesSucceeded: m[MetricsOffsets.PRESCHEDULER_RETRIES_SUCCEEDED],
-      preschedulerRetriesFailed: m[MetricsOffsets.PRESCHEDULER_RETRIES_FAILED],
-      preschedulerBundlesScheduled: m[MetricsOffsets.PRESCHEDULER_BUNDLES_SCHEDULED],
-      preschedulerEventsCancelled: m[MetricsOffsets.PRESCHEDULER_EVENTS_CANCELLED],
-      preschedulerTotalDispatches: m[MetricsOffsets.PRESCHEDULER_TOTAL_DISPATCHES],
-      preschedulerMessagesRetried: m[MetricsOffsets.PRESCHEDULER_MESSAGES_RETRIED],
-      preschedulerRetryQueueSize: m[MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_SIZE],
-      preschedulerRetryQueuePeak: m[MetricsOffsets.PRESCHEDULER_RETRY_QUEUE_PEAK],
-      preschedulerBypassed: m[MetricsOffsets.PRESCHEDULER_BYPASSED],
-      preschedulerMinHeadroomMs: m[MetricsOffsets.PRESCHEDULER_MIN_HEADROOM_MS],
-      preschedulerLates: m[MetricsOffsets.PRESCHEDULER_LATES],
-      preschedulerMaxLateMs: m[MetricsOffsets.PRESCHEDULER_MAX_LATE_MS],
-
       // OSC In/Out metrics
       oscInMessagesReceived: m[MetricsOffsets.OSC_IN_MESSAGES_RECEIVED],
       oscInMessagesDropped: m[MetricsOffsets.OSC_IN_DROPPED_MESSAGES],
@@ -188,12 +146,6 @@ export class MetricsReader {
       scsynthWasmErrors: m[MetricsOffsets.SCSYNTH_WASM_ERRORS],
       oscInCorrupted: m[MetricsOffsets.OSC_IN_CORRUPTED],
       ringBufferDirectWriteFails: m[MetricsOffsets.RING_BUFFER_DIRECT_WRITE_FAILS],
-
-      // Bypass categories
-      bypassNonBundle: m[MetricsOffsets.BYPASS_NON_BUNDLE],
-      bypassImmediate: m[MetricsOffsets.BYPASS_IMMEDIATE],
-      bypassNearFuture: m[MetricsOffsets.BYPASS_NEAR_FUTURE],
-      bypassLate: m[MetricsOffsets.BYPASS_LATE],
 
       // System info (cross-platform; written by shared C++ at init)
       supersonicVersionMajor: m[MetricsOffsets.SUPERSONIC_VERSION_MAJOR],
@@ -232,12 +184,12 @@ export class MetricsReader {
         peakPercentage: (m[MetricsOffsets.OUT_BUFFER_PEAK_BYTES] / bc.OUT_BUFFER_SIZE) * 100,
         capacity: bc.OUT_BUFFER_SIZE,
       };
-      metrics.debugBufferUsed = {
-        bytes: m[MetricsOffsets.DEBUG_BUFFER_USED_BYTES],
-        percentage: (m[MetricsOffsets.DEBUG_BUFFER_USED_BYTES] / bc.DEBUG_BUFFER_SIZE) * 100,
-        peakBytes: m[MetricsOffsets.DEBUG_BUFFER_PEAK_BYTES],
-        peakPercentage: (m[MetricsOffsets.DEBUG_BUFFER_PEAK_BYTES] / bc.DEBUG_BUFFER_SIZE) * 100,
-        capacity: bc.DEBUG_BUFFER_SIZE,
+      metrics.nrtOutBufferUsed = {
+        bytes: m[MetricsOffsets.NRT_OUT_BUFFER_USED_BYTES],
+        percentage: (m[MetricsOffsets.NRT_OUT_BUFFER_USED_BYTES] / bc.NRT_OUT_BUFFER_SIZE) * 100,
+        peakBytes: m[MetricsOffsets.NRT_OUT_BUFFER_PEAK_BYTES],
+        peakPercentage: (m[MetricsOffsets.NRT_OUT_BUFFER_PEAK_BYTES] / bc.NRT_OUT_BUFFER_SIZE) * 100,
+        capacity: bc.NRT_OUT_BUFFER_SIZE,
       };
     }
 
@@ -262,7 +214,6 @@ export class MetricsReader {
       metrics.bufferPoolPoolCount = context.bufferPoolGrowthStats.poolCount;
     }
     if (context.loadedSynthDefsCount !== undefined) metrics.loadedSynthDefs = context.loadedSynthDefsCount;
-    if (context.preschedulerCapacity !== undefined) metrics.preschedulerCapacity = context.preschedulerCapacity;
 
     // Audio diagnostics from merged array context slots
     metrics.audioHealthPct = context.audioHealthPct ?? 100;
@@ -296,11 +247,8 @@ export class MetricsReader {
   updateMergedArray(context = {}) {
     const arr = this.#mergedArray;
 
-    // Copy slots 0-45 from SAB or snapshot
+    // Copy slots 0-49 from SAB or snapshot
     if (this.#mode === 'postMessage') {
-      if (context.preschedulerMetrics) {
-        this.overlayPreschedulerMetrics(context.preschedulerMetrics);
-      }
       if (this.#cachedSnapshotBuffer) {
         const view = new Uint32Array(this.#cachedSnapshotBuffer, 0, MetricsOffsets.SAB_METRICS_COUNT);
         arr.set(view);
@@ -312,21 +260,6 @@ export class MetricsReader {
         }
         if (context.transportMetrics.oscOutBytesSent !== undefined) {
           arr[MetricsOffsets.OSC_OUT_BYTES_SENT] = context.transportMetrics.oscOutBytesSent;
-        }
-        if (context.transportMetrics.preschedulerBypassed !== undefined) {
-          arr[MetricsOffsets.PRESCHEDULER_BYPASSED] = context.transportMetrics.preschedulerBypassed;
-        }
-        if (context.transportMetrics.bypassNonBundle !== undefined) {
-          arr[MetricsOffsets.BYPASS_NON_BUNDLE] = context.transportMetrics.bypassNonBundle;
-        }
-        if (context.transportMetrics.bypassImmediate !== undefined) {
-          arr[MetricsOffsets.BYPASS_IMMEDIATE] = context.transportMetrics.bypassImmediate;
-        }
-        if (context.transportMetrics.bypassNearFuture !== undefined) {
-          arr[MetricsOffsets.BYPASS_NEAR_FUTURE] = context.transportMetrics.bypassNearFuture;
-        }
-        if (context.transportMetrics.bypassLate !== undefined) {
-          arr[MetricsOffsets.BYPASS_LATE] = context.transportMetrics.bypassLate;
         }
       }
     } else if (this.#metricsView) {
@@ -356,10 +289,9 @@ export class MetricsReader {
     // Static capacities from bufferConstants
     const bc = this.#bufferConstants;
     arr[MetricsOffsets.CTX_SCSYNTH_SCHEDULER_CAPACITY] = bc?.scheduler_slot_count ?? 0;
-    arr[MetricsOffsets.CTX_PRESCHEDULER_CAPACITY] = context.preschedulerCapacity ?? 0;
     arr[MetricsOffsets.CTX_IN_BUFFER_CAPACITY] = bc?.IN_BUFFER_SIZE ?? 0;
     arr[MetricsOffsets.CTX_OUT_BUFFER_CAPACITY] = bc?.OUT_BUFFER_SIZE ?? 0;
-    arr[MetricsOffsets.CTX_DEBUG_BUFFER_CAPACITY] = bc?.DEBUG_BUFFER_SIZE ?? 0;
+    arr[MetricsOffsets.CTX_NRT_OUT_BUFFER_CAPACITY] = bc?.NRT_OUT_BUFFER_SIZE ?? 0;
 
     // Mode enum: 0=sab, 1=postMessage
     arr[MetricsOffsets.CTX_MODE] = this.#mode === 'sab' ? 0 : 1;

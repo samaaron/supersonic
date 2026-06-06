@@ -59,49 +59,6 @@ test.describe("Flush Scheduler", () => {
     });
   });
 
-  test("purge clears prescheduler pending bundles", async ({ page, sonicConfig }) => {
-    const result = await page.evaluate(async (config) => {
-      eval(config._helpers);
-
-      const sonic = new window.SuperSonic(config);
-      await sonic.init();
-      await sonic.loadSynthDefs(["sonic-pi-beep"]);
-      await sonic.sync(1);
-
-      // Schedule 20 bundles 30 seconds in the future (stays in prescheduler heap)
-      const baseNTP = getCurrentNTP() + 30.0;
-      for (let i = 0; i < 20; i++) {
-        const bundle = createTimedBundle(baseNTP + (i * 0.1), 20000 + i);
-        sonic.sendOSC(bundle, { sessionId: 0, runTag: 'flush_test' });
-      }
-
-      // Wait for bundles to reach prescheduler
-      await new Promise(r => setTimeout(r, 200));
-
-      const metricsBefore = sonic.getMetrics();
-      const pendingBefore = metricsBefore.preschedulerPending || 0;
-
-      // Flush everything (awaits confirmation from both sides)
-      await sonic.purge();
-
-      // Wait for metrics to propagate (PM mode sends snapshots periodically)
-      await new Promise(r => setTimeout(r, 200));
-
-      const metricsAfter = sonic.getMetrics();
-      const pendingAfter = metricsAfter.preschedulerPending || 0;
-
-      await sonic.shutdown();
-      return { pendingBefore, pendingAfter };
-    }, { ...sonicConfig, _helpers: HELPERS });
-
-    console.log(`\npurge prescheduler test (${sonicConfig.mode}):`);
-    console.log(`  Pending before flush: ${result.pendingBefore}`);
-    console.log(`  Pending after flush: ${result.pendingAfter}`);
-
-    expect(result.pendingBefore).toBe(20);
-    expect(result.pendingAfter).toBe(0);
-  });
-
   test("purge clears WASM scheduler pending bundles", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       eval(config._helpers);
@@ -268,18 +225,15 @@ test.describe("Flush Scheduler", () => {
       await sonic.shutdown();
       return {
         wasmDepth: metrics.scsynthSchedulerDepth || 0,
-        preschedulerPending: metrics.preschedulerPending || 0,
       };
     }, { ...sonicConfig, _helpers: HELPERS });
 
     console.log(`\nnew OSC after flush test (${sonicConfig.mode}):`);
     console.log(`  WASM scheduler depth: ${result.wasmDepth}`);
-    console.log(`  Prescheduler pending: ${result.preschedulerPending}`);
 
-    // The 5 new WASM bundles should be in the scheduler
-    expect(result.wasmDepth).toBe(5);
-    // The 5 new prescheduler bundles should be pending
-    expect(result.preschedulerPending).toBe(5);
+    // All 10 new future bundles (5 near + 5 far) land in the WASM scheduler —
+    // there is no separate prescheduler tier anymore.
+    expect(result.wasmDepth).toBe(10);
   });
 
   test("quick restart: stale messages do not contaminate new run", async ({ page, sonicConfig }) => {
@@ -333,24 +287,20 @@ test.describe("Flush Scheduler", () => {
       await sonic.shutdown();
       return {
         run1WasmDepth: metricsRun1.scsynthSchedulerDepth || 0,
-        run1Prescheduler: metricsRun1.preschedulerPending || 0,
         run2WasmDepth: metricsRun2.scsynthSchedulerDepth || 0,
-        run2Prescheduler: metricsRun2.preschedulerPending || 0,
       };
     }, { ...sonicConfig, _helpers: HELPERS });
 
     console.log(`\nquick restart test (${sonicConfig.mode}):`);
-    console.log(`  Run 1 - WASM: ${result.run1WasmDepth}, Prescheduler: ${result.run1Prescheduler}`);
-    console.log(`  Run 2 - WASM: ${result.run2WasmDepth}, Prescheduler: ${result.run2Prescheduler}`);
+    console.log(`  Run 1 - WASM: ${result.run1WasmDepth}`);
+    console.log(`  Run 2 - WASM: ${result.run2WasmDepth}`);
 
-    // Run 1 should have had its bundles present
-    expect(result.run1WasmDepth).toBe(10);
-    expect(result.run1Prescheduler).toBe(10);
+    // Run 1: all 20 future bundles (10 near + 10 far) sit in the WASM scheduler.
+    expect(result.run1WasmDepth).toBe(20);
 
-    // Run 2 should have ONLY its bundles (no run 1 leftovers)
-    // If stale messages leaked, depth would be > 8
-    expect(result.run2WasmDepth).toBe(8);
-    expect(result.run2Prescheduler).toBe(8);
+    // Run 2 should have ONLY its 16 bundles (no run 1 leftovers after purge).
+    // If stale messages leaked, depth would be > 16.
+    expect(result.run2WasmDepth).toBe(16);
   });
 
   test("purge resolves within a bounded time", async ({ page, sonicConfig }) => {
@@ -577,62 +527,5 @@ test.describe("Flush Scheduler", () => {
     expect(result.newLates).toBe(0);
     // No stale messages should have been processed from the ring buffer
     expect(result.newProcessed).toBe(0);
-  });
-
-  test("purge resolves only after both sides confirm", async ({ page, sonicConfig }) => {
-    const result = await page.evaluate(async (config) => {
-      eval(config._helpers);
-
-      const sonic = new window.SuperSonic(config);
-      await sonic.init();
-      await sonic.loadSynthDefs(["sonic-pi-beep"]);
-      await sonic.sync(1);
-
-      // Fill prescheduler
-      const baseNTP = getCurrentNTP() + 30.0;
-      for (let i = 0; i < 15; i++) {
-        const bundle = createTimedBundle(baseNTP + (i * 0.1), 70000 + i);
-        sonic.sendOSC(bundle, { sessionId: 0, runTag: 'ack_test' });
-      }
-
-      // Wait for bundles to reach prescheduler
-      await new Promise(r => setTimeout(r, 200));
-
-      const pendingBefore = (sonic.getMetrics().preschedulerPending) || 0;
-
-      // purge returns a promise — if the ack mechanism works,
-      // a non-awaited purge followed by immediate metric read
-      // might still show pending bundles (race). But awaited purge
-      // guarantees the prescheduler has processed the cancel.
-      const flushPromise = sonic.purge();
-
-      // Read metrics BEFORE the promise resolves (fire-and-forget check)
-      // In SAB mode, the cancel may already be processed since postMessage
-      // to the worker is fast, but this tests the intent.
-      const pendingDuringFlush = (sonic.getMetrics().preschedulerPending) || 0;
-
-      // Now await — after this, the cancel is confirmed
-      await flushPromise;
-
-      // In SAB mode metrics are live, so pending should be 0 immediately.
-      // In PM mode we need a brief wait for the snapshot to arrive.
-      if (config.mode === 'postMessage') {
-        await new Promise(r => setTimeout(r, 200));
-      }
-
-      const pendingAfter = (sonic.getMetrics().preschedulerPending) || 0;
-
-      await sonic.shutdown();
-      return { pendingBefore, pendingDuringFlush, pendingAfter, mode: config.mode };
-    }, { ...sonicConfig, _helpers: HELPERS });
-
-    console.log(`\npurge ack guarantee test (${sonicConfig.mode}):`);
-    console.log(`  Pending before: ${result.pendingBefore}`);
-    console.log(`  Pending during (pre-await): ${result.pendingDuringFlush}`);
-    console.log(`  Pending after await: ${result.pendingAfter}`);
-
-    expect(result.pendingBefore).toBe(15);
-    // After await, prescheduler must be confirmed clear
-    expect(result.pendingAfter).toBe(0);
   });
 });

@@ -32,7 +32,7 @@ test.describe('Audio Health Diagnostics', () => {
     expect(result.missing).toEqual([]);
   });
 
-  test('audio health metric offsets 82-86 are defined in schema', async ({ page }) => {
+  test('audio health metric offsets 62-66 are defined in schema', async ({ page }) => {
     const result = await page.evaluate(() => {
       const schema = window.SuperSonic.getMetricsSchema();
       return {
@@ -45,11 +45,11 @@ test.describe('Audio Health Diagnostics', () => {
     });
 
     // Offsets per js/lib/metrics_offsets.js (CTX_GLITCH_COUNT … CTX_AUDIO_HEALTH_PCT).
-    expect(result.glitchCount).toBe(82);
-    expect(result.glitchDurationMs).toBe(83);
-    expect(result.averageLatencyUs).toBe(84);
-    expect(result.maxLatencyUs).toBe(85);
-    expect(result.audioHealthPct).toBe(86);
+    expect(result.glitchCount).toBe(62);
+    expect(result.glitchDurationMs).toBe(63);
+    expect(result.averageLatencyUs).toBe(64);
+    expect(result.maxLatencyUs).toBe(65);
+    expect(result.audioHealthPct).toBe(66);
   });
 
   test('audioHealthPct is populated in metrics after boot', async ({ page, sonicConfig }) => {
@@ -67,7 +67,7 @@ test.describe('Audio Health Diagnostics', () => {
 
       return {
         objectValue: metrics.audioHealthPct,
-        arrayValue: arr[86],  // audioHealthPct offset (CTX_AUDIO_HEALTH_PCT)
+        arrayValue: arr[66],  // audioHealthPct offset (CTX_AUDIO_HEALTH_PCT)
       };
     }, sonicConfig);
 

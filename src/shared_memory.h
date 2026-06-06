@@ -53,12 +53,12 @@ inline double bitsToDouble(uint64_t bits) {
 
 // User-configurable buffer sizes.
 // Balanced to prevent message drops in the audioworklet; sized per device via
-// memory_profile.h (defaults: IN 768KB, OUT 128KB, DEBUG 64KB).
+// memory_profile.h (defaults: IN 768KB, OUT 128KB, NRT-out 64KB).
 constexpr uint32_t IN_BUFFER_SIZE     = SUPERSONIC_IN_BUFFER_SIZE;    // OSC messages from host to scsynth (large for SynthDefs)
 constexpr uint32_t OUT_BUFFER_SIZE    = SUPERSONIC_OUT_BUFFER_SIZE;   // OSC replies from scsynth to host (prevent drops)
-constexpr uint32_t DEBUG_BUFFER_SIZE  = SUPERSONIC_DEBUG_BUFFER_SIZE; // Debug messages from scsynth
+constexpr uint32_t NRT_OUT_BUFFER_SIZE  = SUPERSONIC_NRT_OUT_BUFFER_SIZE; // NRT-thread egress ring (replies, notifications, debug)
 constexpr uint32_t CONTROL_SIZE       = 48;    // Atomic control pointers & flags (11 fields × 4 bytes + 4 padding for 8-byte alignment)
-constexpr uint32_t METRICS_SIZE       = 280;   // Performance metrics: 70 fields * 4 bytes = 280 bytes (multiple of 8)
+constexpr uint32_t METRICS_SIZE       = 208;   // Performance metrics: 52 fields * 4 bytes = 208 bytes (multiple of 8)
 constexpr uint32_t NTP_START_TIME_SIZE = 8;    // NTP time when AudioContext started (double, 8-byte aligned, write-once)
 constexpr uint32_t DRIFT_OFFSET_SIZE = 4;      // Drift offset in microseconds (int32, atomic)
 constexpr uint32_t GLOBAL_OFFSET_SIZE = 4;     // Global timing offset in milliseconds (int32, atomic) - for multi-system sync (Ableton Link, NTP, etc.)
@@ -83,8 +83,8 @@ constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MIRROR_MA
 // Auto-calculated offsets (DO NOT MODIFY - computed from sizes above)
 constexpr uint32_t IN_BUFFER_START    = 0;
 constexpr uint32_t OUT_BUFFER_START   = IN_BUFFER_START + IN_BUFFER_SIZE;
-constexpr uint32_t DEBUG_BUFFER_START = OUT_BUFFER_START + OUT_BUFFER_SIZE;
-constexpr uint32_t CONTROL_START      = DEBUG_BUFFER_START + DEBUG_BUFFER_SIZE;
+constexpr uint32_t NRT_OUT_BUFFER_START = OUT_BUFFER_START + OUT_BUFFER_SIZE;
+constexpr uint32_t CONTROL_START      = NRT_OUT_BUFFER_START + NRT_OUT_BUFFER_SIZE;
 constexpr uint32_t METRICS_START      = CONTROL_START + CONTROL_SIZE;
 constexpr uint32_t NODE_TREE_START = METRICS_START + METRICS_SIZE;  // Contiguous with METRICS for efficient postMessage copying
 constexpr uint32_t NTP_START_TIME_START = NODE_TREE_START + NODE_TREE_SIZE;
@@ -105,18 +105,6 @@ constexpr uint32_t NODE_ID_COUNTER_START = SHM_AUDIO_START + SHM_AUDIO_TOTAL_SIZ
 constexpr uint32_t WORLD_OPTIONS_SIZE  = 18 * sizeof(uint32_t);  // 72 bytes
 constexpr uint32_t WORLD_OPTIONS_START = NODE_ID_COUNTER_START + NODE_ID_COUNTER_SIZE;
 
-// Reply channel buffers — per-OscChannel ring buffers for direct reply delivery.
-// Each channel gets a small ring buffer (16KB) with its own head/tail/active control words.
-// Active flag is set atomically by the OscChannel when onReply() is called.
-// The osc_in_worker (SAB) or AudioWorklet (PM) fans out replies to all active channels.
-constexpr uint32_t REPLY_CHANNEL_COUNT = SUPERSONIC_REPLY_CHANNEL_COUNT;
-constexpr uint32_t REPLY_CHANNEL_BUFFER_SIZE = SUPERSONIC_REPLY_CHANNEL_BUFFER_SIZE;  // bytes per channel (default 16KB)
-constexpr uint32_t REPLY_CHANNEL_CONTROL_SIZE = 16;    // head(4) + tail(4) + active(4) + drops(4) per channel
-constexpr uint32_t REPLY_CHANNELS_CONTROL_START = WORLD_OPTIONS_START + WORLD_OPTIONS_SIZE;
-constexpr uint32_t REPLY_CHANNELS_CONTROL_SIZE = REPLY_CHANNEL_COUNT * REPLY_CHANNEL_CONTROL_SIZE;  // 96 bytes
-constexpr uint32_t REPLY_CHANNELS_BUFFER_START = REPLY_CHANNELS_CONTROL_START + REPLY_CHANNELS_CONTROL_SIZE;
-constexpr uint32_t REPLY_CHANNELS_BUFFER_SIZE = REPLY_CHANNEL_COUNT * REPLY_CHANNEL_BUFFER_SIZE;    // 128KB
-
 // Scope buffers — per-bus audio scope data for visualisation.
 // Uses the same triple-buffer algorithm as native shm_scope_buffer.hpp
 // but with fixed layout in the SAB (no TLSF pool, no relative_ptr).
@@ -134,7 +122,7 @@ constexpr uint32_t SCOPE_SLOT_DATA_SIZE = 3 * SHM_SCOPE_REGION_SIZE;  // Triple 
 constexpr uint32_t SHM_SCOPE_SLOT_SIZE = SHM_SCOPE_SLOT_HEADER_SIZE + SCOPE_SLOT_DATA_SIZE;  // ~24KB per slot
 constexpr uint32_t SHM_SCOPE_TOTAL_SIZE = SHM_SCOPE_HEADER_SIZE + (SHM_SCOPE_MAX_SCOPES * SHM_SCOPE_SLOT_SIZE);
 
-constexpr uint32_t SHM_SCOPE_START = REPLY_CHANNELS_BUFFER_START + REPLY_CHANNELS_BUFFER_SIZE;
+constexpr uint32_t SHM_SCOPE_START = WORLD_OPTIONS_START + WORLD_OPTIONS_SIZE;
 
 // Scope header layout (at SHM_SCOPE_START):
 //   [0..3]   u32  maxScopes
@@ -181,11 +169,11 @@ struct alignas(4) ControlPointers {
     std::atomic<int32_t> in_tail;
     std::atomic<int32_t> out_head;
     std::atomic<int32_t> out_tail;
-    std::atomic<int32_t> debug_head;
-    std::atomic<int32_t> debug_tail;
+    std::atomic<int32_t> nrt_out_head;
+    std::atomic<int32_t> nrt_out_tail;
     std::atomic<int32_t> in_sequence;     // Sequence counter for IN buffer (shared between main thread & worker)
     std::atomic<int32_t> out_sequence;    // Sequence counter for OUT buffer
-    std::atomic<int32_t> debug_sequence;  // Sequence counter for DEBUG buffer
+    std::atomic<int32_t> nrt_out_sequence;  // Sequence counter for the NRT-out buffer
     std::atomic<uint32_t> status_flags;
     std::atomic<int32_t> in_write_lock;   // Spinlock for IN buffer writes (0=unlocked, 1=locked)
     int32_t _padding;                     // Padding to maintain 8-byte alignment for subsequent Float64
@@ -194,18 +182,16 @@ struct alignas(4) ControlPointers {
 // Performance metrics structure
 // Layout designed for contiguous memcpy operations:
 // - [0-8]   scsynth (WASM + JS worklet writes)
-// - [9-23]  Prescheduler (JS prescheduler worker - all contiguous for single memcpy overlay)
-// - [24-25] OSC Out (JS main thread)
-// - [26-29] OSC In (JS osc_in_worker)
-// - [30-31] Debug (JS debug_worker)
-// - [32-34] Ring buffer usage (WASM writes)
-// - [35-37] Ring buffer peak usage (WASM writes)
-// - [38-41] Bypass category metrics (JS main thread / PM transport)
-// - [42-44] scsynth late timing diagnostics (WASM writes)
-// - [45]    Ring buffer direct write failures (OscChannel SAB mode, JS-only)
-// - [46-57] Link (native-only)
-// - [58-64] System info: version + audio config (shared C++, write-once)
-// - [65-68] SuperClock readouts: tempo/beat/phase/playing (shared C++, per block)
+// - [9-10]  OSC Out (JS main thread)
+// - [11-14] OSC In (JS osc_in_worker)
+// - [15-16] Debug (JS debug_worker)
+// - [17-19] Ring buffer usage (WASM writes)
+// - [20-22] Ring buffer peak usage (WASM writes)
+// - [23-25] scsynth late timing diagnostics (WASM writes)
+// - [26]    Ring buffer direct write failures (OscChannel SAB mode, JS-only)
+// - [27-38] Link (native-only)
+// - [39-45] System info: version + audio config (shared C++, write-once)
+// - [46-49] SuperClock readouts: tempo/beat/phase/playing (shared C++, per block)
 struct alignas(4) PerformanceMetrics {
     // The same struct is written from native (binary + NIF) and web (WASM/JS).
     // Each group below identifies its writers by runtime. "shared C++" means
@@ -227,124 +213,94 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> wasm_errors;             // 7: WASM execution errors (JS-only)
     std::atomic<uint32_t> scheduler_lates;         // 8: Bundles executed after scheduled time
 
-    // Prescheduler metrics [9-23]
-    // Writers: native — src/workers/Prescheduler.cpp; web —
-    //   js/workers/osc_out_prescheduler_worker.js. Both implementations
-    //   write the same set of fields with matching semantics.
-    // bypassed is additionally written by OscUdpServer.cpp on native
-    //   (FAR_FUTURE classification path) and by the JS transport.
-    // min_headroom_ms uses 0xFFFFFFFF as a sentinel meaning "never recorded";
-    //   set on init, replaced with the smallest observed headroom on dispatch.
-    std::atomic<uint32_t> prescheduler_pending;           // 9
-    std::atomic<uint32_t> prescheduler_pending_peak;      // 10: Peak heap size
-    std::atomic<uint32_t> prescheduler_bundles_scheduled; // 11
-    std::atomic<uint32_t> prescheduler_dispatched;        // 12: Successful dispatches
-    std::atomic<uint32_t> prescheduler_events_cancelled;  // 13
-    std::atomic<uint32_t> prescheduler_min_headroom_ms;   // 14: Min headroom (0xFFFFFFFF until first record)
-    std::atomic<uint32_t> prescheduler_lates;             // 15: Dispatched after scheduled time
-    std::atomic<uint32_t> prescheduler_retries_succeeded; // 16: Retry attempts that succeeded
-    std::atomic<uint32_t> prescheduler_retries_failed;    // 17: Retry-queue overflow drops (backpressure)
-    std::atomic<uint32_t> prescheduler_retry_queue_size;  // 18: Current retry queue depth
-    std::atomic<uint32_t> prescheduler_retry_queue_peak;  // 19: Peak retry queue depth
-    std::atomic<uint32_t> prescheduler_messages_retried;  // 20: Total push-to-retry events
-    std::atomic<uint32_t> prescheduler_total_dispatches;  // 21: All dispatch attempts (success + retried)
-    std::atomic<uint32_t> prescheduler_bypassed;          // 22
-    std::atomic<int32_t> prescheduler_max_late_ms;        // 23: Max lateness observed (ms)
-
-    // OSC Out metrics [24-25]
+    // OSC Out metrics [9-10]
     // Writers: native — OscUdpServer.cpp (handlePacket); web — sab_transport.js.
-    std::atomic<uint32_t> osc_out_messages_sent;   // 24
-    std::atomic<uint32_t> osc_out_bytes_sent;      // 25
+    std::atomic<uint32_t> osc_out_messages_sent;   // 9
+    std::atomic<uint32_t> osc_out_bytes_sent;      // 10
 
-    // OSC In metrics [26-29]
+    // OSC In metrics [11-14]
     // Writers: native — src/workers/ReplyReader.cpp; web — js/workers/osc_in_worker.js.
     // osc_in_dropped_messages is JS-only (no native writer).
-    std::atomic<uint32_t> osc_in_messages_received; // 26
-    std::atomic<uint32_t> osc_in_bytes_received;    // 27
-    std::atomic<uint32_t> osc_in_dropped_messages;  // 28 (JS-only)
-    std::atomic<uint32_t> osc_in_corrupted;         // 29: Ring buffer message corruption
+    std::atomic<uint32_t> osc_in_messages_received; // 11
+    std::atomic<uint32_t> osc_in_bytes_received;    // 12
+    std::atomic<uint32_t> osc_in_dropped_messages;  // 13 (JS-only)
+    std::atomic<uint32_t> osc_in_corrupted;         // 14: Ring buffer message corruption
 
-    // Debug metrics [30-31]
+    // Debug metrics [15-16]
     // Writers: native — src/workers/DebugReader.cpp; web — debug_worker.
-    std::atomic<uint32_t> debug_messages_received;  // 30
-    std::atomic<uint32_t> debug_bytes_received;     // 31
+    std::atomic<uint32_t> debug_messages_received;  // 15
+    std::atomic<uint32_t> debug_bytes_received;     // 16
 
-    // Ring buffer usage [32-34]
+    // Ring buffer usage [17-19]
     // Writers: shared C++ during process() (audio_processor.cpp / scsynth core).
-    std::atomic<uint32_t> in_buffer_used_bytes;     // 32: Bytes used in IN buffer
-    std::atomic<uint32_t> out_buffer_used_bytes;    // 33: Bytes used in OUT buffer
-    std::atomic<uint32_t> debug_buffer_used_bytes;  // 34: Bytes used in DEBUG buffer
+    std::atomic<uint32_t> in_buffer_used_bytes;     // 17: Bytes used in IN buffer
+    std::atomic<uint32_t> out_buffer_used_bytes;    // 18: Bytes used in OUT buffer
+    std::atomic<uint32_t> nrt_out_buffer_used_bytes;  // 19: Bytes used in NRT-out buffer
 
-    // Ring buffer peak usage [35-37]
+    // Ring buffer peak usage [20-22]
     // Writers: shared C++ during process() (audio_processor.cpp / scsynth core).
-    std::atomic<uint32_t> in_buffer_peak_bytes;     // 35: Peak bytes used in IN buffer
-    std::atomic<uint32_t> out_buffer_peak_bytes;    // 36: Peak bytes used in OUT buffer
-    std::atomic<uint32_t> debug_buffer_peak_bytes;  // 37: Peak bytes used in DEBUG buffer
+    std::atomic<uint32_t> in_buffer_peak_bytes;     // 20: Peak bytes used in IN buffer
+    std::atomic<uint32_t> out_buffer_peak_bytes;    // 21: Peak bytes used in OUT buffer
+    std::atomic<uint32_t> nrt_out_buffer_peak_bytes;  // 22: Peak bytes used in NRT-out buffer
 
-    // Bypass category metrics [38-41]
-    // Writers: native — OscUdpServer.cpp (immediate, near_future, late);
-    //   web — JS transport.
-    // bypass_non_bundle is JS-only (native counts plain messages as IMMEDIATE).
-    std::atomic<uint32_t> bypass_non_bundle;        // 38: Plain OSC messages (JS-only)
-    std::atomic<uint32_t> bypass_immediate;         // 39: Bundles with timetag 0 or 1
-    std::atomic<uint32_t> bypass_near_future;       // 40: Within lookahead window but not late
-    std::atomic<uint32_t> bypass_late;              // 41: Past their scheduled time
-
-    // scsynth late timing diagnostics [42-44]
+    // scsynth late timing diagnostics [23-25]
     // Writers: shared C++ during process() (audio_processor.cpp).
-    std::atomic<int32_t> scheduler_max_late_ms;     // 42: Maximum lateness observed (ms)
-    std::atomic<int32_t> scheduler_last_late_ms;    // 43: Most recent late magnitude (ms)
-    std::atomic<uint32_t> scheduler_last_late_tick; // 44: Process count when last late occurred
+    std::atomic<int32_t> scheduler_max_late_ms;     // 23: Maximum lateness observed (ms)
+    std::atomic<int32_t> scheduler_last_late_ms;    // 24: Most recent late magnitude (ms)
+    std::atomic<uint32_t> scheduler_last_late_tick; // 25: Process count when last late occurred
 
-    // Ring buffer direct write failures [45]
+    // Ring buffer direct write failures [26]
     // Writer: JS-only — OscChannel in SAB mode increments when an optimistic
-    // direct ring write fails and the bundle is delivered via prescheduler.
+    // direct ring write fails and the bundle is dropped.
     // C++ side reserves the slot but doesn't read or write it.
-    std::atomic<uint32_t> ring_buffer_direct_write_fails; // 45
+    std::atomic<uint32_t> ring_buffer_direct_write_fails; // 26
 
     // ─── Link (native-only; 0 on WASM) ──────────────────────────────────
     // Clock readouts mirrored from SuperClock each block; floats stored as
     // fixed-point (decoded by the panel's display formats).
-    std::atomic<uint32_t> link_peers;              // 46: connected Link peers
-    std::atomic<uint32_t> link_tempo_mbpm;         // 47: tempo, milli-BPM (bpm * 1000)
-    std::atomic<uint32_t> link_beat_centi;         // 48: beat position * 100
-    std::atomic<uint32_t> link_phase_centi;        // 49: phase within quantum * 100
-    std::atomic<uint32_t> link_playing;            // 50: transport 0/1
+    std::atomic<uint32_t> link_peers;              // 27: connected Link peers
+    std::atomic<uint32_t> link_tempo_mbpm;         // 28: tempo, milli-BPM (bpm * 1000)
+    std::atomic<uint32_t> link_beat_centi;         // 29: beat position * 100
+    std::atomic<uint32_t> link_phase_centi;        // 30: phase within quantum * 100
+    std::atomic<uint32_t> link_playing;            // 31: transport 0/1
 
     // ─── Link Audio stream health (native-only; 0 on WASM) ──────────────
-    std::atomic<uint32_t> link_audio_in_channels;  // 51: active received channels
-    std::atomic<uint32_t> link_audio_stream_rate;  // 52: received stream sample rate (Hz)
-    std::atomic<uint32_t> link_audio_underruns;    // 53: receiver queue underrun events
-    std::atomic<uint32_t> link_audio_buffered_ms;  // 54: receiver queue depth (ms)
-    std::atomic<int32_t>  link_audio_drift_ppm;    // 55: read-rate deviation from 1.0 (ppm, signed)
-    std::atomic<uint32_t> link_audio_publish;      // 56: publishing enabled 0/1
-    std::atomic<uint32_t> link_audio_sinks;        // 57: active output sinks
+    std::atomic<uint32_t> link_audio_in_channels;  // 32: active received channels
+    std::atomic<uint32_t> link_audio_stream_rate;  // 33: received stream sample rate (Hz)
+    std::atomic<uint32_t> link_audio_underruns;    // 34: receiver queue underrun events
+    std::atomic<uint32_t> link_audio_buffered_ms;  // 35: receiver queue depth (ms)
+    std::atomic<int32_t>  link_audio_drift_ppm;    // 36: read-rate deviation from 1.0 (ppm, signed)
+    std::atomic<uint32_t> link_audio_publish;      // 37: publishing enabled 0/1
+    std::atomic<uint32_t> link_audio_sinks;        // 38: active output sinks
 
     // ─── System info (cross-platform; written by shared C++ on every runtime) ─
     // Engine identity + audio connection details. Written once at init by
     // init_memory() (audio_processor.cpp). Constant for the session.
-    std::atomic<uint32_t> supersonic_version_major; // 58: SUPERSONIC_VERSION_MAJOR
-    std::atomic<uint32_t> supersonic_version_minor; // 59: SUPERSONIC_VERSION_MINOR
-    std::atomic<uint32_t> supersonic_version_patch; // 60: SUPERSONIC_VERSION_PATCH
-    std::atomic<uint32_t> audio_sample_rate;        // 61: output sample rate (Hz)
-    std::atomic<uint32_t> audio_block_size;         // 62: block size (frames; 128 on web)
-    std::atomic<uint32_t> audio_output_channels;    // 63: output bus channels
-    std::atomic<uint32_t> audio_input_channels;     // 64: input bus channels
+    std::atomic<uint32_t> supersonic_version_major; // 39: SUPERSONIC_VERSION_MAJOR
+    std::atomic<uint32_t> supersonic_version_minor; // 40: SUPERSONIC_VERSION_MINOR
+    std::atomic<uint32_t> supersonic_version_patch; // 41: SUPERSONIC_VERSION_PATCH
+    std::atomic<uint32_t> audio_sample_rate;        // 42: output sample rate (Hz)
+    std::atomic<uint32_t> audio_block_size;         // 43: block size (frames; 128 on web)
+    std::atomic<uint32_t> audio_output_channels;    // 44: output bus channels
+    std::atomic<uint32_t> audio_input_channels;     // 45: input bus channels
 
     // ─── SuperClock readouts (cross-platform; written per block) ─────────────
     // Mirrored from SuperClock each block by publishClockMetrics() — sourced
     // from the SuperClockState SAB mirror, so live on web and native alike
     // (independent of Link). Floats stored as fixed-point (see web schema /
     // panel display formats). Supersedes the native-only link_* clock slots.
-    std::atomic<uint32_t> clock_tempo_mbpm;         // 65: tempo, milli-BPM (bpm * 1000)
-    std::atomic<uint32_t> clock_beat_centi;         // 66: beat position * 100
-    std::atomic<uint32_t> clock_phase_centi;        // 67: phase within quantum * 100
-    std::atomic<uint32_t> clock_playing;            // 68: transport 0/1
+    std::atomic<uint32_t> clock_tempo_mbpm;         // 46: tempo, milli-BPM (bpm * 1000)
+    std::atomic<uint32_t> clock_beat_centi;         // 47: beat position * 100
+    std::atomic<uint32_t> clock_phase_centi;        // 48: phase within quantum * 100
+    std::atomic<uint32_t> clock_playing;            // 49: transport 0/1
 
     // Reserved padding so METRICS_SIZE stays a multiple of 8 bytes — the
     // regions that follow in the arena (NTP time, SuperClockState) are
     // 8-byte-aligned and read via Float64/BigInt64 views, which require it.
-    std::atomic<uint32_t> _metrics_reserved;        // 69: reserved (alignment)
+    // Two words are needed to keep the 51-meaningful-field struct (0-49 plus
+    // _metrics_reserved at 50) padded to a multiple of 8.
+    std::atomic<uint32_t> _metrics_reserved;        // 50: reserved (alignment)
+    std::atomic<uint32_t> _metrics_reserved2;       // 51: reserved (alignment pad)
 };
 
 // SuperClock session state. Has its own SAB region because it's engine
@@ -417,7 +373,7 @@ struct alignas(8) NodeEntry {
 constexpr uint32_t MAX_MESSAGE_SIZE = IN_BUFFER_SIZE - sizeof(Message);
 constexpr uint32_t MESSAGE_MAGIC = 0xDEADBEEF;
 constexpr uint32_t PADDING_MAGIC = 0xBADDCAFE;  // Marks padding at end of buffer (OSC buffers)
-constexpr uint8_t DEBUG_PADDING_MARKER = 0xFF;  // Marks padding at end of debug buffer (skip to position 0)
+constexpr uint8_t RING_PADDING_MARKER = 0xFF;  // Byte marking ring-buffer padding (skip to position 0 on wrap)
 
 // Scheduler configuration is sized per device via memory_profile.h
 // (defaults: SCHEDULER_DATA_POOL_SIZE 512KB, SCHEDULER_SLOT_COUNT 512) and is
@@ -434,8 +390,8 @@ struct BufferLayout {
     uint32_t in_buffer_size;
     uint32_t out_buffer_start;
     uint32_t out_buffer_size;
-    uint32_t debug_buffer_start;
-    uint32_t debug_buffer_size;
+    uint32_t nrt_out_buffer_start;
+    uint32_t nrt_out_buffer_size;
     uint32_t control_start;
     uint32_t control_size;
     uint32_t metrics_start;
@@ -465,12 +421,6 @@ struct BufferLayout {
     uint32_t node_id_counter_size;
     uint32_t world_options_start;
     uint32_t world_options_size;
-    uint32_t reply_channels_control_start;
-    uint32_t reply_channels_control_size;
-    uint32_t reply_channels_buffer_start;
-    uint32_t reply_channel_buffer_size;
-    uint32_t reply_channel_control_size;
-    uint32_t reply_channel_count;
     uint32_t shm_scope_start;
     uint32_t shm_scope_total_size;
     uint32_t shm_scope_header_size;
@@ -486,7 +436,7 @@ struct BufferLayout {
     uint32_t padding_magic;
     uint32_t scheduler_data_pool_size;
     uint32_t scheduler_slot_count;
-    uint8_t debug_padding_marker;
+    uint8_t ring_padding_marker;
     uint8_t _padding[3];  // Align to 4 bytes
 };
 
@@ -496,8 +446,8 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     IN_BUFFER_SIZE,
     OUT_BUFFER_START,
     OUT_BUFFER_SIZE,
-    DEBUG_BUFFER_START,
-    DEBUG_BUFFER_SIZE,
+    NRT_OUT_BUFFER_START,
+    NRT_OUT_BUFFER_SIZE,
     CONTROL_START,
     CONTROL_SIZE,
     METRICS_START,
@@ -527,12 +477,6 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     NODE_ID_COUNTER_SIZE,
     WORLD_OPTIONS_START,
     WORLD_OPTIONS_SIZE,
-    REPLY_CHANNELS_CONTROL_START,
-    REPLY_CHANNELS_CONTROL_SIZE,
-    REPLY_CHANNELS_BUFFER_START,
-    REPLY_CHANNEL_BUFFER_SIZE,
-    REPLY_CHANNEL_CONTROL_SIZE,
-    REPLY_CHANNEL_COUNT,
     SHM_SCOPE_START,
     SHM_SCOPE_TOTAL_SIZE,
     SHM_SCOPE_HEADER_SIZE,
@@ -548,7 +492,7 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     PADDING_MAGIC,
     SCHEDULER_DATA_POOL_SIZE,
     SCHEDULER_SLOT_COUNT,
-    DEBUG_PADDING_MARKER,
+    RING_PADDING_MARKER,
     {0, 0, 0}  // padding
 };
 
@@ -593,11 +537,11 @@ SS_ASSERT_OFFSET(ControlPointers, in_head,        0,  "js/lib/control_offsets.js
 SS_ASSERT_OFFSET(ControlPointers, in_tail,        4,  "js/lib/control_offsets.js IN_TAIL");
 SS_ASSERT_OFFSET(ControlPointers, out_head,       8,  "js/lib/control_offsets.js OUT_HEAD");
 SS_ASSERT_OFFSET(ControlPointers, out_tail,       12, "js/lib/control_offsets.js OUT_TAIL");
-SS_ASSERT_OFFSET(ControlPointers, debug_head,     16, "js/lib/control_offsets.js DEBUG_HEAD");
-SS_ASSERT_OFFSET(ControlPointers, debug_tail,     20, "js/lib/control_offsets.js DEBUG_TAIL");
+SS_ASSERT_OFFSET(ControlPointers, nrt_out_head,     16, "js/lib/control_offsets.js NRT_OUT_HEAD");
+SS_ASSERT_OFFSET(ControlPointers, nrt_out_tail,     20, "js/lib/control_offsets.js NRT_OUT_TAIL");
 SS_ASSERT_OFFSET(ControlPointers, in_sequence,    24, "js/lib/control_offsets.js IN_SEQUENCE");
 SS_ASSERT_OFFSET(ControlPointers, out_sequence,   28, "js/lib/control_offsets.js OUT_SEQUENCE");
-SS_ASSERT_OFFSET(ControlPointers, debug_sequence, 32, "js/lib/control_offsets.js DEBUG_SEQUENCE");
+SS_ASSERT_OFFSET(ControlPointers, nrt_out_sequence, 32, "js/lib/control_offsets.js NRT_OUT_SEQUENCE");
 SS_ASSERT_OFFSET(ControlPointers, status_flags,   36, "js/lib/control_offsets.js STATUS_FLAGS");
 SS_ASSERT_OFFSET(ControlPointers, in_write_lock,  40, "js/lib/control_offsets.js IN_WRITE_LOCK");
 SS_ASSERT_OFFSET(ControlPointers, _padding,       44, "js/lib/control_offsets.js IN_LOG_TAIL");
@@ -612,59 +556,40 @@ SS_ASSERT_METRIC(scheduler_queue_dropped,         5);
 SS_ASSERT_METRIC(messages_sequence_gaps,          6);
 SS_ASSERT_METRIC(wasm_errors,                     7);
 SS_ASSERT_METRIC(scheduler_lates,                 8);
-SS_ASSERT_METRIC(prescheduler_pending,            9);
-SS_ASSERT_METRIC(prescheduler_pending_peak,       10);
-SS_ASSERT_METRIC(prescheduler_bundles_scheduled,  11);
-SS_ASSERT_METRIC(prescheduler_dispatched,         12);
-SS_ASSERT_METRIC(prescheduler_events_cancelled,   13);
-SS_ASSERT_METRIC(prescheduler_min_headroom_ms,    14);
-SS_ASSERT_METRIC(prescheduler_lates,              15);
-SS_ASSERT_METRIC(prescheduler_retries_succeeded,  16);
-SS_ASSERT_METRIC(prescheduler_retries_failed,     17);
-SS_ASSERT_METRIC(prescheduler_retry_queue_size,   18);
-SS_ASSERT_METRIC(prescheduler_retry_queue_peak,   19);
-SS_ASSERT_METRIC(prescheduler_messages_retried,   20);
-SS_ASSERT_METRIC(prescheduler_total_dispatches,   21);
-SS_ASSERT_METRIC(prescheduler_bypassed,           22);
-SS_ASSERT_METRIC(prescheduler_max_late_ms,        23);
-SS_ASSERT_METRIC(osc_out_messages_sent,           24);
-SS_ASSERT_METRIC(osc_out_bytes_sent,              25);
-SS_ASSERT_METRIC(osc_in_messages_received,        26);
-SS_ASSERT_METRIC(osc_in_bytes_received,           27);
-SS_ASSERT_METRIC(osc_in_dropped_messages,         28);
-SS_ASSERT_METRIC(osc_in_corrupted,                29);
-SS_ASSERT_METRIC(debug_messages_received,         30);
-SS_ASSERT_METRIC(debug_bytes_received,            31);
-SS_ASSERT_METRIC(in_buffer_used_bytes,            32);
-SS_ASSERT_METRIC(out_buffer_used_bytes,           33);
-SS_ASSERT_METRIC(debug_buffer_used_bytes,         34);
-SS_ASSERT_METRIC(in_buffer_peak_bytes,            35);
-SS_ASSERT_METRIC(out_buffer_peak_bytes,           36);
-SS_ASSERT_METRIC(debug_buffer_peak_bytes,         37);
-SS_ASSERT_METRIC(bypass_non_bundle,               38);
-SS_ASSERT_METRIC(bypass_immediate,                39);
-SS_ASSERT_METRIC(bypass_near_future,              40);
-SS_ASSERT_METRIC(bypass_late,                     41);
-SS_ASSERT_METRIC(scheduler_max_late_ms,           42);
-SS_ASSERT_METRIC(scheduler_last_late_ms,          43);
-SS_ASSERT_METRIC(scheduler_last_late_tick,        44);
-SS_ASSERT_METRIC(ring_buffer_direct_write_fails,  45);
-// Link [46-57] is native-only and intentionally unasserted (the web merged
-// array never reads those slots). The cross-platform system-info block [58-68]
+SS_ASSERT_METRIC(osc_out_messages_sent,           9);
+SS_ASSERT_METRIC(osc_out_bytes_sent,              10);
+SS_ASSERT_METRIC(osc_in_messages_received,        11);
+SS_ASSERT_METRIC(osc_in_bytes_received,           12);
+SS_ASSERT_METRIC(osc_in_dropped_messages,         13);
+SS_ASSERT_METRIC(osc_in_corrupted,                14);
+SS_ASSERT_METRIC(debug_messages_received,         15);
+SS_ASSERT_METRIC(debug_bytes_received,            16);
+SS_ASSERT_METRIC(in_buffer_used_bytes,            17);
+SS_ASSERT_METRIC(out_buffer_used_bytes,           18);
+SS_ASSERT_METRIC(nrt_out_buffer_used_bytes,         19);
+SS_ASSERT_METRIC(in_buffer_peak_bytes,            20);
+SS_ASSERT_METRIC(out_buffer_peak_bytes,           21);
+SS_ASSERT_METRIC(nrt_out_buffer_peak_bytes,         22);
+SS_ASSERT_METRIC(scheduler_max_late_ms,           23);
+SS_ASSERT_METRIC(scheduler_last_late_ms,          24);
+SS_ASSERT_METRIC(scheduler_last_late_tick,        25);
+SS_ASSERT_METRIC(ring_buffer_direct_write_fails,  26);
+// Link [27-38] is native-only and intentionally unasserted (the web merged
+// array never reads those slots). The cross-platform system-info block [39-49]
 // is written by shared C++ on every runtime and IS asserted against the JS
 // mirror in js/lib/metrics_offsets.js.
-SS_ASSERT_METRIC(supersonic_version_major,        58);
-SS_ASSERT_METRIC(supersonic_version_minor,        59);
-SS_ASSERT_METRIC(supersonic_version_patch,        60);
-SS_ASSERT_METRIC(audio_sample_rate,               61);
-SS_ASSERT_METRIC(audio_block_size,                62);
-SS_ASSERT_METRIC(audio_output_channels,           63);
-SS_ASSERT_METRIC(audio_input_channels,            64);
-SS_ASSERT_METRIC(clock_tempo_mbpm,                65);
-SS_ASSERT_METRIC(clock_beat_centi,                66);
-SS_ASSERT_METRIC(clock_phase_centi,               67);
-SS_ASSERT_METRIC(clock_playing,                   68);
-SS_ASSERT_METRIC(_metrics_reserved,               69);
+SS_ASSERT_METRIC(supersonic_version_major,        39);
+SS_ASSERT_METRIC(supersonic_version_minor,        40);
+SS_ASSERT_METRIC(supersonic_version_patch,        41);
+SS_ASSERT_METRIC(audio_sample_rate,               42);
+SS_ASSERT_METRIC(audio_block_size,                43);
+SS_ASSERT_METRIC(audio_output_channels,           44);
+SS_ASSERT_METRIC(audio_input_channels,            45);
+SS_ASSERT_METRIC(clock_tempo_mbpm,                46);
+SS_ASSERT_METRIC(clock_beat_centi,                47);
+SS_ASSERT_METRIC(clock_phase_centi,               48);
+SS_ASSERT_METRIC(clock_playing,                   49);
+SS_ASSERT_METRIC(_metrics_reserved,               50);
 
 // METRICS_SIZE must cover the whole struct and stay a multiple of 8: the arena
 // regions that follow (NTP time, SuperClockState) are 8-byte aligned and read

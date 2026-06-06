@@ -47,6 +47,9 @@ SuperClock::~SuperClock() = default;
 SuperClockState*       SuperClock::state()       { return g_superclock_state; }
 const SuperClockState* SuperClock::state() const { return g_superclock_state; }
 
+// WASM binds its SAB region via superclock_wasm_init; this is the native seam.
+void SuperClock::bindStateToShm(SuperClockState*) {}
+
 using supersonic::doubleToBits;
 using supersonic::bitsToDouble;
 
@@ -102,18 +105,6 @@ void* SuperClock::audioThreadLinkAudioPtr() { return nullptr; }
 
 void SuperClock::requestSetLinkEnabledAsync(bool enabled) {
     setLinkEnabled(enabled);
-}
-
-double SuperClock::getBpm() const {
-    const SuperClockState* s = state();
-    if (!s) return 120.0;
-    return bitsToDouble(s->bpm.load(std::memory_order_relaxed));
-}
-
-bool SuperClock::isPlaying() const {
-    const SuperClockState* s = state();
-    if (!s) return false;
-    return s->is_playing.load(std::memory_order_relaxed) != 0u;
 }
 
 bool SuperClock::isLinkEnabled() const {

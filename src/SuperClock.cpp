@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 
 using supersonic::bitsToDouble;
 
@@ -29,6 +30,22 @@ double SuperClock::getIsPlayingAtNtp() const {
     const SuperClockState* s = state();
     if (!s) return 0.0;
     return bitsToDouble(s->is_playing_at_ntp.load(std::memory_order_relaxed));
+}
+
+// tempo / transport read from the shared SuperClockState mirror — identical on
+// every build. The mirror is written by setBpm/setIsPlaying and, on native, kept
+// in sync with Link's converged value by Link's tempo/transport callbacks, so a
+// relaxed atomic read here is RT-safe and consistent on every build.
+double SuperClock::getBpm() const {
+    const SuperClockState* s = state();
+    if (!s) return 120.0;
+    return bitsToDouble(s->bpm.load(std::memory_order_relaxed));
+}
+
+bool SuperClock::isPlaying() const {
+    const SuperClockState* s = state();
+    if (!s) return false;
+    return s->is_playing.load(std::memory_order_relaxed) != 0u;
 }
 
 // ── NTP-domain beat math ────────────────────────────────────────────────

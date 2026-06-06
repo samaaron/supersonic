@@ -5,22 +5,27 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 #ifdef __APPLE__
 #include <CoreAudio/CoreAudio.h>
 #endif
 
-#include "Prescheduler.h"
-#include "ReplyReader.h"
-#include "DebugReader.h"
-#include "OscUdpServer.h"
+#include "RingReader.h"
+#include "IOscTransport.h"
+#include "CallbackTransport.h"
+#include "OscEgress.h"
+#include "RingBufferWriter.h"
+#include "src/OscIngress.h"
+#include "EngineControl.h"
 #include "JuceAudioCallback.h"
 #include "SampleLoader.h"
 #include "SuperClock.h"
@@ -60,7 +65,6 @@ public:
                                                // clamped to [32, kMaxBlockSize]. WASM ignores
                                                // it (must equal the 128-sample render quantum).
         int    udpPort                  = 57110;
-        double preschedulerLookaheadS   = 0.500;
         int    maxNodes                 = 1024;
         int    numBuffers               = 1024;
         int    numOutputChannels        = kAutoChannelCount;
@@ -94,8 +98,44 @@ public:
     std::function<void(const uint8_t*, uint32_t)> onReply;
     std::function<void(const std::string&)>        onDebug;
 
+    // Inject the egress transport (the standalone server its OscUdpServer). Call
+    // before init(); if unset, the engine uses the in-process CallbackTransport
+    // (replies via onReply).
+    void setTransport(IOscTransport* transport) { mTransport = transport; }
+
     void sendOSC(const uint8_t* data, uint32_t size);
+
+    // The OSC ingress: classify a raw packet and dispatch it to the registered
+    // sink (audio -> IN ring, /supersonic/ + /clock/ -> handlers). Every transport
+    // (UDP, NIF send_osc) funnels into this; the engine owns the routing, the
+    // transports know only their medium. Adding a subsystem is one registerRoute.
+    // `originToken` is an opaque transport handle (minted by the transport's
+    // internOrigin at its entry point) the egress later resolves to route replies
+    // back; 0 means an anonymous in-process / embedder caller. No default — every
+    // entry point assigns an origin, so an unstamped 0 can never sneak in.
+    void ingest(const uint8_t* data, uint32_t size, uint32_t originToken);
     bool isRunning() const { return mRunning.load(); }
+
+    // Audio-thread control route (registered on mIngress for /clock + /supersonic):
+    // forwards the message to the NRT command ring with its origin token. Runs on
+    // the audio thread; the NrtCommandReader drains + runs EngineControl.
+    static bool nrtForwardSink(void* ctx, void* callCtx, const uint8_t* data, std::size_t len);
+
+    // Device control surface (called by EngineControl + engine lifecycle).
+    // Builds the device/input/info report and pushes it to notify subscribers.
+    void sendDeviceReport();
+    // Push the truthful outcome of a debounced switch to subscribers.
+    void sendSwitchDone(const SwapResult& result,
+                        const std::string& requestedOutput,
+                        const std::string& requestedInput);
+    // Debounced device switch: store the request, run only the last one after a
+    // quiet period on a worker thread.
+    void scheduleDeviceSwitch(const std::string& devName,
+                              const std::string& inputDevName,
+                              double sampleRate, int bufferSize);
+    // Accept-or-reject a device reopen (in-flight + cooldown gated). On accept,
+    // launches the reopen worker and returns true; on reject fills `reason`.
+    bool requestReopen(std::string& reason);
 
     // --- Engine lifecycle state ---
     EngineState engineState() const { return mEngineState.load(); }
@@ -104,8 +144,8 @@ public:
     // --- Metrics ---
     // Shared PerformanceMetrics struct (defined in src/shared_memory.h).
     // Same struct that JS callers see via SuperSonic.getMetrics(). Both
-    // runtimes write to it from symmetric paths (audio_processor, prescheduler,
-    // OSC reader/writer, debug reader). Pointer is null before init().
+    // runtimes write to it from symmetric paths (audio_processor, OSC
+    // reader/writer, debug reader). Pointer is null before init().
     const PerformanceMetrics& getMetrics() const { return *mMetrics; }
     const PerformanceMetrics* metricsPtr() const { return mMetrics; }
 
@@ -401,19 +441,75 @@ private:
     bool waitForDeviceVisible(const std::string& name, int timeoutMs);
 #endif
 
-    // Declaration order matters: mSuperClock owns Link's network
-    // thread which calls broadcastLinkNotify on mUdpServer; declared
-    // AFTER mUdpServer so the Link thread joins before the socket is
-    // destroyed. NTP consumers receive the SuperClock pointer via
-    // setSuperClock() during init(), so construction order is fine.
     JuceAudioCallback mAudioCallback;
-    Prescheduler      mPrescheduler;
-    ReplyReader       mReplyReader;
-    DebugReader       mDebugReader;
-    OscUdpServer      mUdpServer;
+    // The default egress transport: in-process, replies via onReply. An embedder
+    // injects a real transport via setTransport (the standalone server its
+    // OscUdpServer). The engine owns no socket. Bound to onReply by pointer so a
+    // runtime callback swap is seen.
+    CallbackTransport mDefaultTransport{&onReply};
+    IOscTransport*    mTransport = nullptr;
+    OscEgress         mEgress;
+    OscIngress        mIngress;
+    EngineControl     mEngineControl;
     SuperClock        mSuperClock;
     SampleLoader      mSampleLoader;
     StateCache        mStateCache;
+
+    // Audio-plane ingress: the default OscIngress route writes the IN ring
+    // directly. The ring pointers moved off the transport so it stays a dumb
+    // pipe; the engine owns the audio plane.
+    uint8_t*              mInBufferStart = nullptr;
+    uint32_t              mInBufferSize  = 0;
+    std::atomic<int32_t>* mInHead        = nullptr;
+    std::atomic<int32_t>* mInTail        = nullptr;
+    std::atomic<int32_t>* mInSequence    = nullptr;
+    std::atomic<int32_t>* mInWriteLock   = nullptr;
+
+    // NRT control plane: the audio-thread ingress forwards /clock + /supersonic
+    // onto this process-local, Message-framed ring. The NRT gateway (mNrtGateway)
+    // is the sole non-RT egress consumer: woken every audio block via processCount,
+    // it drains BOTH the OUT reply ring AND this control ring, runs EngineControl
+    // off the audio thread, and is the only thread that talks to the transport.
+    // Native-only (wasm has no NRT thread).
+    static constexpr uint32_t kNrtRingSize = 65536;
+    uint8_t                   mNrtBuffer[kNrtRingSize] = {};
+    std::atomic<int32_t>      mNrtHead{0};
+    std::atomic<int32_t>      mNrtTail{0};
+    std::atomic<int32_t>      mNrtSeq{0};
+    std::atomic<int32_t>      mNrtLock{0};
+
+    // NRT-out egress ring. The NRT_OUT_BUFFER SHM region carries ALL NRT-thread
+    // outgoing OSC — command replies, Link/device notifications, off-thread
+    // debug — written by OscEgress under mEgressLock
+    // (multi-producer). The gateway drains it and is the sole transport caller, so
+    // no engine thread ever touches a socket. (Web has no NRT thread → unused.)
+    std::atomic<int32_t>      mEgressLock{0};
+
+    RingReader                mNrtGateway{"SuperSonic-NrtGateway"};
+
+
+    // Debounced device switch — rapid clicks settle into one final switch.
+    struct PendingSwitch {
+        std::string devName;
+        std::string inputDevName;
+        double sampleRate = 0;
+        int bufferSize = 0;
+        std::chrono::steady_clock::time_point timestamp;
+        bool active = false;
+    };
+    PendingSwitch              mPendingSwitch;
+    std::mutex                 mPendingSwitchMutex;
+    std::thread                mDebounceSwitchThread;
+    std::atomic<bool>          mDebounceSwitchRunning{false};
+    std::atomic<bool>          mDebounceSwitchStop{false};
+    void executePendingSwitch();
+
+    // Device reopen — rejected while one is in flight or within a short cooldown
+    // after completion; accepted requests run on a worker thread.
+    std::atomic<bool>          mReopenInProgress{false};
+    std::chrono::steady_clock::time_point mLastReopenFinishedAt{};
+    std::thread                mReopenThread;
+    void executeReopen();
 
     HeadlessDriver               mHeadlessDriver;
     std::unique_ptr<juce::AudioDeviceManager> mDeviceManager;

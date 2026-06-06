@@ -8,9 +8,9 @@
 
 * [osc](#osc)
 
-* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [SendOSCOptions](#sendoscoptions) · [Snapshot](#snapshot) · [SuperClock](#superclock-1) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
+* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [Snapshot](#snapshot) · [SuperClock](#superclock-1) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
 
-* **Type Aliases** — [AddAction](#addaction) · [BlockedCommand](#blockedcommand) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscCategory](#osccategory) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
+* **Type Aliases** — [AddAction](#addaction) · [BlockedCommand](#blockedcommand) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
 
 ## Classes
 
@@ -23,24 +23,20 @@ scsynth with low latency inside a web page.
 
 **Core**
 
-| Member                                    | Description                                                                                                                 |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| [`init()`](#init)                         | Initialise the engine.                                                                                                      |
-| [`shutdown()`](#shutdown)                 | Shut down the engine.                                                                                                       |
-| [`destroy()`](#destroy)                   | Destroy the engine completely.                                                                                              |
-| [`recover()`](#recover)                   | Smart recovery — tries a quick resume first, falls back to full reload.                                                     |
-| [`suspend()`](#suspend)                   | Suspend the AudioContext and stop the drift timer.                                                                          |
-| [`resume()`](#resume)                     | Quick resume — calls purge to flush stale messages, resumes AudioContext, and resyncs timing.                               |
-| [`reload()`](#reload)                     | Full reload — destroys and recreates the worklet and WASM, then restores all previously loaded synthdefs and audio buffers. |
-| [`reset()`](#reset)                       | Shutdown and immediately re-initialise.                                                                                     |
-| [`send()`](#send)                         | Send any OSC message.                                                                                                       |
-| [`sendOSC()`](#sendosc)                   | Send pre-encoded OSC bytes to scsynth.                                                                                      |
-| [`sync()`](#sync)                         | Wait for scsynth to process all pending commands.                                                                           |
-| [`purge()`](#purge)                       | Cancel all pending scheduled messages everywhere in the pipeline.                                                           |
-| [`cancelAll()`](#cancelall)               | Cancel all scheduled messages in the JS prescheduler.                                                                       |
-| [`cancelSession()`](#cancelsession)       | Cancel all scheduled messages for a session.                                                                                |
-| [`cancelSessionTag()`](#cancelsessiontag) | Cancel scheduled messages matching both a session and run tag.                                                              |
-| [`cancelTag()`](#canceltag)               | Cancel all scheduled messages with the given run tag.                                                                       |
+| Member                    | Description                                                                                                                 |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [`init()`](#init)         | Initialise the engine.                                                                                                      |
+| [`shutdown()`](#shutdown) | Shut down the engine.                                                                                                       |
+| [`destroy()`](#destroy)   | Destroy the engine completely.                                                                                              |
+| [`recover()`](#recover)   | Smart recovery — tries a quick resume first, falls back to full reload.                                                     |
+| [`suspend()`](#suspend)   | Suspend the AudioContext and stop the drift timer.                                                                          |
+| [`resume()`](#resume)     | Quick resume — calls purge to flush stale messages, resumes AudioContext, and resyncs timing.                               |
+| [`reload()`](#reload)     | Full reload — destroys and recreates the worklet and WASM, then restores all previously loaded synthdefs and audio buffers. |
+| [`reset()`](#reset)       | Shutdown and immediately re-initialise.                                                                                     |
+| [`send()`](#send)         | Send any OSC message.                                                                                                       |
+| [`sendOSC()`](#sendosc)   | Send pre-encoded OSC bytes to scsynth.                                                                                      |
+| [`sync()`](#sync)         | Wait for scsynth to process all pending commands.                                                                           |
+| [`purge()`](#purge)       | Flush all pending scheduled OSC: clears the WASM BundleScheduler and the IN ring so nothing already in-flight will fire.    |
 
 **Asset Loading**
 
@@ -193,33 +189,31 @@ const sonic = new SuperSonic({
 
 #### Constructor Options
 
-| Property                                                    | Type                                        | Description                                                                                                                                                                                                                                                        | Required |
-| ----------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
-| <a id="activityevent"></a> `activityEvent?`                 | [`ActivityLineConfig`](#activitylineconfig) | Line length limits for activity events emitted to listeners.                                                                                                                                                                                                       |          |
-| <a id="audiocontext-1"></a> `audioContext?`                 | `AudioContext`                              | Provide your own AudioContext instead of letting SuperSonic create one.                                                                                                                                                                                            |          |
-| <a id="audiocontextoptions"></a> `audioContextOptions?`     | `AudioContextOptions`                       | Options passed to `new AudioContext()`. Ignored if `audioContext` is provided.                                                                                                                                                                                     |          |
-| <a id="autoconnect"></a> `autoConnect?`                     | `boolean`                                   | Auto-connect the AudioWorkletNode to the AudioContext destination. Default: true.                                                                                                                                                                                  |          |
-| <a id="baseurl"></a> `baseURL?`                             | `string`                                    | Convenience shorthand when all assets (WASM, workers, synthdefs, samples) are co-located.                                                                                                                                                                          | Yes\*    |
-| <a id="buffergrowincrement"></a> `bufferGrowIncrement?`     | `number`                                    | Bytes to grow the buffer pool per growth event. Default: 32MB.                                                                                                                                                                                                     |          |
-| <a id="bypasslookaheadms"></a> `bypassLookaheadMs?`         | `number`                                    | Bundles scheduled within this many ms of now are dispatched immediately for lowest latency. Bundles further in the future are held and dispatched closer to their scheduled time. Default: 500.                                                                    |          |
-| <a id="corebaseurl"></a> `coreBaseURL?`                     | `string`                                    | Base URL for GPL assets: WASM and AudioWorklet (supersonic-scsynth-core package). Defaults to `baseURL`.                                                                                                                                                           |          |
-| <a id="debug-1"></a> `debug?`                               | `boolean`                                   | Enable all debug console logging. Default: false.                                                                                                                                                                                                                  |          |
-| <a id="debugoscin"></a> `debugOscIn?`                       | `boolean`                                   | Log incoming OSC messages to console. Default: false.                                                                                                                                                                                                              |          |
-| <a id="debugoscout"></a> `debugOscOut?`                     | `boolean`                                   | Log outgoing OSC messages to console. Default: false.                                                                                                                                                                                                              |          |
-| <a id="debugscsynth"></a> `debugScsynth?`                   | `boolean`                                   | Log scsynth debug output to console. Default: false.                                                                                                                                                                                                               |          |
-| <a id="fetchmaxretries"></a> `fetchMaxRetries?`             | `number`                                    | Max fetch retries when loading assets. Default: 3.                                                                                                                                                                                                                 |          |
-| <a id="fetchretrydelay"></a> `fetchRetryDelay?`             | `number`                                    | Base delay between retries in ms (exponential backoff). Default: 1000.                                                                                                                                                                                             |          |
-| <a id="maxbuffermemory"></a> `maxBufferMemory?`             | `number`                                    | Maximum buffer pool capacity in bytes. Pool grows on demand up to this limit. Default: 256MB.                                                                                                                                                                      |          |
-| <a id="mode-5"></a> `mode?`                                 | [`TransportMode`](#transportmode)           | Transport mode. - `'postMessage'` (default) — works everywhere, no special headers needed - `'sab'` — lowest latency, requires Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers See docs/MODES.md for a full comparison of communication modes. |          |
-| <a id="preschedulercapacity-1"></a> `preschedulerCapacity?` | `number`                                    | Max pending events in the JS prescheduler. Default: 65536.                                                                                                                                                                                                         |          |
-| <a id="samplebaseurl"></a> `sampleBaseURL?`                 | `string`                                    | Base URL for audio sample files (used by [SuperSonic.loadSample](#loadsample)).                                                                                                                                                                                    |          |
-| <a id="scsynthoptions-1"></a> `scsynthOptions?`             | [`ScsynthOptions`](#scsynthoptions)         | Engine options passed to scsynth World\_New().                                                                                                                                                                                                                     |          |
-| <a id="snapshotintervalms"></a> `snapshotIntervalMs?`       | `number`                                    | How often to snapshot metrics/tree in postMessage mode (ms).                                                                                                                                                                                                       |          |
-| <a id="synthdefbaseurl"></a> `synthdefBaseURL?`             | `string`                                    | Base URL for synthdef files (used by [SuperSonic.loadSynthDef](#loadsynthdef)).                                                                                                                                                                                    |          |
-| <a id="wasmbaseurl"></a> `wasmBaseURL?`                     | `string`                                    | Base URL for WASM files. Defaults to `coreBaseURL + 'wasm/'`.                                                                                                                                                                                                      |          |
-| <a id="wasmurl"></a> `wasmUrl?`                             | `string`                                    | Full URL to the WASM binary. Overrides wasmBaseURL.                                                                                                                                                                                                                |          |
-| <a id="workerbaseurl"></a> `workerBaseURL?`                 | `string`                                    | Base URL for MIT worker scripts. Defaults to `baseURL + 'workers/'`.                                                                                                                                                                                               |          |
-| <a id="workleturl"></a> `workletUrl?`                       | `string`                                    | Full URL to the AudioWorklet script. Overrides `coreBaseURL`.                                                                                                                                                                                                      |          |
+| Property                                                | Type                                        | Description                                                                                                                                                                                                                                                        | Required |
+| ------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| <a id="activityevent"></a> `activityEvent?`             | [`ActivityLineConfig`](#activitylineconfig) | Line length limits for activity events emitted to listeners.                                                                                                                                                                                                       |          |
+| <a id="audiocontext-1"></a> `audioContext?`             | `AudioContext`                              | Provide your own AudioContext instead of letting SuperSonic create one.                                                                                                                                                                                            |          |
+| <a id="audiocontextoptions"></a> `audioContextOptions?` | `AudioContextOptions`                       | Options passed to `new AudioContext()`. Ignored if `audioContext` is provided.                                                                                                                                                                                     |          |
+| <a id="autoconnect"></a> `autoConnect?`                 | `boolean`                                   | Auto-connect the AudioWorkletNode to the AudioContext destination. Default: true.                                                                                                                                                                                  |          |
+| <a id="baseurl"></a> `baseURL?`                         | `string`                                    | Convenience shorthand when all assets (WASM, workers, synthdefs, samples) are co-located.                                                                                                                                                                          | Yes\*    |
+| <a id="buffergrowincrement"></a> `bufferGrowIncrement?` | `number`                                    | Bytes to grow the buffer pool per growth event. Default: 32MB.                                                                                                                                                                                                     |          |
+| <a id="corebaseurl"></a> `coreBaseURL?`                 | `string`                                    | Base URL for GPL assets: WASM and AudioWorklet (supersonic-scsynth-core package). Defaults to `baseURL`.                                                                                                                                                           |          |
+| <a id="debug-1"></a> `debug?`                           | `boolean`                                   | Enable all debug console logging. Default: false.                                                                                                                                                                                                                  |          |
+| <a id="debugoscin"></a> `debugOscIn?`                   | `boolean`                                   | Log incoming OSC messages to console. Default: false.                                                                                                                                                                                                              |          |
+| <a id="debugoscout"></a> `debugOscOut?`                 | `boolean`                                   | Log outgoing OSC messages to console. Default: false.                                                                                                                                                                                                              |          |
+| <a id="debugscsynth"></a> `debugScsynth?`               | `boolean`                                   | Log scsynth debug output to console. Default: false.                                                                                                                                                                                                               |          |
+| <a id="fetchmaxretries"></a> `fetchMaxRetries?`         | `number`                                    | Max fetch retries when loading assets. Default: 3.                                                                                                                                                                                                                 |          |
+| <a id="fetchretrydelay"></a> `fetchRetryDelay?`         | `number`                                    | Base delay between retries in ms (exponential backoff). Default: 1000.                                                                                                                                                                                             |          |
+| <a id="maxbuffermemory"></a> `maxBufferMemory?`         | `number`                                    | Maximum buffer pool capacity in bytes. Pool grows on demand up to this limit. Default: 256MB.                                                                                                                                                                      |          |
+| <a id="mode-5"></a> `mode?`                             | [`TransportMode`](#transportmode)           | Transport mode. - `'postMessage'` (default) — works everywhere, no special headers needed - `'sab'` — lowest latency, requires Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers See docs/MODES.md for a full comparison of communication modes. |          |
+| <a id="samplebaseurl"></a> `sampleBaseURL?`             | `string`                                    | Base URL for audio sample files (used by [SuperSonic.loadSample](#loadsample)).                                                                                                                                                                                    |          |
+| <a id="scsynthoptions-1"></a> `scsynthOptions?`         | [`ScsynthOptions`](#scsynthoptions)         | Engine options passed to scsynth World\_New().                                                                                                                                                                                                                     |          |
+| <a id="snapshotintervalms"></a> `snapshotIntervalMs?`   | `number`                                    | How often to snapshot metrics/tree in postMessage mode (ms).                                                                                                                                                                                                       |          |
+| <a id="synthdefbaseurl"></a> `synthdefBaseURL?`         | `string`                                    | Base URL for synthdef files (used by [SuperSonic.loadSynthDef](#loadsynthdef)).                                                                                                                                                                                    |          |
+| <a id="wasmbaseurl"></a> `wasmBaseURL?`                 | `string`                                    | Base URL for WASM files. Defaults to `coreBaseURL + 'wasm/'`.                                                                                                                                                                                                      |          |
+| <a id="wasmurl"></a> `wasmUrl?`                         | `string`                                    | Full URL to the WASM binary. Overrides wasmBaseURL.                                                                                                                                                                                                                |          |
+| <a id="workerbaseurl"></a> `workerBaseURL?`             | `string`                                    | Base URL for MIT worker scripts. Defaults to `baseURL + 'workers/'`.                                                                                                                                                                                               |          |
+| <a id="workleturl"></a> `workletUrl?`                   | `string`                                    | Full URL to the AudioWorklet script. Overrides `coreBaseURL`.                                                                                                                                                                                                      |          |
 
 *Required unless both `coreBaseURL`/`workerBaseURL` and `wasmBaseURL` are provided.*
 
@@ -414,66 +408,6 @@ See [SuperClock](#superclock-1) for the full API surface.
 ***
 
 #### Methods
-
-##### cancelAll()
-
-> **cancelAll**(): `void`
-
-Cancel all scheduled messages in the JS prescheduler.
-
-###### Returns
-
-`void`
-
-##### cancelSession()
-
-> **cancelSession**(`sessionId`): `void`
-
-Cancel all scheduled messages for a session.
-
-###### Parameters
-
-| Parameter   | Type     | Description       |
-| ----------- | -------- | ----------------- |
-| `sessionId` | `string` | Session to cancel |
-
-###### Returns
-
-`void`
-
-##### cancelSessionTag()
-
-> **cancelSessionTag**(`sessionId`, `runTag`): `void`
-
-Cancel scheduled messages matching both a session and run tag.
-
-###### Parameters
-
-| Parameter   | Type     | Description                      |
-| ----------- | -------- | -------------------------------- |
-| `sessionId` | `string` | Session to match                 |
-| `runTag`    | `string` | Tag to match within that session |
-
-###### Returns
-
-`void`
-
-##### cancelTag()
-
-> **cancelTag**(`runTag`): `void`
-
-Cancel all scheduled messages with the given run tag.
-Only affects messages in the JS prescheduler (not yet dispatched to WASM).
-
-###### Parameters
-
-| Parameter | Type     | Description   |
-| --------- | -------- | ------------- |
-| `runTag`  | `string` | Tag to cancel |
-
-###### Returns
-
-`void`
 
 ##### createOscChannel()
 
@@ -1002,11 +936,8 @@ Unsubscribe function — call it to remove the listener before it fires
 
 > **purge**(): `Promise`<`void`>
 
-Cancel all pending scheduled messages everywhere in the pipeline.
-
-Unlike [cancelAll](#cancelall) which only clears messages still waiting in JS,
-`purge()` guarantees that nothing already in-flight will fire either.
-Resolves when the flush is confirmed complete.
+Flush all pending scheduled OSC: clears the WASM BundleScheduler and the IN
+ring so nothing already in-flight will fire. Resolves when confirmed.
 
 ###### Returns
 
@@ -1297,7 +1228,7 @@ File writing is not available in the browser.
 
 ###### Deprecated
 
-Use purge() to clear both the JS prescheduler and WASM scheduler.
+Use purge() to clear the WASM BundleScheduler + IN ring.
 
 ###### Call Signature
 
@@ -2352,7 +2283,7 @@ For 64-bit or timetag types, use the tagged object form:
 
 ##### sendOSC()
 
-> **sendOSC**(`oscData`, `options?`): `void`
+> **sendOSC**(`oscData`): `void`
 
 Send pre-encoded OSC bytes to scsynth.
 
@@ -2363,10 +2294,9 @@ Use [send](#send-1) for buffer commands so they are handled correctly.
 
 ###### Parameters
 
-| Parameter  | Type                                             | Description                           |
-| ---------- | ------------------------------------------------ | ------------------------------------- |
-| `oscData`  | `ArrayBuffer` \| `Uint8Array`<`ArrayBufferLike`> | Encoded OSC message or bundle bytes   |
-| `options?` | [`SendOSCOptions`](#sendoscoptions)              | Optional session/tag for cancellation |
+| Parameter | Type                                             | Description                         |
+| --------- | ------------------------------------------------ | ----------------------------------- |
+| `oscData` | `ArrayBuffer` \| `Uint8Array`<`ArrayBufferLike`> | Encoded OSC message or bundle bytes |
 
 ###### Returns
 
@@ -2374,17 +2304,13 @@ Use [send](#send-1) for buffer commands so they are handled correctly.
 
 ###### Throws
 
-If the bundle exceeds the maximum schedulable size
+If the message exceeds the IN ring size
 
 ###### Example
 
 ```ts
 const msg = SuperSonic.osc.encodeMessage('/n_set', [1001, 'freq', 880]);
 sonic.sendOSC(msg);
-
-// With cancellation tags:
-const bundle = SuperSonic.osc.encodeBundle(futureTime, packets);
-sonic.sendOSC(bundle, { sessionId: 'song1', runTag: 'verse' });
 ```
 
 ##### setClockOffset()
@@ -2537,27 +2463,19 @@ OscChannel — unified dispatch for sending OSC to the AudioWorklet.
 Obtain a channel via [SuperSonic.createOscChannel](#createoscchannel) on the main thread,
 then transfer it to a Web Worker for direct communication with the AudioWorklet.
 
-| Member                                        | Description                                                                                             |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| [`getCurrentNTP`](#getcurrentntp)             | Set the NTP time source for classification (used in AudioWorklet context).                              |
-| [`mode`](#mode)                               | Transport mode this channel is using.                                                                   |
-| [`replyDrops`](#replydrops)                   | Number of reply messages dropped because the reply buffer was full.                                     |
-| [`transferable`](#transferable)               | Serializable config for transferring this channel to a worker via postMessage.                          |
-| [`transferList`](#transferlist)               | Array of transferable objects (MessagePorts) for the postMessage transfer list.                         |
-| [`activateReplies()`](#activatereplies)       | Activate the reply slot without registering a handler.                                                  |
-| [`classify()`](#classify)                     | Classify an OSC message to determine its routing.                                                       |
-| [`clearReplyHandler()`](#clearreplyhandler)   | Clear the reply handler and release the reply channel.                                                  |
-| [`close()`](#close)                           | Close the channel and release its ports.                                                                |
-| [`deactivateReplies()`](#deactivatereplies)   | Release the reply slot.                                                                                 |
-| [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                                                   |
-| [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                                           |
-| [`nextNodeId()`](#nextnodeid)                 | Get the next unique node ID.                                                                            |
-| [`pollReplies()`](#pollreplies)               | Drain pending replies, calling the registered handler (or handler argument, if given) once per message. |
-| [`send()`](#send)                             | Send an OSC message with automatic routing.                                                             |
-| [`sendDirect()`](#senddirect)                 | Send directly to worklet without classification or metrics tracking.                                    |
-| [`sendToPrescheduler()`](#sendtoprescheduler) | Send to prescheduler without classification.                                                            |
-| [`setReplyHandler()`](#setreplyhandler)       | Register a handler for OSC replies from scsynth.                                                        |
-| [`fromTransferable()`](#fromtransferable)     | Reconstruct an OscChannel from data received via postMessage in a worker.                               |
+| Member                                        | Description                                                                                   |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| [`getCurrentNTP`](#getcurrentntp)             | Set the NTP time source for classification (used in AudioWorklet context).                    |
+| [`mode`](#mode)                               | Transport mode this channel is using.                                                         |
+| [`transferable`](#transferable)               | Serializable config for transferring this channel to a worker via postMessage.                |
+| [`transferList`](#transferlist)               | Array of transferable objects (MessagePorts) for the postMessage transfer list.               |
+| [`close()`](#close)                           | Close the channel and release its ports.                                                      |
+| [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                                         |
+| [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                                 |
+| [`nextNodeId()`](#nextnodeid)                 | Get the next unique node ID.                                                                  |
+| [`send()`](#send)                             | Send an OSC message: frames it onto the IN ring (SAB) or postMessages it to the worklet (PM). |
+| [`sendDirect()`](#senddirect)                 | Alias of send — kept for callers that used the explicit direct path.                          |
+| [`fromTransferable()`](#fromtransferable)     | Reconstruct an OscChannel from data received via postMessage in a worker.                     |
 
 #### Example
 
@@ -2621,20 +2539,6 @@ Transport mode this channel is using.
 
 [`TransportMode`](#transportmode)
 
-##### replyDrops
-
-###### Get Signature
-
-> **get** **replyDrops**(): `number`
-
-Number of reply messages dropped because the reply buffer was full.
-SAB mode only — undefined in PM mode or before [activateReplies](#activatereplies).
-Counter resets each time the slot is (re)claimed.
-
-###### Returns
-
-`number`
-
 ##### transferable
 
 ###### Get Signature
@@ -2675,60 +2579,11 @@ worker.postMessage({ ch: channel.transferable }, channel.transferList);
 
 #### Methods
 
-##### activateReplies()
-
-> **activateReplies**(): `void`
-
-Activate the reply slot without registering a handler. Usually called
-for you by [setReplyHandler](#setreplyhandler); only call directly if you want to
-claim the slot before installing a handler (or to use the optional
-one-shot handler argument of [pollReplies](#pollreplies)).
-
-###### Returns
-
-`void`
-
-##### classify()
-
-> **classify**(`oscData`): [`OscCategory`](#osccategory)
-
-Classify an OSC message to determine its routing.
-
-###### Parameters
-
-| Parameter | Type         | Description       |
-| --------- | ------------ | ----------------- |
-| `oscData` | `Uint8Array` | Encoded OSC bytes |
-
-###### Returns
-
-[`OscCategory`](#osccategory)
-
-##### clearReplyHandler()
-
-> **clearReplyHandler**(): `void`
-
-Clear the reply handler and release the reply channel. Idempotent.
-
-###### Returns
-
-`void`
-
 ##### close()
 
 > **close**(): `void`
 
 Close the channel and release its ports.
-
-###### Returns
-
-`void`
-
-##### deactivateReplies()
-
-> **deactivateReplies**(): `void`
-
-Release the reply slot. Usually called for you by [clearReplyHandler](#clearreplyhandler).
 
 ###### Returns
 
@@ -2770,40 +2625,13 @@ the root group, 1 is the default group, 2–999 are reserved for manual use).
 
 A unique node ID (>= 1000)
 
-##### pollReplies()
-
-> **pollReplies**(`handler?`): `number`
-
-Drain pending replies, calling the registered handler (or `handler`
-argument, if given) once per message. Returns the number of messages
-processed. Zero-allocation on the hot path.
-
-Call from an AudioWorklet's `process()` method to receive replies on
-the audio thread. In other contexts automatic delivery already calls
-this for you.
-
-###### Parameters
-
-| Parameter  | Type                                                                                        | Description                          |
-| ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `handler?` | ((`view`, `offset`, `length`, `sequence`) => `void`) \| ((`oscData`, `sequence`) => `void`) | Optional override for this call only |
-
-###### Returns
-
-`number`
-
-Number of messages drained
-
 ##### send()
 
 > **send**(`oscData`): `boolean`
 
-Send an OSC message with automatic routing.
-
-Classifies the message and routes it:
-
-* bypass categories → sent directly to the AudioWorklet
-* far-future bundles → routed to the prescheduler for timed dispatch
+Send an OSC message: frames it onto the IN ring (SAB) or postMessages it to
+the worklet (PM). Classification and scheduling happen on the audio thread
+(the engine's OscIngress + BundleScheduler) — the producer never classifies.
 
 ###### Parameters
 
@@ -2821,7 +2649,7 @@ true if sent successfully
 
 > **sendDirect**(`oscData`): `boolean`
 
-Send directly to worklet without classification or metrics tracking.
+Alias of [send](#send) — kept for callers that used the explicit direct path.
 
 ###### Parameters
 
@@ -2834,58 +2662,6 @@ Send directly to worklet without classification or metrics tracking.
 `boolean`
 
 true if sent successfully
-
-##### sendToPrescheduler()
-
-> **sendToPrescheduler**(`oscData`): `boolean`
-
-Send to prescheduler without classification.
-
-###### Parameters
-
-| Parameter | Type         | Description       |
-| --------- | ------------ | ----------------- |
-| `oscData` | `Uint8Array` | Encoded OSC bytes |
-
-###### Returns
-
-`boolean`
-
-true if sent successfully
-
-##### setReplyHandler()
-
-> **setReplyHandler**(`handler`): `void`
-
-Register a handler for OSC replies from scsynth. Idempotent — replaces
-any previously-registered handler. In AudioWorklet contexts the worklet
-must call [pollReplies](#pollreplies) from `process()` to drain; in all other
-contexts delivery is automatic. All registered channels receive all
-replies (broadcast); filter locally if you only need specific addresses.
-
-SAB mode: handler receives `(view, offset, length, sequence)` — zero-copy
-into the shared buffer. Read bytes from `view[offset..offset+length]`.
-Data is valid only for the duration of the handler call.
-
-PM mode: handler receives `(oscData, sequence)` where `oscData` is a copy.
-
-###### Parameters
-
-| Parameter | Type                                                                                        |
-| --------- | ------------------------------------------------------------------------------------------- |
-| `handler` | ((`view`, `offset`, `length`, `sequence`) => `void`) \| ((`oscData`, `sequence`) => `void`) |
-
-###### Returns
-
-`void`
-
-###### Example
-
-```ts
-channel.setReplyHandler((view, offset, length, sequence) => {
-  // SAB: read raw OSC bytes from view[offset..offset+length]
-});
-```
 
 ##### fromTransferable()
 
@@ -3074,13 +2850,11 @@ a declarative UI layout for rendering metrics panels, and sentinel values.
 
 #### Properties
 
-| Property                           | Type                                                                                                | Description                                                                      |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| <a id="layout"></a> `layout`       | `object`                                                                                            | Panel structure for rendering a metrics UI. Used by `<supersonic-metrics>`.      |
-| `layout.panels`                    | `object`\[]                                                                                         | -                                                                                |
-| <a id="metrics"></a> `metrics`     | `Record`\<keyof [`SuperSonicMetrics`](#supersonicmetrics), [`MetricDefinition`](#metricdefinition)> | Each key maps to offset, type, unit, and description for the merged Uint32Array. |
-| <a id="sentinels"></a> `sentinels` | `object`                                                                                            | Magic values used in the metrics array.                                          |
-| `sentinels.HEADROOM_UNSET`         | `number`                                                                                            | Value of preschedulerMinHeadroomMs before any data arrives.                      |
+| Property                       | Type                                                                                                | Description                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| <a id="layout"></a> `layout`   | `object`                                                                                            | Panel structure for rendering a metrics UI. Used by `<supersonic-metrics>`.      |
+| `layout.panels`                | `object`\[]                                                                                         | -                                                                                |
+| <a id="metrics"></a> `metrics` | `Record`\<keyof [`SuperSonicMetrics`](#supersonicmetrics), [`MetricDefinition`](#metricdefinition)> | Each key maps to offset, type, unit, and description for the merged Uint32Array. |
 
 ***
 
@@ -3105,13 +2879,8 @@ OscChannel metrics counters.
 
 | Property                                 | Type     |
 | ---------------------------------------- | -------- |
-| <a id="bypassed"></a> `bypassed`         | `number` |
 | <a id="bytessent"></a> `bytesSent`       | `number` |
-| <a id="immediate"></a> `immediate`       | `number` |
-| <a id="late"></a> `late`                 | `number` |
 | <a id="messagessent"></a> `messagesSent` | `number` |
-| <a id="nearfuture"></a> `nearFuture`     | `number` |
-| <a id="nonbundle"></a> `nonBundle`       | `number` |
 
 ***
 
@@ -3121,14 +2890,12 @@ Transferable config for postMessage mode OscChannel.
 
 #### Properties
 
-| Property                                         | Type            |
-| ------------------------------------------------ | --------------- |
-| <a id="blocking"></a> `blocking`                 | `boolean`       |
-| <a id="bypasslookaheads"></a> `bypassLookaheadS` | `number`        |
-| <a id="mode-2"></a> `mode`                       | `"postMessage"` |
-| <a id="port"></a> `port`                         | `MessagePort`   |
-| <a id="preschedulerport"></a> `preschedulerPort` | `MessagePort`   |
-| <a id="sourceid"></a> `sourceId`                 | `number`        |
+| Property                         | Type            |
+| -------------------------------- | --------------- |
+| <a id="blocking"></a> `blocking` | `boolean`       |
+| <a id="mode-2"></a> `mode`       | `"postMessage"` |
+| <a id="port"></a> `port`         | `MessagePort`   |
+| <a id="sourceid"></a> `sourceId` | `number`        |
 
 ***
 
@@ -3138,17 +2905,15 @@ Transferable config for SAB mode OscChannel.
 
 #### Properties
 
-| Property                                           | Type                         |
-| -------------------------------------------------- | ---------------------------- |
-| <a id="blocking-1"></a> `blocking`                 | `boolean`                    |
-| <a id="bufferconstants-1"></a> `bufferConstants`   | `Record`<`string`, `number`> |
-| <a id="bypasslookaheads-1"></a> `bypassLookaheadS` | `number`                     |
-| <a id="controlindices"></a> `controlIndices`       | `Record`<`string`, `number`> |
-| <a id="mode-3"></a> `mode`                         | `"sab"`                      |
-| <a id="preschedulerport-1"></a> `preschedulerPort` | `MessagePort`                |
-| <a id="ringbufferbase-1"></a> `ringBufferBase`     | `number`                     |
-| <a id="sharedbuffer-1"></a> `sharedBuffer`         | `SharedArrayBuffer`          |
-| <a id="sourceid-1"></a> `sourceId`                 | `number`                     |
+| Property                                         | Type                         |
+| ------------------------------------------------ | ---------------------------- |
+| <a id="blocking-1"></a> `blocking`               | `boolean`                    |
+| <a id="bufferconstants-1"></a> `bufferConstants` | `Record`<`string`, `number`> |
+| <a id="controlindices"></a> `controlIndices`     | `Record`<`string`, `number`> |
+| <a id="mode-3"></a> `mode`                       | `"sab"`                      |
+| <a id="ringbufferbase-1"></a> `ringBufferBase`   | `number`                     |
+| <a id="sharedbuffer-1"></a> `sharedBuffer`       | `SharedArrayBuffer`          |
+| <a id="sourceid-1"></a> `sourceId`               | `number`                     |
 
 ***
 
@@ -3214,19 +2979,6 @@ value of [SuperSonic.loadSample](#loadsample) (with `bufnum`).
 | <a id="numframes-2"></a> `numFrames`     | `number` | Number of sample frames.                                   |
 | <a id="samplerate-2"></a> `sampleRate`   | `number` | Sample rate in Hz.                                         |
 | <a id="source-2"></a> `source`           | `string` | Original source path/URL, or null for inline data.         |
-
-### SendOSCOptions
-
-Options for [SuperSonic.sendOSC](#sendosc).
-
-#### Properties
-
-| Property                            | Type     | Description                                                                 |
-| ----------------------------------- | -------- | --------------------------------------------------------------------------- |
-| <a id="runtag"></a> `runTag?`       | `string` | Run tag for cancellation via [SuperSonic.cancelTag](#canceltag).            |
-| <a id="sessionid"></a> `sessionId?` | `string` | Session ID for cancellation via [SuperSonic.cancelSession](#cancelsession). |
-
-***
 
 ### Snapshot
 
@@ -3647,10 +3399,6 @@ descriptions, units, and UI layout metadata.
 | <a id="bufferpoolpoolcount"></a> `bufferPoolPoolCount`                   | `number` | Number of buffer pool segments (1 = no growth yet).                                           |
 | <a id="bufferpooltotalcapacity"></a> `bufferPoolTotalCapacity`           | `number` | Buffer pool committed capacity in bytes (grows on demand).                                    |
 | <a id="bufferpoolusedbytes"></a> `bufferPoolUsedBytes`                   | `number` | Buffer pool bytes currently in use.                                                           |
-| <a id="bypassimmediate"></a> `bypassImmediate`                           | `number` | Bundles with timetag 0 or 1 that bypassed prescheduler.                                       |
-| <a id="bypasslate"></a> `bypassLate`                                     | `number` | Late bundles that bypassed prescheduler.                                                      |
-| <a id="bypassnearfuture"></a> `bypassNearFuture`                         | `number` | Bundles within lookahead threshold that bypassed prescheduler.                                |
-| <a id="bypassnonbundle"></a> `bypassNonBundle`                           | `number` | Plain OSC messages (not bundles) that bypassed prescheduler.                                  |
 | <a id="clockbeatcenti"></a> `clockBeatCenti`                             | `number` | Beat position \* 100. Divide by 100 for the beat.                                             |
 | <a id="clockoffsetms"></a> `clockOffsetMs`                               | `number` | Clock offset for multi-system sync (ms, signed).                                              |
 | <a id="clockphasecenti"></a> `clockPhaseCenti`                           | `number` | Phase within the quantum \* 100. Divide by 100 for the phase.                                 |
@@ -3679,23 +3427,7 @@ descriptions, units, and UI layout metadata.
 | <a id="outbuffercapacity"></a> `outBufferCapacity`                       | `number` | OUT ring buffer capacity (bytes).                                                             |
 | <a id="outbufferpeakbytes"></a> `outBufferPeakBytes`                     | `number` | Peak bytes used in OUT ring buffer.                                                           |
 | <a id="outbufferusedbytes"></a> `outBufferUsedBytes`                     | `number` | Bytes used in OUT ring buffer (scsynth → JS).                                                 |
-| <a id="preschedulerbundlesscheduled"></a> `preschedulerBundlesScheduled` | `number` | Bundles added to prescheduler.                                                                |
-| <a id="preschedulerbypassed"></a> `preschedulerBypassed`                 | `number` | Messages sent directly, bypassing prescheduler (aggregate).                                   |
-| <a id="preschedulercapacity"></a> `preschedulerCapacity`                 | `number` | Maximum pending events in JS prescheduler.                                                    |
-| <a id="preschedulerdispatched"></a> `preschedulerDispatched`             | `number` | Events sent from prescheduler to worklet.                                                     |
-| <a id="preschedulereventscancelled"></a> `preschedulerEventsCancelled`   | `number` | Bundles cancelled before dispatch.                                                            |
-| <a id="preschedulerlates"></a> `preschedulerLates`                       | `number` | Bundles dispatched after their scheduled time.                                                |
-| <a id="preschedulermaxlatems"></a> `preschedulerMaxLateMs`               | `number` | Maximum lateness at prescheduler (ms).                                                        |
-| <a id="preschedulermessagesretried"></a> `preschedulerMessagesRetried`   | `number` | Total messages that needed retry.                                                             |
-| <a id="preschedulerminheadroomms"></a> `preschedulerMinHeadroomMs`       | `number` | Smallest time gap between dispatch and execution (ms). 0xFFFFFFFF = no data yet.              |
-| <a id="preschedulerpending"></a> `preschedulerPending`                   | `number` | Events waiting in JS prescheduler queue.                                                      |
-| <a id="preschedulerpendingpeak"></a> `preschedulerPendingPeak`           | `number` | Peak pending events.                                                                          |
-| <a id="preschedulerretriesfailed"></a> `preschedulerRetriesFailed`       | `number` | Ring buffer write retries that failed.                                                        |
-| <a id="preschedulerretriessucceeded"></a> `preschedulerRetriesSucceeded` | `number` | Ring buffer write retries that succeeded.                                                     |
-| <a id="preschedulerretryqueuepeak"></a> `preschedulerRetryQueuePeak`     | `number` | Peak retry queue size.                                                                        |
-| <a id="preschedulerretryqueuesize"></a> `preschedulerRetryQueueSize`     | `number` | Current retry queue size.                                                                     |
-| <a id="preschedulertotaldispatches"></a> `preschedulerTotalDispatches`   | `number` | Total dispatch cycles.                                                                        |
-| <a id="ringbufferdirectwritefails"></a> `ringBufferDirectWriteFails`     | `number` | SAB mode only: optimistic direct writes that fell back to prescheduler.                       |
+| <a id="ringbufferdirectwritefails"></a> `ringBufferDirectWriteFails`     | `number` | SAB mode only: direct IN-ring writes dropped on lock contention / full ring.                  |
 | <a id="scsynthmessagesdropped"></a> `scsynthMessagesDropped`             | `number` | Messages dropped by scsynth (scheduler queue full).                                           |
 | <a id="scsynthmessagesprocessed"></a> `scsynthMessagesProcessed`         | `number` | OSC messages processed by scsynth.                                                            |
 | <a id="scsynthprocesscount"></a> `scsynthProcessCount`                   | `number` | Audio process() calls (cumulative).                                                           |
@@ -3852,20 +3584,6 @@ Accepts three formats:
 // Nested bundle:
 { timeTag: ntpTime, packets: [ ["/n_set", 1001, "freq", 880] ] }
 ```
-
-***
-
-### OscCategory
-
-> **OscCategory** = `"nonBundle"` | `"immediate"` | `"nearFuture"` | `"late"` | `"farFuture"`
-
-Classification category for OSC message routing.
-
-* `'nonBundle'` — plain message (not a bundle), sent directly
-* `'immediate'` — bundle with timetag 0 or 1, sent directly
-* `'nearFuture'` — bundle within the bypass lookahead threshold, sent directly
-* `'late'` — bundle past its scheduled time, sent directly
-* `'farFuture'` — bundle beyond the lookahead threshold, routed to the prescheduler
 
 ***
 

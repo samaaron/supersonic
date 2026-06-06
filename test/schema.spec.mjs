@@ -8,12 +8,11 @@ test.describe('Schema Validation', () => {
     });
   });
 
-  test('getMetricsSchema() returns valid schema with metrics, layout, and sentinels', async ({ page }) => {
+  test('getMetricsSchema() returns valid schema with metrics and layout', async ({ page }) => {
     const result = await page.evaluate(() => {
       const schema = window.SuperSonic.getMetricsSchema();
       const metrics = schema.metrics;
       const layout = schema.layout;
-      const sentinels = schema.sentinels;
 
       const metricKeys = Object.keys(metrics);
 
@@ -28,15 +27,11 @@ test.describe('Schema Validation', () => {
       // Check layout exists and has panels
       const hasPanels = Array.isArray(layout?.panels) && layout.panels.length > 0;
 
-      // Check sentinels
-      const hasHeadroomUnset = sentinels?.HEADROOM_UNSET === 0xFFFFFFFF;
-
       return {
         metricCount: metricKeys.length,
         invalidMetrics,
         hasPanels,
         panelCount: layout?.panels?.length ?? 0,
-        hasHeadroomUnset,
       };
     });
 
@@ -44,7 +39,6 @@ test.describe('Schema Validation', () => {
     expect(result.invalidMetrics).toEqual([]);
     expect(result.hasPanels).toBe(true);
     expect(result.panelCount).toBeGreaterThan(5);
-    expect(result.hasHeadroomUnset).toBe(true);
   });
 
   test('layout panel keys all reference valid metrics', async ({ page }) => {
@@ -154,21 +148,21 @@ test.describe('Schema Validation', () => {
       await sonic.destroy();
 
       // The getMetrics() object has a different shape from the merged array —
-      // it includes derived objects (inBufferUsed, outBufferUsed, debugBufferUsed)
+      // it includes derived objects (inBufferUsed, outBufferUsed, nrtOutBufferUsed)
       // and excludes raw byte metrics that are wrapped into those objects.
-      // Also excludes: inBufferCapacity, outBufferCapacity, debugBufferCapacity (in derived objects)
+      // Also excludes: inBufferCapacity, outBufferCapacity, nrtOutBufferCapacity (in derived objects)
       // and some array-only fields (inBufferUsedBytes etc. are deleted in gatherMetrics).
 
       // Schema.metrics keys that DON'T appear in getMetrics() because they're array-only:
       const arrayOnlyKeys = new Set([
-        'inBufferUsedBytes', 'outBufferUsedBytes', 'debugBufferUsedBytes',
-        'inBufferPeakBytes', 'outBufferPeakBytes', 'debugBufferPeakBytes',
-        'inBufferCapacity', 'outBufferCapacity', 'debugBufferCapacity',
+        'inBufferUsedBytes', 'outBufferUsedBytes', 'nrtOutBufferUsedBytes',
+        'inBufferPeakBytes', 'outBufferPeakBytes', 'nrtOutBufferPeakBytes',
+        'inBufferCapacity', 'outBufferCapacity', 'nrtOutBufferCapacity',
       ]);
 
       // Keys in getMetrics() that aren't in schema.metrics (derived objects):
       const derivedKeys = new Set([
-        'inBufferUsed', 'outBufferUsed', 'debugBufferUsed', 'ntpStartTime',
+        'inBufferUsed', 'outBufferUsed', 'nrtOutBufferUsed', 'ntpStartTime',
       ]);
 
       const schemaKeys = Object.keys(schema.metrics)
@@ -556,10 +550,5 @@ test.describe('Schema Validation', () => {
 
     // We should have received at least 5 /status.reply messages
     expect(result.receivedDelta).toBeGreaterThanOrEqual(5);
-
-    // In postMessage mode, bypass counter should increment for immediate messages
-    if (result.mode === 'postMessage') {
-      expect(result.bypassedDelta).toBeGreaterThanOrEqual(5);
-    }
   });
 });

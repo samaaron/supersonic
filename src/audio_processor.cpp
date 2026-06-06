@@ -8,7 +8,16 @@
 
 #include "audio_processor.h"
 #include "audio_config.h"
+#include "osc_debug.h"
 #include "SuperClock.h"
+#include "EngineClock.h"
+#include "OscIngress.h"
+#include "IngressCallCtx.h"
+
+// The ingress the audio-thread drain classifies through (extern in OscIngress.h).
+// Defined here — compiled by both native and wasm. Published by the engine at
+// init (native: SupersonicEngine::mIngress; wasm: a file-static, see init_memory).
+std::atomic<OscIngress*> g_active_ingress{nullptr};
 
 #ifdef __EMSCRIPTEN__
 extern "C" void superclock_wasm_init(SuperClockState* superclock_state,
@@ -70,6 +79,24 @@ shm_audio_buffer* g_shm_audio_buffers = nullptr;
 // Forward declarations
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
+
+// Audio-thread /clock handler (the wasm ingress route). Handles the cheap
+// clock-core verbs inline and replies via the OUT ring. /clock is the control
+// namespace and is always consumed here — it never reaches scsynth. (Native
+// registers a different /clock route that forwards to the NRT thread.)
+static bool clockCoreRoute(void* /*routeCtx*/, void* callCtx,
+                           const uint8_t* data, size_t len) {
+    SuperClock* clk = g_active_superclock.load(std::memory_order_acquire);
+    if (!clk) return false;  // not ready — let the drain fall through
+    auto* cc = static_cast<DrainCallCtx*>(callCtx);
+    handleClockCoreOsc(*clk, data, static_cast<uint32_t>(len),
+        [cc](const uint8_t* d, uint32_t n) {
+            SendReply(cc->reply,
+                      const_cast<char*>(reinterpret_cast<const char*>(d)),
+                      static_cast<int>(n));
+        });
+    return true;
+}
 
 // Forward declare UnrollOSCPacket from SC_ComPort.cpp (in scsynth namespace)
 namespace scsynth {
@@ -166,7 +193,7 @@ extern "C" {
     std::atomic<int32_t> last_in_sequence{-1};
     std::atomic<uint32_t> local_in_peak{0};
     std::atomic<uint32_t> local_out_peak{0};
-    std::atomic<uint32_t> local_debug_peak{0};
+    std::atomic<uint32_t> local_nrt_out_peak{0};
     std::atomic<uint32_t> metrics_cycle{0};
     std::atomic<uint32_t> corruption_count{0};
     std::atomic<uint32_t> gap_log_count{0};
@@ -272,7 +299,7 @@ extern "C" {
         last_in_sequence.store(-1, std::memory_order_relaxed);
         local_in_peak.store(0, std::memory_order_relaxed);
         local_out_peak.store(0, std::memory_order_relaxed);
-        local_debug_peak.store(0, std::memory_order_relaxed);
+        local_nrt_out_peak.store(0, std::memory_order_relaxed);
         metrics_cycle.store(0, std::memory_order_relaxed);
         corruption_count.store(0, std::memory_order_relaxed);
         gap_log_count.store(0, std::memory_order_relaxed);
@@ -331,6 +358,14 @@ extern "C" {
 
         superclock_wasm_init(superclock_state, ntp_start_time, drift_offset, global_offset);
         g_active_superclock.store(&superClock(), std::memory_order_release);
+
+        // The wasm audio-thread ingress: /clock is the only control namespace
+        // here (no NRT thread for /supersonic or Link-session verbs). Register it
+        // and publish; unmatched packets fall through to the audio plane.
+        static OscIngress wasm_ingress;
+        if (wasm_ingress.routeCount() == 0)
+            wasm_ingress.registerRoute("/clock/", &clockCoreRoute, nullptr);
+        g_active_ingress.store(&wasm_ingress, std::memory_order_release);
 #endif
 
         // Initialize all atomics to 0
@@ -338,11 +373,11 @@ extern "C" {
         control->in_tail.store(0, std::memory_order_relaxed);
         control->out_head.store(0, std::memory_order_relaxed);
         control->out_tail.store(0, std::memory_order_relaxed);
-        control->debug_head.store(0, std::memory_order_relaxed);
-        control->debug_tail.store(0, std::memory_order_relaxed);
+        control->nrt_out_head.store(0, std::memory_order_relaxed);
+        control->nrt_out_tail.store(0, std::memory_order_relaxed);
         control->in_sequence.store(0, std::memory_order_relaxed);
         control->out_sequence.store(0, std::memory_order_relaxed);
-        control->debug_sequence.store(0, std::memory_order_relaxed);
+        control->nrt_out_sequence.store(0, std::memory_order_relaxed);
         control->status_flags.store(STATUS_OK, std::memory_order_relaxed);
         control->in_write_lock.store(0, std::memory_order_relaxed);  // 0 = unlocked
 
@@ -670,12 +705,12 @@ extern "C" {
                 local_out_peak.store(out_used, std::memory_order_relaxed);
             }
 
-            int32_t debug_head = control->debug_head.load(std::memory_order_relaxed);
-            int32_t debug_tail = control->debug_tail.load(std::memory_order_relaxed);
-            uint32_t debug_used = (debug_head - debug_tail + DEBUG_BUFFER_SIZE) % DEBUG_BUFFER_SIZE;
-            metrics->debug_buffer_used_bytes.store(debug_used, std::memory_order_relaxed);
-            if (debug_used > local_debug_peak.load(std::memory_order_relaxed)) {
-                local_debug_peak.store(debug_used, std::memory_order_relaxed);
+            int32_t nrt_out_head = control->nrt_out_head.load(std::memory_order_relaxed);
+            int32_t nrt_out_tail = control->nrt_out_tail.load(std::memory_order_relaxed);
+            uint32_t nrt_out_used = (nrt_out_head - nrt_out_tail + NRT_OUT_BUFFER_SIZE) % NRT_OUT_BUFFER_SIZE;
+            metrics->nrt_out_buffer_used_bytes.store(nrt_out_used, std::memory_order_relaxed);
+            if (nrt_out_used > local_nrt_out_peak.load(std::memory_order_relaxed)) {
+                local_nrt_out_peak.store(nrt_out_used, std::memory_order_relaxed);
             }
 
             // Write peaks to atomics every 16 cycles (~43ms at 48kHz/128)
@@ -683,7 +718,7 @@ extern "C" {
                 metrics_cycle.store(0, std::memory_order_relaxed);
                 metrics->in_buffer_peak_bytes.store(local_in_peak.load(std::memory_order_relaxed), std::memory_order_relaxed);
                 metrics->out_buffer_peak_bytes.store(local_out_peak.load(std::memory_order_relaxed), std::memory_order_relaxed);
-                metrics->debug_buffer_peak_bytes.store(local_debug_peak.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                metrics->nrt_out_buffer_peak_bytes.store(local_nrt_out_peak.load(std::memory_order_relaxed), std::memory_order_relaxed);
             }
         }
 
@@ -824,8 +859,17 @@ extern "C" {
                         }
                     }
                 } else {
-                    // Single OSC message - execute immediately
-                    PerformOSCMessage(g_world, payload_size, osc_buffer, &reply_addr);
+                    // Single OSC message. Classify through the audio-thread ingress
+                    // (published by the engine). A registered control route consumes
+                    // it (wasm: /clock inline; native: /clock + /supersonic forwarded
+                    // to the NRT thread); unmatched / no-ingress falls through to the
+                    // audio plane (scsynth) inline. sourceId carries the origin token.
+                    DrainCallCtx cc{ &reply_addr, header.sourceId };
+                    OscIngress* ig = g_active_ingress.load(std::memory_order_acquire);
+                    bool consumed = ig && ig->ingest(
+                        reinterpret_cast<const uint8_t*>(osc_buffer), payload_size, &cc);
+                    if (!consumed)
+                        PerformOSCMessage(g_world, payload_size, osc_buffer, &reply_addr);
                 }
 
                 // Update IN tail (consume message)
@@ -988,38 +1032,35 @@ extern "C" {
         return true; // Keep processor alive
     }
 
-    // Core implementation - write formatted message to ring buffer
+    // Frame a log line as a `/supersonic/debug <text>` OSC message and write it to
+    // the OUT (egress) ring. The audio thread is the sole OUT writer, so this is
+    // lock-free; the line leaves the engine as an ordinary addressed OSC message,
+    // and the host dispatches /supersonic/debug to its debug channel.
+    static void emit_debug_osc(const char* text, uint32_t len) {
+        if (!memory_initialized) return;
+        if (len > 960) len = 960;  // matches buildDebugOsc's clamp; keeps the metric in sync
+
+        char pkt[1024];
+        uint32_t p = supersonic::buildDebugOsc(pkt, text, len);
+
+        ::ring_buffer_write(
+            shared_memory, OUT_BUFFER_SIZE, OUT_BUFFER_START,
+            &control->out_head, &control->out_tail, pkt, p, nullptr);
+
+        // Count the debug line for the metrics view.
+        if (metrics) {
+            metrics->debug_messages_received.fetch_add(1, std::memory_order_relaxed);
+            metrics->debug_bytes_received.fetch_add(len, std::memory_order_relaxed);
+        }
+    }
+
     static int ss_log_impl(const char* fmt, va_list args) {
         if (!memory_initialized) return 0;
-
-        // Format the message
         char buffer[1024];
         int result = vsnprintf(buffer, sizeof(buffer), fmt, args);
-
-        // Calculate message length (including newline)
-        uint32_t msg_len = 0;
-        while (buffer[msg_len] != '\0' && msg_len < sizeof(buffer)) {
-            msg_len++;
-        }
-
-        // Add newline to buffer
-        if (msg_len < sizeof(buffer) - 1) {
-            buffer[msg_len] = '\n';
-            msg_len++;
-        }
-
-        // Use unified ring buffer write with full protection (:: for global scope)
-        ::ring_buffer_write(
-            shared_memory,              // buffer_start
-            DEBUG_BUFFER_SIZE,          // buffer_size
-            DEBUG_BUFFER_START,         // buffer_start_offset
-            &control->debug_head,       // head
-            &control->debug_tail,       // tail
-            buffer,                     // data
-            msg_len,                    // data_size
-            nullptr                     // metrics (not tracked for debug currently)
-        );
-
+        uint32_t len = 0;
+        while (buffer[len] != '\0' && len < sizeof(buffer)) len++;
+        emit_debug_osc(buffer, len);
         return result;
     }
 
@@ -1039,24 +1080,11 @@ extern "C" {
         return ss_log_impl(fmt, args);
     }
 
-    // Raw version - writes pre-formatted message directly to ring buffer
-    // Use this when you already have a formatted string (avoids double-copy)
+    // Raw version - already-formatted string (avoids the vsnprintf double-copy).
     extern "C" EMSCRIPTEN_KEEPALIVE
     int ss_log_raw(const char* msg, uint32_t len) {
         if (!memory_initialized || !msg || len == 0) return 0;
-
-        // Use unified ring buffer write with full protection (:: for global scope)
-        ::ring_buffer_write(
-            shared_memory,              // buffer_start
-            DEBUG_BUFFER_SIZE,          // buffer_size
-            DEBUG_BUFFER_START,         // buffer_start_offset
-            &control->debug_head,       // head
-            &control->debug_tail,       // tail
-            msg,                        // data
-            len,                        // data_size
-            nullptr                     // metrics (not tracked for debug currently)
-        );
-
+        emit_debug_osc(msg, len);
         return (int)len;
     }
 
@@ -1229,8 +1257,8 @@ bool ring_buffer_write(
     if (buffer_start_offset == OUT_BUFFER_START) {
         header.sequence = control->out_sequence.fetch_add(1, std::memory_order_relaxed);
     } else {
-        // DEBUG_BUFFER_START
-        header.sequence = control->debug_sequence.fetch_add(1, std::memory_order_relaxed);
+        // NRT_OUT_BUFFER_START
+        header.sequence = control->nrt_out_sequence.fetch_add(1, std::memory_order_relaxed);
     }
 
     // Load head and tail with acquire semantics
@@ -1254,7 +1282,7 @@ bool ring_buffer_write(
 
     // Check if message fits contiguously, otherwise write padding and wrap to 0.
     //
-    // Design note: OUT/DEBUG buffers use contiguous-only writes (with padding markers)
+    // Design note: OUT/NRT-out buffers use contiguous-only writes (with padding markers)
     // rather than split writes that wrap around the boundary. This keeps the C++ writer
     // simple (one memcpy per message on the audio thread) and the JS reader simple
     // (contiguous reads, no wrap-around logic for payloads). The IN buffer uses a

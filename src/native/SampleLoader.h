@@ -12,6 +12,7 @@
 #include <string>
 #include <atomic>
 #include <array>
+#include <functional>
 
 struct World;
 
@@ -41,7 +42,18 @@ public:
     void pauseLoading();
     void resumeLoading();
 
+    // SampleLoader runs off the audio thread; the engine wires this sink to
+    // OscEgress::debug so its diagnostics ride the locked NRT-out ring. Set
+    // before startThread().
+    void setDebugSink(std::function<void(const char*, uint32_t)> sink) {
+        mDebugSink = std::move(sink);
+    }
+
 private:
+    // Format + route a diagnostic line to mDebugSink (or stderr if unset).
+    void debugLog(const char* fmt, ...);
+    std::function<void(const char*, uint32_t)> mDebugSink;
+
     // ── Request queue (audio thread → I/O thread, SPSC) ─────────────────
     struct Request {
         World*      world      = nullptr;

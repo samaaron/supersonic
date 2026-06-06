@@ -222,18 +222,20 @@ set(WORKERS_SRC     "${CMAKE_CURRENT_SOURCE_DIR}/src/workers")
 set(ENGINE_SOURCES
     ${NATIVE_SRC}/HeadlessDriver.cpp
     ${NATIVE_SRC}/JuceAudioCallback.cpp
-    ${NATIVE_SRC}/OscUdpServer.cpp
+    # OscUdpServer.cpp builds into the SuperSonic exe (below), not this shared
+    # lib — the UDP transport belongs to the standalone server, so the NIF and
+    # the in-process test suite don't compile it.
+    ${NATIVE_SRC}/OscEgress.cpp
+    ${NATIVE_SRC}/EngineControl.cpp
     ${NATIVE_SRC}/SampleLoader.cpp
     ${NATIVE_SRC}/SupersonicEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/SuperClock.cpp
+    ${CMAKE_SOURCE_DIR}/src/EngineClock.cpp
     ${NATIVE_SRC}/SuperClockNative.cpp
     ${NATIVE_SRC}/DevicePolicy.cpp
     ${NATIVE_SRC}/AggregateDeviceHelper.cpp
     ${NATIVE_SRC}/StateCache.cpp
-    ${WORKERS_SRC}/PreschedulerCore.cpp
-    ${WORKERS_SRC}/Prescheduler.cpp
-    ${WORKERS_SRC}/ReplyReader.cpp
-    ${WORKERS_SRC}/DebugReader.cpp
+    ${WORKERS_SRC}/RingReader.cpp
 )
 
 if(APPLE)
@@ -508,7 +510,7 @@ juce_add_console_app(SuperSonic
     COMPANY_NAME    "SuperSonic"
 )
 
-target_sources(SuperSonic PRIVATE ${NATIVE_SRC}/Main.cpp)
+target_sources(SuperSonic PRIVATE ${NATIVE_SRC}/Main.cpp ${NATIVE_SRC}/OscUdpServer.cpp)
 target_link_libraries(SuperSonic PRIVATE supersonic_engine)
 
 target_compile_definitions(SuperSonic PRIVATE

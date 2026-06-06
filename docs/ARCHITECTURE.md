@@ -200,18 +200,7 @@ The main thread needs to hear replies, but `Atomics.wait()` is forbidden on the 
 
 The AudioWorklet reads the OUT ring buffer directly during `process()` and sends replies to the main thread via its MessagePort. There's no need for a separate worker because the AudioWorklet is already running on a dedicated thread.
 
-**Both modes converge** at the SuperSonic event emitter on the main thread, which decodes the reply and emits `in` and `in:osc` events.
-
-### Direct Reply Delivery to OscChannels
-
-The main thread path described above is the default. But workers and AudioWorklets can also register for replies directly via `channel.setReplyHandler()`, bypassing the main thread entirely. This mirrors the native backend's `/supersonic/notify` pattern where external OSC clients register to receive replies.
-
-When a channel registers, replies are fanned out at the point of origin — the same place that already has the reply bytes in hand:
-
-- **SAB mode**: the reply worker copies each reply to per-channel ring buffers (8 slots, 16KB each) in the SharedArrayBuffer. The consuming worker or AudioWorklet reads its own buffer — workers via `Atomics.wait()`, AudioWorklets by polling in `process()`.
-- **PM mode**: the AudioWorklet posts each reply batch to registered MessagePorts alongside the main thread delivery. Workers receive on the event loop, AudioWorklets queue between `process()` calls.
-
-No extra threads are involved. An AudioWorklet consuming replies sees them on the next audio quantum — the same latency as scsynth's own AudioWorklet.
+**Both modes converge** at the SuperSonic event emitter on the main thread, which decodes the reply and emits `in` and `in:osc` events. Egress is a single OUT ring buffer; the only consumer is the reply path above (worker → main thread in SAB mode, worklet → main thread in PM mode). There is no per-channel reply delivery — every reply reaches clients through the main-thread event emitter.
 
 **Lapping detection**: In SAB mode, the log worker maintains its own read tail (`IN_LOG_TAIL`) independent of the C++ consumer's tail. If the writer wraps the ring buffer and overtakes the log reader, the log worker detects the invalid magic number at its read position, resyncs to head, and skips the corrupted batch rather than reading corrupt data.
 
@@ -247,7 +236,6 @@ Pre-allocated in WASM memory (no runtime allocation):
 - **Control Region**: 48B (atomic pointers/flags)
 - **Metrics Region**: 168B (performance counters)
 - **Node Tree Mirror**: ~73KB (synth hierarchy for visualization, includes UUIDs)
-- **Reply Channel Buffers**: 128KB (8 x 16KB per-channel ring buffers for direct reply delivery)
 
 ## Metrics Collection
 

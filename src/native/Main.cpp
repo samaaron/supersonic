@@ -10,6 +10,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_core/juce_core.h>
 #include "SupersonicEngine.h"
+#include "OscUdpServer.h"
 #include "supersonic_config.h"
 
 #include <csignal>
@@ -300,14 +301,21 @@ int main(int argc, char* argv[]) {
     std::signal(SIGABRT, crashHandler);
     std::signal(SIGFPE,  crashHandler);
 
-    // ── Engine ────────────────────────────────────────────────────────────────
+    // ── Engine + transport ─────────────────────────────────────────────────────
+    // The standalone server owns the UDP transport; the engine owns no socket.
+    // Declared before `engine` so it outlives the engine's teardown. Wired as
+    // ingress (recv → engine.ingest) and egress (engine → socket).
+    OscUdpServer     udpServer;
     SupersonicEngine engine;
 
     engine.onDebug = [](const std::string& s) {
         fprintf(stderr, "  [scsynth] %s\n", s.c_str());
         fflush(stderr);
     };
-    engine.onReply = [](const uint8_t*, uint32_t) {};
+
+    udpServer.setEngine(&engine);
+    engine.setTransport(&udpServer);
+    udpServer.initialise(cfg.udpPort, cfg.bindAddress);
 
     try {
         engine.init(cfg);
@@ -318,6 +326,10 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "[supersonic] ERROR: unknown exception during init\n");
         return 1;
     }
+
+    // Start the UDP recv thread now that the engine's rings exist for it to feed.
+    if (cfg.udpPort > 0)
+        udpServer.startThread(juce::Thread::Priority::normal);
 
     // Preserve the user's originally-requested input channel count across
     // the permission-pending zeroing above. Otherwise re-enable paths fall
@@ -402,6 +414,10 @@ int main(int argc, char* argv[]) {
 #endif
 
     fprintf(stderr, "\n  shutting down...\n");
+    // Stop UDP recv before the engine frees its rings — the recv thread feeds
+    // engine.ingest(), which writes the IN ring that shutdown() tears down.
+    udpServer.signalThreadShouldExit();
+    udpServer.stopThread(2000);
     engine.shutdown();
     return 0;
 }

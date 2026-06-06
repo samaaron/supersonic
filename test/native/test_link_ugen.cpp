@@ -57,7 +57,7 @@ bool allAbove(const std::vector<float>& samples, float threshold) {
 TEST_CASE("LinkUGen: LinkTempo.kr outputs session tempo in CPS",
           "[Link][LinkUGen][integration]") {
     EngineFixture fx;
-    fx.send(osc_test::message("/link/visibility", int32_t{1}));   // LoopbackOnly
+    fx.send(osc_test::message("/clock/visibility", int32_t{1}));   // LoopbackOnly
 
     REQUIRE(fx.loadSynthDef("link_tempo_probe"));
     {
@@ -98,7 +98,7 @@ TEST_CASE("LinkUGen: LinkTempo.kr outputs session tempo in CPS",
 TEST_CASE("LinkUGen: LinkPhase.kr outputs phase in [0, quantum)",
           "[Link][LinkUGen][integration]") {
     EngineFixture fx;
-    fx.send(osc_test::message("/link/visibility", int32_t{1}));   // LoopbackOnly
+    fx.send(osc_test::message("/clock/visibility", int32_t{1}));   // LoopbackOnly
 
     REQUIRE(fx.loadSynthDef("link_phase_probe"));
     {
@@ -143,7 +143,7 @@ TEST_CASE("LinkUGen: LinkPhase.kr outputs phase in [0, quantum)",
 TEST_CASE("LinkUGen: LinkJump.kr forces beat-at-time on trigger",
           "[Link][LinkUGen][integration]") {
     EngineFixture fx;
-    fx.send(osc_test::message("/link/visibility", int32_t{1}));   // LoopbackOnly
+    fx.send(osc_test::message("/clock/visibility", int32_t{1}));   // LoopbackOnly
 
     REQUIRE(fx.loadSynthDef("link_phase_probe"));
     REQUIRE(fx.loadSynthDef("link_jump_trigger"));

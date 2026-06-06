@@ -30,9 +30,7 @@
  *   SAB / ring-buffer regions ............ shared_memory.h
  *     SUPERSONIC_IN_BUFFER_SIZE            OSC in  (host -> engine)
  *     SUPERSONIC_OUT_BUFFER_SIZE           OSC out (engine -> host)
- *     SUPERSONIC_DEBUG_BUFFER_SIZE         debug/log ring
- *     SUPERSONIC_REPLY_CHANNEL_COUNT       per-client reply rings
- *     SUPERSONIC_REPLY_CHANNEL_BUFFER_SIZE bytes per reply ring
+ *     SUPERSONIC_NRT_OUT_BUFFER_SIZE       NRT-thread egress ring
  *     NODE_TREE_MIRROR_MAX_NODES           node-tree mirror capacity
  *     SHM_SCOPE_MAX_SCOPES                 scope slots
  *     SHM_SCOPE_FRAMES_PER_SCOPE           frames per scope triple-buffer
@@ -82,14 +80,8 @@
   #ifndef SUPERSONIC_OUT_BUFFER_SIZE
   #define SUPERSONIC_OUT_BUFFER_SIZE 8192          // 8 KB
   #endif
-  #ifndef SUPERSONIC_DEBUG_BUFFER_SIZE
-  #define SUPERSONIC_DEBUG_BUFFER_SIZE 4096        // 4 KB
-  #endif
-  #ifndef SUPERSONIC_REPLY_CHANNEL_COUNT
-  #define SUPERSONIC_REPLY_CHANNEL_COUNT 2
-  #endif
-  #ifndef SUPERSONIC_REPLY_CHANNEL_BUFFER_SIZE
-  #define SUPERSONIC_REPLY_CHANNEL_BUFFER_SIZE 4096 // 4 KB
+  #ifndef SUPERSONIC_NRT_OUT_BUFFER_SIZE
+  #define SUPERSONIC_NRT_OUT_BUFFER_SIZE 4096        // 4 KB
   #endif
   #ifndef NODE_TREE_MIRROR_MAX_NODES
   #define NODE_TREE_MIRROR_MAX_NODES 128
@@ -141,14 +133,8 @@
 #ifndef SUPERSONIC_OUT_BUFFER_SIZE
 #define SUPERSONIC_OUT_BUFFER_SIZE 131072          // 128 KB
 #endif
-#ifndef SUPERSONIC_DEBUG_BUFFER_SIZE
-#define SUPERSONIC_DEBUG_BUFFER_SIZE 65536         // 64 KB
-#endif
-#ifndef SUPERSONIC_REPLY_CHANNEL_COUNT
-#define SUPERSONIC_REPLY_CHANNEL_COUNT 8
-#endif
-#ifndef SUPERSONIC_REPLY_CHANNEL_BUFFER_SIZE
-#define SUPERSONIC_REPLY_CHANNEL_BUFFER_SIZE 16384 // 16 KB
+#ifndef SUPERSONIC_NRT_OUT_BUFFER_SIZE
+#define SUPERSONIC_NRT_OUT_BUFFER_SIZE 65536         // 64 KB
 #endif
 #ifndef NODE_TREE_MIRROR_MAX_NODES
 #define NODE_TREE_MIRROR_MAX_NODES 1024

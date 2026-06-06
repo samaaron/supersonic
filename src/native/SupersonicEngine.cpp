@@ -7,9 +7,11 @@
 #include "src/audio_processor.h"
 #include "audio_config.h"
 #include "src/shared_memory.h"
+#include "src/osc_debug.h"
 #include "osc/OscReceivedElements.h"
 #include "osc/OscOutboundPacketStream.h"
 #include "RingBufferWriter.h"
+#include "src/IngressCallCtx.h"
 #include "scsynth/server/SC_Prototypes.h"  // zfree
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "FuzzyMatch.h"
@@ -279,9 +281,9 @@ int SupersonicEngine::aggregateInputChannelOffsetFor(
 // single SUPERSONIC_QUIET=1 (set in CI) silences it; warnings and errors keep
 // using fprintf(stderr) directly and are never gated.
 //
-// Native-only host logging to the terminal/CI — deliberately NOT ss_log(),
-// which feeds the debug ring buffer (consumed by JS/Tau5) and no-ops until
-// memory is initialised, so it would drop these early-boot lines.
+// Native-only host logging to the terminal/CI. ss_log() instead frames
+// /supersonic/debug onto the OUT ring (the host's debug channel) and no-ops
+// until memory is initialised, so it would drop these early-boot lines.
 static void ssLifecycleLog(const char* fmt, ...) {
     static const bool quiet = [] {
         const char* v = std::getenv("SUPERSONIC_QUIET");
@@ -304,7 +306,7 @@ void SupersonicEngine::setEngineState(EngineState state, const std::string& reas
                    engineStateToString(prev), stateStr,
                    reason.empty() ? "-" : reason.c_str());
 
-    mUdpServer.sendStateChange(stateStr, reason.c_str());
+    mEgress.sendStateChange(stateStr, reason.c_str());
 
     // /supersonic/setup fires ONLY when the World was actually rebuilt
     // (cold swap). Spider receives this and runs cold_swap_reinit! which
@@ -318,7 +320,7 @@ void SupersonicEngine::setEngineState(EngineState state, const std::string& reas
         auto* dev = mDeviceManager ? mDeviceManager->getCurrentAudioDevice() : nullptr;
         int sr  = dev ? static_cast<int>(dev->getCurrentSampleRate()) : mCurrentConfig.sampleRate;
         int buf = dev ? dev->getCurrentBufferSizeSamples() : mCurrentConfig.bufferSize;
-        mUdpServer.sendSetup(sr, buf, gen);
+        mEgress.sendSetup(sr, buf, gen);
     }
 }
 
@@ -364,24 +366,11 @@ void SupersonicEngine::init(const Config& cfg) {
     int reqIn  = resolveReq(cfg.numInputChannels);
     int reqOut = resolveReq(cfg.numOutputChannels);
 
-    // -- Wire callbacks ---------------------------------------------------
-    // onReply/onDebug should be set before init() — worker threads
-    // read them via captured `this` pointer without synchronisation.
-    // Setting them after init() is a data race.
-    mReplyReader.onReply = [this](const uint8_t* d, uint32_t s) {
-        // Intercept /supersonic/buffer/freed — free the buffer memory
-        // and don't forward this internal message to external listeners.
-        if (interceptBufferFreed(d, s)) return;
-
-        // Send to all registered notify targets (registered via /supersonic/notify).
-        // This replaces the single-target sendReply() so that all clients
-        // (Spider, GUI, etc.) receive scsynth replies reliably.
-        if (mDeviceManager) mUdpServer.broadcastToTargets(d, s);
-        if (onReply) onReply(d, s);
-    };
-    mDebugReader.onDebug = [this](const std::string& s) {
-        if (onDebug) onDebug(s);
-    };
+    // The reader drains (OUT reply ring → broadcast/onDebug, NRT-out egress ring
+    // → transport, NRT control ring → EngineControl) are registered below in
+    // init_memory, where
+    // the ring pointers exist, and before the reader threads start — so the
+    // handlers are visible without a data race.
 
     if (!cfg.headless) {
 #ifdef __APPLE__
@@ -935,6 +924,12 @@ void SupersonicEngine::init(const Config& cfg) {
         chosenBufLen
     );
 
+    // Move the clock state into the shared arena's SUPERCLOCK_STATE region so
+    // the native SHM has the same shape as web (was a private member). Done
+    // before publish() below, so a cross-process reader sees it populated.
+    mSuperClock.bindStateToShm(
+        reinterpret_cast<SuperClockState*>(arena + SUPERCLOCK_STATE_START));
+
     // The arena is populated by init_memory() (run synchronously inside
     // initialiseWorld). Publish the segment — store MAGIC last — so a
     // cross-process reader that observes MAGIC sees fully-initialised regions
@@ -950,56 +945,64 @@ void SupersonicEngine::init(const Config& cfg) {
     mMetrics                 = reinterpret_cast<PerformanceMetrics*>(base + METRICS_START);
     PerformanceMetrics* met  = mMetrics;
 
-    // -- Prescheduler -------------------------------------------------------
-    mPrescheduler.initialise(
-        base + IN_BUFFER_START,
-        IN_BUFFER_SIZE,
-        &ctrl->in_head,
-        &ctrl->in_tail,
-        &ctrl->in_sequence,
-        &ctrl->in_write_lock,
-        met,
-        cfg.preschedulerLookaheadS
-    );
+    // -- NRT gateway: drain #1 = OUT egress ring (scsynth replies + debug). Woken
+    //    every audio block via processCount. (Drain #2 = the control ring, added
+    //    with the NRT plane below.)
+    mNrtGateway.setWake(&mAudioCallback.processCount);
+    mNrtGateway.addDrain(
+        base + OUT_BUFFER_START, OUT_BUFFER_SIZE,
+        &ctrl->out_head, &ctrl->out_tail,
+        [this](uint32_t, const uint8_t* d, uint32_t s, uint32_t) {
+            // Debug log lines go to the host's onDebug channel.
+            if (s >= supersonic::kDebugArgOffset &&
+                std::memcmp(d, "/supersonic/debug", 17) == 0) {
+                const char* t = reinterpret_cast<const char*>(d) + supersonic::kDebugArgOffset;
+                mEgress.deliverDebug(t, static_cast<uint32_t>(strnlen(t, s - supersonic::kDebugArgOffset)));
+                return;
+            }
+            // Intercept /supersonic/buffer/freed (free the memory, don't forward);
+            // otherwise fan the reply out through the transport — notify
+            // subscribers on UDP, or the in-process observer (onReply) on a
+            // CallbackTransport. We're on the gateway thread, so deliver directly.
+            if (interceptBufferFreed(d, s)) return;
+            mEgress.deliverBroadcastNotify(d, s);
+        },
+        { &met->osc_in_messages_received,
+          &met->osc_in_bytes_received,
+          &met->osc_in_corrupted,
+          &met->messages_sequence_gaps });
 
-    // -- ReplyReader --------------------------------------------------------
-    mReplyReader.initialise(
-        base + OUT_BUFFER_START,
-        OUT_BUFFER_SIZE,
-        &ctrl->out_head,
-        &ctrl->out_tail,
-        met,
-        &mAudioCallback.processCount
-    );
+    // -- Audio-plane ingress (engine-owned) ---------------------------------
+    // The engine owns the IN ring; the default OscIngress route writes it. The
+    // transport is a dumb pipe.
+    mInBufferStart = base + IN_BUFFER_START;
+    mInBufferSize  = IN_BUFFER_SIZE;
+    mInHead        = &ctrl->in_head;
+    mInTail        = &ctrl->in_tail;
+    mInSequence    = &ctrl->in_sequence;
+    mInWriteLock   = &ctrl->in_write_lock;
 
-    // -- DebugReader --------------------------------------------------------
-    mDebugReader.initialise(
-        base + DEBUG_BUFFER_START,
-        DEBUG_BUFFER_SIZE,
-        &ctrl->debug_head,
-        &ctrl->debug_tail,
-        met,
-        &mAudioCallback.processCount
-    );
+    // The engine owns no socket. By default egress is in-process (CallbackTransport
+    // → onReply); the embedder injects a real transport via setTransport before
+    // init() — the standalone server an OscUdpServer.
+    if (!mTransport)
+        mTransport = &mDefaultTransport;
 
-    // -- UDP OSC Server -----------------------------------------------------
-    mUdpServer.initialise(
-        cfg.udpPort,
-        &mPrescheduler,
-        base + IN_BUFFER_START,
-        IN_BUFFER_SIZE,
-        &ctrl->in_head,
-        &ctrl->in_tail,
-        &ctrl->in_sequence,
-        &ctrl->in_write_lock,
-        met,
-        cfg.preschedulerLookaheadS,
-        cfg.bindAddress
-    );
+    // Egress is deferred: producers frame OSC into the NRT-out ring; the gateway
+    // drains it and is the sole transport caller. /supersonic/debug log lines
+    // surface via onDebug.
+    mEgress.init(mTransport, &onDebug,
+        base + NRT_OUT_BUFFER_START, NRT_OUT_BUFFER_SIZE,
+        &ctrl->nrt_out_head, &ctrl->nrt_out_tail, &ctrl->nrt_out_sequence, &mEgressLock);
 
-    // Pass engine reference for /supersonic/* command handling
-    mUdpServer.setEngine(this);
-    mUdpServer.setSuperClock(&mSuperClock);
+    // Register the OSC routes on the engine-owned ingress, which the AUDIO thread
+    // classifies through (published as g_active_ingress below). Control prefixes
+    // forward to the NRT command ring; there is NO default — bundles / scsynth
+    // messages fall through to the audio plane (the drain's inline perform).
+    // Adding a subsystem (e.g. /midi/) is one more registerRoute here.
+    mEngineControl.init(this, &mEgress, &mSuperClock);
+    mIngress.registerRoute("/supersonic/", &SupersonicEngine::nrtForwardSink, this);
+    mIngress.registerRoute("/clock/", &SupersonicEngine::nrtForwardSink, this);
 
     // Single-engine-per-process: g_active_superclock has no per-engine
     // routing, so a second publisher would steer /superclock_get to
@@ -1017,6 +1020,43 @@ void SupersonicEngine::init(const Config& cfg) {
         }
     }
 
+    // Publish the ingress for the audio-thread drain to classify through (mirrors
+    // g_active_superclock; single publisher per process).
+    {
+        OscIngress* expected = nullptr;
+        if (!g_active_ingress.compare_exchange_strong(
+                expected, &mIngress, std::memory_order_release)) {
+            g_active_ingress.store(&mIngress, std::memory_order_release);
+        }
+    }
+
+    // NRT gateway drain #2: the control ring. Stamp the origin token (the egress
+    // resolves it via the transport at reply time — no address touches the engine)
+    // and run EngineControl off the audio thread.
+    mNrtGateway.addDrain(
+        mNrtBuffer, kNrtRingSize, &mNrtHead, &mNrtTail,
+        [this](uint32_t token, const uint8_t* d, uint32_t n, uint32_t) {
+            mEgress.setOrigin(token);
+            if (n >= 12 && std::memcmp(d, "/supersonic/", 12) == 0)
+                mEngineControl.handleSupersonicCommand(d, n);
+            else
+                mEngineControl.handleLinkCommand(d, n);
+        },
+        {});
+
+    // NRT gateway drain #3: the NRT-out egress ring.
+    // Off-thread producers (EngineControl replies above, Link/device notifications,
+    // SampleLoader debug) framed OSC + a route tag here via OscEgress; the gateway
+    // is the sole transport caller, so deliver each one. Added after the control
+    // drain so a reply framed this wake is sent the same wake.
+    mNrtGateway.addDrain(
+        base + NRT_OUT_BUFFER_START, NRT_OUT_BUFFER_SIZE,
+        &ctrl->nrt_out_head, &ctrl->nrt_out_tail,
+        [this](uint32_t token, const uint8_t* d, uint32_t n, uint32_t) {
+            mEgress.dispatchEgress(token, d, n);
+        },
+        {});
+
     // Test hook for issue #3526: close the device before the source
     // decision so startAudioSource() sees no current device and falls
     // back to the headless driver.
@@ -1033,45 +1073,46 @@ void SupersonicEngine::init(const Config& cfg) {
     // thread. Done before startAudioSource() so the audio thread sees a
     // fully-configured callback the first time it fires.
     mSampleLoader.initialise();
+    // Off-thread loader diagnostics ride the NRT-out egress ring.
+    mSampleLoader.setDebugSink([this](const char* t, uint32_t n) { mEgress.debug(t, n); });
     mAudioCallback.setSampleLoader(&mSampleLoader);
     mAudioCallback.setSuperClock(&mSuperClock);
-    mPrescheduler.setSuperClock(&mSuperClock);
     mAudioCallback.onWake = [this]() { purge(); };
 
     // Wire SuperClock's Link-event callbacks → OSC notify push.
-    // Callbacks fire on Link's network thread; broadcastLinkNotify
-    // serialises socket writes via mSocketWriteLock.
+    // Callbacks fire on Link's network thread; the egress serialises socket
+    // writes via the transport's send().
     {
-        OscUdpServer* udp = &mUdpServer;
+        OscEgress* egr = &mEgress;
         std::atomic<bool>* alive = &mLinkCallbacksAlive;
-        mSuperClock.setTempoChangedCallback([udp, alive](double bpm) {
+        mSuperClock.setTempoChangedCallback([egr, alive](double bpm) {
             if (!alive->load(std::memory_order_acquire)) return;
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
-            s << osc::BeginMessage("/link/notify/tempo") << bpm << osc::EndMessage;
-            udp->broadcastLinkNotify(
+            s << osc::BeginMessage("/clock/notify/tempo") << bpm << osc::EndMessage;
+            egr->broadcastLinkNotify(
                 reinterpret_cast<const uint8_t*>(s.Data()),
                 static_cast<uint32_t>(s.Size()));
         });
-        mSuperClock.setNumPeersChangedCallback([udp, alive](std::size_t n) {
+        mSuperClock.setNumPeersChangedCallback([egr, alive](std::size_t n) {
             if (!alive->load(std::memory_order_acquire)) return;
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
-            s << osc::BeginMessage("/link/notify/peers")
+            s << osc::BeginMessage("/clock/notify/peers")
               << static_cast<int32_t>(n) << osc::EndMessage;
-            udp->broadcastLinkNotify(
+            egr->broadcastLinkNotify(
                 reinterpret_cast<const uint8_t*>(s.Data()),
                 static_cast<uint32_t>(s.Size()));
         });
-        mSuperClock.setStartStopChangedCallback([udp, alive](bool playing, int64_t t) {
+        mSuperClock.setStartStopChangedCallback([egr, alive](bool playing, int64_t t) {
             if (!alive->load(std::memory_order_acquire)) return;
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
-            s << osc::BeginMessage("/link/notify/transport")
+            s << osc::BeginMessage("/clock/notify/transport")
               << static_cast<int32_t>(playing ? 1 : 0)
               << static_cast<osc::int64>(t)
               << osc::EndMessage;
-            udp->broadcastLinkNotify(
+            egr->broadcastLinkNotify(
                 reinterpret_cast<const uint8_t*>(s.Data()),
                 static_cast<uint32_t>(s.Size()));
         });
@@ -1079,14 +1120,10 @@ void SupersonicEngine::init(const Config& cfg) {
 
     // -- Start worker threads ----------------------------------------------
     // Workers must be running before the audio source starts, otherwise
-    // OUT/DEBUG ring buffers can back up during the audio thread's first
+    // OUT/NRT-out ring buffers can back up during the audio thread's first
     // few hundred ticks (~ms) before any reader is draining them.
-    mPrescheduler.startThread(juce::Thread::Priority::normal);
-    mReplyReader.startThread(juce::Thread::Priority::normal);
-    mDebugReader.startThread(juce::Thread::Priority::low);
+    mNrtGateway.startThread(juce::Thread::Priority::normal);
     mSampleLoader.startThread(juce::Thread::Priority::normal);
-    if (mDeviceManager)
-        mUdpServer.startThread(juce::Thread::Priority::normal);
 
     // -- Start the audio source (real callback or headless fallback) -------
     // Picks based on whether the device manager has a current device.
@@ -1149,15 +1186,18 @@ void SupersonicEngine::shutdown() {
     mSuperClock.setNumPeersChangedCallback({});
     mSuperClock.setStartStopChangedCallback({});
 
+    // Join the device-orchestration workers before tearing down the device
+    // manager + egress they call into.
+    mDebounceSwitchStop.store(true);
+    if (mDebounceSwitchThread.joinable()) mDebounceSwitchThread.join();
+    if (mReopenThread.joinable()) mReopenThread.join();
+
     mHeadlessDriver.signalThreadShouldExit();
-    mUdpServer.signalThreadShouldExit();
-    mPrescheduler.signalThreadShouldExit();
-    mReplyReader.signalThreadShouldExit();
-    mDebugReader.signalThreadShouldExit();
+    mNrtGateway.signalThreadShouldExit();
     mSampleLoader.signalThreadShouldExit();
 
-    // Wake atomic waiters so threads can exit.
-    // Must increment value so wait() sees a change and returns.
+    // Wake the readers so they can exit. Both wait on processCount; bump it so
+    // wait() sees a change and returns.
     mAudioCallback.processCount.fetch_add(1, std::memory_order_release);
     mAudioCallback.processCount.notify_all();
 
@@ -1189,16 +1229,20 @@ void SupersonicEngine::shutdown() {
 
     mHeadlessDriver.stopThread(2000);
     mSampleLoader.stopThread(2000);
-    mUdpServer.stopThread(2000);
-    mPrescheduler.stopThread(2000);
-    mReplyReader.stopThread(2000);
-    mDebugReader.stopThread(2000);
+    mNrtGateway.stopThread(2000);
 
     // Unpublish from /superclock_get only if we're the current
     // publisher — never stomp another engine's pointer.
     {
         SuperClock* expected = &mSuperClock;
         g_active_superclock.compare_exchange_strong(
+            expected, nullptr, std::memory_order_release);
+    }
+
+    // Unpublish the audio-thread ingress (same single-publisher discipline).
+    {
+        OscIngress* expected = &mIngress;
+        g_active_ingress.compare_exchange_strong(
             expected, nullptr, std::memory_order_release);
     }
 
@@ -1214,7 +1258,576 @@ void SupersonicEngine::sendOSC(const uint8_t* data, uint32_t size) {
     if (size >= 8 && data[0] == '/') {
         interceptForCache(data, size);
     }
-    mUdpServer.sendInProcess(data, size);
+    // The in-process entry point: origin 0 = an anonymous in-process caller,
+    // assigned explicitly here (every entry point mints its own origin — UDP
+    // interns the sender on recv; ingest no longer defaults one in).
+    ingest(data, size, 0);
+}
+
+void SupersonicEngine::ingest(const uint8_t* data, uint32_t size, uint32_t originToken) {
+    if (mMetrics) {
+        mMetrics->osc_out_messages_sent.fetch_add(1, std::memory_order_relaxed);
+        mMetrics->osc_out_bytes_sent.fetch_add(size, std::memory_order_relaxed);
+    }
+
+    // Dumb transport: frame the bytes onto the IN ring carrying the opaque origin
+    // token in the Message header. The audio thread drains, classifies
+    // (OscIngress), and either performs the audio plane inline or forwards control
+    // to the NRT thread — which resolves the token back to a reply address via the
+    // transport. Token 0 (in-process / embedder) replies via onReply.
+    if (mInBufferStart) {
+        RingBufferWriter::write(
+            mInBufferStart, mInBufferSize,
+            mInHead, mInTail, mInSequence, mInWriteLock,
+            data, size, originToken);
+    }
+}
+
+// --- Audio-thread control route: forward /clock + /supersonic to the NRT ring -
+// Runs on the audio thread (the OscIngress default-less route). Writes the raw
+// control message to the process-local NRT command ring with the origin token in
+// the Message header; the NrtCommandReader thread drains + runs EngineControl.
+bool SupersonicEngine::nrtForwardSink(void* ctx, void* callCtx,
+                                      const uint8_t* data, std::size_t len) {
+    auto* self = static_cast<SupersonicEngine*>(ctx);
+    auto* cc   = static_cast<DrainCallCtx*>(callCtx);
+    bool ok = RingBufferWriter::write(
+        self->mNrtBuffer, kNrtRingSize,
+        &self->mNrtHead, &self->mNrtTail, &self->mNrtSeq, &self->mNrtLock,
+        data, static_cast<uint32_t>(len), cc ? cc->sourceId : 0);
+    // The NRT gateway drains this ring every audio block (it waits on
+    // processCount), so no wake is needed here. A full ring drops the control
+    // message — count it rather than losing it silently (sender gets no reply).
+    if (!ok && self->mMetrics)
+        self->mMetrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
+    return true;  // consumed — control never falls through to scsynth
+}
+
+// --- Device switch / reopen orchestration -------------------------------------
+
+void SupersonicEngine::scheduleDeviceSwitch(const std::string& devName,
+                                            const std::string& inputDevName,
+                                            double sampleRate, int bufferSize) {
+    // Rapid clicks replace the pending switch; only the last one executes
+    // after the debounce worker's quiet period.
+    {
+        std::lock_guard<std::mutex> lock(mPendingSwitchMutex);
+        mPendingSwitch.devName = devName;
+        mPendingSwitch.inputDevName = inputDevName;
+        mPendingSwitch.sampleRate = sampleRate;
+        mPendingSwitch.bufferSize = bufferSize;
+        mPendingSwitch.timestamp = std::chrono::steady_clock::now();
+        mPendingSwitch.active = true;
+    }
+    if (!mDebounceSwitchRunning.load()) {
+        if (mDebounceSwitchThread.joinable()) mDebounceSwitchThread.join();
+        mDebounceSwitchRunning.store(true);
+        mDebounceSwitchThread = std::thread(&SupersonicEngine::executePendingSwitch, this);
+    }
+}
+
+void SupersonicEngine::executePendingSwitch() {
+    // Wait for rapid clicks to settle (500ms quiet period)
+    constexpr auto kDebounceMs = std::chrono::milliseconds(500);
+
+    std::string devName, inputDevName;
+    double sr = 0;
+    int bufSz = 0;
+
+    while (!mDebounceSwitchStop.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (mDebounceSwitchStop.load()) break;
+
+        std::lock_guard<std::mutex> lock(mPendingSwitchMutex);
+        if (!mPendingSwitch.active) {
+            mDebounceSwitchRunning.store(false);
+            return;
+        }
+
+        auto elapsed = std::chrono::steady_clock::now() - mPendingSwitch.timestamp;
+        if (elapsed >= kDebounceMs) {
+            devName      = mPendingSwitch.devName;
+            inputDevName = mPendingSwitch.inputDevName;
+            sr           = mPendingSwitch.sampleRate;
+            bufSz        = mPendingSwitch.bufferSize;
+            mPendingSwitch.active = false;
+            break;
+        }
+    }
+
+    if (mDebounceSwitchStop.load()) {
+        mDebounceSwitchRunning.store(false);
+        return;
+    }
+
+    fprintf(stderr, "[audio-device] debounced switch: out='%s' in='%s' sr=%.0f buf=%d\n",
+            devName.c_str(), inputDevName.c_str(), sr, bufSz);
+    fflush(stderr);
+
+    // Explicit GUI switch → force device mode so changeListenerCallback
+    // doesn't fight us by reinitialising to system defaults.
+    if (!devName.empty())
+        forceDeviceMode(devName);
+
+    // Retry if a swap is already in progress (e.g. cascade from a
+    // device-change notification). Give it up to ~3 seconds.
+    SwapResult result;
+    int attempts = 0;
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        attempts = attempt + 1;
+        result = switchDevice(devName, sr, bufSz, false, inputDevName);
+        if (result.success || result.error != "swap already in progress") break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    if (!result.success) {
+        fprintf(stderr, "[audio-device] debounced switch failed after %d attempts: %s\n",
+                attempts, result.error.c_str());
+        fflush(stderr);
+    }
+    // No sendDeviceReport() here — switchDevice's printDeviceList already
+    // broadcasts. A second call can race with JUCE's post-switch device-list
+    // rescan and report an empty snapshot. Push the truthful outcome instead.
+    sendSwitchDone(result, devName, inputDevName);
+
+    mDebounceSwitchRunning.store(false);
+}
+
+bool SupersonicEngine::requestReopen(std::string& reason) {
+    // Cooldown covers Spider's cold_swap_reinit — which reloads synthdefs,
+    // recreates groups + mixer + scope, and takes roughly 1-3 seconds. A
+    // shorter cooldown lets a second reopen race a still-running reinit and
+    // leaves Spider with missing synthdefs / groups.
+    constexpr int kReopenCooldownMs = 3000;
+    if (mReopenInProgress.load()) {
+        reason = "already in progress";
+        return false;
+    }
+    const auto sinceLast = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - mLastReopenFinishedAt).count();
+    if (sinceLast < kReopenCooldownMs) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "cooldown (%lld ms since last)",
+                 (long long)sinceLast);
+        reason = msg;
+        return false;
+    }
+    mReopenInProgress.store(true);
+    if (mReopenThread.joinable()) mReopenThread.join();
+    mReopenThread = std::thread(&SupersonicEngine::executeReopen, this);
+    reason = "started";
+    return true;
+}
+
+void SupersonicEngine::executeReopen() {
+    SwapResult result = reopenCurrentDevice();
+
+    char buf[1024];
+    osc::OutboundPacketStream s(buf, sizeof(buf));
+    s << osc::BeginMessage("/supersonic/devices/reopen.done")
+      << static_cast<osc::int32>(result.success ? 1 : 0)
+      << result.deviceName.c_str()
+      << static_cast<float>(result.sampleRate)
+      << static_cast<osc::int32>(result.bufferSize)
+      << (result.error.empty() ? "" : result.error.c_str())
+      << osc::EndMessage;
+    // Deferred reply: broadcast reopen.done to the notify subscribers (which
+    // includes the requester). Broadcasting is robust to the origin token being
+    // evicted during the 1–3 s reopen, and frames into the NRT-out ring like all
+    // other off-thread egress — no socket touched here.
+    mEgress.broadcastToTargets(reinterpret_cast<const uint8_t*>(s.Data()),
+                               static_cast<uint32_t>(s.Size()));
+
+    if (result.success) sendDeviceReport();
+
+    mLastReopenFinishedAt = std::chrono::steady_clock::now();
+    mReopenInProgress.store(false);
+}
+
+void SupersonicEngine::sendSwitchDone(const SwapResult& result,
+                                      const std::string& requestedOutput,
+                                      const std::string& requestedInput) {
+    if (!mEgress.hasSubscribers()) return;
+
+    // Wire format (all fields present on every emit):
+    //   success(int32),
+    //   requestedOutput(str),  requestedInput(str),
+    //   actualOutput(str),     actualInput(str),
+    //   error(str),                  ← top-level error, "" on success
+    //   inputUnavailable(int32),     ← 1 = output opened, input fell back
+    //   inputUnavailableReason(str)  ← JUCE verbatim, "" otherwise
+    char buf[2048];
+    osc::OutboundPacketStream s(buf, sizeof(buf));
+    s << osc::BeginMessage("/supersonic/devices/switch.done")
+      << static_cast<osc::int32>(result.success ? 1 : 0)
+      << requestedOutput.c_str()
+      << requestedInput.c_str()
+      << result.deviceName.c_str()
+      << result.inputDeviceName.c_str()
+      << result.error.c_str()
+      << static_cast<osc::int32>(result.inputUnavailable ? 1 : 0)
+      << result.inputUnavailableReason.c_str()
+      << osc::EndMessage;
+    mEgress.broadcastToTargets(reinterpret_cast<const uint8_t*>(s.Data()),
+                               static_cast<uint32_t>(s.Size()));
+}
+
+void SupersonicEngine::sendDeviceReport() {
+    if (!mEgress.hasSubscribers()) return;
+
+    // Skip rescan — sendDeviceReport() is usually called right after a
+    // device switch, when rescanning would disrupt the freshly-opened device.
+    auto allDevices = listDevices(false);
+    auto current = currentDevice();
+    auto mode    = deviceMode();
+
+    // Detect whether PipeWire is managing audio on Linux. The reliable
+    // signal is presence of the "PipeWire Sound Server" ALSA-typed
+    // virtual device — that's what PipeWire exposes when its ALSA
+    // compat layer is active. Passed into isPlatformClutter() so direct-
+    // hardware PCMs (which PipeWire holds exclusive) can be hidden.
+    bool pipewireActive = false;
+    for (auto& dev : allDevices) {
+        if (dev.typeName == "ALSA" && dev.name == "PipeWire Sound Server") {
+            pipewireActive = true;
+            break;
+        }
+    }
+
+    // Split devices into output-capable and input-capable lists.
+    // Platform filters applied:
+    //  - macOS: hide wireless (AirPlay/Bluetooth) from both lists —
+    //    can't be opened via HAL (output) and they force low-quality
+    //    codec modes for input (HFP 16 kHz mono).
+    //  - Linux: hide ALSA plug/dmix/dsnoop/surround variants and, when
+    //    PipeWire is active, direct-hardware PCMs (unopenable while
+    //    PipeWire owns the card).
+    std::vector<decltype(allDevices)::value_type> outputDevices, inputDevices;
+    for (auto& dev : allDevices) {
+        if (dev.isPlatformClutter(pipewireActive)) continue;
+        if (dev.maxOutputChannels > 0 && !dev.isWirelessTransport())
+            outputDevices.push_back(dev);
+        if (dev.maxInputChannels > 0 && dev.isSuitableForInput())
+            inputDevices.push_back(dev);
+    }
+
+    // Dedupe by device name. JUCE on Windows enumerates the same physical
+    // device under each driver type (Windows Audio shared / exclusive /
+    // low-latency / DirectSound), so a single pair of speakers shows up
+    // four times. Keep the entry whose typeName matches the active
+    // driver, falling back to the first occurrence so devices not present
+    // in the active driver still appear. Driver selection is exposed
+    // separately via /supersonic/drivers.
+    auto dedupeByName = [&](std::vector<decltype(allDevices)::value_type>& devs) {
+        std::vector<decltype(allDevices)::value_type> out;
+        out.reserve(devs.size());
+        std::set<std::string> seen;
+        // Pass 1: entries matching the active driver win.
+        for (auto& dev : devs) {
+            if (dev.typeName == current.typeName && seen.insert(dev.name).second)
+                out.push_back(dev);
+        }
+        // Pass 2: anything not yet represented.
+        for (auto& dev : devs) {
+            if (seen.insert(dev.name).second) out.push_back(dev);
+        }
+        devs.swap(out);
+    };
+    dedupeByName(outputDevices);
+    dedupeByName(inputDevices);
+
+    // Hide inputs that have already failed when paired with the current
+    // output (remembered by switchDevice's input-fallback branch). Per-
+    // output scoping: the same input may pair fine with a different
+    // output. "Don't show options we can't honour."
+    if (!current.name.empty()) {
+        inputDevices.erase(
+            std::remove_if(inputDevices.begin(), inputDevices.end(),
+                [&](const DeviceInfo& d) {
+                    return isInputKnownBadFor(current.name, d.name);
+                }),
+            inputDevices.end());
+    }
+
+    // When current output is wireless (e.g. AirPlay via System Output),
+    // we cannot aggregate it with a hardware mic — the IOProc freezes.
+    // Hide input devices from the GUI in that case so the user isn't
+    // shown options that would fail. The "-- None --" entry is still
+    // offered on the GUI side, making the effective state clear: no
+    // input available while on this output.
+    if (!current.name.empty()) {
+        for (auto& dev : allDevices) {
+            if ((dev.name == current.name
+                 || (dev.name.size() > current.name.size()
+                     && dev.name.compare(0, current.name.size(), current.name) == 0
+                     && dev.name[current.name.size()] == ' '))
+                && dev.isWirelessTransport()) {
+                inputDevices.clear();
+                break;
+            }
+        }
+    }
+
+    // Guard against reporting an inconsistent snapshot: JUCE's device
+    // enumeration can briefly return an empty list around a device-list-
+    // changed event (especially when an aggregate is being torn down /
+    // recreated). If we have a current input but the list is empty, the
+    // GUI's findText() would fall back to "-- None --" and silently
+    // deselect the user's real mic. Skip this report; the next one (after
+    // the change settles) will carry the full picture.
+    fprintf(stderr, "[device-report] outputs=%zu inputs=%zu currentIn='%s' currentOut='%s'\n",
+            outputDevices.size(), inputDevices.size(),
+            current.inputDeviceName.c_str(), current.name.c_str());
+    fflush(stderr);
+    if (inputDevices.empty() && !current.inputDeviceName.empty()) {
+        fprintf(stderr, "[device-report] skipping: currentIn set but inputDevices list empty "
+                "(transient enumeration, probably mid-swap)\n");
+        fflush(stderr);
+        return;
+    }
+
+    // Build output device list message
+    // Format: mode(str), current(str), device1(str), ..., deviceN(str),
+    //         sampleRate(int32), compat1(int32), ..., compatN(int32),
+    //         type1(str), ..., typeN(str)
+    //   compat: 1 = device supports current rate, 0 = rate change needed
+    //   type:   driver type per device, enables the GUI's per-driver
+    //           dropdown filter
+    char devBuf[8192];
+    osc::OutboundPacketStream devMsg(devBuf, sizeof(devBuf));
+    devMsg << osc::BeginMessage("/supersonic/devices")
+           << (mode.empty() ? "system" : mode.c_str())
+           << current.name.c_str();
+    for (auto& dev : outputDevices)
+        devMsg << dev.name.c_str();
+    devMsg << static_cast<osc::int32>(current.activeSampleRate);
+    int curRate = static_cast<int>(current.activeSampleRate);
+    for (auto& dev : outputDevices) {
+        bool compat = false;
+        for (auto r : dev.availableSampleRates)
+            if (static_cast<int>(r) == curRate)
+                compat = true;
+        devMsg << static_cast<osc::int32>(compat ? 1 : 0);
+    }
+    for (auto& dev : outputDevices)
+        devMsg << dev.typeName.c_str();
+    devMsg << osc::EndMessage;
+
+    // Build input device list message
+    // Format: currentInput(str), numDevices(int32),
+    //         name1(str), ..., nameN(str),
+    //         type1(str), ..., typeN(str)
+    char inDevBuf[2048];
+    osc::OutboundPacketStream inDevMsg(inDevBuf, sizeof(inDevBuf));
+    inDevMsg << osc::BeginMessage("/supersonic/input-devices")
+             << current.inputDeviceName.c_str()
+             << static_cast<osc::int32>(inputDevices.size());
+    for (auto& dev : inputDevices)
+        inDevMsg << dev.name.c_str();
+    for (auto& dev : inputDevices)
+        inDevMsg << dev.typeName.c_str();
+    inDevMsg << osc::EndMessage;
+
+    // Build hardware info message
+    double sr = current.activeSampleRate;
+    double outLatMs = sr > 0 ? (current.outputLatencySamples / sr) * 1000.0 : 0.0;
+    double inLatMs  = sr > 0 ? (current.inputLatencySamples  / sr) * 1000.0 : 0.0;
+
+    // Use per-device channel counts (maxOutputChannels / maxInputChannels)
+    // rather than the aggregate's activeOutputChannels / activeInputChannels.
+    // When running on an aggregate, active counts are sums across sub-devices
+    // (MBP Speakers 2 out + MOTU 8 out = 10) which is confusing when the
+    // user picked MBP Speakers as the output — they see "10 out" on a
+    // 2-channel device. currentDevice() populates maxOutputChannels /
+    // maxInputChannels with the real underlying sub-device counts.
+    int outCh = current.maxOutputChannels > 0 ? current.maxOutputChannels
+                                              : current.activeOutputChannels;
+    int inCh  = current.maxInputChannels  > 0 ? current.maxInputChannels
+                                              : current.activeInputChannels;
+
+    char info[1024];
+    if (!current.inputDeviceName.empty() && inCh > 0) {
+        snprintf(info, sizeof(info),
+                 "Output:      %s (%d ch)\n"
+                 "Input:       %s (%d ch)\n"
+                 "Driver:      %s\n"
+                 "Sample Rate: %.0f Hz\n"
+                 "Buffer Size: %d samples\n"
+                 "Latency:     %.1f / %.1f ms (out/in)",
+                 current.name.c_str(), outCh,
+                 current.inputDeviceName.c_str(), inCh,
+                 current.typeName.c_str(),
+                 sr,
+                 current.activeBufferSize,
+                 outLatMs, inLatMs);
+    } else {
+        snprintf(info, sizeof(info),
+                 "Output:      %s (%d ch)\n"
+                 "Driver:      %s\n"
+                 "Sample Rate: %.0f Hz\n"
+                 "Buffer Size: %d samples\n"
+                 "Latency:     %.1f ms",
+                 current.name.c_str(), outCh,
+                 current.typeName.c_str(),
+                 sr,
+                 current.activeBufferSize,
+                 outLatMs);
+    }
+
+    // Info message with config data appended
+    // Format: info_string, sampleRate(int32), bufferSize(int32),
+    //         numRates(int32), rate1..rateN, numBufs(int32), buf1..bufN,
+    //         numDrivers(int32), driver1..driverN, currentDriver(str),
+    //         outputChannels(int32), inputChannels(int32)
+    auto drivers = listDrivers();
+    auto curDriver = currentDriver();
+
+    // Compute usable sample rates: intersection of output and input device rates.
+    // If no input device is active, use the output device's rates.
+    //
+    // When an aggregate is active, constrain to the CURRENT rate only.
+    // Rate changes on a live aggregate are not reliable: pre-aligning
+    // sub-devices in AggregateDeviceHelper::createOrUpdate fails because
+    // the old aggregate still owns the sub-devices (destroying it early
+    // crashes JUCE's AudioComponentInstanceDispose on the dangling id),
+    // so the new aggregate inherits the old sub-device rates and the
+    // requested rate gets snapped back by CoreAudio within a few audio
+    // callbacks. Rather than expose rates that silently fail, show only
+    // the current rate — the user can change rate by first switching to
+    // a non-aggregated device (so the aggregate is torn down), then
+    // changing rate, then re-adding the mic.
+    std::vector<double> usableRates = current.availableSampleRates;
+    bool onAggregate = !realOutputDeviceName().empty();
+    if (onAggregate) {
+        // Offer the rates BOTH sub-devices natively support — not just the
+        // current one — so the rate is selectable on macOS. A rate only one
+        // side supports would force aggregate-internal SRC, so it's excluded.
+        std::vector<int> outRates, inRates;
+        const std::string ro = realOutputDeviceName();
+        const std::string ri = realInputDeviceName();
+        for (auto& dev : allDevices) {
+            if (dev.name == ro)
+                for (auto r : dev.availableSampleRates)
+                    outRates.push_back(static_cast<int>(r));
+            if (!ri.empty() && dev.name == ri)
+                for (auto r : dev.availableSampleRates)
+                    inRates.push_back(static_cast<int>(r));
+        }
+        auto offered = sonicpi::device::usableAggregateRates(outRates, inRates);
+        if (!offered.empty())
+            usableRates.assign(offered.begin(), offered.end());
+    } else if (!current.inputDeviceName.empty()) {
+        for (auto& dev : allDevices) {
+            if (dev.name == current.inputDeviceName) {
+                std::vector<double> intersection;
+                for (auto r : current.availableSampleRates)
+                    for (auto ir : dev.availableSampleRates)
+                        if (static_cast<int>(r) == static_cast<int>(ir))
+                            intersection.push_back(r);
+                if (!intersection.empty())
+                    usableRates = intersection;
+                break;
+            }
+        }
+    }
+
+    char infoBuf[4096];
+    osc::OutboundPacketStream infoMsg(infoBuf, sizeof(infoBuf));
+    infoMsg << osc::BeginMessage("/supersonic/info")
+            << info
+            << static_cast<osc::int32>(current.activeSampleRate)
+            << static_cast<osc::int32>(current.activeBufferSize)
+            << static_cast<osc::int32>(usableRates.size());
+    for (auto r : usableRates)
+        infoMsg << static_cast<osc::int32>(r);
+
+    // Same intersection for buffer sizes (skip when on aggregate)
+    std::vector<int> usableBufferSizes = current.availableBufferSizes;
+    if (!onAggregate && !current.inputDeviceName.empty()) {
+        for (auto& dev : allDevices) {
+            if (dev.name == current.inputDeviceName) {
+                std::vector<int> intersection;
+                for (auto b : current.availableBufferSizes)
+                    for (auto ib : dev.availableBufferSizes)
+                        if (b == ib)
+                            intersection.push_back(b);
+                if (!intersection.empty())
+                    usableBufferSizes = intersection;
+                break;
+            }
+        }
+    }
+
+    // Filter to a canonical set of useful buffer sizes. Raw CoreAudio
+    // lists up to 10+ sizes including weird non-powers-of-two (14, 24,
+    // 48, 96) and extreme values (16, 8192). Most Sonic Pi users only
+    // want 64–2048. On an aggregate with kernel drift correction,
+    // buffers below 256 starve the drift compensator — the IOProc's
+    // sample-rate conversion can't keep up and the audio warbles (the
+    // "drift storm" the user reported after picking bs=16 on an
+    // aggregate). Raise the minimum in that case.
+    //
+    // This is a DISPLAY filter, not a safety net: -Z / -z CLI flags and
+    // TOML sound_card_buffer_size can still force any value for power
+    // users who know what they're doing.
+    {
+        // Non-aggregate and same-clock aggregate: include small sizes
+        // for low-latency use. Only drift-compensated aggregates force
+        // the 256-sample floor — SRC IOProc starves at tight buffers
+        // and produces warbling. Same-clock aggregates (e.g. MBP
+        // Speakers + MBP Mic, both Apple Silicon built-in) have no SRC
+        // running and can handle 16/32 just like a single device.
+        static const int kCanonicalSingle[] = {16, 32, 64, 128, 256, 512, 1024, 2048};
+        static const int kCanonicalAggregate[] = {256, 512, 1024, 2048};
+        std::set<int> canonical;
+#ifdef __APPLE__
+        bool driftAggregate = onAggregate
+            && AggregateDeviceHelper::driftCompensationEnabled();
+#else
+        bool driftAggregate = false;
+#endif
+        if (driftAggregate) {
+            for (int b : kCanonicalAggregate) canonical.insert(b);
+        } else {
+            for (int b : kCanonicalSingle) canonical.insert(b);
+        }
+        std::vector<int> filtered;
+        for (int b : usableBufferSizes)
+            if (canonical.count(b)) filtered.push_back(b);
+        if (!filtered.empty()) usableBufferSizes = std::move(filtered);
+        // Also ensure the currently-active buffer size is represented so
+        // the GUI dropdown can display the correct selection when a
+        // non-canonical size was forced via CLI / TOML.
+        if (current.activeBufferSize > 0) {
+            bool present = false;
+            for (int b : usableBufferSizes)
+                if (b == current.activeBufferSize) { present = true; break; }
+            if (!present) {
+                usableBufferSizes.insert(usableBufferSizes.begin(), current.activeBufferSize);
+            }
+        }
+    }
+
+    infoMsg << static_cast<osc::int32>(usableBufferSizes.size());
+    for (auto b : usableBufferSizes)
+        infoMsg << static_cast<osc::int32>(b);
+    infoMsg << static_cast<osc::int32>(drivers.size());
+    for (auto& d : drivers)
+        infoMsg << d.c_str();
+    infoMsg << curDriver.c_str();
+    // Send per-device counts (outCh/inCh), not aggregate sums — same
+    // semantics as the banner. GUI shows these as "out N | in M" in the
+    // SuperSonic summary label.
+    infoMsg << static_cast<osc::int32>(outCh);
+    infoMsg << static_cast<osc::int32>(inCh);
+    infoMsg << osc::EndMessage;
+
+    // Fan out to all registered notify subscribers via the transport.
+    mEgress.broadcastToTargets(reinterpret_cast<const uint8_t*>(devMsg.Data()),
+                               static_cast<uint32_t>(devMsg.Size()));
+    mEgress.broadcastToTargets(reinterpret_cast<const uint8_t*>(inDevMsg.Data()),
+                               static_cast<uint32_t>(inDevMsg.Size()));
+    mEgress.broadcastToTargets(reinterpret_cast<const uint8_t*>(infoMsg.Data()),
+                               static_cast<uint32_t>(infoMsg.Size()));
 }
 
 bool SupersonicEngine::interceptBufferFreed(const uint8_t* data, uint32_t size) {
@@ -3562,7 +4175,7 @@ void SupersonicEngine::printDeviceList() {
     fflush(stderr);
 
     // Also push device info via OSC to registered GUI listener
-    mUdpServer.sendDeviceReport();
+    sendDeviceReport();
 }
 
 // --- Recording ---
@@ -3667,9 +4280,6 @@ void SupersonicEngine::purge() {
     // Reset IN ring buffer
     ctrl->in_head.store(0, std::memory_order_release);
     ctrl->in_tail.store(0, std::memory_order_release);
-
-    // Cancel prescheduler events
-    mPrescheduler.cancelAll();
 
     // Clear scsynth BundleScheduler
     clear_scheduler();

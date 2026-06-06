@@ -44,13 +44,13 @@ test.describe("Buffer Peak Metrics", () => {
           hasCapacity: metrics.outBufferUsed?.capacity !== undefined,
           values: metrics.outBufferUsed,
         },
-        debugBufferUsed: {
-          hasBytes: metrics.debugBufferUsed?.bytes !== undefined,
-          hasPercentage: metrics.debugBufferUsed?.percentage !== undefined,
-          hasPeakBytes: metrics.debugBufferUsed?.peakBytes !== undefined,
-          hasPeakPercentage: metrics.debugBufferUsed?.peakPercentage !== undefined,
-          hasCapacity: metrics.debugBufferUsed?.capacity !== undefined,
-          values: metrics.debugBufferUsed,
+        nrtOutBufferUsed: {
+          hasBytes: metrics.nrtOutBufferUsed?.bytes !== undefined,
+          hasPercentage: metrics.nrtOutBufferUsed?.percentage !== undefined,
+          hasPeakBytes: metrics.nrtOutBufferUsed?.peakBytes !== undefined,
+          hasPeakPercentage: metrics.nrtOutBufferUsed?.peakPercentage !== undefined,
+          hasCapacity: metrics.nrtOutBufferUsed?.capacity !== undefined,
+          values: metrics.nrtOutBufferUsed,
         },
       };
     }, sonicConfig);
@@ -71,17 +71,17 @@ test.describe("Buffer Peak Metrics", () => {
     expect(result.outBufferUsed.hasPeakPercentage).toBe(true);
     expect(result.outBufferUsed.hasCapacity).toBe(true);
 
-    // Verify debugBufferUsed structure
-    expect(result.debugBufferUsed.hasBytes).toBe(true);
-    expect(result.debugBufferUsed.hasPercentage).toBe(true);
-    expect(result.debugBufferUsed.hasPeakBytes).toBe(true);
-    expect(result.debugBufferUsed.hasPeakPercentage).toBe(true);
-    expect(result.debugBufferUsed.hasCapacity).toBe(true);
+    // Verify nrtOutBufferUsed structure
+    expect(result.nrtOutBufferUsed.hasBytes).toBe(true);
+    expect(result.nrtOutBufferUsed.hasPercentage).toBe(true);
+    expect(result.nrtOutBufferUsed.hasPeakBytes).toBe(true);
+    expect(result.nrtOutBufferUsed.hasPeakPercentage).toBe(true);
+    expect(result.nrtOutBufferUsed.hasCapacity).toBe(true);
 
     console.log("\nBuffer metrics structure:");
     console.log("  inBufferUsed:", result.inBufferUsed.values);
     console.log("  outBufferUsed:", result.outBufferUsed.values);
-    console.log("  debugBufferUsed:", result.debugBufferUsed.values);
+    console.log("  nrtOutBufferUsed:", result.nrtOutBufferUsed.values);
   });
 
   test("peak values are >= current values", async ({ page, sonicConfig }) => {
@@ -134,10 +134,10 @@ test.describe("Buffer Peak Metrics", () => {
             peakPercentage: m.outBufferUsed?.peakPercentage,
           },
           debug: {
-            bytes: m.debugBufferUsed?.bytes,
-            peak: m.debugBufferUsed?.peakBytes,
-            percentage: m.debugBufferUsed?.percentage,
-            peakPercentage: m.debugBufferUsed?.peakPercentage,
+            bytes: m.nrtOutBufferUsed?.bytes,
+            peak: m.nrtOutBufferUsed?.peakBytes,
+            percentage: m.nrtOutBufferUsed?.percentage,
+            peakPercentage: m.nrtOutBufferUsed?.peakPercentage,
           },
         })),
       };
@@ -197,8 +197,8 @@ test.describe("Buffer Peak Metrics", () => {
           capacity: metrics.outBufferUsed?.capacity,
         },
         debug: {
-          peakBytes: metrics.debugBufferUsed?.peakBytes,
-          capacity: metrics.debugBufferUsed?.capacity,
+          peakBytes: metrics.nrtOutBufferUsed?.peakBytes,
+          capacity: metrics.nrtOutBufferUsed?.capacity,
         },
       };
     }, sonicConfig);
@@ -318,7 +318,7 @@ test.describe("Buffer Peak Metrics", () => {
         success: true,
         in: checkPercentage(metrics.inBufferUsed),
         out: checkPercentage(metrics.outBufferUsed),
-        debug: checkPercentage(metrics.debugBufferUsed),
+        debug: checkPercentage(metrics.nrtOutBufferUsed),
       };
     }, sonicConfig);
 

@@ -277,14 +277,21 @@ public:
     // implementation in SuperClock.cpp (no platform override).
     void publishClockMetrics(PerformanceMetrics* m, double ntpNow, double quantum = 4.0);
 
-    // ─── SAB mirror accessor (RT-safe reads) ─────────────────────────────
-    // Underlying SuperClockState — SAB region on WASM, private mirror
-    // on native. Atomic loads through this pointer are RT-safe; the
-    // audio thread should prefer them over getBpm()/isPlaying(), which
-    // on native+Link route through Link::captureAppSessionState()
-    // (documented "Realtime-safe: no").
+    // ─── Shared-memory state accessor (RT-safe reads) ────────────────────
+    // Underlying SuperClockState — the engine's shared arena region on BOTH
+    // WASM (bound at superclock_wasm_init) and native (bound at
+    // bindStateToShm), so the clock has one identical SHM shape on every build.
+    // Atomic loads through this pointer are RT-safe; the audio thread should
+    // prefer them over getBpm()/isPlaying(), which on native+Link route through
+    // Link::captureAppSessionState() (documented "Realtime-safe: no").
     SuperClockState*       state();
     const SuperClockState* state() const;
+
+    // Native: point the clock state at the shared arena's SUPERCLOCK_STATE
+    // region (copying current state into it) so the native SHM matches web's
+    // shape, instead of hiding state in a private member. No-op on WASM, which
+    // binds its SAB region via superclock_wasm_init.
+    void bindStateToShm(SuperClockState* region);
 
     // Audio-thread accessor for the underlying LinkAudio instance.
     // Used by scsynth plugins (LinkTempo / LinkPhase / LinkJump

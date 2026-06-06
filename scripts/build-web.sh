@@ -96,6 +96,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     "$SRC_DIR/node_tree.cpp" \
     "$SRC_DIR/SuperClock.cpp" \
     "$SRC_DIR/SuperClockWasm.cpp" \
+    "$SRC_DIR/EngineClock.cpp" \
     "$SRC_DIR/scsynth/server/SC_OscUnroll.cpp" \
     $SCSYNTH_SERVER_SOURCES \
     $SCSYNTH_COMMON_SOURCES \

@@ -142,7 +142,7 @@ export function writeMessageToBuffer({
  * @param {Function} params.onMessage - Callback: (payloadOffset: number, payloadLength: number, sequence: number, sourceId: number) => void
  *   payloadOffset is absolute byte offset into uint8View where payload starts
  *   Caller reads directly: uint8View[payloadOffset + i] for i in 0..payloadLength-1
- *   Note: for OUT/DEBUG buffers (C++ writer), payloads never wrap — padding markers are used at buffer boundaries.
+ *   Note: for OUT/NRT-out buffers (C++ writer), payloads never wrap — padding markers are used at buffer boundaries.
  * @param {Function} [params.onCorruption] - Optional callback for corrupted messages: (position: number) => void
  * @returns {{ newTail: number, messagesRead: number }} new tail position and count
  */
@@ -277,25 +277,26 @@ function releaseLock(atomicView, lockIndex) {
 
 /**
  * Write an OSC message to the IN ring buffer with lock acquisition.
- * @param {Object} params
- * @param {Int32Array} params.atomicView
- * @param {DataView} params.dataView
- * @param {Uint8Array} params.uint8View
- * @param {Object} params.bufferConstants
- * @param {number} params.ringBufferBase
- * @param {Object} params.controlIndices
- * @param {Uint8Array} params.oscMessage
- * @param {number} [params.sourceId=0]
- * @param {number} [params.maxSpins=0]
- * @param {boolean} [params.useWait=false]
+ * @param {Object}     ring - Cached IN-ring handle (built once per channel):
+ *   { atomicView, dataView, uint8View, bufferConstants, ringBufferBase,
+ *     controlIndices, headerScratch, headerScratchView }.
+ * @param {Uint8Array} oscMessage - OSC bytes to frame.
+ * @param {number}     [sourceId=0] - Writer identity stamped into the header.
+ * @param {boolean}    [blocking=false] - Worker (true): spin then Atomics.wait
+ *   for guaranteed delivery. Main thread (false): cannot wait — spin harder,
+ *   then return false (backpressure) rather than block.
  * @returns {boolean} true if write succeeded
  */
-export function writeToRingBuffer({
-    atomicView, dataView, uint8View,
-    bufferConstants, ringBufferBase, controlIndices,
-    oscMessage, sourceId = 0, maxSpins = 0, useWait = false,
-    headerScratch = null, headerScratchView = null
-}) {
+export function writeToRingBuffer(ring, oscMessage, sourceId = 0, blocking = false) {
+    const {
+        atomicView, dataView, uint8View,
+        bufferConstants, ringBufferBase, controlIndices,
+        headerScratch = null, headerScratchView = null,
+    } = ring;
+    // Lock-acquisition policy is the writer's concern, not the caller's.
+    const maxSpins = blocking ? 10 : 64;
+    const useWait  = blocking;
+
     const payloadSize = oscMessage.length;
     const totalSize = bufferConstants.MESSAGE_HEADER_SIZE + payloadSize;
 
@@ -330,7 +331,6 @@ export function writeToRingBuffer({
             headerScratch, headerScratchView
         });
 
-        Atomics.load(atomicView, controlIndices.IN_HEAD);
         Atomics.store(atomicView, controlIndices.IN_HEAD, newHead);
         Atomics.notify(atomicView, controlIndices.IN_HEAD, 1);
 

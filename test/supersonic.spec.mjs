@@ -247,19 +247,23 @@ test.describe("SuperSonic", () => {
       expect(result.message).toContain("must be a name, path/URL string, ArrayBuffer, Uint8Array, or File/Blob");
     });
 
-    test("debug metrics increment when scsynth outputs", async ({ page, sonicConfig }) => {
+    test("scsynth debug output reaches the 'debug' event", async ({ page, sonicConfig }) => {
+      // Debug rides the egress as /supersonic/debug and surfaces on the 'debug'
+      // event (there is no separate debug ring any more).
       const result = await page.evaluate(async (config) => {
         const sonic = new window.SuperSonic(config);
-
+        const debugMsgs = [];
         try {
+          sonic.on('debug', (m) => debugMsgs.push(m));
           await sonic.init();
-          // Wait for scsynth startup banner to be processed
+          // Provoke a scsynth error → debug output (reliable in both modes,
+          // produced during process() rather than the early startup banner).
+          sonic.send('/s_new', 'definitely_not_a_real_synthdef', 99991, 0, 0);
           await new Promise(r => setTimeout(r, 500));
-          const metrics = sonic.getMetrics();
           return {
             success: true,
-            debugMessagesReceived: metrics.debugMessagesReceived,
-            debugBytesReceived: metrics.debugBytesReceived,
+            debugCount: debugMsgs.length,
+            sampleText: debugMsgs[0]?.text ?? null,
           };
         } catch (err) {
           return { success: false, error: err.message };
@@ -267,8 +271,8 @@ test.describe("SuperSonic", () => {
       }, sonicConfig);
 
       expect(result.success).toBe(true);
-      expect(result.debugMessagesReceived).toBeGreaterThan(0);
-      expect(result.debugBytesReceived).toBeGreaterThan(0);
+      expect(result.debugCount).toBeGreaterThan(0);
+      expect(typeof result.sampleText).toBe("string");
     });
 
     test("responds to /status command", async ({ page, sonicConfig }) => {

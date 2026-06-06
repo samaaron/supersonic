@@ -33,10 +33,10 @@
 extern "C" {
 #endif
 
-// Debug logging — writes to the debug ring buffer (DEBUG_BUFFER) on both WASM
-// and native; the consumer drains it via the debug channel. No-ops until
-// memory is initialised. printf-compatible signature. Note: this does NOT go
-// to stderr — native host logging uses fprintf(stderr) directly.
+// Debug logging — frames a /supersonic/debug OSC message onto the OUT ring on
+// both WASM and native; the host surfaces it on its debug channel. No-ops until
+// memory is initialised. printf-compatible signature. (ss_log feeds the debug
+// channel; native host logging to the terminal uses fprintf(stderr) directly.)
 int ss_log(const char* fmt, ...);
 
 // Table initialization — must be called explicitly before World_New.

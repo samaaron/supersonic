@@ -31,9 +31,21 @@
 // oscpack for building /done reply
 #include "osc/OscOutboundPacketStream.h"
 
-extern "C" {
-    int ss_log(const char* fmt, ...);
+// Format a diagnostic line and route it through mDebugSink (the engine wires
+// that to OscEgress::debug), or stderr before the sink is set.
+void SampleLoader::debugLog(const char* fmt, ...) {
+    char buf[1024];
+    va_list a;
+    va_start(a, fmt);
+    int n = vsnprintf(buf, sizeof(buf), fmt, a);
+    va_end(a);
+    if (n < 0) return;
+    uint32_t len = (n < (int)sizeof(buf)) ? (uint32_t)n : (uint32_t)sizeof(buf) - 1;
+    if (mDebugSink) mDebugSink(buf, len);
+    else { fputs(buf, stderr); fputc('\n', stderr); }
+}
 
+extern "C" {
     // Globals from audio_processor.cpp — needed for ring buffer writes.
     // Use `shared_memory` (the arena: public segment when present, else
     // ring_buffer_storage) as the OUT-ring base, consistent with `control`/
@@ -165,7 +177,7 @@ void SampleLoader::processRequest(const Request& req) {
     SF_INFO info = {};
     SNDFILE* sf = openSndfile(req.path, SFM_READ, &info);
     if (!sf) {
-        ss_log("[SampleLoader] sf_open failed: %s — %s",
+        debugLog("[SampleLoader] sf_open failed: %s — %s",
                       req.path, sf_strerror(nullptr));
         enqueueCompleted({ req.world, req.bufnum, nullptr, 0, 0, 0, false, req.generation });
         return;
@@ -187,7 +199,7 @@ void SampleLoader::processRequest(const Request& req) {
     float* data = static_cast<float*>(zalloc(numSamples, sizeof(float)));
     if (!data) {
         sf_close(sf);
-        ss_log("[SampleLoader] zalloc failed for %d samples", numSamples);
+        debugLog("[SampleLoader] zalloc failed for %d samples", numSamples);
         enqueueCompleted({ req.world, req.bufnum, nullptr, 0, 0, 0, false, req.generation });
         return;
     }
@@ -199,12 +211,12 @@ void SampleLoader::processRequest(const Request& req) {
 
     if (framesRead <= 0) {
         zfree(data);
-        ss_log("[SampleLoader] sf_readf_float returned %lld", (long long)framesRead);
+        debugLog("[SampleLoader] sf_readf_float returned %lld", (long long)framesRead);
         enqueueCompleted({ req.world, req.bufnum, nullptr, 0, 0, 0, false, req.generation });
         return;
     }
 
-    ss_log("[SampleLoader] decoded buf %d: %s (%lld frames, %d ch, %d Hz)",
+    debugLog("[SampleLoader] decoded buf %d: %s (%lld frames, %d ch, %d Hz)",
                   req.bufnum, req.path, (long long)framesRead,
                   numChannels, info.samplerate);
 
@@ -226,7 +238,7 @@ void SampleLoader::enqueueCompleted(CompletedLoad&& load) {
     if (next == mCompTail.load(std::memory_order_acquire)) {
         // Queue full — drop the load and free data
         if (load.data) zfree(load.data);
-        ss_log("[SampleLoader] completed queue full, dropped buf %d", load.bufnum);
+        debugLog("[SampleLoader] completed queue full, dropped buf %d", load.bufnum);
         return;
     }
 
@@ -277,7 +289,7 @@ void SampleLoader::installBuffer(const CompletedLoad& load) {
 
     zfree(oldData);
 
-    ss_log("[SampleLoader] installed buf %d (%d frames, %d ch, %d Hz)",
+    debugLog("[SampleLoader] installed buf %d (%d frames, %d ch, %d Hz)",
                   load.bufnum, load.numFrames, load.numChannels, load.sampleRate);
 }
 

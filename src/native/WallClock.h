@@ -2,7 +2,7 @@
  * WallClock.h — Wall-clock NTP time (free function)
  *
  * Returns the current wall-clock time as NTP seconds.
- * Used by OscUdpServer and Prescheduler for timestamping and scheduling.
+ * Used by OscUdpServer for timestamping.
  *
  * ## Drift architecture (web vs native)
  *

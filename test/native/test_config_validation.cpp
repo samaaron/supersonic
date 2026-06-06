@@ -17,7 +17,6 @@ TEST_CASE("Default Config values are correct", "[config]") {
     CHECK(cfg.sampleRate             == 48000);
     CHECK(cfg.bufferSize             == 0);   // 0 = auto (smallest multiple of 128)
     CHECK(cfg.udpPort                == 57110);
-    CHECK(cfg.preschedulerLookaheadS == 0.500);
     CHECK(cfg.maxNodes               == 1024);
     CHECK(cfg.numBuffers             == 1024);
     // Default is "auto" (-1) — JUCE/CoreAudio clamps to the device's real
@@ -211,38 +210,6 @@ TEST_CASE("Engine boots with zero input channels", "[config]") {
     cfg.headless         = true;
     cfg.udpPort          = 0;
     cfg.numInputChannels = 0;
-    engine.init(cfg);
-
-    CHECK(engine.isRunning());
-    engine.shutdown();
-    CHECK_FALSE(engine.isRunning());
-}
-
-// ── 10. Prescheduler lookahead variations ───────────────────────────────────
-
-TEST_CASE("Engine boots with short prescheduler lookahead", "[config]") {
-    SupersonicEngine engine;
-    engine.onReply = [](const uint8_t*, uint32_t) {};
-
-    SupersonicEngine::Config cfg;
-    cfg.headless               = true;
-    cfg.udpPort                = 0;
-    cfg.preschedulerLookaheadS = 0.050;
-    engine.init(cfg);
-
-    CHECK(engine.isRunning());
-    engine.shutdown();
-    CHECK_FALSE(engine.isRunning());
-}
-
-TEST_CASE("Engine boots with long prescheduler lookahead", "[config]") {
-    SupersonicEngine engine;
-    engine.onReply = [](const uint8_t*, uint32_t) {};
-
-    SupersonicEngine::Config cfg;
-    cfg.headless               = true;
-    cfg.udpPort                = 0;
-    cfg.preschedulerLookaheadS = 2.0;
     engine.init(cfg);
 
     CHECK(engine.isRunning());

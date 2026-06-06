@@ -240,10 +240,6 @@ export interface SuperSonicOptions {
 
   /** How often to snapshot metrics/tree in postMessage mode (ms). */
   snapshotIntervalMs?: number;
-  /** Max pending events in the JS prescheduler. Default: 65536. */
-  preschedulerCapacity?: number;
-  /** Bundles scheduled within this many ms of now are dispatched immediately for lowest latency. Bundles further in the future are held and dispatched closer to their scheduled time. Default: 500. */
-  bypassLookaheadMs?: number;
 
   /** Enable all debug console logging. Default: false. */
   debug?: boolean;
@@ -300,38 +296,6 @@ export interface SuperSonicMetrics {
   /** Bundles executed after their scheduled time. */
   scsynthSchedulerLates: number;
 
-  // Prescheduler metrics
-  /** Events waiting in JS prescheduler queue. */
-  preschedulerPending: number;
-  /** Peak pending events. */
-  preschedulerPendingPeak: number;
-  /** Bundles added to prescheduler. */
-  preschedulerBundlesScheduled: number;
-  /** Events sent from prescheduler to worklet. */
-  preschedulerDispatched: number;
-  /** Bundles cancelled before dispatch. */
-  preschedulerEventsCancelled: number;
-  /** Smallest time gap between dispatch and execution (ms). 0xFFFFFFFF = no data yet. */
-  preschedulerMinHeadroomMs: number;
-  /** Bundles dispatched after their scheduled time. */
-  preschedulerLates: number;
-  /** Ring buffer write retries that succeeded. */
-  preschedulerRetriesSucceeded: number;
-  /** Ring buffer write retries that failed. */
-  preschedulerRetriesFailed: number;
-  /** Current retry queue size. */
-  preschedulerRetryQueueSize: number;
-  /** Peak retry queue size. */
-  preschedulerRetryQueuePeak: number;
-  /** Total messages that needed retry. */
-  preschedulerMessagesRetried: number;
-  /** Total dispatch cycles. */
-  preschedulerTotalDispatches: number;
-  /** Messages sent directly, bypassing prescheduler (aggregate). */
-  preschedulerBypassed: number;
-  /** Maximum lateness at prescheduler (ms). */
-  preschedulerMaxLateMs: number;
-
   // OSC Out metrics
   /** OSC messages sent from JS to scsynth. */
   oscOutMessagesSent: number;
@@ -368,16 +332,6 @@ export interface SuperSonicMetrics {
   /** Peak bytes used in DEBUG ring buffer. */
   debugBufferPeakBytes: number;
 
-  // Bypass categories
-  /** Plain OSC messages (not bundles) that bypassed prescheduler. */
-  bypassNonBundle: number;
-  /** Bundles with timetag 0 or 1 that bypassed prescheduler. */
-  bypassImmediate: number;
-  /** Bundles within lookahead threshold that bypassed prescheduler. */
-  bypassNearFuture: number;
-  /** Late bundles that bypassed prescheduler. */
-  bypassLate: number;
-
   // scsynth late timing diagnostics
   /** Maximum lateness observed in scsynth scheduler (ms). */
   scsynthSchedulerMaxLateMs: number;
@@ -386,7 +340,7 @@ export interface SuperSonicMetrics {
   /** Process count when last scsynth late occurred. */
   scsynthSchedulerLastLateTick: number;
 
-  /** SAB mode only: optimistic direct writes that fell back to prescheduler. */
+  /** SAB mode only: direct IN-ring writes dropped on lock contention / full ring. */
   ringBufferDirectWriteFails: number;
 
   // System info (cross-platform; written by shared C++ at init)
@@ -440,8 +394,6 @@ export interface SuperSonicMetrics {
   loadedSynthDefs: number;
   /** Maximum scsynth scheduler queue size (compile-time constant). */
   scsynthSchedulerCapacity: number;
-  /** Maximum pending events in JS prescheduler. */
-  preschedulerCapacity: number;
   /** IN ring buffer capacity (bytes). */
   inBufferCapacity: number;
   /** OUT ring buffer capacity (bytes). */
@@ -510,11 +462,6 @@ export interface MetricsSchema {
         color?: string;
       }>;
     }>;
-  };
-  /** Magic values used in the metrics array. */
-  sentinels: {
-    /** Value of preschedulerMinHeadroomMs before any data arrives. */
-    HEADROOM_UNSET: number;
   };
 }
 
@@ -938,26 +885,10 @@ export type SuperSonicEvent = keyof SuperSonicEventMap;
 // OscChannel
 // ============================================================================
 
-/**
- * Classification category for OSC message routing.
- *
- * - `'nonBundle'` — plain message (not a bundle), sent directly
- * - `'immediate'` — bundle with timetag 0 or 1, sent directly
- * - `'nearFuture'` — bundle within the bypass lookahead threshold, sent directly
- * - `'late'` — bundle past its scheduled time, sent directly
- * - `'farFuture'` — bundle beyond the lookahead threshold, routed to the prescheduler
- */
-export type OscCategory = 'nonBundle' | 'immediate' | 'nearFuture' | 'late' | 'farFuture';
-
 /** OscChannel metrics counters. */
 export interface OscChannelMetrics {
   messagesSent: number;
   bytesSent: number;
-  nonBundle: number;
-  immediate: number;
-  nearFuture: number;
-  late: number;
-  bypassed: number;
 }
 
 /** Transferable config for SAB mode OscChannel. */
@@ -967,8 +898,6 @@ export interface OscChannelSABTransferable {
   ringBufferBase: number;
   bufferConstants: Record<string, number>;
   controlIndices: Record<string, number>;
-  preschedulerPort: MessagePort | null;
-  bypassLookaheadS: number;
   sourceId: number;
   blocking: boolean;
 }
@@ -977,8 +906,6 @@ export interface OscChannelSABTransferable {
 export interface OscChannelPMTransferable {
   mode: 'postMessage';
   port: MessagePort;
-  preschedulerPort: MessagePort | null;
-  bypassLookaheadS: number;
   sourceId: number;
   blocking: boolean;
 }
@@ -1007,17 +934,9 @@ export type OscChannelTransferable = OscChannelSABTransferable | OscChannelPMTra
  */
 export class OscChannel {
   /**
-   * Classify an OSC message to determine its routing.
-   * @param oscData - Encoded OSC bytes
-   */
-  classify(oscData: Uint8Array): OscCategory;
-
-  /**
-   * Send an OSC message with automatic routing.
-   *
-   * Classifies the message and routes it:
-   * - bypass categories → sent directly to the AudioWorklet
-   * - far-future bundles → routed to the prescheduler for timed dispatch
+   * Send an OSC message: frames it onto the IN ring (SAB) or postMessages it to
+   * the worklet (PM). Classification and scheduling happen on the audio thread
+   * (the engine's OscIngress + BundleScheduler) — the producer never classifies.
    *
    * @param oscData - Encoded OSC bytes
    * @returns true if sent successfully
@@ -1025,18 +944,11 @@ export class OscChannel {
   send(oscData: Uint8Array): boolean;
 
   /**
-   * Send directly to worklet without classification or metrics tracking.
+   * Alias of {@link send} — kept for callers that used the explicit direct path.
    * @param oscData - Encoded OSC bytes
    * @returns true if sent successfully
    */
   sendDirect(oscData: Uint8Array): boolean;
-
-  /**
-   * Send to prescheduler without classification.
-   * @param oscData - Encoded OSC bytes
-   * @returns true if sent successfully
-   */
-  sendToPrescheduler(oscData: Uint8Array): boolean;
 
   /** Get current metrics snapshot. */
   getMetrics(): OscChannelMetrics;
@@ -1054,73 +966,6 @@ export class OscChannel {
    * @returns A unique node ID (>= 1000)
    */
   nextNodeId(): number;
-
-  /**
-   * Register a handler for OSC replies from scsynth. Idempotent — replaces
-   * any previously-registered handler. In AudioWorklet contexts the worklet
-   * must call {@link pollReplies} from `process()` to drain; in all other
-   * contexts delivery is automatic. All registered channels receive all
-   * replies (broadcast); filter locally if you only need specific addresses.
-   *
-   * SAB mode: handler receives `(view, offset, length, sequence)` — zero-copy
-   * into the shared buffer. Read bytes from `view[offset..offset+length]`.
-   * Data is valid only for the duration of the handler call.
-   *
-   * PM mode: handler receives `(oscData, sequence)` where `oscData` is a copy.
-   *
-   * @example
-   * channel.setReplyHandler((view, offset, length, sequence) => {
-   *   // SAB: read raw OSC bytes from view[offset..offset+length]
-   * });
-   */
-  setReplyHandler(
-    handler:
-      | ((view: Uint8Array, offset: number, length: number, sequence: number) => void)
-      | ((oscData: Uint8Array, sequence: number) => void),
-  ): void;
-
-  /**
-   * Clear the reply handler and release the reply channel. Idempotent.
-   */
-  clearReplyHandler(): void;
-
-  /**
-   * Activate the reply slot without registering a handler. Usually called
-   * for you by {@link setReplyHandler}; only call directly if you want to
-   * claim the slot before installing a handler (or to use the optional
-   * one-shot handler argument of {@link pollReplies}).
-   */
-  activateReplies(): void;
-
-  /**
-   * Release the reply slot. Usually called for you by {@link clearReplyHandler}.
-   */
-  deactivateReplies(): void;
-
-  /**
-   * Drain pending replies, calling the registered handler (or `handler`
-   * argument, if given) once per message. Returns the number of messages
-   * processed. Zero-allocation on the hot path.
-   *
-   * Call from an AudioWorklet's `process()` method to receive replies on
-   * the audio thread. In other contexts automatic delivery already calls
-   * this for you.
-   *
-   * @param handler - Optional override for this call only
-   * @returns Number of messages drained
-   */
-  pollReplies(
-    handler?:
-      | ((view: Uint8Array, offset: number, length: number, sequence: number) => void)
-      | ((oscData: Uint8Array, sequence: number) => void),
-  ): number;
-
-  /**
-   * Number of reply messages dropped because the reply buffer was full.
-   * SAB mode only — undefined in PM mode or before {@link activateReplies}.
-   * Counter resets each time the slot is (re)claimed.
-   */
-  get replyDrops(): number | undefined;
 
   /** Close the channel and release its ports. */
   close(): void;
@@ -1271,14 +1116,6 @@ export type BlockedCommand =
 // ============================================================================
 // SuperSonic
 // ============================================================================
-
-/** Options for {@link SuperSonic.sendOSC}. */
-export interface SendOSCOptions {
-  /** Session ID for cancellation via {@link SuperSonic.cancelSession}. */
-  sessionId?: string;
-  /** Run tag for cancellation via {@link SuperSonic.cancelTag}. */
-  runTag?: string;
-}
 
 /**
  * SuperSonic — WebAssembly SuperCollider synthesis engine for the browser.
@@ -1657,7 +1494,7 @@ export class SuperSonic {
   send(address: '/b_write', ...args: OscArg[]): never;
   /** @deprecated File writing is not available in the browser. */
   send(address: '/b_close', ...args: OscArg[]): never;
-  /** @deprecated Use purge() to clear both the JS prescheduler and WASM scheduler. */
+  /** @deprecated Use purge() to clear the WASM BundleScheduler + IN ring. */
   send(address: '/clearSched', ...args: OscArg[]): never;
   /** @deprecated SuperSonic always enables error notifications so you never miss a /fail reply. */
   send(address: '/error', ...args: OscArg[]): never;
@@ -1810,48 +1647,17 @@ export class SuperSonic {
    * Use {@link send} for buffer commands so they are handled correctly.
    *
    * @param oscData - Encoded OSC message or bundle bytes
-   * @param options - Optional session/tag for cancellation
-   * @throws If the bundle exceeds the maximum schedulable size
+   * @throws If the message exceeds the IN ring size
    *
    * @example
    * const msg = SuperSonic.osc.encodeMessage('/n_set', [1001, 'freq', 880]);
    * sonic.sendOSC(msg);
-   *
-   * // With cancellation tags:
-   * const bundle = SuperSonic.osc.encodeBundle(futureTime, packets);
-   * sonic.sendOSC(bundle, { sessionId: 'song1', runTag: 'verse' });
    */
-  sendOSC(oscData: Uint8Array | ArrayBuffer, options?: SendOSCOptions): void;
+  sendOSC(oscData: Uint8Array | ArrayBuffer): void;
 
   /**
-   * Cancel all scheduled messages with the given run tag.
-   * Only affects messages in the JS prescheduler (not yet dispatched to WASM).
-   * @param runTag - Tag to cancel
-   */
-  cancelTag(runTag: string): void;
-
-  /**
-   * Cancel all scheduled messages for a session.
-   * @param sessionId - Session to cancel
-   */
-  cancelSession(sessionId: string): void;
-
-  /**
-   * Cancel scheduled messages matching both a session and run tag.
-   * @param sessionId - Session to match
-   * @param runTag - Tag to match within that session
-   */
-  cancelSessionTag(sessionId: string, runTag: string): void;
-
-  /** Cancel all scheduled messages in the JS prescheduler. */
-  cancelAll(): void;
-
-  /**
-   * Cancel all pending scheduled messages everywhere in the pipeline.
-   *
-   * Unlike {@link cancelAll} which only clears messages still waiting in JS,
-   * `purge()` guarantees that nothing already in-flight will fire either.
-   * Resolves when the flush is confirmed complete.
+   * Flush all pending scheduled OSC: clears the WASM BundleScheduler and the IN
+   * ring so nothing already in-flight will fire. Resolves when confirmed.
    */
   purge(): Promise<void>;
 

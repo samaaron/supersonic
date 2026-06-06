@@ -139,7 +139,7 @@ export class SuperClock {
    * Link integration (peer discovery, tempo sync, audio sharing) is
    * native-only — the browser AudioWorklet can't host Link's network
    * thread or do UDP multicast. On native, set via OSC:
-   * /link/visibility (int 0|1|2). On web this is a no-op.
+   * /clock/visibility (int 0|1|2). On web this is a no-op.
    *
    * @param {boolean} enabled
    */
@@ -148,7 +148,7 @@ export class SuperClock {
       // eslint-disable-next-line no-console
       console.warn(
         '[SuperClock] setLinkEnabled(true) ignored on web — Link is ' +
-        'native-only. Use the native build + /link/visibility.');
+        'native-only. Use the native build + /clock/visibility.');
     }
   }
 

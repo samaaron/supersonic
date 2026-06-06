@@ -35,7 +35,8 @@ public:
         std::atomic<int32_t>* sequence,
         std::atomic<int32_t>* write_lock,
         const void*           data,
-        uint32_t              data_size)
+        uint32_t              data_size,
+        uint32_t              source_id = 0)
     {
         const uint32_t total_size = static_cast<uint32_t>(sizeof(Message)) + data_size;
 
@@ -72,7 +73,7 @@ public:
         hdr.magic    = MESSAGE_MAGIC;
         hdr.length   = total_size;
         hdr.sequence = seq;
-        hdr.sourceId = 0;
+        hdr.sourceId = source_id;
 
         writeWrapped(buffer_start, buffer_size, uh, &hdr, sizeof(Message));
         uh = (uh + sizeof(Message)) % buffer_size;

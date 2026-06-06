@@ -16,7 +16,7 @@
  *   audio_processor.cpp writes: process_count, messages_processed,
  *     messages_dropped, scheduler_queue_depth/max/dropped, messages_sequence_gaps,
  *     scheduler_lates, scheduler_max_late_ms, scheduler_last_late_ms,
- *     scheduler_last_late_tick, in/out/debug_buffer_used/peak_bytes (plus
+ *     scheduler_last_late_tick, in/out/nrt_out_buffer_used/peak_bytes (plus
  *     ring-buffer tracking inside scsynth core).
  *   OscUdpServer.cpp writes: osc_out_messages_sent, osc_out_bytes_sent,
  *     bypass_immediate, bypass_near_future, bypass_late, prescheduler_bypassed.
@@ -182,172 +182,6 @@ TEST_CASE("metrics: scheduler_lates is 0 or low at idle",
 }
 
 // ============================================================================
-// Prescheduler metrics [9-23]
-// ============================================================================
-
-TEST_CASE("metrics: prescheduler_pending is 0 at idle",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    CHECK(metrics(fx).prescheduler_pending.load() == 0);
-}
-
-TEST_CASE("metrics: prescheduler_pending_peak grows with concurrent FAR_FUTURE schedules",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    constexpr int N = 5;
-    uint32_t before = metrics(fx).prescheduler_pending_peak.load();
-    for (int i = 0; i < N; ++i) {
-        fx.engine().sendBundle(wallClockNTP() + 60.0 + i,
-                               { OscBuilder::message("/status") });
-    }
-    // Wait until the prescheduler thread has registered all N schedules,
-    // rather than guessing a fixed delay that a loaded runner may overrun.
-    CHECK(fx.pollUntil([&] {
-        return metrics(fx).prescheduler_pending_peak.load() >= before + N;
-    }));
-}
-
-TEST_CASE("metrics: prescheduler_bundles_scheduled increments on FAR_FUTURE",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    uint32_t before = metrics(fx).prescheduler_bundles_scheduled.load();
-    fx.engine().sendBundle(wallClockNTP() + 60.0,
-                           { OscBuilder::message("/status") });
-    CHECK(fx.pollUntil([&] {
-        return metrics(fx).prescheduler_bundles_scheduled.load() > before;
-    }));
-}
-
-TEST_CASE("metrics: prescheduler_bypassed increments on FAR_FUTURE",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    uint32_t before = metrics(fx).prescheduler_bypassed.load();
-    fx.engine().sendBundle(wallClockNTP() + 60.0,
-                           { OscBuilder::message("/status") });
-    CHECK(metrics(fx).prescheduler_bypassed.load() > before);
-}
-
-TEST_CASE("metrics: prescheduler_dispatched increments after scheduled fire",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    uint32_t before = metrics(fx).prescheduler_dispatched.load();
-    // Schedule beyond the 0.5s default lookahead so it goes through the
-    // prescheduler, but close enough that we can wait it out.
-    fx.engine().sendBundle(wallClockNTP() + 0.7,
-                           { OscBuilder::message("/status") });
-    // The scheduled /status emits a /status.reply when it dispatches — wait on
-    // that instead of a fixed sleep (the prescheduler fires off wall time, so a
-    // loaded runner can wake late).
-    OscReply r;
-    REQUIRE(fx.waitForReply("/status.reply", r, 3000));
-    CHECK(metrics(fx).prescheduler_dispatched.load() > before);
-}
-
-TEST_CASE("metrics: prescheduler_total_dispatches increments after fire",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    uint32_t before = metrics(fx).prescheduler_total_dispatches.load();
-    fx.engine().sendBundle(wallClockNTP() + 0.7,
-                           { OscBuilder::message("/status") });
-    OscReply r;
-    REQUIRE(fx.waitForReply("/status.reply", r, 3000));
-    CHECK(metrics(fx).prescheduler_total_dispatches.load() > before);
-}
-
-TEST_CASE("metrics: prescheduler_events_cancelled increments on purge",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    uint32_t schedBefore = metrics(fx).prescheduler_bundles_scheduled.load();
-    fx.engine().sendBundle(wallClockNTP() + 60.0,
-                           { OscBuilder::message("/status") });
-    // Ensure the bundle is registered in the prescheduler before we purge.
-    REQUIRE(fx.pollUntil([&] {
-        return metrics(fx).prescheduler_bundles_scheduled.load() > schedBefore;
-    }));
-    uint32_t before = metrics(fx).prescheduler_events_cancelled.load();
-    fx.engine().purge();
-    CHECK(fx.pollUntil([&] {
-        return metrics(fx).prescheduler_events_cancelled.load() > before;
-    }));
-}
-
-TEST_CASE("metrics: prescheduler_min_headroom_ms initialised to sentinel",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    // 0xFFFFFFFF is HEADROOM_UNSET_SENTINEL — see Prescheduler.h.
-    CHECK(metrics(fx).prescheduler_min_headroom_ms.load() == 0xFFFFFFFFu);
-}
-
-TEST_CASE("metrics: prescheduler_min_headroom_ms recorded after FAR_FUTURE dispatch",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    // Schedule at now + 0.7s (FAR_FUTURE since lookahead is 0.5s).
-    // Dispatch fires at ~ now + 0.2s with ~500ms remaining until exec.
-    fx.engine().sendBundle(wallClockNTP() + 0.7,
-                           { OscBuilder::message("/status") });
-    // Most timing-sensitive metrics assertion: headroom is recorded only on an
-    // on-time dispatch. The reply barrier guarantees the dispatch happened;
-    // poll in case the relaxed store lags on weak-memory hosts.
-    OscReply r;
-    REQUIRE(fx.waitForReply("/status.reply", r, 3000));
-    CHECK(fx.pollUntil([&] {
-        return metrics(fx).prescheduler_min_headroom_ms.load() != 0xFFFFFFFFu;
-    }));
-    CHECK(metrics(fx).prescheduler_min_headroom_ms.load() < 1000);  // sanity bound
-}
-
-TEST_CASE("metrics: prescheduler_lates is 0 at idle",
-          "[metrics][prescheduler]") {
-    // Native writes this on late dispatch (event time already past at fire);
-    // no late events expected in a normal idle test.
-    EngineFixture fx;
-    CHECK(metrics(fx).prescheduler_lates.load() == 0);
-}
-
-TEST_CASE("metrics: prescheduler_retries_succeeded is 0 without buffer-full",
-          "[metrics][prescheduler]") {
-    // Native writes this when a previously-queued retry succeeds. No buffer-full
-    // condition expected at idle.
-    EngineFixture fx;
-    CHECK(metrics(fx).prescheduler_retries_succeeded.load() == 0);
-}
-
-TEST_CASE("metrics: prescheduler_retries_failed is 0 at idle",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    fx.engine().sendBundle(wallClockNTP() + 0.7,
-                           { OscBuilder::message("/status") });
-    OscReply r;
-    REQUIRE(fx.waitForReply("/status.reply", r, 3000));
-    CHECK(metrics(fx).prescheduler_retries_failed.load() == 0);
-}
-
-TEST_CASE("metrics: prescheduler_retry_queue_size is 0 without buffer-full",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    CHECK(metrics(fx).prescheduler_retry_queue_size.load() == 0);
-}
-
-TEST_CASE("metrics: prescheduler_retry_queue_peak is 0 without buffer-full",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    CHECK(metrics(fx).prescheduler_retry_queue_peak.load() == 0);
-}
-
-TEST_CASE("metrics: prescheduler_messages_retried is 0 without buffer-full",
-          "[metrics][prescheduler]") {
-    EngineFixture fx;
-    CHECK(metrics(fx).prescheduler_messages_retried.load() == 0);
-}
-
-TEST_CASE("metrics: prescheduler_max_late_ms is 0 at idle",
-          "[metrics][prescheduler]") {
-    // Native writes max(lateMs) on late dispatch. No late events expected at idle.
-    EngineFixture fx;
-    CHECK(metrics(fx).prescheduler_max_late_ms.load() == 0);
-}
-
-// ============================================================================
 // OSC Out [24-25]
 // (Counts messages routed through the ring buffer to scsynth — i.e. anything
 //  the engine receives. Naming is JS-perspective: "out to scsynth".)
@@ -449,10 +283,10 @@ TEST_CASE("metrics: out_buffer_used_bytes < OUT_BUFFER_SIZE",
     CHECK(metrics(fx).out_buffer_used_bytes.load() < OUT_BUFFER_SIZE);
 }
 
-TEST_CASE("metrics: debug_buffer_used_bytes < DEBUG_BUFFER_SIZE",
+TEST_CASE("metrics: nrt_out_buffer_used_bytes < NRT_OUT_BUFFER_SIZE",
           "[metrics][buffer]") {
     EngineFixture fx;
-    CHECK(metrics(fx).debug_buffer_used_bytes.load() < DEBUG_BUFFER_SIZE);
+    CHECK(metrics(fx).nrt_out_buffer_used_bytes.load() < NRT_OUT_BUFFER_SIZE);
 }
 
 TEST_CASE("metrics: in_buffer_peak_bytes > 0 after activity",
@@ -476,51 +310,11 @@ TEST_CASE("metrics: out_buffer_peak_bytes > 0 after replies",
     }));
 }
 
-TEST_CASE("metrics: debug_buffer_peak_bytes is readable",
+TEST_CASE("metrics: nrt_out_buffer_peak_bytes is readable",
           "[metrics][buffer]") {
     EngineFixture fx;
-    (void)metrics(fx).debug_buffer_peak_bytes.load();
+    (void)metrics(fx).nrt_out_buffer_peak_bytes.load();
     SUCCEED();
-}
-
-// ============================================================================
-// Bypass categories [38-41]
-// ============================================================================
-
-TEST_CASE("metrics: bypass_non_bundle is 0 on native (JS-only)",
-          "[metrics][bypass][js-only]") {
-    // Native OscUdpServer counts plain messages as IMMEDIATE; the JS transport
-    // is the only writer that distinguishes non-bundle.
-    EngineFixture fx;
-    fx.send(osc_test::message("/status"));
-    CHECK(metrics(fx).bypass_non_bundle.load() == 0);
-}
-
-TEST_CASE("metrics: bypass_immediate increments on plain messages",
-          "[metrics][bypass]") {
-    EngineFixture fx;
-    uint32_t before = metrics(fx).bypass_immediate.load();
-    fx.send(osc_test::message("/status"));
-    CHECK(metrics(fx).bypass_immediate.load() > before);
-}
-
-TEST_CASE("metrics: bypass_near_future increments on near-future bundles",
-          "[metrics][bypass]") {
-    EngineFixture fx;
-    uint32_t before = metrics(fx).bypass_near_future.load();
-    // Within the default lookahead (0.5s) but in the future
-    fx.engine().sendBundle(wallClockNTP() + 0.05,
-                           { OscBuilder::message("/status") });
-    CHECK(metrics(fx).bypass_near_future.load() > before);
-}
-
-TEST_CASE("metrics: bypass_late increments on past timetags",
-          "[metrics][bypass]") {
-    EngineFixture fx;
-    uint32_t before = metrics(fx).bypass_late.load();
-    fx.engine().sendBundle(wallClockNTP() - 1.0,
-                           { OscBuilder::message("/status") });
-    CHECK(metrics(fx).bypass_late.load() > before);
 }
 
 // ============================================================================

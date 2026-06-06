@@ -18,10 +18,6 @@
 
 import { test as base } from '@playwright/test';
 
-// Re-export protocol constants for the reply_oscchannel_test_worklet so spec
-// files don't have to know the asset path. Same source the worklet imports.
-export { REPLY_WORKLET_MSG } from './assets/reply_worklet_protocol.js';
-
 export const test = base.extend({
   /**
    * Fixture: SuperSonic configuration based on current project mode.

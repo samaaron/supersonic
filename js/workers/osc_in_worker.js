@@ -2,24 +2,19 @@
 // Copyright (c) 2025 Sam Aaron
 
 /**
- * OSC IN Worker - Receives OSC messages from scsynth
- * Uses Atomics.wait() for instant wake when data arrives
- * Reads from OUT ring buffer and forwards to main thread
+ * OSC IN Worker — drains the OUT ring buffer and forwards every reply to the
+ * main thread. The main thread fans out to registered callbacks; this worker
+ * is a dumb pump (Atomics.wait for instant wake, copy out, postMessage).
  */
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
-import { readMessagesFromBuffer, writeMessageToBuffer, calculateAvailableSpace } from '../lib/ring_buffer_core.js';
-import { calculateOutControlIndices, calculateReplyChannelIndices } from '../lib/control_offsets.js';
+import { readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
+import { calculateOutControlIndices } from '../lib/control_offsets.js';
 import { getCurrentNTPFromPerformance as getCurrentNTP } from '../lib/osc_classifier.js';
 import { runSabWorker } from '../lib/sab_worker_loop.js';
 
 // Sequence tracking for dropped message detection
 let lastSequenceReceived = -1;
-
-// Per-channel reply buffer fan-out state (populated on init)
-let replyChannels = null;  // Array of { bufferStart, bufferSize, headIndex, tailIndex, activeIndex, dropsIndex }
-let replyHeaderScratch = null;  // Pre-allocated scratch for wrap-around writes
-let replyHeaderScratchView = null;
 
 /**
  * Read all available OSC messages from the OUT ring buffer
@@ -69,38 +64,6 @@ function readOscMessages(ctx) {
                 timestamp: getCurrentNTP()
             });
 
-            // Fan out to active reply channel buffers
-            if (replyChannels) {
-                for (let ch = 0; ch < replyChannels.length; ch++) {
-                    const rc = replyChannels[ch];
-                    if (Atomics.load(atomicView, rc.activeIndex) !== 1) continue;
-
-                    const chHead = Atomics.load(atomicView, rc.headIndex);
-                    const chTail = Atomics.load(atomicView, rc.tailIndex);
-                    const available = calculateAvailableSpace(chHead, chTail, rc.bufferSize);
-                    const needed = ((bufferConstants.MESSAGE_HEADER_SIZE + payloadLength) + 3) & ~3;
-                    if (needed > available) {
-                        Atomics.add(atomicView, rc.dropsIndex, 1);
-                        continue;
-                    }
-
-                    const newHead = writeMessageToBuffer({
-                        uint8View, dataView,
-                        bufferStart: rc.bufferStart,
-                        bufferSize: rc.bufferSize,
-                        head: chHead,
-                        payload: oscData,
-                        sequence,
-                        messageMagic: bufferConstants.MESSAGE_MAGIC,
-                        headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
-                        headerScratch: replyHeaderScratch,
-                        headerScratchView: replyHeaderScratchView,
-                    });
-                    Atomics.store(atomicView, rc.headIndex, newHead);
-                    Atomics.notify(atomicView, rc.headIndex);
-                }
-            }
-
             if (metricsView) {
                 Atomics.add(metricsView, MetricsOffsets.OSC_IN_MESSAGES_RECEIVED, 1);
                 Atomics.add(metricsView, MetricsOffsets.OSC_IN_BYTES_RECEIVED, payloadLength);
@@ -128,28 +91,4 @@ runSabWorker({
     tailIndex: (idx) => idx.OUT_TAIL,
     readMessages: readOscMessages,
     postResults: (messages) => self.postMessage({ type: 'messages', messages }),
-    onInit: (ctx) => {
-        const bc = ctx.bufferConstants;
-        if (!bc.REPLY_CHANNEL_COUNT) return;  // Old WASM without reply channels
-
-        // Pre-allocate scratch buffers for wrap-around writes (avoids allocation per reply)
-        replyHeaderScratch = new Uint8Array(bc.MESSAGE_HEADER_SIZE);
-        replyHeaderScratchView = new DataView(replyHeaderScratch.buffer);
-
-        const base = ctx.ringBufferBase;
-        replyChannels = [];
-        for (let i = 0; i < bc.REPLY_CHANNEL_COUNT; i++) {
-            const idx = calculateReplyChannelIndices(
-                base, bc.REPLY_CHANNELS_CONTROL_START, bc.REPLY_CHANNEL_CONTROL_SIZE, i,
-            );
-            replyChannels.push({
-                bufferStart: base + bc.REPLY_CHANNELS_BUFFER_START + (i * bc.REPLY_CHANNEL_BUFFER_SIZE),
-                bufferSize: bc.REPLY_CHANNEL_BUFFER_SIZE,
-                headIndex: idx.headIndex,
-                tailIndex: idx.tailIndex,
-                activeIndex: idx.activeIndex,
-                dropsIndex: idx.dropsIndex,
-            });
-        }
-    },
 });

@@ -7,7 +7,7 @@
  */
 
 import { createTransport, OscChannel } from "./lib/transport/index.js";
-import { shouldBypass, readTimetag, getCurrentNTPFromPerformance } from "./lib/osc_classifier.js";
+import { readTimetag, getCurrentNTPFromPerformance } from "./lib/osc_classifier.js";
 
 // Re-export OscChannel for use in workers
 export { OscChannel };
@@ -157,107 +157,83 @@ export class SuperSonic {
         scsynthWasmErrors:            { offset: 7,  type: 'counter',  unit: 'count', description: 'WASM execution errors in audio worklet' },
         scsynthSchedulerLates:        { offset: 8,  type: 'counter',  unit: 'count', description: 'Bundles executed after their scheduled time' },
 
-        // Prescheduler metrics [9-23]
-        preschedulerPending:          { offset: 9,  type: 'gauge',    unit: 'count', description: 'Events waiting to be scheduled' },
-        preschedulerPendingPeak:      { offset: 10, type: 'gauge',    unit: 'count', description: 'Peak pending events' },
-        preschedulerBundlesScheduled: { offset: 11, type: 'counter',  unit: 'count', description: 'Bundles scheduled' },
-        preschedulerDispatched:       { offset: 12, type: 'counter',  unit: 'count', description: 'Events sent to worklet' },
-        preschedulerEventsCancelled:  { offset: 13, type: 'counter',  unit: 'count', description: 'Events cancelled' },
-        preschedulerMinHeadroomMs:    { offset: 14, type: 'gauge',    unit: 'ms',    description: 'Smallest time gap between JS prescheduler dispatch and scsynth scheduler execution' },
-        preschedulerLates:            { offset: 15, type: 'counter',  unit: 'count', description: 'Bundles dispatched after their scheduled execution time' },
-        preschedulerRetriesSucceeded: { offset: 16, type: 'counter',  unit: 'count', description: 'Retries that succeeded' },
-        preschedulerRetriesFailed:    { offset: 17, type: 'counter',  unit: 'count', description: 'Retries that failed' },
-        preschedulerRetryQueueSize:   { offset: 18, type: 'gauge',    unit: 'count', description: 'Current retry queue size' },
-        preschedulerRetryQueuePeak:   { offset: 19, type: 'gauge',    unit: 'count', description: 'Peak retry queue size' },
-        preschedulerMessagesRetried:  { offset: 20, type: 'counter',  unit: 'count', description: 'Messages that needed retry' },
-        preschedulerTotalDispatches:  { offset: 21, type: 'counter',  unit: 'count', description: 'Total dispatch attempts' },
-        preschedulerBypassed:         { offset: 22, type: 'counter',  unit: 'count', description: 'Messages sent directly from JS to scsynth, bypassing prescheduler (aggregate)' },
-        preschedulerMaxLateMs:        { offset: 23, type: 'gauge',    unit: 'ms',    description: 'Maximum lateness at prescheduler (ms)' },
+        // OSC Out metrics [9-10]
+        oscOutMessagesSent:           { offset: 9,  type: 'counter',  unit: 'count', description: 'OSC messages sent from JS to scsynth' },
+        oscOutBytesSent:              { offset: 10, type: 'counter',  unit: 'bytes', description: 'Total bytes sent from JS to scsynth' },
 
-        // OSC Out metrics [24-25]
-        oscOutMessagesSent:           { offset: 24, type: 'counter',  unit: 'count', description: 'OSC messages sent from JS to scsynth' },
-        oscOutBytesSent:              { offset: 25, type: 'counter',  unit: 'bytes', description: 'Total bytes sent from JS to scsynth' },
+        // OSC In metrics [11-14]
+        oscInMessagesReceived:        { offset: 11, type: 'counter',  unit: 'count', description: 'OSC replies received from scsynth to JS' },
+        oscInBytesReceived:           { offset: 12, type: 'counter',  unit: 'bytes', description: 'Total bytes received from scsynth to JS' },
+        oscInMessagesDropped:         { offset: 13, type: 'counter',  unit: 'count', description: 'Replies lost in transit from scsynth to JS' },
+        oscInCorrupted:               { offset: 14, type: 'counter',  unit: 'count', description: 'Corrupted messages detected from scsynth to JS' },
 
-        // OSC In metrics [26-29]
-        oscInMessagesReceived:        { offset: 26, type: 'counter',  unit: 'count', description: 'OSC replies received from scsynth to JS' },
-        oscInBytesReceived:           { offset: 27, type: 'counter',  unit: 'bytes', description: 'Total bytes received from scsynth to JS' },
-        oscInMessagesDropped:         { offset: 28, type: 'counter',  unit: 'count', description: 'Replies lost in transit from scsynth to JS' },
-        oscInCorrupted:               { offset: 29, type: 'counter',  unit: 'count', description: 'Corrupted messages detected from scsynth to JS' },
+        // Debug metrics [15-16]
+        debugMessagesReceived:        { offset: 15, type: 'counter',  unit: 'count', description: 'Debug messages from scsynth' },
+        debugBytesReceived:           { offset: 16, type: 'counter',  unit: 'bytes', description: 'Debug bytes received' },
 
-        // Debug metrics [30-31]
-        debugMessagesReceived:        { offset: 30, type: 'counter',  unit: 'count', description: 'Debug messages from scsynth' },
-        debugBytesReceived:           { offset: 31, type: 'counter',  unit: 'bytes', description: 'Debug bytes received' },
+        // Ring buffer usage [17-22]
+        inBufferUsedBytes:            { offset: 17, type: 'gauge',    unit: 'bytes', description: 'Bytes used in IN ring buffer' },
+        outBufferUsedBytes:           { offset: 18, type: 'gauge',    unit: 'bytes', description: 'Bytes used in OUT ring buffer' },
+        nrtOutBufferUsedBytes:         { offset: 19, type: 'gauge',    unit: 'bytes', description: 'Bytes used in NRT-out ring buffer' },
+        inBufferPeakBytes:            { offset: 20, type: 'gauge',    unit: 'bytes', description: 'Peak bytes used in IN ring buffer' },
+        outBufferPeakBytes:           { offset: 21, type: 'gauge',    unit: 'bytes', description: 'Peak bytes used in OUT ring buffer' },
+        nrtOutBufferPeakBytes:         { offset: 22, type: 'gauge',    unit: 'bytes', description: 'Peak bytes used in NRT-out ring buffer' },
 
-        // Ring buffer usage [32-37]
-        inBufferUsedBytes:            { offset: 32, type: 'gauge',    unit: 'bytes', description: 'Bytes used in IN ring buffer' },
-        outBufferUsedBytes:           { offset: 33, type: 'gauge',    unit: 'bytes', description: 'Bytes used in OUT ring buffer' },
-        debugBufferUsedBytes:         { offset: 34, type: 'gauge',    unit: 'bytes', description: 'Bytes used in DEBUG ring buffer' },
-        inBufferPeakBytes:            { offset: 35, type: 'gauge',    unit: 'bytes', description: 'Peak bytes used in IN ring buffer' },
-        outBufferPeakBytes:           { offset: 36, type: 'gauge',    unit: 'bytes', description: 'Peak bytes used in OUT ring buffer' },
-        debugBufferPeakBytes:         { offset: 37, type: 'gauge',    unit: 'bytes', description: 'Peak bytes used in DEBUG ring buffer' },
+        // scsynth late timing diagnostics [23-25]
+        scsynthSchedulerMaxLateMs:    { offset: 23, type: 'gauge',    unit: 'ms',    description: 'Maximum lateness observed in scsynth scheduler (ms)' },
+        scsynthSchedulerLastLateMs:   { offset: 24, type: 'gauge',    unit: 'ms',    description: 'Most recent late magnitude in scsynth scheduler (ms)' },
+        scsynthSchedulerLastLateTick: { offset: 25, type: 'gauge',    unit: 'count', description: 'Process count when last scsynth late occurred' },
 
-        // Bypass category metrics [38-41]
-        bypassNonBundle:              { offset: 38, type: 'counter',  unit: 'count', description: 'Plain OSC messages (not bundles) that bypassed prescheduler' },
-        bypassImmediate:              { offset: 39, type: 'counter',  unit: 'count', description: 'Bundles with timetag 0 or 1 that bypassed prescheduler' },
-        bypassNearFuture:             { offset: 40, type: 'counter',  unit: 'count', description: 'Bundles within bypass lookahead threshold that bypassed prescheduler' },
-        bypassLate:                   { offset: 41, type: 'counter',  unit: 'count', description: 'Timestamped OSC bundles arriving late into SuperSonic bypassing prescheduler' },
+        // Ring buffer direct write failures [26]
+        ringBufferDirectWriteFails:   { offset: 26, type: 'counter',  unit: 'count', description: 'SAB mode only: direct IN-ring writes that lost the lock race or hit a full ring and were dropped (no fallback)' },
 
-        // scsynth late timing diagnostics [42-44]
-        scsynthSchedulerMaxLateMs:    { offset: 42, type: 'gauge',    unit: 'ms',    description: 'Maximum lateness observed in scsynth scheduler (ms)' },
-        scsynthSchedulerLastLateMs:   { offset: 43, type: 'gauge',    unit: 'ms',    description: 'Most recent late magnitude in scsynth scheduler (ms)' },
-        scsynthSchedulerLastLateTick: { offset: 44, type: 'gauge',    unit: 'count', description: 'Process count when last scsynth late occurred' },
-
-        // Ring buffer direct write failures [45]
-        ringBufferDirectWriteFails:   { offset: 45, type: 'counter',  unit: 'count', description: 'SAB mode only: optimistic direct writes attempted but failed due to ring buffer lock not being available (delivered via prescheduler instead)' },
-
-        // Link [46-57] is native-only (always 0 on web) and not exposed here.
+        // Link [27-38] is native-only (always 0 on web) and not exposed here.
         // SuperClock session state lives in its own SAB region (SuperClockState),
         // not in PerformanceMetrics. Owned by engine.superClock.
 
-        // System info [58-64] — cross-platform; written by shared C++ at init.
-        supersonicVersionMajor:       { offset: 58, type: 'constant', unit: 'count', description: 'SuperSonic major version' },
-        supersonicVersionMinor:       { offset: 59, type: 'constant', unit: 'count', description: 'SuperSonic minor version' },
-        supersonicVersionPatch:       { offset: 60, type: 'constant', unit: 'count', description: 'SuperSonic patch version' },
-        audioSampleRate:              { offset: 61, type: 'constant', unit: 'Hz',    description: 'Output sample rate' },
-        audioBlockSize:               { offset: 62, type: 'constant', unit: 'count', description: 'Audio block size in frames (128 on web)' },
-        audioOutputChannels:          { offset: 63, type: 'constant', unit: 'count', description: 'Output bus channels' },
-        audioInputChannels:           { offset: 64, type: 'constant', unit: 'count', description: 'Input bus channels' },
+        // System info [39-45] — cross-platform; written by shared C++ at init.
+        supersonicVersionMajor:       { offset: 39, type: 'constant', unit: 'count', description: 'SuperSonic major version' },
+        supersonicVersionMinor:       { offset: 40, type: 'constant', unit: 'count', description: 'SuperSonic minor version' },
+        supersonicVersionPatch:       { offset: 41, type: 'constant', unit: 'count', description: 'SuperSonic patch version' },
+        audioSampleRate:              { offset: 42, type: 'constant', unit: 'Hz',    description: 'Output sample rate' },
+        audioBlockSize:               { offset: 43, type: 'constant', unit: 'count', description: 'Audio block size in frames (128 on web)' },
+        audioOutputChannels:          { offset: 44, type: 'constant', unit: 'count', description: 'Output bus channels' },
+        audioInputChannels:           { offset: 45, type: 'constant', unit: 'count', description: 'Input bus channels' },
 
-        // SuperClock readouts [65-68] — cross-platform; written per block.
-        clockTempoMbpm:               { offset: 65, type: 'gauge',    unit: 'milliBpm', description: 'Tempo in milli-BPM (bpm * 1000)' },
-        clockBeatCenti:               { offset: 66, type: 'gauge',    unit: 'centi',    description: 'Beat position * 100' },
-        clockPhaseCenti:              { offset: 67, type: 'gauge',    unit: 'centi',    description: 'Phase within quantum * 100' },
-        clockPlaying:                 { offset: 68, type: 'gauge',    unit: 'bool',     description: 'Transport playing (0/1)' },
+        // SuperClock readouts [46-49] — cross-platform; written per block.
+        clockTempoMbpm:               { offset: 46, type: 'gauge',    unit: 'milliBpm', description: 'Tempo in milli-BPM (bpm * 1000)' },
+        clockBeatCenti:               { offset: 47, type: 'gauge',    unit: 'centi',    description: 'Beat position * 100' },
+        clockPhaseCenti:              { offset: 48, type: 'gauge',    unit: 'centi',    description: 'Phase within quantum * 100' },
+        clockPlaying:                 { offset: 49, type: 'gauge',    unit: 'bool',     description: 'Transport playing (0/1)' },
 
-        // Context metrics [69+] (main thread only)
-        driftOffsetMs:                { offset: 69, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock drift between AudioContext and wall clock' },
-        clockOffsetMs:                { offset: 70, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock offset for multi-system sync' },
-        audioContextState:            { offset: 71, type: 'enum',     values: ['unknown', 'running', 'suspended', 'closed', 'interrupted'], description: 'AudioContext state' },
-        bufferPoolUsedBytes:          { offset: 72, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes used' },
-        bufferPoolAvailableBytes:     { offset: 73, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes available' },
-        bufferPoolAllocations:        { offset: 74, type: 'counter',  unit: 'count', description: 'Total buffer allocations' },
-        loadedSynthDefs:              { offset: 75, type: 'gauge',    unit: 'count', description: 'Number of loaded synthdefs' },
-        scsynthSchedulerCapacity:     { offset: 76, type: 'constant', unit: 'count', description: 'Maximum scheduler queue size' },
-        preschedulerCapacity:         { offset: 77, type: 'constant', unit: 'count', description: 'Maximum pending events in prescheduler' },
-        inBufferCapacity:             { offset: 78, type: 'constant', unit: 'bytes', description: 'IN ring buffer capacity' },
-        outBufferCapacity:            { offset: 79, type: 'constant', unit: 'bytes', description: 'OUT ring buffer capacity' },
-        debugBufferCapacity:          { offset: 80, type: 'constant', unit: 'bytes', description: 'DEBUG ring buffer capacity' },
-        mode:                         { offset: 81, type: 'enum',     values: ['sab', 'postMessage'], description: 'Transport mode' },
+        // Context metrics [50+] (main thread only)
+        driftOffsetMs:                { offset: 50, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock drift between AudioContext and wall clock' },
+        clockOffsetMs:                { offset: 51, type: 'gauge',    unit: 'ms',    signed: true, description: 'Clock offset for multi-system sync' },
+        audioContextState:            { offset: 52, type: 'enum',     values: ['unknown', 'running', 'suspended', 'closed', 'interrupted'], description: 'AudioContext state' },
+        bufferPoolUsedBytes:          { offset: 53, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes used' },
+        bufferPoolAvailableBytes:     { offset: 54, type: 'gauge',    unit: 'bytes', description: 'Buffer pool bytes available' },
+        bufferPoolAllocations:        { offset: 55, type: 'counter',  unit: 'count', description: 'Total buffer allocations' },
+        loadedSynthDefs:              { offset: 56, type: 'gauge',    unit: 'count', description: 'Number of loaded synthdefs' },
+        scsynthSchedulerCapacity:     { offset: 57, type: 'constant', unit: 'count', description: 'Maximum scheduler queue size' },
+        inBufferCapacity:             { offset: 58, type: 'constant', unit: 'bytes', description: 'IN ring buffer capacity' },
+        outBufferCapacity:            { offset: 59, type: 'constant', unit: 'bytes', description: 'OUT ring buffer capacity' },
+        nrtOutBufferCapacity:          { offset: 60, type: 'constant', unit: 'bytes', description: 'NRT-out ring buffer capacity' },
+        mode:                         { offset: 61, type: 'enum',     values: ['sab', 'postMessage'], description: 'Transport mode' },
 
-        // Audio diagnostics [82-88] (main thread, Chrome playbackStats + cross-browser health)
-        glitchCount:                  { offset: 82, type: 'counter',  unit: 'count', description: 'Chrome only: audio underrun/glitch events' },
-        glitchDurationMs:             { offset: 83, type: 'gauge',    unit: 'ms',    description: 'Chrome only: total silence from audio underruns' },
-        averageLatencyUs:             { offset: 84, type: 'gauge',    unit: 'us',    description: 'Chrome only: average audio output latency' },
-        maxLatencyUs:                 { offset: 85, type: 'gauge',    unit: 'us',    description: 'Chrome only: maximum audio output latency' },
-        audioHealthPct:               { offset: 86, type: 'gauge',    unit: '%',     description: 'Cross-browser: fraction of expected audio frames delivered (100% = no issues)' },
-        totalFramesDurationMs:        { offset: 87, type: 'counter',  unit: 'ms',    description: 'Chrome only: total audio rendered duration' },
-        hasPlaybackStats:             { offset: 88, type: 'gauge',    unit: 'bool',  description: '1 if Chrome playbackStats API is available, 0 otherwise' },
+        // Audio diagnostics [62-68] (main thread, Chrome playbackStats + cross-browser health)
+        glitchCount:                  { offset: 62, type: 'counter',  unit: 'count', description: 'Chrome only: audio underrun/glitch events' },
+        glitchDurationMs:             { offset: 63, type: 'gauge',    unit: 'ms',    description: 'Chrome only: total silence from audio underruns' },
+        averageLatencyUs:             { offset: 64, type: 'gauge',    unit: 'us',    description: 'Chrome only: average audio output latency' },
+        maxLatencyUs:                 { offset: 65, type: 'gauge',    unit: 'us',    description: 'Chrome only: maximum audio output latency' },
+        audioHealthPct:               { offset: 66, type: 'gauge',    unit: '%',     description: 'Cross-browser: fraction of expected audio frames delivered (100% = no issues)' },
+        totalFramesDurationMs:        { offset: 67, type: 'counter',  unit: 'ms',    description: 'Chrome only: total audio rendered duration' },
+        hasPlaybackStats:             { offset: 68, type: 'gauge',    unit: 'bool',  description: '1 if Chrome playbackStats API is available, 0 otherwise' },
 
-        // Buffer pool growth metrics [89-92] (main thread)
-        bufferPoolTotalCapacity:      { offset: 89, type: 'gauge',    unit: 'bytes', description: 'Buffer pool committed capacity (grows on demand)' },
-        bufferPoolMaxCapacity:        { offset: 90, type: 'gauge',    unit: 'bytes', description: 'Buffer pool hard ceiling' },
-        bufferPoolGrowthCount:        { offset: 91, type: 'counter',  unit: 'count', description: 'Number of buffer pool growth events' },
-        bufferPoolPoolCount:          { offset: 92, type: 'gauge',    unit: 'count', description: 'Number of buffer pool segments' },
+        // Buffer pool growth metrics [69-72] (main thread)
+        bufferPoolTotalCapacity:      { offset: 69, type: 'gauge',    unit: 'bytes', description: 'Buffer pool committed capacity (grows on demand)' },
+        bufferPoolMaxCapacity:        { offset: 70, type: 'gauge',    unit: 'bytes', description: 'Buffer pool hard ceiling' },
+        bufferPoolGrowthCount:        { offset: 71, type: 'counter',  unit: 'count', description: 'Number of buffer pool growth events' },
+        bufferPoolPoolCount:          { offset: 72, type: 'gauge',    unit: 'count', description: 'Number of buffer pool segments' },
       },
 
       layout: {
@@ -267,17 +243,7 @@ export class SuperSonic {
             rows: [
               { label: 'sent',   cells: [{ key: 'oscOutMessagesSent' }] },
               { label: 'bytes',  cells: [{ key: 'oscOutBytesSent', kind: 'muted', format: 'bytes' }] },
-              { label: 'bypass', cells: [{ key: 'preschedulerBypassed', kind: 'green' }] },
               { label: 'lost',   cells: [{ key: 'scsynthSequenceGaps', kind: 'error' }] },
-            ]
-          },
-          {
-            title: 'Bypass',
-            rows: [
-              { label: 'msg',  cells: [{ key: 'bypassNonBundle', kind: 'muted' }] },
-              { label: 'imm',  cells: [{ key: 'bypassImmediate', kind: 'muted' }] },
-              { label: 'near', cells: [{ key: 'bypassNearFuture', kind: 'muted' }] },
-              { label: 'late', cells: [{ key: 'bypassLate', kind: 'muted' }] },
             ]
           },
           {
@@ -287,24 +253,6 @@ export class SuperSonic {
               { label: 'bytes',     cells: [{ key: 'oscInBytesReceived', kind: 'muted', format: 'bytes' }] },
               { label: 'dropped',   cells: [{ key: 'oscInMessagesDropped', kind: 'error' }] },
               { label: 'corrupted', cells: [{ key: 'oscInCorrupted', kind: 'error' }] },
-            ]
-          },
-          {
-            title: 'Presched Flow',
-            rows: [
-              { label: 'pending',    tooltip: 'Current pending events | peak pending events', cells: [{ key: 'preschedulerPending' }, { sep: ' | ' }, { key: 'preschedulerPendingPeak', kind: 'muted' }] },
-              { label: 'scheduled',  cells: [{ key: 'preschedulerBundlesScheduled' }] },
-              { label: 'dispatched', cells: [{ key: 'preschedulerDispatched', kind: 'dim' }] },
-              { label: 'min slack',  cells: [{ key: 'preschedulerMinHeadroomMs', kind: 'dim', format: 'headroom' }, { text: ' ms', kind: 'muted' }] },
-            ]
-          },
-          {
-            title: 'Presched Health',
-            rows: [
-              { label: 'lates',       tooltip: 'Bundles dispatched after their scheduled time (count and max lateness in ms)', cells: [{ key: 'preschedulerLates', kind: 'error' }, { sep: ' (' }, { key: 'preschedulerMaxLateMs', kind: 'dim' }, { text: ' ms max)', kind: 'muted' }] },
-              { label: 'cancelled',   cells: [{ key: 'preschedulerEventsCancelled', kind: 'error' }] },
-              { label: 'retried',     tooltip: 'Messages retried | succeeded | failed', cells: [{ key: 'preschedulerMessagesRetried', kind: 'dim' }, { sep: ' | ' }, { key: 'preschedulerRetriesSucceeded', kind: 'green' }, { sep: ' | ' }, { key: 'preschedulerRetriesFailed', kind: 'error' }] },
-              { label: 'retry queue', tooltip: 'Current retry queue size | peak size', cells: [{ key: 'preschedulerRetryQueueSize' }, { sep: ' | ' }, { key: 'preschedulerRetryQueuePeak', kind: 'muted' }] },
             ]
           },
           {
@@ -331,7 +279,7 @@ export class SuperSonic {
             rows: [
               { type: 'bar', label: 'in',  usedKey: 'inBufferUsedBytes',  peakKey: 'inBufferPeakBytes',  capacityKey: 'inBufferCapacity',  color: 'blue' },
               { type: 'bar', label: 'out', usedKey: 'outBufferUsedBytes', peakKey: 'outBufferPeakBytes', capacityKey: 'outBufferCapacity', color: 'green' },
-              { type: 'bar', label: 'dbg', usedKey: 'debugBufferUsedBytes', peakKey: 'debugBufferPeakBytes', capacityKey: 'debugBufferCapacity', color: 'purple' },
+              { type: 'bar', label: 'dbg', usedKey: 'nrtOutBufferUsedBytes', peakKey: 'nrtOutBufferPeakBytes', capacityKey: 'nrtOutBufferCapacity', color: 'purple' },
               { label: 'direct write fails', cells: [{ key: 'ringBufferDirectWriteFails', kind: 'error' }] },
             ]
           },
@@ -373,10 +321,6 @@ export class SuperSonic {
           },
         ]
       },
-
-      sentinels: {
-        HEADROOM_UNSET: 0xFFFFFFFF,
-      }
     });
   }
 
@@ -606,7 +550,6 @@ export class SuperSonic {
       },
       memory: this.#buildMemoryConfig(options.memory, options.scsynthOptions),
       worldOptions: worldOptions,
-      preschedulerCapacity: options.preschedulerCapacity || 65536,
       bypassLookaheadMs: options.bypassLookaheadMs ?? 500,
       activityEvent: {
         maxLineLength: options.activityEvent?.maxLineLength ?? 200,
@@ -1047,7 +990,6 @@ export class SuperSonic {
     this.#syncListeners = null;
 
     if (this.#osc) {
-      this.#osc.cancelAll();
       this.#osc.dispose();
       this.#osc = null;
     }
@@ -1392,56 +1334,26 @@ export class SuperSonic {
     this.sendOSC(oscData);
   }
 
-  sendOSC(oscData, options = {}) {
+  sendOSC(oscData) {
     this.#ensureInitialized("send OSC data");
 
     const uint8Data = this.#toUint8Array(oscData);
-    this.#sendPreparedOSC(uint8Data, options);
-  }
-
-  cancelTag(runTag) {
-    this.#ensureInitialized("cancel by tag");
-    this.#osc.cancelTag(runTag);
-  }
-
-  cancelSession(sessionId) {
-    this.#ensureInitialized("cancel by session");
-    this.#osc.cancelSession(sessionId);
-  }
-
-  cancelSessionTag(sessionId, runTag) {
-    this.#ensureInitialized("cancel by session and tag");
-    this.#osc.cancelSessionTag(sessionId, runTag);
-  }
-
-  cancelAll() {
-    this.#ensureInitialized("cancel all scheduled");
-    this.#osc.cancelAll();
+    this.#sendPreparedOSC(uint8Data);
   }
 
   /**
-   * Flush all pending OSC messages from both the JS prescheduler
-   * and the WASM BundleScheduler.
+   * Flush pending OSC from the WASM BundleScheduler and the IN ring.
    *
-   * Unlike cancelAll() which only clears the JS prescheduler,
-   * this also clears bundles that have already been consumed from the
-   * ring buffer and are sitting in the WASM scheduler's priority queue.
-   *
-   * Uses a postMessage flag (not the ring buffer) to avoid the race
-   * condition where stale scheduled bundles would fire before a
-   * /clearSched command could be read from the ring buffer.
-   *
-   * Returns a promise that resolves when both the prescheduler and
-   * WASM scheduler have confirmed they are cleared.
+   * Uses a postMessage flag (not the ring buffer) to avoid the race where stale
+   * scheduled bundles would fire before a /clearSched command could be read from
+   * the ring buffer. Resolves when the worklet confirms it is cleared.
    *
    * @returns {Promise<void>}
    */
   async purge() {
     this.#ensureInitialized("purge");
 
-    const preschedulerDone = this.#osc.cancelAllWithAck();
-
-    const workletDone = new Promise(resolve => {
+    await new Promise(resolve => {
       const handler = (event) => {
         if (event.data.type === 'clearSchedAck') {
           this.#workletNode.port.removeEventListener('message', handler);
@@ -1451,8 +1363,6 @@ export class SuperSonic {
       this.#workletNode.port.addEventListener('message', handler);
       this.#workletNode.port.postMessage({ type: 'clearSched', ack: true });
     });
-
-    await Promise.all([preschedulerDone, workletDone]);
   }
 
   /**
@@ -1717,7 +1627,6 @@ export class SuperSonic {
     this.#syncListeners = null;
 
     if (this.#osc) {
-      this.#osc.cancelAll();
       this.#osc.dispose();
       this.#osc = null;
     }
@@ -1987,7 +1896,6 @@ export class SuperSonic {
     // Create transport based on mode
     const transportConfig = {
       workerBaseURL: this.#config.workerBaseURL,
-      preschedulerCapacity: this.#config.preschedulerCapacity,
       snapshotIntervalMs: this.#config.snapshotIntervalMs,
       bypassLookaheadS: this.#config.bypassLookaheadMs / 1000,
       getAudioContextTime: () => this.#audioContext?.currentTime ?? 0,
@@ -2049,7 +1957,15 @@ export class SuperSonic {
         // Handle special messages (msg is [address, ...args])
         const address = msg[0];
         const args = msg.slice(1);
-        if (address === "/supersonic/buffer/freed") {
+        if (address === "/supersonic/debug") {
+          // Debug log lines ride the egress as /supersonic/debug — surface them on
+          // the 'debug' event, not the regular OSC-in stream.
+          const eventMaxLen = this.#config.activityEvent.scsynthMaxLineLength ?? this.#config.activityEvent.maxLineLength;
+          let text = args[0] ?? '';
+          if (eventMaxLen > 0 && text.length > eventMaxLen) text = text.slice(0, eventMaxLen) + '...';
+          this.#eventEmitter.emit('debug', { text, sequence, timestamp });
+          return;
+        } else if (address === "/supersonic/buffer/freed") {
           this.#bufferManager?.handleBufferFreed(args);
         } else if (address === "/supersonic/buffer/allocated") {
           this.#bufferManager?.handleBufferAllocated(args);
@@ -2078,14 +1994,7 @@ export class SuperSonic {
       }
     });
 
-    // Handle debug messages
-    this.#osc.onDebug((msg) => {
-      const eventMaxLen = this.#config.activityEvent.scsynthMaxLineLength ?? this.#config.activityEvent.maxLineLength;
-      if (eventMaxLen > 0 && msg.text?.length > eventMaxLen) {
-        msg = { ...msg, text: msg.text.slice(0, eventMaxLen) + '...' };
-      }
-      this.#eventEmitter.emit('debug', msg);
-    });
+    // Debug arrives as /supersonic/debug on the OSC-in path above.
 
     // Handle errors
     this.#osc.onError((error, workerName) => {
@@ -2170,14 +2079,6 @@ export class SuperSonic {
   }
 
   async #finishInitialization() {
-    // Single source of truth for the engine's wall-clock NTP: the OSC
-    // classifier routes through SuperClock rather than its default
-    // `getCurrentNTPFromPerformance`. Wired here because #oscChannel is
-    // created in #initializeOSC, which runs after #initializeAudioWorklet.
-    if (this.#oscChannel && this.#superClock) {
-      this.#oscChannel.getCurrentNTP = () => this.#superClock.wallNow();
-    }
-
     this.#initialized = true;
     this.#initializing = false;
     this.bootStats.initDuration = performance.now() - this.bootStats.initStartTime;
@@ -2329,7 +2230,6 @@ export class SuperSonic {
 
   #metricsContext() {
     return {
-      preschedulerMetrics: this.#osc?.getPreschedulerMetrics(),
       transportMetrics: this.#osc?.getMetrics(),
       driftOffsetMs: this.#superClock?.getDriftOffset() ?? 0,
       ntpStartTime: this.#superClock?.getNTPStartTime() ?? 0,
@@ -2338,7 +2238,6 @@ export class SuperSonic {
       bufferPoolStats: this.#bufferManager?.getStats(),
       bufferPoolGrowthStats: this.#bufferManager?.getGrowthStats(),
       loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,
-      preschedulerCapacity: this.#config.preschedulerCapacity,
       audioHealthPct: this.#audioHealthMonitor?.update() ?? 100,
       playbackStats: this.#capabilities.playbackStats ? this.#audioContext?.playbackStats : null,
     };
@@ -2382,32 +2281,22 @@ export class SuperSonic {
     throw new Error("oscData must be ArrayBuffer or Uint8Array");
   }
 
-  #sendPreparedOSC(preparedData, options = {}) {
-    // Classify the message to determine routing
-    const category = this.#oscChannel.classify(preparedData);
-
-    if (shouldBypass(category)) {
-      // Bypass: send direct to worklet
-      if (this.#config.mode === 'sab') {
-        // SAB mode: use OscChannel for direct ring buffer write
-        this.#oscChannel.send(preparedData);
-      } else {
-        // PM mode: use transport's sendImmediate which tracks metrics locally
-        this.#osc.sendImmediate(preparedData, category);
-      }
-    } else {
-      // Far-future: goes to prescheduler for timing
-      // Check size limit: must fit in both ring buffer and scheduler data pool
-      const bc = this.#metricsReader.bufferConstants;
-      const maxSize = bc ? Math.min(bc.IN_BUFFER_SIZE || Infinity, bc.scheduler_data_pool_size || Infinity) : Infinity;
-      if (preparedData.length > maxSize) {
-        throw new Error(
-          `OSC bundle too large to schedule (${preparedData.length} > ${maxSize} bytes).`
-        );
-      }
-      // Send to prescheduler with session/tag options for cancellation
-      this.#osc.sendWithOptions(preparedData, options);
+  #sendPreparedOSC(preparedData) {
+    // A message larger than the IN ring can never be delivered — fail loudly
+    // rather than dropping it silently in the ring writer.
+    const bc = this.#metricsReader?.bufferConstants;
+    const maxSize = bc?.IN_BUFFER_SIZE;
+    if (maxSize && preparedData.length > maxSize - 16 /* Message header */) {
+      throw new Error(
+        `OSC message too large to send (${preparedData.length} > ${maxSize - 16} bytes)`
+      );
     }
+
+    // Dumb send: frame the bytes onto the IN ring (SAB) or postMessage them (PM).
+    // The audio thread classifies + schedules (OscIngress + BundleScheduler).
+    // A SAB write that loses the lock race / hits a full ring is dropped and
+    // counted as ringBufferDirectWriteFails (no fallback) — not silent.
+    this.#oscChannel.send(preparedData);
   }
 
   #validateBufferCommand(address, args) {

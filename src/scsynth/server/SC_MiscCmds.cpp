@@ -1407,7 +1407,7 @@ SCErr meth_superclock_get(World* inWorld, int /*inSize*/, char* /*inData*/, Repl
     const uint32_t playing    = s->is_playing.load(std::memory_order_relaxed);
     const uint32_t flags      = s->flags.load(std::memory_order_relaxed);
     // numPeers isn't mirrored in SAB and reading it live needs a Link
-    // RPC (not RT-safe). App-thread consumers should use /link/peers/get.
+    // RPC (not RT-safe). App-thread consumers should use /clock/peers/get.
     const uint32_t numPeers   = 0;
 
     small_scpacket packet;

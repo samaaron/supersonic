@@ -73,6 +73,10 @@ using supersonic::bitsToDouble;
 
 struct SuperClock::Impl {
     SuperClockState ownedState;
+    // Where the clock state actually lives: the private ownedState until the
+    // engine binds it into the shared arena (bindStateToShm), after which it's
+    // the SHM SUPERCLOCK_STATE region — same shape as web.
+    SuperClockState* boundState{&ownedState};
 
     // IIR-smoothed audio-thread NTP. Bit-pattern in uint64 because
     // std::atomic<double> isn't lock-free everywhere.
@@ -263,8 +267,22 @@ SuperClock::~SuperClock() {
 #endif
 }
 
-SuperClockState*       SuperClock::state()       { return &mImpl->ownedState; }
-const SuperClockState* SuperClock::state() const { return &mImpl->ownedState; }
+SuperClockState*       SuperClock::state()       { return mImpl->boundState; }
+const SuperClockState* SuperClock::state() const { return mImpl->boundState; }
+
+// Move the clock state into the shared arena region so the native SHM has the
+// same shape as web. Copies the current (pre-bind) state across, then repoints.
+// Called once at engine init, before the audio thread starts — no concurrency.
+void SuperClock::bindStateToShm(SuperClockState* region) {
+    if (!region || region == mImpl->boundState) return;
+    const SuperClockState* src = mImpl->boundState;
+    region->bpm.store(src->bpm.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    region->beat_origin_ntp.store(src->beat_origin_ntp.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    region->is_playing_at_ntp.store(src->is_playing_at_ntp.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    region->is_playing.store(src->is_playing.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    region->flags.store(src->flags.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    mImpl->boundState = region;
+}
 
 // ─── Mutators (app-thread) ──────────────────────────────────────────────
 
@@ -390,22 +408,6 @@ void* SuperClock::audioThreadLinkAudioPtr() {
 #endif
 }
 
-double SuperClock::getBpm() const {
-#ifdef SUPERSONIC_LINK
-    return mImpl->link.captureAppSessionState().tempo();
-#else
-    return bitsToDouble(state()->bpm.load(std::memory_order_relaxed));
-#endif
-}
-
-bool SuperClock::isPlaying() const {
-#ifdef SUPERSONIC_LINK
-    return mImpl->link.captureAppSessionState().isPlaying();
-#else
-    return state()->is_playing.load(std::memory_order_relaxed) != 0u;
-#endif
-}
-
 bool SuperClock::isLinkEnabled() const {
 #ifdef SUPERSONIC_LINK
     return mImpl->link.isEnabled();
@@ -506,7 +508,7 @@ void SuperClock::setTempoChangedCallback(std::function<void(double)> cb) {
         [cb = std::move(cb), impl](const double bpmIn) {
             double bpm = bpmIn;
             if (!(bpm >= 1.0)) bpm = 1.0;
-            impl->ownedState.bpm.store(doubleToBits(bpm),
+            impl->boundState->bpm.store(doubleToBits(bpm),
                                         std::memory_order_relaxed);
             auto st = impl->link.captureAppSessionState();
             const auto now = impl->link.clock().micros();
@@ -514,7 +516,7 @@ void SuperClock::setTempoChangedCallback(std::function<void(double)> cb) {
             const double currentBeat = st.beatAtTime(now, kBeatOriginQuantum);
             const double wallNow = wallClockNTP();
             const double newOrigin = wallNow - currentBeat * 60.0 / bpm;
-            impl->ownedState.beat_origin_ntp.store(
+            impl->boundState->beat_origin_ntp.store(
                 doubleToBits(newOrigin), std::memory_order_relaxed);
             // cb may be empty (shutdown's setTempoChangedCallback({})).
             // Pass clamped bpm so a corrupt peer's NaN doesn't leak out.
@@ -540,14 +542,14 @@ void SuperClock::setStartStopChangedCallback(
     auto* impl = mImpl.get();
     mImpl->link.setStartStopCallback(
         [cb = std::move(cb), impl](const bool playing) {
-            impl->ownedState.is_playing.store(playing ? 1u : 0u,
+            impl->boundState->is_playing.store(playing ? 1u : 0u,
                                                std::memory_order_relaxed);
             // Mirror is_playing_at_ntp too so consumers reading both
             // (e.g. /superclock_get → beats-since-transport-start math)
             // don't see new is_playing paired with stale timestamp.
             // wallClockNTP() is the closest NTP-domain timestamp to
             // "right now" we have on the Link network thread.
-            impl->ownedState.is_playing_at_ntp.store(
+            impl->boundState->is_playing_at_ntp.store(
                 doubleToBits(wallClockNTP()), std::memory_order_relaxed);
             const auto t = impl->link.captureAppSessionState()
                                      .timeForIsPlaying().count();

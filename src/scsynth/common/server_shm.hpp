@@ -196,8 +196,8 @@ struct shm_segment_header {
     uint32_t in_ring_size;
     uint32_t out_ring_offset;      // OSC engine→host (replies) ring
     uint32_t out_ring_size;
-    uint32_t debug_ring_offset;    // debug/log text ring
-    uint32_t debug_ring_size;
+    uint32_t nrt_out_ring_offset;  // NRT-thread egress ring (replies, notifications, debug)
+    uint32_t nrt_out_ring_size;
     uint32_t control_offset;       // ControlPointers (ring head/tail/seq + cursors)
 
     uint32_t metrics_offset;       // PerformanceMetrics
@@ -245,8 +245,8 @@ public:
             header_->in_ring_size      = IN_BUFFER_SIZE;
             header_->out_ring_offset   = OUT_BUFFER_START;
             header_->out_ring_size     = OUT_BUFFER_SIZE;
-            header_->debug_ring_offset = DEBUG_BUFFER_START;
-            header_->debug_ring_size   = DEBUG_BUFFER_SIZE;
+            header_->nrt_out_ring_offset = NRT_OUT_BUFFER_START;
+            header_->nrt_out_ring_size   = NRT_OUT_BUFFER_SIZE;
             header_->control_offset    = CONTROL_START;
 
             header_->metrics_offset      = METRICS_START;
