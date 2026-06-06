@@ -26,12 +26,10 @@ import type {
   BootStats,
   SuperSonicEventMap,
   SuperSonicEvent,
-  OscCategory,
   OscChannelMetrics,
   OscChannelSABTransferable,
   OscChannelPMTransferable,
   OscChannelTransferable,
-  SendOSCOptions,
   AddAction,
   BlockedCommand,
   UUID,
@@ -119,7 +117,7 @@ expectAssignable<SuperSonicOptions>({ debug: true, debugScsynth: true, debugOscI
 expectAssignable<SuperSonicOptions>({ baseURL: '/dist/', coreBaseURL: '/core/', workerBaseURL: '/workers/' });
 expectAssignable<SuperSonicOptions>({ wasmBaseURL: '/wasm/', wasmUrl: '/wasm/scsynth.wasm', workletUrl: '/worklet.js' });
 expectAssignable<SuperSonicOptions>({ sampleBaseURL: '/samples/', synthdefBaseURL: '/synthdefs/' });
-expectAssignable<SuperSonicOptions>({ snapshotIntervalMs: 100, preschedulerCapacity: 65536, bypassLookaheadMs: 500 });
+expectAssignable<SuperSonicOptions>({ snapshotIntervalMs: 100 });
 expectAssignable<SuperSonicOptions>({ fetchMaxRetries: 3, fetchRetryDelay: 1000 });
 expectAssignable<SuperSonicOptions>({ autoConnect: false });
 
@@ -137,13 +135,11 @@ expectType<number>(metrics.scsynthProcessCount);
 expectType<number>(metrics.oscOutMessagesSent);
 expectType<number>(metrics.oscOutBytesSent);
 expectType<number>(metrics.oscInMessagesReceived);
-expectType<number>(metrics.preschedulerPending);
 expectType<number>(metrics.inBufferUsedBytes);
 expectType<number>(metrics.driftOffsetMs);
 expectType<number>(metrics.clockOffsetMs);
 expectType<number>(metrics.audioContextState);
 expectType<number>(metrics.mode);
-expectType<number>(metrics.bypassNonBundle);
 expectType<number>(metrics.ringBufferDirectWriteFails);
 expectType<number>(metrics.bufferPoolUsedBytes);
 expectType<number>(metrics.scsynthSchedulerMaxLateMs);
@@ -157,7 +153,6 @@ expectType<string>(metricDef.description);
 // MetricsSchema
 declare const schema: MetricsSchema;
 expectType<Record<keyof SuperSonicMetrics, MetricDefinition>>(schema.metrics);
-expectType<number>(schema.sentinels.HEADROOM_UNSET);
 expectType<string>(schema.layout.panels[0].title);
 
 // ============================================================================
@@ -386,23 +381,10 @@ expectType<SuperSonic>(sonic.removeAllListeners());
 // Section 7: OscChannel
 // ============================================================================
 
-// OscCategory
-expectAssignable<OscCategory>('nonBundle');
-expectAssignable<OscCategory>('immediate');
-expectAssignable<OscCategory>('nearFuture');
-expectAssignable<OscCategory>('late');
-expectAssignable<OscCategory>('farFuture');
-expectNotAssignable<OscCategory>('invalid');
-
 // OscChannelMetrics
 declare const chMetrics: OscChannelMetrics;
 expectType<number>(chMetrics.messagesSent);
 expectType<number>(chMetrics.bytesSent);
-expectType<number>(chMetrics.nonBundle);
-expectType<number>(chMetrics.immediate);
-expectType<number>(chMetrics.nearFuture);
-expectType<number>(chMetrics.late);
-expectType<number>(chMetrics.bypassed);
 
 // SAB transferable — discriminated by mode literal
 declare const sabTransfer: OscChannelSABTransferable;
@@ -411,8 +393,6 @@ expectType<SharedArrayBuffer>(sabTransfer.sharedBuffer);
 expectType<number>(sabTransfer.ringBufferBase);
 expectType<Record<string, number>>(sabTransfer.bufferConstants);
 expectType<Record<string, number>>(sabTransfer.controlIndices);
-expectType<MessagePort | null>(sabTransfer.preschedulerPort);
-expectType<number>(sabTransfer.bypassLookaheadS);
 expectType<number>(sabTransfer.sourceId);
 expectType<boolean>(sabTransfer.blocking);
 
@@ -420,17 +400,13 @@ expectType<boolean>(sabTransfer.blocking);
 declare const pmTransfer: OscChannelPMTransferable;
 expectType<'postMessage'>(pmTransfer.mode);
 expectType<MessagePort>(pmTransfer.port);
-expectType<MessagePort | null>(pmTransfer.preschedulerPort);
-expectType<number>(pmTransfer.bypassLookaheadS);
 expectType<number>(pmTransfer.sourceId);
 expectType<boolean>(pmTransfer.blocking);
 
 // OscChannel instance methods
 declare const channel: OscChannel;
-expectType<OscCategory>(channel.classify(new Uint8Array()));
 expectType<boolean>(channel.send(new Uint8Array()));
 expectType<boolean>(channel.sendDirect(new Uint8Array()));
-expectType<boolean>(channel.sendToPrescheduler(new Uint8Array()));
 expectType<number>(channel.nextNodeId());
 expectType<OscChannelMetrics>(channel.getMetrics());
 expectType<OscChannelMetrics>(channel.getAndResetMetrics());
@@ -499,16 +475,10 @@ expectType<void>(sonic.send('/s_new', 'beep', 1001, 0, 1, 'freq', 440));
 expectType<void>(sonic.send('/n_free', 1001));
 expectType<void>(sonic.send('/g_new', 1, 0, 0));
 
-// sendOSC() accepts Uint8Array/ArrayBuffer with optional SendOSCOptions
+// sendOSC() accepts Uint8Array/ArrayBuffer
 expectType<void>(sonic.sendOSC(new Uint8Array()));
 expectType<void>(sonic.sendOSC(new ArrayBuffer(8)));
-expectType<void>(sonic.sendOSC(new Uint8Array(), { sessionId: 'song1', runTag: 'verse' }));
 
-// Cancellation
-expectType<void>(sonic.cancelTag('tag1'));
-expectType<void>(sonic.cancelSession('session1'));
-expectType<void>(sonic.cancelSessionTag('session1', 'tag1'));
-expectType<void>(sonic.cancelAll());
 expectType<Promise<void>>(sonic.purge());
 
 // createOscChannel
