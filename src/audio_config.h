@@ -81,9 +81,16 @@ namespace WorldOpts {
         kSampleRate            = 14,
         kVerbosity             = 15,
         kMode                  = 16,
-        // Indices 17 / 18 differ between web (transport flag + sharedMemoryID)
-        // and native (sharedMemoryID at 17) — intentionally not named here;
-        // call sites that need those use the raw index with an inline comment.
+        // Index 17 onwards differs by runtime, so it carries runtime-specific
+        // names rather than one shared one:
+        //   native: sharedMemoryID at 17 (native has no transport flag)
+        //   web:    transport flag at 17, sharedMemoryID at 18 (web only)
+        // The two MUST be read/written at the SAME index on each side — a
+        // native write at 17 read back at 18 silently picked up the next
+        // region's first word (scope maxScopes) and made the World create a
+        // stray shm segment every boot. Name them to keep the sides locked.
+        kNativeSharedMemoryID  = 17,  // native write (JuceAudioCallback) + native read (init_memory)
+        kWebTransportFlag      = 17,  // web only (init_memory, __EMSCRIPTEN__)
     };
 }
 

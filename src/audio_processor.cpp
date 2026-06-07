@@ -505,7 +505,12 @@ extern "C" {
         }
 #endif
 #ifndef __EMSCRIPTEN__
-        options.mSharedMemoryID = worldOptionsPtr[18];              // UDP port for boost shm (native only)
+        // Native: sharedMemoryID is written at index 17 (JuceAudioCallback).
+        // Reading 18 here was off by one — index 18 is past the 18-word options
+        // block and aliased the following region's first word (scope maxScopes
+        // = 32), making the World create+leak a stray /dev/shm/SuperSonic_32 on
+        // every boot. The named constant locks this to the write site.
+        options.mSharedMemoryID = worldOptionsPtr[sonicpi::WorldOpts::kNativeSharedMemoryID];  // UDP port for boost shm (native only)
         extern void* g_external_shared_memory;
         if (g_external_shared_memory) {
             options.mExternalSharedMemory = g_external_shared_memory;

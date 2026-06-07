@@ -77,7 +77,7 @@ void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
     opts[kSampleRate]            = static_cast<uint32_t>(sampleRate);
     opts[kVerbosity]             = 0;
     opts[kMode]                  = 0;  // direct memory access (SAB path in web, direct pointers in native)
-    opts[17] = static_cast<uint32_t>(sharedMemoryID);  // mSharedMemoryID — index differs between web (18) and native (17); keep raw
+    opts[kNativeSharedMemoryID] = static_cast<uint32_t>(sharedMemoryID);  // native: sharedMemoryID lives at 17 (web puts it at 18)
 
     init_memory(static_cast<double>(sampleRate));
 }
