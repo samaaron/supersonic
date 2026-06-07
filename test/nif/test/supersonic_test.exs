@@ -135,6 +135,53 @@ defmodule SupersonicTest do
     assert :ok = :supersonic.clear_notification_pid()
   end
 
+  test "multiple registered processes each receive replies" do
+    :ok = :supersonic.start(start_config())
+    test_pid = self()
+
+    # A second process registers itself and relays the first reply it sees.
+    relay = spawn(fn ->
+      :supersonic.set_notification_pid()
+      send(test_pid, :relay_registered)
+
+      receive do
+        {:osc_reply, bin} -> send(test_pid, {:relay, bin})
+      after
+        2000 -> send(test_pid, :relay_timeout)
+      end
+    end)
+
+    assert_receive :relay_registered, 2000
+
+    # This process registers too, then triggers a reply.
+    :ok = :supersonic.set_notification_pid()
+    :ok = :supersonic.send_osc(osc_message("/version"))
+
+    # Both audiences receive it — the registry fans out, it isn't single-pid.
+    assert {:ok, _} = wait_for_reply_matching("/version.reply")
+    assert_receive {:relay, bin} when is_binary(bin), 2000
+
+    Process.exit(relay, :kill)
+  end
+
+  # ── Link notify (parity with the UDP transport) ──────────────────────────
+  #
+  # /clock/notify/subscribe immediately pushes a tempo + peers snapshot via the
+  # networkOnly SEND_TO_CALLER route. CallbackTransport drops networkOnly (an
+  # in-process observer reads engine state directly); the NIF transport, being a
+  # real out-of-process peer, delivers it — proving the Link path now works from
+  # BEAM exactly as it does over UDP.
+
+  test "subscribing to Link notify pushes an immediate snapshot to the registered pid" do
+    :ok = :supersonic.start(start_config())
+    :ok = :supersonic.set_notification_pid()
+
+    :ok = :supersonic.send_osc(osc_message("/clock/notify/subscribe"))
+
+    assert {:ok, _} = wait_for_reply_matching("/clock/notify/tempo")
+    assert {:ok, _} = wait_for_reply_matching("/clock/notify/peers")
+  end
+
   test "receive /version.reply" do
     :ok = :supersonic.start(start_config())
     :ok = :supersonic.set_notification_pid()

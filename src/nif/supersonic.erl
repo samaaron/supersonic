@@ -4,7 +4,17 @@
 %%
 %% Wraps the SuperSonic scsynth audio engine as a NIF.  OSC messages
 %% go in via {@link send_osc/1}, replies come back as Erlang messages
-%% to a registered process (see {@link set_notification_pid/0}).
+%% to the registered processes (see {@link set_notification_pid/0}).
+%%
+%% The NIF is a first-class peer to the native UDP server: anything the
+%% UDP transport can do, BEAM can do without a socket. Device-notify and
+%% Link-notify are subscribed to with the usual OSC commands sent through
+%% {@link send_osc/1} (e.g. `/supersonic/notify', `/clock/notify/subscribe'),
+%% and their broadcasts arrive as ordinary `{osc_reply, Binary}' messages.
+%%
+%% Multiple processes may register; each receives every reply, broadcast
+%% and debug line. A registered process that dies is dropped automatically
+%% on the next delivery — the rest keep receiving.
 %%
 %% Usage from Elixir:
 %%   :supersonic.start(%{headless: true})
@@ -93,10 +103,15 @@ send_osc(_OscBinary) -> erlang:nif_error(nif_not_loaded).
 %% The registered process will receive messages:
 %%   {osc_reply, Binary} — OSC reply data
 %%   {debug, String}     — debug output from scsynth
+%%
+%% Any number of processes may register; each receives a copy. Registering
+%% the same process twice is a no-op. A registered process that exits is
+%% dropped automatically.
 -spec set_notification_pid() -> ok.
 set_notification_pid() -> erlang:nif_error(nif_not_loaded).
 
-%% @doc Unregister from OSC reply notifications.
+%% @doc Unregister the calling process from OSC reply notifications.
+%% Other registered processes are unaffected.
 -spec clear_notification_pid() -> ok.
 clear_notification_pid() -> erlang:nif_error(nif_not_loaded).
 

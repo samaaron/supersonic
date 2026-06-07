@@ -6,8 +6,9 @@
  * destination, what the notify/link subscriber audiences actually are, and how a
  * packet physically leaves (UDP socket / in-process callback). This is the
  * *only* place address/socket/pid knowledge lives. Implementations: OscUdpServer
- * (UDP) and CallbackTransport (in-process — embedders, tests, and the NIF, whose
- * onReply forwards to enif_send).
+ * (UDP), NifTransport (BEAM — fans out to the registered Erlang pids via
+ * enif_send), and CallbackTransport (in-process — embedders and tests, surfacing
+ * through the engine's onReply callback).
  *
  * The NRT gateway is the sole caller of these methods (one thread), so
  * implementations need no internal send serialisation beyond their own resource
