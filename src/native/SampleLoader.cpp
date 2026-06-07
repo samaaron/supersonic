@@ -56,15 +56,18 @@ extern "C" {
     extern PerformanceMetrics* metrics;
 }
 
-// ring_buffer_write defined in audio_processor.cpp (outside any namespace)
+// ring_buffer_write defined in audio_processor.cpp (outside any namespace).
+// Defaults live on the declaration in audio_processor.cpp; this extern omits
+// them (a default may be given in only one declaration per translation unit).
 extern bool ring_buffer_write(
     uint8_t* buffer_start,
     uint32_t buffer_size,
-    uint32_t buffer_start_offset,
     std::atomic<int32_t>* head,
     std::atomic<int32_t>* tail,
+    std::atomic<int32_t>* sequence,
     const void* data,
     uint32_t data_size,
+    std::atomic<uint32_t>* status_flags,
     PerformanceMetrics* metrics
 );
 
@@ -303,13 +306,14 @@ void SampleLoader::writeDoneReply(int bufnum) {
       << osc::EndMessage;
 
     ring_buffer_write(
-        shared_memory,
+        shared_memory + OUT_BUFFER_START,
         OUT_BUFFER_SIZE,
-        OUT_BUFFER_START,
         &control->out_head,
         &control->out_tail,
+        &control->out_sequence,
         p.Data(),
         static_cast<uint32_t>(p.Size()),
+        &control->status_flags,
         metrics
     );
 }
@@ -324,13 +328,14 @@ void SampleLoader::writeFailReply(int bufnum, const char* cmdName) {
       << osc::EndMessage;
 
     ring_buffer_write(
-        shared_memory,
+        shared_memory + OUT_BUFFER_START,
         OUT_BUFFER_SIZE,
-        OUT_BUFFER_START,
         &control->out_head,
         &control->out_tail,
+        &control->out_sequence,
         p.Data(),
         static_cast<uint32_t>(p.Size()),
+        &control->status_flags,
         metrics
     );
 }

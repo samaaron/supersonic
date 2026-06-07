@@ -103,16 +103,21 @@ namespace scsynth {
     bool UnrollOSCPacket(World* inWorld, int inSize, char* inData, OSC_Packet* inPacket);
 }
 
-// Forward declare ring buffer write function (defined after namespace)
+// Forward declare ring buffer write function (defined after namespace).
+// Dependencies (sequence counter, status-flags word, metrics) are passed in
+// rather than read from scsynth globals; default-null args here keep callers
+// terse and let the function be unit-tested directly. Defaults live on this
+// declaration only — never repeated on the definition.
 bool ring_buffer_write(
     uint8_t* buffer_start,
     uint32_t buffer_size,
-    uint32_t buffer_start_offset,
     std::atomic<int32_t>* head,
     std::atomic<int32_t>* tail,
+    std::atomic<int32_t>* sequence,
     const void* data,
     uint32_t data_size,
-    PerformanceMetrics* metrics
+    std::atomic<uint32_t>* status_flags = nullptr,
+    PerformanceMetrics* metrics = nullptr
 );
 
 // Forward declare table initialization functions
@@ -1049,8 +1054,9 @@ extern "C" {
         uint32_t p = supersonic::buildDebugOsc(pkt, text, len);
 
         ::ring_buffer_write(
-            shared_memory, OUT_BUFFER_SIZE, OUT_BUFFER_START,
-            &control->out_head, &control->out_tail, pkt, p, nullptr);
+            shared_memory + OUT_BUFFER_START, OUT_BUFFER_SIZE,
+            &control->out_head, &control->out_tail, &control->out_sequence,
+            pkt, p, &control->status_flags);
 
         // Count the debug line for the metrics view.
         if (metrics) {
@@ -1240,31 +1246,36 @@ extern "C" {
  * @param metrics Optional metrics structure for tracking drops/overruns
  * @return true if message written successfully, false if dropped due to insufficient space
  */
+// Contiguous (padding-marker) ring writer for the OUT egress ring — scsynth
+// replies, the sample loader's /done|/fail, and /supersonic/debug. All three run
+// on the audio thread, so OUT has a single producer and needs no write lock.
+//
+// All state is passed in (head/tail, sequence counter, status-flags word,
+// metrics) rather than read from scsynth globals, so the function has no hidden
+// dependencies and is unit-tested directly (test_ring_buffer_write.cpp).
+//
+// Design note: the OUT ring uses contiguous-only writes — a message never wraps;
+// when it won't fit before the end, a PADDING_MAGIC marker fills the tail and the
+// write restarts at 0. That keeps this writer one memcpy per message and the
+// reader free of payload wrap-around logic. The IN and NRT-out rings instead use
+// split/wrapping writes (RingBufferWriter.h / ring_buffer_writer.js): they have
+// multiple producers and take a spinlock, so the wrap complexity is cheap there.
 bool ring_buffer_write(
     uint8_t* buffer_start,
     uint32_t buffer_size,
-    uint32_t buffer_start_offset,
     std::atomic<int32_t>* head,
     std::atomic<int32_t>* tail,
+    std::atomic<int32_t>* sequence,
     const void* data,
     uint32_t data_size,
+    std::atomic<uint32_t>* status_flags,
     PerformanceMetrics* metrics
 ) {
-    using namespace scsynth;  // Access globals from scsynth namespace
-
     // Create message header
     Message header;
     header.magic = MESSAGE_MAGIC;
     header.length = sizeof(Message) + data_size;
-
-    // Use appropriate sequence counter based on which buffer we're writing to
-    // This prevents false "dropped message" detection when debug and OSC messages interleave
-    if (buffer_start_offset == OUT_BUFFER_START) {
-        header.sequence = control->out_sequence.fetch_add(1, std::memory_order_relaxed);
-    } else {
-        // NRT_OUT_BUFFER_START
-        header.sequence = control->nrt_out_sequence.fetch_add(1, std::memory_order_relaxed);
-    }
+    header.sequence = static_cast<uint32_t>(sequence->fetch_add(1, std::memory_order_relaxed));
 
     // Load head and tail with acquire semantics
     int32_t current_head = head->load(std::memory_order_acquire);
@@ -1276,23 +1287,12 @@ bool ring_buffer_write(
     // Check if there's enough space for the message
     if (available < header.length) {
         // Not enough space - drop the message and track metrics
-        if (metrics) {
-            metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
-        }
-        if (control) {
-            control->status_flags.fetch_or(STATUS_BUFFER_FULL, std::memory_order_relaxed);
-        }
+        if (metrics) metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
+        if (status_flags) status_flags->fetch_or(STATUS_BUFFER_FULL, std::memory_order_relaxed);
         return false;
     }
 
     // Check if message fits contiguously, otherwise write padding and wrap to 0.
-    //
-    // Design note: OUT/NRT-out buffers use contiguous-only writes (with padding markers)
-    // rather than split writes that wrap around the boundary. This keeps the C++ writer
-    // simple (one memcpy per message on the audio thread) and the JS reader simple
-    // (contiguous reads, no wrap-around logic for payloads). The IN buffer uses a
-    // different design (split writes via RingBufferWriter.h) because it's written from
-    // JS where the complexity tradeoff is different.
     //
     // After wrapping, we must re-check that there's enough space between position 0
     // and tail — the initial available-space check included bytes that will be wasted
@@ -1302,12 +1302,8 @@ bool ring_buffer_write(
         // Verify space at front after wrap (tail-1 to avoid head==tail ambiguity)
         uint32_t space_at_front = (current_tail > 0) ? (current_tail - 1) : 0;
         if (space_at_front < header.length) {
-            if (metrics) {
-                metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
-            }
-            if (control) {
-                control->status_flags.fetch_or(STATUS_BUFFER_FULL, std::memory_order_relaxed);
-            }
+            if (metrics) metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
+            if (status_flags) status_flags->fetch_or(STATUS_BUFFER_FULL, std::memory_order_relaxed);
             return false;
         }
 
@@ -1318,15 +1314,15 @@ bool ring_buffer_write(
             padding.length = 0;
             padding.sequence = 0;
 
-            std::memcpy(buffer_start + buffer_start_offset + current_head, &padding, sizeof(Message));
+            std::memcpy(buffer_start + current_head, &padding, sizeof(Message));
         } else if (space_to_end >= 4) {
             // Not enough room for full padding header but enough for the magic word.
             // Write PADDING_MAGIC so the reader recognises this as a wrap marker
             // (without this, zeroed bytes look like corruption to the reader).
             uint32_t pad = PADDING_MAGIC;
-            std::memcpy(buffer_start + buffer_start_offset + current_head, &pad, 4);
+            std::memcpy(buffer_start + current_head, &pad, 4);
             if (space_to_end > 4) {
-                std::memset(buffer_start + buffer_start_offset + current_head + 4, 0, space_to_end - 4);
+                std::memset(buffer_start + current_head + 4, 0, space_to_end - 4);
             }
         }
 
@@ -1335,10 +1331,10 @@ bool ring_buffer_write(
     }
 
     // Write message header (now contiguous)
-    std::memcpy(buffer_start + buffer_start_offset + current_head, &header, sizeof(Message));
+    std::memcpy(buffer_start + current_head, &header, sizeof(Message));
 
     // Write payload (contiguous)
-    std::memcpy(buffer_start + buffer_start_offset + current_head + sizeof(Message), data, data_size);
+    std::memcpy(buffer_start + current_head + sizeof(Message), data, data_size);
 
     // Update head pointer with release semantics (publish message)
     int32_t new_head = (current_head + header.length) % buffer_size;
@@ -1346,7 +1342,7 @@ bool ring_buffer_write(
 
     // Track peak buffer usage at write time — the reader may drain the
     // buffer before the periodic metrics sampling sees the fill level.
-    if (metrics && buffer_start_offset == OUT_BUFFER_START) {
+    if (metrics) {
         uint32_t used = (new_head - current_tail + buffer_size) % buffer_size;
         uint32_t prev = metrics->out_buffer_peak_bytes.load(std::memory_order_relaxed);
         while (used > prev) {
@@ -1370,13 +1366,14 @@ void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
 
     // Use unified ring buffer write with full protection
     ring_buffer_write(
-        shared_memory,              // buffer_start
-        OUT_BUFFER_SIZE,            // buffer_size
-        OUT_BUFFER_START,           // buffer_start_offset
-        &control->out_head,         // head
-        &control->out_tail,         // tail
-        msg,                        // data
-        size,                       // data_size
-        metrics                     // metrics
+        shared_memory + OUT_BUFFER_START,  // ring base
+        OUT_BUFFER_SIZE,                   // buffer_size
+        &control->out_head,                // head
+        &control->out_tail,                // tail
+        &control->out_sequence,            // sequence
+        msg,                               // data
+        size,                              // data_size
+        &control->status_flags,            // status_flags
+        metrics                            // metrics
     );
 }

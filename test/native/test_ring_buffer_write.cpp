@@ -1,12 +1,14 @@
 /*
- * test_ring_buffer_write.cpp — Tests for the OUT/DEBUG ring buffer writer
+ * test_ring_buffer_write.cpp — Tests for the OUT/egress ring buffer writer.
  *
- * The OUT/DEBUG ring buffers use a contiguous-write design where messages
- * must not wrap around the buffer boundary. When a message doesn't fit
- * before the end, a padding marker is written and the head wraps to 0.
+ * The OUT ring uses a contiguous-write design: a message never wraps the buffer
+ * boundary. When it doesn't fit before the end, a PADDING_MAGIC marker fills the
+ * tail and the write restarts at 0. The space check must account for the bytes
+ * wasted by padding so a wrap-and-write never overwrites unread data.
  *
- * This test verifies that the space check correctly accounts for the
- * bytes wasted by padding — a wrap-and-write must not overwrite unread data.
+ * These exercise the REAL `ring_buffer_write` from audio_processor.cpp (declared
+ * extern below). It takes its head/tail/sequence/status-flags as parameters, so
+ * it can be driven with local atomics — no scsynth globals required.
  */
 #include <catch2/catch_test_macros.hpp>
 #include <atomic>
@@ -14,59 +16,18 @@
 #include <cstring>
 #include "src/shared_memory.h"
 
-// Standalone reproduction of ring_buffer_write from audio_processor.cpp.
-// Extracted here so we can test it without the full scsynth namespace globals.
-static bool ring_buffer_write_standalone(
+// Defined in audio_processor.cpp (global namespace). Defaults live on the
+// declaration there; this extern lists every parameter explicitly.
+extern bool ring_buffer_write(
     uint8_t* buffer_start,
     uint32_t buffer_size,
     std::atomic<int32_t>* head,
     std::atomic<int32_t>* tail,
     std::atomic<int32_t>* sequence,
     const void* data,
-    uint32_t data_size)
-{
-    Message header;
-    header.magic = MESSAGE_MAGIC;
-    header.length = sizeof(Message) + data_size;
-    header.sequence = static_cast<uint32_t>(sequence->fetch_add(1, std::memory_order_relaxed));
-    header.sourceId = 0;
-
-    int32_t current_head = head->load(std::memory_order_acquire);
-    int32_t current_tail = tail->load(std::memory_order_acquire);
-
-    uint32_t available = (buffer_size - 1 - current_head + current_tail) % buffer_size;
-    if (available < header.length) {
-        return false;
-    }
-
-    uint32_t space_to_end = buffer_size - current_head;
-    if (header.length > space_to_end) {
-        // Re-check space at front after wrap
-        uint32_t space_at_front = (current_tail > 0) ? (current_tail - 1) : 0;
-        if (space_at_front < header.length) {
-            return false;
-        }
-
-        if (space_to_end >= sizeof(Message)) {
-            Message padding;
-            padding.magic = PADDING_MAGIC;
-            padding.length = 0;
-            padding.sequence = 0;
-            padding.sourceId = 0;
-            std::memcpy(buffer_start + current_head, &padding, sizeof(Message));
-        } else if (space_to_end > 0) {
-            std::memset(buffer_start + current_head, 0, space_to_end);
-        }
-        current_head = 0;
-    }
-
-    std::memcpy(buffer_start + current_head, &header, sizeof(Message));
-    std::memcpy(buffer_start + current_head + sizeof(Message), data, data_size);
-
-    int32_t new_head = (current_head + header.length) % buffer_size;
-    head->store(new_head, std::memory_order_release);
-    return true;
-}
+    uint32_t data_size,
+    std::atomic<uint32_t>* status_flags,
+    PerformanceMetrics* metrics);
 
 TEST_CASE("ring_buffer_write rejects message when wrap wastes space needed by tail", "[RingBuffer]") {
     // Buffer layout: 128 bytes, head near end, tail near start.
@@ -80,9 +41,6 @@ TEST_CASE("ring_buffer_write rejects message when wrap wastes space needed by ta
     // Message: 16 (header) + 32 (payload) = 48 bytes — fits in 57.
     // But space_to_end = 128 - 100 = 28. Message (48) > 28, so pad+wrap.
     // Space at front (0 to tail-1) = 29 bytes. Message needs 48. Should FAIL.
-    //
-    // Without the fix: available check (57 >= 48) passes, wraps to 0,
-    // writes 48 bytes at position 0, overwriting unread data at 0-29.
 
     const uint32_t BUF_SIZE = 128;
     uint8_t buffer[BUF_SIZE];
@@ -100,8 +58,8 @@ TEST_CASE("ring_buffer_write rejects message when wrap wastes space needed by ta
     uint8_t payload[32];
     std::memset(payload, 0x42, sizeof(payload));
 
-    bool result = ring_buffer_write_standalone(
-        buffer, BUF_SIZE, &head, &tail, &seq, payload, sizeof(payload));
+    bool result = ring_buffer_write(
+        buffer, BUF_SIZE, &head, &tail, &seq, payload, sizeof(payload), nullptr, nullptr);
 
     // The write should be REJECTED because after padding the end,
     // there isn't enough space at the front (29 bytes < 48 needed).
@@ -135,8 +93,8 @@ TEST_CASE("ring_buffer_write succeeds when wrap has enough space at front", "[Ri
     uint8_t payload[32];
     std::memset(payload, 0x42, sizeof(payload));
 
-    bool result = ring_buffer_write_standalone(
-        buffer, BUF_SIZE, &head, &tail, &seq, payload, sizeof(payload));
+    bool result = ring_buffer_write(
+        buffer, BUF_SIZE, &head, &tail, &seq, payload, sizeof(payload), nullptr, nullptr);
 
     REQUIRE(result == true);
 
@@ -144,4 +102,83 @@ TEST_CASE("ring_buffer_write succeeds when wrap has enough space at front", "[Ri
     Message* msg = reinterpret_cast<Message*>(buffer);
     REQUIRE(msg->magic == MESSAGE_MAGIC);
     REQUIRE(msg->length == sizeof(Message) + 32);
+}
+
+TEST_CASE("ring_buffer_write frames header, payload and advancing sequence", "[RingBuffer]") {
+    const uint32_t BUF_SIZE = 256;
+    uint8_t buffer[BUF_SIZE];
+    std::memset(buffer, 0, BUF_SIZE);
+
+    std::atomic<int32_t> head{0};
+    std::atomic<int32_t> tail{0};
+    std::atomic<int32_t> seq{0};
+
+    const char* payload = "hello";
+    const uint32_t len = 5;
+
+    REQUIRE(ring_buffer_write(
+        buffer, BUF_SIZE, &head, &tail, &seq, payload, len, nullptr, nullptr));
+
+    Message* msg = reinterpret_cast<Message*>(buffer);
+    REQUIRE(msg->magic == MESSAGE_MAGIC);
+    REQUIRE(msg->length == sizeof(Message) + len);
+    REQUIRE(msg->sequence == 0u);
+    REQUIRE(std::memcmp(buffer + sizeof(Message), payload, len) == 0);
+    REQUIRE(head.load() == static_cast<int32_t>(sizeof(Message) + len));
+
+    // The sequence counter is the caller's — a second write advances it.
+    REQUIRE(ring_buffer_write(
+        buffer, BUF_SIZE, &head, &tail, &seq, payload, len, nullptr, nullptr));
+    Message* msg2 = reinterpret_cast<Message*>(buffer + sizeof(Message) + len);
+    REQUIRE(msg2->sequence == 1u);
+}
+
+TEST_CASE("ring_buffer_write writes a PADDING_MAGIC marker when a message wraps", "[RingBuffer]") {
+    // head leaves >= sizeof(Message) but < the message length before the end, so
+    // a full padding header is written at the tail and the message restarts at 0.
+    //   space_to_end = 128 - 108 = 20  (>= 16, full padding header)
+    //   available    = (128 - 1 - 108 + 60) % 128 = 79  (>= 24, fits)
+    //   space_at_front = 59  (>= 24)
+    const uint32_t BUF_SIZE = 128;
+    uint8_t buffer[BUF_SIZE];
+    std::memset(buffer, 0, BUF_SIZE);
+
+    std::atomic<int32_t> head{108};
+    std::atomic<int32_t> tail{60};
+    std::atomic<int32_t> seq{0};
+
+    uint8_t payload[8];
+    std::memset(payload, 0x7E, sizeof(payload));
+
+    REQUIRE(ring_buffer_write(
+        buffer, BUF_SIZE, &head, &tail, &seq, payload, sizeof(payload), nullptr, nullptr));
+
+    // Padding marker left at the old head so the reader skips to 0.
+    Message* pad = reinterpret_cast<Message*>(buffer + 108);
+    REQUIRE(pad->magic == PADDING_MAGIC);
+
+    // Message itself restarted at position 0.
+    Message* msg = reinterpret_cast<Message*>(buffer);
+    REQUIRE(msg->magic == MESSAGE_MAGIC);
+    REQUIRE(msg->length == sizeof(Message) + sizeof(payload));
+    REQUIRE(head.load() == static_cast<int32_t>(sizeof(Message) + sizeof(payload)));
+}
+
+TEST_CASE("ring_buffer_write flags STATUS_BUFFER_FULL and counts drops on overflow", "[RingBuffer]") {
+    const uint32_t BUF_SIZE = 64;
+    uint8_t buffer[BUF_SIZE];
+    std::memset(buffer, 0, BUF_SIZE);
+
+    std::atomic<int32_t> head{0};
+    std::atomic<int32_t> tail{0};
+    std::atomic<int32_t> seq{0};
+    std::atomic<uint32_t> status{0};
+
+    uint8_t payload[100];  // 16 + 100 = 116 > 64 — cannot fit
+    std::memset(payload, 0x11, sizeof(payload));
+
+    REQUIRE_FALSE(ring_buffer_write(
+        buffer, BUF_SIZE, &head, &tail, &seq, payload, sizeof(payload), &status, nullptr));
+    REQUIRE((status.load() & STATUS_BUFFER_FULL) != 0u);
+    REQUIRE(head.load() == 0);  // nothing written
 }
