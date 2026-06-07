@@ -83,6 +83,9 @@ void OscEgress::dispatchEgress(uint32_t originToken, const uint8_t* payload, uin
         return;
     }
 
+    // Engine pre-dispatch hook (e.g. /supersonic/buffer/freed).
+    if (mInterceptor && mInterceptor(osc, oscLen)) return;
+
     if (!mTransport) return;
     switch (route) {
         case REPLY:          mTransport->send(originToken, osc, oscLen, /*networkOnly*/ false); break;

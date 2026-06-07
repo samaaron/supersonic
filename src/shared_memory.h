@@ -163,6 +163,16 @@ struct alignas(4) Message {
     // payload follows (binary data - OSC or text depending on buffer)
 };
 
+// Egress framing: every frame on both egress rings is
+// Message{sourceId = origin token} + [route:u32][osc].
+enum EgressRoute : uint32_t {
+    EGRESS_REPLY            = 0,  // reply to the origin token
+    EGRESS_SEND_TO_CALLER   = 1,  // reply to the origin token, network peers only
+    EGRESS_BROADCAST_NOTIFY = 2,  // fan out to all notify subscribers
+    EGRESS_BROADCAST_LINK   = 3,  // fan out to all Link subscribers
+};
+constexpr uint32_t EGRESS_ROUTE_SIZE = sizeof(uint32_t);  // leading route word
+
 // Control pointers structure (4-byte aligned for atomics, padded to 48 bytes for 8-byte alignment)
 struct alignas(4) ControlPointers {
     std::atomic<int32_t> in_head;

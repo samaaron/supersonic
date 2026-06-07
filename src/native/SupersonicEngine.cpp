@@ -945,27 +945,16 @@ void SupersonicEngine::init(const Config& cfg) {
     mMetrics                 = reinterpret_cast<PerformanceMetrics*>(base + METRICS_START);
     PerformanceMetrics* met  = mMetrics;
 
-    // -- NRT gateway: drain #1 = OUT egress ring (scsynth replies + debug). Woken
-    //    every audio block via processCount. (Drain #2 = the control ring, added
-    //    with the NRT plane below.)
+    // -- NRT gateway: drain #1 = OUT egress ring. Woken every audio block via
+    //    processCount. (Drain #2 = the control ring, added with the NRT plane
+    //    below.) OUT frames use the same framing as NRT-out, so both drain
+    //    through dispatchEgress.
     mNrtGateway.setWake(&mAudioCallback.processCount);
     mNrtGateway.addDrain(
         base + OUT_BUFFER_START, OUT_BUFFER_SIZE,
         &ctrl->out_head, &ctrl->out_tail,
-        [this](uint32_t, const uint8_t* d, uint32_t s, uint32_t) {
-            // Debug log lines go to the host's onDebug channel.
-            if (s >= supersonic::kDebugArgOffset &&
-                std::memcmp(d, "/supersonic/debug", 17) == 0) {
-                const char* t = reinterpret_cast<const char*>(d) + supersonic::kDebugArgOffset;
-                mEgress.deliverDebug(t, static_cast<uint32_t>(strnlen(t, s - supersonic::kDebugArgOffset)));
-                return;
-            }
-            // Intercept /supersonic/buffer/freed (free the memory, don't forward);
-            // otherwise fan the reply out through the transport — notify
-            // subscribers on UDP, or the in-process observer (onReply) on a
-            // CallbackTransport. We're on the gateway thread, so deliver directly.
-            if (interceptBufferFreed(d, s)) return;
-            mEgress.deliverBroadcastNotify(d, s);
+        [this](uint32_t token, const uint8_t* d, uint32_t n, uint32_t) {
+            mEgress.dispatchEgress(token, d, n);
         },
         { &met->osc_in_messages_received,
           &met->osc_in_bytes_received,
@@ -994,6 +983,9 @@ void SupersonicEngine::init(const Config& cfg) {
     mEgress.init(mTransport, &onDebug,
         base + NRT_OUT_BUFFER_START, NRT_OUT_BUFFER_SIZE,
         &ctrl->nrt_out_head, &ctrl->nrt_out_tail, &ctrl->nrt_out_sequence, &mEgressLock);
+
+    // Pre-dispatch hook for both egress rings (/supersonic/buffer/freed deferred-free).
+    mEgress.setInterceptor([this](const uint8_t* d, uint32_t n) { return interceptBufferFreed(d, n); });
 
     // Register the OSC routes on the engine-owned ingress, which the AUDIO thread
     // classifies through (published as g_active_ingress below). Control prefixes

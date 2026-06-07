@@ -34,6 +34,22 @@ TEST_CASE("/status generates exactly one /status.reply callback", "[callback]") 
     CHECK(statusCount == 0);  // no duplicate replies
 }
 
+// scsynth replies ride the OUT ring; /clock control replies ride NRT-out. Both
+// drain through the one dispatchEgress, so a reply from each proves it.
+TEST_CASE("OUT-ring and NRT-out replies both arrive via the unified egress drain", "[callback][egress]") {
+    EngineFixture fx;
+    fx.clearReplies();
+
+    OscReply r;
+    // OUT ring.
+    fx.send(osc_test::message("/status"));
+    REQUIRE(fx.waitForReply("/status.reply", r));
+
+    // NRT-out ring.
+    fx.send(osc_test::message("/clock/tempo/get"));
+    REQUIRE(fx.waitForReply("/clock/tempo.reply", r));
+}
+
 TEST_CASE("/sync generates exactly one /synced callback with matching ID", "[callback]") {
     EngineFixture fx;
     fx.clearReplies();

@@ -24,6 +24,8 @@ extern bool ring_buffer_write(
     std::atomic<int32_t>* head,
     std::atomic<int32_t>* tail,
     std::atomic<int32_t>* sequence,
+    uint32_t route,
+    uint32_t source_id,
     const void* data,
     uint32_t data_size,
     std::atomic<uint32_t>* status_flags,
@@ -59,7 +61,7 @@ TEST_CASE("ring_buffer_write rejects message when wrap wastes space needed by ta
     std::memset(payload, 0x42, sizeof(payload));
 
     bool result = ring_buffer_write(
-        buffer, BUF_SIZE, &head, &tail, &seq, payload, sizeof(payload), nullptr, nullptr);
+        buffer, BUF_SIZE, &head, &tail, &seq, EGRESS_BROADCAST_NOTIFY, 7, payload, sizeof(payload), nullptr, nullptr);
 
     // The write should be REJECTED because after padding the end,
     // there isn't enough space at the front (29 bytes < 48 needed).
@@ -94,14 +96,14 @@ TEST_CASE("ring_buffer_write succeeds when wrap has enough space at front", "[Ri
     std::memset(payload, 0x42, sizeof(payload));
 
     bool result = ring_buffer_write(
-        buffer, BUF_SIZE, &head, &tail, &seq, payload, sizeof(payload), nullptr, nullptr);
+        buffer, BUF_SIZE, &head, &tail, &seq, EGRESS_BROADCAST_NOTIFY, 7, payload, sizeof(payload), nullptr, nullptr);
 
     REQUIRE(result == true);
 
     // Verify message was written at position 0
     Message* msg = reinterpret_cast<Message*>(buffer);
     REQUIRE(msg->magic == MESSAGE_MAGIC);
-    REQUIRE(msg->length == sizeof(Message) + 32);
+    REQUIRE(msg->length == sizeof(Message) + EGRESS_ROUTE_SIZE + 32);
 }
 
 TEST_CASE("ring_buffer_write frames header, payload and advancing sequence", "[RingBuffer]") {
@@ -117,25 +119,28 @@ TEST_CASE("ring_buffer_write frames header, payload and advancing sequence", "[R
     const uint32_t len = 5;
 
     REQUIRE(ring_buffer_write(
-        buffer, BUF_SIZE, &head, &tail, &seq, payload, len, nullptr, nullptr));
+        buffer, BUF_SIZE, &head, &tail, &seq, EGRESS_BROADCAST_NOTIFY, 7, payload, len, nullptr, nullptr));
 
-    // Messages are packed back-to-back without alignment padding, so read each
-    // header via memcpy (as the production RingReader does) rather than casting a
-    // possibly-misaligned pointer to Message*.
+    // Frame = Message{sourceId = token} + [route:u32] + payload. Read headers via
+    // memcpy (as the RingReader does) rather than casting a misaligned pointer.
     Message msg;
     std::memcpy(&msg, buffer, sizeof(Message));
     REQUIRE(msg.magic == MESSAGE_MAGIC);
-    REQUIRE(msg.length == sizeof(Message) + len);
+    REQUIRE(msg.length == sizeof(Message) + EGRESS_ROUTE_SIZE + len);
     REQUIRE(msg.sequence == 0u);
-    REQUIRE(std::memcmp(buffer + sizeof(Message), payload, len) == 0);
-    REQUIRE(head.load() == static_cast<int32_t>(sizeof(Message) + len));
+    REQUIRE(msg.sourceId == 7u);  // the origin token we passed
+    uint32_t route = 0;
+    std::memcpy(&route, buffer + sizeof(Message), sizeof(route));
+    REQUIRE(route == EGRESS_BROADCAST_NOTIFY);  // route word precedes the OSC
+    REQUIRE(std::memcmp(buffer + sizeof(Message) + EGRESS_ROUTE_SIZE, payload, len) == 0);
+    REQUIRE(head.load() == static_cast<int32_t>(sizeof(Message) + EGRESS_ROUTE_SIZE + len));
 
     // The sequence counter is the caller's — a second write advances it. This
-    // message starts at an unaligned offset (sizeof(Message) + 5), so memcpy.
+    // message starts at an unaligned offset, so memcpy.
     REQUIRE(ring_buffer_write(
-        buffer, BUF_SIZE, &head, &tail, &seq, payload, len, nullptr, nullptr));
+        buffer, BUF_SIZE, &head, &tail, &seq, EGRESS_BROADCAST_NOTIFY, 7, payload, len, nullptr, nullptr));
     Message msg2;
-    std::memcpy(&msg2, buffer + sizeof(Message) + len, sizeof(Message));
+    std::memcpy(&msg2, buffer + sizeof(Message) + EGRESS_ROUTE_SIZE + len, sizeof(Message));
     REQUIRE(msg2.sequence == 1u);
 }
 
@@ -157,7 +162,7 @@ TEST_CASE("ring_buffer_write writes a PADDING_MAGIC marker when a message wraps"
     std::memset(payload, 0x7E, sizeof(payload));
 
     REQUIRE(ring_buffer_write(
-        buffer, BUF_SIZE, &head, &tail, &seq, payload, sizeof(payload), nullptr, nullptr));
+        buffer, BUF_SIZE, &head, &tail, &seq, EGRESS_BROADCAST_NOTIFY, 7, payload, sizeof(payload), nullptr, nullptr));
 
     // Padding marker left at the old head so the reader skips to 0.
     Message* pad = reinterpret_cast<Message*>(buffer + 108);
@@ -166,8 +171,8 @@ TEST_CASE("ring_buffer_write writes a PADDING_MAGIC marker when a message wraps"
     // Message itself restarted at position 0.
     Message* msg = reinterpret_cast<Message*>(buffer);
     REQUIRE(msg->magic == MESSAGE_MAGIC);
-    REQUIRE(msg->length == sizeof(Message) + sizeof(payload));
-    REQUIRE(head.load() == static_cast<int32_t>(sizeof(Message) + sizeof(payload)));
+    REQUIRE(msg->length == sizeof(Message) + EGRESS_ROUTE_SIZE + sizeof(payload));
+    REQUIRE(head.load() == static_cast<int32_t>(sizeof(Message) + EGRESS_ROUTE_SIZE + sizeof(payload)));
 }
 
 TEST_CASE("ring_buffer_write flags STATUS_BUFFER_FULL and counts drops on overflow", "[RingBuffer]") {
@@ -184,7 +189,7 @@ TEST_CASE("ring_buffer_write flags STATUS_BUFFER_FULL and counts drops on overfl
     std::memset(payload, 0x11, sizeof(payload));
 
     REQUIRE_FALSE(ring_buffer_write(
-        buffer, BUF_SIZE, &head, &tail, &seq, payload, sizeof(payload), &status, nullptr));
+        buffer, BUF_SIZE, &head, &tail, &seq, EGRESS_BROADCAST_NOTIFY, 7, payload, sizeof(payload), &status, nullptr));
     REQUIRE((status.load() & STATUS_BUFFER_FULL) != 0u);
     REQUIRE(head.load() == 0);  // nothing written
 }

@@ -15,6 +15,8 @@
 #include <functional>
 #include <string>
 
+#include "src/shared_memory.h"   // EgressRoute
+
 class IOscTransport;
 
 class OscEgress {
@@ -43,11 +45,12 @@ public:
     void sendSetup(int sampleRate, int bufferSize, uint32_t generation);
 
     // ── Gateway side: deliver (only the NRT gateway calls these) ──────────────
-    // Drain handler for one NRT-out message: reads the route tag and dispatches
-    // to the transport (or onDebug for /supersonic/debug).
+    // Drain handler for one egress frame (OUT or NRT-out): peel /supersonic/debug
+    // to onDebug, run the interceptor, else route by tag to the transport.
     void dispatchEgress(uint32_t originToken, const uint8_t* payload, uint32_t len);
-    // Deliver an already-OSC packet to the notify audience (the OUT-ring drain's
-    // audio-thread replies) and a debug line (audio-thread ss_log).
+    // Optional pre-dispatch hook; returns true to swallow the message.
+    void setInterceptor(std::function<bool(const uint8_t*, uint32_t)> fn) { mInterceptor = std::move(fn); }
+    // Deliver an already-OSC packet to the notify audience and a debug line.
     void deliverBroadcastNotify(const uint8_t* osc, uint32_t size);
     void deliverDebug(const char* text, uint32_t len);
 
@@ -62,10 +65,17 @@ public:
 
 private:
     enum Route : uint32_t { REPLY = 0, SEND_TO_CALLER = 1, BROADCAST_NOTIFY = 2, BROADCAST_LINK = 3 };
+    // Must match the shared on-ring EgressRoute values (shared_memory.h).
+    static_assert(uint32_t(REPLY) == uint32_t(EGRESS_REPLY) &&
+                  uint32_t(SEND_TO_CALLER) == uint32_t(EGRESS_SEND_TO_CALLER) &&
+                  uint32_t(BROADCAST_NOTIFY) == uint32_t(EGRESS_BROADCAST_NOTIFY) &&
+                  uint32_t(BROADCAST_LINK) == uint32_t(EGRESS_BROADCAST_LINK),
+                  "OscEgress::Route must match shared_memory.h EgressRoute");
     void frame(Route route, uint32_t token, const uint8_t* osc, uint32_t size);
 
     IOscTransport*                                  mTransport = nullptr;
     const std::function<void(const std::string&)>*  mOnDebug   = nullptr;
+    std::function<bool(const uint8_t*, uint32_t)>    mInterceptor;  // pre-dispatch swallow hook
 
     std::atomic<uint32_t> mOriginToken{0};
 

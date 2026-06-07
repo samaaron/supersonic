@@ -114,6 +114,8 @@ bool ring_buffer_write(
     std::atomic<int32_t>* head,
     std::atomic<int32_t>* tail,
     std::atomic<int32_t>* sequence,
+    uint32_t route,
+    uint32_t source_id,
     const void* data,
     uint32_t data_size,
     std::atomic<uint32_t>* status_flags = nullptr,
@@ -1056,6 +1058,7 @@ extern "C" {
         ::ring_buffer_write(
             shared_memory + OUT_BUFFER_START, OUT_BUFFER_SIZE,
             &control->out_head, &control->out_tail, &control->out_sequence,
+            EGRESS_BROADCAST_NOTIFY, 0,  // route, source_id (debug broadcasts)
             pkt, p, &control->status_flags);
 
         // Count the debug line for the metrics view.
@@ -1266,16 +1269,20 @@ bool ring_buffer_write(
     std::atomic<int32_t>* head,
     std::atomic<int32_t>* tail,
     std::atomic<int32_t>* sequence,
+    uint32_t route,
+    uint32_t source_id,
     const void* data,
     uint32_t data_size,
     std::atomic<uint32_t>* status_flags,
     PerformanceMetrics* metrics
 ) {
-    // Create message header
+    // Egress frame: Message{sourceId = token} + [route:u32][osc]; the route word
+    // counts toward the message length.
     Message header;
     header.magic = MESSAGE_MAGIC;
-    header.length = sizeof(Message) + data_size;
+    header.length = sizeof(Message) + static_cast<uint32_t>(sizeof(uint32_t)) + data_size;
     header.sequence = static_cast<uint32_t>(sequence->fetch_add(1, std::memory_order_relaxed));
+    header.sourceId = source_id;
 
     // Load head and tail with acquire semantics
     int32_t current_head = head->load(std::memory_order_acquire);
@@ -1333,8 +1340,8 @@ bool ring_buffer_write(
     // Write message header (now contiguous)
     std::memcpy(buffer_start + current_head, &header, sizeof(Message));
 
-    // Write payload (contiguous)
-    std::memcpy(buffer_start + current_head + sizeof(Message), data, data_size);
+    std::memcpy(buffer_start + current_head + sizeof(Message), &route, sizeof(uint32_t));
+    std::memcpy(buffer_start + current_head + sizeof(Message) + sizeof(uint32_t), data, data_size);
 
     // Update head pointer with release semantics (publish message)
     int32_t new_head = (current_head + header.length) % buffer_size;
@@ -1364,13 +1371,15 @@ void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
         return;
     }
 
-    // Use unified ring buffer write with full protection
+    // Use unified ring buffer write with full protection.
     ring_buffer_write(
         shared_memory + OUT_BUFFER_START,  // ring base
         OUT_BUFFER_SIZE,                   // buffer_size
         &control->out_head,                // head
         &control->out_tail,                // tail
         &control->out_sequence,            // sequence
+        EGRESS_BROADCAST_NOTIFY,           // route
+        0,                                 // source_id (broadcast)
         msg,                               // data
         size,                              // data_size
         &control->status_flags,            // status_flags

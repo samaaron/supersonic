@@ -52,10 +52,16 @@ function readOscMessages(ctx) {
             }
             lastSequenceReceived = sequence;
 
+            // Egress frames are [route:u32][osc]; strip the route word.
+            const ROUTE_SIZE = 4;
+            const oscOffset = payloadOffset + ROUTE_SIZE;
+            const oscLength = payloadLength - ROUTE_SIZE;
+            if (oscLength <= 0) return;
+
             // Copy the data since ring buffer may be overwritten
-            const oscData = new Uint8Array(payloadLength);
-            for (let i = 0; i < payloadLength; i++) {
-                oscData[i] = uint8View[payloadOffset + i];
+            const oscData = new Uint8Array(oscLength);
+            for (let i = 0; i < oscLength; i++) {
+                oscData[i] = uint8View[oscOffset + i];
             }
 
             messages.push({

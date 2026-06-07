@@ -65,6 +65,8 @@ extern bool ring_buffer_write(
     std::atomic<int32_t>* head,
     std::atomic<int32_t>* tail,
     std::atomic<int32_t>* sequence,
+    uint32_t route,
+    uint32_t source_id,
     const void* data,
     uint32_t data_size,
     std::atomic<uint32_t>* status_flags,
@@ -311,6 +313,7 @@ void SampleLoader::writeDoneReply(int bufnum) {
         &control->out_head,
         &control->out_tail,
         &control->out_sequence,
+        EGRESS_BROADCAST_NOTIFY, 0,  // route, source_id (broadcast)
         p.Data(),
         static_cast<uint32_t>(p.Size()),
         &control->status_flags,
@@ -333,6 +336,7 @@ void SampleLoader::writeFailReply(int bufnum, const char* cmdName) {
         &control->out_head,
         &control->out_tail,
         &control->out_sequence,
+        EGRESS_BROADCAST_NOTIFY, 0,  // route, source_id (broadcast)
         p.Data(),
         static_cast<uint32_t>(p.Size()),
         &control->status_flags,

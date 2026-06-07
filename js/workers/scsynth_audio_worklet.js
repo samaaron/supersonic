@@ -534,20 +534,26 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             maxMessages: C.MAX_REPLY_MESSAGES,
             onMessage: (payloadOffset, payloadLength, sequence, sourceId) => {
                 if (count >= C.MAX_REPLY_MESSAGES) return;
-                if (bufferOffset + payloadLength > C.REPLY_BUFFER_SIZE) return;
+
+                // Egress frames are [route:u32][osc]; strip the route word.
+                const ROUTE_SIZE = 4;
+                const oscOffset = payloadOffset + ROUTE_SIZE;
+                const oscLength = payloadLength - ROUTE_SIZE;
+                if (oscLength <= 0) return;
+                if (bufferOffset + oscLength > C.REPLY_BUFFER_SIZE) return;
 
                 // Copy directly from source to pool - NO intermediate allocation
-                for (let i = 0; i < payloadLength; i++) {
-                    pool.bufferView[bufferOffset + i] = this.uint8View[payloadOffset + i];
+                for (let i = 0; i < oscLength; i++) {
+                    pool.bufferView[bufferOffset + i] = this.uint8View[oscOffset + i];
                 }
 
                 // Update pre-allocated entry
                 const entry = pool.entries[count];
                 entry.offset = bufferOffset;
-                entry.length = payloadLength;
+                entry.length = oscLength;
                 entry.sequence = sequence;
 
-                bufferOffset += payloadLength;
+                bufferOffset += oscLength;
                 count++;
             }
         });
