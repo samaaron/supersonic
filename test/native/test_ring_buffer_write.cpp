@@ -119,18 +119,24 @@ TEST_CASE("ring_buffer_write frames header, payload and advancing sequence", "[R
     REQUIRE(ring_buffer_write(
         buffer, BUF_SIZE, &head, &tail, &seq, payload, len, nullptr, nullptr));
 
-    Message* msg = reinterpret_cast<Message*>(buffer);
-    REQUIRE(msg->magic == MESSAGE_MAGIC);
-    REQUIRE(msg->length == sizeof(Message) + len);
-    REQUIRE(msg->sequence == 0u);
+    // Messages are packed back-to-back without alignment padding, so read each
+    // header via memcpy (as the production RingReader does) rather than casting a
+    // possibly-misaligned pointer to Message*.
+    Message msg;
+    std::memcpy(&msg, buffer, sizeof(Message));
+    REQUIRE(msg.magic == MESSAGE_MAGIC);
+    REQUIRE(msg.length == sizeof(Message) + len);
+    REQUIRE(msg.sequence == 0u);
     REQUIRE(std::memcmp(buffer + sizeof(Message), payload, len) == 0);
     REQUIRE(head.load() == static_cast<int32_t>(sizeof(Message) + len));
 
-    // The sequence counter is the caller's — a second write advances it.
+    // The sequence counter is the caller's — a second write advances it. This
+    // message starts at an unaligned offset (sizeof(Message) + 5), so memcpy.
     REQUIRE(ring_buffer_write(
         buffer, BUF_SIZE, &head, &tail, &seq, payload, len, nullptr, nullptr));
-    Message* msg2 = reinterpret_cast<Message*>(buffer + sizeof(Message) + len);
-    REQUIRE(msg2->sequence == 1u);
+    Message msg2;
+    std::memcpy(&msg2, buffer + sizeof(Message) + len, sizeof(Message));
+    REQUIRE(msg2.sequence == 1u);
 }
 
 TEST_CASE("ring_buffer_write writes a PADDING_MAGIC marker when a message wraps", "[RingBuffer]") {
