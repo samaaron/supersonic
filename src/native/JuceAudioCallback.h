@@ -28,6 +28,20 @@ extern "C" {
     void touch_audio_bus_for_next_block(uint32_t busIdx);
 }
 
+// Shared per-scsynth-block render, used by both HeadlessDriver and the engine's
+// manual pump (SupersonicEngine::pumpAudioBlock): drain Link Audio inputs into
+// the bus pool, run process_audio, then publish the main + aux Link sinks. The
+// caller owns installPendingBuffers(), the NTP/host-time derivation, the
+// samplePos advance, and the processCount tick — only the block body lives here
+// so the two drivers can't drift apart.
+void renderAudioBlock(SuperClock& clock,
+                      uint32_t blockSize,
+                      uint32_t numOutputChannels,
+                      uint32_t numInputChannels,
+                      uint32_t sampleRate,
+                      double   ntp,
+                      uint64_t hostMicros);
+
 class JuceAudioCallback : public juce::AudioIODeviceCallback {
 public:
     JuceAudioCallback();

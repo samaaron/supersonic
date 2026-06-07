@@ -52,46 +52,13 @@ void HeadlessDriver::processBlock(double& samplePos) {
     const uint64_t hostMicros =
         static_cast<uint64_t>(std::max<int64_t>(0, mSuperClock->linkClockMicros()));
 
-    // Drain Link Audio inputs into the bus pool before process_audio
-    // so In.ar reads receive them this block.
-    if (auto* busPool = reinterpret_cast<float*>(get_audio_bus_pool())) {
-        mSuperClock->drainLinkAudioInputsToBuses(
-            busPool,
-            static_cast<uint32_t>(mBlockSize),
-            static_cast<uint32_t>(get_audio_bus_count()),
-            static_cast<uint32_t>(mSampleRate),
-            hostMicros);
-    }
-
-    process_audio(ntp,
-                  static_cast<uint32_t>(mNumOutputChannels),
-                  static_cast<uint32_t>(mNumInputChannels));
+    renderAudioBlock(*mSuperClock,
+                     static_cast<uint32_t>(mBlockSize),
+                     static_cast<uint32_t>(mNumOutputChannels),
+                     static_cast<uint32_t>(mNumInputChannels),
+                     static_cast<uint32_t>(mSampleRate),
+                     ntp, hostMicros);
     samplePos += mBlockSize;
-
-    // Publish own main + aux sinks (no-op when no subscribers / no sinks).
-    if (auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus())) {
-        if (mNumOutputChannels >= 2) {
-            mSuperClock->publishAudioBlock(
-                outputBus, outputBus + mBlockSize,
-                static_cast<size_t>(mBlockSize),
-                static_cast<uint32_t>(mSampleRate),
-                hostMicros);
-        } else if (mNumOutputChannels == 1) {
-            mSuperClock->publishAudioBlock(
-                outputBus, nullptr,
-                static_cast<size_t>(mBlockSize),
-                static_cast<uint32_t>(mSampleRate),
-                hostMicros);
-        }
-    }
-    if (auto* busPool = reinterpret_cast<float*>(get_audio_bus_pool())) {
-        mSuperClock->publishAuxSinks(
-            busPool,
-            static_cast<uint32_t>(mBlockSize),
-            static_cast<uint32_t>(get_audio_bus_count()),
-            static_cast<uint32_t>(mSampleRate),
-            hostMicros);
-    }
 
     mCallback->processCount.fetch_add(1, std::memory_order_release);
     mCallback->processCount.notify_all();

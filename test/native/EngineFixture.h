@@ -64,9 +64,12 @@ public:
         const auto deadline = std::chrono::steady_clock::now()
                             + std::chrono::milliseconds(timeoutMs);
         while (true) {
+            // In manual-pump mode nothing advances the engine unless we do it
+            // here, on this thread — keeps the test the sole audio-thread writer.
+            if (mManualPump) pumpBlock();
             if (pred()) return true;
             if (std::chrono::steady_clock::now() >= deadline) return false;
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            std::this_thread::sleep_for(std::chrono::milliseconds(mManualPump ? 3 : 2));
         }
     }
 
@@ -94,9 +97,21 @@ public:
     // Stop the HeadlessDriver so callers can own process_audio exclusively
     void stopHeadlessDriver();
 
+    // Render `n` audio blocks on the calling (test) thread via
+    // SupersonicEngine::pumpAudioBlock(). In manualAudioPump mode (no driver
+    // thread) the test thread is the sole audio-thread writer, so a bus snapshot
+    // taken between pumps can't race a real-time driver. waitForReply()/pollUntil()
+    // pump automatically in this mode, so most tests never call this directly.
+    void pumpBlock(uint32_t n = 1);
+
+    // True when constructed with cfg.manualAudioPump — the wait primitives drive
+    // the audio thread themselves (see pumpBlock).
+    bool manualPump() const { return mManualPump; }
+
 private:
     void init(const SupersonicEngine::Config& cfg);
     SupersonicEngine mEngine;
+    bool             mManualPump = false;  // cfg.manualAudioPump — wait prims pump
 
     mutable std::mutex       mReplyMutex;
     std::condition_variable  mReplyCv;

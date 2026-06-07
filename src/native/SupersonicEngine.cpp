@@ -1272,6 +1272,39 @@ void SupersonicEngine::sendOSC(const uint8_t* data, uint32_t size) {
     ingest(data, size, 0);
 }
 
+void SupersonicEngine::pumpAudioBlock() {
+    // Anchor the audio-thread clock on the first manual block (mirrors what
+    // HeadlessDriver::run does at thread start). Safe to call after stopping the
+    // HeadlessDriver — picks up rendering from a clean time base.
+    if (!mManualPumpStarted) {
+        mManualSamplePos = 0.0;
+        mSuperClock.resetAudioThreadTime(mManualSamplePos, mCurrentConfig.sampleRate);
+        mManualPumpStarted = true;
+    }
+
+    mSampleLoader.installPendingBuffers();
+
+    const double   ntp        = mSuperClock.updateAudioThreadNTP(
+                                    mManualSamplePos, mCurrentConfig.sampleRate);
+    const uint64_t hostMicros = static_cast<uint64_t>(
+                                    std::max<int64_t>(0, mSuperClock.linkClockMicros()));
+
+    // scsynth's actual block size is authoritative for bus striding; the config
+    // buffer size can differ from the render quantum.
+    const uint32_t blockSize = static_cast<uint32_t>(get_audio_buffer_samples());
+    const uint32_t nOut = mCurrentConfig.numOutputChannels > 0
+                              ? static_cast<uint32_t>(mCurrentConfig.numOutputChannels) : 2;
+    const uint32_t nIn  = mCurrentConfig.numInputChannels  > 0
+                              ? static_cast<uint32_t>(mCurrentConfig.numInputChannels)  : 0;
+
+    renderAudioBlock(mSuperClock, blockSize, nOut, nIn,
+                     static_cast<uint32_t>(mCurrentConfig.sampleRate), ntp, hostMicros);
+    mManualSamplePos += blockSize;
+
+    mAudioCallback.processCount.fetch_add(1, std::memory_order_release);
+    mAudioCallback.processCount.notify_all();
+}
+
 void SupersonicEngine::ingest(const uint8_t* data, uint32_t size, uint32_t originToken) {
     if (mMetrics) {
         mMetrics->osc_out_messages_sent.fetch_add(1, std::memory_order_relaxed);

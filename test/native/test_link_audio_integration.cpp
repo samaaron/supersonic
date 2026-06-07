@@ -420,7 +420,11 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
+    // Manual pump: this test reads the output bus, so the test thread must be the
+    // sole audio-thread writer (no real-time driver) or the read races the drain.
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    EngineFixture fx(cfg);
     fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
     fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
 
@@ -463,20 +467,20 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
     // fixed sleep to: (1) let the HeadlessDriver drain Link audio
     // into bus 64, (2) let scsynth run the synth at least once with
     // non-zero In.ar input, (3) settle into a steady stream.
+    // pollUntil() pumps a block on this thread before each check (manual mode),
+    // so the read below sees freshly-rendered output and can't race the drain.
     const auto* outBus = reinterpret_cast<const float*>(get_audio_output_bus());
     REQUIRE(outBus != nullptr);
     constexpr uint32_t kBlockSize = 128;
     float pL = 0.0f, pR = 0.0f, diff = 0.0f;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (std::chrono::steady_clock::now() < deadline) {
+    fx.pollUntil([&] {
         std::vector<float> outL(outBus,             outBus +     kBlockSize);
         std::vector<float> outR(outBus + kBlockSize, outBus + 2 * kBlockSize);
         pL   = peakAbs(outL);
         pR   = peakAbs(outR);
         diff = maxAbsDiff(outL, outR);
-        if (pL > 0.01f && pR > 0.01f && diff > 0.01f) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
+        return pL > 0.01f && pR > 0.01f && diff > 0.01f;
+    }, 5000);
     INFO("output peakL=" << pL << " peakR=" << pR
          << " maxAbsDiff=" << diff);
     CHECK(pL > 0.01f);    // L audio from the Link sub (sine440)
@@ -494,7 +498,10 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
+    // Manual pump: bus snapshots below must not race a real-time driver.
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    EngineFixture fx(cfg);
     fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
     fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
 
@@ -527,19 +534,14 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     constexpr uint32_t kBlockSize = 128;
     std::vector<float> bus64, bus66;
     float p64 = 0.0f, p66 = 0.0f, diff = 0.0f;
-    {
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (std::chrono::steady_clock::now() < deadline) {
-            REQUIRE(snapshotBus(64, kBlockSize, bus64));
-            REQUIRE(snapshotBus(66, kBlockSize, bus66));
-            p64  = peakAbs(bus64);
-            p66  = peakAbs(bus66);
-            diff = maxAbsDiff(bus64, bus66);
-            if (p64 > 0.1f && p66 > 0.3f && diff > 0.1f) break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
-    }
+    fx.pollUntil([&] {
+        REQUIRE(snapshotBus(64, kBlockSize, bus64));
+        REQUIRE(snapshotBus(66, kBlockSize, bus66));
+        p64  = peakAbs(bus64);
+        p66  = peakAbs(bus66);
+        diff = maxAbsDiff(bus64, bus66);
+        return p64 > 0.1f && p66 > 0.3f && diff > 0.1f;
+    }, 5000);
     INFO("peak64(sine)=" << p64 << " peak66(dc)=" << p66
          << " maxAbsDiff=" << diff);
     CHECK(p64 > 0.1f);              // sine present
@@ -558,7 +560,10 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
+    // Manual pump: reads the output bus below; test thread is the sole writer.
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    EngineFixture fx(cfg);
     fx.send(osc_test::message("/clock/visibility", int32_t{2}));  // NetworkWide
     // NB: no /clock/audio/publish/set — engine is receive-only.
 
@@ -598,16 +603,14 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
     REQUIRE(outBus != nullptr);
     constexpr uint32_t kBlockSize = 128;
     float pL = 0.0f, pR = 0.0f, diff = 0.0f;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (std::chrono::steady_clock::now() < deadline) {
+    fx.pollUntil([&] {
         std::vector<float> outL(outBus,             outBus +     kBlockSize);
         std::vector<float> outR(outBus + kBlockSize, outBus + 2 * kBlockSize);
         pL   = peakAbs(outL);
         pR   = peakAbs(outR);
         diff = maxAbsDiff(outL, outR);
-        if (pL > 0.01f && pR > 0.01f && diff > 0.01f) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
+        return pL > 0.01f && pR > 0.01f && diff > 0.01f;
+    }, 5000);
     INFO("receive-only output peakL=" << pL << " peakR=" << pR
          << " maxAbsDiff=" << diff);
     CHECK(pL > 0.01f);
@@ -626,7 +629,11 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
+    // Manual pump: this test snapshots bus 64 (before and after removal), so the
+    // test thread must own the audio thread — no real-time driver writing the bus.
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    EngineFixture fx(cfg);
     fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
     fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
 
@@ -646,22 +653,14 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
                               std::chrono::seconds(30)).state
             == kStateConnected);
 
-    // Confirm audio is on the bus before removal — poll rather than
-    // fixed sleep so slow CI runners have time for the drain to
-    // populate bus 64.
+    // Confirm audio is on the bus before removal — pollUntil() pumps a block on
+    // this thread before each check, so the snapshot can't race the drain.
     constexpr uint32_t kBlockSize = 128;
     std::vector<float> busL;
-    {
-        const auto deadline =
-            std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        bool sawAudio = false;
-        while (std::chrono::steady_clock::now() < deadline) {
-            REQUIRE(snapshotBus(64, kBlockSize, busL));
-            if (peakAbs(busL) > 0.01f) { sawAudio = true; break; }
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
-        REQUIRE(sawAudio);
-    }
+    REQUIRE(fx.pollUntil([&] {
+        REQUIRE(snapshotBus(64, kBlockSize, busL));
+        return peakAbs(busL) > 0.01f;
+    }, 5000));
 
     // Explicit remove.
     {
@@ -676,9 +675,13 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
     // no longer writes the pair — and nothing else is writing here,
     // so the bus settles. (May still contain the last sample frozen
     // in time on the private region; we verify it stops *changing*.)
+    // Pump the drain a few times with the sub now removed — it must not touch
+    // bus 64 — then confirm two snapshots are identical. All on this thread, so
+    // the comparison is exact and race-free.
     std::vector<float> snap1, snap2;
+    fx.pumpBlock(4);
     REQUIRE(snapshotBus(64, kBlockSize, snap1));
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    fx.pumpBlock(4);
     REQUIRE(snapshotBus(64, kBlockSize, snap2));
     INFO("post-remove drift=" << maxAbsDiff(snap1, snap2));
     CHECK(maxAbsDiff(snap1, snap2) < 1e-6f);

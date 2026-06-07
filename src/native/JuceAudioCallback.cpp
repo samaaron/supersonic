@@ -15,6 +15,44 @@
 // C linkage). Used to mirror Link clock + stream-health into the dashboard.
 extern "C" PerformanceMetrics* metrics;
 
+// Shared per-scsynth-block render (see JuceAudioCallback.h). One copy of the
+// drain → process_audio → publish sequence for both HeadlessDriver and the
+// engine's manual pump.
+void renderAudioBlock(SuperClock& clock,
+                      uint32_t blockSize,
+                      uint32_t numOutputChannels,
+                      uint32_t numInputChannels,
+                      uint32_t sampleRate,
+                      double   ntp,
+                      uint64_t hostMicros) {
+    // Drain Link Audio inputs into the private bus pool before process_audio so
+    // In.ar reads see them this block (no-op without an active subscription).
+    if (auto* busPool = reinterpret_cast<float*>(get_audio_bus_pool())) {
+        clock.drainLinkAudioInputsToBuses(
+            busPool, blockSize,
+            static_cast<uint32_t>(get_audio_bus_count()), sampleRate, hostMicros);
+    }
+
+    process_audio(ntp, numOutputChannels, numInputChannels);
+
+    // Publish the main sink (stereo when nOut >= 2, mono fallback for 1) plus any
+    // user aux sinks. No-op when Link Audio is off / no subscriber.
+    if (auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus())) {
+        if (numOutputChannels >= 2) {
+            clock.publishAudioBlock(outputBus, outputBus + blockSize,
+                                    static_cast<size_t>(blockSize), sampleRate, hostMicros);
+        } else if (numOutputChannels == 1) {
+            clock.publishAudioBlock(outputBus, nullptr,
+                                    static_cast<size_t>(blockSize), sampleRate, hostMicros);
+        }
+    }
+    if (auto* busPool = reinterpret_cast<float*>(get_audio_bus_pool())) {
+        clock.publishAuxSinks(
+            busPool, blockSize,
+            static_cast<uint32_t>(get_audio_bus_count()), sampleRate, hostMicros);
+    }
+}
+
 JuceAudioCallback::JuceAudioCallback() = default;
 
 void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,

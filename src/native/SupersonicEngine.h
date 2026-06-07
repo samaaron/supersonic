@@ -105,6 +105,15 @@ public:
 
     void sendOSC(const uint8_t* data, uint32_t size);
 
+    // Render exactly one audio block on the calling thread: the full per-block
+    // sequence (install loader buffers, derive NTP/host-time, drain Link inputs,
+    // process_audio, publish sinks, tick processCount) — the same body the
+    // HeadlessDriver runs, via the shared renderAudioBlock(). For manual-pump
+    // mode and tests that need to drive the engine deterministically (e.g. so a
+    // bus snapshot doesn't race a real-time audio thread). The first call anchors
+    // the audio-thread clock; safe to call after stopping the HeadlessDriver.
+    void pumpAudioBlock();
+
     // The OSC ingress: classify a raw packet and dispatch it to the registered
     // sink (audio -> IN ring, /supersonic/ + /clock/ -> handlers). Every transport
     // (UDP, NIF send_osc) funnels into this; the engine owns the routing, the
@@ -454,6 +463,12 @@ private:
     SuperClock        mSuperClock;
     SampleLoader      mSampleLoader;
     StateCache        mStateCache;
+
+    // Manual-pump state for pumpAudioBlock(): sample position advanced by the
+    // caller's thread, and a one-shot flag to anchor the audio-thread clock on
+    // the first pump.
+    double mManualSamplePos    = 0.0;
+    bool   mManualPumpStarted  = false;
 
     // Audio-plane ingress: the default OscIngress route writes the IN ring
     // directly. The ring pointers moved off the transport so it stays a dumb

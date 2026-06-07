@@ -42,6 +42,10 @@ EngineFixture::EngineFixture(const SupersonicEngine::Config& cfg) {
 }
 
 void EngineFixture::init(const SupersonicEngine::Config& cfg) {
+    // In manual-pump mode there is no audio-driver thread; the wait primitives
+    // drive process_audio on the test thread instead (see pollUntil/waitForReply).
+    mManualPump = cfg.manualAudioPump;
+
     // Wire reply/debug callbacks before initialising
     mEngine.onReply = [this](const uint8_t* data, uint32_t size) {
         OscReply r;
@@ -100,6 +104,31 @@ bool EngineFixture::waitForReply(const std::string& addr, OscReply& out,
                                   int timeoutMs) {
     auto deadline = std::chrono::steady_clock::now()
                   + std::chrono::milliseconds(timeoutMs);
+
+    auto take = [&]() -> bool {
+        std::lock_guard<std::mutex> lk(mReplyMutex);
+        for (auto it = mReplies.begin(); it != mReplies.end(); ++it) {
+            if (it->address == addr) {
+                out = *it;
+                mReplies.erase(it);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // Manual-pump mode: the NRT gateway only delivers replies after the audio
+    // thread ticks, and nothing ticks unless we pump here on the test thread.
+    if (mManualPump) {
+        while (true) {
+            pumpBlock();
+            if (take()) return true;
+            if (std::chrono::steady_clock::now() >= deadline) return false;
+            // Let the gateway thread (woken by the pump's processCount tick)
+            // deliver before the next scan.
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
+        }
+    }
 
     std::unique_lock<std::mutex> lk(mReplyMutex);
     while (true) {
@@ -164,6 +193,11 @@ void EngineFixture::stopHeadlessDriver() {
     mEngine.mHeadlessDriver.signalThreadShouldExit();
     mEngine.mHeadlessDriver.stopThread(2000);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
+}
+
+void EngineFixture::pumpBlock(uint32_t n) {
+    for (uint32_t i = 0; i < n; ++i)
+        mEngine.pumpAudioBlock();
 }
 
 // ── Synthdef helpers ─────────────────────────────────────────────────────────
