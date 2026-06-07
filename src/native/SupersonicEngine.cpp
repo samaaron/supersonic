@@ -1186,14 +1186,23 @@ void SupersonicEngine::shutdown() {
     mSuperClock.setNumPeersChangedCallback({});
     mSuperClock.setStartStopChangedCallback({});
 
-    // Join the device-orchestration workers before tearing down the device
-    // manager + egress they call into.
+    // Stop the NRT gateway first. It runs EngineControl, whose
+    // scheduleDeviceSwitch assigns mDebounceSwitchThread — joining that thread
+    // below while the gateway could still spawn it is a data race, so drain the
+    // gateway to a stop before touching the device-orchestration workers. It
+    // waits on processCount; bump it so the run loop wakes and sees the exit flag.
+    mNrtGateway.signalThreadShouldExit();
+    mAudioCallback.processCount.fetch_add(1, std::memory_order_release);
+    mAudioCallback.processCount.notify_all();
+    mNrtGateway.stopThread(2000);
+
+    // No control command can run now — join the device-orchestration workers
+    // before tearing down the device manager + egress they call into.
     mDebounceSwitchStop.store(true);
     if (mDebounceSwitchThread.joinable()) mDebounceSwitchThread.join();
     if (mReopenThread.joinable()) mReopenThread.join();
 
     mHeadlessDriver.signalThreadShouldExit();
-    mNrtGateway.signalThreadShouldExit();
     mSampleLoader.signalThreadShouldExit();
 
     // Wake the readers so they can exit. Both wait on processCount; bump it so
@@ -1229,7 +1238,6 @@ void SupersonicEngine::shutdown() {
 
     mHeadlessDriver.stopThread(2000);
     mSampleLoader.stopThread(2000);
-    mNrtGateway.stopThread(2000);
 
     // Unpublish from /superclock_get only if we're the current
     // publisher — never stomp another engine's pointer.
