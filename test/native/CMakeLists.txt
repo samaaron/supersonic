@@ -61,6 +61,7 @@ add_executable(SuperSonicNativeTests
     test_heap_growth.cpp
     test_priority_queue.cpp
     test_ring_buffer_write.cpp
+    test_ring_reader.cpp
     test_benchmark.cpp
     test_bundle_sequential.cpp
     test_input_fallback.cpp

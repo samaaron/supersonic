@@ -217,6 +217,10 @@ jobs:
 
     runs-on: ubuntu-latest
     name: sanitize-${{ matrix.name }}
+    # A sanitizer deadlock would otherwise sit on GitHub's 6-hour default.
+    # The full TSan suite runs in well under this even on a slow shared runner;
+    # if it ever exceeds it, fail fast rather than burn a 6-hour runner.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout

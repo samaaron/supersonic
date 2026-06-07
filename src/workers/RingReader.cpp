@@ -10,7 +10,17 @@ RingReader::RingReader(const char* threadName) : juce::Thread(threadName) {
 
 RingReader::~RingReader() {
     signalThreadShouldExit();
-    if (mWake) mWake->notify_all();  // break the wait so the thread can exit
+    // A bare notify_all() cannot break std::atomic::wait(old): the wait only
+    // returns when the value DIFFERS from old, so the value must change first.
+    // Bump-then-notify (signal already set above) guarantees the run loop wakes,
+    // sees threadShouldExit(), and exits, with no dependence on an external
+    // processCount tick (the headless driver may already have stopped ticking).
+    // Without this, stopThread(2000) times out and JUCE resorts to killThread()
+    // / pthread_cancel(), which can deadlock under ThreadSanitizer.
+    if (mWake) {
+        mWake->fetch_add(1, std::memory_order_release);
+        mWake->notify_all();
+    }
     stopThread(2000);
 }
 
