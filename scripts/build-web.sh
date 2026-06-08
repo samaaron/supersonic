@@ -93,6 +93,7 @@ SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" ! -name "
 # Memory can grow on demand from INITIAL_MEMORY up to MAXIMUM_MEMORY (for buffer pool expansion)
 emcc "$SRC_DIR/audio_processor.cpp" \
     "$SRC_DIR/scheduler/EventScheduler.cpp" \
+    "$SRC_DIR/scheduler/MidiClockOut.cpp" \
     "$SRC_DIR/buffer_commands.cpp" \
     "$SRC_DIR/node_tree.cpp" \
     "$SRC_DIR/SuperClock.cpp" \

@@ -4,8 +4,8 @@
 #include "MidiClockOut.h"
 
 #include "EventScheduler.h"
-#include "src/SuperClock.h"
-#include "src/shared_memory.h"
+#include "SuperClock.h"
+#include "shared_memory.h"
 #include "osc/OscOutboundPacketStream.h"
 
 #include <utility>
