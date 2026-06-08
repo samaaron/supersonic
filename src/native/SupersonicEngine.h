@@ -26,7 +26,9 @@
 #include "RingBufferWriter.h"
 #include "src/OscIngress.h"
 #include "EngineControl.h"
+#ifdef SUPERSONIC_MIDI
 #include "MidiControl.h"
+#endif
 #include "src/scheduler/EventScheduler.h"
 #include "JuceAudioCallback.h"
 #include "SampleLoader.h"
@@ -467,7 +469,9 @@ private:
     OscEgress         mEgress;
     OscIngress        mIngress;
     EngineControl     mEngineControl;
+#ifdef SUPERSONIC_MIDI
     MidiControl       mMidiControl;
+#endif
     SuperClock        mSuperClock;
     SampleLoader      mSampleLoader;
     StateCache        mStateCache;
@@ -510,10 +514,12 @@ private:
 
     RingReader                mNrtGateway{"SuperSonic-NrtGateway"};
 
+#ifdef SUPERSONIC_MIDI
     // Drains the deferred-event scheduler's OUT ring (events due this block) and
     // dispatches each to its destination (MIDI → MidiControl). Woken per audio
     // block via processCount, like mNrtGateway.
     RingReader                mMidiDispatch{"SuperSonic-MidiDispatch"};
+#endif
 
 
     // Debounced device switch — rapid clicks settle into one final switch.

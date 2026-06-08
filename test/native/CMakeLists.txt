@@ -68,7 +68,6 @@ add_executable(SuperSonicNativeTests
     test_headless_fallback.cpp
     test_rt_alloc.cpp
     test_superclock.cpp
-    test_midi.cpp
     test_event_scheduler.cpp
     test_midi_clock_gen.cpp
     test_midi_clock_out.cpp
@@ -78,6 +77,12 @@ add_executable(SuperSonicNativeTests
     test_link_audio_integration.cpp
     test_link_ugen.cpp
 )
+
+# test_midi exercises the gated midir backend (MidiControl/ss_midi); the other MIDI
+# tests cover the always-compiled core (EventScheduler/MidiClockOut/MidiClockGen).
+if(SUPERSONIC_ENABLE_MIDI)
+    target_sources(SuperSonicNativeTests PRIVATE test_midi.cpp)
+endif()
 
 target_link_libraries(SuperSonicNativeTests PRIVATE
     supersonic_engine

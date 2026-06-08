@@ -3911,7 +3911,9 @@ void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
     // only broadcasts /midi/ports when the MIDI list actually changed). Runs
     // after the debounce + swap guards so a device-swap notification storm
     // doesn't re-enumerate midir on every event.
+#ifdef SUPERSONIC_MIDI
     mMidiControl.refreshDevices();
+#endif
 
     // Collected hot-plug work to schedule after the mutex is released.
     std::string pendingSwitchOutput;
