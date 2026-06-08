@@ -509,7 +509,9 @@ if(SUPERSONIC_ENABLE_MIDI)
         set(SS_MIDI_PROFILE release)
         set(SS_MIDI_CARGO_FLAGS --release)
     endif()
-    set(SS_MIDI_LIB ${SS_MIDI_DIR}/target/${SS_MIDI_PROFILE}/libsupersonic_midi.a)
+    # Rust staticlib name is platform-dependent: libsupersonic_midi.a on
+    # Unix/GNU, supersonic_midi.lib on Windows/MSVC. Use CMake's prefix/suffix.
+    set(SS_MIDI_LIB ${SS_MIDI_DIR}/target/${SS_MIDI_PROFILE}/${CMAKE_STATIC_LIBRARY_PREFIX}supersonic_midi${CMAKE_STATIC_LIBRARY_SUFFIX})
 
     # cargo tracks incremental freshness itself, so run it every build.
     add_custom_target(supersonic_midi_rust ALL
@@ -530,6 +532,11 @@ if(SUPERSONIC_ENABLE_MIDI)
     # already linked above.
     if(APPLE)
         target_link_libraries(supersonic_engine PUBLIC "-framework CoreMIDI")
+    elseif(WIN32)
+        # Rust std (windows-msvc) pulls in these system libs. ws2_32 is already
+        # linked above; kernel32/msvcrt are MSVC defaults. Authoritative list
+        # from `rustc --print native-static-libs`.
+        target_link_libraries(supersonic_engine PUBLIC ntdll userenv dbghelp)
     elseif(UNIX)
         target_link_libraries(supersonic_engine PUBLIC asound)
     endif()
