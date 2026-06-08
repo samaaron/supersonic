@@ -348,6 +348,38 @@ mod tests {
     }
 
     #[test]
+    fn kind_and_data_args_agree_with_encoded_osc() {
+        // The structured web seam (MidiMessage::kind / data_args) must produce
+        // exactly the address suffix + integer args that encode_in emits, so the
+        // OSC and structured paths can never diverge.
+        let cases = [
+            MidiMessage::NoteOn { channel: 2, note: 64, velocity: 99 },
+            MidiMessage::NoteOff { channel: 1, note: 60, velocity: 0 },
+            MidiMessage::ControlChange { channel: 10, controller: 74, value: 64 },
+            MidiMessage::ProgramChange { channel: 8, program: 40 },
+            MidiMessage::ChannelPressure { channel: 2, pressure: 99 },
+            MidiMessage::PolyPressure { channel: 3, note: 50, pressure: 7 },
+            MidiMessage::PitchBend { channel: 1, value: 8192 },
+            MidiMessage::SongPosition(12345),
+            MidiMessage::SongSelect(7),
+            MidiMessage::Start,
+            MidiMessage::Stop,
+        ];
+        for m in cases {
+            let bytes = encode_in("kbd", &m).unwrap();
+            let decoded = osc::decode(&bytes).unwrap();
+            assert_eq!(decoded.addr, format!("/midi/in/{}", m.kind()), "addr for {m:?}");
+            assert_eq!(decoded.args[0], OscArg::Str("kbd".into()), "port for {m:?}");
+            // Int args after the port must match data_args, in order.
+            let osc_ints: Vec<i32> =
+                decoded.args[1..].iter().filter_map(|a| a.as_i32()).collect();
+            let mut buf = [0i32; 3];
+            let n = m.data_args(&mut buf);
+            assert_eq!(osc_ints, buf[..n].to_vec(), "data_args for {m:?}");
+        }
+    }
+
+    #[test]
     fn ports_reply_roundtrips() {
         let bytes = encode_ports_reply(
             &[("a".into(), true), ("b".into(), false)],

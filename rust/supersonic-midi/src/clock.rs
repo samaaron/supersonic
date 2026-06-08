@@ -9,6 +9,11 @@ use std::collections::VecDeque;
 /// Standard MIDI clock resolution: 24 pulses per quarter-note (beat).
 pub const PPQN: u32 = 24;
 
+/// Upper bound on the median window, so [`ClockEstimator::median`] can use a
+/// fixed stack buffer instead of a per-pulse heap allocation. Far above any
+/// sensible window (default 7); larger requests are clamped at construction.
+const MAX_MEDIAN: usize = 64;
+
 /// Tuning for [`ClockEstimator`].
 #[derive(Clone, Copy, Debug)]
 pub struct EstimatorParams {
@@ -69,7 +74,9 @@ impl ClockEstimator {
         Self::default()
     }
 
-    pub fn with_params(params: EstimatorParams) -> Self {
+    pub fn with_params(mut params: EstimatorParams) -> Self {
+        // Keep the window within the fixed median buffer (and ≥1).
+        params.window = params.window.clamp(1, MAX_MEDIAN);
         Self {
             params,
             last_us: None,
@@ -101,9 +108,17 @@ impl ClockEstimator {
     }
 
     fn median(&self) -> f64 {
-        let mut v: Vec<f64> = self.intervals.iter().copied().collect();
-        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        v[v.len() / 2]
+        // Copy into a stack buffer instead of allocating a Vec on every pulse —
+        // this runs 24×/beat per clocked device, so the per-pulse heap alloc was
+        // pure waste. The window is tiny (default 7); MAX_MEDIAN caps it safely.
+        let n = self.intervals.len().min(MAX_MEDIAN);
+        let mut buf = [0.0f64; MAX_MEDIAN];
+        for (slot, v) in buf[..n].iter_mut().zip(self.intervals.iter()) {
+            *slot = *v;
+        }
+        let s = &mut buf[..n];
+        s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        s[n / 2]
     }
 
     /// Feed one clock pulse arrival timestamp (µs). Returns the updated BPM
@@ -178,6 +193,17 @@ mod tests {
             *t += dt;
         }
         last
+    }
+
+    #[test]
+    fn median_picks_middle_value() {
+        // Guards the stack-buffer median refactor: behaviour must match a
+        // plain sort-and-take-middle, regardless of insertion order.
+        let mut e = ClockEstimator::new();
+        for v in [30.0, 10.0, 20.0, 50.0, 40.0] {
+            e.intervals.push_back(v);
+        }
+        assert_eq!(e.median(), 30.0);
     }
 
     #[test]

@@ -10,6 +10,7 @@
 
 import init, {
   midi_in_osc,
+  midi_in_fields,
   midi_out_decode,
   normalize_name,
   WasmClockEstimator,
@@ -21,7 +22,8 @@ export class MidiManager {
     this._inputs = new Map(); // normalized name -> MIDIInput
     this._outputs = new Map(); // normalized name -> MIDIOutput
     this._estimators = new Map(); // normalized name -> WasmClockEstimator
-    this._onEvent = null; // (Uint8Array osc) => void  — /midi/in/* events
+    this._onEvent = null; // (Uint8Array osc) => void  — /midi/in/* OSC packet
+    this._onMessage = null; // (Array [kind, port, ...ints]) => void  — structured
     this._onPorts = null; // ({ins, outs}) => void
     this._onTempo = null; // (port, bpm) => void  — clock-in
     this._lastPortsKey = null; // last emitted port list, to suppress no-op pushes
@@ -38,6 +40,10 @@ export class MidiManager {
   }
 
   onEvent(cb) { this._onEvent = cb; }
+  // Structured inbound events: cb receives a flat [kind, port, ...ints] array
+  // (e.g. ["note_on", "kbd", 1, 60, 100]) with no OSC encode/decode round-trip.
+  // Takes precedence over onEvent when both are set.
+  onMessage(cb) { this._onMessage = cb; }
   onPorts(cb) { this._onPorts = cb; }
   onTempo(cb) { this._onTempo = cb; }
 
@@ -77,6 +83,13 @@ export class MidiManager {
       }
       const bpm = est.update(event.timeStamp * 1000.0); // ms → µs
       if (bpm != null && this._onTempo) this._onTempo(port, bpm);
+      return;
+    }
+    // Prefer the structured fast path; fall back to OSC bytes for consumers
+    // (e.g. the native-shaped engine ingress) that want the wire form.
+    if (this._onMessage) {
+      const fields = midi_in_fields(port, bytes);
+      if (fields) this._onMessage(fields);
       return;
     }
     const osc = midi_in_osc(port, bytes);
