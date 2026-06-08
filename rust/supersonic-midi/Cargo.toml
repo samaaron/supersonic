@@ -17,13 +17,35 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 default = []
+# Windows: use midir's WinRT (Windows.Devices.Midi) backend instead of WinMM.
+# Gives full-length device names (no WinMM 31-char truncation) and pairs with the
+# WinRT DeviceWatcher used for hot-swap (see src/watcher.rs). Enabled for Windows
+# builds by CMake (--features winrt).
+winrt = ["midir/winrt"]
 
-# midir provides the actual device IO on both targets (CoreMIDI/ALSA/WinMM
+# midir provides the actual device IO on both targets (CoreMIDI/ALSA/WinMM/WinRT
 # natively, Web MIDI on wasm). Vendored from a patched fork (adds webmidi
 # `send_at`); the path is finalised to a submodule/vendor dir in the build-wiring
 # step. Native target only for now; the wasm target is added with the web seam.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 midir = { path = "../../external/midir" }
+
+# Hot-swap watcher (src/watcher.rs) device-change sources, per OS. These reuse
+# the same crates midir already depends on, so they add no new transitive trees.
+[target.'cfg(windows)'.dependencies]
+windows = { version = ">=0.59.0,<=0.62", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Devices_Midi",
+    "Devices_Enumeration",
+    "Win32_System_Com",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+coremidi = "0.9.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = ">=0.9.0, <0.12"
 
 # Integration tests reach midir directly to create virtual loopback ports.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

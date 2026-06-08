@@ -509,6 +509,13 @@ if(SUPERSONIC_ENABLE_MIDI)
         set(SS_MIDI_PROFILE release)
         set(SS_MIDI_CARGO_FLAGS --release)
     endif()
+
+    # Windows uses midir's WinRT backend (full-length device names) plus the
+    # WinRT DeviceWatcher for hot-swap; both live behind the crate's `winrt`
+    # feature. Other platforms get native hot-swap (CoreMIDI/ALSA) with no flag.
+    if(WIN32)
+        list(APPEND SS_MIDI_CARGO_FLAGS --features winrt)
+    endif()
     # Rust staticlib name is platform-dependent: libsupersonic_midi.a on
     # Unix/GNU, supersonic_midi.lib on Windows/MSVC. Use CMake's prefix/suffix.
     set(SS_MIDI_LIB ${SS_MIDI_DIR}/target/${SS_MIDI_PROFILE}/${CMAKE_STATIC_LIBRARY_PREFIX}supersonic_midi${CMAKE_STATIC_LIBRARY_SUFFIX})
@@ -537,6 +544,9 @@ if(SUPERSONIC_ENABLE_MIDI)
         # linked above; kernel32/msvcrt are MSVC defaults. Authoritative list
         # from `rustc --print native-static-libs`.
         target_link_libraries(supersonic_engine PUBLIC ntdll userenv dbghelp)
+        # WinRT MIDI + DeviceWatcher (windows crate / midir winrt feature):
+        # combase (CoIncrementMTAUsage) and the WinRT runtime activation libs.
+        target_link_libraries(supersonic_engine PUBLIC ole32 oleaut32 runtimeobject)
     elseif(UNIX)
         target_link_libraries(supersonic_engine PUBLIC asound)
     endif()

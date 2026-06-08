@@ -78,6 +78,9 @@ struct InputState {
 
 /// The opaque handle the C++ side owns.
 pub struct SsMidi {
+    // Declared first so it drops first: stopping the watcher's thread before the
+    // rest tears down guarantees no refresh runs against half-dropped state.
+    _watcher: crate::watcher::Watcher,
     host: Host,
     io: Arc<Mutex<MidiIo>>,
     input: Arc<Mutex<InputState>>,
@@ -219,7 +222,21 @@ pub extern "C" fn ss_midi_create(
     });
     let io = Arc::new(Mutex::new(MidiIo::new("SuperSonic", on_input)));
 
-    Box::into_raw(Box::new(SsMidi { host, io, input }))
+    // Native hot-swap: the OS device-change notification (WinRT DeviceWatcher /
+    // CoreMIDI notify / ALSA announce) re-enumerates and diff-broadcasts
+    // `/midi/ports` directly — no JUCE, no audio-thread, no polling.
+    let watch_host = host;
+    let watch_io = io.clone();
+    let on_change: crate::watcher::OnChange =
+        Arc::new(move || refresh_and_broadcast(&watch_host, &watch_io));
+    let watcher = crate::watcher::Watcher::new(on_change);
+
+    Box::into_raw(Box::new(SsMidi {
+        _watcher: watcher,
+        host,
+        io,
+        input,
+    }))
 }
 
 /// Destroy the subsystem: closes all ports.
@@ -257,23 +274,31 @@ pub unsafe extern "C" fn ss_midi_emit_ports(handle: *mut SsMidi) {
 }
 
 /// Re-enumerate devices and, only if the port list actually changed, broadcast
-/// the updated `/midi/ports` to subscribers. The C++ seam calls this from the
-/// engine's hotplug listener (which also fires for audio-only changes), so the
-/// change check keeps an audio hotplug from spamming `/midi/ports`.
-#[no_mangle]
-pub unsafe extern "C" fn ss_midi_refresh(handle: *mut SsMidi) {
-    if handle.is_null() {
-        return;
-    }
-    let me = &*handle;
+/// the updated `/midi/ports` to subscribers. Shared by the C ABI [`ss_midi_refresh`]
+/// and the native hot-swap [`crate::watcher::Watcher`]; the change check keeps a
+/// device-event storm from spamming `/midi/ports`.
+fn refresh_and_broadcast(host: &Host, io: &Mutex<MidiIo>) {
     let updated = {
-        let mut io = me.io.lock().unwrap();
+        let mut io = io.lock().unwrap();
         let before = io.port_lists();
         io.refresh();
         let after = io.port_lists();
         if after != before { Some(after) } else { None }
     };
     if let Some((ins, outs)) = updated {
-        me.host.emit(EMIT_BROADCAST, &encode_ports(&ins, &outs));
+        host.emit(EMIT_BROADCAST, &encode_ports(&ins, &outs));
     }
+}
+
+/// Re-enumerate devices and, only if the port list actually changed, broadcast
+/// the updated `/midi/ports` to subscribers. Retained for the manual
+/// `/midi/refresh` seam; native hot-swap is driven by the watcher (see
+/// [`crate::watcher`]).
+#[no_mangle]
+pub unsafe extern "C" fn ss_midi_refresh(handle: *mut SsMidi) {
+    if handle.is_null() {
+        return;
+    }
+    let me = &*handle;
+    refresh_and_broadcast(&me.host, &me.io);
 }

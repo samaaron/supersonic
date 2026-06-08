@@ -3906,14 +3906,12 @@ void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
 
     mLastSelfTriggeredChange = std::chrono::steady_clock::now();
 
-    // JUCE's AudioDeviceManager fires this for MIDI device-list changes as well
-    // as audio ones, so refresh the MIDI subsystem here (it diffs internally and
-    // only broadcasts /midi/ports when the MIDI list actually changed). Runs
-    // after the debounce + swap guards so a device-swap notification storm
-    // doesn't re-enumerate midir on every event.
-#ifdef SUPERSONIC_MIDI
-    mMidiControl.refreshDevices();
-#endif
+    // MIDI hot-swap is owned by the MIDI subsystem's own native device-change
+    // watcher (WinRT DeviceWatcher / CoreMIDI notify / ALSA announce — see
+    // rust/supersonic-midi/src/watcher.rs), not JUCE. This audio callback no
+    // longer pokes MIDI: a pure-MIDI hot-plug never reached here reliably (it
+    // doesn't change the audio device list, and the audio debounce below could
+    // swallow it), which is exactly what the dedicated watcher fixes.
 
     // Collected hot-plug work to schedule after the mutex is released.
     std::string pendingSwitchOutput;
