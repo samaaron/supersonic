@@ -32,6 +32,16 @@ jobs:
           version: '4.0.21'
           actions-cache-folder: 'emsdk-cache'
 
+      - name: Setup Rust (wasm32 target for the MIDI module)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.122
+
       - name: Build (release mode)
         run: ./scripts/build-web.sh --release
 
