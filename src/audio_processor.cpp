@@ -61,6 +61,8 @@ static SuperClock& superClock() {
 
 // Scheduler includes
 #include "scheduler/BundleScheduler.h"
+#include "scheduler/EventScheduler.h"   // deferred-event scheduler (MIDI, …)
+#include "scheduler/MidiClockOut.h"     // MIDI clock-OUT generation (SuperClock-timed)
 
 // Node tree for SharedArrayBuffer polling
 #include "node_tree.h"
@@ -192,6 +194,10 @@ extern "C" {
     // OSC Bundle Scheduler - Index-based pool for RT-safety
     // Events stored in pool (never copied), queue only stores small indices
     BundleScheduler g_scheduler;
+
+    // Deferred-event scheduler: "events in → stored → events out on time" for
+    // non-scsynth destinations (MIDI today). Ticked beside g_scheduler below.
+    EventScheduler g_event_scheduler;
 
     // File-scope state shared across threads: written by clear_scheduler()
     // on the control thread, read/updated by process_audio() on the audio
@@ -909,6 +915,16 @@ extern "C" {
             int64_t currentOscTime = ntp_to_osc_timetag(current_ntp);
             int64_t nextOscTime = currentOscTime + g_osc_increment;
 
+            // Generate the MIDI clock pulses due in the look-ahead window and
+            // schedule them (SuperClock-timed) into the same scheduler, so the
+            // generated clock is sample-locked to audio.
+            if (SuperClock* clk = g_active_superclock.load(std::memory_order_acquire))
+                get_midi_clock_out().generate(*clk, current_ntp);
+
+            // Emit any deferred events (MIDI, …) due this block to their OUT ring,
+            // on the same clock as scsynth bundles so they stay in sync.
+            g_event_scheduler.tick(nextOscTime);
+
             // Execute all bundles that are due within this buffer
             int64_t schedTime;
             while ((schedTime = g_scheduler.NextTime()) <= nextOscTime) {
@@ -1385,4 +1401,23 @@ void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
         &control->status_flags,            // status_flags
         metrics                            // metrics
     );
+}
+
+// ── Deferred-event scheduler bridge (global linkage; see EventScheduler.h) ────
+
+EventScheduler& get_event_scheduler() {
+    using namespace scsynth;
+    return g_event_scheduler;
+}
+
+extern "C" void ss_defer_schedule(double ntp_seconds, uint32_t dest,
+                                  const uint8_t* osc, uint32_t len) {
+    using namespace scsynth;
+    g_event_scheduler.enqueue(ntp_to_osc_timetag(ntp_seconds), dest, osc, len);
+}
+
+extern "C" void ss_defer_schedule_raw(int64_t osc_timetag, uint32_t dest,
+                                      const uint8_t* osc, uint32_t len) {
+    using namespace scsynth;
+    g_event_scheduler.enqueue(osc_timetag, dest, osc, len);
 }

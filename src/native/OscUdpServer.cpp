@@ -97,6 +97,27 @@ void OscUdpServer::unsubscribeLink(uint32_t token) {
     removeTarget(mLinkNotifyTargets, ip, port);
 }
 
+void OscUdpServer::broadcastMidi(const uint8_t* data, uint32_t size) {
+    broadcast(mMidiNotifyTargets, data, size);
+}
+
+bool OscUdpServer::subscribeMidi(uint32_t token) {
+    juce::String ip;
+    int port = 0;
+    resolveOrigin(token, ip, port);
+    if (port <= 0) return false;       // an unaddressable caller can't be a MIDI target
+    addTarget(mMidiNotifyTargets, ip, port);
+    return true;
+}
+
+void OscUdpServer::unsubscribeMidi(uint32_t token) {
+    juce::String ip;
+    int port = 0;
+    resolveOrigin(token, ip, port);
+    if (port <= 0) return;
+    removeTarget(mMidiNotifyTargets, ip, port);
+}
+
 // Cap subscriber lists so clients that reconnect on fresh ephemeral ports
 // (restart loops) can't grow them unbounded; evict oldest first.
 bool OscUdpServer::addTarget(std::vector<Target>& list, const juce::String& ip, int port) {

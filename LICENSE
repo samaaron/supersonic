@@ -22,6 +22,14 @@ Open Sound Control (OSC) messages and contain no GPL-derived code.
   Erlang/BEAM client:
     src/nif/supersonic.erl
 
+  Rust client / subsystem:
+    rust/supersonic-midi/         (MIDI subsystem; midir-based, no GPL-derived
+                                   code; exchanges /midi/* OSC with the engine.
+                                   When statically linked into the GPL native
+                                   engine the combined binary is GPL, but this
+                                   crate itself is available under MIT OR
+                                   GPL-3.0-or-later — e.g. for the web build.)
+
 ================================================================================
 Audio Engine (GPL-3.0-or-later)
 ================================================================================

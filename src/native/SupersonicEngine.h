@@ -26,6 +26,8 @@
 #include "RingBufferWriter.h"
 #include "src/OscIngress.h"
 #include "EngineControl.h"
+#include "MidiControl.h"
+#include "src/scheduler/EventScheduler.h"
 #include "JuceAudioCallback.h"
 #include "SampleLoader.h"
 #include "SuperClock.h"
@@ -129,6 +131,11 @@ public:
     // forwards the message to the NRT command ring with its origin token. Runs on
     // the audio thread; the NrtCommandReader drains + runs EngineControl.
     static bool nrtForwardSink(void* ctx, void* callCtx, const uint8_t* data, std::size_t len);
+
+    // Audio-thread route for "/midi/at" (scheduled MIDI): parses [timetag, blob]
+    // and enqueues the inner event into the deferred-event scheduler — all on the
+    // RT thread, so no lock is needed.
+    static bool midiAtSink(void* ctx, void* callCtx, const uint8_t* data, std::size_t len);
 
     // Device control surface (called by EngineControl + engine lifecycle).
     // Builds the device/input/info report and pushes it to notify subscribers.
@@ -460,6 +467,7 @@ private:
     OscEgress         mEgress;
     OscIngress        mIngress;
     EngineControl     mEngineControl;
+    MidiControl       mMidiControl;
     SuperClock        mSuperClock;
     SampleLoader      mSampleLoader;
     StateCache        mStateCache;
@@ -501,6 +509,11 @@ private:
     std::atomic<int32_t>      mEgressLock{0};
 
     RingReader                mNrtGateway{"SuperSonic-NrtGateway"};
+
+    // Drains the deferred-event scheduler's OUT ring (events due this block) and
+    // dispatches each to its destination (MIDI → MidiControl). Woken per audio
+    // block via processCount, like mNrtGateway.
+    RingReader                mMidiDispatch{"SuperSonic-MidiDispatch"};
 
 
     // Debounced device switch — rapid clicks settle into one final switch.
@@ -582,6 +595,10 @@ private:
     mutable std::mutex                           mListDevicesMutex;
     mutable std::vector<DeviceInfo>              mCachedDevices;
     mutable std::chrono::steady_clock::time_point mCachedDevicesAt{};
+    // Audio device-list fingerprint from the last changeListenerCallback. JUCE
+    // fires that callback for MIDI device changes too, so it's used to skip the
+    // audio re-report when only MIDI changed (no needless audio-list churn).
+    std::string                                  mLastAudioDeviceFingerprint;
     // Pause CFRunLoop pumping in Main.cpp during aggregate destroy/create
     // — queued audioDeviceListChanged messages would trigger a second
     // cold swap and crash ScopeOut2 during the rebuild. Accessed from

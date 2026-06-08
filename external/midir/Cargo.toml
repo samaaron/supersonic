@@ -1,0 +1,89 @@
+[workspace]
+members = [".", "examples/browser"]
+
+[package]
+name = "midir"
+version = "0.11.0"
+authors = ["Patrick Reisert"]
+description = "A cross-platform, realtime MIDI processing library, inspired by RtMidi."
+repository = "https://github.com/Boddlnagg/midir"
+documentation = "https://docs.rs/midir"
+readme = "README.md"
+keywords = ["midi", "audio", "music", "sound"]
+categories = ["multimedia::audio", "api-bindings"]
+license = "MIT"
+edition = "2021"
+
+[features]
+default = []
+avoid_timestamping = []
+coremidi_send_timestamped = []
+jack = ["jack-sys", "libc", "bitflags"]
+winrt = [
+    "windows/Foundation",
+    "windows/Foundation_Collections",
+    "windows/Devices_Midi",
+    "windows/Devices_Enumeration",
+    "windows/Storage_Streams",
+    "windows/Win32_System_WinRT",
+]
+
+[dependencies]
+log = "0.4"
+bitflags = { version = "2", optional = true }
+jack-sys = { version = "0.5", optional = true }
+libc = { version = "0.2.21", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Try to be compatible with a wide range of alsa versions
+alsa = ">=0.9.0, <0.12"
+libc = "0.2.21"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+coremidi = "0.9.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+coremidi = "0.9.0"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = ">=0.59.0,<=0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media",
+    "Win32_Media_Multimedia",
+    "Win32_Media_Audio",
+] }
+parking_lot = { version = "0.12.1" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Event",
+    "Navigator",
+    "Window",
+    "MidiAccess",
+    "MidiInput",
+    "MidiInputMap",
+    "MidiMessageEvent",
+    "MidiOptions",
+    "MidiOutput",
+    "MidiOutputMap",
+    "MidiPort",
+    "MidiPortType",
+] }
+
+[dev-dependencies]
+env_logger = "0.11" # only for examples
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.2"
+
+# Android parts.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21", default-features = false }
+ndk-context = "0.1"
+jni-min-helper = "0.3"
+
+# is already provided by the NDK. (will show a link error below API 29)
+[target.'cfg(target_os = "android")'.build-dependencies]
+cc = "1.0"

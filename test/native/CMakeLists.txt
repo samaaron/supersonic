@@ -68,6 +68,10 @@ add_executable(SuperSonicNativeTests
     test_headless_fallback.cpp
     test_rt_alloc.cpp
     test_superclock.cpp
+    test_midi.cpp
+    test_event_scheduler.cpp
+    test_midi_clock_gen.cpp
+    test_midi_clock_out.cpp
     OscTestUtils.cpp
     EngineFixture.cpp
     FakeLinkPeerProcess.cpp

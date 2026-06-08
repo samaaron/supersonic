@@ -55,6 +55,7 @@ struct Subscribers {
     std::set<uint32_t>   notifyTokens;   // gates hasNotifySubscribers()
     std::set<int>        notifyPorts;
     bool                 linkSubscribed = false;
+    bool                 midiSubscribed = false;
 
     void addPid(const ErlNifPid& p) {
         std::lock_guard<std::mutex> lk(mutex);
@@ -72,6 +73,7 @@ struct Subscribers {
         notifyTokens.clear();
         notifyPorts.clear();
         linkSubscribed = false;
+        midiSubscribed = false;
     }
 
     // Frame {osc_reply, <<bytes>>} and fan out to every registered pid.
@@ -178,6 +180,23 @@ public:
     void unsubscribeLink(uint32_t) override {
         std::lock_guard<std::mutex> lk(mSubs->mutex);
         mSubs->linkSubscribed = false;
+    }
+
+    // MIDI notify: a BEAM caller is addressable; delivery is gated
+    // on midiSubscribed.
+    void broadcastMidi(const uint8_t* data, uint32_t size) override {
+        bool wanted;
+        { std::lock_guard<std::mutex> lk(mSubs->mutex); wanted = mSubs->midiSubscribed; }
+        if (wanted) mSubs->deliverOscReply(data, size);
+    }
+    bool subscribeMidi(uint32_t) override {
+        std::lock_guard<std::mutex> lk(mSubs->mutex);
+        mSubs->midiSubscribed = true;
+        return true;
+    }
+    void unsubscribeMidi(uint32_t) override {
+        std::lock_guard<std::mutex> lk(mSubs->mutex);
+        mSubs->midiSubscribed = false;
     }
 
 private:

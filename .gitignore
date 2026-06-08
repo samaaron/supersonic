@@ -24,4 +24,12 @@ deps/
 *.ez
 test/wasm_simd/simd_test.mjs
 test/wasm_simd/simd_test.wasm
+
+# Rust build artefacts (supersonic-midi subsystem)
+# Cargo.lock IS committed (this crate is built as part of an application).
+rust/target/
+
 .DS_Store
+
+# Vendored midir build artefacts
+external/midir/target/

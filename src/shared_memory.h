@@ -170,6 +170,7 @@ enum EgressRoute : uint32_t {
     EGRESS_SEND_TO_CALLER   = 1,  // reply to the origin token, network peers only
     EGRESS_BROADCAST_NOTIFY = 2,  // fan out to all notify subscribers
     EGRESS_BROADCAST_LINK   = 3,  // fan out to all Link subscribers
+    EGRESS_BROADCAST_MIDI   = 4,  // fan out to all MIDI-notify subscribers
 };
 constexpr uint32_t EGRESS_ROUTE_SIZE = sizeof(uint32_t);  // leading route word
 

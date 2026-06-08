@@ -14,7 +14,9 @@
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
 #include <immintrin.h>
 #endif
-#include "src/shared_memory.h"
+// src-relative so this header is usable under both the native (CMake) and web
+// (emcc -Isrc) include roots.
+#include "shared_memory.h"
 
 class RingBufferWriter {
 public:

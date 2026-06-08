@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>SuperSonic MIDI WASM Test</title>
+  </head>
+  <body>
+    <p>Driven by Playwright (midi_wasm.spec.mjs).</p>
+    <script type="module">
+      import initWasm, {
+        midi_in_osc,
+        midi_out_decode,
+        normalize_name,
+        WasmClockEstimator,
+      } from "/dist/midi/supersonic_midi.js";
+      import { MidiManager } from "/js/lib/midi_manager.js";
+
+      // Minimal OSC message encoder, just for building /midi/out test inputs.
+      function oscString(s) {
+        const b = new TextEncoder().encode(s);
+        const padded = (b.length + 1 + 3) & ~3;
+        const out = new Uint8Array(padded);
+        out.set(b);
+        return out;
+      }
+      function encodeOsc(addr, args) {
+        let tags = ",";
+        const chunks = [];
+        for (const a of args) {
+          tags += a.t;
+          if (a.t === "i") {
+            const d = new DataView(new ArrayBuffer(4));
+            d.setInt32(0, a.v, false);
+            chunks.push(new Uint8Array(d.buffer));
+          } else if (a.t === "s") {
+            chunks.push(oscString(a.v));
+          }
+        }
+        const parts = [oscString(addr), oscString(tags), ...chunks];
+        const total = parts.reduce((n, p) => n + p.length, 0);
+        const out = new Uint8Array(total);
+        let o = 0;
+        for (const p of parts) { out.set(p, o); o += p.length; }
+        return out;
+      }
+
+      window.wasmMidi = { initWasm, midi_in_osc, midi_out_decode, normalize_name, WasmClockEstimator, encodeOsc };
+      window.MidiManager = MidiManager;
+      window.midiWasmReady = true;
+    </script>
+  </body>
+</html>

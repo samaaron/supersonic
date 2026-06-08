@@ -295,6 +295,87 @@ event time. No reply.
 
 ---
 
+## MIDI
+
+A native MIDI subsystem (Rust + `midir`: CoreMIDI / ALSA / WinMM) folded into the
+engine, replacing the external `sp_midi` NIF and the Tau MIDI glue. It is a
+peripheral that exchanges `/midi/*` OSC with the engine. Ports are addressed by a
+**normalised handle** (lowercase, OSC-unsafe chars → `_`, duplicates suffixed
+`_2`, `_3`); `port = "*"` means all open ports; MIDI channels are **1-based**
+(1–16), and `channel = -1` on output means "all 16". Available only on native
+builds (gated by `SUPERSONIC_ENABLE_MIDI`).
+
+### Device management
+
+| `→` Request | Effect / Reply |
+| --- | --- |
+| `/midi/ports/list` | Reply `← /midi/ports.reply i:nIn [s:name i:open]* i:nOut [s:name i:open]*` |
+| `/midi/in/enable s:port i:0\|1` | Open/close an input (`"*"` = all). Pushes `/midi/ports`. |
+| `/midi/out/enable s:port i:0\|1` | Open/close an output (`"*"` = all). Pushes `/midi/ports`. |
+| `/midi/refresh` | Re-enumerate devices; pushes `/midi/ports`. |
+| `/midi/notify/subscribe` | Subscribe to `/midi/in/*` events + `/midi/ports` pushes; replies with a `/midi/ports.reply` snapshot. |
+| `/midi/notify/unsubscribe` | Stop notifications. |
+
+### Output (engine → device)
+
+`→ /midi/out/<verb> s:port [i:channel] <args…>` — no reply. Verbs:
+
+| Verb | Args after `port` |
+| --- | --- |
+| `note_on` / `note_off` | `i:channel i:note i:velocity` |
+| `control_change` | `i:channel i:controller i:value` |
+| `program_change` | `i:channel i:program` |
+| `channel_pressure` | `i:channel i:value` |
+| `poly_pressure` | `i:channel i:note i:value` |
+| `pitch_bend` | `i:channel i:value` (14-bit, 0–16383) |
+| `raw` / `sysex` | `i:byte …` (or a single `b:blob`) |
+| `clock` / `start` / `stop` / `continue` | *(port only)* — single system-real-time byte (Sonic Pi's `midi_clock_tick`/`midi_start`/`midi_stop`/`midi_continue`) |
+
+`channel = -1` fans a channel-voice message out to all 16 channels.
+
+### Scheduling (sample-locked to audio)
+
+`→ /midi/at t:oscTimetag b:<inner /midi/out OSC>` — schedule an outgoing MIDI
+event for a future time. The timetag is in SuperClock's OSC-timetag domain (the
+same one scsynth bundles use), so scheduled MIDI stays locked to the audio. The
+engine's deferred-event scheduler (ticked in `process_audio`) holds the event and
+dispatches it on time. (A `d:ntpSeconds` form is also accepted, e.g. by tests.)
+
+### Clock output
+
+The engine generates a rock-solid 24-PPQN clock locked to SuperClock (so it
+tracks tempo and Link peers):
+
+| `→` Request | Effect |
+| --- | --- |
+| `/midi/clock/start s:port` | Send `Start` (0xFA), then continuous 24-PPQN on `port`. |
+| `/midi/clock/continue s:port` | Send `Continue` (0xFB) + resume clock. |
+| `/midi/clock/stop s:port` | Send `Stop` (0xFC) + halt clock. |
+| `/midi/clock/beat s:port f:durationMs` | One beat of 24 evenly-spaced ticks (Sonic Pi's `midi_clock_beat`). |
+| `/midi/clock/tick s:port` | One immediate tick. |
+
+### Input (device → engine → subscribers)
+
+Pushed to `/midi/notify` subscribers as `← /midi/in/<verb> s:port [i:channel] <args…>`,
+mirroring the output verbs, plus the system messages: `sysex s:port b:blob`,
+`song_position s:port i:sixteenths`, `song_select s:port i:n`,
+`time_code s:port i:data`, `tune_request s:port`, and the realtime transport
+`start` / `continue` / `stop` / `reset` (`s:port`). Clock pulses (0xF8) are **not**
+forwarded — see below. (This is full parity with the Tau layer it replaces, which
+also ignored bare clock + active-sensing.)
+
+### Clock input (sync SuperClock to external MIDI clock)
+
+| `→` Request | Effect |
+| --- | --- |
+| `/midi/clock/sync s:port i:0\|1` | Use incoming clock on `port` as the SuperClock tempo source. |
+
+When enabled, clock pulses are timestamped and run through a median-filtered
+estimator to derive BPM (pushed to SuperClock, not forwarded as events); `Start` /
+`Continue` / `Stop` / Song-Position drive SuperClock's transport and beat origin.
+
+---
+
 ## Sonic Pi daemon relay
 
 Sonic Pi's GUI can't send to SuperSonic's UDP port directly (the

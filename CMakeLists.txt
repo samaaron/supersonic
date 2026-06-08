@@ -245,6 +245,8 @@ endif()
 # SuperSonic core (audio_processor + companions)
 set(SUPERSONIC_CORE_SOURCES
     ${SUPERSONIC_SRC}/audio_processor.cpp
+    ${SUPERSONIC_SRC}/scheduler/EventScheduler.cpp
+    ${SUPERSONIC_SRC}/scheduler/MidiClockOut.cpp
     ${SUPERSONIC_SRC}/buffer_commands.cpp
     ${SUPERSONIC_SRC}/node_tree.cpp
     ${SUPERSONIC_SRC}/supersonic_heap.cpp
@@ -490,6 +492,47 @@ elseif(APPLE)
 elseif(UNIX)
     find_package(Threads REQUIRED)
     target_link_libraries(supersonic_engine PUBLIC Threads::Threads rt ${CMAKE_DL_LIBS})
+endif()
+
+# ── MIDI subsystem (Rust / midir) ─────────────────────────────────────────────
+# A dual-licensed (MIT OR GPL-3.0-or-later) Rust crate, built by cargo as a
+# staticlib and linked into the engine. The C++ seam is src/native/MidiControl,
+# which talks to it via rust/supersonic-midi/cpp/ss_midi.h.
+option(SUPERSONIC_ENABLE_MIDI "Integrate the Rust/midir MIDI subsystem (native)" ON)
+if(SUPERSONIC_ENABLE_MIDI)
+    find_program(CARGO_EXECUTABLE cargo REQUIRED)
+    set(SS_MIDI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/rust)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(SS_MIDI_PROFILE debug)
+        set(SS_MIDI_CARGO_FLAGS)
+    else()
+        set(SS_MIDI_PROFILE release)
+        set(SS_MIDI_CARGO_FLAGS --release)
+    endif()
+    set(SS_MIDI_LIB ${SS_MIDI_DIR}/target/${SS_MIDI_PROFILE}/libsupersonic_midi.a)
+
+    # cargo tracks incremental freshness itself, so run it every build.
+    add_custom_target(supersonic_midi_rust ALL
+        BYPRODUCTS ${SS_MIDI_LIB}
+        COMMAND ${CARGO_EXECUTABLE} build ${SS_MIDI_CARGO_FLAGS} -p supersonic-midi
+        WORKING_DIRECTORY ${SS_MIDI_DIR}
+        COMMENT "Building Rust MIDI subsystem (cargo)"
+        VERBATIM)
+    add_dependencies(supersonic_engine supersonic_midi_rust)
+
+    target_sources(supersonic_engine PRIVATE ${NATIVE_SRC}/MidiControl.cpp)
+    target_include_directories(supersonic_engine PUBLIC ${SS_MIDI_DIR}/supersonic-midi/cpp)
+    target_compile_definitions(supersonic_engine PUBLIC SUPERSONIC_MIDI=1)
+    target_link_libraries(supersonic_engine PUBLIC ${SS_MIDI_LIB})
+
+    # Libraries the midir backend needs at final link (Rust staticlibs don't
+    # carry their link deps): CoreMIDI on macOS, ALSA on Linux; Windows winmm is
+    # already linked above.
+    if(APPLE)
+        target_link_libraries(supersonic_engine PUBLIC "-framework CoreMIDI")
+    elseif(UNIX)
+        target_link_libraries(supersonic_engine PUBLIC asound)
+    endif()
 endif()
 
 if(MSVC)

@@ -2,6 +2,7 @@
  * SupersonicEngine.cpp
  */
 #include "SupersonicEngine.h"
+#include "scheduler/MidiClockOut.h"
 #include "AggregateDeviceHelper.h"
 #include "DevicePolicy.h"
 #include "src/audio_processor.h"
@@ -995,6 +996,13 @@ void SupersonicEngine::init(const Config& cfg) {
     mEngineControl.init(this, &mEgress, &mSuperClock);
     mIngress.registerRoute("/supersonic/", &SupersonicEngine::nrtForwardSink, this);
     mIngress.registerRoute("/clock/", &SupersonicEngine::nrtForwardSink, this);
+#ifdef SUPERSONIC_MIDI
+    mMidiControl.init(&mEgress, &mSuperClock);
+    mIngress.registerRoute("/midi/", &SupersonicEngine::nrtForwardSink, this);
+    // Longest-prefix wins: scheduled MIDI ("/midi/at") is handled on the audio
+    // thread (enqueued into the deferred-event scheduler) rather than forwarded.
+    mIngress.registerRoute("/midi/at", &SupersonicEngine::midiAtSink, this);
+#endif
 
     // Single-engine-per-process: g_active_superclock has no per-engine
     // routing, so a second publisher would steer /superclock_get to
@@ -1031,6 +1039,10 @@ void SupersonicEngine::init(const Config& cfg) {
             mEgress.setOrigin(token);
             if (n >= 12 && std::memcmp(d, "/supersonic/", 12) == 0)
                 mEngineControl.handleSupersonicCommand(d, n);
+#ifdef SUPERSONIC_MIDI
+            else if (n >= 6 && std::memcmp(d, "/midi/", 6) == 0)
+                mMidiControl.handleMidiCommand(d, n);
+#endif
             else
                 mEngineControl.handleLinkCommand(d, n);
         },
@@ -1117,6 +1129,26 @@ void SupersonicEngine::init(const Config& cfg) {
     mNrtGateway.startThread(juce::Thread::Priority::normal);
     mSampleLoader.startThread(juce::Thread::Priority::normal);
 
+#ifdef SUPERSONIC_MIDI
+    // Drain the deferred-event scheduler's OUT ring each block and dispatch due
+    // events by destination (MIDI → MidiControl → midir, off the audio thread).
+    {
+        EventScheduler& es = get_event_scheduler();
+        mMidiDispatch.setWake(&mAudioCallback.processCount);
+        mMidiDispatch.addDrain(
+            es.outBuffer(), es.outSize(), es.outHead(), es.outTail(),
+            [this](uint32_t, const uint8_t* d, uint32_t n, uint32_t) {
+                if (n < sizeof(uint32_t)) return;
+                uint32_t dest;
+                std::memcpy(&dest, d, sizeof(dest));
+                if (dest == EventScheduler::DEST_MIDI)
+                    mMidiControl.dispatchOsc(d + sizeof(dest), n - static_cast<uint32_t>(sizeof(dest)));
+            },
+            {});
+        mMidiDispatch.startThread(juce::Thread::Priority::normal);
+    }
+#endif
+
     // -- Start the audio source (real callback or headless fallback) -------
     // Picks based on whether the device manager has a current device.
     // Blocks until process_audio has ticked at least once, or 5 s with a
@@ -1166,6 +1198,22 @@ void SupersonicEngine::shutdown() {
     // Stop recording if active
     if (isRecording())
         stopRecording();
+
+    // Tear down the MIDI subsystem before mEgress/mSuperClock: ss_midi_destroy
+    // closes its midir connections (stopping midir's input thread), so no MIDI
+    // callback can fire into mEgress/mSuperClock after this returns.
+#ifdef SUPERSONIC_MIDI
+    // Stop the dispatch thread before the subsystem it calls into. It waits on
+    // processCount, so bump + notify to wake it for the exit check.
+    mMidiDispatch.signalThreadShouldExit();
+    mAudioCallback.processCount.fetch_add(1, std::memory_order_release);
+    mAudioCallback.processCount.notify_all();
+    mMidiDispatch.stopThread(2000);
+    mMidiControl.shutdown();
+    // Drop clock-out state so a generated clock can't resume with stale ports on
+    // the next boot (the coordinator is a process-wide singleton).
+    get_midi_clock_out().reset();
+#endif
 
     // Order: signal alive=false, then disable Link (this joins the
     // network thread synchronously inside link.enable(false), so
@@ -1335,6 +1383,47 @@ bool SupersonicEngine::nrtForwardSink(void* ctx, void* callCtx,
         self->mMetrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
     return true;  // consumed — control never falls through to scsynth
 }
+
+#ifdef SUPERSONIC_MIDI
+bool SupersonicEngine::midiAtSink(void* /*ctx*/, void* /*callCtx*/,
+                                  const uint8_t* data, std::size_t len) {
+    // /midi/at <d|f: ntpSeconds> <b: inner /midi/out OSC> — enqueue the inner
+    // event into the deferred-event scheduler to fire on time. Runs on the audio
+    // thread; ss_defer_schedule's enqueue is RT-safe and lock-free.
+    try {
+        osc::ReceivedPacket pkt(reinterpret_cast<const char*>(data),
+                                static_cast<osc::osc_bundle_element_size_t>(len));
+        osc::ReceivedMessage msg(pkt);
+        auto it = msg.ArgumentsBegin();
+        if (it == msg.ArgumentsEnd()) return true;
+        // Time: an OSC timetag (int64, Sonic Pi's path — same domain as its
+        // scsynth bundles) or NTP seconds (double/float, e.g. tests).
+        const bool haveTimetag = it->IsInt64();
+        const int64_t timetag = haveTimetag ? it->AsInt64Unchecked() : 0;
+        const double ntp = it->IsDouble() ? it->AsDoubleUnchecked()
+                         : it->IsFloat()  ? static_cast<double>(it->AsFloatUnchecked())
+                                          : 0.0;
+        ++it;
+        if (it == msg.ArgumentsEnd() || !it->IsBlob()) return true;
+        const void* blob = nullptr;
+        osc::osc_bundle_element_size_t blobSize = 0;
+        it->AsBlobUnchecked(blob, blobSize);
+        if (blob && blobSize > 0) {
+            const auto* b = static_cast<const uint8_t*>(blob);
+            const auto n = static_cast<uint32_t>(blobSize);
+            if (haveTimetag)
+                ss_defer_schedule_raw(timetag, EventScheduler::DEST_MIDI, b, n);
+            else
+                ss_defer_schedule(ntp, EventScheduler::DEST_MIDI, b, n);
+        }
+    } catch (...) {
+        // Malformed /midi/at — ignore.
+    }
+    return true;  // consumed
+}
+#else
+bool SupersonicEngine::midiAtSink(void*, void*, const uint8_t*, std::size_t) { return true; }
+#endif
 
 // --- Device switch / reopen orchestration -------------------------------------
 
@@ -3817,6 +3906,13 @@ void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
 
     mLastSelfTriggeredChange = std::chrono::steady_clock::now();
 
+    // JUCE's AudioDeviceManager fires this for MIDI device-list changes as well
+    // as audio ones, so refresh the MIDI subsystem here (it diffs internally and
+    // only broadcasts /midi/ports when the MIDI list actually changed). Runs
+    // after the debounce + swap guards so a device-swap notification storm
+    // doesn't re-enumerate midir on every event.
+    mMidiControl.refreshDevices();
+
     // Collected hot-plug work to schedule after the mutex is released.
     std::string pendingSwitchOutput;
     std::string pendingSwitchInput;
@@ -3828,38 +3924,54 @@ void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
 
         auto devices = listDevices(true);
         auto* dev = mDeviceManager->getCurrentAudioDevice();
-        std::string currentOutput = mRealOutputDeviceName.empty()
-            ? (dev ? dev->getName().toStdString() : "")
-            : mRealOutputDeviceName;
-        int currentActiveIn = dev ? dev->getActiveInputChannels().countNumberOfSetBits() : 0;
 
-        std::vector<std::string> visibleNames;
-        visibleNames.reserve(devices.size());
-        for (auto& d : devices) visibleNames.push_back(d.name);
-
-        auto decision = sonicpi::device::decideHotplugAction(
-            mPreferredOutputDevice, mPreferredInputDevice,
-            currentOutput, currentActiveIn, visibleNames);
-
-        schedulePreferredReattach = decision.switchOutput;
-        scheduleInputReattach     = decision.switchInput;
-        pendingSwitchOutput       = decision.outputName;
-        pendingSwitchInput        = decision.inputName;
-
-        if (mDeviceMode.empty()) {
-            // System mode: don't reinitialise here — that would destroy our
-            // aggregate device (needed for input). The dedicated
-            // handleSystemDefaultOutputChanged listener handles actual
-            // default-output changes. Just update channel counts.
-            if (dev) {
-                mCurrentConfig.numOutputChannels =
-                    dev->getActiveOutputChannels().countNumberOfSetBits();
-                mCurrentConfig.numInputChannels =
-                    dev->getActiveInputChannels().countNumberOfSetBits();
-            }
+        // Active channel counts track the current device's live mask, not the
+        // device list, so refresh them on every callback — independent of the
+        // device-list fingerprint below. (System mode only: a reinit here would
+        // destroy our aggregate device; handleSystemDefaultOutputChanged owns
+        // actual default-output changes.)
+        if (mDeviceMode.empty() && dev) {
+            mCurrentConfig.numOutputChannels =
+                dev->getActiveOutputChannels().countNumberOfSetBits();
+            mCurrentConfig.numInputChannels =
+                dev->getActiveInputChannels().countNumberOfSetBits();
         }
 
-        printDeviceList();
+        // Fingerprint the audio device LIST; skip the hotplug decision + device
+        // re-report when it's unchanged (e.g. a MIDI-only change that fired this
+        // callback) so a MIDI hotplug doesn't churn the GUI's audio list. The
+        // field/record separators are control chars that can't appear in a name.
+        std::string fingerprint;
+        for (auto& d : devices) {
+            fingerprint += d.name;
+            fingerprint += '\x1f' + std::to_string(d.maxOutputChannels);
+            fingerprint += '\x1f' + std::to_string(d.maxInputChannels);
+            fingerprint += '\x1f' + std::to_string(d.transportType) + '\x1e';
+        }
+
+        if (fingerprint != mLastAudioDeviceFingerprint) {
+            mLastAudioDeviceFingerprint = fingerprint;
+
+            std::string currentOutput = mRealOutputDeviceName.empty()
+                ? (dev ? dev->getName().toStdString() : "")
+                : mRealOutputDeviceName;
+            int currentActiveIn = dev ? dev->getActiveInputChannels().countNumberOfSetBits() : 0;
+
+            std::vector<std::string> visibleNames;
+            visibleNames.reserve(devices.size());
+            for (auto& d : devices) visibleNames.push_back(d.name);
+
+            auto decision = sonicpi::device::decideHotplugAction(
+                mPreferredOutputDevice, mPreferredInputDevice,
+                currentOutput, currentActiveIn, visibleNames);
+
+            schedulePreferredReattach = decision.switchOutput;
+            scheduleInputReattach     = decision.switchInput;
+            pendingSwitchOutput       = decision.outputName;
+            pendingSwitchInput        = decision.inputName;
+
+            printDeviceList();
+        }
     }
 
     // Schedule switchDevice async so it can take mSwapMutex itself.

@@ -44,6 +44,9 @@ public:
     void clearNotify() override;
     bool subscribeLink(uint32_t token) override;
     void unsubscribeLink(uint32_t token) override;
+    void broadcastMidi(const uint8_t* data, uint32_t size) override;
+    bool subscribeMidi(uint32_t token) override;
+    void unsubscribeMidi(uint32_t token) override;
 
 private:
     void run() override;
@@ -74,6 +77,7 @@ private:
 
     std::vector<Target> mNotifyTargets;
     std::vector<Target> mLinkNotifyTargets;
+    std::vector<Target> mMidiNotifyTargets;
 
     // (ip,port) ↔ token table — the transport's address book.
     struct OriginEntry { uint32_t token = 0; char ip[64] = {}; int port = 0; };

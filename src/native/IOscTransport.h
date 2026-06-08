@@ -47,4 +47,10 @@ public:
     // unaddressable caller (e.g. in-process, no port) is rejected → false.
     virtual bool subscribeLink(uint32_t token) = 0;
     virtual void unsubscribeLink(uint32_t token) = 0;
+
+    // MIDI-notify audience: receives /midi/in/* events and
+    // /midi/ports change pushes. Caller-relative, like the Link audience.
+    virtual void broadcastMidi(const uint8_t* data, uint32_t size) = 0;
+    virtual bool subscribeMidi(uint32_t token) = 0;
+    virtual void unsubscribeMidi(uint32_t token) = 0;
 };

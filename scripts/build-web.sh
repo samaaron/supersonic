@@ -92,6 +92,7 @@ SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" ! -name "
 # Compile audio processor with all scsynth sources and oscpack (standalone WASM for AudioWorklet)
 # Memory can grow on demand from INITIAL_MEMORY up to MAXIMUM_MEMORY (for buffer pool expansion)
 emcc "$SRC_DIR/audio_processor.cpp" \
+    "$SRC_DIR/scheduler/EventScheduler.cpp" \
     "$SRC_DIR/buffer_commands.cpp" \
     "$SRC_DIR/node_tree.cpp" \
     "$SRC_DIR/SuperClock.cpp" \
@@ -257,6 +258,36 @@ rm -rf "$CORE_PKG_DIR/wasm" "$CORE_PKG_DIR/workers"
 cp -r "$OUTPUT_DIR/wasm" "$CORE_PKG_DIR/wasm"
 mkdir -p "$CORE_PKG_DIR/workers"
 cp "$OUTPUT_DIR/workers/scsynth_audio_worklet.js" "$CORE_PKG_DIR/workers/"
+
+# ── MIDI subsystem (Rust core → wasm-bindgen module, main-thread) ────────────
+# The shared Rust MIDI core compiled to wasm + JS bindings for the main-thread
+# MidiManager (Web MIDI lives in JS). Needs a rust toolchain with the wasm32
+# target and wasm-bindgen. Best-effort: warn (don't fail the whole web build) if
+# the tools are missing.
+echo "Building MIDI wasm module (supersonic-midi)..."
+MIDI_OK=1
+# Prefer a rustup toolchain that ships wasm32 std (a homebrew rustc may not).
+RUSTUP_BIN="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin"
+if [ -x "$RUSTUP_BIN/cargo" ]; then
+    MIDI_CARGO="$RUSTUP_BIN/cargo"
+    MIDI_PATH="$RUSTUP_BIN:$PATH"
+else
+    MIDI_CARGO="cargo"
+    MIDI_PATH="$PATH"
+fi
+WASM_BINDGEN="$(command -v wasm-bindgen || echo "$HOME/.cargo/bin/wasm-bindgen")"
+if PATH="$MIDI_PATH" "$MIDI_CARGO" build --release --target wasm32-unknown-unknown \
+        --manifest-path "$PROJECT_ROOT/rust/supersonic-midi/Cargo.toml" 2>/dev/null \
+   && [ -x "$WASM_BINDGEN" ]; then
+    mkdir -p "$OUTPUT_DIR/midi"
+    "$WASM_BINDGEN" --target web --no-typescript \
+        --out-dir "$OUTPUT_DIR/midi" --out-name supersonic_midi \
+        "$PROJECT_ROOT/rust/target/wasm32-unknown-unknown/release/supersonic_midi.wasm"
+    echo "  → dist/midi/supersonic_midi.{js,_bg.wasm}"
+else
+    MIDI_OK=0
+    echo "  WARNING: skipped MIDI wasm build (need rustup wasm32 target + wasm-bindgen 0.2.122)."
+fi
 
 # Generate API documentation
 echo "Generating API docs..."

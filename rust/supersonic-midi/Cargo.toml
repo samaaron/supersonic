@@ -1,0 +1,35 @@
+[package]
+name = "supersonic-midi"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sam Aaron"]
+description = "SuperSonic MIDI subsystem (midir-based): parse/encode, device registry, SuperClock-locked clock generation, and clock-in BPM estimation. Compiles to a native staticlib and a wasm-bindgen module."
+# Dual-licensed like SuperSonic's other OSC-only client libraries: this crate
+# contains no GPL-derived code and talks to the engine purely via the /midi/* OSC
+# schema. See the repo LICENSE.
+license = "MIT OR GPL-3.0-or-later"
+
+[lib]
+# staticlib → linked into the C++ engine (native).
+# cdylib    → wasm-bindgen module (web).
+# rlib      → so the crate's own unit tests can link it on the host.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = []
+
+# midir provides the actual device IO on both targets (CoreMIDI/ALSA/WinMM
+# natively, Web MIDI on wasm). Vendored from a patched fork (adds webmidi
+# `send_at`); the path is finalised to a submodule/vendor dir in the build-wiring
+# step. Native target only for now; the wasm target is added with the web seam.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+midir = { path = "../../external/midir" }
+
+# Integration tests reach midir directly to create virtual loopback ports.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+midir = { path = "../../external/midir" }
+
+# Web seam: the shared core is exposed to the main-thread JS MidiManager via
+# wasm-bindgen (Web MIDI I/O is done in JS).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
