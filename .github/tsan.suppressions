@@ -1,0 +1,19 @@
+# ThreadSanitizer suppressions for the SuperSonic native test binary.
+#
+# Format: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
+# Wired in via TSAN_OPTIONS=suppressions=... in .github/workflows/native.yml.
+#
+# ── Rust standard-library channels ────────────────────────────────────────────
+# The Rust std shipped with the toolchain is precompiled WITHOUT ThreadSanitizer
+# instrumentation, so TSan cannot see the atomic happens-before edges inside
+# std::sync::mpsc (its mpmc backend). It therefore reports false data races on
+# the channel's internal block alloc/free during concurrent send / recv / drop —
+# e.g. the MIDI hot-swap watcher's coalescer channel
+# (rust/supersonic-midi/src/watcher.rs): a sender thread's send() (calloc) versus
+# the receiver-drop's disconnect_receivers() (free) reusing the same heap block.
+# std's channel API is thread-safe by construction, so these are not real races.
+#
+# Scope is deliberately the std channel internals only: a genuine race in our own
+# code keeps a supersonic_midi::watcher frame on top and is still reported.
+race:std::sync::mpmc
+race:std::sync::mpsc

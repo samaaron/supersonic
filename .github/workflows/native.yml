@@ -253,7 +253,10 @@ jobs:
           # set =0 to collect every report in one run.
           ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_leaks=0:symbolize=1"
           UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1:symbolize=1"
-          TSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:second_deadlock_stack=1:history_size=4"
+          # suppressions: Rust std channels ship without TSan instrumentation, so
+          # TSan reports false races inside std::sync::mpsc (the MIDI watcher's
+          # coalescer). See .github/tsan.suppressions.
+          TSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:second_deadlock_stack=1:history_size=4:suppressions=${{ github.workspace }}/.github/tsan.suppressions"
           SUPERSONIC_QUIET: "1"   # silence per-boot lifecycle logging in CI
         run: ./build/native-sanitize/test/native/SuperSonicNativeTests "~[benchmark]"
 
