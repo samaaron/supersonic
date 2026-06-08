@@ -1,9 +1,9 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2026-04-25
-**Last Sync Commit**: a27ec6c01
-**Upstream Branch**: supercollider/develop (tracked to 2026-04-25)
-**Verified Against**: SuperCollider 3.15.0-dev + PR #7402 (Synth reblocking and upsampling)
+**Last Updated**: 2026-06-08
+**Last Sync Commit**: b70e7ab7e
+**Upstream Branch**: supercollider/develop (tracked to 2026-06-08)
+**Verified Against**: SuperCollider 3.15.0-dev (develop HEAD b70e7ab7e)
 
 ---
 
@@ -587,6 +587,36 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 
 ## Reference: Previous Sync Summary
 
+### No-op sync — upstream's own scsynth.wasm port (2026-06-08)
+
+Reviewed `a27ec6c01..b70e7ab7e` (45 upstream commits). **Nothing backported** — every
+scsynth-relevant commit is either already present in SuperSonic (implemented
+independently) or not applicable.
+
+The notable finding: the entire batch of "relevant" commits is an **alternative
+scsynth.wasm port** ([PR #7428](https://github.com/supercollider/supercollider/pull/7428),
+`wasm-audio-worklet`). It targets a WebAudio driver / Emscripten build and takes a
+different approach from SuperSonic's AudioWorklet architecture, so its changes don't
+apply here.
+
+**Already present (SuperSonic did it independently, its own way):**
+- `7a2d326a1` "add endian for wasm" — `SC_Endian.h` already has the `#elif defined(__EMSCRIPTEN__)` block.
+- `7e681d089` "remove ReplyAddress.mAddress for wasm" — SuperSonic uses `kWeb` protocol + `uint32_t mAddressPlaceholder[4]` under `__EMSCRIPTEN__` (upstream removes the member entirely; SuperSonic keeps a trivially-copyable placeholder).
+- `c68cdbbd3` "fix excessive parameters on init-rate UGen constructors" — the param-drop (`void Foo_Ctor(Unit*)` instead of `(Unit*, int)`, which crashes on wasm via fn-pointer signature mismatch) is **already present** in `DelayUGens.cpp`. ⚠️ **Do NOT cherry-pick this commit**: it also reverts `RadiansPerSample_Ctor` back to `unit->mWorld->mFullRate.mRadiansPerSample`, which would regress the per-Graph reblock/resample lookup (`unit->mParent->mFullRate->mRadiansPerSample`) adopted in the 2026-04-25 sync. This is an ordering artifact — c68cdbbd3 was authored before the reblock PR but merged after it.
+
+**Not applicable (upstream's wasm port / build / dynamic loading):**
+- `6dad9cae6` WebAudio driver backend (`SC_WebAudio.cpp`) — SuperSonic excludes this in `build-web.sh`.
+- `200abb9da` remove NOVA_TT_PRIORITY_RT / `06223d7f1` add webaudio api — `SC_CoreAudio.cpp/.h` driver path.
+- `d331037f6` dummy `main()` — SuperSonic has no main; `scsynth_main.cpp` excluded.
+- `4ae4513ea` "add plugins to scsynth wasm build" — wraps DiskIO in `#ifndef __EMSCRIPTEN__`; SuperSonic already excludes DiskIO via no-op stubs in `SC_Stubs.cpp` (`DiskIO_Load`/`DiskIO_Unload`/`UIUGens_Unload`) plus source removal.
+- `dc04b92a0` "do not skip .so files" (#7484) — Linux dynamic plugin loading; SuperSonic stripped all dynamic-loading infra (2026-02-25) and builds `-DSTATIC_PLUGINS`.
+- `640babcd3` add OscMessageBuilder (`platform/wasm/SC_WebOsc.cpp`) — their port's OSC builder; SuperSonic excludes `SC_WasmOscBuilder.cpp`.
+- Plus sclang (new lexer #7394), supernova, CMake, and HelpSource commits in the wider 45.
+
+**Testing:** No code changed, so no build/test run required.
+
+---
+
 ### Synth reblocking and upsampling (2026-04-25)
 
 Applied SuperCollider PR #7402 (commit a27ec6c01).
@@ -946,6 +976,6 @@ If uncertain about a commit:
 
 ---
 
-**Last Updated**: 2026-03-09
+**Last Updated**: 2026-06-08
 **Maintainer**: See git log for recent contributors
 **Upstream**: https://github.com/supercollider/supercollider
