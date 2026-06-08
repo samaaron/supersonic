@@ -225,27 +225,85 @@ mod imp {
 #[cfg(target_os = "macos")]
 mod imp {
     use super::{Coalescer, OnChange};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::thread::{self, JoinHandle};
+    use std::time::Duration;
+
+    use core_foundation::runloop::{kCFRunLoopDefaultMode, CFRunLoop, CFRunLoopRunResult};
     use coremidi::{Client, Notification};
 
+    /// Run-loop slice length: long enough that a populated loop isn't re-armed
+    /// in a tight spin, short enough that Drop's stop flag is honoured promptly.
+    const POLL_SLICE: Duration = Duration::from_millis(250);
+
     pub struct PlatformWatcher {
-        // The client must stay alive to keep delivering notifications. Dropped
-        // before the coalescer so no poke arrives mid-teardown.
-        _client: Option<Client>,
-        _coalescer: Coalescer,
+        stop: Arc<AtomicBool>,
+        handle: Option<JoinHandle<()>>,
     }
 
     impl PlatformWatcher {
         pub fn new(on_change: OnChange) -> Self {
             let coalescer = Coalescer::new(on_change);
-            let poke = coalescer.poker();
-            // Any setup change (object added/removed, property changed) coalesces
-            // into a single re-enumerate.
-            let client = Client::new_with_notifications("supersonic-midi-hotswap", move |_n: &Notification| {
-                let _ = poke.send(());
-            })
-            .ok();
-            PlatformWatcher { _client: client, _coalescer: coalescer }
+            let stop = Arc::new(AtomicBool::new(false));
+            let stop_thread = stop.clone();
+            // CoreMIDI delivers MIDIClientCreateWithBlock notifications only on the
+            // run loop that was current when the client was created, and only while
+            // that loop is running. So the client is both created *and* pumped on
+            // this dedicated thread — delivery no longer depends on the host
+            // happening to init the engine on a thread with a live CFRunLoop (the
+            // standalone server's main thread does; an embedder's may not). This
+            // matches the self-contained Linux/Windows backends.
+            let handle = thread::Builder::new()
+                .name("ss-midi-coremidi".into())
+                .spawn(move || notify_loop(stop_thread, coalescer))
+                .ok();
+            PlatformWatcher { stop, handle }
         }
+    }
+
+    impl Drop for PlatformWatcher {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            // The pump re-checks `stop` each time a run-loop slice returns (≤ one
+            // POLL_SLICE away), so the join completes promptly without needing a
+            // cross-thread CFRunLoopStop.
+            if let Some(h) = self.handle.take() {
+                let _ = h.join();
+            }
+        }
+    }
+
+    fn notify_loop(stop: Arc<AtomicBool>, coalescer: Coalescer) {
+        let poke = coalescer.poker();
+        // Bind the notification block to *this* thread's run loop. Any setup
+        // change (object added/removed, property changed) coalesces into a single
+        // re-enumerate downstream.
+        let _client = match Client::new_with_notifications(
+            "supersonic-midi-hotswap",
+            move |_n: &Notification| {
+                let _ = poke.send(());
+            },
+        ) {
+            Ok(c) => c,
+            // No notifications available — the manual `/midi/refresh` seam still
+            // works, so degrade quietly rather than tear the subsystem down.
+            Err(_) => return,
+        };
+
+        while !stop.load(Ordering::SeqCst) {
+            // returnAfterSourceHandled = false: run the whole slice, servicing
+            // every device notification, then loop to re-check `stop`.
+            let result =
+                CFRunLoop::run_in_mode(unsafe { kCFRunLoopDefaultMode }, POLL_SLICE, false);
+            // An empty run loop returns immediately; guard against a hot spin in
+            // the brief window before the client's notification source attaches.
+            if matches!(result, CFRunLoopRunResult::Finished) {
+                thread::sleep(POLL_SLICE);
+            }
+        }
+        // `_client` drops here, removing the CoreMIDI notification source; then
+        // `coalescer` drops, joining its worker thread.
     }
 }
 
@@ -329,7 +387,7 @@ mod imp {
                 return;
             }
             // Poll with a timeout so the stop flag is honoured promptly.
-            match seq.event_input_pending(true) {
+            match input.event_input_pending(true) {
                 Ok(0) => {
                     thread::sleep(Duration::from_millis(100));
                     continue;

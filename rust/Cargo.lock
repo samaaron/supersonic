@@ -415,6 +415,7 @@ name = "supersonic-midi"
 version = "0.1.0"
 dependencies = [
  "alsa",
+ "core-foundation",
  "coremidi",
  "midir",
  "wasm-bindgen",

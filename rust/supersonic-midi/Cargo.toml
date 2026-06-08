@@ -43,6 +43,9 @@ windows = { version = ">=0.59.0,<=0.62", features = [
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coremidi = "0.9.0"
+# CFRunLoop pump for the hot-swap watcher's dedicated thread (src/watcher.rs).
+# Already a transitive dep of coremidi, so no new tree — pinned to the same minor.
+core-foundation = "0.10"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 alsa = ">=0.9.0, <0.12"
