@@ -26,6 +26,11 @@ import * as oscFast from "./lib/osc_fast.js";
 const SYNC_TIMEOUT_MS = 10000;
 // Timeout waiting for AudioWorklet initialization
 const WORKLET_INIT_TIMEOUT_MS = 5000;
+// Timeout waiting for the worklet's clearSched ack in purge(). A live worklet
+// acks synchronously from its message handler, so this only elapses when the
+// worklet is gone — at which point purge() resolves best-effort so recover()
+// can fall back to reload() instead of hanging.
+const PURGE_ACK_TIMEOUT_MS = 1000;
 // Interval for metrics/tree snapshots in postMessage mode (ms)
 const SNAPSHOT_INTERVAL_MS = 150;
 import { MemoryLayout } from "./memory_layout.js";
@@ -1354,12 +1359,28 @@ export class SuperSonic {
     this.#ensureInitialized("purge");
 
     await new Promise(resolve => {
-      const handler = (event) => {
-        if (event.data.type === 'clearSchedAck') {
-          this.#workletNode.port.removeEventListener('message', handler);
-          resolve();
-        }
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.#workletNode.port.removeEventListener('message', handler);
+        resolve();
       };
+      const handler = (event) => {
+        if (event.data.type === 'clearSchedAck') finish();
+      };
+      // The worklet acks synchronously from its message handler, so a live
+      // worklet — even one whose AudioContext is suspended — replies almost
+      // immediately. A missing ack therefore means the worklet is gone (its
+      // global scope was reclaimed, e.g. a long-backgrounded mobile tab — the
+      // exact case recover() exists to handle). Resolve best-effort on a
+      // timeout so purge()/resume()/recover() can't wedge and recover() falls
+      // through to reload() instead of hanging forever.
+      const timer = setTimeout(() => {
+        if (__DEV__) console.warn('[Dbg-SuperSonic] purge() timed out waiting for clearSchedAck; worklet may be gone');
+        finish();
+      }, PURGE_ACK_TIMEOUT_MS);
       this.#workletNode.port.addEventListener('message', handler);
       this.#workletNode.port.postMessage({ type: 'clearSched', ack: true });
     });
