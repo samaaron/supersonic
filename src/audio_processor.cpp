@@ -745,6 +745,25 @@ extern "C" {
             int32_t in_head = control->in_head.load(std::memory_order_acquire);
             int32_t in_tail = control->in_tail.load(std::memory_order_acquire);
 
+            // The cursors live in shared memory (cross-process on native) and
+            // are not trusted: an out-of-range value would index outside the
+            // IN region. The tail is reader-owned, so a bad tail is resynced
+            // to head (dropping pending input); a bad head is producer state
+            // we can't repair, so the drain is skipped this block.
+            if ((uint32_t)in_head >= IN_BUFFER_SIZE) {
+                if (corruption_count.load(std::memory_order_relaxed) < 5) {
+                    ss_log("ERROR: IN cursor out of range: head=%d tail=%d", in_head, in_tail);
+                    corruption_count.fetch_add(1, std::memory_order_relaxed);
+                }
+                in_head = in_tail;
+            } else if ((uint32_t)in_tail >= IN_BUFFER_SIZE) {
+                if (corruption_count.load(std::memory_order_relaxed) < 5) {
+                    ss_log("ERROR: IN cursor out of range: head=%d tail=%d", in_head, in_tail);
+                    corruption_count.fetch_add(1, std::memory_order_relaxed);
+                }
+                control->in_tail.store(in_head, std::memory_order_release);
+                in_tail = in_head;
+            }
 
             // Process available messages (limit per frame to stay within audio budget)
             const int MAX_MESSAGES_PER_FRAME = 32;
@@ -766,37 +785,35 @@ extern "C" {
                     std::memcpy((char*)&header + space_to_end, shared_memory + IN_BUFFER_START, sizeof(Message) - space_to_end);
                 }
 
-                // Validate message
-                if (header.magic != MESSAGE_MAGIC) {
+                // Validate the frame. The writer release-stores head only
+                // after a frame is fully written, so anything malformed below
+                // head is genuine corruption and the rest of the region is
+                // suspect: resync tail to head (dropping all pending input),
+                // matching the native RingReader. A byte-wise rescan would be
+                // unbounded work on the audio thread, and a length below the
+                // header size could never advance the tail at all.
+                bool bad_magic = header.magic != MESSAGE_MAGIC;
+                if (bad_magic || header.length < sizeof(Message) ||
+                    header.length > MAX_MESSAGE_SIZE + sizeof(Message)) {
                     if (corruption_count.load(std::memory_order_relaxed) < 5) {
-                        ss_log("ERROR: Invalid magic at tail=%d head=%d: got 0x%08X expected 0x%08X (len=%u seq=%u)",
-                                     in_tail, in_head, header.magic, MESSAGE_MAGIC, header.length, header.sequence);
+                        if (bad_magic)
+                            ss_log("ERROR: Invalid magic at tail=%d head=%d: got 0x%08X expected 0x%08X (len=%u seq=%u)",
+                                         in_tail, in_head, header.magic, MESSAGE_MAGIC, header.length, header.sequence);
+                        else
+                            ss_log("ERROR: Invalid length at tail=%d head=%d: len=%u (seq=%u)",
+                                         in_tail, in_head, header.length, header.sequence);
                         corruption_count.fetch_add(1, std::memory_order_relaxed);
                     }
-                    control->in_tail.store((in_tail + 1) % IN_BUFFER_SIZE, std::memory_order_release);
+                    if (!bad_magic)
+                        control->status_flags.fetch_or(STATUS_FRAGMENTED_MSG, std::memory_order_relaxed);
                     metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
-                    in_tail = control->in_tail.load(std::memory_order_acquire);
-                    continue;
+                    control->in_tail.store(in_head, std::memory_order_release);
+                    break;
                 }
 
-                if (header.length > MAX_MESSAGE_SIZE + sizeof(Message)) {
-                    control->status_flags.fetch_or(STATUS_FRAGMENTED_MSG, std::memory_order_relaxed);
-                    control->in_tail.store((in_tail + header.length) % IN_BUFFER_SIZE, std::memory_order_release);
-                    metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
-                    in_tail = control->in_tail.load(std::memory_order_acquire);
-                    continue;
-                }
-
-                // Extract OSC payload (skip message header)
+                // OSC payload follows the header; the length bounds above
+                // guarantee payload_size <= MAX_MESSAGE_SIZE.
                 uint32_t payload_size = header.length - sizeof(Message);
-
-                // Validate payload size
-                if (payload_size > MAX_MESSAGE_SIZE) {
-                    control->in_tail.store((in_tail + header.length) % IN_BUFFER_SIZE, std::memory_order_release);
-                    metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
-                    in_tail = control->in_tail.load(std::memory_order_acquire);
-                    continue;
-                }
 
                 // Gap detection: check for missing messages
                 int32_t prev_seq = last_in_sequence.load(std::memory_order_relaxed);

@@ -227,8 +227,16 @@ fn transport_code(ev: TransportEvent) -> (i32, f64) {
 
 // ── C ABI ────────────────────────────────────────────────────────────────────
 
-/// Create the MIDI subsystem. Returns an owning pointer; free with
-/// [`ss_midi_destroy`]. The callbacks and `ctx` must remain valid until then.
+/// Run `f`, catching any panic so it cannot unwind across a C ABI or OS
+/// callback boundary (which aborts the whole engine process). MIDI is
+/// best-effort: on a panic the operation is dropped and the subsystem stays
+/// alive (a poisoned mutex then disables MIDI rather than killing audio).
+fn no_unwind<T>(default: T, f: impl FnOnce() -> T) -> T {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or(default)
+}
+
+/// Create the MIDI subsystem. Returns an owning pointer (null on failure); free
+/// with [`ss_midi_destroy`]. The callbacks and `ctx` must remain valid until then.
 #[no_mangle]
 pub extern "C" fn ss_midi_create(
     ctx: *mut c_void,
@@ -236,36 +244,40 @@ pub extern "C" fn ss_midi_create(
     clock: ClockFn,
     transport: TransportFn,
 ) -> *mut SsMidi {
-    let host = Host {
-        ctx,
-        emit,
-        clock,
-        transport,
-    };
+    no_unwind(std::ptr::null_mut(), || {
+        let host = Host {
+            ctx,
+            emit,
+            clock,
+            transport,
+        };
 
-    let input = Arc::new(Mutex::new(InputState::default()));
+        let input = Arc::new(Mutex::new(InputState::default()));
 
-    let in_state = input.clone();
-    let on_input: InputCallback = Arc::new(move |norm: &str, raw: &str, ts: u64, bytes: &[u8]| {
-        handle_input(&host, &in_state, norm, raw, ts, bytes);
-    });
-    let io = Arc::new(Mutex::new(MidiIo::new("SuperSonic", on_input)));
+        // The input callback runs inside the OS MIDI stack's callback frame
+        // (CoreMIDI read proc / WinRT handler), so it must never unwind.
+        let in_state = input.clone();
+        let on_input: InputCallback = Arc::new(move |norm: &str, raw: &str, ts: u64, bytes: &[u8]| {
+            no_unwind((), || handle_input(&host, &in_state, norm, raw, ts, bytes));
+        });
+        let io = Arc::new(Mutex::new(MidiIo::new("SuperSonic", on_input)));
 
-    // Native hot-swap: the OS device-change notification (WinRT DeviceWatcher /
-    // CoreMIDI notify / ALSA announce) re-enumerates and diff-broadcasts
-    // `/midi/ports` directly — no JUCE, no audio-thread, no polling.
-    let watch_host = host;
-    let watch_io = io.clone();
-    let on_change: crate::watcher::OnChange =
-        Arc::new(move || refresh_and_broadcast(&watch_host, &watch_io));
-    let watcher = crate::watcher::Watcher::new(on_change);
+        // Native hot-swap: the OS device-change notification (WinRT DeviceWatcher /
+        // CoreMIDI notify / ALSA announce) re-enumerates and diff-broadcasts
+        // `/midi/ports` directly — no JUCE, no audio-thread, no polling.
+        let watch_host = host;
+        let watch_io = io.clone();
+        let on_change: crate::watcher::OnChange =
+            Arc::new(move || no_unwind((), || refresh_and_broadcast(&watch_host, &watch_io)));
+        let watcher = crate::watcher::Watcher::new(on_change);
 
-    Box::into_raw(Box::new(SsMidi {
-        _watcher: watcher,
-        host,
-        io,
-        input,
-    }))
+        Box::into_raw(Box::new(SsMidi {
+            _watcher: watcher,
+            host,
+            io,
+            input,
+        }))
+    })
 }
 
 /// Destroy the subsystem: closes all ports.
@@ -275,7 +287,7 @@ pub unsafe extern "C" fn ss_midi_destroy(handle: *mut SsMidi) {
         return;
     }
     // Box dropped here → `io` drops → all midir connections close.
-    drop(Box::from_raw(handle));
+    no_unwind((), || drop(Box::from_raw(handle)));
 }
 
 /// Feed one decoded `/midi/*` OSC packet (the C++ seam forwards these off the
@@ -287,9 +299,11 @@ pub unsafe extern "C" fn ss_midi_handle_osc(handle: *mut SsMidi, data: *const u8
     }
     let me = &*handle;
     let bytes = slice::from_raw_parts(data, len as usize);
-    if let Some(cmd) = decode_out(bytes) {
-        me.handle(cmd);
-    }
+    no_unwind((), || {
+        if let Some(cmd) = decode_out(bytes) {
+            me.handle(cmd);
+        }
+    });
 }
 
 /// Emit a fresh `/midi/ports.reply` to the caller — used by the C++ seam to send
@@ -299,7 +313,8 @@ pub unsafe extern "C" fn ss_midi_emit_ports(handle: *mut SsMidi) {
     if handle.is_null() {
         return;
     }
-    (*handle).reply_ports();
+    let me = &*handle;
+    no_unwind((), || me.reply_ports());
 }
 
 /// Re-enumerate devices and, only if the port list actually changed, broadcast
@@ -329,5 +344,5 @@ pub unsafe extern "C" fn ss_midi_refresh(handle: *mut SsMidi) {
         return;
     }
     let me = &*handle;
-    refresh_and_broadcast(&me.host, &me.io);
+    no_unwind((), || refresh_and_broadcast(&me.host, &me.io));
 }

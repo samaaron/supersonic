@@ -82,7 +82,12 @@ inline shm_handle shm_create(const string& name, size_t size) {
     }
 #else
     string posix_name = "/" + name;
-    h.fd = ::shm_open(posix_name.c_str(), O_CREAT | O_RDWR, 0666);
+    // 0600 + O_EXCL: the segment carries ring cursors the engine dereferences,
+    // so only the owning user may map it, and a pre-existing segment (stale or
+    // planted by another local user under the predictable name) is never
+    // silently adopted — creation fails instead. Callers remove their own
+    // leftovers first via shm_remove()/cleanup().
+    h.fd = ::shm_open(posix_name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
     if (h.fd < 0)
         throw std::runtime_error("shm_open(create) failed for " + name);
     if (ftruncate(h.fd, static_cast<off_t>(size)) < 0) {
@@ -442,10 +447,21 @@ public:
         shmem_name(make_shmem_name(port_number)),
         handle(shm_open_existing(shmem_name))
     {
+        // Size check before touching any field: a foreign or truncated segment
+        // must not be dereferenced via header offsets. On throw the destructor
+        // never runs, so the mapping is released here.
+        if (handle.size < SEGMENT_SIZE) {
+            shm_close(handle);
+            throw std::runtime_error(
+                "Shared memory segment smaller than expected — stale or foreign segment?");
+        }
+
         auto* header = static_cast<shm_segment_header*>(handle.ptr);
-        if (header->magic != shm_segment_header::MAGIC)
+        if (header->magic != shm_segment_header::MAGIC) {
+            shm_close(handle);
             throw std::runtime_error(
                 "Invalid shared memory magic — is the audio engine running?");
+        }
 
         // Acquire pairs with the creator's release before the MAGIC store, so
         // observing MAGIC implies a fully-published header.

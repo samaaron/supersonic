@@ -71,6 +71,8 @@ add_executable(SuperSonicNativeTests
     test_event_scheduler.cpp
     test_midi_clock_gen.cpp
     test_midi_clock_out.cpp
+    test_in_ring_drain.cpp
+    test_server_shm_security.cpp
     OscTestUtils.cpp
     EngineFixture.cpp
     FakeLinkPeerProcess.cpp

@@ -121,7 +121,8 @@ pub fn decode_out(data: &[u8]) -> Option<OutCommand> {
             let bytes = if let Some(OscArg::Blob(b)) = a.get(1) {
                 b.clone()
             } else {
-                a[1..]
+                a.get(1..)
+                    .unwrap_or(&[])
                     .iter()
                     .filter_map(|x| x.as_i32())
                     .map(|v| (v & 0xff) as u8)
@@ -332,6 +333,22 @@ mod tests {
         assert_eq!(
             decode_out(&bytes),
             Some(OutCommand::SendRaw { port: "p".into(), bytes: vec![0x90, 60, 64] })
+        );
+    }
+
+    #[test]
+    fn raw_and_sysex_with_missing_args_decode_to_none() {
+        // Arity must be checked before the byte-collection slice: a bare
+        // address with no args reaches the engine from arbitrary OSC clients
+        // and must be rejected, not panic (a panic would unwind across the
+        // C ABI and abort the host process).
+        for addr in ["/midi/out/raw", "/midi/out/sysex"] {
+            assert_eq!(decode_out(&osc::encode(addr, &[])), None);
+        }
+        // Port but no data bytes is well-formed: an empty send.
+        assert_eq!(
+            decode_out(&osc::encode("/midi/out/raw", &[OscArg::Str("p".into())])),
+            Some(OutCommand::SendRaw { port: "p".into(), bytes: vec![] })
         );
     }
 
