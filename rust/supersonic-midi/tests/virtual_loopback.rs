@@ -27,7 +27,7 @@ fn input_loopback_via_virtual_port() {
     let sink = got.clone();
     let mut io = MidiIo::new(
         "SuperSonic-test",
-        Arc::new(move |port: &str, _ts, bytes: &[u8]| {
+        Arc::new(move |port: &str, _raw: &str, _ts, bytes: &[u8]| {
             sink.lock().unwrap().push((port.to_string(), bytes.to_vec()));
         }),
     );
@@ -61,7 +61,7 @@ fn output_loopback_via_virtual_port() {
         )
         .unwrap();
 
-    let mut io = MidiIo::new("SuperSonic-test", Arc::new(|_, _, _: &[u8]| {}));
+    let mut io = MidiIo::new("SuperSonic-test", Arc::new(|_, _, _, _: &[u8]| {}));
     io.refresh();
     assert!(io.enable_output("ss-loop-out", true), "open virtual output port");
 

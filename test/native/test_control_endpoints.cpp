@@ -43,6 +43,21 @@ TEST_CASE("link control commands route through the ingress to their handlers",
     expectReply(fx, "/clock/time/now/get", "/clock/time/now.reply");
 }
 
+// The optional <timeline> segment routes /clock/<tl>/<verb> to a timeline:
+// omitted ⇒ link (flat reply, back-compat); "link" echoes into the reply
+// address; "midi" with no clocking port resolves to a 60-BPM placeholder and
+// still replies; "timelines/get" enumerates. midi:<handle> content (both port
+// names) is covered by the SuperClock unit tests.
+TEST_CASE("clock timeline routing and enumerate",
+          "[control][clock][timeline]") {
+    EngineFixture fx;
+    expectReply(fx, "/clock/tempo/get",       "/clock/tempo.reply");        // flat (link)
+    expectReply(fx, "/clock/link/tempo/get",  "/clock/link/tempo.reply");   // explicit link
+    expectReply(fx, "/clock/midi/tempo/get",  "/clock/midi/tempo.reply");   // placeholder
+    expectReply(fx, "/clock/midi/transport/get", "/clock/midi/transport.reply");
+    expectReply(fx, "/clock/timelines/get",   "/clock/timelines.reply");    // enumerate
+}
+
 // /supersonic/notify is device-free (it registers a notify target and replies),
 // so it pins the /supersonic dispatch + reply path headless. The device/driver
 // commands need a real device manager and are covered by the device-management

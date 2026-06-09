@@ -27,8 +27,12 @@ winrt = ["midir/winrt"]
 # natively, Web MIDI on wasm). Vendored from a patched fork (adds webmidi
 # `send_at`); the path is finalised to a submodule/vendor dir in the build-wiring
 # step. Native target only for now; the wasm target is added with the web seam.
+# coremidi_send_timestamped: stamp outgoing CoreMIDI packets with the host time
+# at send (instead of 0 = "now"). The receiver then gets a precise hardware
+# timestamp, so the engine's pulse anchoring uses real pulse times rather than
+# jittery callback-dispatch time — and it tightens our own clock-OUT too.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-midir = { path = "../../external/midir" }
+midir = { path = "../../external/midir", features = ["coremidi_send_timestamped"] }
 
 # Hot-swap watcher (src/watcher.rs) device-change sources, per OS. These reuse
 # the same crates midir already depends on, so they add no new transitive trees.

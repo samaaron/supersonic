@@ -33,10 +33,15 @@ public:
     void refreshDevices();
 
 private:
-    // ss_midi_* host callbacks (ctx = this).
+    // ss_midi_* host callbacks (ctx = this). clock/transport carry the
+    // normalised port handle + raw OS name (length-delimited, not NUL-term).
     static void    emitCb(void* ctx, int32_t kind, const uint8_t* osc, uint32_t len);
-    static void    tempoCb(void* ctx, double bpm);
-    static void    transportCb(void* ctx, int32_t kind, double beat);
+    static void    clockCb(void* ctx, const uint8_t* norm, uint32_t normLen,
+                           const uint8_t* raw, uint32_t rawLen, uint64_t tsUs);
+    static void    transportCb(void* ctx, const uint8_t* norm, uint32_t normLen,
+                               const uint8_t* raw, uint32_t rawLen, int32_t kind, double beat);
+    // Broadcast a /clock/timelines push when the timeline set changes.
+    void           broadcastTimelines();
 
     SsMidi*     mMidi   = nullptr;
     OscEgress*  mEgress = nullptr;

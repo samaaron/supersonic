@@ -2,9 +2,13 @@
  * test_superclock.cpp — SuperClock state-machine tests.
  */
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "src/SuperClock.h"
 #include "src/native/WallClock.h"
@@ -278,4 +282,240 @@ TEST_CASE("SuperClock: resetAudioThreadTime publishes a usable NTP immediately",
     SuperClock sc;
     sc.resetAudioThreadTime(0.0, 48000.0);
     CHECK(std::abs(sc.now() - wallClockNTP()) < 0.01);
+}
+
+// ─── MIDI follower timelines ─────────────────────────────────────────────
+
+TEST_CASE("SuperClock: midi timeline claim is idempotent and slot-stable",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    const int a = sc.claimMidiTimeline("portA", "Port A");
+    CHECK(a == 1);
+    CHECK(sc.claimMidiTimeline("portA", "Port A") == a);          // idempotent
+    CHECK(sc.resolveTimeline("midi:portA") == a);
+    CHECK(sc.resolveTimeline("midi:portB") == -1);      // not claimed
+    CHECK(sc.claimMidiTimeline("portB", "Port B") == 2);
+    CHECK(sc.claimMidiTimeline("", "") == -1);              // empty name rejected
+}
+
+TEST_CASE("SuperClock: midi registry is bounded at SC_MAX_TIMELINES",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    for (int i = 1; i <= SC_MAX_TIMELINES; ++i)
+        CHECK(sc.claimMidiTimeline(("p" + std::to_string(i)).c_str(), "raw") == i);
+    CHECK(sc.claimMidiTimeline("overflow", "Overflow") == -1);      // registry full
+}
+
+TEST_CASE("SuperClock: resolveTimeline maps names to ids", "[SuperClock][midi]") {
+    SuperClock sc;
+    CHECK(sc.resolveTimeline("") == 0);                 // link by default
+    CHECK(sc.resolveTimeline("link") == 0);
+    CHECK(sc.resolveTimeline("midi:nope") == -1);       // unclaimed → placeholder
+    const int a = sc.claimMidiTimeline("portA", "Port A");
+    CHECK(sc.resolveTimeline("midi:portA") == a);
+    CHECK(sc.resolveTimeline("midi") == a);             // bare midi → primary
+}
+
+TEST_CASE("SuperClock: midi tempo feed sets bpm and advances beats",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    sc.setMidiTimelineTempo(id, 140.0);
+    CHECK(sc.timelineBpm(id) == Catch::Approx(140.0));
+
+    const int64_t t = sc.linkClockMicros();
+    const double b0 = sc.timelineBeatAtLinkTime(id, t, 4.0);
+    const double b1 = sc.timelineBeatAtLinkTime(id, t + 1'000'000, 4.0);  // +1s
+    CHECK(b1 - b0 == Catch::Approx(140.0 / 60.0).epsilon(1e-6));          // 140 BPM
+
+    // time_at_beat is the inverse of beat_at_time.
+    const int64_t back = sc.timelineTimeAtBeatLinkMicros(id, b1, 4.0);
+    CHECK(static_cast<double>(back) == Catch::Approx(t + 1'000'000).epsilon(1e-6));
+}
+
+TEST_CASE("SuperClock: midi tempo change preserves the current beat",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    sc.setMidiTimelineTempo(id, 120.0);
+    const double before = sc.timelineBeatAtLinkTime(id, sc.linkClockMicros(), 4.0);
+    sc.setMidiTimelineTempo(id, 174.0);                 // jump tempo
+    const double after = sc.timelineBeatAtLinkTime(id, sc.linkClockMicros(), 4.0);
+    CHECK(after == Catch::Approx(before).margin(0.05)); // no beat discontinuity
+}
+
+TEST_CASE("SuperClock: midi transport drives playing state", "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    CHECK_FALSE(sc.timelineIsPlaying(id));
+    sc.setMidiTimelineTransport(id, /*START*/ 0, 0.0);
+    CHECK(sc.timelineIsPlaying(id));
+    sc.setMidiTimelineTransport(id, /*STOP*/ 2, 0.0);
+    CHECK_FALSE(sc.timelineIsPlaying(id));
+}
+
+TEST_CASE("SuperClock: midi beat tracks the pulse count", "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    const int64_t ts0 = sc.linkClockMicros();                          // first pulse ~now
+    const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6); // 120 BPM pulse
+    const int pulses = 48;                                             // 48 pulses -> beat 2.0
+    for (int k = 0; k < pulses; ++k)
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(ts0 + static_cast<int64_t>(k) * iv));
+    // The beat is the exact count: querying at the last pulse's own timestamp
+    // (pulse 48) gives 48/24 = 2.0.
+    const double beat = sc.timelineBeatAtLinkTime(id, ts0 + static_cast<int64_t>(pulses - 1) * iv, 4.0);
+    CHECK(beat == Catch::Approx(2.0).margin(0.02));
+    CHECK(sc.timelineBpm(id) == Catch::Approx(120.0).margin(0.5));     // tempo recovered
+}
+
+TEST_CASE("SuperClock: midi tempo de-jitters a wobbly clock",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    const int64_t t0 = sc.linkClockMicros();
+    const double iv = 60.0 / 120.0 / 24.0 * 1e6;          // 120 BPM nominal interval
+    // Feed 96 pulses whose arrivals alternate ±20% around the true interval
+    // (bunched OS delivery). The tempo read-out must stay steady at ~120 BPM.
+    double t = static_cast<double>(t0) - 96.0 * iv;
+    for (int k = 1; k <= 96; ++k) {
+        t += iv * (k % 2 ? 1.20 : 0.80);
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(t));
+    }
+    CHECK(sc.timelineBpm(id) == Catch::Approx(120.0).margin(1.0));
+}
+
+TEST_CASE("SuperClock: midi tempo only interpolates between pulses",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    const int64_t t0 = sc.linkClockMicros();
+    const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6);
+    for (int k = 1; k <= 48; ++k)
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(t0 - (48 - k) * iv));
+    // Extrapolating one pulse-interval past the last pulse adds exactly 1/24 beat
+    // at the ~120 BPM tempo.
+    const double here  = sc.timelineBeatAtLinkTime(id, t0, 4.0);
+    const double ahead = sc.timelineBeatAtLinkTime(id, t0 + iv, 4.0);
+    CHECK(ahead - here == Catch::Approx(1.0 / 24.0).margin(1e-3));
+}
+
+// Accuracy test (hidden by default — real-time, busy-waits a CPU; run with
+// `SuperSonicNativeTests "[accuracy]"`). Drives a real accelerando and measures
+// the engine's beat against ground truth (pulse_count/24), alongside a model
+// that integrates the tempo read-out (which drifts).
+TEST_CASE("SuperClock: midi beat is drift-free through a live tempo ramp",
+          "[SuperClock][midi][accuracy][.]") {
+    using namespace std::chrono;
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("ramp", "Ramp");
+
+    const double startBpm = 120.0, endBpm = 180.0, rampSecs = 3.0;
+    const auto   wall0 = steady_clock::now();
+    int64_t pulses = 0;
+    double  maxDrift = 0.0;
+
+    // For comparison: integrate the tempo read-out over elapsed time instead of
+    // counting pulses.
+    double  naiveBeat = 0.0;
+    int64_t naivePrevUs = sc.linkClockMicros();
+    double  maxNaiveDrift = 0.0;
+
+    int64_t nextUs = sc.linkClockMicros();
+    for (;;) {
+        const double el = duration<double>(steady_clock::now() - wall0).count();
+        if (el >= rampSecs) break;
+        const double trueBpm = startBpm + (endBpm - startBpm) * (el / rampSecs);
+        nextUs += static_cast<int64_t>(60.0 / trueBpm / 24.0 * 1e6);
+        while (sc.linkClockMicros() < nextUs) { /* busy-wait to the pulse instant */ }
+
+        ++pulses;
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(sc.linkClockMicros()));
+
+        const int64_t qn        = sc.linkClockMicros();
+        const double  trueBeat  = static_cast<double>(pulses) / 24.0;
+        const double  engineBeat = sc.timelineBeatAtLinkTime(id, qn, 4.0);
+        maxDrift = std::max(maxDrift, std::abs(engineBeat - trueBeat));
+
+        naiveBeat += static_cast<double>(qn - naivePrevUs) * 1e-6 * sc.timelineBpm(id) / 60.0;
+        naivePrevUs = qn;
+        maxNaiveDrift = std::max(maxNaiveDrift, std::abs(naiveBeat - trueBeat));
+    }
+
+    WARN("ramp over " << pulses << " pulses (120->180 BPM, " << rampSecs << "s): "
+         "pulse-anchored max drift = " << (maxDrift * 1000.0) << " milli-beats; "
+         "naive-integrated max drift = " << (maxNaiveDrift * 1000.0) << " milli-beats");
+    CHECK(maxDrift < 0.01);                       // pulse-anchored: ~0 drift
+    CHECK(maxNaiveDrift > maxDrift * 5.0);        // the integrating model drifts
+}
+
+// Models a `use_bpm :midi / sample; sleep 1` live_loop across a 100->300 BPM step
+// landing mid-beat-4. The spider commits each beat's play timestamp ~half a beat
+// early via time_at_beat (look-ahead), so we sample the prediction there. Prints
+// the gap sequence (~600 ms gaps, a short transition, then ~200 ms).
+TEST_CASE("SuperClock: midi beat-fire spread across a 100->300 step",
+          "[SuperClock][midi][accuracy][.]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("clk", "Clk");
+
+    std::vector<int64_t> pulseTs;
+    int64_t t = sc.linkClockMicros();
+    auto feed = [&](double bpm, int pulses) {
+        const int64_t iv = static_cast<int64_t>(60.0 / bpm / 24.0 * 1e6);
+        for (int p = 0; p < pulses; ++p) { pulseTs.push_back(t); t += iv; }
+    };
+    feed(100.0, 90);    // 3.75 beats at 100 BPM
+    feed(300.0, 200);   // big step landing mid-beat-4
+
+    const double lookBeats = 0.5;  // commit each beat ~half a beat ahead
+    std::vector<double> fire;
+    int nextBeat = 1;
+    for (size_t i = 0; i < pulseTs.size(); ++i) {
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(pulseTs[i]));
+        const double beatNow = sc.timelineBeatAtLinkTime(id, pulseTs[i], 4.0);
+        while (nextBeat <= 9 && beatNow >= nextBeat - lookBeats) {
+            fire.push_back(static_cast<double>(sc.timelineTimeAtBeatLinkMicros(id, nextBeat, 4.0)));
+            ++nextBeat;
+        }
+    }
+    REQUIRE(fire.size() >= 8);
+    std::string gaps;
+    for (size_t n = 1; n < fire.size(); ++n)
+        gaps += std::to_string(std::llround((fire[n] - fire[n - 1]) / 1000.0)) + " ";
+    WARN("beat-fire gaps (ms) across 100->300 step: " << gaps
+         << "  [expect ~600 x3, transition, ~200 x...; any gap <200 = overshoot]");
+    // Steady-state sanity: the last few gaps should be the true 300 BPM (~200 ms).
+    const double tail = (fire[fire.size() - 1] - fire[fire.size() - 3]) / 2.0 / 1000.0;
+    CHECK(tail == Catch::Approx(200.0).margin(8.0));
+}
+
+TEST_CASE("SuperClock: primary follows the lowest active slot", "[SuperClock][midi]") {
+    SuperClock sc;
+    const int a = sc.claimMidiTimeline("portA", "Port A");
+    const int b = sc.claimMidiTimeline("portB", "Port B");
+    CHECK(sc.resolveTimeline("midi") == a);             // lowest slot is primary
+    sc.freeMidiTimeline(a);
+    CHECK(sc.resolveTimeline("midi") == b);             // promotes next slot
+}
+
+TEST_CASE("SuperClock: unknown timeline ids read a 60-BPM placeholder",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    CHECK(sc.timelineBpm(-1) == Catch::Approx(60.0));
+    CHECK(sc.timelineBpm(99) == Catch::Approx(60.0));
+    CHECK_FALSE(sc.timelineIsPlaying(-1));
+    CHECK(sc.timelineBeatAtLinkTime(-1, sc.linkClockMicros(), 4.0) == Catch::Approx(0.0));
+}
+
+TEST_CASE("SuperClock: listTimelines reports link plus active midi rows",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    auto only = sc.listTimelines();
+    REQUIRE(only.size() == 1);
+    CHECK(only[0].name == "link");
+    sc.claimMidiTimeline("portA", "Port A");
+    auto two = sc.listTimelines();
+    REQUIRE(two.size() == 2);
+    CHECK(two[1].name == "midi:portA");
+    CHECK(two[1].primary);
 }

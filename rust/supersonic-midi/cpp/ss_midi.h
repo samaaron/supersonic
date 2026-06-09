@@ -37,17 +37,28 @@ typedef struct SsMidi SsMidi;
  * for the duration of the call. */
 typedef void (*ss_midi_emit_fn)(void* ctx, int32_t kind, const uint8_t* osc, uint32_t len);
 
-/* Push a distilled clock-in BPM to SuperClock. */
-typedef void (*ss_midi_tempo_fn)(void* ctx, double bpm);
+/* One MIDI clock pulse (0xF8) for an input port → SuperClock, which anchors the
+ * timeline beat on the pulse count (tempo is estimated engine-side).
+ * `norm`/`norm_len` is the normalised handle the engine keys the timeline on;
+ * `raw`/`raw_len` is the friendly OS device name for display; `ts_us` is the
+ * pulse's OS timestamp (µs). Strings not NUL-terminated; valid only during the
+ * call. */
+typedef void (*ss_midi_clock_fn)(void* ctx,
+                                 const uint8_t* norm, uint32_t norm_len,
+                                 const uint8_t* raw, uint32_t raw_len,
+                                 uint64_t ts_us);
 
-/* Transport intent for SuperClock. `beat` is the target beat for START/POSITION,
- * -1 for CONTINUE/STOP. */
-typedef void (*ss_midi_transport_fn)(void* ctx, int32_t kind, double beat);
+/* Transport intent for SuperClock, scoped to one input port. `beat` is the
+ * target beat for START/POSITION, -1 for CONTINUE/STOP. `norm`/`raw` as above. */
+typedef void (*ss_midi_transport_fn)(void* ctx,
+                                     const uint8_t* norm, uint32_t norm_len,
+                                     const uint8_t* raw, uint32_t raw_len,
+                                     int32_t kind, double beat);
 
 /* Create the subsystem. `ctx` and the callbacks must outlive it. */
 SsMidi* ss_midi_create(void* ctx,
                        ss_midi_emit_fn emit,
-                       ss_midi_tempo_fn set_tempo,
+                       ss_midi_clock_fn clock,
                        ss_midi_transport_fn transport);
 
 /* Stop the clock thread, close all ports, free the instance. */

@@ -14,8 +14,9 @@ use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnec
 use crate::normalize::{normalize_ports, PortInfo};
 
 /// Invoked for each inbound message on midir's input thread:
-/// `(normalized_port, timestamp_us, raw_bytes)`.
-pub type InputCallback = Arc<dyn Fn(&str, u64, &[u8]) + Send + Sync + 'static>;
+/// `(normalized_port, raw_os_name, timestamp_us, raw_bytes)`. The raw OS name
+/// rides along so the engine can label a clock timeline with the friendly name.
+pub type InputCallback = Arc<dyn Fn(&str, &str, u64, &[u8]) + Send + Sync + 'static>;
 
 /// Owns all open MIDI connections plus the last-enumerated port lists.
 pub struct MidiIo {
@@ -112,10 +113,11 @@ impl MidiIo {
         };
         let cb = self.on_input.clone();
         let name = norm.to_string();
+        let raw = infos[idx].raw.clone();
         match midi_in.connect(
             &ports[idx],
             "supersonic-midi-in",
-            move |ts, bytes, _| cb(&name, ts, bytes),
+            move |ts, bytes, _| cb(&name, &raw, ts, bytes),
             (),
         ) {
             Ok(conn) => {

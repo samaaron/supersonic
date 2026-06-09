@@ -11,6 +11,7 @@
 
 #include <emscripten/emscripten.h>
 #include <atomic>
+#include <cstring>
 
 namespace {
 
@@ -143,6 +144,43 @@ int64_t SuperClock::ntpSecondsToLinkMicros(double s) const {
 void SuperClock::setTempoChangedCallback(std::function<void(double)>) {}
 void SuperClock::setNumPeersChangedCallback(std::function<void(std::size_t)>) {}
 void SuperClock::setStartStopChangedCallback(std::function<void(bool, int64_t)>) {}
+
+// ─── MIDI follower timelines (no MIDI subsystem in WASM) ─────────────────
+// Only the Link timeline (id 0) exists; everything else is a 60-BPM stub.
+int  SuperClock::claimMidiTimeline(const char*, const char*) { return -1; }
+void SuperClock::freeMidiTimeline(int)                {}
+int  SuperClock::resolveTimeline(const char* name) const {
+    return (!name || !*name || std::strcmp(name, "link") == 0) ? 0 : -1;
+}
+int  SuperClock::resolveOrClaimTimeline(const char* name) { return resolveTimeline(name); }
+void SuperClock::midiTimelinePulse(int, uint64_t) {}
+void SuperClock::setMidiTimelineTempo(int, double)         {}
+void SuperClock::setMidiTimelineTransport(int, int, double) {}
+void SuperClock::tickMidiStaleness()                       {}
+
+double SuperClock::timelineBpm(int id) const { return id == 0 ? getBpm() : 60.0; }
+bool   SuperClock::timelineIsPlaying(int id) const { return id == 0 ? isPlaying() : false; }
+int64_t SuperClock::timelineTimeForIsPlayingMicros(int id) const {
+    return id == 0 ? timeForIsPlayingMicros() : 0;
+}
+double SuperClock::timelineBeatAtLinkTime(int id, int64_t t, double q) const {
+    return id == 0 ? beatAtLinkTime(t, q) : 0.0;
+}
+double SuperClock::timelinePhaseAtLinkTime(int id, int64_t t, double q) const {
+    return id == 0 ? phaseAtLinkTime(t, q) : 0.0;
+}
+int64_t SuperClock::timelineTimeAtBeatLinkMicros(int id, double b, double q) const {
+    return id == 0 ? timeAtBeatLinkMicros(b, q) : 0;
+}
+std::vector<SuperClock::TimelineInfo> SuperClock::listTimelines() const {
+    TimelineInfo link;
+    link.name = "link";
+    link.raw = "link";
+    link.bpm = getBpm();
+    link.clocking = true;
+    return { link };
+}
+void SuperClock::setTimelinesChangedCallback(std::function<void()>) {}
 
 void SuperClock::setLinkVisibility(LinkVisibility)            {}
 SuperClock::LinkVisibility SuperClock::getLinkVisibility() const {

@@ -74,6 +74,69 @@ public:
     double  phaseAtLinkTime(int64_t timeMicros, double quantum) const;
     int64_t timeAtBeatLinkMicros(double beat, double quantum) const;
 
+    // ─── MIDI-clock follower timelines (native; stubs on WASM) ───────────
+    // SuperClock owns a fixed registry of midi:<port> follower timelines,
+    // separate from the Link timeline. The MIDI subsystem feeds tempo /
+    // transport per port; OSC clients read them via /clock/midi:<port>/*.
+    // Slot assignment, primary selection, and staleness all live here.
+    //
+    // Timeline id: 0 = Link (routes to the getters/RPC above); 1..K =
+    // midi slots. Beat math for midi timelines is in the Link-clock micros
+    // domain, so OSC RPCs answer identically to the Link timeline.
+
+    // Find-or-allocate the slot for a port; idempotent. `normalized` is the
+    // OSC-safe handle (match key + /clock/midi:<handle>/ address segment);
+    // `raw` is the original OS device name, kept for display. Returns 1..K,
+    // or -1 if the registry is full. Fed off the RT thread (MIDI subsystem).
+    int  claimMidiTimeline(const char* normalized, const char* raw);
+    void freeMidiTimeline(int id);
+
+    // Resolve a /clock/<tl>/ name to an id: "" / "link" → 0; "midi" (bare) →
+    // the primary midi slot; "midi:<port>" → that port's slot. Returns -1 for an
+    // unclaimed port or a malformed name (read methods treat id -1 as a 60 BPM
+    // placeholder; resolve never auto-claims — claims happen on the feed path).
+    int  resolveTimeline(const char* name) const;
+
+    // Write-path variant: resolves like the above, but a "midi:<port>" name
+    // claims the slot if it hasn't clocked yet (so the OSC manual-set/transport
+    // path doesn't special-case the midi: grammar). Bare "midi" can't claim.
+    int  resolveOrClaimTimeline(const char* name);
+
+    // Live clock feed: one 0xF8 pulse at OS timestamp `tsUs`. The beat is the
+    // exact pulse count; the tempo is smoothed separately for interpolation.
+    void midiTimelinePulse(int id, uint64_t tsUs);
+    // Manual tempo set (OSC / unfed placeholder): advances beat continuously;
+    // a live clock's pulses override it.
+    void setMidiTimelineTempo(int id, double bpm);
+    void setMidiTimelineTransport(int id, int kind, double beat);
+
+    // Staleness sweep (called periodically off the RT thread): freezes
+    // tempo + marks stale after a feed gap, frees the slot after grace.
+    void tickMidiStaleness();
+
+    // Timeline-parameterised reads (id 0 = Link → the methods above).
+    double  timelineBpm(int id) const;
+    bool    timelineIsPlaying(int id) const;
+    int64_t timelineTimeForIsPlayingMicros(int id) const;
+    double  timelineBeatAtLinkTime(int id, int64_t timeMicros, double quantum) const;
+    double  timelinePhaseAtLinkTime(int id, int64_t timeMicros, double quantum) const;
+    int64_t timelineTimeAtBeatLinkMicros(int id, double beat, double quantum) const;
+
+    // Enumeration snapshot for /clock/timelines/get.
+    struct TimelineInfo {
+        std::string name;            // wire identity: "link" | "midi:<handle>"
+        std::string raw;             // original OS device name (display); "link" for Link
+        double      bpm{0.0};
+        bool        clocking{false};
+        bool        stale{false};
+        bool        primary{false};
+    };
+    std::vector<TimelineInfo> listTimelines() const;
+
+    // Fired (off RT) when the timeline set changes — add / remove / stale /
+    // primary. At most one callback; setting replaces. Never fires on WASM.
+    void setTimelinesChangedCallback(std::function<void()> cb);
+
     // ─── Link event callbacks (registered by app code; fired on Link's
     // network thread). At most one callback per kind; setting replaces.
 
@@ -309,6 +372,12 @@ private:
     // steady micros and NTP seconds.
     double  linkMicrosToNtpSeconds(int64_t linkMicros) const;
     int64_t ntpSecondsToLinkMicros(double ntpSeconds) const;
+
+    // Native-only midi-registry helpers (SuperClockNative.cpp); not
+    // referenced on WASM, so intentionally left undefined there. Callers
+    // must hold mImpl->midiMtx.
+    int  midiSlotForPortLocked(const char* port) const;  // 0 if no slot
+    void recomputePrimaryLocked();
 };
 
 // Active SuperClock pointer for the /superclock_get OSC verb (queryable

@@ -7,24 +7,24 @@
 
 #include "OscEgress.h"
 #include "src/SuperClock.h"
+#include "src/timeline_osc.h"
 #include "ss_midi.h"
 #include "scheduler/MidiClockOut.h"
 #include "osc/OscReceivedElements.h"
+#include "osc/OscOutboundPacketStream.h"
 
 #include <cstring>
 #include <string>
 
-namespace {
-// Quantum only affects phase wrapping; the generated/derived clock uses the
-// absolute beat, so any fixed value works. Match the engine's default bar.
-constexpr double kQuantum = 4.0;
-} // namespace
-
 void MidiControl::init(OscEgress* egress, SuperClock* clock) {
     mEgress = egress;
     mClock  = clock;
+    // Push /clock/timelines whenever the timeline set changes (add/remove/
+    // stale/primary). Fires off the RT thread (MIDI feed / staleness worker).
+    if (mClock)
+        mClock->setTimelinesChangedCallback([this]() { broadcastTimelines(); });
     if (!mMidi) {
-        mMidi = ss_midi_create(this, &MidiControl::emitCb, &MidiControl::tempoCb,
+        mMidi = ss_midi_create(this, &MidiControl::emitCb, &MidiControl::clockCb,
                                &MidiControl::transportCb);
     }
 }
@@ -107,31 +107,39 @@ void MidiControl::emitCb(void* ctx, int32_t kind, const uint8_t* osc, uint32_t l
         self->mEgress->broadcastMidiNotify(osc, len);
 }
 
-void MidiControl::tempoCb(void* ctx, double bpm) {
-    auto* self = static_cast<MidiControl*>(ctx);
-    if (self->mClock) self->mClock->setBpm(bpm, self->mClock->now());
-}
-
-void MidiControl::transportCb(void* ctx, int32_t kind, double beat) {
+// One 0xF8 pulse feeds the port's own midi timeline (claimed by normalised
+// handle, labelled with the raw OS name) — NOT the Link timeline. claim is
+// idempotent, so per-pulse calls just resolve the existing slot; the engine
+// anchors the beat on the pulse count.
+void MidiControl::clockCb(void* ctx, const uint8_t* norm, uint32_t normLen,
+                          const uint8_t* raw, uint32_t rawLen, uint64_t tsUs) {
     auto* self = static_cast<MidiControl*>(ctx);
     if (!self->mClock) return;
-    const double now = self->mClock->now();
-    switch (kind) {
-    case SS_MIDI_TRANSPORT_START:
-        self->mClock->forceBeatAtTime(0.0, now, kQuantum);
-        self->mClock->setIsPlaying(true, now);
-        break;
-    case SS_MIDI_TRANSPORT_CONTINUE:
-        self->mClock->setIsPlaying(true, now);
-        break;
-    case SS_MIDI_TRANSPORT_STOP:
-        self->mClock->setIsPlaying(false, now);
-        break;
-    case SS_MIDI_TRANSPORT_POSITION:
-        if (beat >= 0.0) self->mClock->forceBeatAtTime(beat, now, kQuantum);
-        break;
-    default:
-        break;
-    }
+    const std::string n(reinterpret_cast<const char*>(norm), normLen);
+    const std::string r(reinterpret_cast<const char*>(raw),  rawLen);
+    const int id = self->mClock->claimMidiTimeline(n.c_str(), r.c_str());
+    if (id > 0) self->mClock->midiTimelinePulse(id, tsUs);
+}
+
+void MidiControl::transportCb(void* ctx, const uint8_t* norm, uint32_t normLen,
+                              const uint8_t* raw, uint32_t rawLen, int32_t kind, double beat) {
+    auto* self = static_cast<MidiControl*>(ctx);
+    if (!self->mClock) return;
+    const std::string n(reinterpret_cast<const char*>(norm), normLen);
+    const std::string r(reinterpret_cast<const char*>(raw),  rawLen);
+    const int id = self->mClock->claimMidiTimeline(n.c_str(), r.c_str());
+    if (id > 0) self->mClock->setMidiTimelineTransport(id, kind, beat);
+}
+
+void MidiControl::broadcastTimelines() {
+    if (!mEgress || !mClock) return;
+    const auto tls = mClock->listTimelines();
+    char buf[2048];
+    osc::OutboundPacketStream s(buf, sizeof(buf));
+    s << osc::BeginMessage("/clock/timelines");
+    appendTimelineRows(s, tls);
+    s << osc::EndMessage;
+    mEgress->broadcastLinkNotify(reinterpret_cast<const uint8_t*>(s.Data()),
+                                 static_cast<uint32_t>(s.Size()));
 }
 

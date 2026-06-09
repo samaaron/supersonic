@@ -18,11 +18,15 @@
 #include "native/WallClock.h"
 #include "shared_memory.h"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <string>
@@ -91,6 +95,95 @@ struct SuperClock::Impl {
     // needs. Same sample-counter + slow-IIR scheme as baseNTPBits.
     double linkAudioHostBaseMicros{0.0};
     bool   linkAudioHostAnchored{false};
+
+    // ─── MIDI follower timelines (in-process registry) ───────────────────
+    // Fixed K-slot registry of midi:<port> timelines, independent of Link
+    // (which is the SuperClockState slot). All access is off the RT audio
+    // thread (MIDI subsystem feed, OSC NRT gateway, staleness worker) under
+    // midiMtx; beat math is in the Link-clock micros domain. Slot id i maps
+    // to midi[i-1] (ids are 1..SC_MAX_TIMELINES).
+    struct MidiTimeline {
+        static constexpr double kPpqn            = 24.0;
+        static constexpr double kDefaultPeriodUs = 60.0e6 / (60.0 * 24.0); // 60 BPM
+        // Tempo = MEAN of a window of inter-pulse intervals (averages out OS
+        // arrival bunching). An adaptive outlier test (deviation
+        // > kOutlierSd * window-SD) separates a real tempo STEP from ±jitter:
+        // kStepConfirm same-side outliers reset the window to the new value.
+        static constexpr int    kWin           = 48;  // window (~2 beats)
+        static constexpr double kOutlierSd     = 3.0; // step threshold in SDs
+        static constexpr int    kMinForOutlier = 10;  // samples before judging outliers
+        static constexpr int    kStepConfirm   = 3;   // same-side outliers before reset
+
+        bool        active{false};
+        bool        stale{false};
+        std::string normalized;            // OSC-safe handle: match key + address
+        std::string raw;                   // original OS device name (display)
+
+        // Beat is the exact 0xF8 count, pinned to the latest pulse
+        // (beat = pulseCount/24 at lastTsEngine). periodUs only extrapolates
+        // between/after pulses; it is never integrated into the beat.
+        int64_t     pulseCount{0};         // 0xF8s since the last transport reset
+        double      baseBeat{0.0};         // beat at pulseCount == 0 (Start=0, SPP=beat)
+        int64_t     tsToEngineUs{0};       // pulse-clock -> engine-clock offset, set once
+        bool        tsOriginSet{false};
+        std::array<double, kWin> ivBuf{};  // recent inter-pulse intervals (us)
+        int         ivCount{0}, ivHead{0};
+        double      ivSum{0.0}, ivSumSq{0.0};
+        double      periodUs{kDefaultPeriodUs}; // smoothed us per pulse (= mean ivBuf)
+        double      lastTsEngine{0.0};     // engine-time of the latest pulse (phase anchor)
+        int         pulses{0};             // 0 = none, 1 = have anchor, >=2 = locked
+        int         outlierRun{0};         // consecutive same-side step outliers
+        int         outlierSign{0};
+
+        bool        playing{false};
+        int64_t     isPlayingAtMicros{0};
+        int64_t     lastFedMicros{0};      // last pulse/transport feed
+        int64_t     wentStaleMicros{0};
+        double      lastNotifiedBpm{0.0};  // bpm at the last /clock/timelines push
+
+        double bpm()     const { return 60.0e6 / (periodUs * kPpqn); }   // derived read-out
+        double curBeat() const { return baseBeat + static_cast<double>(pulseCount) / kPpqn; }
+        double tsAtBeat(double beat)  const { return lastTsEngine + (beat - curBeat()) * kPpqn * periodUs; }
+        double beatAtTs(double tsEng) const { return curBeat() + (tsEng - lastTsEngine) / (kPpqn * periodUs); }
+
+        void ivClear() { ivCount = 0; ivHead = 0; ivSum = 0.0; ivSumSq = 0.0; }
+        void ivAdd(double iv) {
+            if (ivCount == kWin) { const double old = ivBuf[ivHead]; ivSum -= old; ivSumSq -= old * old; }
+            else ++ivCount;
+            ivBuf[ivHead] = iv; ivSum += iv; ivSumSq += iv * iv;
+            ivHead = (ivHead + 1) % kWin;
+            if (ivCount > 0) periodUs = ivSum / ivCount;
+        }
+        // Update the smoothed tempo from one inter-pulse interval (locked state).
+        void feedInterval(double iv) {
+            const double mean = ivCount > 0 ? ivSum / ivCount : iv;
+            double var = ivCount > 1 ? (ivSumSq / ivCount - mean * mean) : 0.0;
+            if (var < 0.0) var = 0.0;
+            const double sdFloor = 0.005 * mean;               // clean-clock SD floor (~0.5%)
+            if (ivCount >= kMinForOutlier
+                && std::fabs(iv - mean) > kOutlierSd * std::max(std::sqrt(var), sdFloor)) {
+                const int sign = iv > mean ? 1 : -1;           // a possible step (or glitch)
+                if (sign == outlierSign) ++outlierRun; else { outlierSign = sign; outlierRun = 1; }
+                if (outlierRun >= kStepConfirm) { ivClear(); ivAdd(iv); outlierRun = 0; } // confirmed → reset
+                // else: a lone outlier (dropout/bounce) — keep the old tempo
+            } else {
+                ivAdd(iv);
+                outlierRun = 0;
+            }
+        }
+    };
+    mutable std::mutex                          midiMtx;
+    std::array<MidiTimeline, SC_MAX_TIMELINES>  midi{};
+    int                                         primaryMidiSlot{-1};  // 1..K, or -1
+    std::function<void()>                       timelinesChangedCb;
+    void notifyTimelinesChanged() { if (timelinesChangedCb) timelinesChangedCb(); }
+    // The active midi slot for id (1..K), or nullptr if out of range / inactive.
+    // Caller must hold midiMtx. (id 0 = Link is handled by callers, not here.)
+    MidiTimeline* activeSlotLocked(int id) {
+        if (id < 1 || id > SC_MAX_TIMELINES) return nullptr;
+        auto& t = midi[id - 1];
+        return t.active ? &t : nullptr;
+    }
 
 #ifdef SUPERSONIC_LINK
     // Link starts disabled; setLinkVisibility(non-Off) flips peer
@@ -235,18 +328,23 @@ SuperClock::SuperClock() : mImpl(std::make_unique<Impl>()) {
 #ifdef SUPERSONIC_LINK
     mImpl->deferredWorker = std::thread([this] {
         for (;;) {
-            std::unique_lock<std::mutex> lk(mImpl->deferredMtx);
-            mImpl->deferredCv.wait(lk, [this] {
-                return mImpl->deferredQuit.load(std::memory_order_acquire)
-                    || mImpl->deferredLinkEnableReq.load(
-                           std::memory_order_acquire) != -1;
-            });
-            if (mImpl->deferredQuit.load(std::memory_order_acquire)) return;
-            const int req = mImpl->deferredLinkEnableReq.exchange(
-                -1, std::memory_order_acq_rel);
-            lk.unlock();
-            if (req == 1)      setLinkEnabled(true);
-            else if (req == 0) setLinkEnabled(false);
+            {
+                std::unique_lock<std::mutex> lk(mImpl->deferredMtx);
+                // Wake on a request/quit, or every ~250 ms to sweep midi
+                // timeline staleness (freeze stale tempo, free after grace).
+                mImpl->deferredCv.wait_for(lk, std::chrono::milliseconds(250), [this] {
+                    return mImpl->deferredQuit.load(std::memory_order_acquire)
+                        || mImpl->deferredLinkEnableReq.load(
+                               std::memory_order_acquire) != -1;
+                });
+                if (mImpl->deferredQuit.load(std::memory_order_acquire)) return;
+                const int req = mImpl->deferredLinkEnableReq.exchange(
+                    -1, std::memory_order_acq_rel);
+                lk.unlock();
+                if (req == 1)      setLinkEnabled(true);
+                else if (req == 0) setLinkEnabled(false);
+            }
+            tickMidiStaleness();
         }
     });
 #endif
@@ -282,6 +380,304 @@ void SuperClock::bindStateToShm(SuperClockState* region) {
     region->is_playing.store(src->is_playing.load(std::memory_order_relaxed), std::memory_order_relaxed);
     region->flags.store(src->flags.load(std::memory_order_relaxed), std::memory_order_relaxed);
     mImpl->boundState = region;
+}
+
+// ─── MIDI follower timelines (native) ────────────────────────────────────
+// Off-RT registry of midi:<port> timelines. midiMtx serialises the MIDI
+// subsystem feed, OSC reads, and the staleness worker. Beat math is in the
+// Link-clock micros domain so /clock/midi:<port>/rpc answers match Link.
+
+namespace {
+constexpr int64_t kMidiStaleMicros = 1'500'000;    // freeze tempo after 1.5 s gap
+constexpr int64_t kMidiGraceMicros = 30'000'000;   // free slot 30 s after stale
+}  // namespace
+
+int SuperClock::midiSlotForPortLocked(const char* normalized) const {
+    if (!normalized) return 0;
+    for (int i = 1; i <= SC_MAX_TIMELINES; ++i) {
+        const auto& t = mImpl->midi[i - 1];
+        if (t.active && t.normalized == normalized) return i;
+    }
+    return 0;
+}
+
+void SuperClock::recomputePrimaryLocked() {
+    // Primary = lowest-slot active non-stale timeline; else lowest active; else none.
+    int firstActive = -1;
+    for (int i = 1; i <= SC_MAX_TIMELINES; ++i) {
+        const auto& t = mImpl->midi[i - 1];
+        if (!t.active) continue;
+        if (firstActive < 0) firstActive = i;
+        if (!t.stale) { mImpl->primaryMidiSlot = i; return; }
+    }
+    mImpl->primaryMidiSlot = firstActive;
+}
+
+
+int SuperClock::claimMidiTimeline(const char* normalized, const char* raw) {
+    if (!normalized || !*normalized) return -1;
+    bool changed = false;
+    int slot;
+    {
+        std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+        slot = midiSlotForPortLocked(normalized);
+        if (slot == 0) {
+            for (int i = 1; i <= SC_MAX_TIMELINES; ++i) {
+                if (!mImpl->midi[i - 1].active) { slot = i; break; }
+            }
+            if (slot == 0) return -1;  // registry full
+            const int64_t now = linkClockMicros();
+            auto& t = mImpl->midi[slot - 1];
+            t = Impl::MidiTimeline{};
+            t.active = true;
+            t.normalized = normalized;
+            t.raw = (raw && *raw) ? raw : normalized;
+            t.lastTsEngine = static_cast<double>(now);   // beat==baseBeat until first pulse
+            t.lastFedMicros = now;
+            recomputePrimaryLocked();
+            changed = true;
+        } else if (mImpl->midi[slot - 1].stale) {
+            mImpl->midi[slot - 1].stale = false;
+            recomputePrimaryLocked();
+            changed = true;
+        }
+    }
+    if (changed) mImpl->notifyTimelinesChanged();
+    return slot;
+}
+
+void SuperClock::freeMidiTimeline(int id) {
+    if (id < 1 || id > SC_MAX_TIMELINES) return;
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+        if (mImpl->midi[id - 1].active) {
+            mImpl->midi[id - 1] = Impl::MidiTimeline{};
+            recomputePrimaryLocked();
+            changed = true;
+        }
+    }
+    if (changed) mImpl->notifyTimelinesChanged();
+}
+
+int SuperClock::resolveTimeline(const char* name) const {
+    if (!name || !*name || std::strcmp(name, "link") == 0) return 0;
+    if (std::strcmp(name, "midi") == 0) {
+        std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+        return mImpl->primaryMidiSlot;          // -1 if none active
+    }
+    if (std::strncmp(name, "midi:", 5) == 0) {
+        std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+        const int s = midiSlotForPortLocked(name + 5);
+        return s ? s : -1;                       // -1 = unclaimed port (placeholder)
+    }
+    return -1;
+}
+
+// Write-path resolver: like resolveTimeline, but a "midi:<port>" name claims the
+// slot if unseen (the registry owns the midi: grammar + claim-on-write, so the
+// OSC layer doesn't special-case it). Bare "midi" can't claim (no port).
+int SuperClock::resolveOrClaimTimeline(const char* name) {
+    if (std::strncmp(name ? name : "", "midi:", 5) == 0)
+        return claimMidiTimeline(name + 5, name + 5);
+    return resolveTimeline(name);
+}
+
+// Manual tempo set (OSC /clock/midi:<port>/tempo/set + the unfed placeholder).
+// No real pulses, so set the tempo directly and re-anchor to keep the current
+// beat continuous. A live clock's pulses (midiTimelinePulse) take over.
+void SuperClock::setMidiTimelineTempo(int id, double bpm) {
+    if (!(bpm >= 1.0)) bpm = 1.0;               // also rejects NaN
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+        auto* tp = mImpl->activeSlotLocked(id);
+        if (!tp) return;
+        auto& t = *tp;
+        const int64_t now = linkClockMicros();
+        const double beatNow = t.beatAtTs(static_cast<double>(now));
+        const double manualPeriod = 60.0e6 / (bpm * Impl::MidiTimeline::kPpqn);
+        t.ivClear(); t.ivAdd(manualPeriod);      // seed the window to the manual tempo
+        // Re-base so curBeat() maps to beatNow at anchor=now.
+        t.baseBeat = beatNow - static_cast<double>(t.pulseCount) / Impl::MidiTimeline::kPpqn;
+        t.lastTsEngine = static_cast<double>(now);
+        t.pulses = 2;                            // locked on the manual tempo; pulses smooth from here
+        t.outlierRun = 0;
+        t.lastFedMicros = now;
+        if (t.stale) { t.stale = false; changed = true; }
+        if (std::abs(bpm - t.lastNotifiedBpm) >= 1.0) {
+            t.lastNotifiedBpm = bpm;
+            changed = true;
+        }
+    }
+    if (changed) mImpl->notifyTimelinesChanged();
+}
+
+// Live clock feed: one 0xF8 pulse at OS timestamp `tsUs`. The beat is the exact
+// pulse count pinned to this pulse; the window-mean tempo is used only to
+// extrapolate between pulses.
+void SuperClock::midiTimelinePulse(int id, uint64_t tsUs) {
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+        auto* tp = mImpl->activeSlotLocked(id);
+        if (!tp) return;
+        auto& t = *tp;
+        const int64_t now = linkClockMicros();
+        // Capture the pulse-clock -> engine-clock offset once (they're the same
+        // mach/monotonic clock on macOS, so this is ~the first dispatch latency).
+        if (!t.tsOriginSet) { t.tsToEngineUs = now - static_cast<int64_t>(tsUs); t.tsOriginSet = true; }
+        const double tsEng = static_cast<double>(static_cast<int64_t>(tsUs) + t.tsToEngineUs);
+
+        if (t.pulses == 0) {                     // first pulse: just anchor
+            t.lastTsEngine = tsEng;
+            t.pulseCount += 1;
+            t.pulses = 1;
+        } else {
+            const double iv = tsEng - t.lastTsEngine;
+            // Reject an impossible double-pulse (a real 0xF8 can't arrive within
+            // a small fraction of the interval) — it would corrupt the tempo.
+            if (t.pulses >= 2 && iv < 0.25 * t.periodUs) {
+                t.lastFedMicros = now;
+                return;                          // still alive; ignore the bounce
+            }
+            t.feedInterval(iv);                  // seeds the window when empty, else smooths/resets
+            t.pulses = 2;
+            t.lastTsEngine = tsEng;
+            t.pulseCount += 1;
+        }
+        t.lastFedMicros = now;
+        if (t.stale) { t.stale = false; changed = true; }
+        if (std::abs(t.bpm() - t.lastNotifiedBpm) >= 1.0) {
+            t.lastNotifiedBpm = t.bpm();
+            changed = true;
+        }
+    }
+    if (changed) mImpl->notifyTimelinesChanged();
+}
+
+void SuperClock::setMidiTimelineTransport(int id, int kind, double beat) {
+    std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+    auto* tp = mImpl->activeSlotLocked(id);
+    if (!tp) return;
+    auto& t = *tp;
+    const int64_t now = linkClockMicros();
+    t.lastFedMicros = now;
+    switch (kind) {
+        case 0:  // START — reset the pulse counter; next 0xF8 is beat 0 + 1/24
+            t.baseBeat = 0.0; t.pulseCount = 0;
+            t.pulses = 0; t.outlierRun = 0; t.ivClear(); t.tsOriginSet = false; t.lastTsEngine = static_cast<double>(now);
+            t.playing = true;  t.isPlayingAtMicros = now;
+            break;
+        case 3:  // POSITION (SPP) — re-base the pulse counter at `beat`
+            t.baseBeat = beat; t.pulseCount = 0;
+            t.pulses = 0; t.outlierRun = 0; t.ivClear(); t.tsOriginSet = false; t.lastTsEngine = static_cast<double>(now);
+            break;
+        case 1:  // CONTINUE
+            t.playing = true;  t.isPlayingAtMicros = now;
+            break;
+        case 2:  // STOP
+            t.playing = false; t.isPlayingAtMicros = now;
+            break;
+        default: break;
+    }
+}
+
+void SuperClock::tickMidiStaleness() {
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+        const int64_t now = linkClockMicros();
+        for (int i = 1; i <= SC_MAX_TIMELINES; ++i) {
+            auto& t = mImpl->midi[i - 1];
+            if (!t.active) continue;
+            if (!t.stale && (now - t.lastFedMicros) > kMidiStaleMicros) {
+                t.stale = true;
+                t.wentStaleMicros = now;
+                changed = true;
+            } else if (t.stale && (now - t.wentStaleMicros) > kMidiGraceMicros) {
+                t = Impl::MidiTimeline{};       // free slot
+                changed = true;
+            }
+        }
+        if (changed) recomputePrimaryLocked();
+    }
+    if (changed) mImpl->notifyTimelinesChanged();
+}
+
+double SuperClock::timelineBpm(int id) const {
+    if (id == 0) return getBpm();
+    std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+    auto* t = mImpl->activeSlotLocked(id);
+    return t ? t->bpm() : 60.0;                          // placeholder when absent
+}
+
+bool SuperClock::timelineIsPlaying(int id) const {
+    if (id == 0) return isPlaying();
+    std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+    auto* t = mImpl->activeSlotLocked(id);
+    return t && t->playing;
+}
+
+int64_t SuperClock::timelineTimeForIsPlayingMicros(int id) const {
+    if (id == 0) return timeForIsPlayingMicros();
+    std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+    auto* t = mImpl->activeSlotLocked(id);
+    return t ? t->isPlayingAtMicros : 0;
+}
+
+double SuperClock::timelineBeatAtLinkTime(int id, int64_t timeMicros, double quantum) const {
+    if (id == 0) return beatAtLinkTime(timeMicros, quantum);
+    std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+    auto* t = mImpl->activeSlotLocked(id);
+    if (!t || t->periodUs <= 0.0) return 0.0;
+    return t->beatAtTs(static_cast<double>(timeMicros));
+}
+
+double SuperClock::timelinePhaseAtLinkTime(int id, int64_t timeMicros, double quantum) const {
+    const double beat = timelineBeatAtLinkTime(id, timeMicros, quantum);
+    if (quantum <= 0.0) return 0.0;
+    double phase = std::fmod(beat, quantum);
+    if (phase < 0.0) phase += quantum;
+    return phase;
+}
+
+int64_t SuperClock::timelineTimeAtBeatLinkMicros(int id, double beat, double quantum) const {
+    if (id == 0) return timeAtBeatLinkMicros(beat, quantum);
+    std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+    auto* t = mImpl->activeSlotLocked(id);
+    if (!t || t->periodUs <= 0.0) return linkClockMicros();
+    return static_cast<int64_t>(t->tsAtBeat(beat));
+}
+
+std::vector<SuperClock::TimelineInfo> SuperClock::listTimelines() const {
+    std::vector<TimelineInfo> out;
+    TimelineInfo link;
+    link.name     = "link";
+    link.raw      = "link";
+    link.bpm      = getBpm();
+    link.clocking = true;       // Link is always live
+    out.push_back(std::move(link));
+
+    std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+    for (int i = 1; i <= SC_MAX_TIMELINES; ++i) {
+        const auto& t = mImpl->midi[i - 1];
+        if (!t.active) continue;
+        TimelineInfo info;
+        info.name     = "midi:" + t.normalized;
+        info.raw      = t.raw;
+        info.bpm = t.bpm();
+        info.clocking = !t.stale;
+        info.stale    = t.stale;
+        info.primary  = (i == mImpl->primaryMidiSlot);
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
+void SuperClock::setTimelinesChangedCallback(std::function<void()> cb) {
+    std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+    mImpl->timelinesChangedCb = std::move(cb);
 }
 
 // ─── Mutators (app-thread) ──────────────────────────────────────────────

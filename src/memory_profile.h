@@ -92,6 +92,9 @@
   #ifndef SHM_SCOPE_FRAMES_PER_SCOPE
   #define SHM_SCOPE_FRAMES_PER_SCOPE 128
   #endif
+  #ifndef SC_MAX_TIMELINES
+  #define SC_MAX_TIMELINES 2
+  #endif
   #ifndef SCHEDULER_DATA_POOL_SIZE
   #define SCHEDULER_DATA_POOL_SIZE 65536           // 64 KB
   #endif
@@ -144,6 +147,12 @@
 #endif
 #ifndef SHM_SCOPE_FRAMES_PER_SCOPE
 #define SHM_SCOPE_FRAMES_PER_SCOPE 1024
+#endif
+
+// Max MIDI-clock follower timelines in the SuperClock registry (slot 0 is
+// always Link; slots 1..SC_MAX_TIMELINES are midi:<port> followers).
+#ifndef SC_MAX_TIMELINES
+#define SC_MAX_TIMELINES 8
 #endif
 
 // Scheduler pool
