@@ -59,7 +59,7 @@ export class AudioCapture {
   static #IDX_ENABLED       = 0;  // u32
   static #IDX_SAMPLE_RATE   = 1;  // u32
   static #IDX_CHANNELS      = 2;  // u32
-  // index 3: u32 capacity_frames (unused by JS reader)
+  static #IDX_CAPACITY      = 3;  // u32 capacity_frames (ring size)
   static #IDX_WPOS_LOW      = 4;  // u64 low (write_position)
   static #IDX_WPOS_HIGH     = 5;  // u64 high
   static #HEADER_U32_COUNT  = 8;  // 32 bytes / 4
@@ -139,7 +139,15 @@ export class AudioCapture {
       // arrays would exhaust memory.
       throw new Error(`AudioCapture: write_position too large (high=${wposHigh})`);
     }
-    const frames = wposLow;
+
+    // write_position is a monotonic counter, but `data` is a fixed-capacity
+    // ring-with-overwrite: it only physically holds the last capacity_frames.
+    // Clamp so the Float32Array view below can't run past the data region (a
+    // RangeError, or a read into neighbouring SAB) once a capture outlives the
+    // ring. On overflow the returned frames are the ring's contents in physical
+    // order — best-effort, since anything older has already been overwritten.
+    const capacity = h[AudioCapture.#IDX_CAPACITY];
+    const frames = capacity > 0 ? Math.min(wposLow, capacity) : wposLow;
 
     // shm_audio_buffer is alignas(16) and its 32-byte header is fully
     // populated, so data starts at headerOffset + 32 with no padding.
