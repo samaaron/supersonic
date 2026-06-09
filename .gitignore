@@ -33,3 +33,6 @@ rust/target/
 
 # Vendored midir build artefacts
 external/midir/target/
+
+# Erlang crash dumps (NIF test failures)
+erl_crash.dump

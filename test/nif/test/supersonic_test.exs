@@ -6,14 +6,37 @@ defmodule SupersonicTest do
   # audio processing automatically — no manual ticking needed.
   @headless System.get_env("SUPERSONIC_HEADLESS") == "1"
 
-  # Tests share a single global NIF engine — ensure clean state between tests
+  # Tests share a single global NIF engine — ensure clean state between tests.
+  # start/stop are async (they message the caller on completion), so block on
+  # the completion here to guarantee the engine is actually down before each test.
   setup do
-    :supersonic.stop()
+    stop_sync()
     on_exit(fn -> :supersonic.stop() end)
     :ok
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────────
+
+  # start/1 and stop/0 are asynchronous: they return :ok immediately and deliver
+  # the outcome as a message to the caller. These helpers re-synchronise for the
+  # tests that want the engine up/down before proceeding.
+  defp start_sync(config) do
+    assert :ok = :supersonic.start(config)
+    receive do
+      {:supersonic_started, result} -> result
+    after
+      5000 -> flunk("start did not report completion")
+    end
+  end
+
+  defp stop_sync do
+    assert :ok = :supersonic.stop()
+    receive do
+      {:supersonic_stopped, result} -> result
+    after
+      5000 -> flunk("stop did not report completion")
+    end
+  end
 
   defp start_config(overrides \\ %{}) do
     if @headless do
@@ -99,17 +122,30 @@ defmodule SupersonicTest do
   # ── Lifecycle ────────────────────────────────────────────────────────────
 
   test "start and stop" do
-    assert :ok = :supersonic.start(start_config())
-    assert :ok = :supersonic.stop()
+    assert :ok = start_sync(start_config())
+    assert :ok = stop_sync()
   end
 
-  test "double start returns error" do
+  test "start is asynchronous: returns :ok immediately, reports completion by message" do
+    # The NIF returns before the engine is booted; completion arrives separately.
     assert :ok = :supersonic.start(start_config())
-    assert {:error, :already_running} = :supersonic.start(start_config())
+    assert_receive {:supersonic_started, :ok}, 5000
+  end
+
+  test "stop is asynchronous: returns :ok immediately, reports completion by message" do
+    assert :ok = start_sync(start_config())
+    assert :ok = :supersonic.stop()
+    assert_receive {:supersonic_stopped, :ok}, 5000
+  end
+
+  test "double start reports already_running via the completion message" do
+    assert :ok = start_sync(start_config())
+    assert :ok = :supersonic.start(start_config())
+    assert_receive {:supersonic_started, {:error, :already_running}}, 5000
   end
 
   test "stop when not running is ok" do
-    assert :ok = :supersonic.stop()
+    assert :ok = stop_sync()
   end
 
   # ── OSC send ─────────────────────────────────────────────────────────────
@@ -119,12 +155,12 @@ defmodule SupersonicTest do
   end
 
   test "send_osc with valid message returns ok" do
-    :ok = :supersonic.start(start_config())
+    :ok = start_sync(start_config())
     assert :ok = :supersonic.send_osc(osc_message("/status"))
   end
 
   test "send_osc with non-binary returns badarg" do
-    :ok = :supersonic.start(start_config())
+    :ok = start_sync(start_config())
     assert_raise ArgumentError, fn -> :supersonic.send_osc(:not_a_binary) end
   end
 
@@ -136,7 +172,7 @@ defmodule SupersonicTest do
   end
 
   test "multiple registered processes each receive replies" do
-    :ok = :supersonic.start(start_config())
+    :ok = start_sync(start_config())
     test_pid = self()
 
     # A second process registers itself and relays the first reply it sees.
@@ -173,7 +209,7 @@ defmodule SupersonicTest do
   # BEAM exactly as it does over UDP.
 
   test "subscribing to Link notify pushes an immediate snapshot to the registered pid" do
-    :ok = :supersonic.start(start_config())
+    :ok = start_sync(start_config())
     :ok = :supersonic.set_notification_pid()
 
     :ok = :supersonic.send_osc(osc_message("/clock/notify/subscribe"))
@@ -183,7 +219,7 @@ defmodule SupersonicTest do
   end
 
   test "receive /version.reply" do
-    :ok = :supersonic.start(start_config())
+    :ok = start_sync(start_config())
     :ok = :supersonic.set_notification_pid()
     :ok = :supersonic.send_osc(osc_message("/version"))
 
@@ -193,7 +229,7 @@ defmodule SupersonicTest do
   end
 
   test "receive /g_queryTree.reply" do
-    :ok = :supersonic.start(start_config())
+    :ok = start_sync(start_config())
     :ok = :supersonic.set_notification_pid()
     :ok = :supersonic.send_osc(osc_message("/g_queryTree", 0))
 
@@ -211,7 +247,7 @@ defmodule SupersonicTest do
   # scsynth's own replies, proving the unified egress works for the NRT plane.
 
   test "clock tempo query round-trips via the NRT egress ring" do
-    :ok = :supersonic.start(start_config())
+    :ok = start_sync(start_config())
     :ok = :supersonic.set_notification_pid()
 
     :ok = :supersonic.send_osc(osc_message("/clock/tempo/set", 142.5))
@@ -225,7 +261,7 @@ defmodule SupersonicTest do
   end
 
   test "clock visibility query replies to the registered pid via the NRT ring" do
-    :ok = :supersonic.start(start_config())
+    :ok = start_sync(start_config())
     :ok = :supersonic.set_notification_pid()
 
     :ok = :supersonic.send_osc(osc_message("/clock/visibility/get"))
@@ -235,7 +271,7 @@ defmodule SupersonicTest do
   end
 
   test "RT (scsynth) and NRT (clock) replies both reach the same pid" do
-    :ok = :supersonic.start(start_config())
+    :ok = start_sync(start_config())
     :ok = :supersonic.set_notification_pid()
 
     # /version → scsynth reply on the RT OUT ring.
@@ -257,6 +293,6 @@ defmodule SupersonicTest do
       max_nodes: 512,
       num_buffers: 256
     })
-    assert :ok = :supersonic.start(config)
+    assert :ok = start_sync(config)
   end
 end

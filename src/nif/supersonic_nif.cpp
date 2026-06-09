@@ -6,10 +6,16 @@
  * Erlang process via enif_send.  No UDP sockets needed.
  *
  * Follows the same patterns as tau5_discovery NIF:
- *   - Global engine instance protected by mutex
+ *   - Global engine instance, pointer guarded by a briefly-held mutex
  *   - PID-based notification with separate notification_mutex
- *   - Dirty I/O scheduling for start (heavy JUCE/audio init)
  *   - Fresh ErlNifEnv per thread callback (enif_send from non-BEAM threads)
+ *
+ * Every NIF call is non-blocking. send_osc is a ring-buffer write (microseconds).
+ * start/stop only parse + enqueue and return immediately; a single lifecycle
+ * worker thread performs the slow init()/shutdown() off all BEAM schedulers and
+ * posts the outcome to the calling process as {supersonic_started, Result} /
+ * {supersonic_stopped, ok}. So no NIF ever blocks a scheduler — not even a dirty
+ * one — and nothing needs the dirty-scheduler flag.
  */
 
 #include "erl_nif.h"
@@ -20,18 +26,25 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 // ─── Global state ──────────────────────────────────────────────────────────
 
+// Guards only the g_engine pointer, and is held only for the brief publish /
+// unpublish / read of it — never across the slow init()/shutdown() (those run on
+// the lifecycle worker with no lock held). So send_osc's acquisition is always
+// uncontended-or-microseconds, even while a start/stop is in flight.
 static std::mutex g_engine_mutex;
 static std::unique_ptr<SupersonicEngine> g_engine;
-// JUCE runtime — initialised on first start() call (dirty scheduler)
+// JUCE runtime — initialised lazily on the lifecycle worker before the first boot.
 static std::atomic<bool> g_juce_initialised{false};
 
 // ─── Subscriber registry ────────────────────────────────────────────────────
@@ -260,65 +273,163 @@ static void parse_config(ErlNifEnv* env, ERL_NIF_TERM map,
     enif_map_iterator_destroy(env, &iter);
 }
 
+// ─── Lifecycle worker ───────────────────────────────────────────────────────
+//
+// start()/stop() must never block a BEAM scheduler: opening the audio device and
+// joining the engine's threads take real wall-clock time. So those NIFs only
+// parse + enqueue a command (microseconds) and return; this single dedicated
+// worker thread performs the slow init()/shutdown() off all schedulers. One
+// worker ⇒ start/stop are serialised (never two engines fighting over the device)
+// without any long-held lock — g_engine_mutex is taken only to publish/unpublish
+// the pointer, so a concurrent send_osc never waits on lifecycle work. The
+// outcome is posted to the caller as {supersonic_started, ok|{error,Reason}} /
+// {supersonic_stopped, ok}.
+
+enum class LifecycleOp { Start, Stop };
+struct LifecycleCmd {
+    LifecycleOp              op;
+    SupersonicEngine::Config cfg;     // Start only
+    ErlNifPid                pid;
+    bool                     notify;  // false for VM-shutdown-initiated teardown
+};
+
+static std::mutex               g_worker_mutex;
+static std::condition_variable  g_worker_cv;
+static std::deque<LifecycleCmd> g_worker_queue;
+static bool                     g_worker_exit = false;
+// Heap-owned, never a static std::thread object: erl_nif's on_unload is not
+// reliably called at VM halt, so a static std::thread could reach its destructor
+// still-joinable and std::terminate(). As a pointer it's joined+deleted when
+// on_unload does run, and merely leaked (no terminate) when it doesn't.
+static std::thread*             g_worker_thread = nullptr;
+
+// Post one message to a single pid from this (non-scheduler) worker thread.
+template <typename MakeMsg>
+static void notify_pid(const ErlNifPid& pid, MakeMsg makeMsg) {
+    ErlNifEnv* env = enif_alloc_env();
+    if (!env) return;
+    ERL_NIF_TERM msg = makeMsg(env);
+    enif_send(nullptr, const_cast<ErlNifPid*>(&pid), env, msg);
+    enif_free_env(env);
+}
+
+static ERL_NIF_TERM make_started(ErlNifEnv* e, ERL_NIF_TERM result) {
+    return enif_make_tuple2(e, enif_make_atom(e, "supersonic_started"), result);
+}
+
+static void worker_do_start(const LifecycleCmd& cmd) {
+    // Serialised on this thread, so reading g_engine for the running-check needs
+    // the lock only against a concurrent send_osc, not against another start.
+    {
+        std::lock_guard<std::mutex> lk(g_engine_mutex);
+        if (g_engine && g_engine->isRunning()) {
+            if (cmd.notify)
+                notify_pid(cmd.pid, [](ErlNifEnv* e) {
+                    return make_started(e, enif_make_tuple2(e,
+                        enif_make_atom(e, "error"), enif_make_atom(e, "already_running")));
+                });
+            return;
+        }
+    }
+
+    if (!g_juce_initialised.load()) {
+        juce::initialiseJuce_GUI();
+        g_juce_initialised.store(true);
+    }
+
+    std::unique_ptr<SupersonicEngine> engine;
+    std::string err;
+    try {
+        engine = std::make_unique<SupersonicEngine>();
+        engine->onDebug = on_debug;
+        engine->setTransport(&g_transport);
+        engine->init(cmd.cfg);  // SLOW — no lock held
+    } catch (const std::exception& e) {
+        err = e.what();
+    } catch (...) {
+        err = "unknown_exception";
+    }
+
+    if (!err.empty()) {
+        engine.reset();
+        if (cmd.notify)
+            notify_pid(cmd.pid, [&](ErlNifEnv* e) {
+                return make_started(e, enif_make_tuple2(e, enif_make_atom(e, "error"),
+                    enif_make_string(e, err.c_str(), ERL_NIF_LATIN1)));
+            });
+        return;
+    }
+
+    { std::lock_guard<std::mutex> lk(g_engine_mutex); g_engine = std::move(engine); }  // brief publish
+
+    if (cmd.notify)
+        notify_pid(cmd.pid, [](ErlNifEnv* e) { return make_started(e, enif_make_atom(e, "ok")); });
+}
+
+static void worker_do_stop(const LifecycleCmd& cmd) {
+    std::unique_ptr<SupersonicEngine> local;
+    { std::lock_guard<std::mutex> lk(g_engine_mutex); local = std::move(g_engine); }  // brief unpublish
+    if (local) local->shutdown();  // SLOW — no lock held; engine already unreachable
+    g_subs.clear();                // drop the BEAM audience along with the engine
+
+    if (cmd.notify)
+        notify_pid(cmd.pid, [](ErlNifEnv* e) {
+            return enif_make_tuple2(e, enif_make_atom(e, "supersonic_stopped"),
+                                       enif_make_atom(e, "ok"));
+        });
+}
+
+static void worker_loop() {
+    for (;;) {
+        LifecycleCmd cmd;
+        {
+            std::unique_lock<std::mutex> lk(g_worker_mutex);
+            g_worker_cv.wait(lk, [] { return g_worker_exit || !g_worker_queue.empty(); });
+            if (g_worker_exit) return;  // drop any still-queued ops at VM shutdown
+            cmd = std::move(g_worker_queue.front());
+            g_worker_queue.pop_front();
+        }
+        if (cmd.op == LifecycleOp::Start) worker_do_start(cmd);
+        else                              worker_do_stop(cmd);
+    }
+}
+
+static void worker_enqueue(LifecycleCmd cmd) {
+    { std::lock_guard<std::mutex> lk(g_worker_mutex); g_worker_queue.push_back(std::move(cmd)); }
+    g_worker_cv.notify_one();
+}
+
 // ─── NIF functions ─────────────────────────────────────────────────────────
 
 static ERL_NIF_TERM nif_is_loaded(ErlNifEnv* env, int, const ERL_NIF_TERM[]) {
     return enif_make_atom(env, "true");
 }
 
+// Async: parse the config (fast, needs the calling env), then hand the slow boot
+// to the lifecycle worker. Returns `ok` immediately; the outcome arrives as
+// {supersonic_started, ok | {error, Reason}} to the calling process.
 static ERL_NIF_TERM nif_start(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     if (argc != 1) return enif_make_badarg(env);
 
-    // Initialise JUCE runtime if not already done
-    if (!g_juce_initialised.load()) {
-        juce::initialiseJuce_GUI();
-        g_juce_initialised.store(true);
-    }
+    LifecycleCmd cmd;
+    cmd.op = LifecycleOp::Start;
+    cmd.cfg.udpPort = 0;  // NIF mode: no UDP needed (OS picks ephemeral port, unused)
+    parse_config(env, argv[0], cmd.cfg);
+    enif_self(env, &cmd.pid);
+    cmd.notify = true;
+    worker_enqueue(std::move(cmd));
 
-    std::lock_guard<std::mutex> lock(g_engine_mutex);
-
-    if (g_engine && g_engine->isRunning()) {
-        return enif_make_tuple2(env,
-            enif_make_atom(env, "error"),
-            enif_make_atom(env, "already_running"));
-    }
-
-    // Parse config from Erlang map
-    SupersonicEngine::Config cfg;
-    cfg.udpPort = 0;  // NIF mode: no UDP needed (OS picks ephemeral port, unused)
-    parse_config(env, argv[0], cfg);
-
-    try {
-        g_engine = std::make_unique<SupersonicEngine>();
-        g_engine->onDebug = on_debug;
-        // Inject the BEAM transport before init() — replies/broadcasts then route
-        // to the registered pids instead of the default in-process CallbackTransport.
-        g_engine->setTransport(&g_transport);
-        g_engine->init(cfg);
-    } catch (const std::exception& e) {
-        g_engine.reset();
-        return enif_make_tuple2(env,
-            enif_make_atom(env, "error"),
-            enif_make_string(env, e.what(), ERL_NIF_LATIN1));
-    } catch (...) {
-        g_engine.reset();
-        return enif_make_tuple2(env,
-            enif_make_atom(env, "error"),
-            enif_make_atom(env, "unknown_exception"));
-    }
-
-    return enif_make_atom(env, "ok");
+    return enif_make_atom(env, "ok");  // accepted; result delivered as a message
 }
 
+// Async: hand the slow teardown (thread joins, device close) to the lifecycle
+// worker. Returns `ok` immediately; completion arrives as {supersonic_stopped, ok}.
 static ERL_NIF_TERM nif_stop(ErlNifEnv* env, int, const ERL_NIF_TERM[]) {
-    std::lock_guard<std::mutex> lock(g_engine_mutex);
-
-    if (g_engine) {
-        g_engine->shutdown();
-        g_engine.reset();
-    }
-
-    g_subs.clear();
+    LifecycleCmd cmd;
+    cmd.op = LifecycleOp::Stop;
+    enif_self(env, &cmd.pid);
+    cmd.notify = true;
+    worker_enqueue(std::move(cmd));
 
     return enif_make_atom(env, "ok");
 }
@@ -330,6 +441,11 @@ static ERL_NIF_TERM nif_send_osc(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
     if (!enif_inspect_binary(env, argv[0], &bin))
         return enif_make_badarg(env);
 
+    // Brief lock: the worker never holds g_engine_mutex across slow lifecycle
+    // work, so this never waits on a boot/teardown — the call stays a fast,
+    // scheduler-safe ring write. The lock also keeps stop from freeing the
+    // engine mid-send: stop must take the lock to unpublish g_engine, so it
+    // blocks until this sendOSC completes.
     std::lock_guard<std::mutex> lock(g_engine_mutex);
     if (!g_engine || !g_engine->isRunning()) {
         return enif_make_tuple2(env,
@@ -363,17 +479,34 @@ static ERL_NIF_TERM nif_clear_notification_pid(ErlNifEnv* env, int, const ERL_NI
 // ─── NIF lifecycle ─────────────────────────────────────────────────────────
 
 static int on_load(ErlNifEnv*, void**, ERL_NIF_TERM) {
-    return 0;  // JUCE init deferred to first start() call (dirty scheduler)
+    // Spin up the lifecycle worker (idle until the first start). JUCE/audio init
+    // is deferred to the worker on the first boot.
+    g_worker_exit = false;
+    g_worker_thread = new std::thread(worker_loop);
+    return 0;
 }
 
 static void on_unload(ErlNifEnv*, void*) {
+    // Stop the lifecycle worker: it finishes any in-flight op, then exits without
+    // touching the (shutting-down) BEAM, so no enif_send races VM teardown.
     {
-        std::lock_guard<std::mutex> lock(g_engine_mutex);
-        if (g_engine) {
-            g_engine->shutdown();
-            g_engine.reset();
-        }
+        std::lock_guard<std::mutex> lk(g_worker_mutex);
+        g_worker_exit = true;
     }
+    g_worker_cv.notify_one();
+    if (g_worker_thread) {
+        if (g_worker_thread->joinable())
+            g_worker_thread->join();
+        delete g_worker_thread;
+        g_worker_thread = nullptr;
+    }
+
+    // Tear down a still-running engine inline (VM is exiting; blocking is fine).
+    std::unique_ptr<SupersonicEngine> local;
+    { std::lock_guard<std::mutex> lk(g_engine_mutex); local = std::move(g_engine); }
+    if (local)
+        local->shutdown();
+
     g_subs.clear();
 #ifdef __APPLE__
     // Do NOT call shutdownJuce_GUI() on macOS.  The teardown path
@@ -395,9 +528,11 @@ static void on_unload(ErlNifEnv*, void*) {
 
 // ─── Function table ────────────────────────────────────────────────────────
 
+// Every function is non-blocking, so none need dirty scheduling: start/stop just
+// enqueue to the lifecycle worker and return; send_osc is a ring write.
 static ErlNifFunc nif_funcs[] = {
     {"is_nif_loaded",          0, nif_is_loaded,              0},
-    {"start",                  1, nif_start,                  ERL_NIF_DIRTY_JOB_IO_BOUND},
+    {"start",                  1, nif_start,                  0},
     {"stop",                   0, nif_stop,                   0},
     {"send_osc",               1, nif_send_osc,               0},
     {"set_notification_pid",   0, nif_set_notification_pid,   0},

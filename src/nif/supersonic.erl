@@ -16,14 +16,29 @@
 %% and debug line. A registered process that dies is dropped automatically
 %% on the next delivery — the rest keep receiving.
 %%
+%% Every NIF call is non-blocking and never ties up a BEAM scheduler.
+%% {@link send_osc/1} is a ring-buffer write. {@link start/1} and {@link stop/0}
+%% are asynchronous: they return `ok' immediately (meaning "accepted") and the
+%% slow audio init/teardown runs on a dedicated engine thread. The outcome is
+%% delivered to the calling process as a message:
+%%   {supersonic_started, ok} | {supersonic_started, {error, Reason}}
+%%   {supersonic_stopped, ok}
+%%
 %% Usage from Elixir:
 %%   :supersonic.start(%{headless: true})
+%%   receive do
+%%     {:supersonic_started, :ok} -> ...
+%%     {:supersonic_started, {:error, reason}} -> ...
+%%   end
 %%   :supersonic.set_notification_pid()
 %%   :supersonic.send_osc(osc_binary)
 %%   receive do
 %%     {:osc_reply, binary} -> ...
 %%   end
 %%   :supersonic.stop()
+%%   receive do
+%%     {:supersonic_stopped, :ok} -> ...
+%%   end
 %%
 %% == Hot upgrade not supported ==
 %%
@@ -76,7 +91,7 @@ init() ->
 -spec is_nif_loaded() -> true | false.
 is_nif_loaded() -> false.
 
-%% @doc Boot the audio engine.
+%% @doc Boot the audio engine (asynchronous).
 %%
 %% Config is a map with optional keys:
 %%   sample_rate, num_output_channels, num_input_channels,
@@ -86,11 +101,17 @@ is_nif_loaded() -> false.
 %%
 %% `headless => true' skips audio device init (for testing/CI).
 %%
-%% Runs on a dirty I/O scheduler (heavy init, won't block normal schedulers).
--spec start(Config :: map()) -> ok | {error, term()}.
+%% Returns `ok' immediately. The boot runs on a dedicated engine thread (it never
+%% blocks a scheduler) and its outcome is sent to the calling process as
+%% `{supersonic_started, ok}' or `{supersonic_started, {error, Reason}}'
+%% (e.g. `Reason = already_running').
+-spec start(Config :: map()) -> ok.
 start(_Config) -> erlang:nif_error(nif_not_loaded).
 
-%% @doc Shut down the audio engine.
+%% @doc Shut down the audio engine (asynchronous).
+%%
+%% Returns `ok' immediately. Teardown (thread joins, device close) runs on the
+%% engine thread and completion is sent to the caller as `{supersonic_stopped, ok}'.
 -spec stop() -> ok.
 stop() -> erlang:nif_error(nif_not_loaded).
 
