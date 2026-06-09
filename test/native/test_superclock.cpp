@@ -489,6 +489,37 @@ TEST_CASE("SuperClock: midi beat-fire spread across a 100->300 step",
     CHECK(tail == Catch::Approx(200.0).margin(8.0));
 }
 
+TEST_CASE("SuperClock: a never-seen midi timeline is a coherent free-run fallback",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.resolveTimeline("midi:ghost");        // never claimed
+    CHECK(id == -1);
+    CHECK(sc.timelineBpm(id) == Catch::Approx(60.0));
+    // beat<->time round-trips, and advances at a steady 60 BPM (1 beat / 1e6 us).
+    const int64_t t = sc.timelineTimeAtBeatLinkMicros(id, 4.0, 4.0);
+    CHECK(sc.timelineBeatAtLinkTime(id, t, 4.0) == Catch::Approx(4.0).margin(1e-6));
+    const double adv = sc.timelineBeatAtLinkTime(id, 1'000'000, 4.0)
+                     - sc.timelineBeatAtLinkTime(id, 0, 4.0);
+    CHECK(adv == Catch::Approx(1.0).margin(1e-6));
+}
+
+TEST_CASE("SuperClock: a vanished midi clock keeps its tempo (not freed)",
+          "[SuperClock][midi][.]") {
+    using namespace std::chrono;
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6);   // 120 BPM
+    int64_t ts = sc.linkClockMicros();
+    for (int k = 0; k < 48; ++k) { sc.midiTimelinePulse(id, static_cast<uint64_t>(ts)); ts += iv; }
+    CHECK(sc.timelineBpm(id) == Catch::Approx(120.0).margin(1.0));
+
+    std::this_thread::sleep_for(milliseconds(1800));         // exceed the 1.5 s stale gap
+    sc.tickMidiStaleness();
+    // Slot is NOT reclaimed; the port still resolves and holds its last tempo.
+    CHECK(sc.resolveTimeline("midi:portA") == id);
+    CHECK(sc.timelineBpm(id) == Catch::Approx(120.0).margin(1.0));
+}
+
 TEST_CASE("SuperClock: primary follows the lowest active slot", "[SuperClock][midi]") {
     SuperClock sc;
     const int a = sc.claimMidiTimeline("portA", "Port A");
@@ -504,7 +535,9 @@ TEST_CASE("SuperClock: unknown timeline ids read a 60-BPM placeholder",
     CHECK(sc.timelineBpm(-1) == Catch::Approx(60.0));
     CHECK(sc.timelineBpm(99) == Catch::Approx(60.0));
     CHECK_FALSE(sc.timelineIsPlaying(-1));
-    CHECK(sc.timelineBeatAtLinkTime(-1, sc.linkClockMicros(), 4.0) == Catch::Approx(0.0));
+    // beat<->time is a coherent free-run (not the old degenerate 0/now).
+    const int64_t t = sc.timelineTimeAtBeatLinkMicros(-1, 2.0, 4.0);
+    CHECK(sc.timelineBeatAtLinkTime(-1, t, 4.0) == Catch::Approx(2.0).margin(1e-6));
 }
 
 TEST_CASE("SuperClock: listTimelines reports link plus active midi rows",

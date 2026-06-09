@@ -388,8 +388,11 @@ void SuperClock::bindStateToShm(SuperClockState* region) {
 // Link-clock micros domain so /clock/midi:<port>/rpc answers match Link.
 
 namespace {
-constexpr int64_t kMidiStaleMicros = 1'500'000;    // freeze tempo after 1.5 s gap
-constexpr int64_t kMidiGraceMicros = 30'000'000;   // free slot 30 s after stale
+constexpr int64_t kMidiStaleMicros = 1'500'000;    // mark stale (clock gone) after 1.5 s gap
+// Stale timelines are NOT freed: they keep free-running at their last-known tempo
+// so use_bpm :midi[:port] holds that tempo until the clock returns. The slot is
+// only reclaimed (LRU) when a new port needs one and none are free.
+constexpr double  kFallbackBpm     = 60.0;          // never-seen timeline: free-run default
 }  // namespace
 
 int SuperClock::midiSlotForPortLocked(const char* normalized) const {
@@ -420,13 +423,17 @@ int SuperClock::claimMidiTimeline(const char* normalized, const char* raw) {
     int slot;
     {
         std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+        const int64_t now = linkClockMicros();
         slot = midiSlotForPortLocked(normalized);
         if (slot == 0) {
+            // Prefer a free slot; else evict the one stale (free-running) longest.
+            int64_t oldestAt = INT64_MAX;
             for (int i = 1; i <= SC_MAX_TIMELINES; ++i) {
-                if (!mImpl->midi[i - 1].active) { slot = i; break; }
+                auto& t = mImpl->midi[i - 1];
+                if (!t.active) { slot = i; break; }
+                if (t.stale && t.wentStaleMicros < oldestAt) { oldestAt = t.wentStaleMicros; slot = i; }
             }
-            if (slot == 0) return -1;  // registry full
-            const int64_t now = linkClockMicros();
+            if (slot == 0) return -1;  // registry full of live clocks
             auto& t = mImpl->midi[slot - 1];
             t = Impl::MidiTimeline{};
             t.active = true;
@@ -437,7 +444,14 @@ int SuperClock::claimMidiTimeline(const char* normalized, const char* raw) {
             recomputePrimaryLocked();
             changed = true;
         } else if (mImpl->midi[slot - 1].stale) {
-            mImpl->midi[slot - 1].stale = false;
+            // The port returned: continue the beat from where the free-run reached,
+            // then re-lock to the live clock on the next pulse.
+            auto& t = mImpl->midi[slot - 1];
+            t.baseBeat = t.beatAtTs(static_cast<double>(now));
+            t.pulseCount = 0; t.pulses = 0; t.outlierRun = 0; t.ivClear();
+            t.tsOriginSet = false; t.lastTsEngine = static_cast<double>(now);
+            t.stale = false;
+            t.lastFedMicros = now;
             recomputePrimaryLocked();
             changed = true;
         }
@@ -592,11 +606,8 @@ void SuperClock::tickMidiStaleness() {
             auto& t = mImpl->midi[i - 1];
             if (!t.active) continue;
             if (!t.stale && (now - t.lastFedMicros) > kMidiStaleMicros) {
-                t.stale = true;
-                t.wentStaleMicros = now;
-                changed = true;
-            } else if (t.stale && (now - t.wentStaleMicros) > kMidiGraceMicros) {
-                t = Impl::MidiTimeline{};       // free slot
+                t.stale = true;                 // clock gone; keep free-running at last tempo
+                t.wentStaleMicros = now;        // for LRU eviction order
                 changed = true;
             }
         }
@@ -609,7 +620,7 @@ double SuperClock::timelineBpm(int id) const {
     if (id == 0) return getBpm();
     std::lock_guard<std::mutex> lk(mImpl->midiMtx);
     auto* t = mImpl->activeSlotLocked(id);
-    return t ? t->bpm() : 60.0;                          // placeholder when absent
+    return t ? t->bpm() : kFallbackBpm;                  // never-seen timeline fallback
 }
 
 bool SuperClock::timelineIsPlaying(int id) const {
@@ -630,7 +641,8 @@ double SuperClock::timelineBeatAtLinkTime(int id, int64_t timeMicros, double qua
     if (id == 0) return beatAtLinkTime(timeMicros, quantum);
     std::lock_guard<std::mutex> lk(mImpl->midiMtx);
     auto* t = mImpl->activeSlotLocked(id);
-    if (!t || t->periodUs <= 0.0) return 0.0;
+    if (!t || t->periodUs <= 0.0)
+        return static_cast<double>(timeMicros) * 1e-6 * kFallbackBpm / 60.0;  // free-run fallback
     return t->beatAtTs(static_cast<double>(timeMicros));
 }
 
@@ -646,7 +658,8 @@ int64_t SuperClock::timelineTimeAtBeatLinkMicros(int id, double beat, double qua
     if (id == 0) return timeAtBeatLinkMicros(beat, quantum);
     std::lock_guard<std::mutex> lk(mImpl->midiMtx);
     auto* t = mImpl->activeSlotLocked(id);
-    if (!t || t->periodUs <= 0.0) return linkClockMicros();
+    if (!t || t->periodUs <= 0.0)
+        return static_cast<int64_t>(beat * 60.0 / kFallbackBpm * 1e6);        // free-run fallback
     return static_cast<int64_t>(t->tsAtBeat(beat));
 }
 
