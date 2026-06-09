@@ -594,7 +594,8 @@ World* World_New(WorldOptions* inOptions) {
 }
 
 int World_CopySndBuf(World* world, uint32 index, SndBuf* outBuf, bool onlyIfChanged, bool* outDidChange) {
-    if (index > world->mNumSndBufs)
+    // index == mNumSndBufs is one past the mSndBuf*/mSndBufUpdates arrays (>=).
+    if (index >= world->mNumSndBufs)
         return kSCErr_IndexOutOfRange;
 
     SndBufUpdates* updates = world->mSndBufUpdates + index;
@@ -1320,17 +1321,26 @@ extern "C" void World_UpdateNativeStats(World* inWorld) {
 inline int32 BUFMASK(int32 x) { return (1 << (31 - CLZ(x))) - 1; }
 
 SCErr bufAlloc(SndBuf* buf, int numChannels, int numFrames, double sampleRate) {
-    long numSamples = numFrames * numChannels;
-    if (numSamples < 1)
+    // numChannels/numFrames arrive straight from OSC (/b_alloc, /b_allocRead,
+    // …). Their product must be computed in 64-bit: a 32-bit numFrames *
+    // numChannels can overflow to a small or negative value, under-allocating
+    // the buffer while frames/channels still advertise the large dimensions —
+    // a heap OOB in any UGen that indexes frame*channels. The upper bound also
+    // keeps numSamples*sizeof(float) from wrapping a 32-bit size_t on wasm32
+    // and keeps the count inside SndBuf's int fields.
+    if (numChannels < 1 || numFrames < 1)
         return kSCErr_Failed;
-    buf->data = (float*)zalloc(numSamples, sizeof(float));
+    int64 numSamples = (int64)numFrames * (int64)numChannels;
+    if (numSamples > (int64)0x7FFFFFFF / (int64)sizeof(float))
+        return kSCErr_Failed;
+    buf->data = (float*)zalloc((size_t)numSamples, sizeof(float));
     if (!buf->data)
         return kSCErr_Failed;
 
     buf->channels = numChannels;
     buf->frames = numFrames;
-    buf->samples = numSamples;
-    buf->mask = BUFMASK(numSamples); // for delay lines
+    buf->samples = (int)numSamples;
+    buf->mask = BUFMASK((int32)numSamples); // for delay lines
     buf->mask1 = buf->mask - 1; // for oscillators
     buf->samplerate = sampleRate;
     buf->sampledur = 1. / sampleRate;
