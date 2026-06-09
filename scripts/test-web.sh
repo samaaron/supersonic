@@ -9,7 +9,10 @@
 #   scripts/test-web.sh FILE         # single test file
 #   scripts/test-web.sh --project=SAB  # single project (SAB or postMessage)
 
-set -e
+# pipefail is essential: the playwright invocation below is piped into `tail`,
+# so without it the pipeline's exit status would be tail's (always 0) and a
+# failing test suite would be reported as success.
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
