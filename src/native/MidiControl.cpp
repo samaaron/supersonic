@@ -20,9 +20,13 @@ void MidiControl::init(OscEgress* egress, SuperClock* clock) {
     mEgress = egress;
     mClock  = clock;
     // Push /clock/timelines whenever the timeline set changes (add/remove/
-    // stale/primary). Fires off the RT thread (MIDI feed / staleness worker).
+    // stale/primary), and re-snapshot any clock-OUT ports following a midi
+    // timeline. Fires off the RT thread (MIDI feed / staleness worker).
     if (mClock)
-        mClock->setTimelinesChangedCallback([this]() { broadcastTimelines(); });
+        mClock->setTimelinesChangedCallback([this]() {
+            broadcastTimelines();
+            get_midi_clock_out().refreshTimelineFollowers(*mClock);
+        });
     if (!mMidi) {
         mMidi = ss_midi_create(this, &MidiControl::emitCb, &MidiControl::clockCb,
                                &MidiControl::transportCb);
@@ -52,36 +56,40 @@ bool MidiControl::handleMidiCommand(const uint8_t* data, uint32_t size) {
         return true;
     }
 
-    // Clock-OUT generation is owned by the engine's SuperClock-timed MidiClockOut
-    // (start/stop/continue/beat). /midi/clock/tick (one immediate pulse — also
-    // how MidiClockOut's generated pulses come back through the dispatch path)
-    // and /midi/clock/sync (clock-in tempo source) fall through to the Rust
-    // subsystem below.
+    // Clock-OUT generation is owned by the engine's SuperClock-timed MidiClockOut:
+    //   out/bpm <port> <bpm>     — continuous clock at a fixed tempo
+    //   out/follow <port> <tl>   — continuous clock following "link" | "midi:<handle>"
+    //   out/off <port>           — stop the port's clock
+    //   beat <port> <durMs>      — legacy one-beat burst (manual midi_clock_beat)
+    // /midi/clock/tick (one immediate pulse — also how MidiClockOut's generated
+    // pulses come back through the dispatch path) and /midi/clock/sync (clock-in
+    // tempo source) fall through to the Rust subsystem below.
     if (mClock && std::strncmp(addr, "/midi/clock/", 12) == 0) {
         const char* verb = addr + 12;
-        const bool start = std::strcmp(verb, "start") == 0;
-        const bool cont  = std::strcmp(verb, "continue") == 0;
-        const bool stop  = std::strcmp(verb, "stop") == 0;
-        const bool beat  = std::strcmp(verb, "beat") == 0;
-        if (start || cont || stop || beat) {
-            std::string port = "*";
-            double durMs = 0.0;
+        const bool outBpm    = std::strcmp(verb, "out/bpm") == 0;
+        const bool outFollow = std::strcmp(verb, "out/follow") == 0;
+        const bool outOff    = std::strcmp(verb, "out/off") == 0;
+        const bool beat      = std::strcmp(verb, "beat") == 0;
+        if (outBpm || outFollow || outOff || beat) {
+            std::string port = "*", timeline;
+            double num = 0.0;
             try {
                 osc::ReceivedMessage msg(osc::ReceivedPacket(
                     reinterpret_cast<const char*>(data),
                     static_cast<osc::osc_bundle_element_size_t>(size)));
                 auto it = msg.ArgumentsBegin();
                 if (it != msg.ArgumentsEnd() && it->IsString()) { port = it->AsStringUnchecked(); ++it; }
-                if (beat && it != msg.ArgumentsEnd()) {
-                    if (it->IsFloat())       durMs = it->AsFloatUnchecked();
-                    else if (it->IsDouble()) durMs = it->AsDoubleUnchecked();
-                    else if (it->IsInt32())  durMs = it->AsInt32Unchecked();
+                if (it != msg.ArgumentsEnd()) {
+                    if (outFollow && it->IsString()) timeline = it->AsStringUnchecked();
+                    else if (it->IsFloat())          num = it->AsFloatUnchecked();
+                    else if (it->IsDouble())         num = it->AsDoubleUnchecked();
+                    else if (it->IsInt32())          num = it->AsInt32Unchecked();
                 }
             } catch (...) { return true; }  // malformed — swallow
-            if (start)      get_midi_clock_out().onStart(*mClock, port);
-            else if (cont)  get_midi_clock_out().onContinue(*mClock, port);
-            else if (stop)  get_midi_clock_out().onStop(*mClock, port);
-            else            get_midi_clock_out().onBeat(*mClock, port, durMs / 1000.0);
+            if (outBpm)         get_midi_clock_out().onClockOutTempo(*mClock, port, num);
+            else if (outFollow) get_midi_clock_out().onClockOutFollow(*mClock, port, timeline);
+            else if (outOff)    get_midi_clock_out().onClockOutOff(port);
+            else                get_midi_clock_out().onBeat(*mClock, port, num / 1000.0);
             return true;
         }
     }

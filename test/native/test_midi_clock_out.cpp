@@ -1,9 +1,9 @@
 /*
  * test_midi_clock_out.cpp — the engine-side MIDI clock-OUT coordinator end to
- * end: a command (onStart/onBeat) + repeated render-thread generate() calls,
- * timed off a SuperClock, schedule the right number of /midi/clock/tick events
- * into the EventScheduler at the SuperClock-derived rate. Uses the process-wide
- * scheduler + coordinator (real wiring).
+ * end: a command (onClockOutTempo / onClockOutFollow / onBeat) + repeated
+ * render-thread generate() calls, timed off a SuperClock, schedule the right
+ * number of /midi/clock/tick events into the EventScheduler at the per-port
+ * tempo. Uses the process-wide scheduler + coordinator (real wiring).
  */
 #include <catch2/catch_test_macros.hpp>
 
@@ -45,7 +45,7 @@ int countByAddr(EventScheduler& es, int32_t fromHead, int32_t toHead, const char
     return count;
 }
 
-// Bind a local SuperClockState and run the clock at a fixed tempo (origin 0).
+// Bind a local SuperClockState and run the Link timeline at a fixed tempo (origin 0).
 struct FixedClock {
     SuperClockState st{};
     SuperClock      clock;
@@ -66,46 +66,92 @@ int32_t resetRing(EventScheduler& sched) {
     return sched.outHead()->load();
 }
 
-} // namespace
-
-TEST_CASE("MidiClockOut schedules ~24 SuperClock-timed pulses per beat", "[midi_clock]") {
-    FixedClock fc(120.0);                        // 120 BPM → 0.5 s/beat
-    EventScheduler& sched = get_event_scheduler();
-    MidiClockOut&   clk   = get_midi_clock_out();
-    clk.reset();   // isolate from clock state any other test may have left
-    const double base = fc.clock.now();          // anchor to the clock's NTP base
-    const int32_t startHead = resetRing(sched);
-
-    clk.onStart(fc.clock, "clk");
-    for (double t = 0.0; t <= 0.5 + 1e-9; t += kBlock) clk.generate(fc.clock, base + t);
-    clk.onStop(fc.clock, "clk");
-    clk.generate(fc.clock, base + 0.6);          // drain the stop one-shot
-    sched.tick(INT64_MAX);                        // flush everything enqueued
-
-    const int32_t endHead = sched.outHead()->load();
-    const int ticks  = countByAddr(sched, startHead, endHead, "/midi/clock/tick");
-    const int starts = countByAddr(sched, startHead, endHead, "/midi/out/start");
-    const int stops  = countByAddr(sched, startHead, endHead, "/midi/out/stop");
-
-    // One beat at 24 PPQN ≈ 24 pulses (a couple extra from the ~10 ms look-ahead).
-    CHECK(ticks >= 23);
-    CHECK(ticks <= 27);
-    CHECK(starts == 1);   // transport bytes go out the same scheduled path
-    CHECK(stops == 1);
+// Drive generate() across `seconds` of render blocks from `base`, then flush.
+void runFor(MidiClockOut& clk, FixedClock& fc, double base, double seconds) {
+    for (double t = 0.0; t <= seconds + 1e-9; t += kBlock) clk.generate(fc.clock, base + t);
+    get_event_scheduler().tick(INT64_MAX);
 }
 
-TEST_CASE("MidiClockOut emits nothing while stopped", "[midi_clock]") {
-    FixedClock fc(120.0);
+} // namespace
+
+TEST_CASE("MidiClockOut fixed tempo schedules ~24 pulses per beat", "[midi_clock]") {
+    FixedClock fc(120.0);                        // unused for Fixed, but a valid clock
     EventScheduler& sched = get_event_scheduler();
     MidiClockOut&   clk   = get_midi_clock_out();
-    clk.reset();   // isolate from clock state any other test may have left
+    clk.reset();
     const double base = fc.clock.now();
     const int32_t startHead = resetRing(sched);
 
-    // No onStart → generator idle; generate() must schedule no pulses.
-    for (double t = 0.0; t <= 0.5; t += kBlock) clk.generate(fc.clock, base + t);
-    sched.tick(INT64_MAX);
+    clk.onClockOutTempo(fc.clock, "clk", 120.0);  // 120 BPM → 24 pulses in 0.5 s
+    runFor(clk, fc, base, 0.5);
 
+    const int ticks = countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick");
+    CHECK(ticks >= 23);
+    CHECK(ticks <= 27);
+    // Clock-only: no transport bytes are emitted by a clock-out.
+    CHECK(countByAddr(sched, startHead, sched.outHead()->load(), "/midi/out/start") == 0);
+}
+
+TEST_CASE("MidiClockOut following :link tracks the Link tempo", "[midi_clock]") {
+    FixedClock fc(120.0);                         // Link timeline at 120 BPM
+    EventScheduler& sched = get_event_scheduler();
+    MidiClockOut&   clk   = get_midi_clock_out();
+    clk.reset();
+    const double base = fc.clock.now();
+    const int32_t startHead = resetRing(sched);
+
+    clk.onClockOutFollow(fc.clock, "clk", "link");
+    runFor(clk, fc, base, 0.5);
+
+    const int ticks = countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick");
+    CHECK(ticks >= 23);
+    CHECK(ticks <= 27);
+}
+
+TEST_CASE("MidiClockOut runs independent per-port tempos at once", "[midi_clock]") {
+    FixedClock fc(120.0);
+    EventScheduler& sched = get_event_scheduler();
+    MidiClockOut&   clk   = get_midi_clock_out();
+    clk.reset();
+    const double base = fc.clock.now();
+    const int32_t startHead = resetRing(sched);
+
+    clk.onClockOutTempo(fc.clock, "a", 120.0);    // 24 pulses / 0.5 s
+    clk.onClockOutTempo(fc.clock, "b", 240.0);    // 48 pulses / 0.5 s
+    runFor(clk, fc, base, 0.5);
+
+    // Both trains share the /midi/clock/tick address (port is an arg), so the
+    // aggregate ≈ 24 + 48 = 72 confirms the second port runs at twice the rate.
+    const int ticks = countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick");
+    CHECK(ticks >= 66);
+    CHECK(ticks <= 80);
+}
+
+TEST_CASE("MidiClockOut off stops a port's clock", "[midi_clock]") {
+    FixedClock fc(120.0);
+    EventScheduler& sched = get_event_scheduler();
+    MidiClockOut&   clk   = get_midi_clock_out();
+    clk.reset();
+    const double base = fc.clock.now();
+
+    clk.onClockOutTempo(fc.clock, "clk", 120.0);
+    runFor(clk, fc, base, 0.25);
+    clk.onClockOutOff("clk");
+    const int32_t startHead = resetRing(sched);    // count only what comes AFTER off
+    runFor(clk, fc, base + 0.3, 0.5);
+
+    CHECK(countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick") == 0);
+}
+
+TEST_CASE("MidiClockOut emits nothing with no clock-out ports", "[midi_clock]") {
+    FixedClock fc(120.0);
+    EventScheduler& sched = get_event_scheduler();
+    MidiClockOut&   clk   = get_midi_clock_out();
+    clk.reset();
+    const double base = fc.clock.now();
+    const int32_t startHead = resetRing(sched);
+
+    runFor(clk, fc, base, 0.5);   // no port enabled → no pulses
     CHECK(countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick") == 0);
 }
 
@@ -113,13 +159,12 @@ TEST_CASE("MidiClockOut beat-burst schedules 24 ticks over the duration", "[midi
     FixedClock fc(120.0);
     EventScheduler& sched = get_event_scheduler();
     MidiClockOut&   clk   = get_midi_clock_out();
-    clk.reset();   // isolate from clock state any other test may have left
+    clk.reset();
     const int32_t startHead = resetRing(sched);
     const double base = fc.clock.now();
 
     clk.onBeat(fc.clock, "p", 0.5);              // one beat's worth (24 ticks) over 0.5 s
-    for (double t = 0.0; t <= 0.5 + 1e-9; t += kBlock) clk.generate(fc.clock, base + t);
-    sched.tick(INT64_MAX);
+    runFor(clk, fc, base, 0.5);
 
     CHECK(countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick") == 24);
 }
