@@ -27,35 +27,32 @@ pub struct PortInfo {
 }
 
 /// Normalise a list of raw port names, suffixing duplicates so each handle is
-/// unique. The Nth occurrence (N≥2) of a normalised name gets `_N`, matching
-/// sp_midi's duplicate handling.
+/// unique. A name first claims its bare normalised form; later collisions take
+/// the lowest free `_2`, `_3`, … suffix.
+///
+/// Uniqueness is checked against the set of handles already issued — NOT by
+/// stripping `_<n>` off prior names. Stripping conflates a device whose real
+/// name normalises to e.g. `midi_2` with the dedup suffix of `midi`, which can
+/// hand two physical devices the same handle (the wrong device then gets
+/// addressed by `/midi/*`, and their per-port clock timelines merge).
 pub fn normalize_ports(raw_names: &[String]) -> Vec<PortInfo> {
     let mut out: Vec<PortInfo> = Vec::with_capacity(raw_names.len());
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     for raw in raw_names {
         let base = safe_osc_name(raw);
-        let count = out.iter().filter(|p| base_of(&p.normalized) == base).count();
-        let normalized = if count == 0 {
-            base
-        } else {
-            format!("{base}_{}", count + 1)
-        };
+        let mut handle = base.clone();
+        let mut n = 2;
+        while used.contains(&handle) {
+            handle = format!("{base}_{n}");
+            n += 1;
+        }
+        used.insert(handle.clone());
         out.push(PortInfo {
             raw: raw.clone(),
-            normalized,
+            normalized: handle,
         });
     }
     out
-}
-
-/// Strip a trailing `_<n>` dedup suffix to recover the base name, so duplicate
-/// counting groups `foo`, `foo_2`, `foo_3` together.
-fn base_of(name: &str) -> String {
-    if let Some(idx) = name.rfind('_') {
-        if name[idx + 1..].chars().all(|c| c.is_ascii_digit()) && idx + 1 < name.len() {
-            return name[..idx].to_string();
-        }
-    }
-    name.to_string()
 }
 
 #[cfg(test)]
@@ -85,9 +82,36 @@ mod tests {
     }
 
     #[test]
-    fn base_of_strips_numeric_suffix_only() {
-        assert_eq!(base_of("launchpad_2"), "launchpad");
-        assert_eq!(base_of("launchpad"), "launchpad");
-        assert_eq!(base_of("model_d"), "model_d"); // non-numeric suffix kept
+    fn a_real_numeric_name_does_not_collide_with_a_dedup_suffix() {
+        // "MIDI 2" normalises to "midi_2". A naive dedup that strips "_2" would
+        // treat the next "MIDI" as a duplicate of "midi" and also hand it
+        // "midi_2" — two devices, one handle. Each handle must be unique.
+        let raw = vec![
+            "MIDI 2".to_string(), // -> midi_2
+            "MIDI".to_string(),   // -> midi   (NOT midi_2)
+            "MIDI".to_string(),   // -> midi_3 (midi and midi_2 both taken)
+        ];
+        let got = normalize_ports(&raw);
+        assert_eq!(got[0].normalized, "midi_2");
+        assert_eq!(got[1].normalized, "midi");
+        assert_eq!(got[2].normalized, "midi_3");
+    }
+
+    #[test]
+    fn handles_are_always_unique() {
+        // Whatever the inputs (including names that look like dedup suffixes),
+        // no two devices ever share a handle.
+        let raw = vec![
+            "Port".to_string(),
+            "Port".to_string(),
+            "Port 2".to_string(),
+            "Port_2".to_string(),
+            "Port".to_string(),
+            "Port 3".to_string(),
+        ];
+        let got = normalize_ports(&raw);
+        let handles: std::collections::HashSet<_> =
+            got.iter().map(|p| p.normalized.clone()).collect();
+        assert_eq!(handles.len(), raw.len(), "every handle must be distinct");
     }
 }
