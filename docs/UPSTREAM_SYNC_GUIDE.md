@@ -13,10 +13,86 @@ Supersonic is a WASM port of SuperCollider's scsynth audio server. It originated
 
 ---
 
+## LICENSE FIREWALL: KEEP AGPL CODE OUT OF SUPERSONIC
+
+**This rule is firm. Read it before every sync.**
+
+### Why it matters
+
+- SuperSonic's own code (ingress/egress, SuperClock, scheduler, MIDI, the JS platform layer) is **`MIT OR GPL-3.0-or-later`** — deliberately permissive, so it can be embedded and redistributed without network-copyleft obligations.
+- The forked scsynth *core* is **GPL-3.0-or-later** (inherited from upstream). This is the expected licence to keep syncing.
+- Upstream's **WASM port** ([PR #7428](https://github.com/supercollider/supercollider/pull/7428), `wasm-audio-worklet`) is licensed **GNU Affero GPL v3 (AGPL-3.0-or-later)**, which is broader than the GPL-3.0 core.
+
+AGPL §13 ("Remote Network Interaction") requires that anyone who lets users interact with the software **over a network** be offered its complete corresponding source. A browser-delivered audio engine meets that description. GPL-3.0 → AGPL-3.0 compatibility is **one-way**: incorporating any AGPL code places the **combined work** under AGPL. That would extend the network-source-offer requirement to everyone who deploys it and change the platform layer's effective licence from MIT/GPL to AGPL. The change applies to every copy already distributed, so it cannot be undone after a release. Keeping the two licence domains separate is therefore a release-time decision, made here, on the way in.
+
+### The rule — it covers parts, not just whole files
+
+> **Do not copy, cherry-pick, adapt, paraphrase, "port", or otherwise derive any
+> code — a whole file OR a single fragment — from an AGPL / Affero-licensed
+> upstream source. Copyright covers derivative works: manually re-typing or
+> reworking an AGPL snippet into one of our GPL/MIT files still produces
+> AGPL-licensed code, even without the AGPL header.**
+
+The reliable approach is to **not use an AGPL upstream file as a backport source
+at all.** The decision is made at the **source, before you read it** — not by
+scanning the result afterwards. If you need equivalent behaviour, implement it
+independently from the OSC spec / observable behaviour, with **no reference** to
+the AGPL source.
+
+> **[Manual Application](#option-b-manual-application) is the path where AGPL code
+> could be introduced unintentionally.** "Read the upstream change, apply by hand"
+> is how an AGPL fragment can end up retyped into a GPL file without carrying the
+> AGPL header. No automated scan of this repo detects that — checking the source's
+> licence before adapting it is what keeps it out.
+
+### Known AGPL sources in upstream — do not use as backport sources
+
+All from PR #7428 (upstream's *alternative* wasm port). SuperSonic already has its
+own MIT-or-GPL callback-driven driver + OSC ingress, so none of these are needed:
+
+| Upstream path | What it is | Added by |
+|---|---|---|
+| `server/scsynth/SC_WebAudio.cpp` | AGPL WebAudio driver backend. Note: it lives in `server/scsynth/`, an INCLUDE path, so it appears in Step 2 `--since` discovery — leave it out; do not adapt it. | `6dad9cae6` |
+| `platform/wasm/SC_WebOsc.cpp` | AGPL OSC message builder | `640babcd3` |
+| `platform/wasm/LICENSE` | The AGPL-3.0 licence text covering everything under `platform/wasm/` | PR #7428 |
+| `platform/wasm/**` (`init.js`, `index.html`, pre-js, `README_WASM.md`, …) | Upstream's wasm demo / build glue — all AGPL-covered | PR #7428 |
+
+**Re-verify this list every sync** — upstream may add more AGPL under these paths.
+
+> **Not AGPL (note):** `COPYING`, `external_libraries/hidapi/LICENSE-gpl3.txt`,
+> and ordinary GPL-3.0 file headers contain the word "Affero" because **GPL-3.0 §13
+> *references* the AGPL**. A file is AGPL only if its own header says it is *licensed
+> under* the GNU Affero General Public License.
+
+### Checks — one primary, one backstop
+
+1. **Provenance check, BEFORE adapting anything (the primary check).** Run this on
+   the upstream SOURCE path before you open it, for cherry-pick *and* manual application:
+   ```bash
+   git show <upstream-commit>:<path> | grep -iqE "affero|AGPL" \
+     && echo "AGPL source — leave it out; implement independently if needed" \
+     || echo "ok to inspect"
+   ```
+
+2. **Whole-file backstop (limited).** Catches only a verbatim or header-preserving
+   copy of an entire AGPL file. It does **not** catch fragments retyped into existing
+   files, reworked code, or a copy with the header removed. Wire it into CI so a whole
+   AGPL file does not land unnoticed:
+   ```bash
+   # Must return nothing. A hit = a whole AGPL file is in the tree.
+   grep -rlI -e "Affero" -e "AGPL" src/ | grep -vE "GPL-3\.0|§13"
+   ```
+
+Check (2) only covers a whole copied file. Fragments and adaptations are covered by
+check (1) and the rule above: do not use an AGPL file as a source in the first place.
+
+---
+
 ## Quick Start Checklist
 
 When syncing with upstream:
 
+- [ ] **FIRST — read the [License Firewall](#license-firewall-keep-agpl-code-out-of-supersonic): never derive from AGPL/Affero upstream code, whole files OR fragments**
 - [ ] Fetch latest upstream changes
 - [ ] Identify scsynth-relevant commits since last sync
 - [ ] Filter out non-applicable changes (sclang, supernova, threads, tests)
@@ -87,6 +163,7 @@ git log supercollider/develop --oneline --since="$LAST_SYNC" -- \
 ### Step 3: Exclude Non-Applicable Changes
 
 **Always SKIP these**:
+- ❌ **ANY AGPL / Affero-licensed source — whole file OR fragment (see the [License Firewall](#license-firewall-keep-agpl-code-out-of-supersonic)). Covers all of PR #7428's WASM port: `server/scsynth/SC_WebAudio.cpp`, `platform/wasm/**`. Check the source's license header BEFORE you open it to adapt it.**
 - ❌ sclang changes (`lang/`, `SCClassLibrary/`)
 - ❌ supernova changes (`server/supernova/`)
 - ❌ Help files (`HelpSource/`, `*.schelp`)
@@ -345,6 +422,7 @@ instead of scprintf for WASM AudioWorklet compatibility.
 
 After applying changes:
 
+- [ ] **No AGPL code introduced — every upstream source you adapted was non-AGPL (provenance checked at the source, per the [License Firewall](#license-firewall-keep-agpl-code-out-of-supersonic)); the `grep -rlI -e Affero -e AGPL src/` backstop shows nothing new (backstop only — it does not catch retyped fragments)**
 - [ ] Code compiles on all targets (`scripts/build-web.sh`, `scripts/build-native.sh`)
 - [ ] SuperSonic-specific changes wrapped in `#ifdef SUPERSONIC` with upstream code in `#else`
 - [ ] Platform guards use `#ifndef __EMSCRIPTEN__` (not `#ifdef SUPERSONIC`)
@@ -971,7 +1049,7 @@ If uncertain about a commit:
 
 1. **Check the upstream PR** - Often has discussion about scope/impact
 2. **Ask on SuperCollider forums** - Community can clarify intent
-3. **When in doubt, apply it** - Easier to revert than to miss a critical fix
+3. **When in doubt about a _fix_, apply it** - Easier to revert than to miss a critical fix. **But when in doubt about a _license_, leave it out** - incorporating AGPL code (a whole file or a retyped fragment) produces a derivative work whose licence cannot be undone once distributed. See the [License Firewall](#license-firewall-keep-agpl-code-out-of-supersonic).
 4. **Test in browser** - Some issues only manifest in WASM environment
 
 ---
