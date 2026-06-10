@@ -80,21 +80,32 @@ void OscUdpServer::clearNotify() {
     mNotifyTargets.clear();
 }
 
-bool OscUdpServer::subscribeLink(uint32_t token) {
+// The per-subsystem notify audiences (Link / MIDI / gamepad) share one
+// caller-relative registration shape: resolve the origin token, reject an
+// unaddressable caller (in-process, no port), then add/remove the target.
+bool OscUdpServer::subscribeCallerTo(std::vector<Target>& list, uint32_t token) {
     juce::String ip;
     int port = 0;
     resolveOrigin(token, ip, port);
-    if (port <= 0) return false;       // an unaddressable caller can't be a Link target
-    addTarget(mLinkNotifyTargets, ip, port);
+    if (port <= 0) return false;
+    addTarget(list, ip, port);
     return true;
 }
 
-void OscUdpServer::unsubscribeLink(uint32_t token) {
+void OscUdpServer::unsubscribeCallerFrom(std::vector<Target>& list, uint32_t token) {
     juce::String ip;
     int port = 0;
     resolveOrigin(token, ip, port);
     if (port <= 0) return;
-    removeTarget(mLinkNotifyTargets, ip, port);
+    removeTarget(list, ip, port);
+}
+
+bool OscUdpServer::subscribeLink(uint32_t token) {
+    return subscribeCallerTo(mLinkNotifyTargets, token);
+}
+
+void OscUdpServer::unsubscribeLink(uint32_t token) {
+    unsubscribeCallerFrom(mLinkNotifyTargets, token);
 }
 
 void OscUdpServer::broadcastMidi(const uint8_t* data, uint32_t size) {
@@ -102,20 +113,23 @@ void OscUdpServer::broadcastMidi(const uint8_t* data, uint32_t size) {
 }
 
 bool OscUdpServer::subscribeMidi(uint32_t token) {
-    juce::String ip;
-    int port = 0;
-    resolveOrigin(token, ip, port);
-    if (port <= 0) return false;       // an unaddressable caller can't be a MIDI target
-    addTarget(mMidiNotifyTargets, ip, port);
-    return true;
+    return subscribeCallerTo(mMidiNotifyTargets, token);
 }
 
 void OscUdpServer::unsubscribeMidi(uint32_t token) {
-    juce::String ip;
-    int port = 0;
-    resolveOrigin(token, ip, port);
-    if (port <= 0) return;
-    removeTarget(mMidiNotifyTargets, ip, port);
+    unsubscribeCallerFrom(mMidiNotifyTargets, token);
+}
+
+void OscUdpServer::broadcastGamepad(const uint8_t* data, uint32_t size) {
+    broadcast(mGamepadNotifyTargets, data, size);
+}
+
+bool OscUdpServer::subscribeGamepad(uint32_t token) {
+    return subscribeCallerTo(mGamepadNotifyTargets, token);
+}
+
+void OscUdpServer::unsubscribeGamepad(uint32_t token) {
+    unsubscribeCallerFrom(mGamepadNotifyTargets, token);
 }
 
 // Cap subscriber lists so clients that reconnect on fresh ephemeral ports

@@ -4,8 +4,8 @@
 //! are unsafe inside an OSC address. We normalise them to a stable, OSC-safe,
 //! lowercase token matching sp_midi's `safeOscString`, then suffix
 //! duplicates (`_2`, `_3`, …) so every device has a unique handle. The handle is
-//! the identifier clients use in `/midi/*` addresses, so it must be stable and
-//! reproducible across enumerations.
+//! the identifier clients use in `/midi/*` / `/gamepad/*` messages, so it must
+//! be stable and reproducible across enumerations.
 
 /// Characters that are unsafe in an OSC address (or reserved by Sonic Pi's
 /// `:`-delimited paths) are replaced with `_`. Mirrors sp_midi/src/utils.cpp.
@@ -39,13 +39,7 @@ pub fn normalize_ports(raw_names: &[String]) -> Vec<PortInfo> {
     let mut out: Vec<PortInfo> = Vec::with_capacity(raw_names.len());
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     for raw in raw_names {
-        let base = safe_osc_name(raw);
-        let mut handle = base.clone();
-        let mut n = 2;
-        while used.contains(&handle) {
-            handle = format!("{base}_{n}");
-            n += 1;
-        }
+        let handle = assign_handle(raw, |h| used.contains(h));
         used.insert(handle.clone());
         out.push(PortInfo {
             raw: raw.clone(),
@@ -53,6 +47,22 @@ pub fn normalize_ports(raw_names: &[String]) -> Vec<PortInfo> {
         });
     }
     out
+}
+
+/// Assign one handle for a raw device name against an arbitrary taken-set: the
+/// OSC-safe name, or the lowest free `_2`/`_3`… suffix while `taken` claims it.
+/// This is the single home of the dedup rule above — [`normalize_ports`] uses
+/// it for batch enumeration (MIDI), and the gamepad subsystem (native + web)
+/// for incremental connects, so a handle means the same device everywhere.
+pub fn assign_handle(raw_name: &str, taken: impl Fn(&str) -> bool) -> String {
+    let base = safe_osc_name(raw_name);
+    let mut handle = base.clone();
+    let mut n = 2;
+    while taken(&handle) {
+        handle = format!("{base}_{n}");
+        n += 1;
+    }
+    handle
 }
 
 #[cfg(test)]
@@ -64,6 +74,13 @@ mod tests {
         assert_eq!(safe_osc_name("USB Keyboard 1"), "usb_keyboard_1");
         assert_eq!(safe_osc_name("Arturia: BeatStep/Pro"), "arturia__beatstep_pro");
         assert_eq!(safe_osc_name("MIDI*Port#3"), "midi_port_3");
+    }
+
+    #[test]
+    fn assign_handle_dedups_against_taken() {
+        let taken = ["pad", "pad_2"];
+        assert_eq!(assign_handle("Pad", |h| taken.contains(&h)), "pad_3");
+        assert_eq!(assign_handle("Other", |h| taken.contains(&h)), "other");
     }
 
     #[test]

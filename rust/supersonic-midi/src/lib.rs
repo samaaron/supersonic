@@ -3,7 +3,8 @@
 //! A midir-based MIDI subsystem within SuperSonic. It compiles to two shapes
 //! from one codebase:
 //!
-//! * a **native staticlib** linked into the C++ engine (CoreMIDI/ALSA/WinMM), and
+//! * a **native rlib** folded into the `supersonic-native` staticlib linked
+//!   into the C++ engine (CoreMIDI/ALSA/WinMM), and
 //! * a **wasm-bindgen module** loaded by the main-thread SuperSonic JS, where Web
 //!   MIDI lives.
 //!
@@ -13,10 +14,12 @@
 
 pub mod clock;
 pub mod message;
-pub mod normalize;
-pub mod osc;
 pub mod schema;
 pub mod sync;
+
+// The OSC codec + name normalisation live in the shared supersonic-osc crate
+// (also used by supersonic-gamepad), exposed under this crate's module paths.
+pub use supersonic_osc::{normalize, osc};
 
 pub use clock::{ClockEstimator, EstimatorParams, PPQN};
 pub use message::MidiMessage;

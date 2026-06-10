@@ -376,6 +376,73 @@ estimator to derive BPM (pushed to SuperClock, not forwarded as events); `Start`
 
 ---
 
+## Gamepad
+
+A native game-controller subsystem (Rust: `gilrs` — evdev / XInput, with the
+SDL controller-mapping database — and Apple's GameController framework on
+macOS) folded into the engine, structured like the MIDI one. It is a peripheral that exchanges `/gamepad/*` OSC with the engine.
+Pads are addressed by a stable normalised handle (lowercased, unsafe chars →
+`_`, duplicates suffixed `_2`, `_3`); `pad = "*"` means all connected pads.
+Native builds only (gated by `SUPERSONIC_ENABLE_GAMEPAD`); on the web the
+main-thread `GamepadManager` (JS Gamepad API I/O + the shared Rust core
+compiled to wasm) serves the **input-event and rumble subset** of this
+contract — device lists arrive as structured JS callbacks rather than OSC,
+and the management verbs (`/gamepad/enable`, `/gamepad/devices/list`,
+`/gamepad/refresh`, `/gamepad/notify/*`) are native-only.
+
+On macOS, controller discovery requires the host process to pump the main
+CFRunLoop. The standalone engine does; an embedding that never pumps it (e.g.
+a BEAM/NIF host) serves `/gamepad/*` normally but reports an empty device
+list.
+
+Hotplug is automatic (no refresh needed); pads are **enabled by default** on
+connect.
+
+### Device management
+
+| `→` Request | Effect |
+| --- | --- |
+| `/gamepad/devices/list` | Reply `← /gamepad/devices.reply i:n [s:name i:enabled]*` |
+| `/gamepad/enable s:pad i:0\|1` | Mute/unmute a pad's `/gamepad/in/*` events (`"*"` = all + the default for pads that connect later). Pushes `/gamepad/devices`. |
+| `/gamepad/refresh` | Re-broadcast the device snapshot (`/gamepad/devices`). |
+| `/gamepad/notify/subscribe` | Subscribe to `/gamepad/in/*` events + `/gamepad/devices` pushes; replies with a `/gamepad/devices.reply` snapshot. |
+| `/gamepad/notify/unsubscribe` | Stop notifications. |
+
+### Input events
+
+Pushed to `/gamepad/notify` subscribers. Buttons and axes use a canonical
+cross-platform vocabulary (identical on web and native):
+
+| `←` Event | Meaning |
+| --- | --- |
+| `/gamepad/in/button s:pad s:button i:pressed f:value` | Button edge or analog sweep. `value` is 0..=1 (digital buttons jump 0/1; the triggers sweep). |
+| `/gamepad/in/axis s:pad s:axis f:value` | Stick movement. `value` is -1..=1, **up/right positive**. |
+| `/gamepad/devices i:n [s:name i:enabled]*` | Pushed on connect / disconnect / enable change. |
+
+Button names (W3C standard-mapping order): `south east west north
+left_shoulder right_shoulder left_trigger right_trigger select start
+left_thumb right_thumb dpad_up dpad_down dpad_left dpad_right mode`. Axis
+names: `left_x left_y right_x right_y` (plus `dpad_x`/`dpad_y` for the rare
+native devices whose d-pad reports as a hat axis). Elements beyond the
+canonical tables surface as `button_<i>` / `axis_<i>` (e.g. non-standard web
+mappings).
+
+Values are quantised to 1/127 steps and only changes are emitted (with an 0.08
+stick deadzone and press hysteresis for analog triggers), so a resting stick is
+silent and a sweep can't flood subscribers.
+
+### Output (rumble)
+
+| `→` Request | Effect |
+| --- | --- |
+| `/gamepad/out/rumble s:pad f:strong f:weak i:durationMs` | Start (or retrigger) rumble; motor magnitudes 0..=1. `durationMs <= 0` = until stopped. |
+| `/gamepad/out/rumble_stop s:pad` | Stop any active rumble. |
+
+Best-effort: pads (or platforms — notably macOS) without force-feedback support
+ignore it. On the web, rumble uses `Gamepad.vibrationActuator` (Chromium).
+
+---
+
 ## Sonic Pi daemon relay
 
 Sonic Pi's GUI can't send to SuperSonic's UDP port directly (the

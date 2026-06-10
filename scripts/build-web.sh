@@ -290,6 +290,23 @@ else
     echo "  WARNING: skipped MIDI wasm build (need rustup wasm32 target + wasm-bindgen 0.2.122)."
 fi
 
+# ── Gamepad subsystem (Rust core → wasm-bindgen module, main-thread) ─────────
+# Same shape as the MIDI module: the shared Rust gamepad core compiled to wasm
+# + JS bindings for the main-thread GamepadManager (Gamepad API I/O lives in
+# JS). Reuses the toolchain detected above.
+echo "Building gamepad wasm module (supersonic-gamepad)..."
+if PATH="$MIDI_PATH" "$MIDI_CARGO" build --release --target wasm32-unknown-unknown \
+        --manifest-path "$PROJECT_ROOT/rust/supersonic-gamepad/Cargo.toml" 2>/dev/null \
+   && [ -x "$WASM_BINDGEN" ]; then
+    mkdir -p "$OUTPUT_DIR/gamepad"
+    "$WASM_BINDGEN" --target web --no-typescript \
+        --out-dir "$OUTPUT_DIR/gamepad" --out-name supersonic_gamepad \
+        "$PROJECT_ROOT/rust/target/wasm32-unknown-unknown/release/supersonic_gamepad.wasm"
+    echo "  → dist/gamepad/supersonic_gamepad.{js,_bg.wasm}"
+else
+    echo "  WARNING: skipped gamepad wasm build (need rustup wasm32 target + wasm-bindgen 0.2.122)."
+fi
+
 # Generate API documentation
 echo "Generating API docs..."
 npm run docs:api

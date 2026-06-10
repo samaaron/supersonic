@@ -47,6 +47,9 @@ public:
     void broadcastMidi(const uint8_t* data, uint32_t size) override;
     bool subscribeMidi(uint32_t token) override;
     void unsubscribeMidi(uint32_t token) override;
+    void broadcastGamepad(const uint8_t* data, uint32_t size) override;
+    bool subscribeGamepad(uint32_t token) override;
+    void unsubscribeGamepad(uint32_t token) override;
 
 private:
     void run() override;
@@ -66,6 +69,10 @@ private:
     static bool addTarget(std::vector<Target>& list, const juce::String& ip, int port);
     static void removeTarget(std::vector<Target>& list, const juce::String& ip, int port);
     void        broadcast(const std::vector<Target>& list, const uint8_t* data, uint32_t size);
+    // Caller-relative audience registration shared by the Link/MIDI/gamepad
+    // notify lists: resolve the origin token, reject an unaddressable caller.
+    bool subscribeCallerTo(std::vector<Target>& list, uint32_t token);
+    void unsubscribeCallerFrom(std::vector<Target>& list, uint32_t token);
 
     int               mPort = 57110;
     std::string       mBindAddress;
@@ -78,6 +85,7 @@ private:
     std::vector<Target> mNotifyTargets;
     std::vector<Target> mLinkNotifyTargets;
     std::vector<Target> mMidiNotifyTargets;
+    std::vector<Target> mGamepadNotifyTargets;
 
     // (ip,port) ↔ token table — the transport's address book.
     struct OriginEntry { uint32_t token = 0; char ip[64] = {}; int port = 0; };

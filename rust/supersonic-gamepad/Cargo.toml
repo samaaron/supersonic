@@ -1,0 +1,59 @@
+[package]
+name = "supersonic-gamepad"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sam Aaron"]
+description = "SuperSonic game-controller subsystem (gilrs; GameController framework on macOS): normalised button/axis events, device registry, and rumble. Compiles into the native staticlib (via supersonic-native) and to a wasm-bindgen module for the web Gamepad API seam."
+# Dual-licensed like SuperSonic's other OSC-only client libraries: this crate
+# contains no GPL-derived code and talks to the engine purely via the /gamepad/*
+# OSC schema. See the repo LICENSE. (gilrs itself is MIT OR Apache-2.0.)
+license = "MIT OR GPL-3.0-or-later"
+
+[lib]
+# cdylib → wasm-bindgen module (web).
+# rlib   → folded into the supersonic-native staticlib + host unit tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Shared OSC codec + OSC-safe name normalisation (also used by supersonic-midi).
+supersonic-osc = { path = "../supersonic-osc" }
+
+# gilrs provides the native device IO (evdev/XInput) plus the SDL
+# controller-mapping database, so buttons/axes arrive pre-normalised across
+# vendors. Native target only: on the web the Gamepad API I/O is done in JS and
+# this crate only supplies the shared protocol logic.
+#
+# macOS does NOT use gilrs: modern controllers (Xbox/PlayStation) are claimed
+# by Apple's own drivers, which deliver input exclusively through the
+# GameController framework — gilrs's IOKit backend can enumerate them but
+# never receives input reports. See src/gc.rs for the GCController backend.
+#
+# Windows is declared separately to swap gilrs's default WGI backend for
+# XInput: WGI only delivers events to a focused window, which a headless audio
+# engine never has. (gilrs-core errors out if neither backend feature is set,
+# even off-Windows, so `default-features = false` can't be used globally.)
+[target.'cfg(all(not(target_arch = "wasm32"), not(windows), not(target_os = "macos")))'.dependencies]
+gilrs = { version = "0.11.2" }
+
+[target.'cfg(windows)'.dependencies]
+gilrs = { version = "0.11.2", default-features = false, features = ["xinput"] }
+
+# macOS: Apple GameController framework via the objc2 bindings. Requires the
+# host process to pump the main CFRunLoop (the supersonic standalone does —
+# src/native/Main.cpp) for controller discovery to deliver.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-game-controller = "0.3"
+# For the no-op valueChangedHandler block: GameController only streams input
+# into a pad's profile once a handler is installed (see src/gc.rs).
+block2 = "0.6"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# CFRunLoop pump for the capture example's main thread.
+objc2-core-foundation = "0.3"
+
+# Web seam: the shared core is exposed to the main-thread JS GamepadManager via
+# wasm-bindgen (Gamepad API I/O is done in JS).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"

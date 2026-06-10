@@ -87,6 +87,11 @@ if(SUPERSONIC_ENABLE_MIDI)
     target_sources(SuperSonicNativeTests PRIVATE test_midi.cpp)
 endif()
 
+# test_gamepad exercises the gated gilrs backend (GamepadControl/ss_gamepad).
+if(SUPERSONIC_ENABLE_GAMEPAD)
+    target_sources(SuperSonicNativeTests PRIVATE test_gamepad.cpp)
+endif()
+
 target_link_libraries(SuperSonicNativeTests PRIVATE
     supersonic_engine
     Catch2::Catch2

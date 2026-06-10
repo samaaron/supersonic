@@ -10,10 +10,14 @@ description = "SuperSonic MIDI subsystem (midir-based): parse/encode, device reg
 license = "MIT OR GPL-3.0-or-later"
 
 [lib]
-# staticlib → linked into the C++ engine (native).
-# cdylib    → wasm-bindgen module (web).
-# rlib      → so the crate's own unit tests can link it on the host.
-crate-type = ["staticlib", "cdylib", "rlib"]
+# cdylib → wasm-bindgen module (web).
+# rlib   → folded into the supersonic-native staticlib (the engine link) +
+#          host unit tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Shared OSC codec + OSC-safe name normalisation (also used by supersonic-gamepad).
+supersonic-osc = { path = "../supersonic-osc" }
 
 [features]
 default = []

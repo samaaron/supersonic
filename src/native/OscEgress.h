@@ -41,6 +41,7 @@ public:
     void broadcastToTargets(const uint8_t* data, uint32_t size);
     void broadcastLinkNotify(const uint8_t* data, uint32_t size);
     void broadcastMidiNotify(const uint8_t* data, uint32_t size);  // → /midi/notify audience
+    void broadcastGamepadNotify(const uint8_t* data, uint32_t size);  // → /gamepad/notify audience
     void debug(const char* text, uint32_t len);        // → /supersonic/debug
     void sendStateChange(const char* state, const char* reason);
     void sendSetup(int sampleRate, int bufferSize, uint32_t generation);
@@ -65,17 +66,21 @@ public:
     void unsubscribeCallerFromLinkNotify();
     bool subscribeCallerToMidiNotify();
     void unsubscribeCallerFromMidiNotify();
+    bool subscribeCallerToGamepadNotify();
+    void unsubscribeCallerFromGamepadNotify();
 
 private:
     enum Route : uint32_t {
-        REPLY = 0, SEND_TO_CALLER = 1, BROADCAST_NOTIFY = 2, BROADCAST_LINK = 3, BROADCAST_MIDI = 4
+        REPLY = 0, SEND_TO_CALLER = 1, BROADCAST_NOTIFY = 2, BROADCAST_LINK = 3, BROADCAST_MIDI = 4,
+        BROADCAST_GAMEPAD = 5
     };
     // Must match the shared on-ring EgressRoute values (shared_memory.h).
     static_assert(uint32_t(REPLY) == uint32_t(EGRESS_REPLY) &&
                   uint32_t(SEND_TO_CALLER) == uint32_t(EGRESS_SEND_TO_CALLER) &&
                   uint32_t(BROADCAST_NOTIFY) == uint32_t(EGRESS_BROADCAST_NOTIFY) &&
                   uint32_t(BROADCAST_LINK) == uint32_t(EGRESS_BROADCAST_LINK) &&
-                  uint32_t(BROADCAST_MIDI) == uint32_t(EGRESS_BROADCAST_MIDI),
+                  uint32_t(BROADCAST_MIDI) == uint32_t(EGRESS_BROADCAST_MIDI) &&
+                  uint32_t(BROADCAST_GAMEPAD) == uint32_t(EGRESS_BROADCAST_GAMEPAD),
                   "OscEgress::Route must match shared_memory.h EgressRoute");
     void frame(Route route, uint32_t token, const uint8_t* osc, uint32_t size);
 

@@ -171,6 +171,7 @@ enum EgressRoute : uint32_t {
     EGRESS_BROADCAST_NOTIFY = 2,  // fan out to all notify subscribers
     EGRESS_BROADCAST_LINK   = 3,  // fan out to all Link subscribers
     EGRESS_BROADCAST_MIDI   = 4,  // fan out to all MIDI-notify subscribers
+    EGRESS_BROADCAST_GAMEPAD = 5, // fan out to all gamepad-notify subscribers
 };
 constexpr uint32_t EGRESS_ROUTE_SIZE = sizeof(uint32_t);  // leading route word
 

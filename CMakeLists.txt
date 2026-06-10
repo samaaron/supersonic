@@ -494,61 +494,98 @@ elseif(UNIX)
     target_link_libraries(supersonic_engine PUBLIC Threads::Threads rt ${CMAKE_DL_LIBS})
 endif()
 
-# ── MIDI subsystem (Rust / midir) ─────────────────────────────────────────────
-# A dual-licensed (MIT OR GPL-3.0-or-later) Rust crate, built by cargo as a
-# staticlib and linked into the engine. The C++ seam is src/native/MidiControl,
-# which talks to it via rust/supersonic-midi/cpp/ss_midi.h.
+# ── Rust subsystems (MIDI / gamepad) ──────────────────────────────────────────
+# Dual-licensed (MIT OR GPL-3.0-or-later) Rust crates, folded by cargo into the
+# single `supersonic-native` umbrella staticlib (a binary may link exactly one
+# Rust staticlib — each carries its own copy of std) and linked into the
+# engine. The C++ seams are src/native/MidiControl
+# (rust/supersonic-midi/cpp/ss_midi.h) and src/native/GamepadControl
+# (rust/supersonic-gamepad/cpp/ss_gamepad.h).
 option(SUPERSONIC_ENABLE_MIDI "Integrate the Rust/midir MIDI subsystem (native)" ON)
-if(SUPERSONIC_ENABLE_MIDI)
+option(SUPERSONIC_ENABLE_GAMEPAD "Integrate the Rust/gilrs gamepad subsystem (native)" ON)
+# A Rust toolchain (cargo) is required unless BOTH subsystems are OFF —
+# disabling just SUPERSONIC_ENABLE_MIDI no longer yields a Rust-free build.
+if(SUPERSONIC_ENABLE_MIDI OR SUPERSONIC_ENABLE_GAMEPAD)
     find_program(CARGO_EXECUTABLE cargo REQUIRED)
-    set(SS_MIDI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/rust)
+    set(SS_RUST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/rust)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(SS_MIDI_PROFILE debug)
-        set(SS_MIDI_CARGO_FLAGS)
+        set(SS_RUST_PROFILE debug)
+        set(SS_RUST_CARGO_FLAGS)
     else()
-        set(SS_MIDI_PROFILE release)
-        set(SS_MIDI_CARGO_FLAGS --release)
+        set(SS_RUST_PROFILE release)
+        set(SS_RUST_CARGO_FLAGS --release)
     endif()
 
-    # Windows uses midir's WinRT backend (full-length device names) plus the
-    # WinRT DeviceWatcher for hot-swap; both live behind the crate's `winrt`
-    # feature. Other platforms get native hot-swap (CoreMIDI/ALSA) with no flag.
-    if(WIN32)
-        list(APPEND SS_MIDI_CARGO_FLAGS --features winrt)
+    # Map the CMake options onto the umbrella crate's subsystem features.
+    set(SS_RUST_FEATURES)
+    if(SUPERSONIC_ENABLE_MIDI)
+        list(APPEND SS_RUST_FEATURES midi)
+        # Windows uses midir's WinRT backend (full-length device names) plus the
+        # WinRT DeviceWatcher for hot-swap; both live behind the `winrt`
+        # feature. Other platforms get native hot-swap (CoreMIDI/ALSA) with no
+        # flag. (The gamepad crate selects its Windows backend — XInput, which
+        # unlike WGI needs no focused window — by itself via a target-specific
+        # dependency.)
+        if(WIN32)
+            list(APPEND SS_RUST_FEATURES winrt)
+        endif()
     endif()
-    # Rust staticlib name is platform-dependent: libsupersonic_midi.a on
-    # Unix/GNU, supersonic_midi.lib on Windows/MSVC. Use CMake's prefix/suffix.
-    set(SS_MIDI_LIB ${SS_MIDI_DIR}/target/${SS_MIDI_PROFILE}/${CMAKE_STATIC_LIBRARY_PREFIX}supersonic_midi${CMAKE_STATIC_LIBRARY_SUFFIX})
+    if(SUPERSONIC_ENABLE_GAMEPAD)
+        list(APPEND SS_RUST_FEATURES gamepad)
+    endif()
+    list(JOIN SS_RUST_FEATURES "," SS_RUST_FEATURES_ARG)
+    list(APPEND SS_RUST_CARGO_FLAGS --no-default-features --features ${SS_RUST_FEATURES_ARG})
+
+    # Rust staticlib name is platform-dependent: libsupersonic_native.a on
+    # Unix/GNU, supersonic_native.lib on Windows/MSVC. Use CMake's prefix/suffix.
+    set(SS_RUST_LIB ${SS_RUST_DIR}/target/${SS_RUST_PROFILE}/${CMAKE_STATIC_LIBRARY_PREFIX}supersonic_native${CMAKE_STATIC_LIBRARY_SUFFIX})
 
     # cargo tracks incremental freshness itself, so run it every build.
-    add_custom_target(supersonic_midi_rust ALL
-        BYPRODUCTS ${SS_MIDI_LIB}
-        COMMAND ${CARGO_EXECUTABLE} build ${SS_MIDI_CARGO_FLAGS} -p supersonic-midi
-        WORKING_DIRECTORY ${SS_MIDI_DIR}
-        COMMENT "Building Rust MIDI subsystem (cargo)"
+    add_custom_target(supersonic_rust ALL
+        BYPRODUCTS ${SS_RUST_LIB}
+        COMMAND ${CARGO_EXECUTABLE} build ${SS_RUST_CARGO_FLAGS} -p supersonic-native
+        WORKING_DIRECTORY ${SS_RUST_DIR}
+        COMMENT "Building Rust subsystems (cargo: supersonic-native)"
         VERBATIM)
-    add_dependencies(supersonic_engine supersonic_midi_rust)
+    add_dependencies(supersonic_engine supersonic_rust)
+    target_link_libraries(supersonic_engine PUBLIC ${SS_RUST_LIB})
 
-    target_sources(supersonic_engine PRIVATE ${NATIVE_SRC}/MidiControl.cpp)
-    target_include_directories(supersonic_engine PUBLIC ${SS_MIDI_DIR}/supersonic-midi/cpp)
-    target_compile_definitions(supersonic_engine PUBLIC SUPERSONIC_MIDI=1)
-    target_link_libraries(supersonic_engine PUBLIC ${SS_MIDI_LIB})
-
-    # Libraries the midir backend needs at final link (Rust staticlibs don't
-    # carry their link deps): CoreMIDI on macOS, ALSA on Linux; Windows winmm is
-    # already linked above.
-    if(APPLE)
-        target_link_libraries(supersonic_engine PUBLIC "-framework CoreMIDI")
-    elseif(WIN32)
+    if(WIN32)
         # Rust std (windows-msvc) pulls in these system libs. ws2_32 is already
         # linked above; kernel32/msvcrt are MSVC defaults. Authoritative list
         # from `rustc --print native-static-libs`.
         target_link_libraries(supersonic_engine PUBLIC ntdll userenv dbghelp)
-        # WinRT MIDI + DeviceWatcher (windows crate / midir winrt feature):
-        # combase (CoIncrementMTAUsage) and the WinRT runtime activation libs.
-        target_link_libraries(supersonic_engine PUBLIC ole32 oleaut32 runtimeobject)
-    elseif(UNIX)
-        target_link_libraries(supersonic_engine PUBLIC asound)
+    endif()
+
+    # Per-subsystem seams + the OS libraries each Rust backend needs at final
+    # link (Rust staticlibs don't carry their link deps).
+    if(SUPERSONIC_ENABLE_MIDI)
+        target_sources(supersonic_engine PRIVATE ${NATIVE_SRC}/MidiControl.cpp)
+        target_include_directories(supersonic_engine PUBLIC ${SS_RUST_DIR}/supersonic-midi/cpp)
+        target_compile_definitions(supersonic_engine PUBLIC SUPERSONIC_MIDI=1)
+        if(APPLE)
+            target_link_libraries(supersonic_engine PUBLIC "-framework CoreMIDI")
+        elseif(WIN32)
+            # WinRT MIDI + DeviceWatcher (windows crate / midir winrt feature):
+            # combase (CoIncrementMTAUsage) and the WinRT runtime activation libs.
+            target_link_libraries(supersonic_engine PUBLIC ole32 oleaut32 runtimeobject)
+        elseif(UNIX)
+            target_link_libraries(supersonic_engine PUBLIC asound)
+        endif()
+    endif()
+    if(SUPERSONIC_ENABLE_GAMEPAD)
+        target_sources(supersonic_engine PRIVATE ${NATIVE_SRC}/GamepadControl.cpp)
+        target_include_directories(supersonic_engine PUBLIC ${SS_RUST_DIR}/supersonic-gamepad/cpp)
+        target_compile_definitions(supersonic_engine PUBLIC SUPERSONIC_GAMEPAD=1)
+        # Backend link deps: Apple's GameController framework + the ObjC
+        # runtime on macOS (the gc.rs backend — gilrs can't see Apple-driven
+        # pads there), libudev on Linux (gilrs evdev hotplug); Windows XInput
+        # loads its DLL at runtime, so nothing extra there.
+        if(APPLE)
+            target_link_libraries(supersonic_engine PUBLIC "-framework GameController" objc)
+        elseif(UNIX AND NOT WIN32)
+            target_link_libraries(supersonic_engine PUBLIC udev)
+        endif()
     endif()
 endif()
 

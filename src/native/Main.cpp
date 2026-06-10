@@ -344,7 +344,11 @@ int main(int argc, char* argv[]) {
     auto dev = engine.currentDevice();
     printBanner(VERSION, dev, cfg.udpPort);
 
-    // On macOS, pump the CFRunLoop so AUHAL audio callbacks fire.
+    // On macOS, pump the CFRunLoop so AUHAL audio callbacks fire — and so
+    // GameController discovery delivers: the gamepad subsystem's controller
+    // list only populates while the MAIN run loop is pumped (see
+    // rust/supersonic-gamepad/src/gc.rs; hosts without a pump, e.g. a BEAM/NIF
+    // embedding, get an empty list).
     // On other platforms, just block.
 #ifdef __APPLE__
     // If the run loop is suppressed (aggregate was created at boot),

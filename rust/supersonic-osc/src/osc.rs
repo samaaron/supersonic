@@ -1,9 +1,10 @@
 //! Minimal, dependency-free OSC 1.0 message codec.
 //!
-//! Only what the `/midi/*` schema needs: a flat message (no bundles) with int32,
-//! float32, int64, string and blob arguments. Kept tiny and `std`-only so it
-//! builds identically for the native staticlib and the wasm-bindgen module
-//! without pulling an OSC crate into the wasm bundle.
+//! Only what the subsystem schemas (`/midi/*`, `/gamepad/*`) need: a flat
+//! message (no bundles) with int32, float32, int64, string and blob arguments.
+//! Kept tiny and `std`-only so it builds identically for the native staticlibs
+//! and the wasm-bindgen modules without pulling an OSC crate into the wasm
+//! bundles.
 
 /// A single decoded OSC argument.
 #[derive(Clone, Debug, PartialEq)]

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>SuperSonic Gamepad WASM Test</title>
+  </head>
+  <body>
+    <p>Driven by Playwright (gamepad_wasm.spec.mjs).</p>
+    <script type="module">
+      import initWasm, {
+        normalize_name,
+        assign_handle,
+        WasmPadState,
+        gamepad_button_osc,
+        gamepad_axis_osc,
+        gamepad_out_decode,
+      } from "/dist/gamepad/supersonic_gamepad.js";
+      import { GamepadManager } from "/js/lib/gamepad_manager.js";
+
+      // Minimal OSC message encoder, just for building /gamepad/out test inputs.
+      function oscString(s) {
+        const b = new TextEncoder().encode(s);
+        const padded = (b.length + 1 + 3) & ~3;
+        const out = new Uint8Array(padded);
+        out.set(b);
+        return out;
+      }
+      function encodeOsc(addr, args) {
+        let tags = ",";
+        const chunks = [];
+        for (const a of args) {
+          tags += a.t;
+          if (a.t === "i") {
+            const d = new DataView(new ArrayBuffer(4));
+            d.setInt32(0, a.v, false);
+            chunks.push(new Uint8Array(d.buffer));
+          } else if (a.t === "f") {
+            const d = new DataView(new ArrayBuffer(4));
+            d.setFloat32(0, a.v, false);
+            chunks.push(new Uint8Array(d.buffer));
+          } else if (a.t === "s") {
+            chunks.push(oscString(a.v));
+          }
+        }
+        const parts = [oscString(addr), oscString(tags), ...chunks];
+        const total = parts.reduce((n, p) => n + p.length, 0);
+        const out = new Uint8Array(total);
+        let o = 0;
+        for (const p of parts) { out.set(p, o); o += p.length; }
+        return out;
+      }
+
+      window.wasmGamepad = { initWasm, normalize_name, assign_handle, WasmPadState, gamepad_button_osc, gamepad_axis_osc, gamepad_out_decode, encodeOsc };
+      window.GamepadManager = GamepadManager;
+      window.gamepadWasmReady = true;
+    </script>
+  </body>
+</html>

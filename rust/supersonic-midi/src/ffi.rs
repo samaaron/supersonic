@@ -24,14 +24,10 @@ use crate::message::MidiMessage;
 use crate::schema::{decode_out, encode_in, encode_ports, encode_ports_reply, OutCommand};
 use crate::sync::{transport_event, TransportEvent};
 
-/// Emit an OSC packet to the engine. `kind` is [`EMIT_BROADCAST`] (fan out to
-/// the /midi/notify audience — `/midi/in/*`, `/midi/ports`) or [`EMIT_REPLY`]
-/// (reply to the current caller — `/midi/ports.reply`).
-pub type EmitFn = extern "C" fn(ctx: *mut c_void, kind: i32, osc: *const u8, len: u32);
-
-/// `kind` codes for [`EmitFn`].
-pub const EMIT_BROADCAST: i32 = 0;
-pub const EMIT_REPLY: i32 = 1;
+// Emit-callback shape (here delivering `/midi/in/*` + `/midi/ports*` packets),
+// kind codes and panic fence: shared across the subsystem C ABIs — see
+// supersonic_osc::ffi.
+pub use supersonic_osc::ffi::{no_unwind, EmitFn, EMIT_BROADCAST, EMIT_REPLY};
 /// One MIDI clock pulse (0xF8) for an input port → the engine, which anchors the
 /// timeline beat on the pulse count and estimates tempo engine-side (not here).
 /// `norm` is the normalised handle the engine keys the timeline on; `raw` is the
@@ -226,14 +222,6 @@ fn transport_code(ev: TransportEvent) -> (i32, f64) {
 }
 
 // ── C ABI ────────────────────────────────────────────────────────────────────
-
-/// Run `f`, catching any panic so it cannot unwind across a C ABI or OS
-/// callback boundary (which aborts the whole engine process). MIDI is
-/// best-effort: on a panic the operation is dropped and the subsystem stays
-/// alive (a poisoned mutex then disables MIDI rather than killing audio).
-fn no_unwind<T>(default: T, f: impl FnOnce() -> T) -> T {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or(default)
-}
 
 /// Create the MIDI subsystem. Returns an owning pointer (null on failure); free
 /// with [`ss_midi_destroy`]. The callbacks and `ctx` must remain valid until then.

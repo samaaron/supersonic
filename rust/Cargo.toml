@@ -1,11 +1,21 @@
 # Rust workspace for SuperSonic's Rust-implemented subsystems.
 #
-# Currently hosts `supersonic-midi` — a midir-based MIDI subsystem that compiles
-# both to a native staticlib (linked into the C++ engine) and to a wasm-bindgen
-# module (loaded by the main-thread SuperSonic JS, where Web MIDI lives).
+# * `supersonic-osc`     — shared OSC codec + name normalisation (std-only).
+# * `supersonic-midi`    — midir-based MIDI subsystem.
+# * `supersonic-gamepad` — gilrs-based game-controller subsystem.
+# * `supersonic-native`  — umbrella staticlib bundling the native subsystems
+#                          (one Rust staticlib per binary; CMake links this).
+#
+# The midi/gamepad crates each also compile to a wasm-bindgen module (loaded by
+# the main-thread SuperSonic JS, where the Web MIDI / Gamepad APIs live).
 [workspace]
 resolver = "2"
-members = ["supersonic-midi"]
+members = [
+    "supersonic-osc",
+    "supersonic-midi",
+    "supersonic-gamepad",
+    "supersonic-native",
+]
 
 [profile.release]
 opt-level = 3

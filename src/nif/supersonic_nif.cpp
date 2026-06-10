@@ -69,6 +69,7 @@ struct Subscribers {
     std::set<int>        notifyPorts;
     bool                 linkSubscribed = false;
     bool                 midiSubscribed = false;
+    bool                 gamepadSubscribed = false;
 
     void addPid(const ErlNifPid& p) {
         std::lock_guard<std::mutex> lk(mutex);
@@ -87,6 +88,7 @@ struct Subscribers {
         notifyPorts.clear();
         linkSubscribed = false;
         midiSubscribed = false;
+        gamepadSubscribed = false;
     }
 
     // Frame {osc_reply, <<bytes>>} and fan out to every registered pid.
@@ -210,6 +212,22 @@ public:
     void unsubscribeMidi(uint32_t) override {
         std::lock_guard<std::mutex> lk(mSubs->mutex);
         mSubs->midiSubscribed = false;
+    }
+
+    // Gamepad notify: same shape as the MIDI audience.
+    void broadcastGamepad(const uint8_t* data, uint32_t size) override {
+        bool wanted;
+        { std::lock_guard<std::mutex> lk(mSubs->mutex); wanted = mSubs->gamepadSubscribed; }
+        if (wanted) mSubs->deliverOscReply(data, size);
+    }
+    bool subscribeGamepad(uint32_t) override {
+        std::lock_guard<std::mutex> lk(mSubs->mutex);
+        mSubs->gamepadSubscribed = true;
+        return true;
+    }
+    void unsubscribeGamepad(uint32_t) override {
+        std::lock_guard<std::mutex> lk(mSubs->mutex);
+        mSubs->gamepadSubscribed = false;
     }
 
 private:

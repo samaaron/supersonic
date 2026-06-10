@@ -29,6 +29,9 @@
 #ifdef SUPERSONIC_MIDI
 #include "MidiControl.h"
 #endif
+#ifdef SUPERSONIC_GAMEPAD
+#include "GamepadControl.h"
+#endif
 #include "src/scheduler/EventScheduler.h"
 #include "JuceAudioCallback.h"
 #include "SampleLoader.h"
@@ -471,6 +474,9 @@ private:
     EngineControl     mEngineControl;
 #ifdef SUPERSONIC_MIDI
     MidiControl       mMidiControl;
+#endif
+#ifdef SUPERSONIC_GAMEPAD
+    GamepadControl    mGamepadControl;
 #endif
     SuperClock        mSuperClock;
     SampleLoader      mSampleLoader;

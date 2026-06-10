@@ -1,0 +1,12 @@
+[package]
+name = "supersonic-osc"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sam Aaron"]
+description = "Shared std-only helpers for SuperSonic's Rust subsystems: a minimal OSC 1.0 codec and OSC-safe device-name normalisation. Used by supersonic-midi and supersonic-gamepad on both native and wasm targets."
+# Dual-licensed like SuperSonic's other OSC-only client libraries: this crate
+# contains no GPL-derived code. See the repo LICENSE.
+license = "MIT OR GPL-3.0-or-later"
+
+[lib]
+crate-type = ["rlib"]

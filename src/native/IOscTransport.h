@@ -53,4 +53,10 @@ public:
     virtual void broadcastMidi(const uint8_t* data, uint32_t size) = 0;
     virtual bool subscribeMidi(uint32_t token) = 0;
     virtual void unsubscribeMidi(uint32_t token) = 0;
+
+    // Gamepad-notify audience: receives /gamepad/in/* events and
+    // /gamepad/devices change pushes. Caller-relative, like the MIDI audience.
+    virtual void broadcastGamepad(const uint8_t* data, uint32_t size) = 0;
+    virtual bool subscribeGamepad(uint32_t token) = 0;
+    virtual void unsubscribeGamepad(uint32_t token) = 0;
 };

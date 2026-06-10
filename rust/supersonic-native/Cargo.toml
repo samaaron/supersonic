@@ -1,0 +1,25 @@
+[package]
+name = "supersonic-native"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sam Aaron"]
+description = "Umbrella staticlib bundling SuperSonic's native Rust subsystems (MIDI, gamepad) into the single Rust staticlib a binary may link. CMake builds this; the C ABIs live in the subsystem crates."
+license = "MIT OR GPL-3.0-or-later"
+
+[lib]
+# Exactly one Rust staticlib can be linked into a binary (each carries its own
+# copy of std, so two collide at link time). This crate is that one staticlib;
+# the subsystems are rlib dependencies whose #[no_mangle] C ABIs it re-exports.
+crate-type = ["staticlib"]
+
+[features]
+default = ["midi", "gamepad"]
+midi = ["dep:supersonic-midi"]
+gamepad = ["dep:supersonic-gamepad"]
+# Windows backend selector, forwarded to supersonic-midi (the gamepad crate
+# picks XInput on Windows by itself via a target-specific dependency).
+winrt = ["supersonic-midi/winrt"]
+
+[dependencies]
+supersonic-midi = { path = "../supersonic-midi", optional = true }
+supersonic-gamepad = { path = "../supersonic-gamepad", optional = true }

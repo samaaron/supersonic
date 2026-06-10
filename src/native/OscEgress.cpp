@@ -64,6 +64,10 @@ void OscEgress::broadcastMidiNotify(const uint8_t* data, uint32_t size) {
     frame(BROADCAST_MIDI, 0, data, size);
 }
 
+void OscEgress::broadcastGamepadNotify(const uint8_t* data, uint32_t size) {
+    frame(BROADCAST_GAMEPAD, 0, data, size);
+}
+
 void OscEgress::debug(const char* text, uint32_t len) {
     char pkt[1024];
     uint32_t p = supersonic::buildDebugOsc(pkt, text, len);
@@ -96,6 +100,7 @@ void OscEgress::dispatchEgress(uint32_t originToken, const uint8_t* payload, uin
         case SEND_TO_CALLER: mTransport->send(originToken, osc, oscLen, /*networkOnly*/ true);  break;
         case BROADCAST_LINK: mTransport->broadcastLink(osc, oscLen); break;
         case BROADCAST_MIDI: mTransport->broadcastMidi(osc, oscLen); break;
+        case BROADCAST_GAMEPAD: mTransport->broadcastGamepad(osc, oscLen); break;
         case BROADCAST_NOTIFY:
         default:             mTransport->broadcastNotify(osc, oscLen); break;
     }
@@ -145,6 +150,14 @@ bool OscEgress::subscribeCallerToMidiNotify() {
 
 void OscEgress::unsubscribeCallerFromMidiNotify() {
     if (mTransport) mTransport->unsubscribeMidi(mOriginToken.load(std::memory_order_relaxed));
+}
+
+bool OscEgress::subscribeCallerToGamepadNotify() {
+    return mTransport && mTransport->subscribeGamepad(mOriginToken.load(std::memory_order_relaxed));
+}
+
+void OscEgress::unsubscribeCallerFromGamepadNotify() {
+    if (mTransport) mTransport->unsubscribeGamepad(mOriginToken.load(std::memory_order_relaxed));
 }
 
 // ── Small generic lifecycle broadcasts (gated by an audience) ────────────────

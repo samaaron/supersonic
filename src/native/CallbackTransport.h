@@ -57,9 +57,18 @@ public:
     bool subscribeMidi(uint32_t token) override { return mMidi.insert(token).second; }
     void unsubscribeMidi(uint32_t token) override { mMidi.erase(token); }
 
+    // Gamepad notify: deliver to the single in-process observer so an
+    // embedder/test can see /gamepad/in/* events through onReply.
+    void broadcastGamepad(const uint8_t* data, uint32_t size) override {
+        if (mOnReply && *mOnReply) (*mOnReply)(data, size);
+    }
+    bool subscribeGamepad(uint32_t token) override { return mGamepad.insert(token).second; }
+    void unsubscribeGamepad(uint32_t token) override { mGamepad.erase(token); }
+
 private:
     const std::function<void(const uint8_t*, uint32_t)>* mOnReply;
     std::set<uint32_t> mNotify;
     std::set<int>      mNotifyPorts;
     std::set<uint32_t> mMidi;
+    std::set<uint32_t> mGamepad;
 };

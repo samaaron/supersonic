@@ -1003,6 +1003,10 @@ void SupersonicEngine::init(const Config& cfg) {
     // thread (enqueued into the deferred-event scheduler) rather than forwarded.
     mIngress.registerRoute("/midi/at", &SupersonicEngine::midiAtSink, this);
 #endif
+#ifdef SUPERSONIC_GAMEPAD
+    mGamepadControl.init(&mEgress);
+    mIngress.registerRoute("/gamepad/", &SupersonicEngine::nrtForwardSink, this);
+#endif
 
     // Single-engine-per-process: g_active_superclock has no per-engine
     // routing, so a second publisher would steer /superclock_get to
@@ -1042,6 +1046,10 @@ void SupersonicEngine::init(const Config& cfg) {
 #ifdef SUPERSONIC_MIDI
             else if (n >= 6 && std::memcmp(d, "/midi/", 6) == 0)
                 mMidiControl.handleMidiCommand(d, n);
+#endif
+#ifdef SUPERSONIC_GAMEPAD
+            else if (n >= 9 && std::memcmp(d, "/gamepad/", 9) == 0)
+                mGamepadControl.handleGamepadCommand(d, n);
 #endif
             else
                 mEngineControl.handleLinkCommand(d, n);
@@ -1213,6 +1221,13 @@ void SupersonicEngine::shutdown() {
     // Drop clock-out state so a generated clock can't resume with stale ports on
     // the next boot (the coordinator is a process-wide singleton).
     get_midi_clock_out().reset();
+#endif
+
+    // Tear down the gamepad subsystem before mEgress for the same reason:
+    // ss_gamepad_destroy joins its poll thread, so no gamepad callback can
+    // fire into mEgress after this returns.
+#ifdef SUPERSONIC_GAMEPAD
+    mGamepadControl.shutdown();
 #endif
 
     // Order: signal alive=false, then disable Link (this joins the
