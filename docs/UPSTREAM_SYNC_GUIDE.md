@@ -665,6 +665,32 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 
 ## Reference: Previous Sync Summary
 
+### Single-commit check — static-plugins build option (2026-06-10)
+
+Reviewed `963a8d2d3` ("build: expose static plugins as a build option",
+[PR #7548](https://github.com/supercollider/supercollider/pull/7548)) on
+request. **Nothing backported.** Not a full-range sweep — only this commit.
+
+- 5 of 6 files are upstream build system / CI / docs (`CMakeLists.txt`,
+  `server/{plugins,scsynth}/CMakeLists.txt`, `.github/workflows/build_wasm.yml`,
+  `README_WASM.md`) — all excluded categories.
+- `server/scsynth/SC_Lib_Cintf.cpp` (provenance-checked: plain GPL core, ok to
+  inspect): upstream switches the STATIC_PLUGINS DiskIO/UIUGens load/unload
+  guards from `#ifndef __EMSCRIPTEN__` to capability macros (`NO_LIBSNDFILE`,
+  `NO_X11`) driven by new CMake options. **Already present** — SuperSonic
+  guards these with `NO_LIBSNDFILE` (src/scsynth/server/SC_Lib_Cintf.cpp:74,
+  100, 129; `-DNO_LIBSNDFILE` in build-web.sh) and additionally provides no-op
+  stubs for `DiskIO_Load`/`DiskIO_Unload`/`UIUGens_Unload` (SC_Stubs.cpp:380),
+  implemented independently before this upstream change. The remaining delta
+  (a separate `NO_X11` guard for `UIUGens_Unload`) is moot here: the stubs
+  make both unloads no-ops on every SuperSonic target.
+- PR #7548 is part of upstream's wasm-port work (PR #7428 lineage) — its
+  non-core files are not backport sources regardless.
+
+**Testing:** No code changed, so no build/test run required.
+
+---
+
 ### No-op sync — upstream's own scsynth.wasm port (2026-06-08)
 
 Reviewed `a27ec6c01..b70e7ab7e` (45 upstream commits). **Nothing backported** — every
