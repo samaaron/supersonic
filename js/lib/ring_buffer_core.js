@@ -140,9 +140,11 @@ export function writeMessageToBuffer({
  * @param {number} params.headerSize - Size of message header (typically 16)
  * @param {number} [params.maxMessages=Infinity] - Maximum messages to read per call
  * @param {Function} params.onMessage - Callback: (payloadOffset: number, payloadLength: number, sequence: number, sourceId: number) => void
- *   payloadOffset is absolute byte offset into uint8View where payload starts
- *   Caller reads directly: uint8View[payloadOffset + i] for i in 0..payloadLength-1
- *   Note: for OUT/NRT-out buffers (C++ writer), payloads never wrap — padding markers are used at buffer boundaries.
+ *   payloadOffset is absolute byte offset into uint8View where payload starts.
+ *   For OUT/NRT-out buffers (C++ writer) payloads never wrap — padding markers
+ *   are used at boundaries — so a direct uint8View[payloadOffset + i] read is
+ *   safe. The IN ring's JS writer DOES split payloads at the boundary, so its
+ *   readers must reassemble via copyWrappedPayload(), not a linear read.
  * @param {Function} [params.onCorruption] - Optional callback for corrupted messages: (position: number) => void
  * @returns {{ newTail: number, messagesRead: number }} new tail position and count
  */
@@ -232,6 +234,30 @@ export function readMessagesFromBuffer({
     }
 
     return { newTail: currentTail, messagesRead };
+}
+
+/**
+ * Copy a message payload out of the ring into `dest`, wrapping at the buffer
+ * boundary. readMessagesFromBuffer reports `payloadOffset` as an absolute index
+ * already wrapped to the buffer for the FIRST byte, but a payload written by the
+ * JS writer (writeMessageToBuffer) can straddle the end of the ring. A naive
+ * `uint8View[payloadOffset + i]` loop then walks past the buffer into adjacent
+ * memory; this re-wraps each index so the tail of the payload is read from the
+ * start of the buffer instead. No allocation — caller provides `dest`.
+ *
+ * @param {Uint8Array} uint8View - byte view spanning the ring region
+ * @param {number} bufferStart - absolute offset of the ring's first byte
+ * @param {number} bufferSize - ring length in bytes
+ * @param {number} payloadOffset - absolute offset of the payload's first byte
+ * @param {number} length - number of payload bytes to copy
+ * @param {Uint8Array} dest - destination buffer
+ * @param {number} [destOffset=0] - start index in dest
+ */
+export function copyWrappedPayload(uint8View, bufferStart, bufferSize, payloadOffset, length, dest, destOffset = 0) {
+    const rel = payloadOffset - bufferStart;
+    for (let i = 0; i < length; i++) {
+        dest[destOffset + i] = uint8View[bufferStart + ((rel + i) % bufferSize)];
+    }
 }
 
 // =========================================================================

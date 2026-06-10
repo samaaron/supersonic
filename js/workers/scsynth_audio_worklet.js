@@ -7,7 +7,7 @@
  */
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
-import { writeMessageToBuffer, calculateAvailableSpace, readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
+import { writeMessageToBuffer, calculateAvailableSpace, readMessagesFromBuffer, copyWrappedPayload } from '../lib/ring_buffer_core.js';
 import { calculateAllControlIndices } from '../lib/control_offsets.js';
 import {
   SC_BPM_I64,
@@ -749,11 +749,14 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         let count = 0;
         let bufferOffset = 0;
 
+        const bufferStart = this.ringBufferBase + this.bufferConstants.IN_BUFFER_START;
+        const bufferSize = this.bufferConstants.IN_BUFFER_SIZE;
+
         const { newTail, messagesRead } = readMessagesFromBuffer({
             uint8View: this.uint8View,
             dataView: this.dataView,
-            bufferStart: this.ringBufferBase + this.bufferConstants.IN_BUFFER_START,
-            bufferSize: this.bufferConstants.IN_BUFFER_SIZE,
+            bufferStart,
+            bufferSize,
             head,
             tail: logTail,
             messageMagic: this.bufferConstants.MESSAGE_MAGIC,
@@ -769,10 +772,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 // Check if pool buffer has space
                 if (bufferOffset + actualLength > C.LOG_BUFFER_SIZE) return;
 
-                // Copy (possibly truncated) directly from source - NO intermediate allocation
-                for (let i = 0; i < actualLength; i++) {
-                    pool.bufferView[bufferOffset + i] = this.uint8View[payloadOffset + i];
-                }
+                // Copy (possibly truncated) directly into the pool — NO intermediate
+                // allocation, and wrap-aware: the IN ring's JS writer splits payloads
+                // at the boundary, so a linear read would walk past the buffer.
+                copyWrappedPayload(this.uint8View, bufferStart, bufferSize, payloadOffset, actualLength, pool.bufferView, bufferOffset);
 
                 // Update pre-allocated entry with truncation info
                 const entry = pool.entries[count];

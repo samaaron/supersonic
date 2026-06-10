@@ -11,7 +11,7 @@
  * The C++ scsynth advances IN_TAIL when it processes messages.
  */
 
-import { readMessagesFromBuffer } from '../lib/ring_buffer_core.js';
+import { readMessagesFromBuffer, copyWrappedPayload } from '../lib/ring_buffer_core.js';
 import { calculateInControlIndices } from '../lib/control_offsets.js';
 import { getCurrentNTPFromPerformance as getCurrentNTP } from '../lib/osc_classifier.js';
 import { runSabWorker } from '../lib/sab_worker_loop.js';
@@ -71,11 +71,11 @@ function readLogMessages(ctx) {
         headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
         maxMessages: 100,
         onMessage: (payloadOffset, payloadLength, sequence, sourceId) => {
-            // Copy the data since ring buffer may be overwritten
+            // Copy the data since ring buffer may be overwritten. The IN ring's
+            // JS writer splits payloads at the boundary, so copy wrap-aware —
+            // a linear read would walk past the buffer into the OUT region.
             const oscData = new Uint8Array(payloadLength);
-            for (let i = 0; i < payloadLength; i++) {
-                oscData[i] = uint8View[payloadOffset + i];
-            }
+            copyWrappedPayload(uint8View, bufferStart, bufferSize, payloadOffset, payloadLength, oscData, 0);
             entries.push({
                 sourceId,
                 oscData,
