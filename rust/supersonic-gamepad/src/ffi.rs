@@ -2,12 +2,20 @@
 //! against (via the `supersonic-native` umbrella staticlib).
 //!
 //! The engine creates one instance, supplying one host callback, and feeds it
-//! decoded-from-the-wire `/gamepad/*` OSC via [`ss_gamepad_handle_osc`]. The
-//! subsystem owns its device IO (see [`crate::backend`]) on a dedicated poll
-//! thread; it never touches the audio thread. Translated `/gamepad/in/*` events and
-//! `/gamepad/devices` pushes flow back through the `emit` callback, which may
-//! fire on the poll thread — the engine's implementation must be thread-safe
-//! (it is: the egress ring).
+//! decoded-from-the-wire `/gamepad/*` OSC via [`ss_gamepad_handle_osc`].
+//! Translated `/gamepad/in/*` events and `/gamepad/devices` pushes flow back
+//! through the `emit` callback, which may fire on the poll thread — the
+//! engine's implementation must be thread-safe (it is: the egress ring).
+//!
+//! The device IO (see [`crate::backend`]) is **process-global**: one poll
+//! thread and one device context, created on first use and kept for the life
+//! of the process. gilrs is built as a per-process singleton — its Linux
+//! backend spawns a hotplug thread with no shutdown path, so tearing down and
+//! recreating the context leaks a thread + fds each time. Instances are
+//! host registrations: create installs the engine's callback, destroy removes
+//! it (the poll thread then parks, keeping the device registry warm for the
+//! next instance). Destroy synchronises on the host lock, so no callback
+//! fires after it returns.
 //!
 //! Replies (`/gamepad/devices.reply`) are emitted synchronously inside
 //! [`ss_gamepad_handle_osc`] / [`ss_gamepad_emit_devices`] on the caller's
@@ -15,10 +23,8 @@
 
 use std::ffi::c_void;
 use std::slice;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::backend::GamepadIo;
@@ -48,27 +54,55 @@ impl Host {
     }
 }
 
-/// The opaque handle the C++ side owns. Rumble commands need the backend's
-/// device context, so they hop to the poll thread over `tx` as-is.
+/// The process-global subsystem: poll thread, device registry, rumble channel
+/// and the currently-registered host (None = parked, events discarded).
+struct Global {
+    registry: Arc<Mutex<Registry>>,
+    active: Arc<Mutex<Option<Host>>>,
+    tx: Sender<OutCommand>,
+}
+
+static GLOBAL: OnceLock<Global> = OnceLock::new();
+
+fn global() -> &'static Global {
+    GLOBAL.get_or_init(|| {
+        let registry = Arc::new(Mutex::new(Registry::default()));
+        let active: Arc<Mutex<Option<Host>>> = Arc::new(Mutex::new(None));
+        let (tx, rx) = channel();
+
+        let thread_registry = registry.clone();
+        let thread_active = active.clone();
+        // The poll thread runs for the life of the process (matching the
+        // device backends' own lifetime expectations). Errors are best-effort:
+        // if the backend can't start, the registry simply stays empty.
+        let _ = std::thread::Builder::new().name("supersonic-gamepad".into()).spawn(move || {
+            // The loop body must never unwind into the OS thread shim.
+            no_unwind((), || poll_loop(thread_active, thread_registry, rx));
+        });
+
+        Global { registry, active, tx }
+    })
+}
+
+/// The opaque handle the C++ side owns: a registration against the global
+/// subsystem carrying the engine's callback (also used directly for the
+/// synchronous replies).
 pub struct SsGamepad {
     host: Host,
-    registry: Arc<Mutex<Registry>>,
-    tx: Sender<OutCommand>,
-    stop: Arc<AtomicBool>,
-    join: Option<JoinHandle<()>>,
 }
 
 impl SsGamepad {
     fn handle(&self, cmd: OutCommand) {
         match cmd {
+            // Rumble needs the backend's device context: hop to the poll thread.
             cmd @ (OutCommand::Rumble { .. } | OutCommand::RumbleStop { .. }) => {
-                let _ = self.tx.send(cmd);
+                let _ = global().tx.send(cmd);
             }
 
             // Enable toggles the shared registry directly (the poll thread
             // reads it per event), so the devices push reflects it immediately.
             OutCommand::Enable { pad, enabled } => {
-                let changed = self.registry.lock().unwrap().set_enabled(&pad, enabled);
+                let changed = global().registry.lock().unwrap().set_enabled(&pad, enabled);
                 if changed {
                     self.push_devices();
                 }
@@ -84,37 +118,43 @@ impl SsGamepad {
     }
 
     fn reply_devices(&self) {
-        let rows = self.registry.lock().unwrap().snapshot();
+        let rows = global().registry.lock().unwrap().snapshot();
         self.host.emit(EMIT_REPLY, &encode_devices_reply(&rows));
     }
 
     fn push_devices(&self) {
-        let rows = self.registry.lock().unwrap().snapshot();
+        let rows = global().registry.lock().unwrap().snapshot();
         self.host.emit(EMIT_BROADCAST, &encode_devices(&rows));
     }
 }
 
-/// The poll-thread body: drain backend events → emit, run rumble commands,
-/// expire rumble deadlines. The ~4 ms poll pace keeps worst-case added input
-/// latency well under an audio buffer.
+/// The poll-thread body: drain backend events → emit to the registered host,
+/// run rumble commands, expire rumble deadlines. The ~4 ms poll pace keeps
+/// worst-case added input latency well under an audio buffer; with no host
+/// registered the thread parks at a lazy tick, keeping the registry warm.
+/// Emission holds the host lock, so `ss_gamepad_destroy`'s host removal
+/// strictly orders against any in-flight callback.
 fn poll_loop(
-    host: Host,
+    active: Arc<Mutex<Option<Host>>>,
     registry: Arc<Mutex<Registry>>,
     rx: std::sync::mpsc::Receiver<OutCommand>,
-    stop: Arc<AtomicBool>,
 ) {
     let mut io = match GamepadIo::new(registry.clone()) {
         Ok(io) => io,
         Err(_) => return, // no backend (rare): devices list stays empty
     };
-    while !stop.load(Ordering::Acquire) {
-        for out in io.poll(Duration::from_millis(4)) {
+    loop {
+        let parked = active.lock().unwrap().is_none();
+        let pace = if parked { Duration::from_millis(250) } else { Duration::from_millis(4) };
+        for out in io.poll(pace) {
+            let guard = active.lock().unwrap();
+            let Some(host) = *guard else { continue }; // parked: discard
             match out {
-                Out::Button { handle, name, pressed, value } => {
-                    host.emit(EMIT_BROADCAST, &encode_button(&handle, &name, pressed, value));
+                Out::Button { ref handle, ref name, pressed, value } => {
+                    host.emit(EMIT_BROADCAST, &encode_button(handle, name, pressed, value));
                 }
-                Out::Axis { handle, name, value } => {
-                    host.emit(EMIT_BROADCAST, &encode_axis(&handle, &name, value));
+                Out::Axis { ref handle, ref name, value } => {
+                    host.emit(EMIT_BROADCAST, &encode_axis(handle, name, value));
                 }
                 Out::DevicesChanged => {
                     let rows = registry.lock().unwrap().snapshot();
@@ -137,45 +177,39 @@ fn poll_loop(
 
 // ── C ABI ────────────────────────────────────────────────────────────────────
 
-/// Create the gamepad subsystem. Returns an owning pointer (null on failure);
-/// free with [`ss_gamepad_destroy`]. `ctx` and the callback must remain valid
-/// until then.
+/// Create a gamepad-subsystem registration: installs `emit` as the active
+/// host (starting the process-global device IO on first use). Returns an
+/// owning pointer (null on failure); free with [`ss_gamepad_destroy`]. `ctx`
+/// and the callback must remain valid until then. One registration at a time:
+/// a second create supersedes the first (the engine is single-per-process).
 #[no_mangle]
 pub extern "C" fn ss_gamepad_create(ctx: *mut c_void, emit: EmitFn) -> *mut SsGamepad {
     no_unwind(std::ptr::null_mut(), || {
         let host = Host { ctx, emit };
-        let registry = Arc::new(Mutex::new(Registry::default()));
-        let stop = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = channel();
-
-        let thread_host = host;
-        let thread_registry = registry.clone();
-        let thread_stop = stop.clone();
-        let join = std::thread::Builder::new()
-            .name("supersonic-gamepad".into())
-            .spawn(move || {
-                // The loop body must never unwind into the OS thread shim.
-                no_unwind((), || poll_loop(thread_host, thread_registry, rx, thread_stop));
-            })
-            .ok();
-
-        Box::into_raw(Box::new(SsGamepad { host, registry, tx, stop, join }))
+        *global().active.lock().unwrap() = Some(host);
+        Box::into_raw(Box::new(SsGamepad { host }))
     })
 }
 
-/// Destroy the subsystem: stops the poll thread (≤ ~4 ms), dropping all rumble
-/// effects and the backend's device context with it.
+/// Remove the registration and stop all rumble. The poll thread and device
+/// context persist (parked) for the life of the process; once this returns no
+/// further callbacks fire (host removal synchronises on the emission lock).
 #[no_mangle]
 pub unsafe extern "C" fn ss_gamepad_destroy(handle: *mut SsGamepad) {
     if handle.is_null() {
         return;
     }
     no_unwind((), || {
-        let mut me = Box::from_raw(handle);
-        me.stop.store(true, Ordering::Release);
-        if let Some(join) = me.join.take() {
-            let _ = join.join();
+        let me = Box::from_raw(handle);
+        let g = global();
+        let mut active = g.active.lock().unwrap();
+        // Only deregister if we are still the active host (a newer instance
+        // may have superseded this one).
+        if active.map(|h| h.ctx) == Some(me.host.ctx) {
+            *active = None;
         }
+        drop(active);
+        let _ = g.tx.send(OutCommand::RumbleStop { pad: "*".into() });
     });
 }
 

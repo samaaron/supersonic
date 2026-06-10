@@ -1224,8 +1224,9 @@ void SupersonicEngine::shutdown() {
 #endif
 
     // Tear down the gamepad subsystem before mEgress for the same reason:
-    // ss_gamepad_destroy joins its poll thread, so no gamepad callback can
-    // fire into mEgress after this returns.
+    // ss_gamepad_destroy deregisters the host callback (synchronising on the
+    // emission lock), so no gamepad callback can fire into mEgress after this
+    // returns. The subsystem's poll thread itself is process-global and parks.
 #ifdef SUPERSONIC_GAMEPAD
     mGamepadControl.shutdown();
 #endif

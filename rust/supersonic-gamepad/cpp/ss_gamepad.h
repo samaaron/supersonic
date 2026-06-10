@@ -4,8 +4,10 @@
  *
  * The C++ engine seam (src/native/GamepadControl) creates one instance,
  * supplying one thread-safe host callback, and forwards decoded "/gamepad/"
- * OSC into it via ss_gamepad_handle_osc(). The subsystem owns its device
- * IO on a dedicated poll thread and never touches the audio thread; results
+ * OSC into it via ss_gamepad_handle_osc(). The device IO lives on a
+ * process-global poll thread (created on first use, kept for the life of the
+ * process — gilrs's hotplug machinery has no shutdown path) and never touches
+ * the audio thread; an instance is a host *registration* against it. Results
  * return through the callback, which may fire on the poll thread. Replies
  * ("/gamepad/devices.reply") are emitted synchronously on the caller's thread.
  *
@@ -34,11 +36,12 @@ typedef struct SsGamepad SsGamepad;
  * only valid for the duration of the call. May fire on the poll thread. */
 typedef void (*ss_gamepad_emit_fn)(void* ctx, int32_t kind, const uint8_t* osc, uint32_t len);
 
-/* Create the subsystem (spawns the poll thread). `ctx` and the callback must
- * outlive it. Returns NULL on failure. */
+/* Register the host callback (starting the process-global device IO on first
+ * use). `ctx` and the callback must outlive the instance. NULL on failure. */
 SsGamepad* ss_gamepad_create(void* ctx, ss_gamepad_emit_fn emit);
 
-/* Stop the poll thread, drop all rumble effects, free the instance. */
+/* Deregister the host and stop all rumble; no callback fires after this
+ * returns. The poll thread parks until the next ss_gamepad_create. */
 void ss_gamepad_destroy(SsGamepad* handle);
 
 /* Feed one decoded "/gamepad/" OSC packet (off the audio thread). */
