@@ -12,6 +12,13 @@ const DRIFT_UPDATE_INTERVAL_MS = 1000;
 // Allows enough contextTime to elapse for accurate measurement.
 const INITIAL_DRIFT_DELAY_MS = 500;
 
+// How long initialize() waits for the AudioContext to start producing audio
+// (contextTime > 0) before giving up, and the poll interval. A suspended /
+// autoplay-blocked context never advances contextTime, so without a bound
+// initialize() — and the init() that awaits it — would hang forever.
+const AUDIO_START_TIMEOUT_MS = 5000;
+const AUDIO_START_POLL_MS = 50;
+
 /**
  * Calculate current NTP time from performance timestamp
  * @param {number} performanceTimeMs - performance.timeOrigin + timestamp.performanceTime
@@ -51,6 +58,7 @@ export class NTPTiming {
   #mode;
   #audioContext;
   #workletPort;
+  #audioStartTimeoutMs;
   #bufferConstants;
   #ringBufferBase;
 
@@ -77,6 +85,7 @@ export class NTPTiming {
     this.#mode = options.mode || 'sab';
     this.#audioContext = options.audioContext;
     this.#workletPort = options.workletPort || null;
+    this.#audioStartTimeoutMs = options.audioStartTimeoutMs ?? AUDIO_START_TIMEOUT_MS;
   }
 
   /**
@@ -147,14 +156,28 @@ export class NTPTiming {
       return;
     }
 
-    // Wait for audio to actually be flowing (contextTime > 0)
+    // Wait for audio to actually be flowing (contextTime > 0), but bound the
+    // wait: a suspended / autoplay-blocked context never advances contextTime,
+    // and an unbounded poll would wedge initialize() — and the init() awaiting
+    // it — forever. On timeout, reject so the caller can surface an actionable
+    // error (resume the AudioContext after a user gesture, then retry) instead
+    // of hanging silently.
     let timestamp;
+    const maxAttempts = Math.max(1, Math.ceil(this.#audioStartTimeoutMs / AUDIO_START_POLL_MS));
+    let attempts = 0;
     while (true) {
       timestamp = this.#audioContext.getOutputTimestamp();
       if (timestamp.contextTime > 0) {
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (++attempts >= maxAttempts) {
+        throw new Error(
+          `NTPTiming: AudioContext did not start (contextTime stayed 0 after ` +
+          `${this.#audioStartTimeoutMs}ms) — resume the AudioContext after a user ` +
+          `gesture, then retry init()`
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, AUDIO_START_POLL_MS));
     }
 
     // Get current time from both domains using a synchronized pair.
