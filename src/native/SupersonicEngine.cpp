@@ -1099,6 +1099,16 @@ void SupersonicEngine::init(const Config& cfg) {
         std::atomic<bool>* alive = &mLinkCallbacksAlive;
         mSuperClock.setTempoChangedCallback([egr, alive](double bpm) {
             if (!alive->load(std::memory_order_acquire)) return;
+            // Tempo slides fire this per-update — cap logging at one
+            // line per second so a slide can't flood the log.
+            static std::atomic<int64_t> lastLogSec{0};
+            const int64_t nowSec = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            int64_t prev = lastLogSec.load(std::memory_order_relaxed);
+            if (nowSec != prev && lastLogSec.compare_exchange_strong(prev, nowSec)) {
+                fprintf(stderr, "[link] tempo -> %.2f bpm\n", bpm);
+                fflush(stderr);
+            }
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/notify/tempo") << bpm << osc::EndMessage;
@@ -1108,6 +1118,8 @@ void SupersonicEngine::init(const Config& cfg) {
         });
         mSuperClock.setNumPeersChangedCallback([egr, alive](std::size_t n) {
             if (!alive->load(std::memory_order_acquire)) return;
+            fprintf(stderr, "[link] peers -> %zu\n", n);
+            fflush(stderr);
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/notify/peers")
@@ -1118,6 +1130,8 @@ void SupersonicEngine::init(const Config& cfg) {
         });
         mSuperClock.setStartStopChangedCallback([egr, alive](bool playing, int64_t t) {
             if (!alive->load(std::memory_order_acquire)) return;
+            fprintf(stderr, "[link] transport -> %s\n", playing ? "playing" : "stopped");
+            fflush(stderr);
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/notify/transport")

@@ -13,6 +13,7 @@
 #include "osc/OscReceivedElements.h"
 #include "osc/OscOutboundPacketStream.h"
 
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -106,13 +107,44 @@ void MidiControl::refreshDevices() {
     if (mMidi) ss_midi_refresh(mMidi);
 }
 
+// Hotplug logging. /midi/ports broadcasts fire only on a device change (plus
+// one snapshot per new subscriber), so this is flood-safe. Per-event traffic
+// (/midi/in/*, /midi/out/*, clock pulses) is deliberately not logged.
+// Payload: <nIn:i> [name:s enabled:i]* <nOut:i> [name:s enabled:i]*
+static void logMidiPortsChange(const uint8_t* data, uint32_t len) {
+    if (std::strcmp(reinterpret_cast<const char*>(data), "/midi/ports") != 0) return;
+    std::string ins, outs;
+    try {
+        osc::ReceivedMessage msg(osc::ReceivedPacket(
+            reinterpret_cast<const char*>(data),
+            static_cast<osc::osc_bundle_element_size_t>(len)));
+        auto it = msg.ArgumentsBegin();
+        auto readList = [&](std::string& names) {
+            if (it == msg.ArgumentsEnd() || !it->IsInt32()) return;
+            const int n = it->AsInt32Unchecked(); ++it;
+            for (int i = 0; i < n && it != msg.ArgumentsEnd(); ++i) {
+                if (!it->IsString()) return;
+                if (!names.empty()) names += ", ";
+                names += it->AsStringUnchecked(); ++it;   // name
+                if (it != msg.ArgumentsEnd()) ++it;       // enabled flag
+            }
+        };
+        readList(ins);
+        readList(outs);
+    } catch (...) { return; }
+    fprintf(stderr, "[midi] ports: in=[%s] out=[%s]\n", ins.c_str(), outs.c_str());
+    fflush(stderr);
+}
+
 void MidiControl::emitCb(void* ctx, int32_t kind, const uint8_t* osc, uint32_t len) {
     auto* self = static_cast<MidiControl*>(ctx);
     if (!self->mEgress) return;
-    if (kind == SS_MIDI_EMIT_REPLY)
+    if (kind == SS_MIDI_EMIT_REPLY) {
         self->mEgress->reply(osc, len);
-    else
+    } else {
+        logMidiPortsChange(osc, len);
         self->mEgress->broadcastMidiNotify(osc, len);
+    }
 }
 
 // One 0xF8 pulse feeds the port's own midi timeline (claimed by normalised
