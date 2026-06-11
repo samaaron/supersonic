@@ -177,7 +177,7 @@ void cleanupOrphaned() {
         std::string sUid(buf);
         bool isOurs = (sUid.rfind(kAggregateUIDBase, 0) == 0);
         if (isOurs) {
-            fprintf(stderr, "[audio-device] cleaning up orphaned SuperSonic aggregate device\n");
+            fprintf(stderr, "[device-setup] cleaning up orphaned SuperSonic aggregate device\n");
             AudioHardwareDestroyAggregateDevice(id);
         }
     }
@@ -216,7 +216,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     AudioObjectID inputID  = findDeviceByName(inputDeviceName);
 
     if (outputID == kAudioObjectUnknown || inputID == kAudioObjectUnknown) {
-        fprintf(stderr, "[audio-device] aggregate: couldn't find devices: out='%s' in='%s'\n",
+        fprintf(stderr, "[device-setup] aggregate: couldn't find devices: out='%s' in='%s'\n",
                 outputDeviceName.c_str(), inputDeviceName.c_str());
         return "";
     }
@@ -229,14 +229,14 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     std::string inputUID  = getDeviceUID(inputID);
 
     if (outputUID.empty() || inputUID.empty()) {
-        fprintf(stderr, "[audio-device] aggregate: couldn't get UIDs\n");
+        fprintf(stderr, "[device-setup] aggregate: couldn't get UIDs\n");
         return "";
     }
 
     // Log transport types for diagnostics
     UInt32 outTransport = getTransportType(outputID);
     UInt32 inTransport  = getTransportType(inputID);
-    fprintf(stderr, "[audio-device] aggregate: out='%s' transport=%s, in='%s' transport=%s\n",
+    fprintf(stderr, "[device-setup] aggregate: out='%s' transport=%s, in='%s' transport=%s\n",
             outputDeviceName.c_str(), transportTypeString(outTransport).c_str(),
             inputDeviceName.c_str(), transportTypeString(inTransport).c_str());
 
@@ -359,7 +359,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     CFRelease(uidRef);
 
     if (err != noErr) {
-        fprintf(stderr, "[audio-device] aggregate: creation failed (err %d)\n", (int)err);
+        fprintf(stderr, "[device-setup] aggregate: creation failed (err %d)\n", (int)err);
         return "";
     }
 
@@ -394,7 +394,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     CFRelease(subDevicesArray);
 
     if (err != noErr) {
-        fprintf(stderr, "[audio-device] aggregate: failed to set sub-devices (err %d)\n", (int)err);
+        fprintf(stderr, "[device-setup] aggregate: failed to set sub-devices (err %d)\n", (int)err);
         AudioHardwareDestroyAggregateDevice(newID);
         CFRelease(outUIDRef);
         CFRelease(inUIDRef);
@@ -439,12 +439,12 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     CFStringRef masterUIDRef = *firstTry;
 
     if (err != noErr) {
-        fprintf(stderr, "[audio-device] aggregate: %s-master failed (err %d), trying %s\n",
+        fprintf(stderr, "[device-setup] aggregate: %s-master failed (err %d), trying %s\n",
                 firstName, (int)err, secondName);
         fflush(stderr);
         err = AudioObjectSetPropertyData(newID, &masterAddr, 0, nullptr, masterSize, secondTry);
         if (err != noErr) {
-            fprintf(stderr, "[audio-device] aggregate: no master could be set (err %d)\n", (int)err);
+            fprintf(stderr, "[device-setup] aggregate: no master could be set (err %d)\n", (int)err);
             fflush(stderr);
             AudioHardwareDestroyAggregateDevice(newID);
             CFRelease(outUIDRef);
@@ -477,13 +477,13 @@ std::string createOrUpdate(const std::string& outputDeviceName,
         if (outErr != noErr || inErr != noErr) {
             // Can't determine clock domains — assume drift comp needed
             needsDriftComp = true;
-            fprintf(stderr, "[audio-device] aggregate: couldn't read clock domains, assuming drift comp needed\n");
+            fprintf(stderr, "[device-setup] aggregate: couldn't read clock domains, assuming drift comp needed\n");
         } else if (outClock != inClock) {
             needsDriftComp = true;
-            fprintf(stderr, "[audio-device] aggregate: different clock domains (%u vs %u), enabling drift comp\n",
+            fprintf(stderr, "[device-setup] aggregate: different clock domains (%u vs %u), enabling drift comp\n",
                     outClock, inClock);
         } else {
-            fprintf(stderr, "[audio-device] aggregate: same clock domain (%u), skipping drift comp\n", outClock);
+            fprintf(stderr, "[device-setup] aggregate: same clock domain (%u), skipping drift comp\n", outClock);
         }
     }
     sDriftCompEnabled.store(needsDriftComp);
@@ -549,7 +549,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
                 }
             }
         } else {
-            fprintf(stderr, "[audio-device] aggregate: drift comp skipped — no sub-devices exposed after 1s poll\n");
+            fprintf(stderr, "[device-setup] aggregate: drift comp skipped — no sub-devices exposed after 1s poll\n");
             fflush(stderr);
         }
     }
@@ -566,7 +566,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
         sAggregateID = newID;
     }
 
-    fprintf(stderr, "[audio-device] aggregate: created '%s' (out=%s, in=%s) id=%u\n",
+    fprintf(stderr, "[device-setup] aggregate: created '%s' (out=%s, in=%s) id=%u\n",
             nameBuf, outputDeviceName.c_str(), inputDeviceName.c_str(),
             (unsigned)newID);
     fflush(stderr);
@@ -585,7 +585,7 @@ void destroy() {
     std::lock_guard<std::mutex> lock(sMutex);
 
     if (sAggregateID != kAudioObjectUnknown) {
-        fprintf(stderr, "[audio-device] aggregate: destroying '%s'\n", sCurrentName.c_str());
+        fprintf(stderr, "[device-setup] aggregate: destroying '%s'\n", sCurrentName.c_str());
         AudioHardwareDestroyAggregateDevice(sAggregateID);
         sAggregateID = kAudioObjectUnknown;
         sCurrentName.clear();

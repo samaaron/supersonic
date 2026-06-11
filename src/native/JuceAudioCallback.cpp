@@ -174,7 +174,7 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
         mAccumPerChanCap = perChanNeeded;
     size_t neededSize = static_cast<size_t>(mAccumPerChanCap) * chans;
     if (mInputAccum.size() < neededSize) {
-        fprintf(stderr, "[juce-callback] resizing input accum: %zu -> %zu floats "
+        fprintf(stderr, "[juce] resizing input accum: %zu -> %zu floats "
                 "(perChanCap=%d chans=%d hwBuf=%d activeIn=%d mNumIn=%d)\n",
                 mInputAccum.size(), neededSize, mAccumPerChanCap, chans,
                 hwBufSize, activeIn, mNumInputChannels);
@@ -195,14 +195,14 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
     {
         auto outNames = device->getOutputChannelNames();
         auto activeOut = device->getActiveOutputChannels();
-        fprintf(stderr, "[juce-callback] output channels (%d total):\n", outNames.size());
+        fprintf(stderr, "[juce] output channels (%d total):\n", outNames.size());
         for (int i = 0; i < outNames.size(); ++i) {
-            fprintf(stderr, "[juce-callback]   [%d] %s%s\n", i,
+            fprintf(stderr, "[juce]   [%d] %s%s\n", i,
                     outNames[i].toRawUTF8(), activeOut[i] ? " (active)" : "");
         }
         fflush(stderr);
     }
-    fprintf(stderr, "[juce-callback] aboutToStart: device='%s' type='%s' sr=%d bs=%d activeOut=%d activeIn=%d outLat=%d inLat=%d\n",
+    fprintf(stderr, "[juce] aboutToStart: device='%s' type='%s' sr=%d bs=%d activeOut=%d activeIn=%d outLat=%d inLat=%d\n",
             device->getName().toRawUTF8(),
             device->getTypeName().toRawUTF8(),
             mSampleRate,
@@ -227,7 +227,7 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
 }
 
 void JuceAudioCallback::audioDeviceStopped() {
-    fprintf(stderr, "[juce-callback] audioDeviceStopped (callbackCount=%u)\n", mCallbackCount);
+    fprintf(stderr, "[juce] audioDeviceStopped (callbackCount=%u)\n", mCallbackCount);
     fflush(stderr);
     mSamplePosition = 0.0;
     mPrefetchCount  = 0;

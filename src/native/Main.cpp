@@ -309,7 +309,11 @@ int main(int argc, char* argv[]) {
     SupersonicEngine engine;
 
     engine.onDebug = [](const std::string& s) {
-        fprintf(stderr, "  [scsynth] %s\n", s.c_str());
+        // Engine messages often carry their own trailing newline (scsynth
+        // print conventions) — trim so the log doesn't get blank lines.
+        size_t end = s.find_last_not_of("\r\n");
+        if (end == std::string::npos) return;  // whitespace-only message
+        fprintf(stderr, "[synth] %.*s\n", static_cast<int>(end + 1), s.c_str());
         fflush(stderr);
     };
 

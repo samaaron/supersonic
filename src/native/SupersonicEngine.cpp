@@ -246,7 +246,7 @@ void SupersonicEngine::probeAndAdjustForTargetRate(const std::string& name,
             nearest = r;
     sampleRate = nearest;
     fprintf(stderr,
-        "[audio-device] current rate %.0f not supported "
+        "[device-setup] current rate %.0f not supported "
         "by %s, will use %.0f (cold swap)\n",
         currentRate, name.c_str(), sampleRate);
 }
@@ -257,7 +257,7 @@ void SupersonicEngine::clampAggregateBufferIfNeeded(int& bufferSize) {
                      && AggregateDeviceHelper::driftCompensationEnabled();
     const int clamped = sonicpi::device::clampBufferForDriftComp(bufferSize, active);
     if (clamped != bufferSize) {
-        fprintf(stderr, "[audio-device] clamping aggregate buffer "
+        fprintf(stderr, "[device-setup] clamping aggregate buffer "
                 "%d -> %d (drift-comp minimum)\n",
                 bufferSize, clamped);
         fflush(stderr);
@@ -472,7 +472,7 @@ void SupersonicEngine::init(const Config& cfg) {
             std::string matched = fuzzyMatch(cfg.hardwareDevice, combinedNames);
             if (matched.empty()) {
                 fprintf(stderr,
-                        "[audio-device] WARNING: requested output device '%s' not found. "
+                        "[device-setup] WARNING: requested output device '%s' not found. "
                         "Falling back to system default. Available outputs:\n",
                         cfg.hardwareDevice.c_str());
                 for (auto& e : entries)
@@ -497,7 +497,7 @@ void SupersonicEngine::init(const Config& cfg) {
                         nullptr, false, juce::String(), &setup);
 
                     if (initError.isNotEmpty()) {
-                        fprintf(stderr, "[audio-device] -H '%s' matched '%s' but failed: %s\n",
+                        fprintf(stderr, "[device-setup] -H '%s' matched '%s' but failed: %s\n",
                                 cfg.hardwareDevice.c_str(), e.combined.c_str(),
                                 initError.toRawUTF8());
                     } else {
@@ -574,12 +574,12 @@ void SupersonicEngine::init(const Config& cfg) {
                         bootFallback = sonicpi::device::selectBootOutputDevice(
                             defaultName, defaultIsWireless, names, wirelessFlags);
                         if (!bootFallback.empty()) {
-                            fprintf(stderr, "[audio-device] boot: default '%s' "
+                            fprintf(stderr, "[device-setup] boot: default '%s' "
                                     "is wireless; using non-wireless fallback '%s'\n",
                                     defaultName.c_str(), bootFallback.c_str());
                             fflush(stderr);
                         } else {
-                            fprintf(stderr, "[audio-device] boot: default '%s' "
+                            fprintf(stderr, "[device-setup] boot: default '%s' "
                                     "is wireless and no non-wireless fallback "
                                     "available — opening wireless default may "
                                     "silence audio for ~15 s during boot handshake\n",
@@ -603,7 +603,7 @@ void SupersonicEngine::init(const Config& cfg) {
                     0, reqOut);
             }
             if (initError.isNotEmpty()) {
-                fprintf(stderr, "[audio-device] init with 0 in / %d out failed: %s\n",
+                fprintf(stderr, "[device-setup] init with 0 in / %d out failed: %s\n",
                         reqOut, initError.toRawUTF8());
                 mLastSelfTriggeredChange = std::chrono::steady_clock::now();
                 initError = mDeviceManager->initialiseWithDefaultDevices(0, 0);
@@ -615,21 +615,21 @@ void SupersonicEngine::init(const Config& cfg) {
             initError = mDeviceManager->initialiseWithDefaultDevices(
                 reqIn, reqOut);
             if (initError.isNotEmpty()) {
-                fprintf(stderr, "[audio-device] init with %d in / %d out failed: %s\n",
+                fprintf(stderr, "[device-setup] init with %d in / %d out failed: %s\n",
                         reqIn, reqOut,
                         initError.toRawUTF8());
                 mLastSelfTriggeredChange = std::chrono::steady_clock::now();
                 initError = mDeviceManager->initialiseWithDefaultDevices(0, 2);
             }
             if (initError.isNotEmpty()) {
-                fprintf(stderr, "[audio-device] init with 0 in / 2 out failed: %s\n",
+                fprintf(stderr, "[device-setup] init with 0 in / 2 out failed: %s\n",
                         initError.toRawUTF8());
                 mLastSelfTriggeredChange = std::chrono::steady_clock::now();
                 initError = mDeviceManager->initialiseWithDefaultDevices(0, 0);
             }
 #endif
             if (initError.isNotEmpty()) {
-                fprintf(stderr, "[audio-device] all init attempts failed: %s\n",
+                fprintf(stderr, "[device-setup] all init attempts failed: %s\n",
                         initError.toRawUTF8());
             }
         }
@@ -680,7 +680,7 @@ void SupersonicEngine::init(const Config& cfg) {
                     for (auto& d : listDevices()) {
                         if (d.name == outName && !d.isSuitableForAggregate()) {
                             outputSuitable = false;
-                            fprintf(stderr, "[audio-device] boot: skipping aggregate — "
+                            fprintf(stderr, "[device-setup] boot: skipping aggregate — "
                                     "'%s' is %s; input disabled\n",
                                     outName.c_str(),
                                     d.isVirtualTransport() ? "virtual" : "wireless");
@@ -721,7 +721,7 @@ void SupersonicEngine::init(const Config& cfg) {
                         inputBits.setRange(inOffset, reqIn, true);
                         setup.inputChannels = inputBits;
                         if (inOffset > 0) {
-                            fprintf(stderr, "[audio-device] aggregate input bits offset by %d "
+                            fprintf(stderr, "[device-setup] aggregate input bits offset by %d "
                                     "(output sub-device '%s' contributes %d input channels) — "
                                     "active input range = [%d..%d]\n",
                                     inOffset, outName.c_str(), inOffset,
@@ -731,7 +731,7 @@ void SupersonicEngine::init(const Config& cfg) {
                         mLastSelfTriggeredChange = std::chrono::steady_clock::now();
                         auto aggErr = mDeviceManager->setAudioDeviceSetup(setup, true);
                         if (aggErr.isNotEmpty()) {
-                            fprintf(stderr, "[audio-device] aggregate setup failed: %s — "
+                            fprintf(stderr, "[device-setup] aggregate setup failed: %s — "
                                     "falling back to Combiner\n", aggErr.toRawUTF8());
                             AggregateDeviceHelper::destroy();
                             mRealOutputDeviceName.clear();
@@ -741,7 +741,7 @@ void SupersonicEngine::init(const Config& cfg) {
                             mDeviceManager->initialiseWithDefaultDevices(
                                 reqIn, reqOut);
                         } else {
-                            fprintf(stderr, "[audio-device] booted with aggregate: "
+                            fprintf(stderr, "[device-setup] booted with aggregate: "
                                     "out='%s' in='%s'\n", outName.c_str(), inName.c_str());
                             // Suppress CFRunLoop until Spider has finished
                             // cold_swap_reinit — queued audioDeviceListChanged
@@ -795,7 +795,7 @@ void SupersonicEngine::init(const Config& cfg) {
                     setup.sampleRate = cfg.sampleRate;
                     changed = true;
                 } else {
-                    fprintf(stderr, "[audio-device] requested sr %d not supported, "
+                    fprintf(stderr, "[device-setup] requested sr %d not supported, "
                             "keeping %.0f\n", cfg.sampleRate, setup.sampleRate);
                 }
             }
@@ -833,10 +833,10 @@ void SupersonicEngine::init(const Config& cfg) {
             if (changed) {
                 juce::String setupErr = mDeviceManager->setAudioDeviceSetup(setup, true);
                 if (setupErr.isNotEmpty()) {
-                    fprintf(stderr, "[audio-device] setAudioDeviceSetup error: %s\n",
+                    fprintf(stderr, "[device-setup] setAudioDeviceSetup error: %s\n",
                             setupErr.toRawUTF8());
                     // Recover: reinitialise with defaults rather than leaving device broken
-                    fprintf(stderr, "[audio-device] recovering with device defaults\n");
+                    fprintf(stderr, "[device-setup] recovering with device defaults\n");
                     mDeviceManager->initialiseWithDefaultDevices(
                         reqIn, reqOut);
                 }
@@ -1498,7 +1498,7 @@ void SupersonicEngine::executePendingSwitch() {
         return;
     }
 
-    fprintf(stderr, "[audio-device] debounced switch: out='%s' in='%s' sr=%.0f buf=%d\n",
+    fprintf(stderr, "[device-setup] debounced switch: out='%s' in='%s' sr=%.0f buf=%d\n",
             devName.c_str(), inputDevName.c_str(), sr, bufSz);
     fflush(stderr);
 
@@ -1518,7 +1518,7 @@ void SupersonicEngine::executePendingSwitch() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     if (!result.success) {
-        fprintf(stderr, "[audio-device] debounced switch failed after %d attempts: %s\n",
+        fprintf(stderr, "[device-setup] debounced switch failed after %d attempts: %s\n",
                 attempts, result.error.c_str());
         fflush(stderr);
     }
@@ -1712,12 +1712,12 @@ void SupersonicEngine::sendDeviceReport() {
     // GUI's findText() would fall back to "-- None --" and silently
     // deselect the user's real mic. Skip this report; the next one (after
     // the change settles) will carry the full picture.
-    fprintf(stderr, "[device-report] outputs=%zu inputs=%zu currentIn='%s' currentOut='%s'\n",
+    fprintf(stderr, "[device-list] outputs=%zu inputs=%zu currentIn='%s' currentOut='%s'\n",
             outputDevices.size(), inputDevices.size(),
             current.inputDeviceName.c_str(), current.name.c_str());
     fflush(stderr);
     if (inputDevices.empty() && !current.inputDeviceName.empty()) {
-        fprintf(stderr, "[device-report] skipping: currentIn set but inputDevices list empty "
+        fprintf(stderr, "[device-list] skipping: currentIn set but inputDevices list empty "
                 "(transient enumeration, probably mid-swap)\n");
         fflush(stderr);
         return;
@@ -2634,12 +2634,12 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
                 auto err2 = mDeviceManager->setAudioDeviceSetup(setup, true);
                 if (err2.isEmpty()) {
                     forcedPrev = true;
-                    fprintf(stderr, "[audio-device] reinit: wireless device supports "
+                    fprintf(stderr, "[device-setup] reinit: wireless device supports "
                             "prev rate %d — forcing it (was %.0f)\n",
                             prevRate, dev->getCurrentSampleRate());
                     fflush(stderr);
                 } else {
-                    fprintf(stderr, "[audio-device] reinit: setAudioDeviceSetup at "
+                    fprintf(stderr, "[device-setup] reinit: setAudioDeviceSetup at "
                             "prev rate %d failed on wireless (%s), keeping negotiated\n",
                             prevRate, err2.toRawUTF8());
                     fflush(stderr);
@@ -2647,7 +2647,7 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
             }
         }
         if (!forcedPrev) {
-            fprintf(stderr, "[audio-device] reinit: keeping JUCE's negotiated rate=%.0f buf=%d "
+            fprintf(stderr, "[device-setup] reinit: keeping JUCE's negotiated rate=%.0f buf=%d "
                     "for wireless device (prev rate=%d buf=%d)\n",
                     setup.sampleRate, setup.bufferSize, prevRate, prevBufSize);
             fflush(stderr);
@@ -2794,7 +2794,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                            && resolvesUnder(juceCurrentType, inputDeviceName);
             if (!intendedOk && currentOk) {
                 fprintf(stderr,
-                    "[audio-device] abandoning pending driver intent '%s' "
+                    "[device-setup] abandoning pending driver intent '%s' "
                     "— picks resolve under '%s'\n",
                     mIntendedDriver.c_str(), juceCurrentType.c_str());
                 fflush(stderr);
@@ -2820,7 +2820,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                 crossDriverTarget = plan.targetDriver;
                 crossDriverDevice = plan.targetDevice;
                 fprintf(stderr,
-                    "[audio-device] cross-driver: '%s' -> '%s' (device '%s')\n",
+                    "[device-setup] cross-driver: '%s' -> '%s' (device '%s')\n",
                     juceCurrentType.c_str(), crossDriverTarget.c_str(),
                     name.c_str());
                 fflush(stderr);
@@ -2845,7 +2845,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             && (inputDeviceName.empty() || inputDeviceName == "__none__")) {
             inputDeviceName = crossDriverDevice;
             fprintf(stderr,
-                "[audio-device] ASIO full-duplex: mirroring '%s' to input\n",
+                "[device-setup] ASIO full-duplex: mirroring '%s' to input\n",
                 crossDriverDevice.c_str());
             fflush(stderr);
         }
@@ -2889,7 +2889,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             sampleRate, mPreWirelessRate, currentRate,
             currentIsWireless, targetIsWireless);
         if (resolved != sampleRate) {
-            fprintf(stderr, "[audio-device] restoring pre-wireless rate %d "
+            fprintf(stderr, "[device-setup] restoring pre-wireless rate %d "
                     "(current=%.0f, target='%s')\n",
                     mPreWirelessRate, currentRate, targetName.c_str());
             fflush(stderr);
@@ -2917,7 +2917,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         // we'll know TCC really is denying.
         std::string micStat = MicPermission::status();
         if (micStat != "authorized") {
-            fprintf(stderr, "[audio-device] mic permission status=%s (proceeding anyway; "
+            fprintf(stderr, "[device-setup] mic permission status=%s (proceeding anyway; "
                     "CoreAudio may still grant via GUI's responsible process)\n",
                     micStat.c_str());
             fflush(stderr);
@@ -2939,11 +2939,11 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         int probed = probeDeviceChannelCount(inputDeviceName, true);
         int reEnableCount = (probed > 0 && probed < requested) ? probed : requested;
         if (reEnableCount != requested) {
-            fprintf(stderr, "[audio-device] auto-enabling %d input channels for '%s' "
+            fprintf(stderr, "[device-setup] auto-enabling %d input channels for '%s' "
                     "(requested %d, device max %d)\n",
                     reEnableCount, inputDeviceName.c_str(), requested, probed);
         } else {
-            fprintf(stderr, "[audio-device] auto-enabling %d input channels for '%s'\n",
+            fprintf(stderr, "[device-setup] auto-enabling %d input channels for '%s'\n",
                     reEnableCount, inputDeviceName.c_str());
         }
         mCurrentConfig.numInputChannels = reEnableCount;
@@ -2975,7 +2975,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         if (probedIn  > 0 && probedIn  != mCurrentConfig.numInputChannels)
             forceColdForChannels = true;
         if (forceColdForChannels) {
-            fprintf(stderr, "[audio-device] channel-count change detected "
+            fprintf(stderr, "[device-setup] channel-count change detected "
                     "(probedOut=%d probedIn=%d currentOut=%d currentIn=%d) "
                     "— forcing cold swap so World rebuilds at new bus count\n",
                     probedOut, probedIn,
@@ -3015,7 +3015,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     // (e.g. user-selected name not in the device list, exclusive-mode
     // contention, sample-rate-not-supported). Without restoring, the
     // rollback below re-attaches the audio callback to a manager with
-    // no device — symptom: device-report shows currentIn=''/currentOut='',
+    // no device — symptom: device-list shows currentIn=''/currentOut='',
     // GUI prefs read 0hz | 0buf | 0out | 0in, every scsynth reply times
     // out because the audio thread isn't ticking.
     juce::AudioDeviceManager::AudioDeviceSetup prevSetup;
@@ -3171,7 +3171,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                     needsAggregate = false;
                     dropInput = true;
                     const char* why = dev.isVirtualTransport() ? "virtual" : "wireless";
-                    fprintf(stderr, "[audio-device] skipping aggregate — '%s' is %s; input disabled\n",
+                    fprintf(stderr, "[device-setup] skipping aggregate — '%s' is %s; input disabled\n",
                             dev.name.c_str(), why);
                     fflush(stderr);
                     break;
@@ -3227,7 +3227,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                         inputBits.setRange(inOffset,
                                            mCurrentConfig.numInputChannels, true);
                         setup.inputChannels = inputBits;
-                        fprintf(stderr, "[audio-device] aggregate input bits offset by %d "
+                        fprintf(stderr, "[device-setup] aggregate input bits offset by %d "
                                 "(output sub-device '%s' contributes %d input channels) — "
                                 "active input range = [%d..%d]\n",
                                 inOffset, mRealOutputDeviceName.c_str(), inOffset,
@@ -3256,7 +3256,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             // JUCE fall back to its combiner, which has the same crash
             // as our aggregate (both use AudioUnitRender under the hood).
             if (dropInput && !setup.inputDeviceName.isEmpty()) {
-                fprintf(stderr, "[audio-device] clearing input (was '%s') because output "
+                fprintf(stderr, "[device-setup] clearing input (was '%s') because output "
                         "can't be combined with it\n",
                         setup.inputDeviceName.toRawUTF8());
                 fflush(stderr);
@@ -3279,14 +3279,14 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         // JUCE's setAudioDeviceSetup sees it as a different device and
         // reopens properly.
 
-        fprintf(stderr, "[audio-device] calling setAudioDeviceSetup: out='%s' in='%s' sr=%.0f buf=%d\n",
+        fprintf(stderr, "[device-setup] calling setAudioDeviceSetup: out='%s' in='%s' sr=%.0f buf=%d\n",
                 setup.outputDeviceName.toRawUTF8(),
                 setup.inputDeviceName.toRawUTF8(),
                 setup.sampleRate, setup.bufferSize);
         fflush(stderr);
         mLastSelfTriggeredChange = std::chrono::steady_clock::now();
         juce::String err = mDeviceManager->setAudioDeviceSetup(setup, true);
-        fprintf(stderr, "[audio-device] setAudioDeviceSetup returned: '%s'\n",
+        fprintf(stderr, "[device-setup] setAudioDeviceSetup returned: '%s'\n",
                 err.isEmpty() ? "OK" : err.toRawUTF8());
         fflush(stderr);
         if (err.isNotEmpty()) errStr = err.toStdString();
@@ -3309,7 +3309,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             outOnly.useDefaultInputChannels = false;
             outOnly.inputChannels.clear();
             fprintf(stderr,
-                    "[audio-device] input '%s' failed when paired with output '%s' "
+                    "[device-setup] input '%s' failed when paired with output '%s' "
                     "(%s) — retrying output-only\n",
                     failedInputName.c_str(), pairedOutputName.c_str(),
                     firstError.c_str());
@@ -3333,7 +3333,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             } else {
                 errStr = retryErr.toStdString();
                 fprintf(stderr,
-                        "[audio-device] output-only retry also failed: %s\n",
+                        "[device-setup] output-only retry also failed: %s\n",
                         errStr.c_str());
                 fflush(stderr);
             }
@@ -3388,7 +3388,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             // syncs return) instead of silently dead with the audio thread
             // never ticking.
             fprintf(stderr,
-                    "[audio-device] swap failed (%s), restoring previous setup: out='%s' in='%s' sr=%.0f buf=%d\n",
+                    "[device-setup] swap failed (%s), restoring previous setup: out='%s' in='%s' sr=%.0f buf=%d\n",
                     errStr.c_str(),
                     prevSetup.outputDeviceName.toRawUTF8(),
                     prevSetup.inputDeviceName.toRawUTF8(),
@@ -3397,7 +3397,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             juce::String restoreErr = mDeviceManager->setAudioDeviceSetup(prevSetup, true);
             if (restoreErr.isNotEmpty()) {
                 fprintf(stderr,
-                        "[audio-device] WARNING: failed to restore previous setup: %s\n",
+                        "[device-setup] WARNING: failed to restore previous setup: %s\n",
                         restoreErr.toRawUTF8());
                 fflush(stderr);
                 // Last-resort recovery: try the system default with output-only.
@@ -3409,13 +3409,13 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                     mDeviceManager->initialiseWithDefaultDevices(0, mCurrentConfig.numOutputChannels);
                 if (fallbackErr.isNotEmpty()) {
                     fprintf(stderr,
-                            "[audio-device] WARNING: default-device fallback also failed: %s, "
+                            "[device-setup] WARNING: default-device fallback also failed: %s, "
                             "engine will run via headless driver\n",
                             fallbackErr.toRawUTF8());
                     fflush(stderr);
                 } else {
                     fprintf(stderr,
-                            "[audio-device] recovered to system default after rollback failure\n");
+                            "[device-setup] recovered to system default after rollback failure\n");
                     fflush(stderr);
                     // Clear aggregate-bookkeeping; we're on a single device now.
                     mRealOutputDeviceName.clear();
@@ -3547,7 +3547,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             mDeviceManager->getAudioDeviceSetup(finalSetup);
             result.inputDeviceName = finalSetup.inputDeviceName.toStdString();
 
-            fprintf(stderr, "[audio-device] switched to %s: %s %.0fHz buf=%d %dch\n",
+            fprintf(stderr, "[device-setup] switched to %s: %s %.0fHz buf=%d %dch\n",
                     finalDev->getTypeName().toRawUTF8(),
                     finalDev->getName().toRawUTF8(),
                     result.sampleRate, result.bufferSize,
@@ -3837,7 +3837,7 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
         //     path moves JUCE atomically.
         auto pref = mPreferredDeviceByDriver.find(driverName);
         if (pref != mPreferredDeviceByDriver.end() && !pref->second.empty()) {
-            fprintf(stderr, "[audio-device] switchDriver('%s'): delegating to "
+            fprintf(stderr, "[device-setup] switchDriver('%s'): delegating to "
                     "switchDevice('%s') (saved preference)\n",
                     driverName.c_str(), pref->second.c_str());
             fflush(stderr);
@@ -3860,7 +3860,7 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
                 int idx = type->getDefaultDeviceIndex(false);
                 if (idx < 0 || idx >= names.size()) idx = 0;
                 std::string defaultName = names[idx].toStdString();
-                fprintf(stderr, "[audio-device] switchDriver('%s'): no saved pref, "
+                fprintf(stderr, "[device-setup] switchDriver('%s'): no saved pref, "
                         "auto-selecting default '%s'\n",
                         driverName.c_str(), defaultName.c_str());
                 fflush(stderr);
@@ -3879,7 +3879,7 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
         mIntendedDriver                 = driverName;
         result.success                  = true;
         result.requiresDeviceSelection  = true;
-        fprintf(stderr, "[audio-device] switchDriver('%s'): intent recorded, "
+        fprintf(stderr, "[device-setup] switchDriver('%s'): intent recorded, "
                 "no device opened — caller must follow with switchDevice\n",
                 driverName.c_str());
         fflush(stderr);
@@ -4040,7 +4040,7 @@ bool SupersonicEngine::waitForDeviceVisible(const std::string& name, int timeout
         for (auto& n : dt->getDeviceNames(false)) names.push_back(n.toStdString());
         if (sonicpi::device::deviceNameVisible(name, names)) {
             if (waited > 0) {
-                fprintf(stderr, "[audio-device] aggregate '%s' visible after %d ms\n",
+                fprintf(stderr, "[device-setup] aggregate '%s' visible after %d ms\n",
                         name.c_str(), waited);
                 fflush(stderr);
             }
@@ -4049,7 +4049,7 @@ bool SupersonicEngine::waitForDeviceVisible(const std::string& name, int timeout
         if (waited >= timeoutMs) break;
         juce::Thread::sleep(kStepMs);
     }
-    fprintf(stderr, "[audio-device] aggregate '%s' still not visible after %d ms — "
+    fprintf(stderr, "[device-setup] aggregate '%s' still not visible after %d ms — "
             "aborting open\n", name.c_str(), timeoutMs);
     fflush(stderr);
     return false;
@@ -4126,14 +4126,14 @@ void SupersonicEngine::handleSystemDefaultOutputChanged() {
     // chose and storms the device list.
     if (!sonicpi::device::shouldFollowDefaultOutputChange(
             newDefault, currentOutput, newIsVirtual)) {
-        fprintf(stderr, "[audio-device] system default → '%s' (virtual=%d); "
+        fprintf(stderr, "[device-setup] system default → '%s' (virtual=%d); "
                 "not following (staying on '%s')\n",
                 newDefault.c_str(), newIsVirtual ? 1 : 0, currentOutput.c_str());
         fflush(stderr);
         return;
     }
 
-    fprintf(stderr, "[audio-device] system default output changed: '%s' -> '%s'\n",
+    fprintf(stderr, "[device-setup] system default output changed: '%s' -> '%s'\n",
             currentOutput.c_str(), newDefault.c_str());
     fflush(stderr);
     // Route through setDeviceMode("") so we get the wireless/non-wireless
@@ -4165,7 +4165,7 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
         // System mode — switch to the current macOS default output while
         // keeping the input device (mic) so live_audio follows the output.
         if (mDeviceManager) {
-            fprintf(stderr, "[audio-device] switching to system default\n");
+            fprintf(stderr, "[device-setup] switching to system default\n");
 #ifdef __APPLE__
             AudioDeviceID defaultID = kAudioObjectUnknown;
             AudioObjectPropertyAddress addr = {
@@ -4224,14 +4224,14 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
                 }
                 // Wireless default — fall through to the reinitialise
                 // path below.
-                fprintf(stderr, "[audio-device] system default '%s' is wireless; "
+                fprintf(stderr, "[device-setup] system default '%s' is wireless; "
                         "using JUCE default-device init\n", newDefault.c_str());
                 fflush(stderr);
             }
 #endif
             auto err = reinitialiseWithDefaultsPreservingConfig();
             if (err.isNotEmpty()) {
-                fprintf(stderr, "[audio-device] system mode init failed: %s\n",
+                fprintf(stderr, "[device-setup] system mode init failed: %s\n",
                         err.toRawUTF8());
                 return err.toStdString();
             }
@@ -4249,7 +4249,7 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
 
             if (newRate > 0 && static_cast<int>(newRate) != mCurrentConfig.sampleRate) {
                 fprintf(stderr,
-                        "[audio-device] system default has different rate "
+                        "[device-setup] system default has different rate "
                         "(%d -> %.0f Hz) — performing cold swap\n",
                         mCurrentConfig.sampleRate, newRate);
                 // Force cold even though JUCE is already at newRate (we
@@ -4281,7 +4281,7 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
                         rateOk = true;
                 if (!rateOk) {
                     fprintf(stderr,
-                        "[audio-device] rejecting mode switch to %s: "
+                        "[device-setup] rejecting mode switch to %s: "
                         "current rate %.0f not supported — restart required\n",
                         mDeviceMode.c_str(), curRate);
                     mDeviceMode = previousMode;
