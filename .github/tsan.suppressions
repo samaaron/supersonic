@@ -17,3 +17,15 @@
 # code keeps a supersonic_midi::watcher frame on top and is still reported.
 race:std::sync::mpmc
 race:std::sync::mpsc
+
+# ── Gamepad C-ABI seam ────────────────────────────────────────────────────────
+# Same uninstrumented-std-channel class as above: ss_gamepad_create/destroy/
+# handle_osc (rust/supersonic-gamepad/src/ffi.rs) send commands over a std mpsc
+# channel to the process-global poll thread, which receives and drops them.
+# TSan flags the cross-thread alloc/free of the command payload as a race.
+# The std::sync::mpsc patterns above cannot match here because the gamepad
+# crate's channel frames are inlined away — the report shows only the seam
+# function on one side and an unsymbolized __rust_begin_short_backtrace thread
+# entry on the other. Scoped to the ss_gamepad_ seam functions so races in the
+# C++ callers (GamepadControl, SupersonicEngine) are still reported.
+race:ss_gamepad_
