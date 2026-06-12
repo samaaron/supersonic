@@ -2,6 +2,7 @@
  * RingReader.cpp — see RingReader.h.
  */
 #include "RingReader.h"
+#include <cstdio>
 #include <cstring>
 
 RingReader::RingReader(const char* threadName) : juce::Thread(threadName) {
@@ -21,7 +22,44 @@ RingReader::~RingReader() {
         mWake->fetch_add(1, std::memory_order_release);
         mWake->notify_all();
     }
+    // A thread parked in pause() waits on mPauseRequest, not the wake word —
+    // release it too so stopThread() never times out into killThread().
+    resume();
     stopThread(2000);
+}
+
+void RingReader::pause() {
+    if (!isThreadRunning()) return;
+    // Self-pause would deadlock waiting for our own park acknowledgement.
+    // It is also unnecessary: a drain handler that triggers the caller's
+    // critical section (e.g. a cold swap run from an OSC command on the NRT
+    // gateway thread) is by definition not draining concurrently with it.
+    if (juce::Thread::getCurrentThreadId() == getThreadId()) return;
+    mPauseRequest.store(1, std::memory_order_release);
+    // Kick the wake word so a reader blocked on it re-checks the request
+    // (same bump-then-notify reasoning as the destructor above).
+    if (mWake) {
+        mWake->fetch_add(1, std::memory_order_release);
+        mWake->notify_all();
+    }
+    // Park acknowledgement normally lands within one drain pass. Bound the
+    // wait anyway: a reader wedged behind a foreign lock must degrade to an
+    // unparked (pre-pause) swap, not hang the device switch.
+    for (int waited = 0; mParked.load(std::memory_order_acquire) == 0; ++waited) {
+        if (!isThreadRunning()) return;
+        if (waited >= 2000) {
+            fprintf(stderr, "[%s] pause: reader did not park within 2s — "
+                    "proceeding unparked\n", getThreadName().toRawUTF8());
+            fflush(stderr);
+            return;
+        }
+        juce::Thread::sleep(1);
+    }
+}
+
+void RingReader::resume() {
+    mPauseRequest.store(0, std::memory_order_release);
+    mPauseRequest.notify_all();
 }
 
 void RingReader::addDrain(uint8_t*              buffer,
@@ -37,83 +75,31 @@ void RingReader::addDrain(uint8_t*              buffer,
     d.tail      = tail;
     d.onMessage = std::move(onMessage);
     d.metrics   = metrics;
-    d.msgBuf.reserve(65536);
+    mDrains.push_back(std::move(d));
+}
+
+void RingReader::addTask(std::function<void()> task) {
+    Drain d;
+    d.task = std::move(task);
     mDrains.push_back(std::move(d));
 }
 
 void RingReader::drainOne(Drain& d) {
-    if (!d.buffer || !d.head || !d.tail) return;
-
-    while (true) {
-        int32_t head = d.head->load(std::memory_order_acquire);
-        int32_t tail = d.tail->load(std::memory_order_relaxed);
-        if (head == tail) break;
-
-        uint32_t ut    = static_cast<uint32_t>(tail);
-        uint32_t uh    = static_cast<uint32_t>(head);
-        uint32_t avail = (uh - ut + d.size) % d.size;
-        if (avail < sizeof(Message)) break;
-
-        // Read header (wrapping).
-        Message hdr;
-        {
-            uint32_t sz    = sizeof(Message);
-            uint32_t first = d.size - ut;
-            if (sz <= first) {
-                std::memcpy(&hdr, d.buffer + ut, sz);
-            } else {
-                std::memcpy(&hdr, d.buffer + ut, first);
-                std::memcpy(reinterpret_cast<uint8_t*>(&hdr) + first, d.buffer, sz - first);
-            }
-        }
-
-        if (hdr.magic == PADDING_MAGIC) {
-            d.tail->store(0, std::memory_order_release);
-            break;
-        }
-        if (hdr.magic != MESSAGE_MAGIC) {
-            if (d.metrics.corrupted) d.metrics.corrupted->fetch_add(1, std::memory_order_relaxed);
-            d.tail->store(head, std::memory_order_release);  // resync
-            break;
-        }
-
-        uint32_t totalLen = hdr.length;
-        if (totalLen < sizeof(Message) || totalLen > d.size) {
-            if (d.metrics.corrupted) d.metrics.corrupted->fetch_add(1, std::memory_order_relaxed);
-            d.tail->store(head, std::memory_order_release);
-            break;
-        }
-        if (avail < totalLen) break;
-
-        if (d.metrics.seqGaps) {
-            int32_t seq = static_cast<int32_t>(hdr.sequence);
-            if (d.lastSeq >= 0 && seq != d.lastSeq + 1)
-                d.metrics.seqGaps->fetch_add(1, std::memory_order_relaxed);
-            d.lastSeq = seq;
-        }
-
-        uint32_t payloadSize  = totalLen - sizeof(Message);
-        uint32_t payloadStart = (ut + sizeof(Message)) % d.size;
-        d.msgBuf.resize(payloadSize);
-        {
-            uint32_t first = d.size - payloadStart;
-            if (payloadSize <= first) {
-                std::memcpy(d.msgBuf.data(), d.buffer + payloadStart, payloadSize);
-            } else {
-                std::memcpy(d.msgBuf.data(), d.buffer + payloadStart, first);
-                std::memcpy(d.msgBuf.data() + first, d.buffer, payloadSize - first);
-            }
-        }
-
-        d.tail->store(static_cast<int32_t>((ut + totalLen) % d.size),
-                      std::memory_order_release);
-
-        if (d.metrics.received) d.metrics.received->fetch_add(1, std::memory_order_relaxed);
-        if (d.metrics.bytes)    d.metrics.bytes->fetch_add(payloadSize, std::memory_order_relaxed);
-
-        if (d.onMessage && payloadSize > 0)
-            d.onMessage(hdr.sourceId, d.msgBuf.data(), payloadSize, hdr.sequence);
+    if (d.task) {
+        d.task();
+        return;
     }
+    // The walk itself is the shared lanes algorithm (src/lanes/ring_drain.h)
+    // — the same code the lanes egress drains run. This class only adds the
+    // thread, the wake word and the drain registry.
+    ss_drain_ring(d.buffer, d.size, d.head, d.tail, d.state, d.metrics,
+                  0 /* drain everything available */,
+                  [&d](uint32_t sourceId, const uint8_t* payload,
+                       uint32_t payloadSize, uint32_t sequence) {
+                      if (d.onMessage)
+                          d.onMessage(sourceId, payload, payloadSize, sequence);
+                      return SsDrainVerdict::Consume;
+                  });
 }
 
 void RingReader::run() {
@@ -128,6 +114,18 @@ void RingReader::run() {
         }
 
         if (threadShouldExit()) break;
+
+        if (mPauseRequest.load(std::memory_order_acquire)) {
+            // Acknowledge between drain passes — the release-store makes every
+            // write of the pass visible to the pauser — then sleep until
+            // resume() (or exit) clears the request.
+            mParked.store(1, std::memory_order_release);
+            while (mPauseRequest.load(std::memory_order_acquire) && !threadShouldExit())
+                mPauseRequest.wait(1, std::memory_order_acquire);
+            mParked.store(0, std::memory_order_relaxed);
+            continue;
+        }
+
         for (auto& d : mDrains) drainOne(d);
     }
 }

@@ -113,8 +113,6 @@ export class OscChannel {
      */
     #initViews() {
         const sab = this.#sabConfig.sharedBuffer;
-        const headerSize = this.#sabConfig.bufferConstants.MESSAGE_HEADER_SIZE || 16;
-        const headerScratch = new Uint8Array(headerSize);
         // Immutable IN-ring handle, assembled once and reused on every send.
         this.#ring = {
             atomicView: new Int32Array(sab),
@@ -123,8 +121,6 @@ export class OscChannel {
             bufferConstants: this.#sabConfig.bufferConstants,
             ringBufferBase: this.#sabConfig.ringBufferBase,
             controlIndices: this.#sabConfig.controlIndices,
-            headerScratch,
-            headerScratchView: new DataView(headerScratch.buffer),
         };
     }
 

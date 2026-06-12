@@ -6,6 +6,7 @@
 #include "AggregateDeviceHelper.h"
 #include "DevicePolicy.h"
 #include "src/audio_processor.h"
+#include "src/lanes/lanes.h"
 #include "audio_config.h"
 #include "src/shared_memory.h"
 #include "src/osc_debug.h"
@@ -944,23 +945,22 @@ void SupersonicEngine::init(const Config& cfg) {
     uint8_t* base = arena;
     ControlPointers*    ctrl = reinterpret_cast<ControlPointers*>(base + CONTROL_START);
     mMetrics                 = reinterpret_cast<PerformanceMetrics*>(base + METRICS_START);
-    PerformanceMetrics* met  = mMetrics;
 
-    // -- NRT gateway: drain #1 = OUT egress ring. Woken every audio block via
+    // -- NRT gateway: drain #1 = the RT egress lane (OUT ring), via the lanes
+    //    ABI — the gateway is its single consumer; the drain state, route
+    //    peeling and metrics live in lanes.cpp. Woken every audio block via
     //    processCount. (Drain #2 = the control ring, added with the NRT plane
-    //    below.) OUT frames use the same framing as NRT-out, so both drain
-    //    through dispatchEgress.
+    //    below.)
     mNrtGateway.setWake(&mAudioCallback.processCount);
-    mNrtGateway.addDrain(
-        base + OUT_BUFFER_START, OUT_BUFFER_SIZE,
-        &ctrl->out_head, &ctrl->out_tail,
-        [this](uint32_t token, const uint8_t* d, uint32_t n, uint32_t) {
-            mEgress.dispatchEgress(token, d, n);
-        },
-        { &met->osc_in_messages_received,
-          &met->osc_in_bytes_received,
-          &met->osc_in_corrupted,
-          &met->messages_sequence_gaps });
+    mNrtGateway.addTask([this]() {
+        ss_egress_rt_drain(
+            [](void* ctx, uint32_t token, uint32_t route,
+               const uint8_t* osc, uint32_t len, uint32_t) {
+                static_cast<SupersonicEngine*>(ctx)->mEgress.dispatchEgress(
+                    token, route, osc, len);
+            },
+            this, 0 /* drain everything available */);
+    });
 
     // -- Audio-plane ingress (engine-owned) ---------------------------------
     // The engine owns the IN ring; the default OscIngress route writes it. The
@@ -978,12 +978,10 @@ void SupersonicEngine::init(const Config& cfg) {
     if (!mTransport)
         mTransport = &mDefaultTransport;
 
-    // Egress is deferred: producers frame OSC into the NRT-out ring; the gateway
-    // drains it and is the sole transport caller. /supersonic/debug log lines
-    // surface via onDebug.
-    mEgress.init(mTransport, &onDebug,
-        base + NRT_OUT_BUFFER_START, NRT_OUT_BUFFER_SIZE,
-        &ctrl->nrt_out_head, &ctrl->nrt_out_tail, &ctrl->nrt_out_sequence, &mEgressLock);
+    // Egress is deferred: producers frame OSC into the NRT-out ring (via the
+    // lanes producer, ss_egress_nrt_write); the gateway drains it and is the
+    // sole transport caller. /supersonic/debug log lines surface via onDebug.
+    mEgress.init(mTransport, &onDebug);
 
     // Pre-dispatch hook for both egress rings (/supersonic/buffer/freed deferred-free).
     mEgress.setInterceptor([this](const uint8_t* d, uint32_t n) { return interceptBufferFreed(d, n); });
@@ -1056,18 +1054,21 @@ void SupersonicEngine::init(const Config& cfg) {
         },
         {});
 
-    // NRT gateway drain #3: the NRT-out egress ring.
-    // Off-thread producers (EngineControl replies above, Link/device notifications,
-    // SampleLoader debug) framed OSC + a route tag here via OscEgress; the gateway
-    // is the sole transport caller, so deliver each one. Added after the control
-    // drain so a reply framed this wake is sent the same wake.
-    mNrtGateway.addDrain(
-        base + NRT_OUT_BUFFER_START, NRT_OUT_BUFFER_SIZE,
-        &ctrl->nrt_out_head, &ctrl->nrt_out_tail,
-        [this](uint32_t token, const uint8_t* d, uint32_t n, uint32_t) {
-            mEgress.dispatchEgress(token, d, n);
-        },
-        {});
+    // NRT gateway drain #3: the NRT egress lane (NRT-out ring), via the lanes
+    // ABI. Off-thread producers (EngineControl replies above, Link/device
+    // notifications, SampleLoader debug) frame OSC + a route tag through
+    // OscEgress → ss_egress_nrt_write; the gateway is the sole transport
+    // caller, so deliver each one. Added after the control drain so a reply
+    // framed this wake is sent the same wake.
+    mNrtGateway.addTask([this]() {
+        ss_egress_nrt_drain(
+            [](void* ctx, uint32_t token, uint32_t route,
+               const uint8_t* osc, uint32_t len, uint32_t) {
+                static_cast<SupersonicEngine*>(ctx)->mEgress.dispatchEgress(
+                    token, route, osc, len);
+            },
+            this, 0 /* drain everything available */);
+    });
 
     // Test hook for issue #3526: close the device before the source
     // decision so startAudioSource() sees no current device and falls
@@ -1376,21 +1377,22 @@ void SupersonicEngine::pumpAudioBlock() {
 }
 
 void SupersonicEngine::ingest(const uint8_t* data, uint32_t size, uint32_t originToken) {
+    // Dumb transport: write the bytes onto the ingress lane (the IN ring) with
+    // the opaque origin token in the Message header. The audio thread drains,
+    // classifies (OscIngress), and either performs the audio plane inline or
+    // forwards control to the NRT thread — which resolves the token back to a
+    // reply address via the transport. Token 0 (in-process / embedder) replies
+    // via onReply.
+    bool written = ss_ingress_write(data, size, originToken);
     if (mMetrics) {
-        mMetrics->osc_out_messages_sent.fetch_add(1, std::memory_order_relaxed);
-        mMetrics->osc_out_bytes_sent.fetch_add(size, std::memory_order_relaxed);
-    }
-
-    // Dumb transport: frame the bytes onto the IN ring carrying the opaque origin
-    // token in the Message header. The audio thread drains, classifies
-    // (OscIngress), and either performs the audio plane inline or forwards control
-    // to the NRT thread — which resolves the token back to a reply address via the
-    // transport. Token 0 (in-process / embedder) replies via onReply.
-    if (mInBufferStart) {
-        RingBufferWriter::write(
-            mInBufferStart, mInBufferSize,
-            mInHead, mInTail, mInSequence, mInWriteLock,
-            data, size, originToken);
+        if (written) {
+            mMetrics->osc_out_messages_sent.fetch_add(1, std::memory_order_relaxed);
+            mMetrics->osc_out_bytes_sent.fetch_add(size, std::memory_order_relaxed);
+        } else {
+            // Backpressure / oversize frame: the message is gone — count it
+            // as a drop, never as sent.
+            mMetrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
+        }
     }
 }
 
@@ -3016,6 +3018,23 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         mSampleLoader.pauseLoading();
     }
     mAudioCallback.pause();
+
+    // Cold swaps tear down and re-init the shared-memory world (destroy_world
+    // / rebuild_world → init_memory → ss_lanes_reset_drains) that the reader
+    // threads' drains walk concurrently — park them until the world is back.
+    // Scope guard so every exit path below resumes them; the happy paths
+    // resume explicitly just before audio restarts.
+    struct ReaderPark {
+        std::vector<RingReader*> parked;
+        void park(RingReader& r) { r.pause(); parked.push_back(&r); }
+        void resumeNow()         { for (auto* r : parked) r->resume(); parked.clear(); }
+        ~ReaderPark()            { resumeNow(); }
+    } readerPark;
+    if (isCold) {
+        readerPark.park(mNrtGateway);
+        readerPark.park(mMidiDispatch);
+    }
+
     if (isCold) mStateCache.captureAll();
 
     // --- Stop audio ---
@@ -3443,6 +3462,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                 }
             }
         }
+        readerPark.resumeNow();
         startAudioSource();
         mAudioCallback.resume();
         if (isCold) mSampleLoader.resumeLoading();
@@ -3529,6 +3549,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     }
 
     // --- Restart audio (success path) ---
+    readerPark.resumeNow();
     startAudioSource();
     mAudioCallback.resume();
 

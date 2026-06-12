@@ -7,7 +7,7 @@
  */
 
 import * as MetricsOffsets from '../lib/metrics_offsets.js';
-import { writeMessageToBuffer, calculateAvailableSpace, readMessagesFromBuffer, copyWrappedPayload } from '../lib/ring_buffer_core.js';
+import { writeMessageToBuffer, canWriteMessage, readMessagesFromBuffer, copyWrappedPayload } from '../lib/ring_buffer_core.js';
 import { calculateAllControlIndices } from '../lib/control_offsets.js';
 import {
   SC_BPM_I64,
@@ -31,8 +31,6 @@ const PM_POOL_CONFIG = {
     // Message size limits
     LOG_MAX_MESSAGE_SIZE: 16 * 1024, // 16KB - truncate larger messages
 
-    // Incoming path
-    MAX_OSC_MESSAGE_SIZE: 8192,      // For header assembly on wrap
 };
 
 class ScsynthProcessor extends AudioWorkletProcessor {
@@ -408,11 +406,6 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 })),
             },
 
-            // === INCOMING POOLS ===
-            incoming: {
-                headerBytes: new Uint8Array(16),  // MESSAGE_HEADER_SIZE
-                headerView: null,
-            },
         };
 
         const p = this.pmPools;
@@ -424,9 +417,6 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         // Wire up message.messages to entries arrays
         p.replies.message.messages = p.replies.entries;
         p.log.message.entries = p.log.entries;
-
-        // Incoming header view
-        p.incoming.headerView = new DataView(p.incoming.headerBytes.buffer);
 
         // Snapshot buffer (needs bufferConstants and wasmMemory)
         if (this.bufferConstants && this.wasmMemory) {
@@ -446,7 +436,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
     }
 
     // Write a single OSC message directly to the IN ring buffer (postMessage mode)
-    // Called from onmessage handlers - uses pre-allocated header scratch for wrap-around case
+    // Called from onmessage handlers
     // Note: new Uint8Array(oscData) creates a view (no copy), which is required to access ArrayBuffer bytes
     writeOscToRingBuffer(oscData, sourceId = 0) {
         if (!this.bufferConstants || !this.uint8View || !this.pmPools) return false;
@@ -463,11 +453,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         const head = this.atomicLoad(this.CONTROL_INDICES.IN_HEAD);
         const tail = this.atomicLoad(this.CONTROL_INDICES.IN_TAIL);
 
-        // Calculate available space using shared helper
-        const available = calculateAvailableSpace(head, tail, IN_BUFFER_SIZE);
-
-        // Check if message fits
-        if (alignedLength > available) {
+        // Authoritative never-wrap fit test (frames need contiguous room
+        // before the boundary or, after padding, before the tail at 0).
+        if (!canWriteMessage(head, tail, IN_BUFFER_SIZE, alignedLength)) {
             // Buffer full - message is dropped
             // This shouldn't happen with proper backpressure
             console.error('[AudioWorklet] Ring buffer full, dropping OSC message');
@@ -482,7 +470,7 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         // This allocation is unavoidable - JS requires TypedArray to access ArrayBuffer bytes
         const oscBytes = new Uint8Array(oscData);
 
-        // Write message using shared core logic with pre-allocated header scratch
+        // Write message using shared core logic (never-wrap framing)
         const newHead = writeMessageToBuffer({
             uint8View: this.uint8View,
             dataView: this.dataView,
@@ -492,10 +480,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             payload: oscBytes,
             sequence,
             messageMagic: this.bufferConstants.MESSAGE_MAGIC,
+            paddingMagic: this.bufferConstants.PADDING_MAGIC,
             headerSize: MESSAGE_HEADER_SIZE,
-            sourceId,
-            headerScratch: this.pmPools.incoming.headerBytes,
-            headerScratchView: this.pmPools.incoming.headerView
+            sourceId
         });
 
         // Update head
@@ -772,9 +759,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                 // Check if pool buffer has space
                 if (bufferOffset + actualLength > C.LOG_BUFFER_SIZE) return;
 
-                // Copy (possibly truncated) directly into the pool — NO intermediate
-                // allocation, and wrap-aware: the IN ring's JS writer splits payloads
-                // at the boundary, so a linear read would walk past the buffer.
+                // Copy (possibly truncated) directly into the pool — no
+                // intermediate allocation. Frames are contiguous; the
+                // wrap-aware copy is a defensive bound against a corrupt ring.
                 copyWrappedPayload(this.uint8View, bufferStart, bufferSize, payloadOffset, actualLength, pool.bufferView, bufferOffset);
 
                 // Update pre-allocated entry with truncation info
@@ -1249,9 +1236,9 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         }
 
         try {
-            if (this.wasmInstance && this.wasmInstance.exports.process_audio) {
+            if (this.wasmInstance && this.wasmInstance.exports.ss_tick) {
 
-                // Clear WASM scheduler if flagged (before process_audio runs scheduled bundles)
+                // Clear WASM scheduler if flagged (before the tick runs scheduled bundles)
                 if (this.pendingClearSched) {
                     this.pendingClearSched = false;
                     if (this.wasmInstance.exports.clear_scheduler) {
@@ -1302,12 +1289,13 @@ class ScsynthProcessor extends AudioWorkletProcessor {
                     }
                 }
 
-                // C++ process_audio() now calculates NTP time internally from:
+                // ss_tick (the lanes tick, src/lanes/lanes.h) calculates NTP
+                // time internally from:
                 // - NTP_START_TIME (write-once, set during initialization)
                 // - DRIFT_OFFSET (microseconds, updated every 1s by main thread)
                 // - GLOBAL_OFFSET (for future multi-system sync)
 
-                const keepAlive = this.wasmInstance.exports.process_audio(
+                const keepAlive = this.wasmInstance.exports.ss_tick(
                     audioContextTime,
                     outputChannels,
                     inputChannels

@@ -245,6 +245,7 @@ endif()
 # SuperSonic core (audio_processor + companions)
 set(SUPERSONIC_CORE_SOURCES
     ${SUPERSONIC_SRC}/audio_processor.cpp
+    ${SUPERSONIC_SRC}/lanes/lanes.cpp
     ${SUPERSONIC_SRC}/scheduler/EventScheduler.cpp
     ${SUPERSONIC_SRC}/scheduler/MidiClockOut.cpp
     ${SUPERSONIC_SRC}/buffer_commands.cpp

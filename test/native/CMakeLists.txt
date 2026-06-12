@@ -74,6 +74,8 @@ add_executable(SuperSonicNativeTests
     test_in_ring_drain.cpp
     test_server_shm_security.cpp
     test_buffer_alloc_bounds.cpp
+    test_lanes.cpp
+    test_ring_wire_conformance.cpp
     OscTestUtils.cpp
     EngineFixture.cpp
     FakeLinkPeerProcess.cpp
@@ -99,6 +101,12 @@ target_link_libraries(SuperSonicNativeTests PRIVATE
 
 target_include_directories(SuperSonicNativeTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Golden ring-wire corpus shared with the JS conformance test
+# (test/unit/ring_wire_conformance.test.mjs).
+target_compile_definitions(SuperSonicNativeTests PRIVATE
+    RING_WIRE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/ring_wire.txt"
 )
 
 target_compile_definitions(SuperSonicNativeTests PRIVATE

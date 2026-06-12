@@ -11,7 +11,9 @@
 */
 
 /**
- * Calculate available space in a circular buffer.
+ * Calculate available space in a circular buffer (total free bytes).
+ * NOTE: frames never wrap, so total free space alone does not mean a frame
+ * fits — use canWriteMessage() for the authoritative fit test.
  * @param {number} head - Current head position
  * @param {number} tail - Current tail position
  * @param {number} bufferSize - Total buffer size
@@ -22,9 +24,34 @@ export function calculateAvailableSpace(head, tail, bufferSize) {
 }
 
 /**
- * Write a message to ring buffer, handling wrap-around at buffer boundary.
- * Pure data operation - no atomics, no locking.
- * Aligns total message length to 4 bytes.
+ * Authoritative fit test for the never-wrap convention: a frame needs
+ * alignedSize contiguous bytes before the end of the ring, or (after a
+ * padding marker) before the tail at offset 0.
+ * @param {number} head - Current head position
+ * @param {number} tail - Current tail position
+ * @param {number} bufferSize - Total buffer size
+ * @param {number} alignedSize - 4-byte-aligned frame size (header + payload)
+ * @returns {boolean} true if writeMessageToBuffer may be called
+ */
+export function canWriteMessage(head, tail, bufferSize, alignedSize) {
+    if (alignedSize > calculateAvailableSpace(head, tail, bufferSize)) return false;
+    const spaceToEnd = bufferSize - head;
+    if (alignedSize <= spaceToEnd) return true;
+    // Restarting at offset 0 needs contiguous room before the tail
+    // (tail - 1 to preserve the head !== tail empty/full distinction).
+    return alignedSize <= (tail > 0 ? tail - 1 : 0);
+}
+
+/**
+ * Write a message to the ring buffer. Frames NEVER wrap: when the frame
+ * doesn't fit before the end of the ring, a padding marker (paddingMagic +
+ * zeros to the boundary) is written and the frame restarts at offset 0, so
+ * every frame is contiguous and readers parse in place. Mirrors the C++
+ * writer (RingBufferWriter.h) byte-for-byte — the two are held identical by
+ * the ring-wire conformance fixtures.
+ *
+ * Pure data operation - no atomics, no locking. The caller must have
+ * verified fit with canWriteMessage().
  *
  * @param {Object} params - Write parameters
  * @param {Uint8Array} params.uint8View - Uint8Array view of memory
@@ -35,10 +62,9 @@ export function calculateAvailableSpace(head, tail, bufferSize) {
  * @param {Uint8Array} params.payload - Message payload to write
  * @param {number} params.sequence - Sequence number for this message
  * @param {number} params.messageMagic - Magic number for message header (e.g., 0xDEADBEEF)
+ * @param {number} params.paddingMagic - Magic number for the boundary padding marker (e.g., 0xDEADFEED)
  * @param {number} params.headerSize - Size of message header (typically 16)
  * @param {number} [params.sourceId=0] - Source ID for logging (0 = main, 1+ = workers)
- * @param {Uint8Array} [params.headerScratch] - Pre-allocated buffer for header (avoids allocation on wrap)
- * @param {DataView} [params.headerScratchView] - Pre-allocated DataView for header
  * @returns {number} new head position (aligned), relative to buffer start
  */
 export function writeMessageToBuffer({
@@ -50,77 +76,49 @@ export function writeMessageToBuffer({
     payload,
     sequence,
     messageMagic,
+    paddingMagic,
     headerSize,
-    sourceId = 0,
-    headerScratch = null,
-    headerScratchView = null
+    sourceId = 0
 }) {
     const payloadSize = payload.length;
     const totalSize = headerSize + payloadSize;
     // Align to 4 bytes
     const alignedSize = (totalSize + 3) & ~3;
 
-    // Calculate space to end of buffer
+    // Frames never wrap: pad to the boundary and restart at offset 0.
     const spaceToEnd = bufferSize - head;
-
     if (alignedSize > spaceToEnd) {
-        // Message will wrap - write in two parts
-        // Use pre-allocated scratch buffers if provided, otherwise allocate
-        const headerBytes = headerScratch || new Uint8Array(headerSize);
-        const headerView = headerScratchView || new DataView(headerBytes.buffer);
-        headerView.setUint32(0, messageMagic, true);
-        headerView.setUint32(4, alignedSize, true);
-        headerView.setUint32(8, sequence, true);
-        headerView.setUint32(12, sourceId, true);  // sourceId (was padding)
-
-        const writePos1 = bufferStart + head;
-        const writePos2 = bufferStart;
-
-        if (spaceToEnd >= headerSize) {
-            // Header fits contiguously
-            uint8View.set(headerBytes, writePos1);
-
-            // Write payload (split across boundary) — byte-by-byte to avoid subarray() allocation
-            const payloadBytesInFirstPart = spaceToEnd - headerSize;
-            for (let i = 0; i < payloadBytesInFirstPart; i++) {
-                uint8View[writePos1 + headerSize + i] = payload[i];
-            }
-            for (let i = payloadBytesInFirstPart; i < payloadSize; i++) {
-                uint8View[writePos2 + i - payloadBytesInFirstPart] = payload[i];
-            }
-        } else {
-            // Header is split across boundary — byte-by-byte to avoid subarray() allocation
-            for (let i = 0; i < spaceToEnd; i++) {
-                uint8View[writePos1 + i] = headerBytes[i];
-            }
-            for (let i = spaceToEnd; i < headerSize; i++) {
-                uint8View[writePos2 + i - spaceToEnd] = headerBytes[i];
-            }
-
-            // All payload goes at beginning after header remainder
-            const payloadOffset = headerSize - spaceToEnd;
-            uint8View.set(payload, writePos2 + payloadOffset);
-        }
-    } else {
-        // Message fits contiguously - write normally
-        const writePos = bufferStart + head;
-
-        // Write header
-        dataView.setUint32(writePos, messageMagic, true);
-        dataView.setUint32(writePos + 4, alignedSize, true);
-        dataView.setUint32(writePos + 8, sequence, true);
-        dataView.setUint32(writePos + 12, sourceId, true);  // sourceId (was padding)
-
-        // Write payload
-        uint8View.set(payload, writePos + headerSize);
+        // Padding marker: magic word, zeros to the end of the ring. 4-byte
+        // alignment guarantees at least the magic always fits. fill() is
+        // memset-backed — the pad run can be large and executes under the
+        // caller's write lock.
+        dataView.setUint32(bufferStart + head, paddingMagic, true);
+        uint8View.fill(0, bufferStart + head + 4, bufferStart + bufferSize);
+        head = 0;
     }
 
-    // Return new head position (aligned)
+    const writePos = bufferStart + head;
+
+    // Header: length is the EXACT frame size (header + payload bytes);
+    // readers advance by its 4-byte-aligned footprint. Payload sizes
+    // round-trip exactly while offsets stay 4-aligned.
+    dataView.setUint32(writePos, messageMagic, true);
+    dataView.setUint32(writePos + 4, totalSize, true);
+    dataView.setUint32(writePos + 8, sequence, true);
+    dataView.setUint32(writePos + 12, sourceId, true);
+
+    // Payload, then zero the 0-3 alignment pad bytes (determinism — the
+    // conformance fixtures compare whole ring images).
+    uint8View.set(payload, writePos + headerSize);
+    if (alignedSize > totalSize) {
+        uint8View.fill(0, writePos + totalSize, writePos + alignedSize);
+    }
+
     return (head + alignedSize) % bufferSize;
 }
 
 /**
- * Read messages from ring buffer, handling wrap-around and padding markers.
+ * Read messages from ring buffer, following padding markers at the boundary.
  * Pure data operation - no atomics, no locking.
  * Calls onMessage callback for each valid message found.
  *
@@ -141,11 +139,12 @@ export function writeMessageToBuffer({
  * @param {number} [params.maxMessages=Infinity] - Maximum messages to read per call
  * @param {Function} params.onMessage - Callback: (payloadOffset: number, payloadLength: number, sequence: number, sourceId: number) => void
  *   payloadOffset is absolute byte offset into uint8View where payload starts.
- *   For OUT/NRT-out buffers (C++ writer) payloads never wrap — padding markers
- *   are used at boundaries — so a direct uint8View[payloadOffset + i] read is
- *   safe. The IN ring's JS writer DOES split payloads at the boundary, so its
- *   readers must reassemble via copyWrappedPayload(), not a linear read.
- * @param {Function} [params.onCorruption] - Optional callback for corrupted messages: (position: number) => void
+ *   Frames never wrap (every writer pads at the boundary and restarts at
+ *   offset 0), so a direct uint8View[payloadOffset + i] read is safe.
+ * @param {Function} [params.onCorruption] - Optional callback invoked once when
+ *   corruption is detected: (position: number) => void. The walk then resyncs
+ *   the tail to head (dropping pending frames) and stops — same policy as the
+ *   C++ walker.
  * @returns {{ newTail: number, messagesRead: number }} new tail position and count
  */
 export function readMessagesFromBuffer({
@@ -165,71 +164,78 @@ export function readMessagesFromBuffer({
     let currentTail = tail;
     let messagesRead = 0;
 
-    // Helper: read a little-endian uint32 that may span the buffer boundary
-    const readU32Wrap = (relativeOffset) => {
-        const absOff = relativeOffset;
-        if (absOff + 4 <= bufferSize) {
-            return dataView.getUint32(bufferStart + absOff, true);
-        }
-        // Split across boundary — read byte by byte (little-endian)
-        let val = 0;
-        for (let b = 0; b < 4; b++) {
-            val |= uint8View[bufferStart + ((absOff + b) % bufferSize)] << (b * 8);
-        }
-        return val;
+    // Corruption policy (mirrors ss_drain_ring, src/lanes/ring_drain.h):
+    // anything malformed below head means the rest of the region is suspect —
+    // resync the tail to head, dropping pending frames, and stop. A byte-wise
+    // rescan would be unbounded work (this walk runs inside the AudioWorklet's
+    // process() in postMessage mode) and can fabricate frames from stale
+    // payload bytes.
+    const corrupt = () => {
+        if (onCorruption) onCorruption(currentTail);
+        currentTail = head;
     };
 
     while (currentTail !== head && messagesRead < maxMessages) {
         const bytesToEnd = bufferSize - currentTail;
+        const avail = (head - currentTail + bufferSize) % bufferSize;
 
-        // Read magic — may be split across buffer boundary
-        let magic;
-        if (bytesToEnd >= 4) {
-            magic = dataView.getUint32(bufferStart + currentTail, true);
-        } else {
-            magic = readU32Wrap(currentTail);
+        // Frame offsets are 4-aligned by construction; a tail closer to the
+        // boundary than a magic word is cursor damage.
+        if (bytesToEnd < 4 || avail < 4) {
+            corrupt();
+            break;
         }
 
-        // Check for padding marker - skip to beginning
+        const magic = dataView.getUint32(bufferStart + currentTail, true);
+
         if (magic === paddingMagic) {
+            // Writer hit end-of-ring and restarted at offset 0. A padding
+            // marker AT offset 0 can never be legitimately written (the whole
+            // ring lies ahead of a writer at 0) — treat it as corruption
+            // rather than spinning on it.
+            if (currentTail === 0) {
+                corrupt();
+                break;
+            }
             currentTail = 0;
             continue;
         }
-
-        // Validate message magic
         if (magic !== messageMagic) {
-            // Corrupted message - skip this byte
-            if (onCorruption) {
-                onCorruption(currentTail);
-            }
-            currentTail = (currentTail + 1) % bufferSize;
-            continue;
+            corrupt();
+            break;
+        }
+        if (bytesToEnd < headerSize) {
+            // A real header can't sit closer to the boundary than its own
+            // size under the never-wrap convention.
+            corrupt();
+            break;
         }
 
-        // Read header fields (may span the boundary, matching C++ split-read approach)
-        const length = readU32Wrap((currentTail + 4) % bufferSize);
-        const sequence = readU32Wrap((currentTail + 8) % bufferSize);
-        const sourceId = readU32Wrap((currentTail + 12) % bufferSize);
+        const length = dataView.getUint32(bufferStart + currentTail + 4, true);
+        const sequence = dataView.getUint32(bufferStart + currentTail + 8, true);
+        const sourceId = dataView.getUint32(bufferStart + currentTail + 12, true);
 
-        // Validate message length
-        if (length < headerSize || length > bufferSize) {
-            // Invalid length - skip this byte
-            if (onCorruption) {
-                onCorruption(currentTail);
-            }
-            currentTail = (currentTail + 1) % bufferSize;
-            continue;
+        // Length sanity, including the never-wrap invariant: the frame's
+        // 4-aligned footprint must lie entirely before the ring boundary and
+        // within the published region — consumers read payloads linearly, so
+        // a frame crossing the boundary would walk past the ring's end.
+        const footprint = (length + 3) & ~3;
+        if (length < headerSize || footprint > bufferSize ||
+            footprint > bytesToEnd || footprint > avail) {
+            corrupt();
+            break;
         }
 
-        // Calculate payload location (no allocation - just arithmetic)
+        // Payload location (frames are contiguous; no allocation, just arithmetic)
         const payloadLength = length - headerSize;
-        const payloadOffset = bufferStart + ((currentTail + headerSize) % bufferSize);
+        const payloadOffset = bufferStart + currentTail + headerSize;
 
         // Call message handler with offset/length (caller reads directly from uint8View)
         onMessage(payloadOffset, payloadLength, sequence, sourceId);
 
-        // Advance tail by message length (which may be aligned by writer)
-        currentTail = (currentTail + length) % bufferSize;
+        // Advance tail by the frame's 4-aligned footprint (header length is
+        // the exact byte count; the writer rounds occupancy up to 4)
+        currentTail = (currentTail + footprint) % bufferSize;
         messagesRead++;
     }
 
@@ -237,13 +243,10 @@ export function readMessagesFromBuffer({
 }
 
 /**
- * Copy a message payload out of the ring into `dest`, wrapping at the buffer
- * boundary. readMessagesFromBuffer reports `payloadOffset` as an absolute index
- * already wrapped to the buffer for the FIRST byte, but a payload written by the
- * JS writer (writeMessageToBuffer) can straddle the end of the ring. A naive
- * `uint8View[payloadOffset + i]` loop then walks past the buffer into adjacent
- * memory; this re-wraps each index so the tail of the payload is read from the
- * start of the buffer instead. No allocation — caller provides `dest`.
+ * Copy a message payload out of the ring into `dest`. Frames never wrap, so
+ * this is a plain linear copy; the index re-wrapping is purely a defensive
+ * bound against malformed offsets from a corrupt ring. No allocation —
+ * caller provides `dest`.
  *
  * @param {Uint8Array} uint8View - byte view spanning the ring region
  * @param {number} bufferStart - absolute offset of the ring's first byte
@@ -317,7 +320,6 @@ export function writeToRingBuffer(ring, oscMessage, sourceId = 0, blocking = fal
     const {
         atomicView, dataView, uint8View,
         bufferConstants, ringBufferBase, controlIndices,
-        headerScratch = null, headerScratchView = null,
     } = ring;
     // Lock-acquisition policy is the writer's concern, not the caller's.
     const maxSpins = blocking ? 10 : 64;
@@ -338,9 +340,8 @@ export function writeToRingBuffer(ring, oscMessage, sourceId = 0, blocking = fal
         const head = Atomics.load(atomicView, controlIndices.IN_HEAD);
         const tail = Atomics.load(atomicView, controlIndices.IN_TAIL);
         const alignedSize = (totalSize + 3) & ~3;
-        const available = calculateAvailableSpace(head, tail, bufferConstants.IN_BUFFER_SIZE);
 
-        if (available < alignedSize) {
+        if (!canWriteMessage(head, tail, bufferConstants.IN_BUFFER_SIZE, alignedSize)) {
             return false;
         }
 
@@ -352,9 +353,9 @@ export function writeToRingBuffer(ring, oscMessage, sourceId = 0, blocking = fal
             bufferSize: bufferConstants.IN_BUFFER_SIZE,
             head, payload: oscMessage, sequence: messageSeq,
             messageMagic: bufferConstants.MESSAGE_MAGIC,
+            paddingMagic: bufferConstants.PADDING_MAGIC,
             headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
-            sourceId,
-            headerScratch, headerScratchView
+            sourceId
         });
 
         Atomics.store(atomicView, controlIndices.IN_HEAD, newHead);

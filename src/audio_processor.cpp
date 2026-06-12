@@ -67,6 +67,12 @@ static SuperClock& superClock() {
 // Node tree for SharedArrayBuffer polling
 #include "node_tree.h"
 
+// Lanes drain-state reset (init_memory resets ring sequences; the lanes
+// consumer state must restart with them) and the shared ring walker the
+// IN-ring drain below runs on.
+#include "lanes/lanes_internal.h"
+#include "lanes/ring_drain.h"
+
 // Pre-allocated heap for RT-safe allocations
 #include "supersonic_heap.h"
 #include "supersonic_config.h"
@@ -166,10 +172,15 @@ extern "C" {
     // g_world->mBufLength samples per channel at runtime.
     alignas(16) float static_audio_bus[sonicpi::kMaxBlockSize * sonicpi::kMaxChannels];
 
-    // Static OSC message buffer - MUST NOT be on stack!
-    // MAX_MESSAGE_SIZE is ~768KB which would overflow the WASM stack.
-    // This buffer is used to copy OSC messages from ring buffer before processing.
-    alignas(8) char static_osc_buffer[MAX_MESSAGE_SIZE];
+    // IN-ring drain state for the shared walker (ring_drain.h): sequence-gap
+    // tracking. Frames are contiguous by wire invariant and parsed in place
+    // from the ring — there is no copy buffer. Audio-thread only.
+    SsDrainState g_in_drain;
+
+    // Sequence-tracking reset requested off-thread (purge → clear_scheduler
+    // runs on a control thread on native); the audio thread applies it before
+    // its next drain so g_in_drain stays single-threaded.
+    std::atomic<bool> g_in_seq_reset{false};
 
     void* g_rt_pool_ptr = nullptr;
     size_t g_rt_pool_size = 0;
@@ -203,7 +214,6 @@ extern "C" {
     // on the control thread, read/updated by process_audio() on the audio
     // thread. Relaxed ordering — these are diagnostic counters with no
     // cross-variable invariants.
-    std::atomic<int32_t> last_in_sequence{-1};
     std::atomic<uint32_t> local_in_peak{0};
     std::atomic<uint32_t> local_out_peak{0};
     std::atomic<uint32_t> local_nrt_out_peak{0};
@@ -309,7 +319,7 @@ extern "C" {
     // so new messages written after purge() resolves are not affected.
     EMSCRIPTEN_KEEPALIVE
     void clear_scheduler() {
-        last_in_sequence.store(-1, std::memory_order_relaxed);
+        g_in_seq_reset.store(true, std::memory_order_relaxed);
         local_in_peak.store(0, std::memory_order_relaxed);
         local_out_peak.store(0, std::memory_order_relaxed);
         local_nrt_out_peak.store(0, std::memory_order_relaxed);
@@ -393,6 +403,11 @@ extern "C" {
         control->nrt_out_sequence.store(0, std::memory_order_relaxed);
         control->status_flags.store(STATUS_OK, std::memory_order_relaxed);
         control->in_write_lock.store(0, std::memory_order_relaxed);  // 0 = unlocked
+
+        // Ring sequences restarted → restart the lanes drains' gap tracking,
+        // and the IN drain's alongside.
+        ss_lanes_reset_drains();
+        g_in_drain.lastSeq = -1;
 
         // Initialize metrics
         metrics->process_count.store(0, std::memory_order_relaxed);
@@ -652,7 +667,7 @@ extern "C" {
         supersonic_heap_destroy();
         g_scheduler.Clear();
         update_scheduler_depth_metric(0);
-        last_in_sequence.store(-1, std::memory_order_relaxed);
+        g_in_seq_reset.store(true, std::memory_order_relaxed);
     }
 
     void rebuild_world(double sample_rate) {
@@ -662,10 +677,10 @@ extern "C" {
     }
 #endif
 
-    // Main audio processing function - called every audio frame (128 samples)
-    // current_time: AudioContext.currentTime
-    // active_output_channels: Number of output channels from AudioContext
-    // active_input_channels: Number of input channels from AudioContext
+    // Main audio processing function - called once per block (the lanes tick,
+    // ss_tick, wraps this).
+    // current_time: AudioContext.currentTime (WASM) or wall-clock NTP (native)
+    // active_output_channels / active_input_channels: live channel counts
     EMSCRIPTEN_KEEPALIVE
     bool process_audio(double current_time, uint32_t active_output_channels, uint32_t active_input_channels) {
         if (!memory_initialized || !g_world) {
@@ -693,7 +708,6 @@ extern "C" {
 #else
         const double current_ntp = current_time;
 #endif
-
 
         uint32_t pc = metrics->process_count.fetch_add(1, std::memory_order_relaxed) + 1;
 
@@ -740,180 +754,118 @@ extern "C" {
             }
         }
 
-        // Process incoming OSC messages if scsynth is ready
+        // Process incoming OSC messages if scsynth is ready. The walk —
+        // header validation, untrusted-cursor repair, padding markers, gap
+        // tracking, tail resync on corruption — is the shared lanes walker
+        // (ring_drain.h); only the perform/schedule/classify policy lives
+        // here, in the callback.
         if (g_world) {
-            int32_t in_head = control->in_head.load(std::memory_order_acquire);
-            int32_t in_tail = control->in_tail.load(std::memory_order_acquire);
+            // Off-thread reset request (purge → clear_scheduler): apply it
+            // here so g_in_drain stays audio-thread-only.
+            if (g_in_seq_reset.exchange(false, std::memory_order_relaxed))
+                g_in_drain.lastSeq = -1;
 
-            // The cursors live in shared memory (cross-process on native) and
-            // are not trusted: an out-of-range value would index outside the
-            // IN region. The tail is reader-owned, so a bad tail is resynced
-            // to head (dropping pending input); a bad head is producer state
-            // we can't repair, so the drain is skipped this block.
-            if ((uint32_t)in_head >= IN_BUFFER_SIZE) {
-                if (corruption_count.load(std::memory_order_relaxed) < 5) {
-                    ss_log("ERROR: IN cursor out of range: head=%d tail=%d", in_head, in_tail);
-                    corruption_count.fetch_add(1, std::memory_order_relaxed);
-                }
-                in_head = in_tail;
-            } else if ((uint32_t)in_tail >= IN_BUFFER_SIZE) {
-                if (corruption_count.load(std::memory_order_relaxed) < 5) {
-                    ss_log("ERROR: IN cursor out of range: head=%d tail=%d", in_head, in_tail);
-                    corruption_count.fetch_add(1, std::memory_order_relaxed);
-                }
-                control->in_tail.store(in_head, std::memory_order_release);
-                in_tail = in_head;
-            }
+            // Bound per block to stay within the audio budget.
+            constexpr uint32_t MAX_MESSAGES_PER_FRAME = 32;
 
-            // Process available messages (limit per frame to stay within audio budget)
-            const int MAX_MESSAGES_PER_FRAME = 32;
-            int messages_this_frame = 0;
-            while (in_head != in_tail && messages_this_frame < MAX_MESSAGES_PER_FRAME) {
-                uint32_t msg_offset = IN_BUFFER_START + in_tail;
-                uint32_t space_to_end = IN_BUFFER_SIZE - in_tail;
+            // Snapshot the gap counter so losses this block can be surfaced
+            // in the debug channel (the walker only counts them).
+            uint32_t gaps_before =
+                metrics->messages_sequence_gaps.load(std::memory_order_relaxed);
 
-                // ringbuf.js approach: no padding markers, handle split reads
-                // Read message header (may be split across wrap boundary)
-                Message header;
+            SsDrainStop stop = SsDrainStop::Empty;
+            ss_drain_ring(
+                shared_memory + IN_BUFFER_START, IN_BUFFER_SIZE,
+                &control->in_head, &control->in_tail, g_in_drain,
+                SsDrainMetrics{ &metrics->messages_processed, nullptr,
+                                &metrics->messages_dropped,
+                                &metrics->messages_sequence_gaps },
+                MAX_MESSAGES_PER_FRAME,
+                [current_ntp](uint32_t sourceId, const uint8_t* payload,
+                              uint32_t payload_size, uint32_t) -> SsDrainVerdict {
+                    // In-place delivery: the payload points into the IN ring
+                    // (the consumer owns the region until we return Consume).
+                    // scsynth's perform path is synchronous and copies what
+                    // it keeps (BundleScheduler::Add memcpys into its pool),
+                    // so nothing retains this pointer.
+                    char* osc_buffer = const_cast<char*>(
+                        reinterpret_cast<const char*>(payload));
 
-                if (space_to_end >= sizeof(Message)) {
-                    // Header fits contiguously
-                    std::memcpy(&header, shared_memory + msg_offset, sizeof(Message));
-                } else {
-                    // Header is split - read in two parts
-                    std::memcpy(&header, shared_memory + msg_offset, space_to_end);
-                    std::memcpy((char*)&header + space_to_end, shared_memory + IN_BUFFER_START, sizeof(Message) - space_to_end);
-                }
+                    // RT-SAFE message processing - no malloc!
+                    // Zero-initialize for consistent comparison in /notify.
+                    ReplyAddress reply_addr = {};
+                    reply_addr.mProtocol = kWeb;
+                    reply_addr.mReplyFunc = osc_reply_to_ring_buffer;
+                    reply_addr.mReplyData = nullptr;
 
-                // Validate the frame. The writer release-stores head only
-                // after a frame is fully written, so anything malformed below
-                // head is genuine corruption and the rest of the region is
-                // suspect: resync tail to head (dropping all pending input),
-                // matching the native RingReader. A byte-wise rescan would be
-                // unbounded work on the audio thread, and a length below the
-                // header size could never advance the tail at all.
-                bool bad_magic = header.magic != MESSAGE_MAGIC;
-                if (bad_magic || header.length < sizeof(Message) ||
-                    header.length > MAX_MESSAGE_SIZE + sizeof(Message)) {
-                    if (corruption_count.load(std::memory_order_relaxed) < 5) {
-                        if (bad_magic)
-                            ss_log("ERROR: Invalid magic at tail=%d head=%d: got 0x%08X expected 0x%08X (len=%u seq=%u)",
-                                         in_tail, in_head, header.magic, MESSAGE_MAGIC, header.length, header.sequence);
-                        else
-                            ss_log("ERROR: Invalid length at tail=%d head=%d: len=%u (seq=%u)",
-                                         in_tail, in_head, header.length, header.sequence);
-                        corruption_count.fetch_add(1, std::memory_order_relaxed);
-                    }
-                    if (!bad_magic)
-                        control->status_flags.fetch_or(STATUS_FRAGMENTED_MSG, std::memory_order_relaxed);
-                    metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
-                    control->in_tail.store(in_head, std::memory_order_release);
-                    break;
-                }
+                    if (is_bundle(osc_buffer, payload_size)) {
+                        uint64_t timetag = extract_timetag(osc_buffer);
 
-                // OSC payload follows the header; the length bounds above
-                // guarantee payload_size <= MAX_MESSAGE_SIZE.
-                uint32_t payload_size = header.length - sizeof(Message);
+                        if (timetag == 0 || timetag == 1) {
+                            // Immediate bundle - execute now
+                            OSC_Packet packet;
+                            packet.mData = osc_buffer;
+                            packet.mSize = payload_size;
+                            packet.mIsBundle = true;
+                            packet.mReplyAddr = reply_addr;
 
-                // Gap detection: check for missing messages
-                int32_t prev_seq = last_in_sequence.load(std::memory_order_relaxed);
-                if (prev_seq >= 0) {
-                    int32_t expected = (prev_seq + 1) & 0x7FFFFFFF;  // Handle wrap at INT32_MAX
-                    if ((int32_t)header.sequence != expected) {
-                        // Gap detected - messages were lost
-                        int32_t gap_size = ((int32_t)header.sequence - expected + 0x80000000) & 0x7FFFFFFF;
-                        if (gap_size > 0 && gap_size < 1000) {  // Sanity check - ignore huge gaps (likely reset)
-                            metrics->messages_sequence_gaps.fetch_add(gap_size, std::memory_order_relaxed);
-                            if (gap_log_count.load(std::memory_order_relaxed) < 5) {
-                                ss_log("WARNING: Sequence gap detected: expected %d, got %u (gap of %d)",
-                                             expected, header.sequence, gap_size);
-                                gap_log_count.fetch_add(1, std::memory_order_relaxed);
+                            PerformOSCBundle(g_world, &packet);
+                        } else {
+                            // Future bundle. If the scheduler has no room the
+                            // frame stays in the ring (Retain backpressure)
+                            // and is re-delivered next block.
+                            if (g_scheduler.IsFull()) {
+                                ss_log("INFO: Scheduler full (%d events), backpressure - message stays in ring buffer",
+                                             g_scheduler.Size());
+                                return SsDrainVerdict::Retain;
+                            }
+
+                            int64_t current_osc_time = ntp_to_osc_timetag(current_ntp);
+                            if (!schedule_bundle(g_world, (int64_t)timetag, current_osc_time,
+                                                 osc_buffer, payload_size, reply_addr)) {
+                                // Shouldn't happen: IsFull() was checked first
+                                ss_log("ERROR: Failed to schedule bundle (unexpected)");
                             }
                         }
-                    }
-                }
-                last_in_sequence.store((int32_t)header.sequence, std::memory_order_relaxed);
-
-                // Use static buffer - local 768KB buffer would overflow WASM stack!
-                char* osc_buffer = static_osc_buffer;
-
-                // Copy OSC payload from ring buffer (may be split across wrap boundary)
-                uint32_t payload_start = (in_tail + sizeof(Message)) % IN_BUFFER_SIZE;
-                uint32_t payload_offset = IN_BUFFER_START + payload_start;
-                uint32_t bytes_to_end = IN_BUFFER_SIZE - payload_start;
-
-                if (payload_size <= bytes_to_end) {
-                    // Payload fits contiguously
-                    std::memcpy(osc_buffer, shared_memory + payload_offset, payload_size);
-                } else {
-                    // Payload is split - read in two parts
-                    std::memcpy(osc_buffer, shared_memory + payload_offset, bytes_to_end);
-                    std::memcpy(osc_buffer + bytes_to_end, shared_memory + IN_BUFFER_START, payload_size - bytes_to_end);
-                }
-
-                // RT-SAFE message processing - no malloc!
-                // Setup reply address - zero-initialize for consistent comparison in /notify
-                ReplyAddress reply_addr = {};
-                reply_addr.mProtocol = kWeb;
-                reply_addr.mReplyFunc = osc_reply_to_ring_buffer;
-                reply_addr.mReplyData = nullptr;
-
-                bool is_bundle_msg = is_bundle(osc_buffer, payload_size);
-
-                if (is_bundle_msg) {
-                    // Extract timetag
-                    uint64_t timetag = extract_timetag(osc_buffer);
-
-                    // Check if immediate execution (timetag == 0 or 1)
-                    if (timetag == 0 || timetag == 1) {
-                        // Immediate bundle - execute now
-                        OSC_Packet packet;
-                        packet.mData = osc_buffer;
-                        packet.mSize = payload_size;
-                        packet.mIsBundle = true;
-                        packet.mReplyAddr = reply_addr;
-
-                        PerformOSCBundle(g_world, &packet);
                     } else {
-                        // Future bundle - check if scheduler has room first (backpressure)
-                        if (g_scheduler.IsFull()) {
-                            // Scheduler full - leave message in ring buffer for next callback
-                            // Reset sequence tracking so next iteration processes this message correctly
-                            last_in_sequence.store((header.sequence > 0) ? (int32_t)(header.sequence - 1) : -1, std::memory_order_relaxed);
-                            ss_log("INFO: Scheduler full (%d events), backpressure - message stays in ring buffer",
-                                         g_scheduler.Size());
-                            break;  // Exit message processing loop
-                        }
-
-                        // Future bundle - schedule it (RT-safe, no malloc!)
-                        int64_t current_osc_time = ntp_to_osc_timetag(current_ntp);
-
-                        if (!schedule_bundle(g_world, (int64_t)timetag, current_osc_time, osc_buffer, payload_size, reply_addr)) {
-                            // This shouldn't happen now since we check IsFull() first
-                            ss_log("ERROR: Failed to schedule bundle (unexpected)");
-                        }
+                        // Single OSC message. Classify through the audio-thread ingress
+                        // (published by the engine). A registered control route consumes
+                        // it (wasm: /clock inline; native: /clock + /supersonic forwarded
+                        // to the NRT thread); unmatched / no-ingress falls through to the
+                        // audio plane (scsynth) inline. sourceId carries the origin token.
+                        DrainCallCtx cc{ &reply_addr, sourceId };
+                        OscIngress* ig = g_active_ingress.load(std::memory_order_acquire);
+                        bool consumed = ig && ig->ingest(
+                            reinterpret_cast<const uint8_t*>(osc_buffer), payload_size, &cc);
+                        if (!consumed)
+                            PerformOSCMessage(g_world, payload_size, osc_buffer, &reply_addr);
                     }
-                } else {
-                    // Single OSC message. Classify through the audio-thread ingress
-                    // (published by the engine). A registered control route consumes
-                    // it (wasm: /clock inline; native: /clock + /supersonic forwarded
-                    // to the NRT thread); unmatched / no-ingress falls through to the
-                    // audio plane (scsynth) inline. sourceId carries the origin token.
-                    DrainCallCtx cc{ &reply_addr, header.sourceId };
-                    OscIngress* ig = g_active_ingress.load(std::memory_order_acquire);
-                    bool consumed = ig && ig->ingest(
-                        reinterpret_cast<const uint8_t*>(osc_buffer), payload_size, &cc);
-                    if (!consumed)
-                        PerformOSCMessage(g_world, payload_size, osc_buffer, &reply_addr);
+                    return SsDrainVerdict::Consume;
+                },
+                &stop);
+
+            // The walker resyncs and counts on corruption; policy — rate-
+            // limited logging and the status flag — stays the engine's.
+            uint32_t gaps_after =
+                metrics->messages_sequence_gaps.load(std::memory_order_relaxed);
+            if (gaps_after != gaps_before &&
+                gap_log_count.load(std::memory_order_relaxed) < 5) {
+                ss_log("WARNING: IN sequence gap: %u message(s) missing (total %u)",
+                             gaps_after - gaps_before, gaps_after);
+                gap_log_count.fetch_add(1, std::memory_order_relaxed);
+            }
+            if (stop == SsDrainStop::BadMagic || stop == SsDrainStop::BadLength ||
+                stop == SsDrainStop::BadCursor) {
+                if (corruption_count.load(std::memory_order_relaxed) < 5) {
+                    ss_log("ERROR: IN ring corrupt (%s): head=%d tail=%d - pending region dropped",
+                                 stop == SsDrainStop::BadMagic  ? "bad magic" :
+                                 stop == SsDrainStop::BadLength ? "bad length" : "bad cursor",
+                                 control->in_head.load(std::memory_order_relaxed),
+                                 control->in_tail.load(std::memory_order_relaxed));
+                    corruption_count.fetch_add(1, std::memory_order_relaxed);
                 }
-
-                // Update IN tail (consume message)
-                control->in_tail.store((in_tail + header.length) % IN_BUFFER_SIZE, std::memory_order_release);
-                metrics->messages_processed.fetch_add(1, std::memory_order_relaxed);
-                messages_this_frame++;
-
-                // Update tail for next iteration
-                in_tail = control->in_tail.load(std::memory_order_acquire);
+                if (stop == SsDrainStop::BadLength)
+                    control->status_flags.fetch_or(STATUS_FRAGMENTED_MSG, std::memory_order_relaxed);
             }
 
             // Block size from scsynth's World options. Web: always 128
@@ -1261,41 +1213,18 @@ extern "C" {
 // RING BUFFER HELPER FUNCTIONS (outside namespace for C++ linkage)
 // ============================================================================
 
-/**
- * Unified ring buffer write function with full corruption protection.
- *
- * This function implements a lock-free SPSC (Single Producer Single Consumer) ring buffer
- * with the following guarantees:
- * - Messages are always written contiguously (no wrapping mid-message)
- * - Automatic padding insertion when wrapping is needed
- * - Buffer overflow detection with graceful message dropping
- * - Atomic memory operations for thread safety
- * - Metrics tracking for dropped messages and overruns
- *
- * @param buffer_start Physical memory address of the buffer
- * @param buffer_size Total size of the ring buffer in bytes
- * @param buffer_start_offset Offset within shared memory where buffer starts
- * @param head Atomic pointer to head position (producer writes here)
- * @param tail Atomic pointer to tail position (consumer reads from here)
- * @param data Payload data to write
- * @param data_size Size of payload in bytes
- * @param metrics Optional metrics structure for tracking drops/overruns
- * @return true if message written successfully, false if dropped due to insufficient space
- */
-// Contiguous (padding-marker) ring writer for the OUT egress ring — scsynth
-// replies, the sample loader's /done|/fail, and /supersonic/debug. All three run
-// on the audio thread, so OUT has a single producer and needs no write lock.
+// Lock-free SPSC ring writer for the OUT egress ring — scsynth replies, the
+// sample loader's /done|/fail, and /supersonic/debug. All three run on the
+// audio thread, so OUT has a single producer and needs no write lock.
+//
+// Same wire convention as every ring (RingBufferWriter.h / the JS writer):
+// frames never wrap — when a frame won't fit before the end, a PADDING_MAGIC
+// marker fills the remainder and the write restarts at offset 0, so readers
+// parse in place. Overflow drops the message (false) and counts it.
 //
 // All state is passed in (head/tail, sequence counter, status-flags word,
 // metrics) rather than read from scsynth globals, so the function has no hidden
 // dependencies and is unit-tested directly (test_ring_buffer_write.cpp).
-//
-// Design note: the OUT ring uses contiguous-only writes — a message never wraps;
-// when it won't fit before the end, a PADDING_MAGIC marker fills the tail and the
-// write restarts at 0. That keeps this writer one memcpy per message and the
-// reader free of payload wrap-around logic. The IN and NRT-out rings instead use
-// split/wrapping writes (RingBufferWriter.h / ring_buffer_writer.js): they have
-// multiple producers and take a spinlock, so the wrap complexity is cheap there.
 bool ring_buffer_write(
     uint8_t* buffer_start,
     uint32_t buffer_size,
@@ -1321,11 +1250,16 @@ bool ring_buffer_write(
     int32_t current_head = head->load(std::memory_order_acquire);
     int32_t current_tail = tail->load(std::memory_order_acquire);
 
+    // Frame footprint: header.length is exact; occupancy and cursor advance
+    // are its 4-byte-aligned rounding, matching RingBufferWriter.h and the JS
+    // writer (readers advance the tail by this footprint).
+    const uint32_t footprint = (header.length + 3u) & ~3u;
+
     // Calculate available space in the buffer
     uint32_t available = (buffer_size - 1 - current_head + current_tail) % buffer_size;
 
     // Check if there's enough space for the message
-    if (available < header.length) {
+    if (available < footprint) {
         // Not enough space - drop the message and track metrics
         if (metrics) metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
         if (status_flags) status_flags->fetch_or(STATUS_BUFFER_FULL, std::memory_order_relaxed);
@@ -1338,32 +1272,23 @@ bool ring_buffer_write(
     // and tail — the initial available-space check included bytes that will be wasted
     // as padding, so it can overestimate the usable space at the front.
     uint32_t space_to_end = buffer_size - current_head;
-    if (header.length > space_to_end) {
+    if (footprint > space_to_end) {
         // Verify space at front after wrap (tail-1 to avoid head==tail ambiguity)
         uint32_t space_at_front = (current_tail > 0) ? (current_tail - 1) : 0;
-        if (space_at_front < header.length) {
+        if (space_at_front < footprint) {
             if (metrics) metrics->messages_dropped.fetch_add(1, std::memory_order_relaxed);
             if (status_flags) status_flags->fetch_or(STATUS_BUFFER_FULL, std::memory_order_relaxed);
             return false;
         }
 
-        if (space_to_end >= sizeof(Message)) {
-            // Write padding marker to fill remaining space
-            Message padding;
-            padding.magic = PADDING_MAGIC;
-            padding.length = 0;
-            padding.sequence = 0;
-
-            std::memcpy(buffer_start + current_head, &padding, sizeof(Message));
-        } else if (space_to_end >= 4) {
-            // Not enough room for full padding header but enough for the magic word.
-            // Write PADDING_MAGIC so the reader recognises this as a wrap marker
-            // (without this, zeroed bytes look like corruption to the reader).
-            uint32_t pad = PADDING_MAGIC;
-            std::memcpy(buffer_start + current_head, &pad, 4);
-            if (space_to_end > 4) {
-                std::memset(buffer_start + current_head + 4, 0, space_to_end - 4);
-            }
+        // Padding marker: magic word, zeros to the end of the ring (matching
+        // the other writers — when >= 16 bytes remain this doubles as a full
+        // zeroed pad header; 4-byte alignment guarantees the magic fits).
+        uint32_t pad = PADDING_MAGIC;
+        std::memcpy(buffer_start + current_head, &pad, sizeof(pad));
+        if (space_to_end > sizeof(pad)) {
+            std::memset(buffer_start + current_head + sizeof(pad), 0,
+                        space_to_end - sizeof(pad));
         }
 
         // Wrap head to beginning
@@ -1376,8 +1301,15 @@ bool ring_buffer_write(
     std::memcpy(buffer_start + current_head + sizeof(Message), &route, sizeof(uint32_t));
     std::memcpy(buffer_start + current_head + sizeof(Message) + sizeof(uint32_t), data, data_size);
 
+    // Zero the 0-3 alignment pad bytes (determinism: no stale ring bytes
+    // inside a frame's footprint).
+    if (footprint > header.length) {
+        std::memset(buffer_start + current_head + header.length, 0,
+                    footprint - header.length);
+    }
+
     // Update head pointer with release semantics (publish message)
-    int32_t new_head = (current_head + header.length) % buffer_size;
+    int32_t new_head = (current_head + footprint) % buffer_size;
     head->store(new_head, std::memory_order_release);
 
     // Track peak buffer usage at write time — the reader may drain the

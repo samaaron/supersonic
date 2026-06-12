@@ -92,6 +92,7 @@ SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" ! -name "
 # Compile audio processor with all scsynth sources and oscpack (standalone WASM for AudioWorklet)
 # Memory can grow on demand from INITIAL_MEMORY up to MAXIMUM_MEMORY (for buffer pool expansion)
 emcc "$SRC_DIR/audio_processor.cpp" \
+    "$SRC_DIR/lanes/lanes.cpp" \
     "$SRC_DIR/scheduler/EventScheduler.cpp" \
     "$SRC_DIR/scheduler/MidiClockOut.cpp" \
     "$SRC_DIR/buffer_commands.cpp" \
@@ -134,7 +135,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -sINITIAL_MEMORY=$FIXED_MEMORY \
     -sMAXIMUM_MEMORY=$MAX_MEMORY \
     -sSTACK_SIZE=$WASM_STACK_SIZE \
-    -sEXPORTED_FUNCTIONS="['___wasm_call_ctors','_get_ring_buffer_base','_get_buffer_layout','_init_memory','_process_audio','_get_audio_output_bus','_get_audio_buffer_samples','_get_supersonic_version_string','_set_time_offset','_get_time_offset','_ss_log','_ss_log_va','_get_process_count','_get_messages_processed','_get_messages_dropped','_get_status_flags']" \
+    -sEXPORTED_FUNCTIONS="['___wasm_call_ctors','_get_ring_buffer_base','_get_buffer_layout','_init_memory','_ss_tick','_process_audio','_get_audio_output_bus','_get_audio_buffer_samples','_get_supersonic_version_string','_set_time_offset','_get_time_offset','_ss_log','_ss_log_va','_get_process_count','_get_messages_processed','_get_messages_dropped','_get_status_flags']" \
     --no-entry \
     -Wl,--import-memory,--shared-memory,--allow-multiple-definition \
     -fcommon \

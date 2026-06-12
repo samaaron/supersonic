@@ -15,6 +15,7 @@
     "pretest": "esbuild node_modules/fast-check/lib/fast-check.js --bundle --format=esm --outfile=test/assets/fast-check.bundle.js",
     "test": "playwright test --reporter=list --max-failures=1",
     "test:all": "playwright test --reporter=list",
+    "test:unit": "node --test \"test/unit/*.test.mjs\"",
     "prepublishOnly": "./scripts/build-web.sh --release",
     "test:types": "tsd",
     "docs:api": "typedoc && mv docs/api-generated/README.md docs/API.md && rm -rf docs/api-generated",

@@ -121,26 +121,33 @@ TEST_CASE("ring_buffer_write frames header, payload and advancing sequence", "[R
     REQUIRE(ring_buffer_write(
         buffer, BUF_SIZE, &head, &tail, &seq, EGRESS_BROADCAST_NOTIFY, 7, payload, len, nullptr, nullptr));
 
-    // Frame = Message{sourceId = token} + [route:u32] + payload. Read headers via
-    // memcpy (as the RingReader does) rather than casting a misaligned pointer.
+    // Frame = Message{sourceId = token} + [route:u32] + payload. The header
+    // length is the EXACT frame size; the cursor advances by that length
+    // rounded up to 4 bytes (the frame footprint), so frames always start
+    // 4-aligned. Read headers via memcpy as the readers do.
+    const uint32_t frame     = sizeof(Message) + EGRESS_ROUTE_SIZE + len;
+    const uint32_t footprint = (frame + 3u) & ~3u;
     Message msg;
     std::memcpy(&msg, buffer, sizeof(Message));
     REQUIRE(msg.magic == MESSAGE_MAGIC);
-    REQUIRE(msg.length == sizeof(Message) + EGRESS_ROUTE_SIZE + len);
+    REQUIRE(msg.length == frame);
     REQUIRE(msg.sequence == 0u);
     REQUIRE(msg.sourceId == 7u);  // the origin token we passed
     uint32_t route = 0;
     std::memcpy(&route, buffer + sizeof(Message), sizeof(route));
     REQUIRE(route == EGRESS_BROADCAST_NOTIFY);  // route word precedes the OSC
     REQUIRE(std::memcmp(buffer + sizeof(Message) + EGRESS_ROUTE_SIZE, payload, len) == 0);
-    REQUIRE(head.load() == static_cast<int32_t>(sizeof(Message) + EGRESS_ROUTE_SIZE + len));
+    REQUIRE(head.load() == static_cast<int32_t>(footprint));
+    for (uint32_t i = frame; i < footprint; i++)
+        REQUIRE(buffer[i] == 0);  // alignment pad bytes are zeroed
 
-    // The sequence counter is the caller's — a second write advances it. This
-    // message starts at an unaligned offset, so memcpy.
+    // The sequence counter is the caller's — a second write advances it, and
+    // the second frame starts at the first frame's aligned footprint.
     REQUIRE(ring_buffer_write(
         buffer, BUF_SIZE, &head, &tail, &seq, EGRESS_BROADCAST_NOTIFY, 7, payload, len, nullptr, nullptr));
     Message msg2;
-    std::memcpy(&msg2, buffer + sizeof(Message) + EGRESS_ROUTE_SIZE + len, sizeof(Message));
+    std::memcpy(&msg2, buffer + footprint, sizeof(Message));
+    REQUIRE(msg2.magic == MESSAGE_MAGIC);
     REQUIRE(msg2.sequence == 1u);
 }
 

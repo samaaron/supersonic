@@ -27,11 +27,13 @@ function readLogMessages(ctx) {
     const logTail = Atomics.load(atomicView, CONTROL_INDICES.IN_LOG_TAIL);
     if (head === logTail) return [];
 
-    // Check if logTail is still at a valid message boundary.
+    // Check if logTail is still at a valid frame boundary.
     // The writer only checks IN_TAIL (C++ consumer) for space, not IN_LOG_TAIL.
-    // If the C++ consumer is fast and the buffer wraps, the writer can overwrite
+    // If the C++ consumer is fast and the ring cycles, the writer can overwrite
     // positions the log worker hasn't read yet (lapping). Detect this by peeking
-    // at the magic — if it's not MESSAGE_MAGIC, resync to head and skip this batch.
+    // at the magic — a frame OR a padding marker is a valid boundary (the writer
+    // pads at the end of the ring and restarts at 0); anything else means the
+    // reader was lapped, so resync to head and skip this batch.
     const bufferStart = ringBufferBase + bufferConstants.IN_BUFFER_START;
     const bufferSize = bufferConstants.IN_BUFFER_SIZE;
     let magic;
@@ -44,7 +46,7 @@ function readLogMessages(ctx) {
         }
     }
 
-    if (magic !== bufferConstants.MESSAGE_MAGIC) {
+    if (magic !== bufferConstants.MESSAGE_MAGIC && magic !== bufferConstants.PADDING_MAGIC) {
         if (__DEV__) {
             console.warn(
                 `[OSCOutLogWorker] Resyncing: invalid magic at logTail=${logTail}` +
@@ -71,9 +73,8 @@ function readLogMessages(ctx) {
         headerSize: bufferConstants.MESSAGE_HEADER_SIZE,
         maxMessages: 100,
         onMessage: (payloadOffset, payloadLength, sequence, sourceId) => {
-            // Copy the data since ring buffer may be overwritten. The IN ring's
-            // JS writer splits payloads at the boundary, so copy wrap-aware —
-            // a linear read would walk past the buffer into the OUT region.
+            // Copy the data out: these entries outlive this call (posted to the
+            // main thread) while the ring region gets overwritten by writers.
             const oscData = new Uint8Array(payloadLength);
             copyWrappedPayload(uint8View, bufferStart, bufferSize, payloadOffset, payloadLength, oscData, 0);
             entries.push({

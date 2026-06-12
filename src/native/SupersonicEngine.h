@@ -511,13 +511,11 @@ private:
     std::atomic<int32_t>      mNrtSeq{0};
     std::atomic<int32_t>      mNrtLock{0};
 
-    // NRT-out egress ring. The NRT_OUT_BUFFER SHM region carries ALL NRT-thread
-    // outgoing OSC — command replies, Link/device notifications, off-thread
-    // debug — written by OscEgress under mEgressLock
-    // (multi-producer). The gateway drains it and is the sole transport caller, so
-    // no engine thread ever touches a socket. (Web has no NRT thread → unused.)
-    std::atomic<int32_t>      mEgressLock{0};
-
+    // The NRT_OUT_BUFFER SHM region carries ALL NRT-thread outgoing OSC —
+    // command replies, Link/device notifications, off-thread debug — written
+    // multi-producer through the lanes producer (ss_egress_nrt_write, which
+    // owns the lock). The gateway drains it and is the sole transport caller,
+    // so no engine thread ever touches a socket. (Web has no NRT thread.)
     RingReader                mNrtGateway{"SuperSonic-NrtGateway"};
 
 #ifdef SUPERSONIC_MIDI

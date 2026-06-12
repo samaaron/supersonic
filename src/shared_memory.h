@@ -382,9 +382,15 @@ struct alignas(8) NodeEntry {
 };
 
 // Constants
+// MAX_MESSAGE_SIZE bounds what a frame header may CLAIM (length sanity for
+// readers), not what is guaranteed writable: frames never wrap the ring
+// boundary, so the largest frame guaranteed to fit depends on where the idle
+// cursors sit — worst case roughly half the ring. Senders learn the real
+// answer per-write from the writer's fit check (canWriteMessage / the
+// writers' false return).
 constexpr uint32_t MAX_MESSAGE_SIZE = IN_BUFFER_SIZE - sizeof(Message);
 constexpr uint32_t MESSAGE_MAGIC = 0xDEADBEEF;
-constexpr uint32_t PADDING_MAGIC = 0xBADDCAFE;  // Marks padding at end of buffer (OSC buffers)
+constexpr uint32_t PADDING_MAGIC = 0xBADDCAFE;  // Marks padding at end-of-ring (frame restarts at offset 0)
 constexpr uint8_t RING_PADDING_MARKER = 0xFF;  // Byte marking ring-buffer padding (skip to position 0 on wrap)
 
 // Scheduler configuration is sized per device via memory_profile.h

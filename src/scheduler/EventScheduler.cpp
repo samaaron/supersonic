@@ -35,12 +35,16 @@ void EventScheduler::tick(int64_t nextOscTime) {
     for (auto& s : mSlots) {
         if (!s.inUse || s.when > nextOscTime) continue;
 
-        // Frame [dest:u32][osc] into the OUT ring for the consumer.
+        // Frame [dest:u32][osc] into the OUT ring for the consumer. A full
+        // ring (stalled consumer) drops the event — count it so the loss is
+        // visible in the same counter as enqueue drops.
         uint8_t buf[sizeof(uint32_t) + kMaxPayload];
         std::memcpy(buf, &s.dest, sizeof(s.dest));
         std::memcpy(buf + sizeof(s.dest), s.data, s.len);
-        RingBufferWriter::write(mOut, kOutSize, &mOutHead, &mOutTail, &mOutSeq, &mOutLock,
-                                buf, static_cast<uint32_t>(sizeof(s.dest)) + s.len, 0);
+        if (!RingBufferWriter::write(mOut, kOutSize, &mOutHead, &mOutTail, &mOutSeq, &mOutLock,
+                                     buf, static_cast<uint32_t>(sizeof(s.dest)) + s.len, 0)) {
+            mDropped.fetch_add(1, std::memory_order_relaxed);
+        }
         s.inUse = false;
     }
 }

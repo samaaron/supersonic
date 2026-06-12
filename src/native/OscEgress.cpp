@@ -6,42 +6,22 @@
 
 #include "IOscTransport.h"
 #include "osc_debug.h"
-#include "src/workers/RingBufferWriter.h"
+#include "src/lanes/lanes_internal.h"  // ss_egress_nrt_write (NRT egress producer)
 #include "osc/OscOutboundPacketStream.h"
 #include <cstring>
 
 void OscEgress::init(IOscTransport*                                  transport,
-                     const std::function<void(const std::string&)>*  onDebug,
-                     uint8_t*               egressBuffer,
-                     uint32_t               egressBufferSize,
-                     std::atomic<int32_t>*  egressHead,
-                     std::atomic<int32_t>*  egressTail,
-                     std::atomic<int32_t>*  egressSeq,
-                     std::atomic<int32_t>*  egressLock) {
-    mTransport        = transport;
-    mOnDebug          = onDebug;
-    mEgressBuffer     = egressBuffer;
-    mEgressBufferSize = egressBufferSize;
-    mEgressHead       = egressHead;
-    mEgressTail       = egressTail;
-    mEgressSeq        = egressSeq;
-    mEgressLock       = egressLock;
+                     const std::function<void(const std::string&)>*  onDebug) {
+    mTransport = transport;
+    mOnDebug   = onDebug;
 }
 
 // ── Producer side: frame `[route][osc]` into the NRT-out ring ─────────────────
 
 void OscEgress::frame(Route route, uint32_t token, const uint8_t* osc, uint32_t size) {
-    if (!mEgressBuffer || size == 0) return;
-    constexpr uint32_t kMax = 4096;       // egress messages (replies/notifies) are small
-    if (size + sizeof(uint32_t) > kMax) return;
-
-    uint8_t buf[kMax];
-    uint32_t r = route;
-    std::memcpy(buf, &r, sizeof(r));
-    std::memcpy(buf + sizeof(r), osc, size);
-    RingBufferWriter::write(mEgressBuffer, mEgressBufferSize,
-                            mEgressHead, mEgressTail, mEgressSeq, mEgressLock,
-                            buf, size + static_cast<uint32_t>(sizeof(r)), token);
+    // The lanes NRT egress producer (src/lanes/lanes.cpp) owns the NRT-out
+    // ring location and the producer lock.
+    ss_egress_nrt_write(static_cast<uint32_t>(route), token, osc, size);
 }
 
 void OscEgress::reply(const uint8_t* data, uint32_t size) {
@@ -76,13 +56,8 @@ void OscEgress::debug(const char* text, uint32_t len) {
 
 // ── Gateway side: dispatch one framed message to the transport / onDebug ─────
 
-void OscEgress::dispatchEgress(uint32_t originToken, const uint8_t* payload, uint32_t len) {
-    if (len < sizeof(uint32_t)) return;
-    uint32_t route;
-    std::memcpy(&route, payload, sizeof(route));
-    const uint8_t* osc    = payload + sizeof(route);
-    uint32_t       oscLen = len - static_cast<uint32_t>(sizeof(route));
-
+void OscEgress::dispatchEgress(uint32_t originToken, uint32_t route,
+                               const uint8_t* osc, uint32_t oscLen) {
     // Debug log lines go to the host's onDebug channel.
     if (oscLen >= supersonic::kDebugArgOffset &&
         std::memcmp(osc, "/supersonic/debug", 17) == 0) {

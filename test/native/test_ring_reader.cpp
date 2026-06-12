@@ -18,6 +18,12 @@
  *
  *   2. The happy path still works: a message written to a drained ring and
  *      followed by a wake-word bump is delivered to the onMessage callback.
+ *
+ *   3. pause() is quiescent and safe from any thread: once it returns, no
+ *      drain runs until resume() (cold swap resets the ring/drain state the
+ *      drains walk), and calling it from the reader's own thread (an OSC
+ *      handler in a drain triggering a swap) is a no-op rather than a
+ *      self-deadlock.
  */
 #include <catch2/catch_test_macros.hpp>
 #include "src/workers/RingReader.h"
@@ -108,4 +114,82 @@ TEST_CASE("RingReader delivers a message after its wake word is bumped",
         std::lock_guard<std::mutex> lock(rxMutex);
         REQUIRE(received == payload);
     }
+}
+
+TEST_CASE("RingReader pause parks draining until resume", "[RingReader]") {
+    constexpr uint32_t kSize = 4096;
+    std::vector<uint8_t> buffer(kSize, 0);
+    std::atomic<int32_t> head{0}, tail{0}, sequence{0}, writeLock{0};
+    std::atomic<uint32_t> wake{0};
+    std::atomic<int> gotCount{0};
+
+    RingReader reader("test-ringreader-pause");
+
+    // pause() before startThread() is a no-op, not a hang.
+    reader.pause();
+    reader.resume();
+
+    reader.setWake(&wake);
+    reader.addDrain(
+        buffer.data(), kSize, &head, &tail,
+        [&](uint32_t, const uint8_t*, uint32_t, uint32_t) {
+            gotCount.fetch_add(1, std::memory_order_release);
+        },
+        RingReader::Metrics{});
+    reader.startThread();
+
+    reader.pause();
+
+    // While parked, a written message plus continuous wake ticks must not
+    // reach the callback.
+    const std::string payload = "parked";
+    REQUIRE(RingBufferWriter::write(
+        buffer.data(), kSize, &head, &tail, &sequence, &writeLock,
+        payload.data(), static_cast<uint32_t>(payload.size()), 0));
+    for (int i = 0; i < 50; i++) {
+        wake.fetch_add(1, std::memory_order_release);
+        wake.notify_all();
+        std::this_thread::sleep_for(milliseconds(2));
+    }
+    REQUIRE(gotCount.load(std::memory_order_acquire) == 0);
+
+    // After resume the pending message is drained.
+    reader.resume();
+    const auto deadline = steady_clock::now() + seconds(2);
+    while (gotCount.load(std::memory_order_acquire) == 0
+           && steady_clock::now() < deadline) {
+        wake.fetch_add(1, std::memory_order_release);
+        wake.notify_all();
+        std::this_thread::sleep_for(milliseconds(2));
+    }
+    REQUIRE(gotCount.load(std::memory_order_acquire) == 1);
+}
+
+TEST_CASE("RingReader pause from its own thread is a no-op, not a deadlock",
+          "[RingReader]") {
+    std::atomic<uint32_t> wake{0};
+    std::atomic<bool> selfPaused{false};
+    std::atomic<int> passes{0};
+
+    RingReader reader("test-ringreader-selfpause");
+    reader.setWake(&wake);
+    // Mirrors a drain handler that triggers a cold swap: switchDevice parks
+    // the readers, including the one whose handler is running.
+    reader.addTask([&]() {
+        if (!selfPaused.exchange(true)) reader.pause();
+        passes.fetch_add(1, std::memory_order_release);
+    });
+    reader.startThread();
+
+    // If self-pause deadlocked, the task would never complete a pass and the
+    // reader would stop servicing wakes.
+    const auto deadline = steady_clock::now() + seconds(2);
+    while (passes.load(std::memory_order_acquire) < 2
+           && steady_clock::now() < deadline) {
+        wake.fetch_add(1, std::memory_order_release);
+        wake.notify_all();
+        std::this_thread::sleep_for(milliseconds(2));
+    }
+    REQUIRE(selfPaused.load());
+    REQUIRE(passes.load(std::memory_order_acquire) >= 2);
 }

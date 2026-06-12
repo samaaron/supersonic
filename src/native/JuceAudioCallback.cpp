@@ -7,6 +7,7 @@
 #include "SuperClock.h"
 #include "shared_memory.h"
 #include "audio_config.h"
+#include "lanes/lanes.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
 #include <cstring>
@@ -33,11 +34,11 @@ void renderAudioBlock(SuperClock& clock,
             static_cast<uint32_t>(get_audio_bus_count()), sampleRate, hostMicros);
     }
 
-    process_audio(ntp, numOutputChannels, numInputChannels);
+    ss_tick(ntp, numOutputChannels, numInputChannels);
 
     // Publish the main sink (stereo when nOut >= 2, mono fallback for 1) plus any
     // user aux sinks. No-op when Link Audio is off / no subscriber.
-    if (auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus())) {
+    if (const float* outputBus = ss_audio_out()) {
         if (numOutputChannels >= 2) {
             clock.publishAudioBlock(outputBus, outputBus + blockSize,
                                     static_cast<size_t>(blockSize), sampleRate, hostMicros);
@@ -416,7 +417,7 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
         // If the accumulator doesn't have a full block yet (common at startup
         // when HW buffer < mBufLen), fall back to zero-padding the rest —
         // but this is now a rare edge case, not the common path.
-        auto* inputBus = reinterpret_cast<float*>(get_audio_input_bus());
+        float* inputBus = ss_audio_in();
         if (inputBus && nIn > 0) {
             int usable = std::min(mInputAccumCount, mBufLen);
             // Clamp to the World's input bus width: mNumInputChannels tracks the
@@ -460,17 +461,16 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
                 linkAudioBlockHostMicros);
         }
 
-        // Native timing: pass wall clock NTP time directly.
-        // process_audio computes: current_ntp = current_time + ntp_start + drift + global
-        // With ntp_start=0 and drift=0, this becomes: wallNTP + global_offset
-        // Advance NTP by one block duration for each sub-block
-        process_audio(wallNTP,
-                      static_cast<uint32_t>(mNumOutputChannels),
-                      static_cast<uint32_t>(mNumInputChannels));
+        // Native timing: pass wall-clock NTP directly; the tick uses it as-is
+        // (only the WASM build converts its argument, from AudioContext time).
+        // Advance NTP by one block duration for each sub-block.
+        ss_tick(wallNTP,
+                static_cast<uint32_t>(mNumOutputChannels),
+                static_cast<uint32_t>(mNumInputChannels));
         wallNTP += static_cast<double>(mBufLen) / mSampleRate;
         mSamplePosition += mBufLen;
 
-        auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus());
+        const float* outputBus = ss_audio_out();
         if (outputBus) {
             // Publish this scsynth block to Link Audio. Main sink:
             // stereo when nOut >= 2, mono fallback for nOut == 1.

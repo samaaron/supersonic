@@ -22,15 +22,9 @@ class IOscTransport;
 class OscEgress {
 public:
     // transport: the egress sink (replies/broadcasts/subscriber registry).
-    // onDebug: host log channel for /supersonic/debug. egress*: the NRT-out ring.
+    // onDebug: host log channel for /supersonic/debug.
     void init(IOscTransport*                                  transport,
-              const std::function<void(const std::string&)>*  onDebug,
-              uint8_t*               egressBuffer,
-              uint32_t               egressBufferSize,
-              std::atomic<int32_t>*  egressHead,
-              std::atomic<int32_t>*  egressTail,
-              std::atomic<int32_t>*  egressSeq,
-              std::atomic<int32_t>*  egressLock);
+              const std::function<void(const std::string&)>*  onDebug);
 
     // Stamp the origin of the packet currently being handled (an opaque token).
     void setOrigin(uint32_t token) { mOriginToken.store(token, std::memory_order_relaxed); }
@@ -47,9 +41,11 @@ public:
     void sendSetup(int sampleRate, int bufferSize, uint32_t generation);
 
     // ── Gateway side: deliver (only the NRT gateway calls these) ──────────────
-    // Drain handler for one egress frame (OUT or NRT-out): peel /supersonic/debug
-    // to onDebug, run the interceptor, else route by tag to the transport.
-    void dispatchEgress(uint32_t originToken, const uint8_t* payload, uint32_t len);
+    // Drain handler for one egress frame (OUT or NRT-out), route already peeled
+    // by the lanes drain: peel /supersonic/debug to onDebug, run the
+    // interceptor, else route by tag to the transport.
+    void dispatchEgress(uint32_t originToken, uint32_t route,
+                        const uint8_t* osc, uint32_t oscLen);
     // Optional pre-dispatch hook; returns true to swallow the message.
     void setInterceptor(std::function<bool(const uint8_t*, uint32_t)> fn) { mInterceptor = std::move(fn); }
     // Deliver an already-OSC packet to the notify audience and a debug line.
@@ -89,12 +85,4 @@ private:
     std::function<bool(const uint8_t*, uint32_t)>    mInterceptor;  // pre-dispatch swallow hook
 
     std::atomic<uint32_t> mOriginToken{0};
-
-    // NRT-out ring — producers frame here under mEgressLock.
-    uint8_t*              mEgressBuffer     = nullptr;
-    uint32_t              mEgressBufferSize = 0;
-    std::atomic<int32_t>* mEgressHead       = nullptr;
-    std::atomic<int32_t>* mEgressTail       = nullptr;
-    std::atomic<int32_t>* mEgressSeq        = nullptr;
-    std::atomic<int32_t>* mEgressLock       = nullptr;
 };
