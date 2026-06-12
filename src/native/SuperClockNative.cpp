@@ -156,6 +156,12 @@ struct SuperClock::Impl {
         }
         // Update the smoothed tempo from one inter-pulse interval (locked state).
         void feedInterval(double iv) {
+            // Absolute plausibility band: outside 10..400 BPM the interval is a
+            // delivery artefact (queue-flush burst / stall gap), not a tempo
+            // observation — it must never seed or reset the window.
+            static constexpr double kMinIvUs = 60.0e6 / (400.0 * kPpqn);
+            static constexpr double kMaxIvUs = 60.0e6 / (10.0 * kPpqn);
+            if (iv < kMinIvUs || iv > kMaxIvUs) return;
             const double mean = ivCount > 0 ? ivSum / ivCount : iv;
             double var = ivCount > 1 ? (ivSumSq / ivCount - mean * mean) : 0.0;
             if (var < 0.0) var = 0.0;
@@ -543,20 +549,23 @@ void SuperClock::midiTimelinePulse(int id, uint64_t tsUs) {
         if (!t.tsOriginSet) { t.tsToEngineUs = now - static_cast<int64_t>(tsUs); t.tsOriginSet = true; }
         const double tsEng = static_cast<double>(static_cast<int64_t>(tsUs) + t.tsToEngineUs);
 
-        if (t.pulses == 0) {                     // first pulse: just anchor
+        if (t.pulses == 0) {
+            // First pulse after a transport reset IS the downbeat: per the MIDI
+            // spec the first 0xF8 following Start/Continue marks beat 0 (or the
+            // SPP position) — anchor there, don't count past it.
             t.lastTsEngine = tsEng;
-            t.pulseCount += 1;
             t.pulses = 1;
         } else {
             const double iv = tsEng - t.lastTsEngine;
-            // Reject an impossible double-pulse (a real 0xF8 can't arrive within
-            // a small fraction of the interval) — it would corrupt the tempo.
-            if (t.pulses >= 2 && iv < 0.25 * t.periodUs) {
-                t.lastFedMicros = now;
-                return;                          // still alive; ignore the bounce
+            // Bunched delivery (a sender/driver stall flushing queued ticks in a
+            // burst) — the ticks are real, each 0xF8 is 1/24 beat of position,
+            // but the interval is arrival jitter, not tempo: always advance the
+            // beat, only feed plausibly-timed intervals to the tempo window.
+            const bool bunched = t.pulses >= 2 && iv < 0.25 * t.periodUs;
+            if (!bunched) {
+                t.feedInterval(iv);              // seeds the window when empty, else smooths/resets
+                t.pulses = 2;
             }
-            t.feedInterval(iv);                  // seeds the window when empty, else smooths/resets
-            t.pulses = 2;
             t.lastTsEngine = tsEng;
             t.pulseCount += 1;
         }

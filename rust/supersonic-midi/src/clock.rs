@@ -138,6 +138,15 @@ impl ClockEstimator {
             return self.bpm();
         }
 
+        // Absolute plausibility band first: outside 20..400 BPM the interval is
+        // a delivery artefact (queue-flush burst / stall gap), not a tempo
+        // observation — it must never enter the window or the reject counter,
+        // or a tick burst force-resyncs the filter onto garbage.
+        let measured = 60.0 / (dt / 1_000_000.0 * PPQN as f64);
+        if !(20.0..=400.0).contains(&measured) {
+            return self.bpm();
+        }
+
         // Outlier rejection against the running median, with a forced resync
         // escape hatch so a real large tempo change can't wedge the filter.
         if self.intervals.len() >= 3 {
@@ -157,11 +166,6 @@ impl ClockEstimator {
             self.intervals.pop_front();
         }
         self.intervals.push_back(dt);
-
-        let measured = 60.0 / (dt / 1_000_000.0 * PPQN as f64);
-        if !(20.0..=400.0).contains(&measured) {
-            return self.bpm(); // implausible even after gating — keep prior
-        }
 
         if !self.initialized {
             self.x = measured;
@@ -234,6 +238,24 @@ mod tests {
         // A spurious tick 100µs after the last one (tick-bunching) → ignored.
         e.update((t - interval_us(120.0) + 100.0) as u64);
         assert!((e.bpm().unwrap() - before).abs() < 1.0, "double-pulse moved estimate");
+    }
+
+    #[test]
+    fn estimator_survives_stall_and_burst() {
+        // Field capture 2026-06-11 (MOTU rig): the tick stream periodically
+        // stalls ~120ms then flushes the queued ticks ~300µs apart. The burst
+        // must neither move the estimate nor force-resync the filter.
+        let mut e = ClockEstimator::new();
+        let mut t = 0.0;
+        feed_steady(&mut e, &mut t, 111.0, 100);
+        let before = e.bpm().unwrap();
+        t += 122_000.0 - interval_us(111.0); // stall: next tick arrives 122ms late
+        for _ in 0..6 {
+            e.update(t as u64); // queued ticks flushed in a burst
+            t += 300.0;
+        }
+        let after = feed_steady(&mut e, &mut t, 111.0, 24).unwrap();
+        assert!((after - before).abs() < 1.0, "stall+burst moved estimate: {before} -> {after}");
     }
 
     #[test]

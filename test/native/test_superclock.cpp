@@ -359,11 +359,11 @@ TEST_CASE("SuperClock: midi beat tracks the pulse count", "[SuperClock][midi]") 
     const int id = sc.claimMidiTimeline("portA", "Port A");
     const int64_t ts0 = sc.linkClockMicros();                          // first pulse ~now
     const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6); // 120 BPM pulse
-    const int pulses = 48;                                             // 48 pulses -> beat 2.0
+    const int pulses = 49;                                             // downbeat + 48 -> beat 2.0
     for (int k = 0; k < pulses; ++k)
         sc.midiTimelinePulse(id, static_cast<uint64_t>(ts0 + static_cast<int64_t>(k) * iv));
-    // The beat is the exact count: querying at the last pulse's own timestamp
-    // (pulse 48) gives 48/24 = 2.0.
+    // The beat is the exact count: the first pulse IS the downbeat (beat 0),
+    // so querying at the last pulse's own timestamp gives 48/24 = 2.0.
     const double beat = sc.timelineBeatAtLinkTime(id, ts0 + static_cast<int64_t>(pulses - 1) * iv, 4.0);
     CHECK(beat == Catch::Approx(2.0).margin(0.02));
     CHECK(sc.timelineBpm(id) == Catch::Approx(120.0).margin(0.5));     // tempo recovered
@@ -383,6 +383,33 @@ TEST_CASE("SuperClock: midi tempo de-jitters a wobbly clock",
         sc.midiTimelinePulse(id, static_cast<uint64_t>(t));
     }
     CHECK(sc.timelineBpm(id) == Catch::Approx(120.0).margin(1.0));
+}
+
+TEST_CASE("SuperClock: midi stall-and-burst keeps both beat and tempo",
+          "[SuperClock][midi]") {
+    // Field capture 2026-06-11 (MOTU rig): the tick stream periodically stalls
+    // ~120ms then flushes the queued ticks ~300µs apart. The burst ticks are
+    // real (each is 1/24 beat) so they must all land in the beat count, while
+    // the garbage arrival intervals must not disturb the tempo.
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    const double iv = 60.0 / 111.0 / 24.0 * 1e6;          // ~111 BPM interval
+    double t = static_cast<double>(sc.linkClockMicros());
+    int pulses = 0;
+    for (int k = 0; k < 96; ++k) { sc.midiTimelinePulse(id, static_cast<uint64_t>(t)); t += iv; ++pulses; }
+    const double bpmBefore = sc.timelineBpm(id);
+
+    t += 122000.0 - iv;                                    // stall: next tick 122ms late
+    for (int k = 0; k < 6; ++k) {                          // queued ticks flushed in a burst
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(t)); t += 300.0; ++pulses;
+    }
+    for (int k = 0; k < 48; ++k) { sc.midiTimelinePulse(id, static_cast<uint64_t>(t)); t += iv; ++pulses; }
+
+    CHECK(sc.timelineBpm(id) == Catch::Approx(bpmBefore).margin(1.0));
+    // Beat at the last pulse's own timestamp = ticks since the downbeat pulse
+    // / 24: every burst tick counted, no phase slip.
+    const double beat = sc.timelineBeatAtLinkTime(id, static_cast<int64_t>(t - iv), 4.0);
+    CHECK(beat == Catch::Approx(static_cast<double>(pulses - 1) / 24.0).margin(0.02));
 }
 
 TEST_CASE("SuperClock: midi tempo only interpolates between pulses",
@@ -433,7 +460,7 @@ TEST_CASE("SuperClock: midi beat is drift-free through a live tempo ramp",
         sc.midiTimelinePulse(id, static_cast<uint64_t>(sc.linkClockMicros()));
 
         const int64_t qn        = sc.linkClockMicros();
-        const double  trueBeat  = static_cast<double>(pulses) / 24.0;
+        const double  trueBeat  = static_cast<double>(pulses - 1) / 24.0;
         const double  engineBeat = sc.timelineBeatAtLinkTime(id, qn, 4.0);
         maxDrift = std::max(maxDrift, std::abs(engineBeat - trueBeat));
 
