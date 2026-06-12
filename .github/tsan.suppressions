@@ -29,3 +29,12 @@ race:std::sync::mpsc
 # entry on the other. Scoped to the ss_gamepad_ seam functions so races in the
 # C++ callers (GamepadControl, SupersonicEngine) are still reported.
 race:ss_gamepad_
+
+# ── Uninstrumented Rust thread entry ──────────────────────────────────────────
+# Catch-all for the same channel class when inlining leaves no ss_gamepad_ or
+# mpsc symbol in either stack (e.g. a gamepad command payload malloc'd in the
+# NRT gateway's control-drain lambda, freed by the gilrs poll thread: one side
+# shows only alloc::raw_vec, the other only this thread trampoline).
+# KNOWN BLIND SPOT: also hides reports against C++ code running on a Rust
+# thread (gilrs, midir) — remove this line when debugging Rust↔C++ memory.
+race:__rust_begin_short_backtrace
