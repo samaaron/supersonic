@@ -1,7 +1,8 @@
 /*
  * SC_PlatformProfile.inc — re-includable capability table (single source of truth).
  *
- * Input:  exactly one of SCP_TARGET_DESKTOP / SCP_TARGET_WASM / SCP_TARGET_ESP32.
+ * Input:  exactly one of SCP_TARGET_DESKTOP / SCP_TARGET_WASM / SCP_TARGET_ESP32
+ *         / SCP_TARGET_FREESTANDING.
  * Output: SCP_HOSTED_OS / SCP_BYTE_ATOMICS / SCP_TIERED_MEMORY  (each 0 or 1).
  *
  * Re-includable BY DESIGN (no include guard): the outputs are #undef'd at the top
@@ -11,6 +12,10 @@
  * SCP_* outputs to the public SC_HAS_* capabilities.
  *
  * To add a target: add one row here and a selection branch in SC_Platform.h.
+ * To add a CAPABILITY: add it to the #undef block, give EVERY row a value, and
+ * add it to the completeness guard at the bottom — which then fails the build
+ * (via test_platform.cpp's per-target re-includes) for any row that forgot it,
+ * rather than letting an undefined capability surface as a wrong value far away.
  */
 #undef SCP_HOSTED_OS
 #undef SCP_BYTE_ATOMICS
@@ -48,4 +53,12 @@
 #    define SCP_TIERED_MEMORY 0
 #else
 #    error "SC_PlatformProfile.inc: define exactly one SCP_TARGET_*"
+#endif
+
+// Completeness guard: the selected row must define EVERY capability. Catches a
+// new target row that forgets one, or a capability added to the table but not
+// back-filled into an existing row, at compile time (test_platform.cpp re-includes
+// this per target, so every row is validated). Keep this list == the #undef block.
+#if !defined(SCP_HOSTED_OS) || !defined(SCP_BYTE_ATOMICS) || !defined(SCP_TIERED_MEMORY)
+#    error "SC_PlatformProfile.inc: selected SCP_TARGET_* is missing a capability define"
 #endif
