@@ -25,6 +25,21 @@
  * header {magic, length, sequence, sourceId} followed by the payload.
  * Egress payloads carry a leading route word (EgressRoute) before the OSC
  * bytes.
+ *
+ * ── Minimal host ───────────────────────────────────────────────────────────
+ * A self-driven host (browser worklet, embedded, the freestanding CI build)
+ * drives the engine through just: ss_init() once, then per block
+ * ss_ingress_write() → ss_tick() → read ss_audio_out() → ss_egress_rt_drain().
+ * Beyond the ABI calls it must supply a little link-time glue the engine expects
+ * a host to define:
+ *   - g_external_shared_memory: set null unless pointing the arena at an external
+ *     segment (native cross-process shm); a self-driven host leaves it null and
+ *     the engine uses its own ring_buffer_storage.
+ *   - a SuperClock backend TU: link SuperClockLean.cpp (the lean, Link-free impl
+ *     shared by every self-driven host) — NOT the native Link-backed one. Leave
+ *     g_active_superclock null and the engine's clock/MIDI paths stay inert.
+ * test/freestanding/freestanding_main.cpp is the reference minimal host: it is
+ * the whole contract in ~60 lines, exercised in CI.
  */
 #pragma once
 
