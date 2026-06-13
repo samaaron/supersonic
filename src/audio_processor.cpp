@@ -380,7 +380,7 @@ extern "C" {
         global_offset->store(0, std::memory_order_relaxed);
 
 #ifdef __EMSCRIPTEN__
-        // Hand SAB pointers to SuperClockWasm at boot.
+        // Hand SAB pointers to the lean SuperClock impl (SuperClockLean) at boot.
         SuperClockState* superclock_state =
             reinterpret_cast<SuperClockState*>(shared_memory + SUPERCLOCK_STATE_START);
         SuperClockState::initDefaults(*superclock_state);

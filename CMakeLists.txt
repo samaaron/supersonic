@@ -447,11 +447,11 @@ add_executable(supersonic_freestanding EXCLUDE_FROM_ALL
     ${SCSYNTH_PLUGIN_SOURCES}
     ${OSCPACK_SOURCES}
     ${SUPERSONIC_SRC}/SuperClock.cpp
-    # SuperClockWasm.cpp is the LEAN/self-driven SuperClock implementation (the
-    # name is historical — it's what the browser uses, and it's Link-free). The
-    # freestanding build shares it rather than the native (Link-backed) variant,
-    # so the lean clock path is the same one the web ships.
-    ${SUPERSONIC_SRC}/SuperClockWasm.cpp
+    # SuperClockLean.cpp is the lean/self-driven SuperClock implementation shared
+    # by every non-native host (web, freestanding, embedded). The freestanding
+    # build uses it rather than the native (Link-backed) SuperClockNative.cpp, so
+    # the lean clock path is the same one the web ships.
+    ${SUPERSONIC_SRC}/SuperClockLean.cpp
     ${SUPERSONIC_SRC}/EngineClock.cpp
 )
 target_include_directories(supersonic_freestanding PRIVATE ${SUPERSONIC_INCLUDE_DIRS})

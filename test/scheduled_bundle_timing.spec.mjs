@@ -7,7 +7,7 @@ import { test, expect, skipIfPostMessage } from './fixtures.mjs';
  * framer) and into the wasm engine, a timestamped OSC bundle is now scheduled
  * by the engine's BundleScheduler against SuperClock, where
  *
- *     engine_now_ntp = audioContextTime + ntp_start + drift + global   (SuperClockWasm.cpp)
+ *     engine_now_ntp = audioContextTime + ntp_start + drift + global   (SuperClockLean.cpp)
  *
  * The hazard: nowAt() silently falls back to `ntp_start = 0.0` when the SAB
  * NTP-start field isn't published yet. With ntp_start = 0, the engine's clock

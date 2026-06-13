@@ -3,7 +3,7 @@
  *
  * tempo, transport, start/stop sync, the rpc beat/time conversions, peer count
  * and the enabled/now queries — all expressed against SuperClock, which exists
- * on native AND web (SuperClockWasm). The native engine calls this from
+ * on native (SuperClockNative) AND the lean hosts (SuperClockLean). The native engine calls this from
  * EngineControl (UDP egress); the web worklet calls it from audio_processor's
  * IN-drain (OUT-ring egress). One implementation, so /clock behaves identically
  * everywhere. Replies leave through `reply`. Native-only Link-session verbs

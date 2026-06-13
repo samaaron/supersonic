@@ -1,10 +1,16 @@
 /*
- * SuperClockWasm.cpp — WASM backend for SuperClock.
+ * SuperClockLean.cpp — the lean / self-driven SuperClock backend.
  *
- * Points at a SuperClockState struct in the SAB (its address is provided
- * by audio_processor.cpp via superclock_wasm_init). All Link Audio APIs
- * are stubs — the browser can't host Link's asio thread or do UDP
- * multicast, so the same header surface returns sensible defaults here.
+ * The SuperClock implementation every self-driven host shares: the browser
+ * (Wasm), the freestanding CI build, and embedded. (The native engine uses the
+ * Link-backed SuperClockNative.cpp instead — so every compiler of THIS file is a
+ * lean target, hence the name.) All Link Audio APIs are stubs — a self-driven
+ * host can't run Link's asio thread or UDP multicast, so the same header surface
+ * returns sensible defaults.
+ *
+ * superclock_wasm_init() below is the Wasm host's hook to point this impl at a
+ * SuperClockState struct in its SAB; other lean hosts (freestanding, embedded)
+ * leave the clock unbound (g_active_superclock stays null).
  */
 #include "SuperClock.h"
 #include "shared_memory.h"
