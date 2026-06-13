@@ -57,49 +57,60 @@ bool MidiControl::handleMidiCommand(const uint8_t* data, uint32_t size) {
         return true;
     }
 
-    // Clock-OUT generation is owned by the engine's SuperClock-timed MidiClockOut:
-    //   out/bpm <port> <bpm>     — continuous clock at a fixed tempo
-    //   out/follow <port> <tl>   — continuous clock following "link" | "midi:<handle>"
-    //   out/off <port>           — stop the port's clock
-    //   beat <port> <durMs>      — legacy one-beat burst (manual midi_clock_beat)
-    // /midi/clock/tick (one immediate pulse — also how MidiClockOut's generated
-    // pulses come back through the dispatch path) and /midi/clock/sync (clock-in
-    // tempo source) fall through to the Rust subsystem below.
-    if (mClock && std::strncmp(addr, "/midi/clock/", 12) == 0) {
-        const char* verb = addr + 12;
-        const bool outBpm    = std::strcmp(verb, "out/bpm") == 0;
-        const bool outFollow = std::strcmp(verb, "out/follow") == 0;
-        const bool outOff    = std::strcmp(verb, "out/off") == 0;
-        const bool beat      = std::strcmp(verb, "beat") == 0;
-        if (outBpm || outFollow || outOff || beat) {
-            std::string port = "*", timeline;
-            double num = 0.0;
-            try {
-                osc::ReceivedMessage msg(osc::ReceivedPacket(
-                    reinterpret_cast<const char*>(data),
-                    static_cast<osc::osc_bundle_element_size_t>(size)));
-                auto it = msg.ArgumentsBegin();
-                if (it != msg.ArgumentsEnd() && it->IsString()) { port = it->AsStringUnchecked(); ++it; }
-                if (it != msg.ArgumentsEnd()) {
-                    if (outFollow && it->IsString()) timeline = it->AsStringUnchecked();
-                    else if (it->IsFloat())          num = it->AsFloatUnchecked();
-                    else if (it->IsDouble())         num = it->AsDoubleUnchecked();
-                    else if (it->IsInt32())          num = it->AsInt32Unchecked();
-                }
-            } catch (...) { return true; }  // malformed — swallow
-            if (outBpm)         get_midi_clock_out().onClockOutTempo(*mClock, port, num);
-            else if (outFollow) get_midi_clock_out().onClockOutFollow(*mClock, port, timeline);
-            else if (outOff)    get_midi_clock_out().onClockOutOff(port);
-            else                get_midi_clock_out().onBeat(*mClock, port, num / 1000.0);
-            return true;
-        }
-    }
+    if (handleClockOutVerb(data, size)) return true;
 
     if (mMidi) ss_midi_handle_osc(mMidi, data, size);
     return true;
 }
 
+// Clock-OUT generation is owned by the engine's SuperClock-timed MidiClockOut:
+//   out/bpm <port> <bpm>     — continuous clock at a fixed tempo
+//   out/follow <port> <tl>   — continuous clock following "link" | "midi:<handle>"
+//   out/off <port>           — stop the port's clock
+//   beat <port> <durMs>      — legacy one-beat burst (manual midi_clock_beat)
+// /midi/clock/tick (one immediate pulse — also how MidiClockOut's generated
+// pulses come back through the dispatch path) and /midi/clock/sync (clock-in
+// tempo source) are not clock-OUT verbs and fall through to the Rust subsystem.
+bool MidiControl::handleClockOutVerb(const uint8_t* data, uint32_t size) {
+    if (!mClock || size < 16) return false;
+    const char* addr = reinterpret_cast<const char*>(data);
+    if (std::strncmp(addr, "/midi/clock/", 12) != 0) return false;
+    const char* verb = addr + 12;
+    const bool outBpm    = std::strcmp(verb, "out/bpm") == 0;
+    const bool outFollow = std::strcmp(verb, "out/follow") == 0;
+    const bool outOff    = std::strcmp(verb, "out/off") == 0;
+    const bool beat      = std::strcmp(verb, "beat") == 0;
+    if (!(outBpm || outFollow || outOff || beat)) return false;
+
+    std::string port = "*", timeline;
+    double num = 0.0;
+    try {
+        osc::ReceivedMessage msg(osc::ReceivedPacket(
+            reinterpret_cast<const char*>(data),
+            static_cast<osc::osc_bundle_element_size_t>(size)));
+        auto it = msg.ArgumentsBegin();
+        if (it != msg.ArgumentsEnd() && it->IsString()) { port = it->AsStringUnchecked(); ++it; }
+        if (it != msg.ArgumentsEnd()) {
+            if (outFollow && it->IsString()) timeline = it->AsStringUnchecked();
+            else if (it->IsFloat())          num = it->AsFloatUnchecked();
+            else if (it->IsDouble())         num = it->AsDoubleUnchecked();
+            else if (it->IsInt32())          num = it->AsInt32Unchecked();
+        }
+    } catch (...) { return true; }  // malformed clock-out verb — swallow
+    if (outBpm)         get_midi_clock_out().onClockOutTempo(*mClock, port, num);
+    else if (outFollow) get_midi_clock_out().onClockOutFollow(*mClock, port, timeline);
+    else if (outOff)    get_midi_clock_out().onClockOutOff(port);
+    else                get_midi_clock_out().onBeat(*mClock, port, num / 1000.0);
+    return true;
+}
+
 void MidiControl::dispatchOsc(const uint8_t* osc, uint32_t len) {
+    // Deferred events carry the same /midi/* surface as immediate commands —
+    // Sonic Pi's midi_clock_beat arrives as /midi/clock/beat wrapped in a
+    // timetagged /midi/at — so clock-OUT verbs must be intercepted here exactly
+    // as in handleMidiCommand. MidiClockOut's command handlers record intent
+    // under a mutex, so this is safe on the MIDI dispatch thread.
+    if (handleClockOutVerb(osc, len)) return;
     if (mMidi) ss_midi_handle_osc(mMidi, osc, len);
 }
 

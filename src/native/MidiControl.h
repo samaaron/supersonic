@@ -25,7 +25,9 @@ public:
     bool handleMidiCommand(const uint8_t* data, uint32_t size);
 
     // Dispatch a now-due scheduled MIDI event (the inner OSC the EventScheduler
-    // emitted). Called on the MIDI dispatch thread; sends immediately.
+    // emitted). Called on the MIDI dispatch thread. Clock-OUT verbs (e.g. a
+    // deferred /midi/clock/beat) route to MidiClockOut; everything else sends
+    // immediately via the Rust subsystem.
     void dispatchOsc(const uint8_t* osc, uint32_t len);
 
     // Re-enumerate MIDI devices and broadcast /midi/ports — called from the
@@ -42,6 +44,10 @@ private:
                                const uint8_t* raw, uint32_t rawLen, int32_t kind, double beat);
     // Broadcast a /clock/timelines push when the timeline set changes.
     void           broadcastTimelines();
+    // Route a /midi/clock/ clock-OUT verb (out/bpm, out/follow, out/off, beat)
+    // to MidiClockOut. Returns false if the message is not a clock-OUT verb.
+    // Safe on any non-RT thread (command path and deferred dispatch).
+    bool           handleClockOutVerb(const uint8_t* data, uint32_t size);
 
     SsMidi*     mMidi   = nullptr;
     OscEgress*  mEgress = nullptr;

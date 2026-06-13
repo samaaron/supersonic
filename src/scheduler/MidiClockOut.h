@@ -43,9 +43,11 @@ public:
 
     enum class Source { Fixed, Link, Timeline };
 
-    // ── Command thread (NRT gateway) — record intent only. Idempotent: each
-    //    call reconciles the port to the requested state (no-op if unchanged,
-    //    re-anchors on a tempo/source change, never restarts/glitches). ───────
+    // ── Command threads (NRT gateway, and the MIDI dispatch thread for a
+    //    deferred /midi/clock/beat) — record intent only, serialised by mLock.
+    //    Idempotent: each call reconciles the port to the requested state (no-op
+    //    if unchanged, re-anchors on a tempo/source change, never restarts/
+    //    glitches). NOT the audio thread — only generate() enqueues. ───────────
     void onClockOutTempo(SuperClock& clock, const std::string& port, double bpm);    // fixed tempo
     void onClockOutFollow(SuperClock& clock, const std::string& port,
                           const std::string& timeline);   // "link" | "midi:<handle>"

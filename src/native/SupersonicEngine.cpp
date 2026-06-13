@@ -995,6 +995,9 @@ void SupersonicEngine::init(const Config& cfg) {
     mIngress.registerRoute("/supersonic/", &SupersonicEngine::nrtForwardSink, this);
     mIngress.registerRoute("/clock/", &SupersonicEngine::nrtForwardSink, this);
 #ifdef SUPERSONIC_MIDI
+    // The clock-out coordinator is a process-wide singleton; a fresh engine owns
+    // no clock-out ports, so clear any left by a prior engine in this process.
+    get_midi_clock_out().reset();
     mMidiControl.init(&mEgress, &mSuperClock);
     mIngress.registerRoute("/midi/", &SupersonicEngine::nrtForwardSink, this);
     // Longest-prefix wins: scheduled MIDI ("/midi/at") is handled on the audio

@@ -7,6 +7,7 @@
  */
 #include <catch2/catch_test_macros.hpp>
 
+#include "RingTestUtils.h"
 #include "scheduler/MidiClockOut.h"
 #include "scheduler/EventScheduler.h"
 #include "src/SuperClock.h"
@@ -17,33 +18,7 @@
 
 namespace {
 
-// Walk the OUT ring from `fromHead` to `toHead`, counting framed
-// [dest:u32][osc] messages whose OSC address equals `addr`.
-int countByAddr(EventScheduler& es, int32_t fromHead, int32_t toHead, const char* addr) {
-    const uint8_t* buf  = es.outBuffer();
-    const uint32_t size = es.outSize();
-    auto at = [&](uint32_t p) { return buf[p % size]; };
-    int count = 0;
-    uint32_t pos = static_cast<uint32_t>(fromHead);
-    while (pos != static_cast<uint32_t>(toHead)) {
-        Message hdr{};
-        for (uint32_t i = 0; i < sizeof(Message); ++i) reinterpret_cast<uint8_t*>(&hdr)[i] = at(pos + i);
-        if (hdr.magic != 0xDEADBEEFu || hdr.length < sizeof(Message)) break;
-        const uint32_t dataPos = pos + static_cast<uint32_t>(sizeof(Message));
-        uint32_t dest = 0;
-        for (uint32_t i = 0; i < sizeof(dest); ++i) reinterpret_cast<uint8_t*>(&dest)[i] = at(dataPos + i);
-        char got[40] = {0};
-        for (uint32_t i = 0; i < sizeof(got) - 1; ++i) {
-            const char ch = static_cast<char>(at(dataPos + sizeof(dest) + i));
-            got[i] = ch;
-            if (ch == '\0') break;
-        }
-        if (dest == static_cast<uint32_t>(EventScheduler::DEST_MIDI) && std::strcmp(got, addr) == 0)
-            ++count;
-        pos = (pos + hdr.length) % size;
-    }
-    return count;
-}
+using ring_test::countOutRingByAddr;
 
 // Bind a local SuperClockState and run the Link timeline at a fixed tempo (origin 0).
 struct FixedClock {
@@ -85,11 +60,11 @@ TEST_CASE("MidiClockOut fixed tempo schedules ~24 pulses per beat", "[midi_clock
     clk.onClockOutTempo(fc.clock, "clk", 120.0);  // 120 BPM → 24 pulses in 0.5 s
     runFor(clk, fc, base, 0.5);
 
-    const int ticks = countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick");
+    const int ticks = countOutRingByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick");
     CHECK(ticks >= 23);
     CHECK(ticks <= 27);
     // Clock-only: no transport bytes are emitted by a clock-out.
-    CHECK(countByAddr(sched, startHead, sched.outHead()->load(), "/midi/out/start") == 0);
+    CHECK(countOutRingByAddr(sched, startHead, sched.outHead()->load(), "/midi/out/start") == 0);
 }
 
 TEST_CASE("MidiClockOut following :link tracks the Link tempo", "[midi_clock]") {
@@ -103,7 +78,7 @@ TEST_CASE("MidiClockOut following :link tracks the Link tempo", "[midi_clock]") 
     clk.onClockOutFollow(fc.clock, "clk", "link");
     runFor(clk, fc, base, 0.5);
 
-    const int ticks = countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick");
+    const int ticks = countOutRingByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick");
     CHECK(ticks >= 23);
     CHECK(ticks <= 27);
 }
@@ -122,7 +97,7 @@ TEST_CASE("MidiClockOut runs independent per-port tempos at once", "[midi_clock]
 
     // Both trains share the /midi/clock/tick address (port is an arg), so the
     // aggregate ≈ 24 + 48 = 72 confirms the second port runs at twice the rate.
-    const int ticks = countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick");
+    const int ticks = countOutRingByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick");
     CHECK(ticks >= 66);
     CHECK(ticks <= 80);
 }
@@ -140,7 +115,7 @@ TEST_CASE("MidiClockOut off stops a port's clock", "[midi_clock]") {
     const int32_t startHead = resetRing(sched);    // count only what comes AFTER off
     runFor(clk, fc, base + 0.3, 0.5);
 
-    CHECK(countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick") == 0);
+    CHECK(countOutRingByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick") == 0);
 }
 
 TEST_CASE("MidiClockOut emits nothing with no clock-out ports", "[midi_clock]") {
@@ -152,7 +127,7 @@ TEST_CASE("MidiClockOut emits nothing with no clock-out ports", "[midi_clock]") 
     const int32_t startHead = resetRing(sched);
 
     runFor(clk, fc, base, 0.5);   // no port enabled → no pulses
-    CHECK(countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick") == 0);
+    CHECK(countOutRingByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick") == 0);
 }
 
 TEST_CASE("MidiClockOut beat-burst schedules 24 ticks over the duration", "[midi_clock]") {
@@ -166,5 +141,5 @@ TEST_CASE("MidiClockOut beat-burst schedules 24 ticks over the duration", "[midi
     clk.onBeat(fc.clock, "p", 0.5);              // one beat's worth (24 ticks) over 0.5 s
     runFor(clk, fc, base, 0.5);
 
-    CHECK(countByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick") == 24);
+    CHECK(countOutRingByAddr(sched, startHead, sched.outHead()->load(), "/midi/clock/tick") == 24);
 }
