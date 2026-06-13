@@ -160,6 +160,7 @@ void SuperClock::tickMidiStaleness()                       {}
 
 double SuperClock::timelineBpm(int id) const { return id == 0 ? getBpm() : 60.0; }
 bool   SuperClock::timelineIsPlaying(int id) const { return id == 0 ? isPlaying() : false; }
+bool   SuperClock::timelineIsAnchored(int id) const { return id == 0; }
 int64_t SuperClock::timelineTimeForIsPlayingMicros(int id) const {
     return id == 0 ? timeForIsPlayingMicros() : 0;
 }

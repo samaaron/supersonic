@@ -354,6 +354,102 @@ TEST_CASE("SuperClock: midi transport drives playing state", "[SuperClock][midi]
     CHECK_FALSE(sc.timelineIsPlaying(id));
 }
 
+// Anchored = a transport event (START or SPP) has defined where beat 0 is.
+// Without one, beats are arbitrary 24-pulse groupings counted from whichever
+// pulse the engine happened to see first, so bar phase is meaningless —
+// midi_sync gates on this flag.
+TEST_CASE("SuperClock: midi timeline anchors on START, not pulses or CONTINUE",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    CHECK_FALSE(sc.timelineIsAnchored(id));
+
+    const int64_t ts0 = sc.linkClockMicros();
+    const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6);
+    for (int k = 0; k < 48; ++k)
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(ts0 + static_cast<int64_t>(k) * iv));
+    CHECK_FALSE(sc.timelineIsAnchored(id));             // pulses alone don't anchor
+
+    sc.setMidiTimelineTransport(id, /*CONTINUE*/ 1, 0.0);
+    CHECK_FALSE(sc.timelineIsAnchored(id));             // resuming an unknown grid
+
+    sc.setMidiTimelineTransport(id, /*START*/ 0, 0.0);
+    CHECK(sc.timelineIsAnchored(id));
+    sc.setMidiTimelineTransport(id, /*STOP*/ 2, 0.0);
+    CHECK(sc.timelineIsAnchored(id));                   // STOP keeps the grid origin
+}
+
+TEST_CASE("SuperClock: midi timeline anchors on SPP (DAW playing mid-song)",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    sc.setMidiTimelineTransport(id, /*POSITION*/ 3, 8.0);
+    CHECK(sc.timelineIsAnchored(id));
+}
+
+TEST_CASE("SuperClock: link timeline is always anchored", "[SuperClock][midi]") {
+    SuperClock sc;
+    CHECK(sc.timelineIsAnchored(0));                    // Link's grid always exists
+}
+
+TEST_CASE("SuperClock: the anchor clears when a slot is recycled",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    sc.setMidiTimelineTransport(id, /*START*/ 0, 0.0);
+    CHECK(sc.timelineIsAnchored(id));
+    sc.freeMidiTimeline(id);
+    const int id2 = sc.claimMidiTimeline("portA", "Port A");
+    CHECK_FALSE(sc.timelineIsAnchored(id2));
+}
+
+TEST_CASE("SuperClock: START mid-stream re-anchors beat 0 to the downbeat",
+          "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6);
+    int64_t ts = sc.linkClockMicros();
+    for (int k = 0; k < 48; ++k, ts += iv)              // beat reaches 2.0 from the
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(ts)); // first-pulse origin
+    sc.setMidiTimelineTransport(id, /*START*/ 0, 0.0);  // device downbeat = beat 0
+    // START re-captures the pulse->engine clock offset on the next pulse, so
+    // the synthetic series must restart at engine-now (as a real stream would).
+    ts = sc.linkClockMicros();
+    for (int k = 0; k < 24; ++k, ts += iv)
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(ts));
+    const double beat = sc.timelineBeatAtLinkTime(id, ts - iv, 4.0);
+    CHECK(beat == Catch::Approx(1.0).margin(0.02));     // 24 pulses after START
+}
+
+TEST_CASE("SuperClock: SPP re-bases the beat counter", "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    sc.setMidiTimelineTransport(id, /*POSITION*/ 3, 8.0);
+    const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6);
+    int64_t ts = sc.linkClockMicros();
+    for (int k = 0; k < 24; ++k, ts += iv)
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(ts));
+    const double beat = sc.timelineBeatAtLinkTime(id, ts - iv, 4.0);
+    CHECK(beat == Catch::Approx(9.0).margin(0.02));     // 8.0 + 24/24
+}
+
+TEST_CASE("SuperClock: CONTINUE preserves the beat anchor", "[SuperClock][midi]") {
+    SuperClock sc;
+    const int id = sc.claimMidiTimeline("portA", "Port A");
+    sc.setMidiTimelineTransport(id, /*START*/ 0, 0.0);
+    const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6);
+    int64_t ts = sc.linkClockMicros();
+    for (int k = 0; k < 24; ++k, ts += iv)
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(ts));
+    sc.setMidiTimelineTransport(id, /*STOP*/ 2, 0.0);
+    sc.setMidiTimelineTransport(id, /*CONTINUE*/ 1, 0.0);
+    for (int k = 0; k < 24; ++k, ts += iv)
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(ts));
+    const double beat = sc.timelineBeatAtLinkTime(id, ts - iv, 4.0);
+    CHECK(beat == Catch::Approx(2.0).margin(0.02));     // counts on, not reset
+    CHECK(sc.timelineIsAnchored(id));
+}
+
 TEST_CASE("SuperClock: midi beat tracks the pulse count", "[SuperClock][midi]") {
     SuperClock sc;
     const int id = sc.claimMidiTimeline("portA", "Port A");

@@ -107,10 +107,13 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             return true;
         }
         if (std::strcmp(verb, "transport/get") == 0) {
+            // Reply: playing(i), anchored(i). Anchored = START/SPP has defined
+            // the beat origin (always 1 for Link); midi_sync gates on it.
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("transport.reply", ra, sizeof(ra)))
-              << static_cast<int32_t>(clock.timelineIsPlaying(id) ? 1 : 0) << osc::EndMessage;
+              << static_cast<int32_t>(clock.timelineIsPlaying(id) ? 1 : 0)
+              << static_cast<int32_t>(clock.timelineIsAnchored(id) ? 1 : 0) << osc::EndMessage;
             send(s);
             return true;
         }

@@ -136,6 +136,7 @@ struct SuperClock::Impl {
         int         outlierSign{0};
 
         bool        playing{false};
+        bool        anchored{false};       // START/SPP has defined beat 0
         int64_t     isPlayingAtMicros{0};
         int64_t     lastFedMicros{0};      // last pulse/transport feed
         int64_t     wentStaleMicros{0};
@@ -451,7 +452,10 @@ int SuperClock::claimMidiTimeline(const char* normalized, const char* raw) {
             changed = true;
         } else if (mImpl->midi[slot - 1].stale) {
             // The port returned: continue the beat from where the free-run reached,
-            // then re-lock to the live clock on the next pulse.
+            // then re-lock to the live clock on the next pulse. `anchored` is left
+            // intact — the grid origin still traces to the original START/SPP, just
+            // extrapolated across the gap; a returning port re-sends START if it
+            // wants to redefine beat 0.
             auto& t = mImpl->midi[slot - 1];
             t.baseBeat = t.beatAtTs(static_cast<double>(now));
             t.pulseCount = 0; t.pulses = 0; t.outlierRun = 0; t.ivClear();
@@ -591,10 +595,12 @@ void SuperClock::setMidiTimelineTransport(int id, int kind, double beat) {
             t.baseBeat = 0.0; t.pulseCount = 0;
             t.pulses = 0; t.outlierRun = 0; t.ivClear(); t.tsOriginSet = false; t.lastTsEngine = static_cast<double>(now);
             t.playing = true;  t.isPlayingAtMicros = now;
+            t.anchored = true;
             break;
         case 3:  // POSITION (SPP) — re-base the pulse counter at `beat`
             t.baseBeat = beat; t.pulseCount = 0;
             t.pulses = 0; t.outlierRun = 0; t.ivClear(); t.tsOriginSet = false; t.lastTsEngine = static_cast<double>(now);
+            t.anchored = true;
             break;
         case 1:  // CONTINUE
             t.playing = true;  t.isPlayingAtMicros = now;
@@ -637,6 +643,13 @@ bool SuperClock::timelineIsPlaying(int id) const {
     std::lock_guard<std::mutex> lk(mImpl->midiMtx);
     auto* t = mImpl->activeSlotLocked(id);
     return t && t->playing;
+}
+
+bool SuperClock::timelineIsAnchored(int id) const {
+    if (id == 0) return true;
+    std::lock_guard<std::mutex> lk(mImpl->midiMtx);
+    auto* t = mImpl->activeSlotLocked(id);
+    return t && t->anchored;
 }
 
 int64_t SuperClock::timelineTimeForIsPlayingMicros(int id) const {

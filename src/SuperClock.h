@@ -117,6 +117,11 @@ public:
     // Timeline-parameterised reads (id 0 = Link → the methods above).
     double  timelineBpm(int id) const;
     bool    timelineIsPlaying(int id) const;
+    // Whether a transport event (START or SPP) has defined the timeline's beat
+    // origin. Without one, beats are arbitrary 24-pulse groupings from the
+    // first pulse seen, so bar phase is meaningless. Link (id 0) is always
+    // anchored — its session grid exists independent of transport.
+    bool    timelineIsAnchored(int id) const;
     int64_t timelineTimeForIsPlayingMicros(int id) const;
     double  timelineBeatAtLinkTime(int id, int64_t timeMicros, double quantum) const;
     double  timelinePhaseAtLinkTime(int id, int64_t timeMicros, double quantum) const;
