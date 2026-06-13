@@ -159,7 +159,10 @@ extern "C" {
     // Size: ~1.4MB (IN: 768KB, OUT: 128KB, DEBUG: 64KB, control/metrics, node tree ~57KB, audio capture ~375KB)
     // 16-byte aligned for shm_audio_buffer slots (alignas(16)) at
     // SHM_AUDIO_START; JS Float64Array access only needs 8.
-    alignas(16) uint8_t ring_buffer_storage[TOTAL_BUFFER_SIZE];
+    // SC_COLD_BSS: on tiered-memory targets (ESP32) this whole arena is bulk
+    // RAM, keeping scarce fast RAM for the audio path; no-op on single-tier
+    // targets (web/native). See SC_Platform.h.
+    alignas(16) SC_COLD_BSS uint8_t ring_buffer_storage[TOTAL_BUFFER_SIZE];
 
     // Validate at compile time that buffer layout fits in allocated storage
     static_assert(TOTAL_BUFFER_SIZE <= sizeof(ring_buffer_storage),
@@ -203,12 +206,15 @@ extern "C" {
     World* g_world = nullptr;
 
     // OSC Bundle Scheduler - Index-based pool for RT-safety
-    // Events stored in pool (never copied), queue only stores small indices
-    BundleScheduler g_scheduler;
+    // Events stored in pool (never copied), queue only stores small indices.
+    // SC_COLD_BSS: the ~100 KB data pool is touched lightly per block (one
+    // NextTime() compare), so it lives in bulk RAM on tiered targets; no-op
+    // off-ESP. The ctor still runs (placing into that RAM).
+    SC_COLD_BSS BundleScheduler g_scheduler;
 
     // Deferred-event scheduler: "events in → stored → events out on time" for
     // non-scsynth destinations (MIDI today). Ticked beside g_scheduler below.
-    EventScheduler g_event_scheduler;
+    SC_COLD_BSS EventScheduler g_event_scheduler;
 
     // File-scope state shared across threads: written by clear_scheduler()
     // on the control thread, read/updated by process_audio() on the audio
