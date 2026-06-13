@@ -30,6 +30,17 @@ Open Sound Control (OSC) messages and contain no GPL-derived code.
                                    crate itself is available under MIT OR
                                    GPL-3.0-or-later — e.g. for the web build.)
 
+  Reference hosts:
+    test/freestanding/freestanding_main.cpp   (desktop build/boot guard)
+    esp32s3/main/main.cpp                      (ESP32-S3 build-smoke)
+                                  (minimal engine drivers that use only the
+                                   lanes C ABI (src/lanes/lanes.h) and contain no
+                                   GPL-derived code, so each file is available
+                                   under MIT OR GPL-3.0-or-later as a reusable
+                                   integration template. As with the Rust client,
+                                   a binary that statically links the GPL engine
+                                   is GPL.)
+
 ================================================================================
 Audio Engine (GPL-3.0-or-later)
 ================================================================================

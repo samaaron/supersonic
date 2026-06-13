@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+//
+// A minimal public-ABI engine driver (lanes.h only, no GPL-derived code), so the
+// file itself is dual-licensed; a binary that links the GPL engine is GPL.
 /*
  * freestanding_main.cpp — the "engine builds and runs for ANY host" guard.
  *

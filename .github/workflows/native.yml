@@ -144,6 +144,28 @@ jobs:
       - name: Run freestanding smoke test
         run: ./build/freestanding/supersonic_freestanding
 
+  # ── ESP32-S3 engine build (real Xtensa, build-only) ─────────────────────────
+  # Compiles the shared engine for the esp32s3 target through ESP-IDF — the
+  # SCP_TARGET_ESP32 profile the desktop freestanding guard cannot reach: the
+  # no-byte-atomics path (supersonic_heap.cpp), EXT_RAM_BSS PSRAM placement, and
+  # Xtensa codegen. Build-only (no hardware/emulator) — it proves the engine
+  # compiles + links for embedded. The official Espressif action runs idf.py
+  # build inside the espressif/idf Docker image on a normal runner.
+  esp32s3:
+    runs-on: ubuntu-latest
+    name: esp32s3-engine-build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build the SuperSonic engine for ESP32-S3
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4
+          target: esp32s3
+          path: esp32s3
+
   # ── BEAM NIF shared library ─────────────────────────────────────────────────
   nif:
     strategy:
