@@ -18,7 +18,12 @@
 #pragma once
 
 // ── Target selection ──────────────────────────────────────────────────────────
-#if defined(__EMSCRIPTEN__)
+// SUPERSONIC_FREESTANDING is an explicit build opt-in (the freestanding CI
+// guard), checked first so it overrides the desktop auto-detection: it compiles
+// the lean/self-driven profile natively. The rest auto-detect from the toolchain.
+#if defined(SUPERSONIC_FREESTANDING)
+#    define SCP_TARGET_FREESTANDING 1
+#elif defined(__EMSCRIPTEN__)
 #    define SCP_TARGET_WASM 1
 #elif defined(ESP_PLATFORM)
 #    define SCP_TARGET_ESP32 1

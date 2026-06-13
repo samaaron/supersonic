@@ -423,6 +423,55 @@ if(MSVC)
     target_compile_options(tlsf PRIVATE /W0)
 endif()
 
+# ─── Freestanding engine smoke target (no JUCE, no Emscripten) ───────────────
+# Compiles the shared engine — the core (audio_processor + lanes + schedulers),
+# scsynth, and oscpack — against the compile-shim stubs ONLY, and drives it
+# purely through the lanes C ABI (ss_init -> ss_ingress_write -> ss_tick ->
+# ss_egress_rt_drain -> ss_audio_out). No JUCE host sources, no JUCE link, no
+# Emscripten. It is the desktop stand-in for an embedded host and exists to make
+# "one C ABI for all build targets" a tested invariant on a normal CI runner:
+# it fails the moment a JUCE/Emscripten dependency leaks into the shared engine,
+# the ABI breaks, or a shared symbol stops resolving without a full host. Built
+# explicitly (CI / `cmake --build <dir> --target supersonic_freestanding`), so
+# EXCLUDE_FROM_ALL keeps it out of every native build.
+#
+# Source set mirrors the embedded component's recipe: core + scsynth + oscpack +
+# the Link-free SuperClock/EngineClock base TUs (the Link-touching methods live
+# in SuperClockNative.cpp, deliberately excluded). The freestanding driver
+# supplies the only host glue these need — a null external-shared-memory pointer.
+add_executable(supersonic_freestanding EXCLUDE_FROM_ALL
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/freestanding/freestanding_main.cpp
+    ${SUPERSONIC_CORE_SOURCES}
+    ${SCSYNTH_SERVER_SOURCES}
+    ${SCSYNTH_COMMON_SOURCES}
+    ${SCSYNTH_PLUGIN_SOURCES}
+    ${OSCPACK_SOURCES}
+    ${SUPERSONIC_SRC}/SuperClock.cpp
+    # SuperClockWasm.cpp is the LEAN/self-driven SuperClock implementation (the
+    # name is historical — it's what the browser uses, and it's Link-free). The
+    # freestanding build shares it rather than the native (Link-backed) variant,
+    # so the lean clock path is the same one the web ships.
+    ${SUPERSONIC_SRC}/SuperClockWasm.cpp
+    ${SUPERSONIC_SRC}/EngineClock.cpp
+)
+target_include_directories(supersonic_freestanding PRIVATE ${SUPERSONIC_INCLUDE_DIRS})
+# Lean engine defs. SUPERSONIC_FREESTANDING selects the lean/self-driven platform
+# profile (hosted-OS off) natively, so the same code paths the browser/embedded
+# build compiles are exercised — no Ableton Link, no host-FS synthdef loading, no
+# cross-process shm. NO_LIBSNDFILE stubs out libsndfile (no file IO), so the build
+# needs neither the sndfile headers nor the link — exactly as the embedded build.
+target_compile_definitions(supersonic_freestanding PRIVATE
+    ${SUPERSONIC_COMPILE_DEFS} NO_LIBSNDFILE=1 SUPERSONIC_FREESTANDING=1)
+target_link_libraries(supersonic_freestanding PRIVATE tlsf)
+# macOS-only: a few scsynth TUs (SC_Filesystem_macos, the Accelerate FFT path)
+# carry platform references even in the lean profile. They are inert on the
+# Linux CI runner (where this guard actually runs), but the system frameworks
+# are needed to link locally on macOS. Always present on macOS, zero cost.
+if(APPLE)
+    target_link_libraries(supersonic_freestanding PRIVATE
+        "-framework CoreFoundation" "-framework Foundation" "-framework Accelerate")
+endif()
+
 # ─── supersonic_engine static library ────────────────────────────────────────
 # Shared between the executable and the test suite.
 add_library(supersonic_engine STATIC

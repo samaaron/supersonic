@@ -35,6 +35,17 @@
 #    define SCP_HOSTED_OS     0
 #    define SCP_BYTE_ATOMICS  0
 #    define SCP_TIERED_MEMORY 1
+#elif defined(SCP_TARGET_FREESTANDING)
+// Lean engine on a desktop CPU: the self-driven (hosted-OS-off) profile a
+// browser/embedded host sees, but compiled and run natively. Exists so a normal
+// CI runner can build + boot the shared engine through the lanes ABI with no
+// JUCE, no Emscripten and no embedded toolchain — the "one C ABI for all build
+// targets" guard. Capabilities INTENTIONALLY mirror WASM (lean, real byte
+// atomics, single RAM tier) — it's "WASM's caps, native toolchain". Keep this
+// triple in sync with the SCP_TARGET_WASM row above; test_platform.cpp pins both.
+#    define SCP_HOSTED_OS     0
+#    define SCP_BYTE_ATOMICS  1
+#    define SCP_TIERED_MEMORY 0
 #else
 #    error "SC_PlatformProfile.inc: define exactly one SCP_TARGET_*"
 #endif

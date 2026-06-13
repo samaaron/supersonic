@@ -43,6 +43,11 @@ constexpr Caps kWasm{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY };
 constexpr Caps kEsp32{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY };
 #undef SCP_TARGET_ESP32
 
+#define SCP_TARGET_FREESTANDING 1
+#include "SC_PlatformProfile.inc"
+constexpr Caps kFreestanding{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY };
+#undef SCP_TARGET_FREESTANDING
+
 // Desktop: full OS, byte atomics, single-tier RAM.
 static_assert(kDesktop.hosted_os == 1, "desktop has hosted OS");
 static_assert(kDesktop.byte_atomics  == 1, "desktop has byte atomics");
@@ -55,6 +60,11 @@ static_assert(kWasm.tiered_memory == 0, "wasm is single-tier");
 static_assert(kEsp32.hosted_os == 0, "esp32 is lean");
 static_assert(kEsp32.byte_atomics  == 0, "esp32 lacks byte atomics");
 static_assert(kEsp32.tiered_memory == 1, "esp32 is two-tier");
+// Freestanding: the lean profile compiled natively (the CI build guard) —
+// mirrors WASM: lean, byte atomics OK, single-tier.
+static_assert(kFreestanding.hosted_os == 0, "freestanding is lean");
+static_assert(kFreestanding.byte_atomics  == 1, "freestanding has byte atomics");
+static_assert(kFreestanding.tiered_memory == 0, "freestanding is single-tier");
 
 // ── Active build: SC_Platform.h as compiled for the host (= desktop) ──────────
 #include "SC_Platform.h"
@@ -90,5 +100,7 @@ TEST_CASE("SC_Platform exposes a coherent capability matrix", "[platform]") {
     CHECK(kWasm.hosted_os == 0);
     CHECK(kEsp32.byte_atomics == 0);
     CHECK(kEsp32.tiered_memory == 1);
+    CHECK(kFreestanding.hosted_os == 0);
+    CHECK(kFreestanding.byte_atomics == 1);
     (void)sc_cold_bss_probe;
 }
