@@ -591,7 +591,7 @@ void SuperClock::setMidiTimelineTransport(int id, int kind, double beat) {
     const int64_t now = linkClockMicros();
     t.lastFedMicros = now;
     switch (kind) {
-        case 0:  // START — reset the pulse counter; next 0xF8 is beat 0 + 1/24
+        case 0:  // START — reset the pulse counter; next 0xF8 anchors the downbeat (beat 0)
             t.baseBeat = 0.0; t.pulseCount = 0;
             t.pulses = 0; t.outlierRun = 0; t.ivClear(); t.tsOriginSet = false; t.lastTsEngine = static_cast<double>(now);
             t.playing = true;  t.isPlayingAtMicros = now;

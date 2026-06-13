@@ -409,16 +409,17 @@ TEST_CASE("SuperClock: START mid-stream re-anchors beat 0 to the downbeat",
     const int id = sc.claimMidiTimeline("portA", "Port A");
     const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6);
     int64_t ts = sc.linkClockMicros();
-    for (int k = 0; k < 48; ++k, ts += iv)              // beat reaches 2.0 from the
-        sc.midiTimelinePulse(id, static_cast<uint64_t>(ts)); // first-pulse origin
+    for (int k = 0; k < 48; ++k, ts += iv)              // free-run to ~beat 2 from
+        sc.midiTimelinePulse(id, static_cast<uint64_t>(ts)); // the first-pulse origin
     sc.setMidiTimelineTransport(id, /*START*/ 0, 0.0);  // device downbeat = beat 0
     // START re-captures the pulse->engine clock offset on the next pulse, so
     // the synthetic series must restart at engine-now (as a real stream would).
+    // The first 0xF8 after START IS the downbeat (beat 0); 24 more advance a beat.
     ts = sc.linkClockMicros();
-    for (int k = 0; k < 24; ++k, ts += iv)
+    for (int k = 0; k < 25; ++k, ts += iv)
         sc.midiTimelinePulse(id, static_cast<uint64_t>(ts));
     const double beat = sc.timelineBeatAtLinkTime(id, ts - iv, 4.0);
-    CHECK(beat == Catch::Approx(1.0).margin(0.02));     // 24 pulses after START
+    CHECK(beat == Catch::Approx(1.0).margin(0.02));     // downbeat + 24 pulses
 }
 
 TEST_CASE("SuperClock: SPP re-bases the beat counter", "[SuperClock][midi]") {
@@ -427,10 +428,11 @@ TEST_CASE("SuperClock: SPP re-bases the beat counter", "[SuperClock][midi]") {
     sc.setMidiTimelineTransport(id, /*POSITION*/ 3, 8.0);
     const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6);
     int64_t ts = sc.linkClockMicros();
-    for (int k = 0; k < 24; ++k, ts += iv)
+    // First 0xF8 after SPP sits on the SPP position (beat 8); 24 more = 1 beat.
+    for (int k = 0; k < 25; ++k, ts += iv)
         sc.midiTimelinePulse(id, static_cast<uint64_t>(ts));
     const double beat = sc.timelineBeatAtLinkTime(id, ts - iv, 4.0);
-    CHECK(beat == Catch::Approx(9.0).margin(0.02));     // 8.0 + 24/24
+    CHECK(beat == Catch::Approx(9.0).margin(0.02));     // 8.0 + downbeat + 24/24
 }
 
 TEST_CASE("SuperClock: CONTINUE preserves the beat anchor", "[SuperClock][midi]") {
@@ -439,14 +441,16 @@ TEST_CASE("SuperClock: CONTINUE preserves the beat anchor", "[SuperClock][midi]"
     sc.setMidiTimelineTransport(id, /*START*/ 0, 0.0);
     const int64_t iv = static_cast<int64_t>(60.0 / 120.0 / 24.0 * 1e6);
     int64_t ts = sc.linkClockMicros();
-    for (int k = 0; k < 24; ++k, ts += iv)
+    // START downbeat (beat 0) + 24 pulses = beat 1.0 before the stop.
+    for (int k = 0; k < 25; ++k, ts += iv)
         sc.midiTimelinePulse(id, static_cast<uint64_t>(ts));
     sc.setMidiTimelineTransport(id, /*STOP*/ 2, 0.0);
     sc.setMidiTimelineTransport(id, /*CONTINUE*/ 1, 0.0);
+    // CONTINUE resumes the existing grid (no re-anchor), so every pulse counts.
     for (int k = 0; k < 24; ++k, ts += iv)
         sc.midiTimelinePulse(id, static_cast<uint64_t>(ts));
     const double beat = sc.timelineBeatAtLinkTime(id, ts - iv, 4.0);
-    CHECK(beat == Catch::Approx(2.0).margin(0.02));     // counts on, not reset
+    CHECK(beat == Catch::Approx(2.0).margin(0.02));     // 1.0 + 24 (counts on)
     CHECK(sc.timelineIsAnchored(id));
 }
 
