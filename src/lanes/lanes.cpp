@@ -22,6 +22,7 @@
 #include <cstring>
 
 #include "../audio_processor.h"          // arena globals + process_audio + accessors
+#include "../audio_config.h"             // sonicpi::WorldOpts positional indices
 #include "../shared_memory.h"            // layout, ControlPointers, EgressRoute
 #include "../workers/RingBufferWriter.h" // the single ring writer
 
@@ -143,6 +144,45 @@ float* ss_audio_in(void) {
 
 uint32_t ss_block_size(void) {
     return static_cast<uint32_t>(get_audio_buffer_samples());
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+// The arena override init_memory() consults (set by the native backend when a
+// public POSIX segment exists; null otherwise). Declared here so ss_init writes
+// the options block into the SAME arena init_memory will read.
+extern uint8_t* g_external_segment;
+
+void ss_init(const SsWorldOptions* o, double sample_rate) {
+    if (!o) return;
+    using namespace sonicpi::WorldOpts;
+    // Where struct-based hosts fill the WHOLE positional options block at boot:
+    // by name from the struct, then hand off to init_memory(). (Runtime
+    // single-field updates on a rebuilt World still poke indices directly in
+    // SupersonicEngine.) Written into the arena init_memory resolves — the
+    // external segment if present, else the process-local ring_buffer_storage.
+    uint8_t* arena = g_external_segment ? g_external_segment : ring_buffer_storage;
+    uint32_t* a = reinterpret_cast<uint32_t*>(arena + WORLD_OPTIONS_START);
+    a[kNumBuffers]            = o->num_buffers;
+    a[kMaxNodes]              = o->max_nodes;
+    a[kMaxGraphDefs]          = o->max_graph_defs;
+    a[kMaxWireBufs]           = o->max_wire_bufs;
+    a[kNumAudioBusChannels]   = o->num_audio_bus_channels;
+    a[kNumInputBusChannels]   = o->num_input_bus_channels;
+    a[kNumOutputBusChannels]  = o->num_output_bus_channels;
+    a[kNumControlBusChannels] = o->num_control_bus_channels;
+    a[kBufLength]             = o->buf_length;
+    a[kRealTimeMemorySize]    = o->real_time_memory_size;
+    a[kNumRGens]              = o->num_rgens;
+    a[kLoadGraphDefs]         = o->load_graph_defs;
+    a[kSampleRate]            = static_cast<uint32_t>(sample_rate + 0.5);
+    a[kVerbosity]             = o->verbosity;
+    a[kNativeSharedMemoryID]  = o->shared_memory_id;
+    // NRT / self-driven invariants — not host-tunable.
+    a[kRealTime]              = 0;
+    a[kMemoryLocking]         = 0;
+    a[kMode]                  = 0;
+    init_memory(sample_rate);
 }
 
 // ── Layout ──────────────────────────────────────────────────────────────────

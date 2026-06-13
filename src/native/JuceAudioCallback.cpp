@@ -96,29 +96,27 @@ void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
     mInputAccum.assign(static_cast<size_t>(inChans) * mAccumPerChanCap, 0.0f);
     mInputAccumCount = 0;
 
-    // Write WorldOptions at WORLD_OPTIONS_START (safe offset outside ring buffers)
-    uint32_t* opts = reinterpret_cast<uint32_t*>(ringBufferStorage + WORLD_OPTIONS_START);
-    using namespace sonicpi::WorldOpts;
-    opts[kNumBuffers]            = static_cast<uint32_t>(numBuffers);
-    opts[kMaxNodes]              = static_cast<uint32_t>(maxNodes);
-    opts[kMaxGraphDefs]          = static_cast<uint32_t>(maxGraphDefs);
-    opts[kMaxWireBufs]           = static_cast<uint32_t>(maxWireBufs);
-    opts[kNumAudioBusChannels]   = static_cast<uint32_t>(numAudioBusChannels);
-    opts[kNumInputBusChannels]   = static_cast<uint32_t>(numInputChannels);
-    opts[kNumOutputBusChannels]  = static_cast<uint32_t>(numOutputChannels);
-    opts[kNumControlBusChannels] = static_cast<uint32_t>(numControlBusChannels);
-    opts[kBufLength]             = static_cast<uint32_t>(mBufLen);
-    opts[kRealTimeMemorySize]    = static_cast<uint32_t>(realTimeMemorySize);
-    opts[kNumRGens]              = static_cast<uint32_t>(numRGens);
-    opts[kRealTime]              = 0;  // always false (NRT/SAB mode)
-    opts[kMemoryLocking]         = 0;
-    opts[kLoadGraphDefs]         = 1;
-    opts[kSampleRate]            = static_cast<uint32_t>(sampleRate);
-    opts[kVerbosity]             = 0;
-    opts[kMode]                  = 0;  // direct memory access (SAB path in web, direct pointers in native)
-    opts[kNativeSharedMemoryID] = static_cast<uint32_t>(sharedMemoryID);  // native: sharedMemoryID lives at 17 (web puts it at 18)
-
-    init_memory(static_cast<double>(sampleRate));
+    // Configure + boot the World through the lanes ABI's typed init. ss_init
+    // writes the positional options block (at WORLD_OPTIONS_START in the arena —
+    // ringBufferStorage here, or the external segment) and brings the engine up,
+    // so this site sets named fields rather than magic indices. NRT/self-driven
+    // invariants (real-time off, memory-locking off, mode 0) are implied by ss_init.
+    SsWorldOptions opts = {};
+    opts.num_buffers              = static_cast<uint32_t>(numBuffers);
+    opts.max_nodes                = static_cast<uint32_t>(maxNodes);
+    opts.max_graph_defs           = static_cast<uint32_t>(maxGraphDefs);
+    opts.max_wire_bufs            = static_cast<uint32_t>(maxWireBufs);
+    opts.num_audio_bus_channels   = static_cast<uint32_t>(numAudioBusChannels);
+    opts.num_input_bus_channels   = static_cast<uint32_t>(numInputChannels);
+    opts.num_output_bus_channels  = static_cast<uint32_t>(numOutputChannels);
+    opts.num_control_bus_channels = static_cast<uint32_t>(numControlBusChannels);
+    opts.buf_length               = static_cast<uint32_t>(mBufLen);
+    opts.real_time_memory_size    = static_cast<uint32_t>(realTimeMemorySize);
+    opts.num_rgens                = static_cast<uint32_t>(numRGens);
+    opts.load_graph_defs          = 1;  // native loads synthdefs from the host filesystem
+    opts.verbosity                = 0;
+    opts.shared_memory_id         = static_cast<uint32_t>(sharedMemoryID);
+    ss_init(&opts, static_cast<double>(sampleRate));
 }
 
 void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {

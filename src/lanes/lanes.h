@@ -113,6 +113,44 @@ const float* ss_audio_out(void);   /* rendered block, channel-major     */
 float*       ss_audio_in(void);    /* input bus region, fill before tick */
 uint32_t     ss_block_size(void);  /* frames per block (web: 128)        */
 
+/* ── Init ──────────────────────────────────────────────────────────────────
+ * Bring the engine up: configure the World, lay out the arena (rings, control,
+ * metrics, node-tree, scope), allocate the RT-safe heap, and create the DSP
+ * graph. Call once before the first ss_tick.
+ *
+ * Hosts that hold their options as a struct (native, embedded) call ss_init.
+ * The web fills the arena's options block over its SharedArrayBuffer and calls
+ * the init_memory export directly — it writes across the JS/wasm boundary, so
+ * it stays offset-based. ss_init writes the WHOLE positional options block by
+ * named field, so struct-based hosts never hand-write magic indices at boot
+ * (the off-by-one that silently created a stray shm segment lived in those
+ * hand-written index sites). Runtime single-field updates on a rebuilt World
+ * (device switch / channel change in SupersonicEngine) still poke individual
+ * indices directly — those sites are not yet funnelled through here.
+ *
+ * NRT/self-driven is implied — real-time off, memory-locking off, direct memory
+ * access — so only the tunable fields are exposed.
+ */
+typedef struct SsWorldOptions {
+    uint32_t num_buffers;              /* sound-buffer (SndBuf) table size         */
+    uint32_t max_nodes;
+    uint32_t max_graph_defs;           /* synthdef table size                      */
+    uint32_t max_wire_bufs;            /* UGen wire-buffer pool                    */
+    uint32_t num_audio_bus_channels;
+    uint32_t num_input_bus_channels;
+    uint32_t num_output_bus_channels;
+    uint32_t num_control_bus_channels;
+    uint32_t buf_length;               /* control block size, frames              */
+    uint32_t real_time_memory_size;    /* RT pool, KB                             */
+    uint32_t num_rgens;                /* random generators                       */
+    uint32_t load_graph_defs;          /* load synthdefs from fs (0 on self-driven */
+                                       /* hosts — no filesystem)                   */
+    uint32_t verbosity;
+    uint32_t shared_memory_id;         /* native: boost shm id; 0 = none / reuse   */
+} SsWorldOptions;
+
+void ss_init(const SsWorldOptions* opts, double sample_rate);
+
 /* ── Layout ────────────────────────────────────────────────────────────────
  * The self-describing arena layout (BufferLayout) and the arena base
  * pointer, for hosts that address the rings directly — the web runtime
