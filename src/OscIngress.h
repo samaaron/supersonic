@@ -1,4 +1,9 @@
 /*
+ * SuperSonic
+ * Copyright (c) 2025 Sam Aaron
+ *
+ * Dual-licensed MIT OR GPL-3.0-or-later (see repo LICENSE).
+ *
  * OscIngress.h — the engine's OSC ingress (owned by the engine, not the transport).
  *
  * A registry of address-prefix -> handler. ingest() classifies a raw OSC packet
@@ -25,14 +30,14 @@
 class OscIngress {
 public:
     // routeCtx is the handler's own state (a ring writer, a subsystem); callCtx
-    // is per-ingest()-call context (e.g. the reply address of the message being
-    // drained); data/len is borrowed — a handler consumes it synchronously
-    // (copy into a ring / handle inline). Returns true iff it owned the packet.
-    using Handler = bool (*)(void* routeCtx, void* callCtx, const uint8_t* data, size_t len);
+    // is the immutable per-call metadata (a const DrainCallCtx: origin token +
+    // timetag); data/len is borrowed — a handler consumes it synchronously (copy
+    // into a ring / handle inline). Returns true iff it owned the packet.
+    using Handler = bool (*)(void* routeCtx, const void* callCtx, const uint8_t* data, size_t len);
 
-    // The default destination — bundles and unclaimed messages. Optional: the
-    // audio-thread drain registers NO default, so unmatched packets fall through
-    // to the caller (the inline audio plane) via ingest() returning false.
+    // The default destination — bundles and unclaimed messages. The synth plane
+    // registers itself here when present; with no default registered, ingest()
+    // returns false and the caller logs the unrouted packet.
     void setDefault(Handler h, void* ctx) noexcept { mDefault = { h, ctx }; }
 
     // Register a control prefix -> handler. Include the trailing delimiter
@@ -52,11 +57,11 @@ public:
     }
 
     // Classify a raw OSC packet and dispatch it. Never reads past len. Returns
-    // true iff a registered route (or the default, if set) consumed it. With no
-    // default registered, bundles and unmatched messages return false so the
-    // caller handles them (the audio plane). A packet that is not a '/'-led,
-    // NUL-terminated OSC address returns false (caller decides).
-    bool ingest(const uint8_t* data, size_t len, void* callCtx) const noexcept {
+    // true iff a registered route (or the default, if set) consumed it; false
+    // when nothing claims it (no matching route and no default) — the caller logs
+    // and drops. A packet that is not a '/'-led, NUL-terminated OSC address (or a
+    // bundle) returns false too.
+    bool ingest(const uint8_t* data, size_t len, const void* callCtx) const noexcept {
         if (data == nullptr || len < 4) return false;
         if (len >= 8 && std::memcmp(data, "#bundle", 8) == 0) return dispatch(mDefault, callCtx, data, len);
         if (data[0] != '/') return false;
@@ -81,7 +86,7 @@ private:
         Handler h   = nullptr;
         void*   ctx = nullptr;
     };
-    static bool dispatch(const Dest& d, void* callCtx, const uint8_t* data, size_t len) noexcept {
+    static bool dispatch(const Dest& d, const void* callCtx, const uint8_t* data, size_t len) noexcept {
         return d.h ? d.h(d.ctx, callCtx, data, len) : false;
     }
 

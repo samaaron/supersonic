@@ -25,6 +25,7 @@
 #include "OscEgress.h"
 #include "RingBufferWriter.h"
 #include "src/OscIngress.h"
+#include "src/IngressCallCtx.h"
 #include "EngineControl.h"
 #ifdef SUPERSONIC_MIDI
 #include "MidiControl.h"
@@ -32,7 +33,10 @@
 #ifdef SUPERSONIC_GAMEPAD
 #include "GamepadControl.h"
 #endif
-#include "src/scheduler/EventScheduler.h"
+#ifdef SUPERSONIC_OSC
+#include "OscControl.h"
+#endif
+#include "src/scheduler/EngineScheduler.h"
 #include "JuceAudioCallback.h"
 #include "SampleLoader.h"
 #include "SuperClock.h"
@@ -41,7 +45,7 @@
 #include "OscBuilder.h"
 #include "HeadlessDriver.h"
 #include "src/engine_state.h"
-#include "scsynth/common/server_shm.hpp"
+#include "synth/common/server_shm.hpp"
 
 class SupersonicEngine : private juce::ChangeListener {
     friend class EngineFixture;  // test fixture needs access to mAudioCallback
@@ -65,7 +69,7 @@ public:
 
     struct Config {
         int    sampleRate               = 48000;
-        int    bufferSize               = 0;   // 0 = auto (smallest multiple of 128)
+        int    bufferSize               = 0;   // 0 = auto (smallest buffer >= 128)
         int    blockSize                = 0;   // scsynth control block size (SC's -z);
                                                // 0 = platform default (kDefaultBlockSize,
                                                // 128). Decoupled from the HW buffer above;
@@ -105,7 +109,7 @@ public:
     std::function<void(const uint8_t*, uint32_t)> onReply;
     std::function<void(const std::string&)>        onDebug;
 
-    // Inject the egress transport (the standalone server its OscUdpServer). Call
+    // Inject the egress transport (the standalone server its UdpOscTransport). Call
     // before init(); if unset, the engine uses the in-process CallbackTransport
     // (replies via onReply).
     void setTransport(IOscTransport* transport) { mTransport = transport; }
@@ -135,12 +139,25 @@ public:
     // Audio-thread control route (registered on mIngress for /clock + /supersonic):
     // forwards the message to the NRT command ring with its origin token. Runs on
     // the audio thread; the NrtCommandReader drains + runs EngineControl.
-    static bool nrtForwardSink(void* ctx, void* callCtx, const uint8_t* data, std::size_t len);
+    static bool nrtForwardSink(void* ctx, const void* callCtx, const uint8_t* data, std::size_t len);
 
-    // Audio-thread route for "/midi/at" (scheduled MIDI): parses [timetag, blob]
-    // and enqueues the inner event into the deferred-event scheduler — all on the
-    // RT thread, so no lock is needed.
-    static bool midiAtSink(void* ctx, void* callCtx, const uint8_t* data, std::size_t len);
+    // One OscIngress adapter for every backend route: forward the immutable call
+    // metadata + (data, len) to a member handler of subsystem T. ctx is the owning
+    // subsystem. Used for the control handlers (NRT thread: handleXCommand →
+    // /supersonic/, /midi/, /gamepad/, /osc/, and the /clock/ default via
+    // handleLinkCommand).
+    template <class T, auto Handler>
+    static bool routeTo(void* ctx, const void* callCtx, const uint8_t* data, std::size_t len) {
+        static const DrainCallCtx kEmpty{};
+        const DrainCallCtx& meta = callCtx ? *static_cast<const DrainCallCtx*>(callCtx) : kEmpty;
+        (static_cast<T*>(ctx)->*Handler)(meta, data, static_cast<uint32_t>(len));
+        return true;
+    }
+
+    // Audio-thread route for "/sched/flush" <tag>: cancels pending scheduled
+    // events with that tag (both MIDI and OSC). Runs on the RT thread alongside
+    // enqueue/tick, so the slot pool stays single-threaded and lock-free.
+    static bool schedFlushSink(void* ctx, const void* callCtx, const uint8_t* data, std::size_t len);
 
     // Device control surface (called by EngineControl + engine lifecycle).
     // Builds the device/input/info report and pushes it to notify subscribers.
@@ -465,18 +482,22 @@ private:
     JuceAudioCallback mAudioCallback;
     // The default egress transport: in-process, replies via onReply. An embedder
     // injects a real transport via setTransport (the standalone server its
-    // OscUdpServer). The engine owns no socket. Bound to onReply by pointer so a
+    // UdpOscTransport). The engine owns no socket. Bound to onReply by pointer so a
     // runtime callback swap is seen.
     CallbackTransport mDefaultTransport{&onReply};
     IOscTransport*    mTransport = nullptr;
     OscEgress         mEgress;
-    OscIngress        mIngress;
+    OscIngress        mIngress;        // ingress dispatcher (audio thread)
+    OscIngress        mControlIngress; // control dispatcher (NRT thread): subsystem commands by address
     EngineControl     mEngineControl;
 #ifdef SUPERSONIC_MIDI
     MidiControl       mMidiControl;
 #endif
 #ifdef SUPERSONIC_GAMEPAD
     GamepadControl    mGamepadControl;
+#endif
+#ifdef SUPERSONIC_OSC
+    OscControl        mOscControl;
 #endif
     SuperClock        mSuperClock;
     SampleLoader      mSampleLoader;
@@ -518,13 +539,6 @@ private:
     // so no engine thread ever touches a socket. (Web has no NRT thread.)
     RingReader                mNrtGateway{"SuperSonic-NrtGateway"};
 
-#ifdef SUPERSONIC_MIDI
-    // Drains the deferred-event scheduler's OUT ring (events due this block) and
-    // dispatches each to its destination (MIDI → MidiControl). Woken per audio
-    // block via processCount, like mNrtGateway.
-    RingReader                mMidiDispatch{"SuperSonic-MidiDispatch"};
-#endif
-
 
     // Debounced device switch — rapid clicks settle into one final switch.
     struct PendingSwitch {
@@ -551,12 +565,12 @@ private:
 
     HeadlessDriver               mHeadlessDriver;
     std::unique_ptr<juce::AudioDeviceManager> mDeviceManager;
-    PerformanceMetrics*          mMetrics = nullptr;  // points into ring_buffer_storage; null before init()
+    PerformanceMetrics*          mMetrics = nullptr;  // points into the shared arena; null before init()
     std::atomic<bool>        mRunning{false};
     std::atomic<EngineState> mEngineState{EngineState::Stopped};
-    // Read by Link network-thread callbacks before they touch
-    // mUdpServer. Cleared early in shutdown() so in-flight callbacks
-    // skip broadcastLinkNotify. Narrows the window; shutdown's
+    // Read by Link network-thread callbacks before they touch the egress.
+    // Cleared early in shutdown() so in-flight callbacks skip
+    // broadcastLinkNotify. Narrows the window; shutdown's
     // setLinkVisibility(Off) call that follows joins the Link thread
     // and closes the race fully.
     std::atomic<bool>        mLinkCallbacksAlive{true};

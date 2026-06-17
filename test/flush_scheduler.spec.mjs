@@ -5,7 +5,7 @@ import { test, expect } from "./fixtures.mjs";
  *
  * Tests that purge() clears pending OSC messages from:
  * 1. The JS prescheduler heap (future-timestamped bundles)
- * 2. The WASM BundleScheduler (bundles already consumed from the ring buffer)
+ * 2. The WASM EngineScheduler (bundles already consumed from the ring buffer)
  *
  * Also tests:
  * 3. The async ack guarantee (purge resolves only when both sides confirm)
@@ -231,8 +231,7 @@ test.describe("Flush Scheduler", () => {
     console.log(`\nnew OSC after flush test (${sonicConfig.mode}):`);
     console.log(`  WASM scheduler depth: ${result.wasmDepth}`);
 
-    // All 10 new future bundles (5 near + 5 far) land in the WASM scheduler —
-    // there is no separate prescheduler tier anymore.
+    // All 10 new future bundles (5 near + 5 far) land in the WASM scheduler.
     expect(result.wasmDepth).toBe(10);
   });
 

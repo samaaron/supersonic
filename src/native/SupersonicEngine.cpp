@@ -14,7 +14,7 @@
 #include "osc/OscOutboundPacketStream.h"
 #include "RingBufferWriter.h"
 #include "src/IngressCallCtx.h"
-#include "scsynth/server/SC_Prototypes.h"  // zfree
+#include "synth/server/SC_Prototypes.h"  // zfree
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "FuzzyMatch.h"
 #include <chrono>
@@ -38,8 +38,7 @@ extern "C" {
     // Unified-arena base. When non-null, init_memory() points the engine's
     // whole shared_memory.h blob (rings, control, metrics, node-tree, audio
     // taps, scope) at this address — the public POSIX segment — instead of the
-    // process-local ring_buffer_storage. One pointer replaces the former
-    // per-region metrics/audio redirects; everything is observable for free.
+    // process-local ring_buffer_storage. Everything is observable for free.
     extern uint8_t* g_external_segment;
 
     // Real-pointer arena base (== init_memory's `shared_memory`): the public
@@ -609,8 +608,8 @@ void SupersonicEngine::init(const Config& cfg) {
                 mLastSelfTriggeredChange = std::chrono::steady_clock::now();
                 initError = mDeviceManager->initialiseWithDefaultDevices(0, 0);
             }
-            // Aggregate-device creation moved below — applies to both the
-            // -H path and this default-device path.
+            // Aggregate-device creation runs below — for both the -H path
+            // and this default-device path.
 #else
             mLastSelfTriggeredChange = std::chrono::steady_clock::now();
             initError = mDeviceManager->initialiseWithDefaultDevices(
@@ -812,10 +811,9 @@ void SupersonicEngine::init(const Config& cfg) {
                 changed = true;
             } else if (dev->getTypeName() != "DirectSound") {
                 // Auto: pick the smallest available buffer that is at least
-                // 128 samples. We no longer require a multiple of 128 —
-                // scsynth's block size matches the HW buffer on native, so
-                // any size works. Buffers below 128 mostly add callback
-                // overhead without a latency win.
+                // 128 samples. scsynth's block size matches the HW buffer on
+                // native, so any size works. Buffers below 128 mostly add
+                // callback overhead without a latency win.
                 constexpr int kMinBuf = 128;
                 auto sizes = dev->getAvailableBufferSizes();
                 int best = 0;
@@ -922,13 +920,13 @@ void SupersonicEngine::init(const Config& cfg) {
         cfg.numControlBusChannels,
         cfg.realTimeMemorySize,
         cfg.numRGens,
-        cfg.udpPort,  // sharedMemoryID — creates boost shm named "SuperColliderServer_<port>"
+        cfg.udpPort,  // sharedMemoryID — names the shm segment "SuperSonic_<port>"
         chosenBufLen
     );
 
     // Move the clock state into the shared arena's SUPERCLOCK_STATE region so
-    // the native SHM has the same shape as web (was a private member). Done
-    // before publish() below, so a cross-process reader sees it populated.
+    // the native SHM has the same shape as web. Done before publish() below,
+    // so a cross-process reader sees it populated.
     mSuperClock.bindStateToShm(
         reinterpret_cast<SuperClockState*>(arena + SUPERCLOCK_STATE_START));
 
@@ -974,7 +972,7 @@ void SupersonicEngine::init(const Config& cfg) {
 
     // The engine owns no socket. By default egress is in-process (CallbackTransport
     // → onReply); the embedder injects a real transport via setTransport before
-    // init() — the standalone server an OscUdpServer.
+    // init() — the standalone server an UdpOscTransport.
     if (!mTransport)
         mTransport = &mDefaultTransport;
 
@@ -986,28 +984,42 @@ void SupersonicEngine::init(const Config& cfg) {
     // Pre-dispatch hook for both egress rings (/supersonic/buffer/freed deferred-free).
     mEgress.setInterceptor([this](const uint8_t* d, uint32_t n) { return interceptBufferFreed(d, n); });
 
-    // Register the OSC routes on the engine-owned ingress, which the AUDIO thread
-    // classifies through (published as g_active_ingress below). Control prefixes
-    // forward to the NRT command ring; there is NO default — bundles / scsynth
-    // messages fall through to the audio plane (the drain's inline perform).
-    // Adding a subsystem (e.g. /midi/) is one more registerRoute here.
+    // Three address dispatchers, all OscIngress: the AUDIO-thread ingress (classifies
+    // inbound OSC — control forwards to the NRT ring, synth is the default route),
+    // the NRT control dispatcher (forwarded command → subsystem handler, default
+    // = handleLinkCommand for /clock/), and the IO outbound dispatcher (below). Each
+    // backend registers its routes on the planes it uses — one stanza per backend.
+    mIngress.setDefault(&ss_synth_default_route, nullptr);
+    mControlIngress.setDefault(&SupersonicEngine::routeTo<EngineControl, &EngineControl::handleLinkCommand>, &mEngineControl);
     mEngineControl.init(this, &mEgress, &mSuperClock);
     mIngress.registerRoute("/supersonic/", &SupersonicEngine::nrtForwardSink, this);
     mIngress.registerRoute("/clock/", &SupersonicEngine::nrtForwardSink, this);
+    mControlIngress.registerRoute("/supersonic/", &SupersonicEngine::routeTo<EngineControl, &EngineControl::handleSupersonicCommand>, &mEngineControl);
 #ifdef SUPERSONIC_MIDI
     // The clock-out coordinator is a process-wide singleton; a fresh engine owns
     // no clock-out ports, so clear any left by a prior engine in this process.
     get_midi_clock_out().reset();
     mMidiControl.init(&mEgress, &mSuperClock);
     mIngress.registerRoute("/midi/", &SupersonicEngine::nrtForwardSink, this);
-    // Longest-prefix wins: scheduled MIDI ("/midi/at") is handled on the audio
-    // thread (enqueued into the deferred-event scheduler) rather than forwarded.
-    mIngress.registerRoute("/midi/at", &SupersonicEngine::midiAtSink, this);
+    mControlIngress.registerRoute("/midi/", &SupersonicEngine::routeTo<MidiControl, &MidiControl::handleMidiCommand>, &mMidiControl);
 #endif
 #ifdef SUPERSONIC_GAMEPAD
     mGamepadControl.init(&mEgress);
     mIngress.registerRoute("/gamepad/", &SupersonicEngine::nrtForwardSink, this);
+    mControlIngress.registerRoute("/gamepad/", &SupersonicEngine::routeTo<GamepadControl, &GamepadControl::handleGamepadCommand>, &mGamepadControl);
 #endif
+#ifdef SUPERSONIC_OSC
+    // The OSC cue server + outbound user OSC. All "/osc/" verbs are control
+    // (forwarded to the NRT thread); outbound user OSC is "/osc/send"
+    // (immediate, or wrapped in /schedule for timed sends).
+    mOscControl.init(&mEgress);
+    mIngress.registerRoute("/osc/", &SupersonicEngine::nrtForwardSink, this);
+    mControlIngress.registerRoute("/osc/", &SupersonicEngine::routeTo<OscControl, &OscControl::handleOscCommand>, &mOscControl);
+#endif
+    // "/schedule" is handled in the shared drain (audio_processor.cpp), beside
+    // timestamped-bundle scheduling, so it works identically on every target — it
+    // never reaches this dispatcher. Only the flush (cancel pending) is wired here.
+    mIngress.registerRoute("/sched/flush", &SupersonicEngine::schedFlushSink, this);
 
     // Single-engine-per-process: g_active_superclock has no per-engine
     // routing, so a second publisher would steer /superclock_get to
@@ -1035,25 +1047,16 @@ void SupersonicEngine::init(const Config& cfg) {
         }
     }
 
-    // NRT gateway drain #2: the control ring. Stamp the origin token (the egress
-    // resolves it via the transport at reply time — no address touches the engine)
-    // and run EngineControl off the audio thread.
+    // NRT gateway drain #2: the control ring. Thread the origin token to the
+    // handler as call metadata (the egress resolves it via the transport at reply
+    // time — no address touches the engine) and route the command by address to
+    // its subsystem handler, off the audio thread. The control dispatcher's
+    // default (handleLinkCommand) takes /clock/.
     mNrtGateway.addDrain(
         mNrtBuffer, kNrtRingSize, &mNrtHead, &mNrtTail,
         [this](uint32_t token, const uint8_t* d, uint32_t n, uint32_t) {
-            mEgress.setOrigin(token);
-            if (n >= 12 && std::memcmp(d, "/supersonic/", 12) == 0)
-                mEngineControl.handleSupersonicCommand(d, n);
-#ifdef SUPERSONIC_MIDI
-            else if (n >= 6 && std::memcmp(d, "/midi/", 6) == 0)
-                mMidiControl.handleMidiCommand(d, n);
-#endif
-#ifdef SUPERSONIC_GAMEPAD
-            else if (n >= 9 && std::memcmp(d, "/gamepad/", 9) == 0)
-                mGamepadControl.handleGamepadCommand(d, n);
-#endif
-            else
-                mEngineControl.handleLinkCommand(d, n);
+            DrainCallCtx cc{ token };   // thread the origin to the handler as metadata
+            mControlIngress.ingest(d, n, &cc);
         },
         {});
 
@@ -1152,28 +1155,8 @@ void SupersonicEngine::init(const Config& cfg) {
     // Workers must be running before the audio source starts, otherwise
     // OUT/NRT-out ring buffers can back up during the audio thread's first
     // few hundred ticks (~ms) before any reader is draining them.
-    mNrtGateway.startThread(juce::Thread::Priority::normal);
+    mNrtGateway.start();
     mSampleLoader.startThread(juce::Thread::Priority::normal);
-
-#ifdef SUPERSONIC_MIDI
-    // Drain the deferred-event scheduler's OUT ring each block and dispatch due
-    // events by destination (MIDI → MidiControl → midir, off the audio thread).
-    {
-        EventScheduler& es = get_event_scheduler();
-        mMidiDispatch.setWake(&mAudioCallback.processCount);
-        mMidiDispatch.addDrain(
-            es.outBuffer(), es.outSize(), es.outHead(), es.outTail(),
-            [this](uint32_t, const uint8_t* d, uint32_t n, uint32_t) {
-                if (n < sizeof(uint32_t)) return;
-                uint32_t dest;
-                std::memcpy(&dest, d, sizeof(dest));
-                if (dest == EventScheduler::DEST_MIDI)
-                    mMidiControl.dispatchOsc(d + sizeof(dest), n - static_cast<uint32_t>(sizeof(dest)));
-            },
-            {});
-        mMidiDispatch.startThread(juce::Thread::Priority::normal);
-    }
-#endif
 
     // -- Start the audio source (real callback or headless fallback) -------
     // Picks based on whether the device manager has a current device.
@@ -1229,16 +1212,16 @@ void SupersonicEngine::shutdown() {
     // closes its midir connections (stopping midir's input thread), so no MIDI
     // callback can fire into mEgress/mSuperClock after this returns.
 #ifdef SUPERSONIC_MIDI
-    // Stop the dispatch thread before the subsystem it calls into. It waits on
-    // processCount, so bump + notify to wake it for the exit check.
-    mMidiDispatch.signalThreadShouldExit();
-    mAudioCallback.processCount.fetch_add(1, std::memory_order_release);
-    mAudioCallback.processCount.notify_all();
-    mMidiDispatch.stopThread(2000);
     mMidiControl.shutdown();
     // Drop clock-out state so a generated clock can't resume with stale ports on
     // the next boot (the coordinator is a process-wide singleton).
     get_midi_clock_out().reset();
+#endif
+
+    // Tear down the OSC cue server (joins its recv thread, closes the socket)
+    // before mEgress, so no inbound cue can fire into mEgress after this returns.
+#ifdef SUPERSONIC_OSC
+    mOscControl.shutdown();
 #endif
 
     // Tear down the gamepad subsystem before mEgress for the same reason:
@@ -1263,12 +1246,9 @@ void SupersonicEngine::shutdown() {
     // Stop the NRT gateway first. It runs EngineControl, whose
     // scheduleDeviceSwitch assigns mDebounceSwitchThread — joining that thread
     // below while the gateway could still spawn it is a data race, so drain the
-    // gateway to a stop before touching the device-orchestration workers. It
-    // waits on processCount; bump it so the run loop wakes and sees the exit flag.
-    mNrtGateway.signalThreadShouldExit();
-    mAudioCallback.processCount.fetch_add(1, std::memory_order_release);
-    mAudioCallback.processCount.notify_all();
-    mNrtGateway.stopThread(2000);
+    // gateway to a stop before touching the device-orchestration workers.
+    // stop() bumps + notifies its wake word (processCount) and joins.
+    mNrtGateway.stop();
 
     // No control command can run now — join the device-orchestration workers
     // before tearing down the device manager + egress they call into.
@@ -1342,7 +1322,7 @@ void SupersonicEngine::sendOSC(const uint8_t* data, uint32_t size) {
     }
     // The in-process entry point: origin 0 = an anonymous in-process caller,
     // assigned explicitly here (every entry point mints its own origin — UDP
-    // interns the sender on recv; ingest no longer defaults one in).
+    // interns the sender on recv).
     ingest(data, size, 0);
 }
 
@@ -1403,10 +1383,10 @@ void SupersonicEngine::ingest(const uint8_t* data, uint32_t size, uint32_t origi
 // Runs on the audio thread (the OscIngress default-less route). Writes the raw
 // control message to the process-local NRT command ring with the origin token in
 // the Message header; the NrtCommandReader thread drains + runs EngineControl.
-bool SupersonicEngine::nrtForwardSink(void* ctx, void* callCtx,
+bool SupersonicEngine::nrtForwardSink(void* ctx, const void* callCtx,
                                       const uint8_t* data, std::size_t len) {
     auto* self = static_cast<SupersonicEngine*>(ctx);
-    auto* cc   = static_cast<DrainCallCtx*>(callCtx);
+    auto* cc   = static_cast<const DrainCallCtx*>(callCtx);
     bool ok = RingBufferWriter::write(
         self->mNrtBuffer, kNrtRingSize,
         &self->mNrtHead, &self->mNrtTail, &self->mNrtSeq, &self->mNrtLock,
@@ -1419,46 +1399,28 @@ bool SupersonicEngine::nrtForwardSink(void* ctx, void* callCtx,
     return true;  // consumed — control never falls through to scsynth
 }
 
-#ifdef SUPERSONIC_MIDI
-bool SupersonicEngine::midiAtSink(void* /*ctx*/, void* /*callCtx*/,
-                                  const uint8_t* data, std::size_t len) {
-    // /midi/at <d|f: ntpSeconds> <b: inner /midi/out OSC> — enqueue the inner
-    // event into the deferred-event scheduler to fire on time. Runs on the audio
-    // thread; ss_defer_schedule's enqueue is RT-safe and lock-free.
+bool SupersonicEngine::schedFlushSink(void* /*ctx*/, const void* /*callCtx*/,
+                                      const uint8_t* data, std::size_t len) {
+    // /sched/flush <tag> — drop pending scheduled events with this tag. An
+    // empty/missing tag defaults to the user-scheduled tag (not the wildcard),
+    // so a tagless flush can never wipe pending synth bundles or the clock.
+    // Runs on the audio thread, same as enqueue/tick.
+    uint32_t tag = SCHED_TAG_DEFAULT;
     try {
-        osc::ReceivedPacket pkt(reinterpret_cast<const char*>(data),
-                                static_cast<osc::osc_bundle_element_size_t>(len));
-        osc::ReceivedMessage msg(pkt);
+        osc::ReceivedMessage msg(osc::ReceivedPacket(
+            reinterpret_cast<const char*>(data),
+            static_cast<osc::osc_bundle_element_size_t>(len)));
         auto it = msg.ArgumentsBegin();
-        if (it == msg.ArgumentsEnd()) return true;
-        // Time: an OSC timetag (int64, Sonic Pi's path — same domain as its
-        // scsynth bundles) or NTP seconds (double/float, e.g. tests).
-        const bool haveTimetag = it->IsInt64();
-        const int64_t timetag = haveTimetag ? it->AsInt64Unchecked() : 0;
-        const double ntp = it->IsDouble() ? it->AsDoubleUnchecked()
-                         : it->IsFloat()  ? static_cast<double>(it->AsFloatUnchecked())
-                                          : 0.0;
-        ++it;
-        if (it == msg.ArgumentsEnd() || !it->IsBlob()) return true;
-        const void* blob = nullptr;
-        osc::osc_bundle_element_size_t blobSize = 0;
-        it->AsBlobUnchecked(blob, blobSize);
-        if (blob && blobSize > 0) {
-            const auto* b = static_cast<const uint8_t*>(blob);
-            const auto n = static_cast<uint32_t>(blobSize);
-            if (haveTimetag)
-                ss_defer_schedule_raw(timetag, EventScheduler::DEST_MIDI, b, n);
-            else
-                ss_defer_schedule(ntp, EventScheduler::DEST_MIDI, b, n);
+        if (it != msg.ArgumentsEnd() && it->IsString()) {
+            const char* t = it->AsStringUnchecked();
+            if (t && *t) tag = sched_tag_hash(t, std::strlen(t));
         }
     } catch (...) {
-        // Malformed /midi/at — ignore.
+        return true;
     }
-    return true;  // consumed
+    get_scheduler().flush(tag);
+    return true;
 }
-#else
-bool SupersonicEngine::midiAtSink(void*, void*, const uint8_t*, std::size_t) { return true; }
-#endif
 
 // --- Device switch / reopen orchestration -------------------------------------
 
@@ -2286,10 +2248,8 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
         // Enumerate input devices. A full-duplex device (e.g. a MOTU
         // soundcard with both playback and capture) shows up in both the
         // output and input enumerations with the same name. Merge the
-        // input-side info into the existing entry rather than skipping —
-        // previously we just `continue`d on alreadyListed, which meant
-        // full-duplex inputs never got recorded and the GUI's input
-        // dropdown silently omitted them.
+        // input-side info into the existing entry so full-duplex inputs are
+        // recorded and the GUI's input dropdown shows them.
         auto inputNames = type->getDeviceNames(true);
         for (auto& devName : inputNames) {
             std::string nameStr = devName.toStdString();
@@ -3028,15 +2988,13 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     // Scope guard so every exit path below resumes them; the happy paths
     // resume explicitly just before audio restarts.
     struct ReaderPark {
-        std::vector<RingReader*> parked;
-        void park(RingReader& r) { r.pause(); parked.push_back(&r); }
-        void resumeNow()         { for (auto* r : parked) r->resume(); parked.clear(); }
-        ~ReaderPark()            { resumeNow(); }
+        std::vector<std::function<void()>> resumers;
+        void park(RingReader& r)      { r.pause(); resumers.push_back([&r] { r.resume(); }); }
+        void resumeNow() { for (auto& f : resumers) f(); resumers.clear(); }
+        ~ReaderPark()    { resumeNow(); }
     } readerPark;
-    if (isCold) {
+    if (isCold)
         readerPark.park(mNrtGateway);
-        readerPark.park(mMidiDispatch);
-    }
 
     if (isCold) mStateCache.captureAll();
 
@@ -4480,7 +4438,7 @@ void SupersonicEngine::purge() {
     ctrl->in_head.store(0, std::memory_order_release);
     ctrl->in_tail.store(0, std::memory_order_release);
 
-    // Clear scsynth BundleScheduler
+    // Drop all pending scheduled events
     clear_scheduler();
 }
 

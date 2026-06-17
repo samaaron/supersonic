@@ -7,9 +7,9 @@
 */
 
 #include "buffer_commands.h"
-#include "scsynth/include/plugin_interface/SC_World.h"
-#include "scsynth/include/plugin_interface/SC_SndBuf.h"
-#include "scsynth/include/common/clz.h"
+#include "synth/include/plugin_interface/SC_World.h"
+#include "synth/include/plugin_interface/SC_SndBuf.h"
+#include "synth/include/common/clz.h"
 #include <string.h>
 #include <stdio.h>
 

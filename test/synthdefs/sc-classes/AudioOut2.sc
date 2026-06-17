@@ -1,5 +1,5 @@
 // sclang shim for the AudioOut2 UGen. The implementation lives in
-// supersonic's scsynth (src/scsynth/plugins/DelayUGens.cpp); this class
+// supersonic's scsynth (src/synth/plugins/DelayUGens.cpp); this class
 // only exists so sclang can emit .scsyndef files that name the UGen.
 // Load at synthdef-compile time with sclang --include-path.
 //

@@ -10,11 +10,10 @@
  *   1. Stopping the reader must NOT depend on anyone bumping the wake word.
  *      std::atomic::wait(old) only returns when the value DIFFERS from `old`,
  *      so a bare notify_all() (value unchanged) cannot break the wait — the
- *      stop path must change the value. Without that, stopThread() times out
+ *      stop path must change the value. Without that, stop() times out
  *      and JUCE falls through to killThread()/pthread_cancel(), which can
- *      wedge under ThreadSanitizer. This is the Linux headless-teardown hazard
- *      from LINUX-TSAN-HANG-HANDOFF.md: once the headless driver stops ticking
- *      processCount, nothing else wakes the gateway.
+ *      wedge under ThreadSanitizer. Under the headless driver, once it stops
+ *      ticking processCount nothing else wakes the gateway.
  *
  *   2. The happy path still works: a message written to a drained ring and
  *      followed by a wake-word bump is delivered to the onMessage callback.
@@ -46,7 +45,7 @@ TEST_CASE("RingReader stops promptly when its wake word is never bumped",
 
     auto reader = std::make_unique<RingReader>("test-ringreader-stop");
     reader->setWake(&wake);
-    reader->startThread();
+    reader->start();
 
     // Give the run loop time to reach its blocking wait on `wake`.
     std::this_thread::sleep_for(milliseconds(50));
@@ -54,7 +53,7 @@ TEST_CASE("RingReader stops promptly when its wake word is never bumped",
     // Nobody ever changes `wake`. Destroying the reader must still stop the
     // thread quickly. The broken path (notify_all without a value change)
     // leaves the thread parked in atomic::wait, so the destructor blocks for
-    // the full stopThread(2000) timeout and then resorts to killThread().
+    // the join timeout.
     const auto t0 = steady_clock::now();
     reader.reset();
     const auto elapsedMs =
@@ -87,7 +86,7 @@ TEST_CASE("RingReader delivers a message after its wake word is bumped",
             gotCount.fetch_add(1, std::memory_order_release);
         },
         RingReader::Metrics{});
-    reader.startThread();
+    reader.start();
 
     const std::string payload = "hello-gateway";
     const uint32_t kSourceId = 7;
@@ -125,7 +124,7 @@ TEST_CASE("RingReader pause parks draining until resume", "[RingReader]") {
 
     RingReader reader("test-ringreader-pause");
 
-    // pause() before startThread() is a no-op, not a hang.
+    // pause() before start() is a no-op, not a hang.
     reader.pause();
     reader.resume();
 
@@ -136,7 +135,7 @@ TEST_CASE("RingReader pause parks draining until resume", "[RingReader]") {
             gotCount.fetch_add(1, std::memory_order_release);
         },
         RingReader::Metrics{});
-    reader.startThread();
+    reader.start();
 
     reader.pause();
 
@@ -179,7 +178,7 @@ TEST_CASE("RingReader pause from its own thread is a no-op, not a deadlock",
         if (!selfPaused.exchange(true)) reader.pause();
         passes.fetch_add(1, std::memory_order_release);
     });
-    reader.startThread();
+    reader.start();
 
     // If self-pause deadlocked, the task would never complete a pass and the
     // reader would stop servicing wakes.

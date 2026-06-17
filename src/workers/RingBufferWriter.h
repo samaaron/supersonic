@@ -1,4 +1,10 @@
 /*
+    SuperSonic
+    Copyright (c) 2025 Sam Aaron
+
+    Dual-licensed MIT OR GPL-3.0-or-later (see repo LICENSE).
+*/
+/*
  * RingBufferWriter.h — Multi-producer ring buffer write (header-only)
  *
  * Mirrors writeMessageToBuffer in ring_buffer_core.js exactly (the two are
@@ -24,7 +30,7 @@
 #endif
 // src-relative so this header is usable under both the native (CMake) and web
 // (emcc -Isrc) include roots.
-#include "shared_memory.h"
+#include "ring/ring.h"
 
 class RingBufferWriter {
 public:

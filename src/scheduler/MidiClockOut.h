@@ -3,7 +3,7 @@
  *
  * Generation is driven from the render context (native audio thread, wasm
  * worklet, embedded timer) via generate(), which is the ONLY place that
- * enqueues — the EventScheduler's slot pool is single-threaded (RT thread only).
+ * enqueues — the EngineScheduler's slot pool is single-threaded (RT thread only).
  * Command handlers run on the NRT gateway thread and only record intent under a
  * mutex; generate() drains it. All timing comes from SuperClock so pulses stay
  * sample-locked to scsynth audio.
@@ -19,7 +19,7 @@
  *                tempo is snapshotted into the port by refreshTimelineFollowers()
  *                on the NRT tempo-change callback; tempo-match, free-running.
  *
- * The legacy onBeat() (one beat = 24 pulses over a duration) backs the manual
+ * onBeat() (one beat = 24 pulses over a duration) backs the manual
  * `midi_clock_beat`; it schedules port-targeted one-shots independent of the
  * continuous trains.
  *
@@ -57,7 +57,7 @@ public:
     // timeline. Call on the NRT tempo-change callback. NRT only.
     void refreshTimelineFollowers(SuperClock& clock);
 
-    // Legacy manual burst: one beat = 24 pulses spread over durationSeconds.
+    // Manual burst: one beat = 24 pulses spread over durationSeconds.
     void onBeat(SuperClock& clock, const std::string& port, double durationSeconds);
 
     // Stop everything (engine shutdown / test isolation). NRT only.
@@ -103,5 +103,5 @@ private:
 };
 
 // Process-wide instance, shared by the render thread (generate) and the NRT
-// command thread. Mirrors get_event_scheduler().
+// command thread. Mirrors get_scheduler().
 MidiClockOut& get_midi_clock_out();

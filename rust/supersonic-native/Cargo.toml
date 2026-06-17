@@ -3,7 +3,7 @@ name = "supersonic-native"
 version = "0.1.0"
 edition = "2021"
 authors = ["Sam Aaron"]
-description = "Umbrella staticlib bundling SuperSonic's native Rust subsystems (MIDI, gamepad) into the single Rust staticlib a binary may link. CMake builds this; the C ABIs live in the subsystem crates."
+description = "Umbrella staticlib bundling SuperSonic's native Rust subsystems (MIDI, gamepad, OSC) into the single Rust staticlib a binary may link. CMake builds this; the C ABIs live in the subsystem crates."
 license = "MIT OR GPL-3.0-or-later"
 
 [lib]
@@ -13,9 +13,10 @@ license = "MIT OR GPL-3.0-or-later"
 crate-type = ["staticlib"]
 
 [features]
-default = ["midi", "gamepad"]
+default = ["midi", "gamepad", "osc"]
 midi = ["dep:supersonic-midi"]
 gamepad = ["dep:supersonic-gamepad"]
+osc = ["dep:supersonic-osc-net"]
 # Windows backend selector, forwarded to supersonic-midi (the gamepad crate
 # picks XInput on Windows by itself via a target-specific dependency).
 winrt = ["supersonic-midi/winrt"]
@@ -23,3 +24,4 @@ winrt = ["supersonic-midi/winrt"]
 [dependencies]
 supersonic-midi = { path = "../supersonic-midi", optional = true }
 supersonic-gamepad = { path = "../supersonic-gamepad", optional = true }
+supersonic-osc-net = { path = "../supersonic-osc-net", optional = true }

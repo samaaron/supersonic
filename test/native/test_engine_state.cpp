@@ -9,7 +9,7 @@
 #include <filesystem>
 #include "EngineFixture.h"
 #include "src/engine_state.h"
-#include "scsynth/common/server_shm.hpp"
+#include "synth/common/server_shm.hpp"
 
 #ifdef _WIN32
 #else

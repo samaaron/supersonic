@@ -14,6 +14,7 @@
 struct SsMidi;       // rust/supersonic-midi/cpp/ss_midi.h
 class OscEgress;
 class SuperClock;
+struct DrainCallCtx;
 
 class MidiControl {
 public:
@@ -22,13 +23,9 @@ public:
 
     // Handle one "/midi/" command off the audio thread (NRT gateway). Returns
     // true if it belongs to this subsystem (always, for a "/midi/" prefix).
-    bool handleMidiCommand(const uint8_t* data, uint32_t size);
-
-    // Dispatch a now-due scheduled MIDI event (the inner OSC the EventScheduler
-    // emitted). Called on the MIDI dispatch thread. Clock-OUT verbs (e.g. a
-    // deferred /midi/clock/beat) route to MidiClockOut; everything else sends
-    // immediately via the Rust subsystem.
-    void dispatchOsc(const uint8_t* osc, uint32_t len);
+    // Reached by both immediate "/midi/" traffic and scheduled "/midi/" events
+    // re-ingested on time (the scheduler feeds the same dispatch).
+    bool handleMidiCommand(const DrainCallCtx& meta, const uint8_t* data, uint32_t size);
 
     // Re-enumerate MIDI devices and broadcast /midi/ports — called from the
     // engine's device-change (hotplug) listener.
@@ -52,4 +49,9 @@ private:
     SsMidi*     mMidi   = nullptr;
     OscEgress*  mEgress = nullptr;
     SuperClock* mClock  = nullptr;
+    // The current command's origin token, held for the duration of a synchronous
+    // ss_midi_handle_osc call so emitCb (a Rust callback with no call ctx) can
+    // route its REPLY back to the caller. NRT-thread-only; REPLY emits are
+    // synchronous within handleMidiCommand. Async emits (/midi/in, ports) broadcast.
+    uint32_t    mReplyToken = 0;
 };

@@ -59,7 +59,7 @@ add_executable(SuperSonicNativeTests
     test_device_policy.cpp
     test_scope_race.cpp
     test_heap_growth.cpp
-    test_priority_queue.cpp
+    test_scheduler.cpp
     test_ring_buffer_write.cpp
     test_ring_reader.cpp
     test_benchmark.cpp
@@ -69,6 +69,7 @@ add_executable(SuperSonicNativeTests
     test_rt_alloc.cpp
     test_superclock.cpp
     test_event_scheduler.cpp
+    test_reply_routing.cpp
     test_midi_clock_gen.cpp
     test_midi_clock_out.cpp
     test_in_ring_drain.cpp
@@ -84,7 +85,7 @@ add_executable(SuperSonicNativeTests
 )
 
 # test_midi exercises the gated midir backend (MidiControl/ss_midi); the other MIDI
-# tests cover the always-compiled core (EventScheduler/MidiClockOut/MidiClockGen).
+# tests cover the always-compiled core (EngineScheduler/MidiClockOut/MidiClockGen).
 if(SUPERSONIC_ENABLE_MIDI)
     target_sources(SuperSonicNativeTests PRIVATE test_midi.cpp)
 endif()
@@ -92,6 +93,11 @@ endif()
 # test_gamepad exercises the gated gilrs backend (GamepadControl/ss_gamepad).
 if(SUPERSONIC_ENABLE_GAMEPAD)
     target_sources(SuperSonicNativeTests PRIVATE test_gamepad.cpp)
+endif()
+
+# test_osc exercises the gated OSC subsystem (OscControl: cue server + outbound).
+if(SUPERSONIC_ENABLE_OSC)
+    target_sources(SuperSonicNativeTests PRIVATE test_osc.cpp)
 endif()
 
 target_link_libraries(SuperSonicNativeTests PRIVATE

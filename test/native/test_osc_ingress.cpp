@@ -24,7 +24,7 @@ struct Recorder {
     size_t lastLen = 0;
 };
 
-bool sink(void* ctx, void* /*callCtx*/, const uint8_t* data, std::size_t len) {
+bool sink(void* ctx, const void* /*callCtx*/, const uint8_t* data, std::size_t len) {
     (void)data;
     auto* r = static_cast<Recorder*>(ctx);
     r->calls++;

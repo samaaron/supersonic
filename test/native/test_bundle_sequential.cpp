@@ -12,8 +12,8 @@
  * on post-init state.
  *
  * This file exists specifically to lock that semantic down. The fix is in:
- *   src/scsynth/server/SC_Graph.cpp   — split Graph_FirstCalc → Graph_InitUnits
- *   src/scsynth/server/SC_MiscCmds.cpp — call Graph_InitUnits in meth_s_new
+ *   src/synth/server/SC_Graph.cpp   — split Graph_FirstCalc → Graph_InitUnits
+ *   src/synth/server/SC_MiscCmds.cpp — call Graph_InitUnits in meth_s_new
  *                                         and meth_s_newargs
  *
  * Tests cover:
@@ -42,6 +42,7 @@
 #include <cstring>
 
 #include "JuceAudioCallback.h"  // get_audio_output_bus / get_audio_buffer_samples
+#include "src/shared_memory.h"  // PerformanceMetrics, SCHEDULER_SLOT_COUNT
 
 // ──────────────────────────────────────────────────────────────────────────
 // OSC helpers — two-level: individual messages via osc_test::Builder, and
@@ -428,7 +429,7 @@ TEST_CASE("Near-future scheduled bundle: /s_new + /n_set slides correctly",
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     // ~50ms in the future — past the bypass-lookahead threshold in practice,
-    // lands on the BundleScheduler queue, fires in ~one audio buffer.
+    // lands on the EngineScheduler queue, fires in ~one audio buffer.
     uint64_t when = ntpPlusMs(50);
     sendBundle(fx, bundleOf(when, {
         sNewDsaw(2302, 1, 50.0f, 0.02f, 120.0f, 6.0f),
@@ -457,7 +458,7 @@ TEST_CASE("Two same-timetag bundles (/s_new then /n_set in separate bundles)",
 
     // Two bundles targeting the same future timetag. They'll be drained
     // together during a single audio-buffer bundle-scheduler sweep, in
-    // priority-queue order (first-inserted first — see BundleScheduler.h
+    // priority-queue order (first-inserted first — see EngineScheduler.h
     // stability ordering). The fix must still produce the slide even
     // though the messages never share a single bundle.
     uint64_t when = ntpPlusMs(50);
@@ -735,4 +736,38 @@ TEST_CASE("Stress: 50 back-to-back bundles of /s_new + /n_set, all free cleanly"
     // Engine still responsive.
     fx.send(osc_test::message("/sync", 3000));
     OscReply s2; REQUIRE(fx.waitForReply("/synced", s2, 5000));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCHEDULER SATURATION — a full scheduler must never wedge command intake.
+//
+// The IN-ring drain is in-order and a Retain verdict stops the whole walk,
+// pinning the un-consumed frame at the head (ring_drain.h): everything behind
+// it — immediate commands, /sched/flush, /quit — is blocked until that frame
+// is consumed. A scheduler full of far-future events frees no space for many
+// blocks, so back-pressuring an un-schedulable bundle would stall ALL intake
+// indefinitely. The engine must instead drop the un-schedulable bundle
+// (counted in scheduler_queue_dropped) and keep draining.
+// ═══════════════════════════════════════════════════════════════════════════
+TEST_CASE("Scheduler saturation drops the overflow and never blocks immediate commands",
+          "[bundle_sequential][scheduler]") {
+    EngineFixture fx;
+
+    // Overfill past SCHEDULER_SLOT_COUNT with bundles timed 10 s out (never due
+    // during the test), so the surplus can't be accepted. The inner message is
+    // tiny, so the slot pool — not the data pool — is the binding limit.
+    const uint64_t farFuture = ntpPlusMs(10'000);
+    const int      overfill  = SCHEDULER_SLOT_COUNT + 64;
+    for (int i = 0; i < overfill; ++i)
+        sendBundle(fx, bundleOf(farFuture, { osc_test::message("/n_set", 9000 + i) }));
+
+    // An immediate command queued AFTER the overflow. If a full scheduler
+    // back-pressures (Retain), this /sync sits behind the stuck frame forever
+    // and never replies — the wedge.
+    fx.send(osc_test::message("/sync", 7777));
+    OscReply r;
+    REQUIRE(fx.waitForReply("/synced", r, 5000));
+
+    // The surplus was dropped and counted, not silently lost without a trace.
+    CHECK(fx.engine().getMetrics().scheduler_queue_dropped.load() > 0);
 }

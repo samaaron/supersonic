@@ -682,6 +682,62 @@ test.describe("OSC Bundle Timing", () => {
     expect(result.absTimingErrorMs).toBeLessThan(5);
   });
 
+  // "/schedule <int64 timetag> <blob>" must schedule a synth as accurately as the
+  // same /s_new inside a timestamped bundle — they're two spellings of one
+  // operation (both parked in the shared drain, re-dispatched on time). This
+  // mirrors the bundle timing test above exactly, swapping bundle → /schedule.
+  test("/schedule schedules a synth sample-accurately (≡ a timestamped bundle)", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+
+    const result = await page.evaluate(
+      async (config) => {
+        eval(config.helpers);
+        const sonic = new window.SuperSonic(config.sonic);
+        await sonic.init();
+        await sonic.loadSynthDef("sonic-pi-beep");
+
+        const sharedBuffer = sonic.sharedBuffer;
+        const ringBufferBase = sonic.ringBufferBase;
+        const ntpStartTime = new Float64Array(
+          sharedBuffer, ringBufferBase + sonic.bufferConstants.NTP_START_TIME_START, 1)[0];
+        const driftSeconds = Atomics.load(new Int32Array(
+          sharedBuffer, ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START, 1), 0) / 1000000;
+
+        sonic.startCapture();
+        const captureStartContextTime = sonic.node.context.currentTime;
+        const scheduledDelayMs = 100;
+        const scheduledNTP = captureStartContextTime + ntpStartTime + driftSeconds + scheduledDelayMs / 1000;
+        const ntpSeconds = Math.floor(scheduledNTP);
+        const ntpFraction = Math.floor((scheduledNTP % 1) * 0x100000000);
+
+        const osc = window.SuperSonic.osc;
+        // /schedule <int64 OSC timetag> <blob: the /s_new>. Same timetag a bundle
+        // carries; present-day timetags set the sign bit, so wrap to signed int64.
+        const inner = osc.encodeMessage("/s_new", ["sonic-pi-beep", 1000, 0, 0, "amp", 0.5]);
+        const timetag = BigInt.asIntN(64, (BigInt(ntpSeconds) << 32n) | BigInt(ntpFraction));
+        sonic.sendOSC(osc.encodeMessage("/schedule", [{ type: "int64", value: timetag }, inner]));
+
+        await new Promise((r) => setTimeout(r, 200));
+        const captured = sonic.stopCapture();
+        await sonic.send("/n_free", 1000);
+
+        let firstNonZero = -1;
+        for (let i = 0; i < captured.left.length; i++) {
+          if (Math.abs(captured.left[i]) > 0.001) { firstNonZero = i; break; }
+        }
+        const audioStartMs = (firstNonZero / captured.sampleRate) * 1000;
+        return {
+          hasAudio: firstNonZero > 0,
+          absTimingErrorMs: Math.abs(audioStartMs - scheduledDelayMs),
+        };
+      },
+      { sonic: sonicConfig, helpers: AUDIO_HELPERS }
+    );
+
+    expect(result.hasAudio).toBe(true);
+    expect(result.absTimingErrorMs).toBeLessThan(5);
+  });
+
   test("immediate bundle (timetag 1) executes immediately", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 

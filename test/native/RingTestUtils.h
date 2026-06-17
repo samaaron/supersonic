@@ -1,49 +1,59 @@
 /*
- * RingTestUtils.h — helpers for asserting against the EventScheduler OUT ring.
+ * RingTestUtils.h — helpers for asserting on what the EngineScheduler fires.
  *
- * The deferred-event scheduler frames each emitted event as [Message hdr]
- * [dest:u32][osc]. Tests walk that ring to count what the engine scheduled.
- * Shared so the frame layout is decoded in exactly one place.
+ * Tests drive the scheduler (or MidiClockOut feeding it), drain the events due
+ * at a given time, and assert on the captured OSC packets. Draining pops each
+ * due event and releases its slot — the same popDue/release the engine's fire
+ * loop performs — so the events captured here are exactly the ones the fire
+ * loop would dispatch.
  */
 #pragma once
 
-#include "scheduler/EventScheduler.h"
-#include "src/shared_memory.h"
+#include "scheduler/EngineScheduler.h"
 
+#include <cstddef>
 #include <cstdint>
-#include <cstring>
+#include <vector>
 
 namespace ring_test {
 
-// Walk the OUT ring from `fromHead` to `toHead`, counting framed
-// [dest:u32][osc] DEST_MIDI messages whose OSC address equals `addr`. The MIDI
-// dispatch thread may consume concurrently, but consumption only moves the
-// tail — bytes between two head snapshots stay valid until the writer laps the
-// ring, which a handful of clock ticks cannot cause.
-inline int countOutRingByAddr(EventScheduler& es, int32_t fromHead, int32_t toHead, const char* addr) {
-    const uint8_t* buf  = es.outBuffer();
-    const uint32_t size = es.outSize();
-    auto at = [&](uint32_t p) { return buf[p % size]; };
-    int count = 0;
-    uint32_t pos = static_cast<uint32_t>(fromHead);
-    while (pos != static_cast<uint32_t>(toHead)) {
-        Message hdr{};
-        for (uint32_t i = 0; i < sizeof(Message); ++i) reinterpret_cast<uint8_t*>(&hdr)[i] = at(pos + i);
-        if (hdr.magic != 0xDEADBEEFu || hdr.length < sizeof(Message)) break;
-        const uint32_t dataPos = pos + static_cast<uint32_t>(sizeof(Message));
-        uint32_t dest = 0;
-        for (uint32_t i = 0; i < sizeof(dest); ++i) reinterpret_cast<uint8_t*>(&dest)[i] = at(dataPos + i);
-        char got[40] = {0};
-        for (uint32_t i = 0; i < sizeof(got) - 1; ++i) {
-            const char ch = static_cast<char>(at(dataPos + sizeof(dest) + i));
-            got[i] = ch;
-            if (ch == '\0') break;
-        }
-        if (dest == static_cast<uint32_t>(EventScheduler::DEST_MIDI) && std::strcmp(got, addr) == 0)
-            ++count;
-        pos = (pos + hdr.length) % size;
+// One event the scheduler returned as due, captured for assertions. `data` is a
+// copy of the scheduled OSC packet, so it stays valid after the slot is freed.
+struct Fired {
+    int64_t              when   = 0;
+    uint32_t             origin = 0;
+    std::vector<uint8_t> data;
+};
+
+// Pop every event due at/through `now`, in fire order, releasing each slot.
+inline std::vector<Fired> drainDue(EngineScheduler& es, int64_t now) {
+    std::vector<Fired> out;
+    for (;;) {
+        auto e = es.popDue(now);
+        if (!e.valid()) break;
+        out.push_back(Fired{e.when, e.meta->origin,
+                            std::vector<uint8_t>(e.data, e.data + e.size)});
+        es.release(e);
     }
-    return count;
+    return out;
+}
+
+// True if `data` begins with the NUL-terminated OSC address `addr`.
+inline bool addrEquals(const std::vector<uint8_t>& data, const char* addr) {
+    for (std::size_t i = 0; i < data.size(); ++i) {
+        const char c = static_cast<char>(data[i]);
+        if (c != addr[i]) return false;
+        if (c == '\0')    return true;
+    }
+    return false;   // no NUL terminator within the packet
+}
+
+// Count captured events whose OSC address equals `addr`.
+inline int countByAddr(const std::vector<Fired>& fired, const char* addr) {
+    int n = 0;
+    for (const auto& f : fired)
+        if (addrEquals(f.data, addr)) ++n;
+    return n;
 }
 
 } // namespace ring_test

@@ -65,10 +65,19 @@ public:
     bool subscribeGamepad(uint32_t token) override { return mGamepad.insert(token).second; }
     void unsubscribeGamepad(uint32_t token) override { mGamepad.erase(token); }
 
+    // OSC-cue notify: deliver to the single in-process observer so an
+    // embedder/test can see /external-osc-cue events through onReply.
+    void broadcastOsc(const uint8_t* data, uint32_t size) override {
+        if (mOnReply && *mOnReply) (*mOnReply)(data, size);
+    }
+    bool subscribeOsc(uint32_t token) override { return mOsc.insert(token).second; }
+    void unsubscribeOsc(uint32_t token) override { mOsc.erase(token); }
+
 private:
     const std::function<void(const uint8_t*, uint32_t)>* mOnReply;
     std::set<uint32_t> mNotify;
     std::set<int>      mNotifyPorts;
     std::set<uint32_t> mMidi;
     std::set<uint32_t> mGamepad;
+    std::set<uint32_t> mOsc;
 };

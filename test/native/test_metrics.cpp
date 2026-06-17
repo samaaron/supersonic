@@ -1,38 +1,14 @@
 /*
- * test_metrics.cpp — Comprehensive coverage for PerformanceMetrics
+ * test_metrics.cpp — Coverage for PerformanceMetrics.
  *
- * For every field in PerformanceMetrics (src/shared_memory.h:169) one or
- * more tests verify:
+ * For each field one or more tests verify:
  *   (a) the field is readable via SupersonicEngine::getMetrics()
  *   (b) the field has a sensible value at boot
- *   (c) the field increments on the documented native driver path
+ *   (c) the field increments on its native write path
  *
- * Some fields are JS-only writers (no native code path updates them) — the
- * tests for those explicitly assert the value stays 0 on native, documenting
- * the metrics-coverage gap between runtimes. Those tests are tagged
- * [metrics][js-only] for easy filtering.
- *
- * Driver-path summary (verified from grep over src/):
- *   audio_processor.cpp writes: process_count, messages_processed,
- *     messages_dropped, scheduler_queue_depth/max/dropped, messages_sequence_gaps,
- *     scheduler_lates, scheduler_max_late_ms, scheduler_last_late_ms,
- *     scheduler_last_late_tick, in/out/nrt_out_buffer_used/peak_bytes (plus
- *     ring-buffer tracking inside scsynth core).
- *   OscUdpServer.cpp writes: osc_out_messages_sent, osc_out_bytes_sent,
- *     bypass_immediate, bypass_near_future, bypass_late, prescheduler_bypassed.
- *   ReplyReader.cpp writes: osc_in_messages_received, osc_in_bytes_received,
- *     osc_in_corrupted, messages_sequence_gaps.
- *   DebugReader.cpp writes: debug_messages_received, debug_bytes_received.
- *   Prescheduler.cpp writes: prescheduler_pending, prescheduler_pending_peak,
- *     prescheduler_bundles_scheduled, prescheduler_events_cancelled,
- *     prescheduler_dispatched, prescheduler_total_dispatches,
- *     prescheduler_retries_failed, prescheduler_retries_succeeded,
- *     prescheduler_retry_queue_size, prescheduler_retry_queue_peak,
- *     prescheduler_messages_retried, prescheduler_min_headroom_ms,
- *     prescheduler_lates, prescheduler_max_late_ms.
- *
- * Native-unwritten fields (JS-only, always 0 on native):
- *   wasm_errors, bypass_non_bundle, osc_in_dropped_messages.
+ * Some fields are JS-only (no native writer): wasm_errors and
+ * osc_in_dropped_messages. Their tests assert the value stays 0 on native
+ * and are tagged [metrics][js-only] for easy filtering.
  */
 #include "EngineFixture.h"
 #include "OscBuilder.h"

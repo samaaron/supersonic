@@ -26,14 +26,15 @@
 #include <set>
 #include <thread>
 
-bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
+bool EngineControl::handleLinkCommand(const DrainCallCtx& meta, const uint8_t* data, uint32_t size) {
+    const uint32_t token = meta.sourceId;
     if (!mSuperClock || size < 16) return false;
     if (std::memcmp(data, "/clock/", 7) != 0) return false;
     // Clock-core verbs (tempo/transport/sync/rpc/queries) go through the shared
     // handler — the same one the web worklet uses. Native-only Link-session
     // verbs (visibility, peers, Link Audio, notify) fall through to below.
     if (handleClockCoreOsc(*mSuperClock, data, size,
-            [this](const uint8_t* d, uint32_t n) { mEgress->reply(d, n); }))
+            [this, token](const uint8_t* d, uint32_t n) { mEgress->reply(token, d, n); }))
         return true;
     try {
         osc::ReceivedPacket pkt(reinterpret_cast<const char*>(data),
@@ -63,7 +64,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
             s << osc::BeginMessage("/clock/visibility.reply")
               << static_cast<int32_t>(mSuperClock->getLinkVisibility())
               << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
@@ -82,7 +83,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
             s << osc::BeginMessage("/clock/audio/publish.reply")
               << static_cast<int32_t>(mSuperClock->isLinkAudioPublishEnabled() ? 1 : 0)
               << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
@@ -102,7 +103,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
             s << osc::BeginMessage("/clock/peer_name.reply")
               << mSuperClock->peerName()
               << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
@@ -120,7 +121,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
                   << c.peerId.c_str() << c.peerName.c_str();
             }
             s << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
@@ -163,7 +164,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
             s << osc::BeginMessage("/clock/audio/input/add.reply")
               << static_cast<int32_t>(ok ? 1 : 0)
               << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
@@ -215,7 +216,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
             s << osc::BeginMessage("/clock/audio/input/latency/set.reply")
               << static_cast<int32_t>(ok ? 1 : 0)
               << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
@@ -245,7 +246,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
             s << osc::BeginMessage("/clock/audio/sink/add.reply")
               << static_cast<int32_t>(ok ? 1 : 0)
               << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
@@ -273,7 +274,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
                   << static_cast<int32_t>(as.hasSubscriber ? 1 : 0);
             }
             s << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
@@ -320,7 +321,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
                   << static_cast<float>(st.latencySeconds);
             }
             s << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
@@ -346,7 +347,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
             // only fire on actual deltas — without this, joining a session at the
             // same tempo as our local default leaves the subscriber stuck on its
             // own default until something moves.
-            if (!mEgress->subscribeCallerToLinkNotify()) return true;  // no addressable caller
+            if (!mEgress->subscribeCallerToLinkNotify(token)) return true;  // no addressable caller
             const double initTempo = mSuperClock->getBpm();
             const int32_t initPeers = static_cast<int32_t>(mSuperClock->numPeers());
             {
@@ -354,7 +355,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
                 osc::OutboundPacketStream s(buf, sizeof(buf));
                 s << osc::BeginMessage("/clock/notify/tempo") << initTempo
                   << osc::EndMessage;
-                mEgress->sendToCaller(reinterpret_cast<const uint8_t*>(s.Data()),
+                mEgress->sendToCaller(token, reinterpret_cast<const uint8_t*>(s.Data()),
                                    static_cast<uint32_t>(s.Size()));
             }
             {
@@ -362,14 +363,14 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
                 osc::OutboundPacketStream s(buf, sizeof(buf));
                 s << osc::BeginMessage("/clock/notify/peers") << initPeers
                   << osc::EndMessage;
-                mEgress->sendToCaller(reinterpret_cast<const uint8_t*>(s.Data()),
+                mEgress->sendToCaller(token, reinterpret_cast<const uint8_t*>(s.Data()),
                                    static_cast<uint32_t>(s.Size()));
             }
             return true;
         }
 
         if (std::strcmp(addr, "/clock/notify/unsubscribe") == 0) {
-            mEgress->unsubscribeCallerFromLinkNotify();
+            mEgress->unsubscribeCallerFromLinkNotify(token);
             return true;
         }
 
@@ -396,7 +397,7 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
                   << static_cast<int32_t>(p.audioPort);
             }
             s << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
@@ -410,7 +411,8 @@ bool EngineControl::handleLinkCommand(const uint8_t* data, uint32_t size) {
     return false;
 }
 
-bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) {
+bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint8_t* data, uint32_t size) {
+    const uint32_t token = meta.sourceId;
     if (!mEngine || size < 20) return false;
 
     // Fast prefix check
@@ -424,13 +426,13 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
 
         if (std::strcmp(addr, "/supersonic/notify") == 0) {
             // Register the caller as a notify target for lifecycle events.
-            const bool firstRegistration = mEgress->subscribeCaller();
+            const bool firstRegistration = mEgress->subscribeCaller(token);
             char buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/supersonic/notify.reply")
               << static_cast<osc::int32>(1)
               << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
 
             // Send current device state ONLY for newly registered clients.
@@ -445,7 +447,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
 
         } else if (std::strcmp(addr, "/supersonic/notify/unregister") == 0) {
             // Remove the caller from notify targets (polite shutdown).
-            mEgress->unsubscribeCaller();
+            mEgress->unsubscribeCaller(token);
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/notify/clear") == 0) {
@@ -467,14 +469,14 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
                 for (auto r : dev.availableSampleRates)
                     s << static_cast<float>(r);
                 s << osc::EndMessage;
-                mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+                mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                           static_cast<uint32_t>(s.Size()));
             }
             // Done marker
             char buf[256];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/supersonic/devices/list.done") << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
 
@@ -490,7 +492,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
               << static_cast<osc::int32>(dev.activeOutputChannels)
               << static_cast<osc::int32>(dev.activeInputChannels)
               << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
 
@@ -522,7 +524,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
                   << static_cast<osc::int32>(error.empty() ? 1 : 0);
                 if (!error.empty()) s << error.c_str();
                 s << osc::EndMessage;
-                mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+                mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                           static_cast<uint32_t>(s.Size()));
                 if (error.empty()) mEngine->sendDeviceReport();
                 return true;
@@ -541,7 +543,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
                   << static_cast<osc::int32>(result.success ? 1 : 0);
                 if (!result.success) s << result.error.c_str();
                 s << osc::EndMessage;
-                mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+                mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                           static_cast<uint32_t>(s.Size()));
                 if (result.success) mEngine->sendDeviceReport();
                 return true;
@@ -557,7 +559,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
                 osc::OutboundPacketStream s(buf, sizeof(buf));
                 s << osc::BeginMessage("/supersonic/devices/switch.reply")
                   << static_cast<osc::int32>(1) << osc::EndMessage;
-                mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+                mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                           static_cast<uint32_t>(s.Size()));
             }
             return true;
@@ -576,7 +578,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
             s << osc::BeginMessage("/supersonic/devices/reopen.reply")
               << static_cast<osc::int32>(accepted ? 1 : 0)
               << reason.c_str() << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
 
@@ -609,7 +611,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
             if (!error.empty())
                 s << error.c_str();
             s << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
 
@@ -623,7 +625,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
             for (auto& d : drivers)
                 s << d.c_str();
             s << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
 
@@ -646,7 +648,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
                 s << static_cast<osc::int32>(0) << result.error.c_str();
             }
             s << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             if (result.success)
                 mEngine->sendDeviceReport();
@@ -676,7 +678,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
                 s << static_cast<osc::int32>(0) << result.error.c_str();
             }
             s << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             if (result.success)
                 mEngine->sendDeviceReport();
@@ -706,7 +708,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
                 s << static_cast<osc::int32>(0) << result.error.c_str();
             }
             s << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
 
@@ -721,7 +723,7 @@ bool EngineControl::handleSupersonicCommand(const uint8_t* data, uint32_t size) 
                 s << static_cast<osc::int32>(0) << result.error.c_str();
             }
             s << osc::EndMessage;
-            mEgress->reply(reinterpret_cast<const uint8_t*>(s.Data()),
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
 

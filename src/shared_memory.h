@@ -15,7 +15,8 @@
 #include <cstring>
 
 #include "memory_profile.h"
-#include "scsynth/common/shm_audio_buffer.hpp"
+#include "ring/ring.h"   // Message, MESSAGE_MAGIC, PADDING_MAGIC
+#include "synth/common/shm_audio_buffer.hpp"
 
 namespace supersonic {
 
@@ -75,7 +76,7 @@ constexpr uint32_t NODE_TREE_ENTRY_SIZE = 72;  // 6 x int32 (24) + def_name (32)
 constexpr uint32_t NODE_TREE_SIZE = NODE_TREE_HEADER_SIZE + (NODE_TREE_MIRROR_MAX_NODES * NODE_TREE_ENTRY_SIZE); // ~57KB
 
 // Audio buffer multi-slot ring. Struct, writer, and reader live in
-// scsynth/common/shm_audio_buffer.hpp. Slot 0 carries the master output
+// synth/common/shm_audio_buffer.hpp. Slot 0 carries the master output
 // mix; slots 1..N-1 are written by AudioOut2 UGens. Per-slot ring
 // duration is controlled by SUPERSONIC_SHM_AUDIO_SECONDS (1s in
 // production, larger in test builds so captures don't wrap).
@@ -86,7 +87,7 @@ constexpr uint32_t OUT_BUFFER_START   = IN_BUFFER_START + IN_BUFFER_SIZE;
 constexpr uint32_t NRT_OUT_BUFFER_START = OUT_BUFFER_START + OUT_BUFFER_SIZE;
 constexpr uint32_t CONTROL_START      = NRT_OUT_BUFFER_START + NRT_OUT_BUFFER_SIZE;
 constexpr uint32_t METRICS_START      = CONTROL_START + CONTROL_SIZE;
-constexpr uint32_t NODE_TREE_START = METRICS_START + METRICS_SIZE;  // Contiguous with METRICS for efficient postMessage copying
+constexpr uint32_t NODE_TREE_START = METRICS_START + METRICS_SIZE;  // contiguous with METRICS for efficient postMessage copying
 constexpr uint32_t NTP_START_TIME_START = NODE_TREE_START + NODE_TREE_SIZE;
 constexpr uint32_t DRIFT_OFFSET_START = NTP_START_TIME_START + NTP_START_TIME_SIZE;
 constexpr uint32_t GLOBAL_OFFSET_START = DRIFT_OFFSET_START + DRIFT_OFFSET_SIZE;
@@ -154,14 +155,7 @@ constexpr uint32_t NATIVE_STAT_BUFFER_BYTES = 8;
 // Total buffer size (for validation)
 constexpr uint32_t TOTAL_BUFFER_SIZE  = NATIVE_STATS_START + NATIVE_STATS_SIZE;
 
-// Message structure
-struct alignas(4) Message {
-    uint32_t magic;       // 0xDEADBEEF for validation
-    uint32_t length;      // Total message size including header
-    uint32_t sequence;    // Sequence number for ordering
-    uint32_t sourceId;    // Writer identity (0 = main thread, 1+ = workers). Matches JS ring_buffer_core.js header layout.
-    // payload follows (binary data - OSC or text depending on buffer)
-};
+// Message frame (magic/length/sequence/sourceId) is defined in ring/ring.h.
 
 // Egress framing: every frame on both egress rings is
 // Message{sourceId = origin token} + [route:u32][osc].
@@ -172,6 +166,7 @@ enum EgressRoute : uint32_t {
     EGRESS_BROADCAST_LINK   = 3,  // fan out to all Link subscribers
     EGRESS_BROADCAST_MIDI   = 4,  // fan out to all MIDI-notify subscribers
     EGRESS_BROADCAST_GAMEPAD = 5, // fan out to all gamepad-notify subscribers
+    EGRESS_BROADCAST_OSC    = 6,  // fan out to all external-OSC-cue subscribers
 };
 constexpr uint32_t EGRESS_ROUTE_SIZE = sizeof(uint32_t);  // leading route word
 
@@ -226,7 +221,7 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> scheduler_lates;         // 8: Bundles executed after scheduled time
 
     // OSC Out metrics [9-10]
-    // Writers: native — OscUdpServer.cpp (handlePacket); web — sab_transport.js.
+    // Writers: native — UdpOscTransport.cpp (onDatagram); web — sab_transport.js.
     std::atomic<uint32_t> osc_out_messages_sent;   // 9
     std::atomic<uint32_t> osc_out_bytes_sent;      // 10
 
@@ -300,7 +295,7 @@ struct alignas(4) PerformanceMetrics {
     // Mirrored from SuperClock each block by publishClockMetrics() — sourced
     // from the SuperClockState SAB mirror, so live on web and native alike
     // (independent of Link). Floats stored as fixed-point (see web schema /
-    // panel display formats). Supersedes the native-only link_* clock slots.
+    // panel display formats).
     std::atomic<uint32_t> clock_tempo_mbpm;         // 46: tempo, milli-BPM (bpm * 1000)
     std::atomic<uint32_t> clock_beat_centi;         // 47: beat position * 100
     std::atomic<uint32_t> clock_phase_centi;        // 48: phase within quantum * 100
@@ -389,13 +384,12 @@ struct alignas(8) NodeEntry {
 // answer per-write from the writer's fit check (canWriteMessage / the
 // writers' false return).
 constexpr uint32_t MAX_MESSAGE_SIZE = IN_BUFFER_SIZE - sizeof(Message);
-constexpr uint32_t MESSAGE_MAGIC = 0xDEADBEEF;
-constexpr uint32_t PADDING_MAGIC = 0xBADDCAFE;  // Marks padding at end-of-ring (frame restarts at offset 0)
+// MESSAGE_MAGIC / PADDING_MAGIC are defined in ring/ring.h.
 constexpr uint8_t RING_PADDING_MARKER = 0xFF;  // Byte marking ring-buffer padding (skip to position 0 on wrap)
 
 // Scheduler configuration is sized per device via memory_profile.h
 // (defaults: SCHEDULER_DATA_POOL_SIZE 512KB, SCHEDULER_SLOT_COUNT 512) and is
-// shared with scheduler/BundleScheduler.h, which includes the same profile.
+// shared with scheduler/EngineScheduler.h, which includes the same profile.
 
 // ============================================================================
 // BUFFER LAYOUT EXPORT (for JavaScript)
@@ -414,7 +408,7 @@ struct BufferLayout {
     uint32_t control_size;
     uint32_t metrics_start;
     uint32_t metrics_size;
-    // NODE_TREE is now contiguous with METRICS for efficient postMessage copying
+    // NODE_TREE is contiguous with METRICS for efficient postMessage copying
     uint32_t node_tree_start;
     uint32_t node_tree_size;
     uint32_t node_tree_header_size;
@@ -470,7 +464,6 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     CONTROL_SIZE,
     METRICS_START,
     METRICS_SIZE,
-    // NODE_TREE now contiguous with METRICS
     NODE_TREE_START,
     NODE_TREE_SIZE,
     NODE_TREE_HEADER_SIZE,

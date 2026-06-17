@@ -1,8 +1,9 @@
 # Rust workspace for SuperSonic's Rust-implemented subsystems.
 #
-# * `supersonic-osc`     — shared OSC codec + name normalisation (std-only).
+# * `supersonic-osc`     — shared OSC codec (messages + bundles) + name normalisation.
 # * `supersonic-midi`    — midir-based MIDI subsystem.
 # * `supersonic-gamepad` — gilrs-based game-controller subsystem.
+# * `supersonic-osc-net` — std::net OSC networking (cue server + outbound send).
 # * `supersonic-native`  — umbrella staticlib bundling the native subsystems
 #                          (one Rust staticlib per binary; CMake links this).
 #
@@ -14,6 +15,7 @@ members = [
     "supersonic-osc",
     "supersonic-midi",
     "supersonic-gamepad",
+    "supersonic-osc-net",
     "supersonic-native",
 ]
 

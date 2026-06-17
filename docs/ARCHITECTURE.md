@@ -194,7 +194,7 @@ scsynth writes replies (e.g. `/done`, `/n_go`) to the OUT ring buffer. This happ
 
 **SAB mode — the reply worker (`osc_in_worker.js`)**
 
-The main thread needs to hear replies, but `Atomics.wait()` is forbidden on the main thread (it would freeze the UI). So a dedicated Web Worker — the reply worker — sits in a blocking `Atomics.wait()` loop on the OUT buffer's head pointer. When scsynth writes a reply and advances the head, the reply worker wakes up, reads the message, and forwards it to the main thread via postMessage. This is the only reason the reply worker exists: it bridges SAB replies to the main thread's event loop.
+The main thread needs to hear replies, but `Atomics.wait()` is not allowed on the main thread (it would freeze the UI). So a dedicated Web Worker — the reply worker — sits in a blocking `Atomics.wait()` loop on the OUT buffer's head pointer. When scsynth writes a reply and advances the head, the reply worker wakes up, reads the message, and forwards it to the main thread via postMessage. This is the only reason the reply worker exists: it bridges SAB replies to the main thread's event loop.
 
 **PM mode — no reply worker needed**
 
@@ -223,7 +223,7 @@ Same pattern as OSC replies but via DEBUG buffer and `onDebug` event.
 | AudioWorklet | `js/workers/scsynth_audio_worklet.js` |
 | NTP timing | `js/lib/ntp_timing.js` |
 | WASM entry | `src/audio_processor.cpp` |
-| WASM scheduler | `src/scheduler/BundleScheduler.h` |
+| WASM scheduler | `src/scheduler/EngineScheduler.h` |
 | Memory layout | `src/shared_memory.h` |
 
 ## Memory Layout

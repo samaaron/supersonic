@@ -15,6 +15,7 @@
 
 struct SsGamepad;    // rust/supersonic-gamepad/cpp/ss_gamepad.h
 class OscEgress;
+struct DrainCallCtx;
 
 class GamepadControl {
 public:
@@ -24,7 +25,7 @@ public:
     // Handle one "/gamepad/" command off the audio thread (NRT gateway).
     // Returns true if it belongs to this subsystem (always, for a "/gamepad/"
     // prefix).
-    bool handleGamepadCommand(const uint8_t* data, uint32_t size);
+    bool handleGamepadCommand(const DrainCallCtx& meta, const uint8_t* data, uint32_t size);
 
 private:
     // ss_gamepad_* host callback (ctx = this). May fire on the subsystem's
@@ -33,4 +34,7 @@ private:
 
     SsGamepad* mGamepad = nullptr;
     OscEgress* mEgress  = nullptr;
+    // Origin token held for synchronous emitCb REPLYs during handleGamepadCommand
+    // (the Rust callback carries no call ctx). Async device emits broadcast.
+    uint32_t   mReplyToken = 0;
 };

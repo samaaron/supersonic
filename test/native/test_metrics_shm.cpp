@@ -16,7 +16,7 @@
 #include "EngineFixture.h"
 #include "OscBuilder.h"
 #include "OscTestUtils.h"
-#include "src/scsynth/common/server_shm.hpp"
+#include "src/synth/common/server_shm.hpp"
 #include "src/shared_memory.h"
 
 extern "C" uint8_t ring_buffer_storage[];

@@ -6,9 +6,9 @@
  *
  * Compile:
  *   g++ -std=c++17 -O2 \
- *     -I src/scsynth/include/plugin_interface \
- *     -I src/scsynth/include/common \
- *     -I src/scsynth/include/server \
+ *     -I src/synth/include/plugin_interface \
+ *     -I src/synth/include/common \
+ *     -I src/synth/include/server \
  *     -DNDEBUG \
  *     -o test_ugen_harness test_ugen_harness.cpp
  */
@@ -124,7 +124,7 @@ void Clip_next_k(Clip* unit, int inNumSamples) {
     ZXP(out) = sc_clip(ZXP(in), lo, hi);
 }
 
-// Clip_Ctor
+// Clip_next_ii: block-rate Clip with scalar bounds
 void Clip_next_ii(Clip* unit, int inNumSamples) {
     float* out = ZOUT(0);
     float* in = ZIN(0);

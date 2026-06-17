@@ -5,6 +5,7 @@
  */
 #include "GamepadControl.h"
 
+#include "src/IngressCallCtx.h"
 #include "OscEgress.h"
 #include "ss_gamepad.h"
 #include "osc/OscReceivedElements.h"
@@ -27,19 +28,22 @@ void GamepadControl::shutdown() {
     }
 }
 
-bool GamepadControl::handleGamepadCommand(const uint8_t* data, uint32_t size) {
+bool GamepadControl::handleGamepadCommand(const DrainCallCtx& meta, const uint8_t* data, uint32_t size) {
+    const uint32_t token = meta.sourceId;
     if (size < 12 || std::memcmp(data, "/gamepad/", 9) != 0) return false;
+    // Hold the origin for synchronous emitCb REPLYs during this call (see header).
+    mReplyToken = token;
 
     // Subscription drives the egress audience (owned by the transport). The
     // address is the leading, NUL-terminated OSC string.
     const char* addr = reinterpret_cast<const char*>(data);
     if (std::strcmp(addr, "/gamepad/notify/subscribe") == 0) {
-        if (mEgress && mEgress->subscribeCallerToGamepadNotify() && mGamepad)
+        if (mEgress && mEgress->subscribeCallerToGamepadNotify(token) && mGamepad)
             ss_gamepad_emit_devices(mGamepad);  // devices snapshot to the new subscriber
         return true;
     }
     if (std::strcmp(addr, "/gamepad/notify/unsubscribe") == 0) {
-        if (mEgress) mEgress->unsubscribeCallerFromGamepadNotify();
+        if (mEgress) mEgress->unsubscribeCallerFromGamepadNotify(token);
         return true;
     }
 
@@ -76,7 +80,7 @@ void GamepadControl::emitCb(void* ctx, int32_t kind, const uint8_t* osc, uint32_
     auto* self = static_cast<GamepadControl*>(ctx);
     if (!self->mEgress) return;
     if (kind == SS_GAMEPAD_EMIT_REPLY) {
-        self->mEgress->reply(osc, len);
+        self->mEgress->reply(self->mReplyToken, osc, len);
     } else {
         logGamepadDevicesChange(osc, len);
         self->mEgress->broadcastGamepadNotify(osc, len);

@@ -14,7 +14,7 @@
 #if !defined(_WIN32)
 
 #include <catch2/catch_test_macros.hpp>
-#include "src/scsynth/common/server_shm.hpp"
+#include "src/synth/common/server_shm.hpp"
 
 #include <fcntl.h>
 #include <sys/mman.h>

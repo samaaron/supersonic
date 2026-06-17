@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const testDir = __dirname;
-const novaSimdDir = resolve(__dirname, '../../src/scsynth/external_libraries/nova-simd');
+const novaSimdDir = resolve(__dirname, '../../src/synth/external_libraries/nova-simd');
 
 // Recompile to ensure we test the latest code
 console.log('Compiling SIMD test...');

@@ -12,7 +12,7 @@
  *
  * Slots 1..N-1 are driven by AudioOut2 UGens, independent of this class.
  *
- * Layout (matches src/scsynth/common/shm_audio_buffer.hpp):
+ * Layout (matches src/synth/common/shm_audio_buffer.hpp):
  *
  *     offset 0   atomic<u32> enabled
  *     offset 4   u32         sample_rate

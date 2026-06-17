@@ -5,6 +5,7 @@
  */
 #include "MidiControl.h"
 
+#include "src/IngressCallCtx.h"
 #include "OscEgress.h"
 #include "src/SuperClock.h"
 #include "src/timeline_osc.h"
@@ -41,19 +42,22 @@ void MidiControl::shutdown() {
     }
 }
 
-bool MidiControl::handleMidiCommand(const uint8_t* data, uint32_t size) {
+bool MidiControl::handleMidiCommand(const DrainCallCtx& meta, const uint8_t* data, uint32_t size) {
+    const uint32_t token = meta.sourceId;
     if (size < 8 || std::memcmp(data, "/midi/", 6) != 0) return false;
+    // Hold the origin for synchronous emitCb REPLYs during this call (see header).
+    mReplyToken = token;
 
     // Subscription drives the egress audience (owned by the transport). The
     // address is the leading, NUL-terminated OSC string.
     const char* addr = reinterpret_cast<const char*>(data);
     if (std::strcmp(addr, "/midi/notify/subscribe") == 0) {
-        if (mEgress && mEgress->subscribeCallerToMidiNotify() && mMidi)
+        if (mEgress && mEgress->subscribeCallerToMidiNotify(token) && mMidi)
             ss_midi_emit_ports(mMidi);   // ports snapshot to the new subscriber
         return true;
     }
     if (std::strcmp(addr, "/midi/notify/unsubscribe") == 0) {
-        if (mEgress) mEgress->unsubscribeCallerFromMidiNotify();
+        if (mEgress) mEgress->unsubscribeCallerFromMidiNotify(token);
         return true;
     }
 
@@ -104,16 +108,6 @@ bool MidiControl::handleClockOutVerb(const uint8_t* data, uint32_t size) {
     return true;
 }
 
-void MidiControl::dispatchOsc(const uint8_t* osc, uint32_t len) {
-    // Deferred events carry the same /midi/* surface as immediate commands —
-    // Sonic Pi's midi_clock_beat arrives as /midi/clock/beat wrapped in a
-    // timetagged /midi/at — so clock-OUT verbs must be intercepted here exactly
-    // as in handleMidiCommand. MidiClockOut's command handlers record intent
-    // under a mutex, so this is safe on the MIDI dispatch thread.
-    if (handleClockOutVerb(osc, len)) return;
-    if (mMidi) ss_midi_handle_osc(mMidi, osc, len);
-}
-
 void MidiControl::refreshDevices() {
     if (mMidi) ss_midi_refresh(mMidi);
 }
@@ -151,7 +145,7 @@ void MidiControl::emitCb(void* ctx, int32_t kind, const uint8_t* osc, uint32_t l
     auto* self = static_cast<MidiControl*>(ctx);
     if (!self->mEgress) return;
     if (kind == SS_MIDI_EMIT_REPLY) {
-        self->mEgress->reply(osc, len);
+        self->mEgress->reply(self->mReplyToken, osc, len);
     } else {
         logMidiPortsChange(osc, len);
         self->mEgress->broadcastMidiNotify(osc, len);

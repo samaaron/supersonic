@@ -17,16 +17,16 @@
 #include <sndfile.h>
 
 // scsynth headers for World / SndBuf access
-#include "scsynth/include/plugin_interface/SC_World.h"
-#include "scsynth/include/plugin_interface/SC_SndBuf.h"
-#include "scsynth/include/common/clz.h"
+#include "synth/include/plugin_interface/SC_World.h"
+#include "synth/include/plugin_interface/SC_SndBuf.h"
+#include "synth/include/common/clz.h"
 #include "src/buffer_commands.h"
 
 // Shared memory layout + ring buffer types
 #include "src/shared_memory.h"
 
 // scsynth allocator (zalloc/zfree use aligned alloc matching free_alig)
-#include "scsynth/server/SC_Prototypes.h"
+#include "synth/server/SC_Prototypes.h"
 
 // oscpack for building /done reply
 #include "osc/OscOutboundPacketStream.h"

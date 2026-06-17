@@ -3,57 +3,52 @@
  */
 #include "RingReader.h"
 #include <cstdio>
-#include <cstring>
 
-RingReader::RingReader(const char* threadName) : juce::Thread(threadName) {
-    mDrains.reserve(4);  // fixed before startThread(); reserve so run() never reallocs
+void RingReader::start() {
+    if (mThread.joinable()) return;
+    mExit.store(false, std::memory_order_release);
+    mThread = std::thread([this] { run(); });
 }
 
-RingReader::~RingReader() {
-    signalThreadShouldExit();
-    // A bare notify_all() cannot break std::atomic::wait(old): the wait only
-    // returns when the value DIFFERS from old, so the value must change first.
-    // Bump-then-notify (signal already set above) guarantees the run loop wakes,
-    // sees threadShouldExit(), and exits, with no dependence on an external
-    // processCount tick (the headless driver may already have stopped ticking).
-    // Without this, stopThread(2000) times out and JUCE resorts to killThread()
-    // / pthread_cancel(), which can deadlock under ThreadSanitizer.
+void RingReader::stop() {
+    if (!mThread.joinable()) return;
+    mExit.store(true, std::memory_order_release);
+    // A bare notify cannot break std::atomic::wait(old): the wait only returns
+    // when the value DIFFERS from old, so the value must change first. Bump-then-
+    // notify (exit already set) guarantees the run loop wakes, sees mExit, and
+    // exits with no dependence on an external processCount tick.
     if (mWake) {
         mWake->fetch_add(1, std::memory_order_release);
         mWake->notify_all();
     }
-    // A thread parked in pause() waits on mPauseRequest, not the wake word —
-    // release it too so stopThread() never times out into killThread().
-    resume();
-    stopThread(2000);
+    resume();  // release a thread parked on mPauseRequest before joining
+    mThread.join();
 }
 
 void RingReader::pause() {
-    if (!isThreadRunning()) return;
-    // Self-pause would deadlock waiting for our own park acknowledgement.
-    // It is also unnecessary: a drain handler that triggers the caller's
-    // critical section (e.g. a cold swap run from an OSC command on the NRT
-    // gateway thread) is by definition not draining concurrently with it.
-    if (juce::Thread::getCurrentThreadId() == getThreadId()) return;
+    if (!mThread.joinable()) return;
+    // Self-pause would deadlock waiting for our own park acknowledgement. It is
+    // also unnecessary: a drain handler that triggers the caller's critical
+    // section (e.g. a cold swap run from an OSC command on the NRT gateway
+    // thread) is by definition not draining concurrently with it.
+    if (std::this_thread::get_id() == mThread.get_id()) return;
     mPauseRequest.store(1, std::memory_order_release);
-    // Kick the wake word so a reader blocked on it re-checks the request
-    // (same bump-then-notify reasoning as the destructor above).
+    // Kick the wake word so a reader blocked on it re-checks the request.
     if (mWake) {
         mWake->fetch_add(1, std::memory_order_release);
         mWake->notify_all();
     }
-    // Park acknowledgement normally lands within one drain pass. Bound the
-    // wait anyway: a reader wedged behind a foreign lock must degrade to an
-    // unparked (pre-pause) swap, not hang the device switch.
+    // Park acknowledgement normally lands within one drain pass. Bound the wait
+    // anyway: a reader wedged behind a foreign lock must degrade to an unparked
+    // (pre-pause) swap, not hang the device switch.
     for (int waited = 0; mParked.load(std::memory_order_acquire) == 0; ++waited) {
-        if (!isThreadRunning()) return;
         if (waited >= 2000) {
             fprintf(stderr, "[%s] pause: reader did not park within 2s — "
-                    "proceeding unparked\n", getThreadName().toRawUTF8());
+                    "proceeding unparked\n", mName);
             fflush(stderr);
             return;
         }
-        juce::Thread::sleep(1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 
@@ -105,22 +100,23 @@ void RingReader::drainOne(Drain& d) {
 void RingReader::run() {
     if (mWake) mLastWake = mWake->load(std::memory_order_relaxed);
 
-    while (!threadShouldExit()) {
+    while (!mExit.load(std::memory_order_acquire)) {
         if (mWake) {
             mWake->wait(mLastWake);  // C++20 equivalent of Atomics.wait()
             mLastWake = mWake->load(std::memory_order_acquire);
         } else {
-            juce::Thread::sleep(1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
-        if (threadShouldExit()) break;
+        if (mExit.load(std::memory_order_acquire)) break;
 
         if (mPauseRequest.load(std::memory_order_acquire)) {
             // Acknowledge between drain passes — the release-store makes every
             // write of the pass visible to the pauser — then sleep until
             // resume() (or exit) clears the request.
             mParked.store(1, std::memory_order_release);
-            while (mPauseRequest.load(std::memory_order_acquire) && !threadShouldExit())
+            while (mPauseRequest.load(std::memory_order_acquire) &&
+                   !mExit.load(std::memory_order_acquire))
                 mPauseRequest.wait(1, std::memory_order_acquire);
             mParked.store(0, std::memory_order_relaxed);
             continue;

@@ -14,7 +14,7 @@
 
 #ifdef __EMSCRIPTEN__
 // WASM: emscripten's malloc already operates on pre-allocated linear memory
-#include "scsynth/common/malloc_aligned.hpp"
+#include "synth/common/malloc_aligned.hpp"
 inline void   supersonic_heap_init(size_t) {}
 inline void*  supersonic_heap_alloc(size_t size) { return nova::malloc_aligned(size); }
 inline void   supersonic_heap_free(void* ptr) { nova::free_aligned(ptr); }

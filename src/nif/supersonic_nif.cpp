@@ -53,9 +53,7 @@ static std::atomic<bool> g_juce_initialised{false};
 // (set_notification_pid); each receives every reply, broadcast and debug line as
 // an {osc_reply, Binary} / {debug, String} message. A process that has died is
 // detected lazily — enif_send returns 0 — and only that pid is dropped, never the
-// whole audience (the old single-pid context silently muted all replies on the
-// first failure). This is at least as good as native UDP, which can't detect a
-// dead peer at all and keeps stale targets until an explicit unsubscribe.
+// whole audience.
 //
 // notifyTokens/notifyPorts/linkSubscribed mirror the transport's subscriber gates
 // so the engine knows whether to bother emitting device- and Link-notify traffic;
@@ -139,7 +137,7 @@ static Subscribers g_subs;
 
 // ─── NifTransport — the engine→BEAM egress boundary ─────────────────────────
 //
-// The BEAM analogue of OscUdpServer: an IOscTransport injected into the engine
+// The BEAM analogue of UdpOscTransport: an IOscTransport injected into the engine
 // (via setTransport) so the NIF is a first-class peer, not a shared-memory
 // observer. Unlike CallbackTransport it delivers Link broadcasts and the
 // networkOnly Link snapshot — an out-of-process BEAM client can only see what
@@ -531,11 +529,8 @@ static void on_unload(ErlNifEnv*, void*) {
     // (MessageManager::doPlatformSpecificShutdown → ~AppDelegate) calls
     // NSRunLoop/NSNotificationCenter/NSApp APIs that require the main
     // thread.  on_unload runs on an arbitrary BEAM scheduler, causing
-    // an abort (trap 6).
-    //
-    // This is safe because on_unload only fires at VM shutdown (we pass
-    // NULL for both reload and upgrade in ERL_NIF_INIT, so hot reload
-    // is not supported).  The OS reclaims all process memory at exit.
+    // an abort (trap 6). on_unload only fires at VM shutdown (reload and
+    // upgrade are NULL in ERL_NIF_INIT), so the OS reclaims memory at exit.
 #else
     if (g_juce_initialised.load()) {
         juce::shutdownJuce_GUI();

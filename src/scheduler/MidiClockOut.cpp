@@ -3,7 +3,7 @@
  */
 #include "MidiClockOut.h"
 
-#include "EventScheduler.h"
+#include "EngineScheduler.h"
 #include "SuperClock.h"
 #include "shared_memory.h"
 #include "osc/OscOutboundPacketStream.h"
@@ -154,7 +154,7 @@ void MidiClockOut::generate(SuperClock& clock, double nowNtp) {
         size_t w = 0;
         for (size_t r = 0; r < mPending.size(); ++r) {
             if (mPending[r].atNtp <= horizonNtp) {
-                ss_defer_schedule(mPending[r].atNtp, EventScheduler::DEST_MIDI,
+                ss_defer_schedule(mPending[r].atNtp, SCHED_TAG_CLOCK, /*origin*/ 0,
                                   mPending[r].osc.data(),
                                   static_cast<uint32_t>(mPending[r].osc.size()));
             } else {
@@ -184,7 +184,7 @@ void MidiClockOut::generate(SuperClock& clock, double nowNtp) {
         const double horizonBeat = (horizonNtp - origin) * bpm / 60.0;
         p.gen.collect(horizonBeat, [&](double pulseBeat) {
             const double t = origin + pulseBeat * 60.0 / bpm;
-            ss_defer_schedule(t, EventScheduler::DEST_MIDI,
+            ss_defer_schedule(t, SCHED_TAG_CLOCK, /*origin*/ 0,
                               p.tickOsc.data(), static_cast<uint32_t>(p.tickOsc.size()));
         });
     }

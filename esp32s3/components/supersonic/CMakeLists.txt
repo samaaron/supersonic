@@ -14,15 +14,15 @@ get_filename_component(SS_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 set(SS_SRC "${SS_ROOT}/src")
 
 # scsynth server, minus the desktop/WASM-specific entry points and drivers.
-file(GLOB SCSYNTH_SERVER "${SS_SRC}/scsynth/server/*.cpp")
+file(GLOB SCSYNTH_SERVER "${SS_SRC}/synth/server/*.cpp")
 list(FILTER SCSYNTH_SERVER EXCLUDE REGEX
      "SC_.*Plugins\\.cpp$|scsynth_main\\.cpp$|SC_WebAudio\\.cpp$|SC_Wasm\\.cpp$|SC_WasmOscBuilder\\.cpp$")
 
-file(GLOB SCSYNTH_COMMON_CPP "${SS_SRC}/scsynth/common/*.cpp")
-file(GLOB SCSYNTH_COMMON_C   "${SS_SRC}/scsynth/common/*.c")
+file(GLOB SCSYNTH_COMMON_CPP "${SS_SRC}/synth/common/*.cpp")
+file(GLOB SCSYNTH_COMMON_C   "${SS_SRC}/synth/common/*.c")
 
 # All UGen plugins except MdaUGens (1.1 MB of embedded piano samples).
-file(GLOB SCSYNTH_PLUGINS "${SS_SRC}/scsynth/plugins/*.cpp")
+file(GLOB SCSYNTH_PLUGINS "${SS_SRC}/synth/plugins/*.cpp")
 list(FILTER SCSYNTH_PLUGINS EXCLUDE REGEX "MdaUGens\\.cpp$")
 
 set(OSCPACK
@@ -39,7 +39,6 @@ idf_component_register(
     # and the schedulers — rather than re-implementing the bundle drain/fire loop.
     "${SS_SRC}/audio_processor.cpp"
     "${SS_SRC}/lanes/lanes.cpp"
-    "${SS_SRC}/scheduler/EventScheduler.cpp"
     "${SS_SRC}/scheduler/MidiClockOut.cpp"
     "${SS_SRC}/supersonic_heap.cpp"
     "${SS_SRC}/mem_region.cpp"
@@ -52,25 +51,25 @@ idf_component_register(
     # timelineBpm, …), which live here — so the link gets a real definition
     # rather than leaning on --gc-sections to drop the device-dead branch.
     "${SS_SRC}/SuperClockLean.cpp"
-    "${SS_SRC}/scsynth/external_libraries/TLSF-2.4.6/src/tlsf.c"
+    "${SS_SRC}/synth/external_libraries/TLSF-2.4.6/src/tlsf.c"
     ${SCSYNTH_SERVER}
     ${SCSYNTH_COMMON_CPP}
     ${SCSYNTH_COMMON_C}
     ${SCSYNTH_PLUGINS}
     # sc3-plugins: Decimator (sample-rate/bit reduction) — sonic-pi-fx_bitcrusher.
-    "${SS_SRC}/scsynth/plugins/sc3-plugins/DistortionUGens.cpp"
+    "${SS_SRC}/synth/plugins/sc3-plugins/DistortionUGens.cpp"
     ${OSCPACK}
   INCLUDE_DIRS
     "${SS_SRC}/native/NativeShim"  # emscripten.h / boost stubs for the lean build
     "${SS_SRC}"
-    "${SS_SRC}/scsynth/include/common"
-    "${SS_SRC}/scsynth/include/plugin_interface"
-    "${SS_SRC}/scsynth/include/server"
-    "${SS_SRC}/scsynth/server"
-    "${SS_SRC}/scsynth/common"
-    "${SS_SRC}/scsynth/external_libraries/boost"
-    "${SS_SRC}/scsynth/external_libraries/nova-simd"
-    "${SS_SRC}/scsynth/external_libraries/TLSF-2.4.6/src"
+    "${SS_SRC}/synth/include/common"
+    "${SS_SRC}/synth/include/plugin_interface"
+    "${SS_SRC}/synth/include/server"
+    "${SS_SRC}/synth/server"
+    "${SS_SRC}/synth/common"
+    "${SS_SRC}/synth/external_libraries/boost"
+    "${SS_SRC}/synth/external_libraries/nova-simd"
+    "${SS_SRC}/synth/external_libraries/TLSF-2.4.6/src"
     "${SS_SRC}/vendor/oscpack"
   REQUIRES driver esp_timer)
 

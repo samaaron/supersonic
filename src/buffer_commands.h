@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "scsynth/include/plugin_interface/SC_SndBuf.h"
+#include "synth/include/plugin_interface/SC_SndBuf.h"
 
 struct World;
 

@@ -1,11 +1,10 @@
 import { test, expect, skipIfPostMessage } from './fixtures.mjs';
 
 /**
- * Behavioural test for the post-unification web scheduling path.
+ * Behavioural test for the web scheduling path.
  *
- * Since the ingress/scheduler moved out of JS (osc_channel.js is now a dumb
- * framer) and into the wasm engine, a timestamped OSC bundle is now scheduled
- * by the engine's BundleScheduler against SuperClock, where
+ * A timestamped OSC bundle is scheduled by the engine's EngineScheduler against
+ * SuperClock, where
  *
  *     engine_now_ntp = audioContextTime + ntp_start + drift + global   (SuperClockLean.cpp)
  *

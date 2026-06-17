@@ -13,6 +13,7 @@
 #include "EngineClock.h"
 #include "OscIngress.h"
 #include "IngressCallCtx.h"
+#include "ReplyChannel.h"
 
 // The ingress the audio-thread drain classifies through (extern in OscIngress.h).
 // Defined here — compiled by both native and wasm. Published by the engine at
@@ -45,23 +46,24 @@ static SuperClock& superClock() {
 #endif
 
 // scsynth includes
-#include "SC_World.h"              // from scsynth/include/plugin_interface/
-#include "SC_WorldOptions.h"       // from scsynth/include/server/
-#include "SC_Prototypes.h"         // from scsynth/server/
-#include "SC_EngineCore.h"         // from scsynth/server/ - shared self-driven bring-up
-#include "OSC_Packet.h"            // from scsynth/server/
-#include "SC_Reply.h"              // from scsynth/include/common/
-#include "SC_ReplyImpl.hpp"        // from scsynth/common/ - for ReplyAddress
-#include "SC_GraphDef.h"           // from scsynth/server/
-#include "SC_Graph.h"              // from scsynth/server/
-#include "SC_Group.h"              // from scsynth/server/
-#include "SC_HiddenWorld.h"        // from scsynth/server/
-#include "sc_msg_iter.h"           // from scsynth/include/plugin_interface/
+#include "SC_World.h"              // from synth/include/plugin_interface/
+#include "SC_WorldOptions.h"       // from synth/include/server/
+#include "SC_Prototypes.h"         // from synth/server/
+#include "SC_EngineCore.h"         // from synth/server/ - shared self-driven bring-up
+#include "OSC_Packet.h"            // from synth/server/
+#include "SC_Reply.h"              // from synth/include/common/
+#include "SC_ReplyImpl.hpp"        // from synth/common/ - for ReplyAddress
+#include "SC_GraphDef.h"           // from synth/server/
+#include "SC_Graph.h"              // from synth/server/
+#include "SC_Group.h"              // from synth/server/
+#include "SC_HiddenWorld.h"        // from synth/server/
+#include "sc_msg_iter.h"           // from synth/include/plugin_interface/
 #include "Samp.hpp"                // for sine table initialization
 
 // Scheduler includes
-#include "scheduler/BundleScheduler.h"
-#include "scheduler/EventScheduler.h"   // deferred-event scheduler (MIDI, …)
+#include "scheduler/EngineScheduler.h"  // unified scheduler: synth + MIDI/OSC
+#include "scheduler/schedule_parse.h"   // shared bundle / "/schedule" parsing
+#include "scheduler/fire_due.h"         // shared scheduler fire loop
 #include "scheduler/MidiClockOut.h"     // MIDI clock-OUT generation (SuperClock-timed)
 
 // Node tree for SharedArrayBuffer polling
@@ -92,16 +94,16 @@ void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
 // clock-core verbs inline and replies via the OUT ring. /clock is the control
 // namespace and is always consumed here — it never reaches scsynth. (Native
 // registers a different /clock route that forwards to the NRT thread.)
-static bool clockCoreRoute(void* /*routeCtx*/, void* callCtx,
+static bool clockCoreRoute(void* routeCtx, const void* callCtx,
                            const uint8_t* data, size_t len) {
     SuperClock* clk = g_active_superclock.load(std::memory_order_acquire);
-    if (!clk) return false;  // not ready — let the drain fall through
-    auto* cc = static_cast<DrainCallCtx*>(callCtx);
+    if (!clk) return true;   // clock route owns /clock/; drop during startup, don't error
+    auto* cc  = static_cast<const DrainCallCtx*>(callCtx);
+    auto* chan = static_cast<ReplyChannel*>(routeCtx);   // RT egress, bound at registration
+    uint32_t token = cc ? cc->sourceId : 0;              // reply metadata, threaded in
     handleClockCoreOsc(*clk, data, static_cast<uint32_t>(len),
-        [cc](const uint8_t* d, uint32_t n) {
-            SendReply(cc->reply,
-                      const_cast<char*>(reinterpret_cast<const char*>(d)),
-                      static_cast<int>(n));
+        [chan, token](const uint8_t* d, uint32_t n) {
+            if (chan) chan->reply(token, d, n);
         });
     return true;
 }
@@ -149,7 +151,7 @@ extern "C" {
 #endif
 
 // Include SuperCollider version info
-#include "scsynth/common/SC_Version.hpp"
+#include "synth/common/SC_Version.hpp"
 
 // Supersonic version — defined in supersonic_config.h (single source of truth)
 
@@ -193,28 +195,23 @@ extern "C" {
     // `shared_memory` here instead of the process-local ring_buffer_storage, so
     // the entire shared_memory.h blob — rings, control, metrics, node-tree,
     // audio taps and scope — lives in the segment and is observable
-    // cross-process. One pointer replaces the former per-region redirects.
+    // cross-process.
     uint8_t* g_external_segment = nullptr;
 
     uint8_t* shared_memory = nullptr;
     ControlPointers* control = nullptr;
     PerformanceMetrics* metrics = nullptr;
-    double* ntp_start_time = nullptr;        // NEW
-    std::atomic<int32_t>* drift_offset = nullptr;  // NEW
-    std::atomic<int32_t>* global_offset = nullptr; // NEW
+    double* ntp_start_time = nullptr;
+    std::atomic<int32_t>* drift_offset = nullptr;
+    std::atomic<int32_t>* global_offset = nullptr;
     bool memory_initialized = false;
     World* g_world = nullptr;
 
-    // OSC Bundle Scheduler - Index-based pool for RT-safety
-    // Events stored in pool (never copied), queue only stores small indices.
-    // SC_COLD_BSS: the ~100 KB data pool is touched lightly per block (one
-    // NextTime() compare), so it lives in bulk RAM on tiered targets; no-op
-    // off-ESP. The ctor still runs (placing into that RAM).
-    SC_COLD_BSS BundleScheduler g_scheduler;
-
-    // Deferred-event scheduler: "events in → stored → events out on time" for
-    // non-scsynth destinations (MIDI today). Ticked beside g_scheduler below.
-    SC_COLD_BSS EventScheduler g_event_scheduler;
+    // Unified event scheduler: one timed queue fanning out to the synth graph
+    // (run inline) and outbound MIDI/OSC (re-dispatched inline through
+    // dispatch()). SC_COLD_BSS: the data pool lives in bulk RAM on tiered
+    // targets; the ctor still runs (placing it there).
+    SC_COLD_BSS EngineScheduler g_scheduler;
 
     // File-scope state shared across threads: written by clear_scheduler()
     // on the control thread, read/updated by process_audio() on the audio
@@ -277,20 +274,30 @@ extern "C" {
         return static_cast<int64_t>((static_cast<uint64_t>(s) << 32) | f);
     }
 
-    // Helper: Check if OSC data is a bundle
-    bool is_bundle(const char* data, uint32_t size) {
-        if (size < 16) return false;  // Minimum bundle size
-        return strncmp(data, "#bundle", 7) == 0;
+    // The engine's standard reply channel: replies go out the OUT ring. Carries
+    // the caller's `origin` token in mReplyData so osc_reply_to_ring_buffer can
+    // route the reply back to that client (0 = broadcast). Used for every synth
+    // perform (immediate and scheduled), so it lives in one place.
+    ReplyAddress ring_reply(uint32_t origin) {
+        ReplyAddress r = {};
+        r.mProtocol  = kWeb;
+        r.mReplyFunc = osc_reply_to_ring_buffer;
+        r.mReplyData = reinterpret_cast<void*>(static_cast<uintptr_t>(origin));
+        return r;
     }
 
-    // Helper: Extract NTP timetag from bundle (8 bytes at offset 8)
-    uint64_t extract_timetag(const char* bundle_data) {
-        uint64_t timetag = 0;
-        for (int i = 0; i < 8; i++) {
-            timetag = (timetag << 8) | (uint8_t)bundle_data[8 + i];
-        }
-        return timetag;
+#ifdef __EMSCRIPTEN__
+    // The RT egress as a generic ReplyChannel: emit one OSC to the OUT ring,
+    // routed by the per-call token. Lets the audio-thread control routes (wasm
+    // /clock) reply through the backend contract without any scsynth reply type.
+    void rt_reply_emit(void*, uint32_t token, const uint8_t* osc, uint32_t len) {
+        ReplyAddress addr = ring_reply(token);
+        osc_reply_to_ring_buffer(
+            &addr, const_cast<char*>(reinterpret_cast<const char*>(osc)),
+            static_cast<int>(len));
     }
+    ReplyChannel g_rt_reply{ &rt_reply_emit, nullptr };
+#endif
 
     // Helper: Update scheduler depth metric and peak tracking
     static inline void update_scheduler_depth_metric(uint32_t depth) {
@@ -315,9 +322,9 @@ extern "C" {
         metrics->scheduler_queue_dropped.fetch_add(1, std::memory_order_relaxed);
     }
 
-    // Clear the WASM-side bundle scheduler.
+    // Clear the event scheduler (all pending synth bundles + outbound MIDI/OSC).
     // Called from the worklet JS layer (via postMessage flag) to flush
-    // all pending scheduled bundles without going through the ring buffer.
+    // everything pending without going through the ring buffer.
     //
     // Note: the IN ring buffer is drained separately by the JS worklet in its
     // message handler (immediately on receiving clearSched), not here. Draining
@@ -334,26 +341,62 @@ extern "C" {
         gap_log_count.store(0, std::memory_order_relaxed);
         late_count.store(0, std::memory_order_relaxed);
         update_scheduler_depth_metric(0);
-        g_scheduler.RequestClear();
+        g_scheduler.requestClear();
     }
 
-    // RT-safe bundle scheduling - no malloc!
-    // Returns true if scheduled, false if queue full or data pool exhausted.
-    // Variable-size: bundles up to the pool's free space are accepted.
-    bool schedule_bundle(World* world, int64_t ntp_time, int64_t current_osc_time,
-                        const char* data, int32_t size, const ReplyAddress& reply_addr) {
-        if (!g_scheduler.Add(world, ntp_time, data, size, reply_addr)) {
-            ss_log("ERROR: Scheduler full — queue=%d pool=%u/%u bytes, bundle=%d bytes",
-                         g_scheduler.Size(), g_scheduler.DataPoolUsed(),
-                         g_scheduler.DataPoolCapacity(), size);
-            increment_scheduler_drop_metric();
-            update_scheduler_depth_metric(g_scheduler.Size());
-            return false;
+    // ── The two engine entry points, shared by every host (WASM/native/embedded).
+    // Once OSC bytes leave the IN ring, everything funnels through these. ─────────
+
+    // Route an OSC message to its handler NOW (synth inline / control / backend).
+    // `when` is the message's intended OSC timetag (0 = immediate); the synth
+    // backend derives its sub-block sample offset from it — every other handler
+    // ignores it. `token` is the sender/origin, threaded through for reply routing.
+    // `blockTime` is this block's start in OSC time — the reference the synth
+    // backend subtracts `when` from for its sub-block offset. Threaded explicitly
+    // (not a global) so the offset's only input is the call ctx; 0 for immediate.
+    void dispatch(const uint8_t* osc, uint32_t len, uint32_t token,
+                  int64_t when, int64_t blockTime) {
+        const DrainCallCtx cc{ token, when, blockTime };
+        OscIngress* ig = g_active_ingress.load(std::memory_order_acquire);
+        if (ig && ig->ingest(osc, len, &cc)) return;
+        // Nothing claimed it: no matching route and no default registered (e.g. a
+        // synth message in a no-synth build). Drop, and log rate-limited so junk
+        // can't flood the audio-thread log.
+        static std::atomic<uint32_t> noBackendLog{0};
+        if (noBackendLog.fetch_add(1, std::memory_order_relaxed) < 16) {
+            uint32_t a = 0; while (a < len && osc[a] != '\0') ++a;
+            ss_log("ERROR: no backend for OSC %.*s — dropped",
+                   static_cast<int>(a), reinterpret_cast<const char*>(osc));
         }
+    }
 
-        update_scheduler_depth_metric(g_scheduler.Size());
-
-        return true;
+    // Defer an OSC message until `when` (its OSC timetag), carrying its sender
+    // token; the fire loop drains due events and calls dispatch(osc, token, when).
+    // `tag` groups events for /sched/flush.
+    //
+    // Fail-open: the IN-ring drain is in-order, so back-pressuring here (leaving
+    // the frame in the ring) would head-of-line-block every later message —
+    // including immediate commands and the /sched/flush that frees space. A full
+    // scheduler holds far-future events that free no space for many blocks, so
+    // that stall is unbounded. An un-schedulable event is therefore dropped (and
+    // counted), never retained, so command intake never wedges. The scheduler is
+    // sized so that, within a sane lookahead, this drop does not happen in normal
+    // use; a drop means the producer scheduled further ahead than the pool holds.
+    void scheduled_dispatch(const uint8_t* osc, uint32_t len, uint32_t token,
+                            int64_t when, uint32_t tag) {
+        if (len > EngineScheduler::kMaxPayload) {
+            ss_log("WARNING: scheduled message too large (%u bytes, max %u) - dropped",
+                   len, EngineScheduler::kMaxPayload);
+            increment_scheduler_drop_metric();
+            return;
+        }
+        if (g_scheduler.full() || !g_scheduler.addScheduled(when, tag, token, osc, len)) {
+            ss_log("WARNING: scheduler full (%d events) - scheduled message dropped",
+                   g_scheduler.size());
+            increment_scheduler_drop_metric();
+            return;
+        }
+        update_scheduler_depth_metric(g_scheduler.size());
     }
 
     // Initialize memory pointers. The arena is the public POSIX segment when
@@ -389,11 +432,13 @@ extern "C" {
         g_active_superclock.store(&superClock(), std::memory_order_release);
 
         // The wasm audio-thread ingress: /clock is the only control namespace
-        // here (no NRT thread for /supersonic or Link-session verbs). Register it
-        // and publish; unmatched packets fall through to the audio plane.
+        // here (no NRT thread for /supersonic or Link-session verbs). The synth
+        // plane is the default route, so unmatched packets perform inline.
         static OscIngress wasm_ingress;
-        if (wasm_ingress.routeCount() == 0)
-            wasm_ingress.registerRoute("/clock/", &clockCoreRoute, nullptr);
+        if (wasm_ingress.routeCount() == 0) {
+            wasm_ingress.registerRoute("/clock/", &clockCoreRoute, &g_rt_reply);
+            wasm_ingress.setDefault(&ss_synth_default_route, nullptr);
+        }
         g_active_ingress.store(&wasm_ingress, std::memory_order_release);
 #endif
 
@@ -539,11 +584,8 @@ extern "C" {
         }
 #endif
 #ifndef __EMSCRIPTEN__
-        // Native: sharedMemoryID is written at index 17 (JuceAudioCallback).
-        // Reading 18 here was off by one — index 18 is past the 18-word options
-        // block and aliased the following region's first word (scope maxScopes
-        // = 32), making the World create+leak a stray /dev/shm/SuperSonic_32 on
-        // every boot. The named constant locks this to the write site.
+        // Native: sharedMemoryID is written at kNativeSharedMemoryID (index 17)
+        // by JuceAudioCallback; the named constant locks this to the write site.
         options.mSharedMemoryID = worldOptionsPtr[sonicpi::WorldOpts::kNativeSharedMemoryID];  // UDP port for boost shm (native only)
         extern void* g_external_shared_memory;
         if (g_external_shared_memory) {
@@ -629,7 +671,7 @@ extern "C" {
         metrics->audio_input_channels.store(options.mNumInputBusChannels, std::memory_order_relaxed);
 
         // Clear scheduler
-        g_scheduler.Clear();
+        g_scheduler.clear();
         update_scheduler_depth_metric(0);
 
         // Add root group to node tree (it was created during World_New but doesn't trigger Node_StateMsg)
@@ -671,7 +713,7 @@ extern "C" {
             g_world = nullptr;
         }
         supersonic_heap_destroy();
-        g_scheduler.Clear();
+        g_scheduler.clear();
         update_scheduler_depth_metric(0);
         g_in_seq_reset.store(true, std::memory_order_relaxed);
     }
@@ -697,7 +739,7 @@ extern "C" {
             return false;
         }
 
-        g_scheduler.DrainPendingClear();
+        g_scheduler.drainPendingClear();
 
         // Calculate current NTP time from components
         // currentNTP = audioContextTime + ntp_start + (drift_us/1000000) + (global_ms/1000)
@@ -792,60 +834,46 @@ extern "C" {
                     // In-place delivery: the payload points into the IN ring
                     // (the consumer owns the region until we return Consume).
                     // scsynth's perform path is synchronous and copies what
-                    // it keeps (BundleScheduler::Add memcpys into its pool),
-                    // so nothing retains this pointer.
+                    // it keeps (a scheduled bundle is memcpy'd into the
+                    // scheduler's data pool), so nothing retains this pointer.
                     char* osc_buffer = const_cast<char*>(
                         reinterpret_cast<const char*>(payload));
+                    const uint8_t* osc = reinterpret_cast<const uint8_t*>(osc_buffer);
 
-                    // RT-SAFE message processing - no malloc!
-                    // Zero-initialize for consistent comparison in /notify.
-                    ReplyAddress reply_addr = {};
-                    reply_addr.mProtocol = kWeb;
-                    reply_addr.mReplyFunc = osc_reply_to_ring_buffer;
-                    reply_addr.mReplyData = nullptr;
+                    // Two ways to schedule, one mechanism. A timestamped bundle and
+                    // "/schedule <timetag> <blob>" both park OSC for re-dispatch on
+                    // time (scheduled_dispatch); everything else dispatches now.
+                    // scheduled_dispatch is fail-open — it always consumes the frame
+                    // (dropping+counting an un-schedulable one) so a full scheduler
+                    // can never head-of-line-block the in-order IN-ring drain.
 
-                    if (is_bundle(osc_buffer, payload_size)) {
-                        uint64_t timetag = extract_timetag(osc_buffer);
-
-                        if (timetag == 0 || timetag == 1) {
-                            // Immediate bundle - execute now
-                            OSC_Packet packet;
-                            packet.mData = osc_buffer;
-                            packet.mSize = payload_size;
-                            packet.mIsBundle = true;
-                            packet.mReplyAddr = reply_addr;
-
-                            PerformOSCBundle(g_world, &packet);
-                        } else {
-                            // Future bundle. If the scheduler has no room the
-                            // frame stays in the ring (Retain backpressure)
-                            // and is re-delivered next block.
-                            if (g_scheduler.IsFull()) {
-                                ss_log("INFO: Scheduler full (%d events), backpressure - message stays in ring buffer",
-                                             g_scheduler.Size());
-                                return SsDrainVerdict::Retain;
-                            }
-
-                            int64_t current_osc_time = ntp_to_osc_timetag(current_ntp);
-                            if (!schedule_bundle(g_world, (int64_t)timetag, current_osc_time,
-                                                 osc_buffer, payload_size, reply_addr)) {
-                                // Shouldn't happen: IsFull() was checked first
-                                ss_log("ERROR: Failed to schedule bundle (unexpected)");
-                            }
+                    // (1) Bundle. A future timetag → scheduler (synth plane;
+                    // SCHED_TAG_SYNTH is protected from the default /sched/flush);
+                    // an immediate one (0/1) dispatches now. Either way a bundle is
+                    // never a /schedule packet — don't fall through to parse_schedule.
+                    if (ss_is_bundle(osc, payload_size)) {
+                        uint64_t timetag = ss_bundle_timetag(osc);
+                        if (timetag != 0 && timetag != 1) {
+                            scheduled_dispatch(osc, payload_size, sourceId,
+                                               (int64_t)timetag, SCHED_TAG_SYNTH);
+                            return SsDrainVerdict::Consume;
                         }
                     } else {
-                        // Single OSC message. Classify through the audio-thread ingress
-                        // (published by the engine). A registered control route consumes
-                        // it (wasm: /clock inline; native: /clock + /supersonic forwarded
-                        // to the NRT thread); unmatched / no-ingress falls through to the
-                        // audio plane (scsynth) inline. sourceId carries the origin token.
-                        DrainCallCtx cc{ &reply_addr, sourceId };
-                        OscIngress* ig = g_active_ingress.load(std::memory_order_acquire);
-                        bool consumed = ig && ig->ingest(
-                            reinterpret_cast<const uint8_t*>(osc_buffer), payload_size, &cc);
-                        if (!consumed)
-                            PerformOSCMessage(g_world, payload_size, osc_buffer, &reply_addr);
+                        // (2) "/schedule <timetag> <blob>" → scheduler (the inner blob,
+                        // re-dispatched on time). SCHED_TAG_DEFAULT — a run-stop flush
+                        // cancels it, matching the MIDI/OSC it usually carries.
+                        SchedulePacket sp = ss_parse_schedule(osc, payload_size);
+                        if (sp.ok) {
+                            scheduled_dispatch(sp.blob, sp.blobLen, sourceId,
+                                               sp.when, SCHED_TAG_DEFAULT);
+                            return SsDrainVerdict::Consume;
+                        }
                     }
+
+                    // (3) Everything else → dispatch now. The one address dispatcher
+                    // routes it: synth inline (default), control to its handler /
+                    // NRT, with no ingress published it goes straight to synth.
+                    dispatch(osc, payload_size, sourceId, /*when=*/0, /*blockTime=*/0);
                     return SsDrainVerdict::Consume;
                 },
                 &stop);
@@ -883,10 +911,10 @@ extern "C" {
             // nothing writes this block are silent) and advance the block counter.
             EngineCore_BeginBlock(g_world);
 
-            // CRITICAL: Also zero static_audio_bus to prevent accumulation across frames
+            // Zero static_audio_bus to prevent accumulation across frames.
             memset(static_audio_bus, 0, QUANTUM_SIZE * g_world->mNumOutputs * sizeof(float));
 
-            // EXECUTE SCHEDULED BUNDLES (from SC_CoreAudio.cpp:1388-1401)
+            // This block's OSC time window, for draining due scheduled events.
             int64_t currentOscTime = ntp_to_osc_timetag(current_ntp);
             int64_t nextOscTime = currentOscTime + g_osc_increment;
 
@@ -896,80 +924,18 @@ extern "C" {
             if (SuperClock* clk = g_active_superclock.load(std::memory_order_acquire))
                 get_midi_clock_out().generate(*clk, current_ntp);
 
-            // Emit any deferred events (MIDI, …) due this block to their OUT ring,
-            // on the same clock as scsynth bundles so they stay in sync.
-            g_event_scheduler.tick(nextOscTime);
-
-            // Execute all bundles that are due within this buffer
-            int64_t schedTime;
-            while ((schedTime = g_scheduler.NextTime()) <= nextOscTime) {
-                // Calculate sub-sample offset (from SC_CoreAudio.cpp:1389-1397)
-                float diffTime = (float)(schedTime - currentOscTime) * g_osc_to_samples + 0.5;
-                float diffTimeFloor = floor(diffTime);
-                g_world->mSampleOffset = (int)diffTimeFloor;
-                g_world->mSubsampleOffset = diffTime - diffTimeFloor;
-
-                // Clamp to buffer bounds [0, bufLen-1]
-                if (g_world->mSampleOffset < 0)
-                    g_world->mSampleOffset = 0;
-                else if (g_world->mSampleOffset >= g_world->mBufLength)
-                    g_world->mSampleOffset = g_world->mBufLength - 1;
-
-                // Get pointer to bundle in pool (no 1KB copy!)
-                ScheduledBundle* bundle = g_scheduler.Remove();
-                update_scheduler_depth_metric(g_scheduler.Size());
-
-                if (!bundle) {
-                    break;  // Should not happen, but be safe
-                }
-
-                // Late bundle detection - track in metrics and warn when timing is broken
-                int64_t time_diff_osc = schedTime - currentOscTime;
-                double time_diff_ms = ((double)time_diff_osc / 4294967296.0) * 1000.0;
-
-                // Bundles within the current quantum are not late — they arrive when
-                // the VM's sleep target doesn't align with quantum boundaries.
-                // scsynth processes them at the correct sub-sample offset (lines above).
-                // Only bundles older than one quantum are genuinely late.
-                double quantum_ms = (1000.0 * QUANTUM_SIZE) / g_world->mSampleRate;
-                if (time_diff_ms < -quantum_ms) {
-                    // Cap late_ms to prevent overflow from timing sync issues
-                    // Values over 10 seconds indicate a systemic problem, not individual lateness
-                    double raw_late_ms = -time_diff_ms;
-                    int32_t late_ms = (raw_late_ms > 10000.0) ? 10000 : (int32_t)raw_late_ms;
-                    int late_now = late_count.fetch_add(1, std::memory_order_relaxed) + 1;
-                    metrics->scheduler_lates.fetch_add(1, std::memory_order_relaxed);
-
-                    // Track max lateness (compare-exchange loop for atomic max)
-                    int32_t current_max = metrics->scheduler_max_late_ms.load(std::memory_order_relaxed);
-                    while (late_ms > current_max) {
-                        if (metrics->scheduler_max_late_ms.compare_exchange_weak(
-                                current_max, late_ms, std::memory_order_relaxed, std::memory_order_relaxed)) {
-                            break;
-                        }
-                        // current_max is updated by compare_exchange_weak on failure
-                    }
-
-                    // Store last late magnitude and tick for correlation
-                    metrics->scheduler_last_late_ms.store(late_ms, std::memory_order_relaxed);
-                    metrics->scheduler_last_late_tick.store(
-                        metrics->process_count.load(std::memory_order_relaxed),
-                        std::memory_order_relaxed);
-
-                    if (late_now == 1 || late_now % 100 == 0) {
-                        // Extract OSC address from first message in bundle
-                        const char* addr = "?";
-                        const uint8_t* bdata = g_scheduler.DataPool() + bundle->mDataOffset;
-                        if (bundle->mSize > 20) {
-                            addr = reinterpret_cast<const char*>(bdata + 20);
-                        }
-                        ss_log("LATE: %.1fms %s (count=%d)", -time_diff_ms, addr, late_now);
-                    }
-                }
-
-                bundle->Perform(g_scheduler.DataPool()); // Execute from data pool
-                g_scheduler.ReleaseSlot(bundle);          // Return slot + maybe reset pool
-            }
+            // Fire: drain every event due this block in time order through the
+            // shared fire loop, handing each to the SAME dispatch() the immediate
+            // drain uses. `ev.when` carries the timetag and currentOscTime is this
+            // block's start, so the synth backend places the event sample-accurately
+            // (offset = ev.when - block start); other handlers ignore both.
+            ss_fire_due(g_scheduler, nextOscTime, currentOscTime,
+                [](const uint8_t* d, uint32_t n, uint32_t token, int64_t when, int64_t bt) {
+                    dispatch(d, n, token, when, bt);
+                });
+            // Publish queue depth once per block, after draining (size() reflects
+            // released slots — a per-event read would lag release and never reach 0).
+            update_scheduler_depth_metric(g_scheduler.size());
 
             // Run the graph (DSP pass): resets the event-time offset, marks the
             // live input buses touched so In.ar reads them (the JS worklet copies
@@ -1342,6 +1308,13 @@ void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
         return;
     }
 
+    // Route the reply by the origin token carried in mReplyData: non-zero → reply
+    // to that specific client; 0 → broadcast to the notify audience (engine-
+    // originated replies, and notifications whose subscriber address carries no
+    // token). The egress drain resolves the token via the transport.
+    uint32_t token = addr ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(addr->mReplyData)) : 0;
+    uint32_t route = token ? EGRESS_REPLY : EGRESS_BROADCAST_NOTIFY;
+
     // Use unified ring buffer write with full protection.
     ring_buffer_write(
         shared_memory + OUT_BUFFER_START,  // ring base
@@ -1349,8 +1322,8 @@ void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
         &control->out_head,                // head
         &control->out_tail,                // tail
         &control->out_sequence,            // sequence
-        EGRESS_BROADCAST_NOTIFY,           // route
-        0,                                 // source_id (broadcast)
+        route,                             // route (REPLY to token, or broadcast)
+        token,                             // source_id (origin token; 0 = broadcast)
         msg,                               // data
         size,                              // data_size
         &control->status_flags,            // status_flags
@@ -1358,21 +1331,86 @@ void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
     );
 }
 
-// ── Deferred-event scheduler bridge (global linkage; see EventScheduler.h) ────
+// ── Unified scheduler bridge (global linkage; see EngineScheduler.h) ──────────
 
-EventScheduler& get_event_scheduler() {
+EngineScheduler& get_scheduler() {
     using namespace scsynth;
-    return g_event_scheduler;
+    return g_scheduler;
 }
 
-extern "C" void ss_defer_schedule(double ntp_seconds, uint32_t dest,
+extern "C" void ss_defer_schedule(double ntp_seconds, uint32_t tag, uint32_t origin,
                                   const uint8_t* osc, uint32_t len) {
     using namespace scsynth;
-    g_event_scheduler.enqueue(ntp_to_osc_timetag(ntp_seconds), dest, osc, len);
+    if (!g_scheduler.addScheduled(ntp_to_osc_timetag(ntp_seconds), tag, origin, osc, len))
+        increment_scheduler_drop_metric();   // full/oversize — surface it, don't lose it silently
 }
 
-extern "C" void ss_defer_schedule_raw(int64_t osc_timetag, uint32_t dest,
-                                      const uint8_t* osc, uint32_t len) {
+// Set the synth plane's sub-sample offset for a SCHEDULED message and surface
+// lateness in the metrics. `when` is the message's OSC timetag and `blockTime`
+// this block's start — both from the call ctx (threaded by the fire loop, no
+// global). Owned by the synth backend — the only handler that reads them; the
+// generic dispatcher and every other backend ignore them.
+//
+// Immediate messages (the OSC sentinels 0/1) leave the offset untouched: only
+// timed events set a sub-block offset, and the graph's DSP pass resets it
+// afterwards. (Forcing it to 0 would clobber a still-live scheduled offset that a
+// synth created this block reads on its first run — silently breaking accuracy.)
+//
+// The check is `== 0 || == 1`, NOT `<= 1`: a present-day OSC timetag is huge and,
+// taken as int64, has its sign bit set — i.e. it is NEGATIVE. `<= 1` would
+// misclassify every real scheduled event as immediate and skip its offset.
+static void synth_apply_offset(int64_t when, int64_t blockTime) {
+    if (when == 0 || when == 1) return;   // OSC "immediate" sentinels only
+    float diffTime = (float)(when - blockTime) * g_osc_to_samples + 0.5f;
+    float diffTimeFloor = floorf(diffTime);
+    g_world->mSampleOffset = (int)diffTimeFloor;
+    g_world->mSubsampleOffset = diffTime - diffTimeFloor;
+    if (g_world->mSampleOffset < 0)
+        g_world->mSampleOffset = 0;
+    else if (g_world->mSampleOffset >= g_world->mBufLength)
+        g_world->mSampleOffset = g_world->mBufLength - 1;
+
+    // Lateness: only messages older than a full quantum are genuinely late
+    // (sub-quantum arrivals just don't align with quantum boundaries and run at
+    // the correct sub-sample offset above).
+    if (!metrics) return;
+    double time_diff_ms = ((double)(when - blockTime) / 4294967296.0) * 1000.0;
+    double quantum_ms = (1000.0 * g_world->mBufLength) / g_world->mSampleRate;
+    if (time_diff_ms >= -quantum_ms) return;
+    double raw_late_ms = -time_diff_ms;
+    int32_t late_ms = (raw_late_ms > 10000.0) ? 10000 : (int32_t)raw_late_ms;
+    int late_now = late_count.fetch_add(1, std::memory_order_relaxed) + 1;
+    metrics->scheduler_lates.fetch_add(1, std::memory_order_relaxed);
+    int32_t current_max = metrics->scheduler_max_late_ms.load(std::memory_order_relaxed);
+    while (late_ms > current_max) {
+        if (metrics->scheduler_max_late_ms.compare_exchange_weak(
+                current_max, late_ms, std::memory_order_relaxed, std::memory_order_relaxed))
+            break;
+    }
+    metrics->scheduler_last_late_ms.store(late_ms, std::memory_order_relaxed);
+    metrics->scheduler_last_late_tick.store(
+        metrics->process_count.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    if (late_now == 1 || late_now % 100 == 0)
+        ss_log("LATE: %.1fms (count=%d)", -time_diff_ms, late_now);
+}
+
+bool ss_synth_default_route(void* /*routeCtx*/, const void* callCtx,
+                            const uint8_t* data, std::size_t len) {
     using namespace scsynth;
-    g_event_scheduler.enqueue(osc_timetag, dest, osc, len);
+    if (!g_world) return true;
+    auto* cc = static_cast<const DrainCallCtx*>(callCtx);
+    ReplyAddress reply = ring_reply(cc ? cc->sourceId : 0);  // built from the threaded token
+    synth_apply_offset(cc ? cc->when : 0, cc ? cc->blockTime : 0);
+    char* osc = reinterpret_cast<char*>(const_cast<uint8_t*>(data));
+    if (ss_is_bundle(data, static_cast<uint32_t>(len))) {
+        OSC_Packet packet;
+        packet.mData      = osc;
+        packet.mSize      = static_cast<int>(len);
+        packet.mIsBundle  = true;
+        packet.mReplyAddr = reply;
+        PerformOSCBundle(g_world, &packet);
+    } else {
+        PerformOSCMessage(g_world, static_cast<int>(len), osc, &reply);
+    }
+    return true;
 }

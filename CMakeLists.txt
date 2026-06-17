@@ -222,7 +222,7 @@ set(WORKERS_SRC     "${CMAKE_CURRENT_SOURCE_DIR}/src/workers")
 set(ENGINE_SOURCES
     ${NATIVE_SRC}/HeadlessDriver.cpp
     ${NATIVE_SRC}/JuceAudioCallback.cpp
-    # OscUdpServer.cpp builds into the SuperSonic exe (below), not this shared
+    # UdpOscTransport.cpp builds into the SuperSonic exe (below), not this shared
     # lib — the UDP transport belongs to the standalone server, so the NIF and
     # the in-process test suite don't compile it.
     ${NATIVE_SRC}/OscEgress.cpp
@@ -246,7 +246,6 @@ endif()
 set(SUPERSONIC_CORE_SOURCES
     ${SUPERSONIC_SRC}/audio_processor.cpp
     ${SUPERSONIC_SRC}/lanes/lanes.cpp
-    ${SUPERSONIC_SRC}/scheduler/EventScheduler.cpp
     ${SUPERSONIC_SRC}/scheduler/MidiClockOut.cpp
     ${SUPERSONIC_SRC}/buffer_commands.cpp
     ${SUPERSONIC_SRC}/node_tree.cpp
@@ -256,94 +255,94 @@ set(SUPERSONIC_CORE_SOURCES
 
 # scsynth server (excludes WASM-only and platform-specific driver files)
 set(SCSYNTH_SERVER_SOURCES
-    ${SUPERSONIC_SRC}/scsynth/server/SC_BufGen.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_EngineCore.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_Graph.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_GraphDef.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_Group.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_Lib.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_Lib_Cintf.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_MiscCmds.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_Node.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_OscUnroll.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_Rate.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_SequencedCommand.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_Str4.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_Stubs.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_Unit.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_UnitDef.cpp
-    ${SUPERSONIC_SRC}/scsynth/server/SC_World.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_BufGen.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_EngineCore.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_Graph.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_GraphDef.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_Group.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_Lib.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_Lib_Cintf.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_MiscCmds.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_Node.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_OscUnroll.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_Rate.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_SequencedCommand.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_Str4.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_Stubs.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_Unit.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_UnitDef.cpp
+    ${SUPERSONIC_SRC}/synth/server/SC_World.cpp
     # SC_WebAudio.cpp, SC_Wasm.cpp, SC_WasmOscBuilder.cpp — excluded (WASM-only)
 )
 
 # scsynth common (cross-platform subset)
 set(SCSYNTH_COMMON_SOURCES
-    ${SUPERSONIC_SRC}/scsynth/common/SC_AllocPool.cpp
-    ${SUPERSONIC_SRC}/scsynth/common/SC_Errors.cpp
-    ${SUPERSONIC_SRC}/scsynth/common/SC_Reply.cpp
-    ${SUPERSONIC_SRC}/scsynth/common/SC_ServerBootDelayWarning.cpp
-    ${SUPERSONIC_SRC}/scsynth/common/SC_StringBuffer.cpp
-    ${SUPERSONIC_SRC}/scsynth/common/SC_StringParser.cpp
-    ${SUPERSONIC_SRC}/scsynth/common/SC_TextUtils.cpp
-    ${SUPERSONIC_SRC}/scsynth/common/SC_fftlib.cpp
-    ${SUPERSONIC_SRC}/scsynth/common/Samp.cpp
-    ${SUPERSONIC_SRC}/scsynth/common/fftlib.c
+    ${SUPERSONIC_SRC}/synth/common/SC_AllocPool.cpp
+    ${SUPERSONIC_SRC}/synth/common/SC_Errors.cpp
+    ${SUPERSONIC_SRC}/synth/common/SC_Reply.cpp
+    ${SUPERSONIC_SRC}/synth/common/SC_ServerBootDelayWarning.cpp
+    ${SUPERSONIC_SRC}/synth/common/SC_StringBuffer.cpp
+    ${SUPERSONIC_SRC}/synth/common/SC_StringParser.cpp
+    ${SUPERSONIC_SRC}/synth/common/SC_TextUtils.cpp
+    ${SUPERSONIC_SRC}/synth/common/SC_fftlib.cpp
+    ${SUPERSONIC_SRC}/synth/common/Samp.cpp
+    ${SUPERSONIC_SRC}/synth/common/fftlib.c
 )
 
 if(WIN32)
     list(APPEND SCSYNTH_COMMON_SOURCES
-        ${SUPERSONIC_SRC}/scsynth/common/SC_Filesystem_win.cpp
-        ${SUPERSONIC_SRC}/scsynth/common/SC_Win32Utils.cpp
+        ${SUPERSONIC_SRC}/synth/common/SC_Filesystem_win.cpp
+        ${SUPERSONIC_SRC}/synth/common/SC_Win32Utils.cpp
     )
 elseif(APPLE)
     # SC_Filesystem_macos.cpp includes Foundation headers — must compile as ObjC++
     set_source_files_properties(
-        ${SUPERSONIC_SRC}/scsynth/common/SC_Filesystem_macos.cpp
+        ${SUPERSONIC_SRC}/synth/common/SC_Filesystem_macos.cpp
         PROPERTIES LANGUAGE OBJCXX
     )
     list(APPEND SCSYNTH_COMMON_SOURCES
-        ${SUPERSONIC_SRC}/scsynth/common/SC_Filesystem_macos.cpp
-        ${SUPERSONIC_SRC}/scsynth/common/SC_Apple.mm
+        ${SUPERSONIC_SRC}/synth/common/SC_Filesystem_macos.cpp
+        ${SUPERSONIC_SRC}/synth/common/SC_Apple.mm
     )
 elseif(UNIX)
     list(APPEND SCSYNTH_COMMON_SOURCES
-        ${SUPERSONIC_SRC}/scsynth/common/SC_Filesystem_unix.cpp
+        ${SUPERSONIC_SRC}/synth/common/SC_Filesystem_unix.cpp
     )
 endif()
 
 # scsynth plugins
 set(SCSYNTH_PLUGIN_SOURCES
-    ${SUPERSONIC_SRC}/scsynth/plugins/BinaryOpUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/ChaosUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/Convolution.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/DelayUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/DemandUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/DemoUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/DynNoiseUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/FFT2InterfaceTable.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/FFTInterfaceTable.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/FFT_UGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/FeatureDetection.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/FilterUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/GendynUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/GrainUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/IOUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/LFUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/LinkUGen.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/MulAddUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/NoiseUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/OscUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/PV_ThirdParty.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/PV_UGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/PanUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/PartitionedConvolution.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/PhysicalModelingUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/ReverbUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/TestUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/TriggerUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/UnaryOpUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/UnpackFFTUGens.cpp
-    ${SUPERSONIC_SRC}/scsynth/plugins/sc3-plugins/DistortionUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/BinaryOpUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/ChaosUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/Convolution.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/DelayUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/DemandUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/DemoUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/DynNoiseUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/FFT2InterfaceTable.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/FFTInterfaceTable.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/FFT_UGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/FeatureDetection.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/FilterUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/GendynUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/GrainUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/IOUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/LFUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/LinkUGen.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/MulAddUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/NoiseUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/OscUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/PV_ThirdParty.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/PV_UGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/PanUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/PartitionedConvolution.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/PhysicalModelingUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/ReverbUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/TestUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/TriggerUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/UnaryOpUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/UnpackFFTUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/sc3-plugins/DistortionUGens.cpp
     # MdaUGens.cpp excluded from build (see upstream commit faff87a)
 )
 
@@ -371,13 +370,13 @@ set(SUPERSONIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}
 
     # scsynth include paths (mirror build.sh)
-    ${SUPERSONIC_SRC}/scsynth/include/common
-    ${SUPERSONIC_SRC}/scsynth/include/plugin_interface
-    ${SUPERSONIC_SRC}/scsynth/include/server
-    ${SUPERSONIC_SRC}/scsynth/server
-    ${SUPERSONIC_SRC}/scsynth/common
-    ${SUPERSONIC_SRC}/scsynth/external_libraries/boost
-    ${SUPERSONIC_SRC}/scsynth/external_libraries/nova-simd
+    ${SUPERSONIC_SRC}/synth/include/common
+    ${SUPERSONIC_SRC}/synth/include/plugin_interface
+    ${SUPERSONIC_SRC}/synth/include/server
+    ${SUPERSONIC_SRC}/synth/server
+    ${SUPERSONIC_SRC}/synth/common
+    ${SUPERSONIC_SRC}/synth/external_libraries/boost
+    ${SUPERSONIC_SRC}/synth/external_libraries/nova-simd
 
     # oscpack vendor
     ${SUPERSONIC_SRC}/vendor/oscpack
@@ -412,10 +411,10 @@ set(SUPERSONIC_COMPILE_DEFS
 
 # ─── TLSF memory allocator (for scope buffer pool in shared memory) ─────────
 add_library(tlsf STATIC
-    ${SUPERSONIC_SRC}/scsynth/external_libraries/TLSF-2.4.6/src/tlsf.c
+    ${SUPERSONIC_SRC}/synth/external_libraries/TLSF-2.4.6/src/tlsf.c
 )
 target_include_directories(tlsf PUBLIC
-    ${SUPERSONIC_SRC}/scsynth/external_libraries/TLSF-2.4.6/src
+    ${SUPERSONIC_SRC}/synth/external_libraries/TLSF-2.4.6/src
 )
 target_compile_definitions(tlsf PRIVATE TLSF_STATISTIC=0)
 set_property(TARGET tlsf PROPERTY POSITION_INDEPENDENT_CODE TRUE)
@@ -430,7 +429,7 @@ endif()
 # ss_egress_rt_drain -> ss_audio_out). No JUCE host sources, no JUCE link, no
 # Emscripten. It is the desktop stand-in for an embedded host and exists to make
 # "one C ABI for all build targets" a tested invariant on a normal CI runner:
-# it fails the moment a JUCE/Emscripten dependency leaks into the shared engine,
+# it fails if a JUCE/Emscripten dependency is pulled into the shared engine,
 # the ABI breaks, or a shared symbol stops resolving without a full host. Built
 # explicitly (CI / `cmake --build <dir> --target supersonic_freestanding`), so
 # EXCLUDE_FROM_ALL keeps it out of every native build.
@@ -553,9 +552,12 @@ endif()
 # (rust/supersonic-gamepad/cpp/ss_gamepad.h).
 option(SUPERSONIC_ENABLE_MIDI "Integrate the Rust/midir MIDI subsystem (native)" ON)
 option(SUPERSONIC_ENABLE_GAMEPAD "Integrate the Rust/gilrs gamepad subsystem (native)" ON)
-# A Rust toolchain (cargo) is required unless BOTH subsystems are OFF —
-# disabling just SUPERSONIC_ENABLE_MIDI no longer yields a Rust-free build.
-if(SUPERSONIC_ENABLE_MIDI OR SUPERSONIC_ENABLE_GAMEPAD)
+# OSC networking is also a Rust subsystem now (std::net cue server + outbound);
+# the C++ seam is src/native/OscControl (rust/supersonic-osc-net/cpp/ss_osc.h).
+option(SUPERSONIC_ENABLE_OSC "Integrate the Rust/std::net OSC subsystem (native)" ON)
+# A Rust toolchain (cargo) is required unless ALL subsystems are OFF —
+# disabling just one no longer yields a Rust-free build.
+if(SUPERSONIC_ENABLE_MIDI OR SUPERSONIC_ENABLE_GAMEPAD OR SUPERSONIC_ENABLE_OSC)
     find_program(CARGO_EXECUTABLE cargo REQUIRED)
     set(SS_RUST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/rust)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -582,6 +584,9 @@ if(SUPERSONIC_ENABLE_MIDI OR SUPERSONIC_ENABLE_GAMEPAD)
     endif()
     if(SUPERSONIC_ENABLE_GAMEPAD)
         list(APPEND SS_RUST_FEATURES gamepad)
+    endif()
+    if(SUPERSONIC_ENABLE_OSC)
+        list(APPEND SS_RUST_FEATURES osc)
     endif()
     list(JOIN SS_RUST_FEATURES "," SS_RUST_FEATURES_ARG)
     list(APPEND SS_RUST_CARGO_FLAGS --no-default-features --features ${SS_RUST_FEATURES_ARG})
@@ -637,6 +642,14 @@ if(SUPERSONIC_ENABLE_MIDI OR SUPERSONIC_ENABLE_GAMEPAD)
             target_link_libraries(supersonic_engine PUBLIC udev)
         endif()
     endif()
+    # OSC networking subsystem (std::net). The C++ seam is src/native/OscControl;
+    # the Rust crate (supersonic-osc-net) owns the cue server + outbound sockets.
+    # No extra OS link deps — std handles UDP.
+    if(SUPERSONIC_ENABLE_OSC)
+        target_sources(supersonic_engine PRIVATE ${NATIVE_SRC}/OscControl.cpp)
+        target_include_directories(supersonic_engine PUBLIC ${SS_RUST_DIR}/supersonic-osc-net/cpp)
+        target_compile_definitions(supersonic_engine PUBLIC SUPERSONIC_OSC=1)
+    endif()
 endif()
 
 if(MSVC)
@@ -657,7 +670,7 @@ juce_add_console_app(SuperSonic
     COMPANY_NAME    "SuperSonic"
 )
 
-target_sources(SuperSonic PRIVATE ${NATIVE_SRC}/Main.cpp ${NATIVE_SRC}/OscUdpServer.cpp)
+target_sources(SuperSonic PRIVATE ${NATIVE_SRC}/Main.cpp ${NATIVE_SRC}/UdpOscTransport.cpp)
 target_link_libraries(SuperSonic PRIVATE supersonic_engine)
 
 target_compile_definitions(SuperSonic PRIVATE
@@ -718,4 +731,73 @@ endif()
 # ─── Tests ───────────────────────────────────────────────────────────────────
 if(BUILD_TESTS)
     add_subdirectory(test/native)
+endif()
+
+# ─── Standalone scheduler host (no synthesis engine) ─────────────────────────
+# A headless build: the generic Scheduler core + the OSC (and optional MIDI)
+# Rust subsystems + a timer-driven clock. Independent of the engine.
+# Opt in with -DSUPERSONIC_BUILD_SCHEDULER_HOST=ON.
+option(SUPERSONIC_BUILD_SCHEDULER_HOST "Build the standalone scheduler host" OFF)
+if(SUPERSONIC_BUILD_SCHEDULER_HOST)
+    find_program(CARGO_EXECUTABLE cargo REQUIRED)
+    set(SS_RUST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/rust)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(HOST_RUST_PROFILE debug)
+        set(HOST_CARGO_FLAGS)
+    else()
+        set(HOST_RUST_PROFILE release)
+        set(HOST_CARGO_FLAGS --release)
+    endif()
+
+    # Only the OSC (+ optional MIDI) subsystems — never gamepad or Link. Built
+    # into a dedicated target dir so it never shares an artifact with the engine
+    # umbrella (which may carry other features).
+    set(HOST_FEATURES osc)
+    if(SUPERSONIC_ENABLE_MIDI)
+        list(APPEND HOST_FEATURES midi)
+    endif()
+    list(JOIN HOST_FEATURES "," HOST_FEATURES_ARG)
+    set(HOST_TARGET_DIR ${SS_RUST_DIR}/target-host)
+    set(HOST_RUST_LIB ${HOST_TARGET_DIR}/${HOST_RUST_PROFILE}/${CMAKE_STATIC_LIBRARY_PREFIX}supersonic_native${CMAKE_STATIC_LIBRARY_SUFFIX})
+
+    add_custom_target(supersonic_scheduler_rust ALL
+        BYPRODUCTS ${HOST_RUST_LIB}
+        COMMAND ${CARGO_EXECUTABLE} build ${HOST_CARGO_FLAGS} --no-default-features
+                --features ${HOST_FEATURES_ARG} --target-dir ${HOST_TARGET_DIR}
+                -p supersonic-native
+        WORKING_DIRECTORY ${SS_RUST_DIR}
+        COMMENT "Building Rust subsystems for scheduler host (cargo: ${HOST_FEATURES_ARG})"
+        VERBATIM)
+
+    add_executable(supersonic-scheduler ${CMAKE_CURRENT_SOURCE_DIR}/src/host/main.cpp)
+    add_dependencies(supersonic-scheduler supersonic_scheduler_rust)
+    target_include_directories(supersonic-scheduler PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${SS_RUST_DIR}/supersonic-osc-net/cpp
+        ${SS_RUST_DIR}/supersonic-midi/cpp)
+    target_link_libraries(supersonic-scheduler PRIVATE ${HOST_RUST_LIB})
+    if(SUPERSONIC_ENABLE_MIDI)
+        target_compile_definitions(supersonic-scheduler PRIVATE SUPERSONIC_WITH_MIDI=1)
+    endif()
+    if(APPLE)
+        target_link_libraries(supersonic-scheduler PRIVATE
+            "-framework CoreFoundation" "-framework Security" iconv)
+        if(SUPERSONIC_ENABLE_MIDI)
+            target_link_libraries(supersonic-scheduler PRIVATE
+                "-framework CoreMIDI" "-framework CoreAudio" "-framework Foundation")
+        endif()
+    elseif(UNIX)
+        find_package(Threads REQUIRED)
+        target_link_libraries(supersonic-scheduler PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+        if(SUPERSONIC_ENABLE_MIDI)
+            target_link_libraries(supersonic-scheduler PRIVATE asound)
+        endif()
+    endif()
+
+    # Host logic unit tests — header-only, no Rust, no engine.
+    add_executable(host_tests ${CMAKE_CURRENT_SOURCE_DIR}/test/host/host_tests.cpp)
+    target_include_directories(host_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+    enable_testing()
+    add_test(NAME host_tests COMMAND host_tests)
 endif()

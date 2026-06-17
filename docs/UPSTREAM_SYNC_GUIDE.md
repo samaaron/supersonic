@@ -13,9 +13,9 @@ Supersonic is a WASM port of SuperCollider's scsynth audio server. It originated
 
 ---
 
-## LICENSE FIREWALL: KEEP AGPL CODE OUT OF SUPERSONIC
+## License boundary: AGPL code stays out of SuperSonic
 
-**This rule is firm. Read it before every sync.**
+**Read this before every sync.**
 
 ### Why it matters
 
@@ -92,7 +92,7 @@ check (1) and the rule above: do not use an AGPL file as a source in the first p
 
 When syncing with upstream:
 
-- [ ] **FIRST — read the [License Firewall](#license-firewall-keep-agpl-code-out-of-supersonic): never derive from AGPL/Affero upstream code, whole files OR fragments**
+- [ ] **FIRST — read the [License boundary](#license-boundary-agpl-code-stays-out-of-supersonic): never derive from AGPL/Affero upstream code, whole files OR fragments**
 - [ ] Fetch latest upstream changes
 - [ ] Identify scsynth-relevant commits since last sync
 - [ ] Filter out non-applicable changes (sclang, supernova, threads, tests)
@@ -163,7 +163,7 @@ git log supercollider/develop --oneline --since="$LAST_SYNC" -- \
 ### Step 3: Exclude Non-Applicable Changes
 
 **Always SKIP these**:
-- ❌ **ANY AGPL / Affero-licensed source — whole file OR fragment (see the [License Firewall](#license-firewall-keep-agpl-code-out-of-supersonic)). Covers all of PR #7428's WASM port: `server/scsynth/SC_WebAudio.cpp`, `platform/wasm/**`. Check the source's license header BEFORE you open it to adapt it.**
+- ❌ **ANY AGPL / Affero-licensed source — whole file OR fragment (see the [License boundary](#license-boundary-agpl-code-stays-out-of-supersonic)). Covers all of PR #7428's WASM port: `server/scsynth/SC_WebAudio.cpp`, `platform/wasm/**`. Check the source's license header BEFORE you open it to adapt it.**
 - ❌ sclang changes (`lang/`, `SCClassLibrary/`)
 - ❌ supernova changes (`server/supernova/`)
 - ❌ Help files (`HelpSource/`, `*.schelp`)
@@ -232,14 +232,14 @@ git log --all --grep="$UPSTREAM_HASH"
 ```bash
 # Read the relevant file to see if the fix is present
 # Example: checking if EnvGen has counter_fractional
-grep -n "counter_fractional" src/scsynth/plugins/LFUGens.cpp
+grep -n "counter_fractional" src/synth/plugins/LFUGens.cpp
 ```
 
 ### Method 3: Check Function Signatures
 
 ```bash
 # Example: checking if World_TotalFree exists (for rtMemoryStatus)
-grep -r "World_TotalFree" src/scsynth/
+grep -r "World_TotalFree" src/synth/
 ```
 
 **Always verify by reading code** - commit messages can be misleading!
@@ -277,7 +277,7 @@ When cherry-pick isn't feasible:
 2. **Read the relevant supersonic file**:
    ```bash
    # Use absolute path
-   cat src/scsynth/plugins/LFUGens.cpp
+   cat src/synth/plugins/LFUGens.cpp
    ```
 
 3. **Apply changes manually** using the Edit tool
@@ -353,7 +353,7 @@ If a commit modifies a file that doesn't exist in supersonic:
 
 ```bash
 # Check if the plugin exists
-ls src/scsynth/plugins/ | grep "PluginName"
+ls src/synth/plugins/ | grep "PluginName"
 
 # If it doesn't exist, skip this part
 git rm -f server/plugins/PluginName.cpp
@@ -366,7 +366,7 @@ git cherry-pick --abort
 
 ```bash
 # If you have unstaged changes that need to be included
-git add src/scsynth/server/SC_GraphDef.cpp
+git add src/synth/server/SC_GraphDef.cpp
 
 # Then continue
 git cherry-pick --continue
@@ -422,7 +422,7 @@ instead of scprintf for WASM AudioWorklet compatibility.
 
 After applying changes:
 
-- [ ] **No AGPL code introduced — every upstream source you adapted was non-AGPL (provenance checked at the source, per the [License Firewall](#license-firewall-keep-agpl-code-out-of-supersonic)); the `grep -rlI -e Affero -e AGPL src/` backstop shows nothing new (backstop only — it does not catch retyped fragments)**
+- [ ] **No AGPL code introduced — every upstream source you adapted was non-AGPL (provenance checked at the source, per the [License boundary](#license-boundary-agpl-code-stays-out-of-supersonic)); the `grep -rlI -e Affero -e AGPL src/` backstop shows nothing new (backstop only — it does not catch retyped fragments)**
 - [ ] Code compiles on all targets (`scripts/build-web.sh`, `scripts/build-native.sh`)
 - [ ] SuperSonic-specific changes wrapped in `#ifdef SUPERSONIC` with upstream code in `#else`
 - [ ] Platform guards use `#ifndef __EMSCRIPTEN__` (not `#ifdef SUPERSONIC`)
@@ -590,7 +590,7 @@ https://github.com/supercollider/supercollider/commit/$COMMIT
 git cherry-pick --abort
 
 # Verify by checking the code
-grep -n "the_fix" src/scsynth/plugins/SomeUGen.cpp
+grep -n "the_fix" src/synth/plugins/SomeUGen.cpp
 ```
 
 ### Problem: Too many conflicts
@@ -609,7 +609,7 @@ git show $COMMIT
 
 ```bash
 # Check if plugin exists
-ls src/scsynth/plugins/ | grep PluginName
+ls src/synth/plugins/ | grep PluginName
 
 # If not, this commit is not applicable
 git cherry-pick --abort
@@ -678,7 +678,7 @@ request. **Nothing backported.** Not a full-range sweep — only this commit.
   inspect): upstream switches the STATIC_PLUGINS DiskIO/UIUGens load/unload
   guards from `#ifndef __EMSCRIPTEN__` to capability macros (`NO_LIBSNDFILE`,
   `NO_X11`) driven by new CMake options. **Already present** — SuperSonic
-  guards these with `NO_LIBSNDFILE` (src/scsynth/server/SC_Lib_Cintf.cpp:74,
+  guards these with `NO_LIBSNDFILE` (src/synth/server/SC_Lib_Cintf.cpp:74,
   100, 129; `-DNO_LIBSNDFILE` in build-web.sh) and additionally provides no-op
   stubs for `DiskIO_Load`/`DiskIO_Unload`/`UIUGens_Unload` (SC_Stubs.cpp:380),
   implemented independently before this upstream change. The remaining delta
@@ -935,19 +935,19 @@ Applied SuperCollider PR #7329 which converts the Plugin API from C++ to C:
 - Added `kSCTrue`/`kSCFalse` enum constants
 
 **Files Modified:**
-- `src/scsynth/include/common/SC_Types.h`
-- `src/scsynth/include/common/SC_fftlib.h`
-- `src/scsynth/common/SC_fftlib.hpp` (new - private header)
-- `src/scsynth/common/SC_fftlib.cpp`
-- `src/scsynth/include/plugin_interface/SC_InterfaceTable.h`
-- `src/scsynth/include/plugin_interface/SC_World.h`
-- `src/scsynth/include/plugin_interface/SC_Unit.h`
-- `src/scsynth/include/plugin_interface/SC_FifoMsg.h`
-- `src/scsynth/server/SC_World.cpp`
-- `src/scsynth/server/SC_Prototypes.h`
-- `src/scsynth/server/SC_SequencedCommand.h`
-- `src/scsynth/server/SC_SequencedCommand.cpp`
-- `src/scsynth/plugins/DelayUGens.cpp`
+- `src/synth/include/common/SC_Types.h`
+- `src/synth/include/common/SC_fftlib.h`
+- `src/synth/common/SC_fftlib.hpp` (new - private header)
+- `src/synth/common/SC_fftlib.cpp`
+- `src/synth/include/plugin_interface/SC_InterfaceTable.h`
+- `src/synth/include/plugin_interface/SC_World.h`
+- `src/synth/include/plugin_interface/SC_Unit.h`
+- `src/synth/include/plugin_interface/SC_FifoMsg.h`
+- `src/synth/server/SC_World.cpp`
+- `src/synth/server/SC_Prototypes.h`
+- `src/synth/server/SC_SequencedCommand.h`
+- `src/synth/server/SC_SequencedCommand.cpp`
+- `src/synth/plugins/DelayUGens.cpp`
 
 **Benefits for WASM:**
 - Eliminates C++ vtable overhead for FFT allocator
@@ -1025,7 +1025,7 @@ Marks where SuperSonic intentionally diverges from upstream scsynth. The origina
 
 ```bash
 # Find all fork divergence points
-grep -rn "ifdef SUPERSONIC\|ifndef SUPERSONIC" src/scsynth/
+grep -rn "ifdef SUPERSONIC\|ifndef SUPERSONIC" src/synth/
 ```
 
 **During upstream syncs:** Update the `#else` branch to match upstream. Then check whether the `SUPERSONIC` branch needs corresponding changes.
@@ -1050,7 +1050,7 @@ Guards upstream code that requires APIs unavailable in WASM (filesystem, boost h
 
 ```bash
 # Find all platform guards
-grep -rn "ifdef __EMSCRIPTEN__\|ifndef __EMSCRIPTEN__" src/scsynth/
+grep -rn "ifdef __EMSCRIPTEN__\|ifndef __EMSCRIPTEN__" src/synth/
 ```
 
 **During upstream syncs:** Update the guarded code to match upstream exactly (uses `scprintf`, not `ss_log`). Don't skip these blocks — they contain the upstream code that native builds use.
@@ -1075,7 +1075,7 @@ If uncertain about a commit:
 
 1. **Check the upstream PR** - Often has discussion about scope/impact
 2. **Ask on SuperCollider forums** - Community can clarify intent
-3. **When in doubt about a _fix_, apply it** - Easier to revert than to miss a critical fix. **But when in doubt about a _license_, leave it out** - incorporating AGPL code (a whole file or a retyped fragment) produces a derivative work whose licence cannot be undone once distributed. See the [License Firewall](#license-firewall-keep-agpl-code-out-of-supersonic).
+3. **When in doubt about a _fix_, apply it** - Easier to revert than to miss a critical fix. **But when in doubt about a _license_, leave it out** - incorporating AGPL code (a whole file or a retyped fragment) produces a derivative work whose licence cannot be undone once distributed. See the [License boundary](#license-boundary-agpl-code-stays-out-of-supersonic).
 4. **Test in browser** - Some issues only manifest in WASM environment
 
 ---

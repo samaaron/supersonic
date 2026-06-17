@@ -15,8 +15,8 @@
 
 #include "node_tree.h"
 #include "audio_processor.h"  // For ss_log
-#include "scsynth/server/SC_Group.h"  // For Node, Group structs
-#include "scsynth/server/SC_SynthDef.h"  // For NodeDef (mName access)
+#include "synth/server/SC_Group.h"  // For Node, Group structs
+#include "synth/server/SC_SynthDef.h"  // For NodeDef (mName access)
 #include <cstring>  // For strncpy
 #include <climits>  // For INT32_MIN
 

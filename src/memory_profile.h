@@ -2,7 +2,7 @@
  * memory_profile.h — Single source of truth for SuperSonic memory sizing
  *
  * SuperSonic runs on wildly different memory budgets: a desktop/native build
- * with gigabytes of RAM, a WASM AudioWorklet with a managed heap, and (newly)
+ * with gigabytes of RAM, a WASM AudioWorklet with a managed heap, and
  * embedded targets like the ESP32-S3 with ~512 KiB of fast internal SRAM plus
  * slower PSRAM. Every region that is sized at compile time is collected here so
  * that porting to a new device means writing one small profile block rather
@@ -11,13 +11,12 @@
  * ── Design rules ────────────────────────────────────────────────────────────
  *   1. This is a PURE-MACRO LEAF header. It includes nothing and defines no
  *      types, so it can be pulled in by the lowest-level headers (including
- *      scsynth/common/shm_audio_buffer.hpp) without creating dependencies.
+ *      synth/common/shm_audio_buffer.hpp) without creating dependencies.
  *   2. Every knob is set with an `#ifndef` guard, so precedence is:
  *          explicit -D on the command line   (highest)
  *        > the selected SUPERSONIC_DEVICE_PROFILE block
  *        > the universal defaults at the bottom of this file  (lowest)
- *   3. The universal defaults MUST equal the historical hardcoded values, so
- *      desktop / WASM / NIF / test builds are byte-for-byte unchanged. The JS
+ *   3. The universal defaults are the desktop / WASM / NIF / test layout. The JS
  *      side reads the actual layout back from the WASM `get_buffer_layout()`
  *      export, so overriding a size here propagates to JS automatically.
  *
@@ -34,7 +33,7 @@
  *     NODE_TREE_MIRROR_MAX_NODES           node-tree mirror capacity
  *     SHM_SCOPE_MAX_SCOPES                 scope slots
  *     SHM_SCOPE_FRAMES_PER_SCOPE           frames per scope triple-buffer
- *   Scheduler pool ....................... shared_memory.h / scheduler/BundleScheduler.h
+ *   Scheduler pool ....................... shared_memory.h / scheduler/EngineScheduler.h
  *     SCHEDULER_DATA_POOL_SIZE             bundle data pool bytes
  *     SCHEDULER_SLOT_COUNT                 max scheduled bundles
  *   RT heap (AllocPool) .................. supersonic_config.h / supersonic_heap.cpp
@@ -45,7 +44,7 @@
  *     SUPERSONIC_MAX_BLOCK_SIZE            static_audio_bus block cap (non-WASM)
  *     SUPERSONIC_DEFAULT_BLOCK_SIZE        default control block size (non-WASM)
  *     SUPERSONIC_MAX_CHANNELS              per-world max channels
- *   Audio capture ring ................... scsynth/common/shm_audio_buffer.hpp
+ *   Audio capture ring ................... synth/common/shm_audio_buffer.hpp
  *     SUPERSONIC_MAX_SHM_AUDIO_BUFFERS     capture slot count
  *     SUPERSONIC_SHM_AUDIO_SECONDS         per-slot ring duration (seconds)
  *     SUPERSONIC_SHM_AUDIO_SAMPLE_RATE     capture ring sample rate
@@ -68,9 +67,8 @@
 // Tight budget for the Waveshare ESP32-S3-Touch-LCD-1.9 (ESP32-S3R8: 512 KiB
 // internal SRAM, 8 MiB octal PSRAM, 16 MiB flash) + Pimoroni Pico Audio Pack.
 //
-// These are STARTING values — a sensible baseline, NOT yet retuned against an
-// on-device build. Treat them as a reasonable default, not a validated optimum.
-// Each is `#ifndef`-guarded so a build can still pin any individual knob with an
+// Baseline values, not yet retuned against an on-device build. Each is
+// `#ifndef`-guarded so a build can still pin any individual knob with an
 // explicit -D.
 #if SUPERSONIC_DEVICE_PROFILE == SUPERSONIC_PROFILE_ESP32S3
 
@@ -126,8 +124,8 @@
 #endif // SUPERSONIC_PROFILE_ESP32S3
 
 // ── Universal defaults (desktop / WASM / NIF / tests) ───────────────────────
-// MUST match the historical hardcoded values. Anything left unset by an
-// explicit -D or by the selected profile falls through to here.
+// Anything left unset by an explicit -D or by the selected profile falls
+// through to here.
 
 // SAB / ring-buffer regions
 #ifndef SUPERSONIC_IN_BUFFER_SIZE

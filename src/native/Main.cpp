@@ -10,7 +10,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_core/juce_core.h>
 #include "SupersonicEngine.h"
-#include "OscUdpServer.h"
+#include "UdpOscTransport.h"
 #include "supersonic_config.h"
 
 #include <csignal>
@@ -305,7 +305,7 @@ int main(int argc, char* argv[]) {
     // The standalone server owns the UDP transport; the engine owns no socket.
     // Declared before `engine` so it outlives the engine's teardown. Wired as
     // ingress (recv → engine.ingest) and egress (engine → socket).
-    OscUdpServer     udpServer;
+    UdpOscTransport  udpServer;
     SupersonicEngine engine;
 
     engine.onDebug = [](const std::string& s) {
@@ -317,7 +317,9 @@ int main(int argc, char* argv[]) {
         fflush(stderr);
     };
 
-    udpServer.setEngine(&engine);
+    udpServer.setIngest([&engine](const uint8_t* d, uint32_t n, uint32_t token) {
+        engine.ingest(d, n, token);
+    });
     engine.setTransport(&udpServer);
     udpServer.initialise(cfg.udpPort, cfg.bindAddress);
 
@@ -331,9 +333,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Start the UDP recv thread now that the engine's rings exist for it to feed.
+    // Start the UDP recv now that the engine's rings exist for it to feed.
     if (cfg.udpPort > 0)
-        udpServer.startThread(juce::Thread::Priority::normal);
+        udpServer.start();
 
     // Preserve the user's originally-requested input channel count across
     // the permission-pending zeroing above. Otherwise re-enable paths fall
@@ -424,8 +426,7 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "\n  shutting down...\n");
     // Stop UDP recv before the engine frees its rings — the recv thread feeds
     // engine.ingest(), which writes the IN ring that shutdown() tears down.
-    udpServer.signalThreadShouldExit();
-    udpServer.stopThread(2000);
+    udpServer.stop();
     engine.shutdown();
     return 0;
 }

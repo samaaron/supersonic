@@ -1,25 +1,5 @@
 /*
- * WallClock.h — Wall-clock NTP time (free function)
- *
- * Returns the current wall-clock time as NTP seconds.
- * Used by OscUdpServer for timestamping.
- *
- * ## Drift architecture (web vs native)
- *
- * Both targets derive audio-thread NTP from the sample counter for jitter-free
- * timing, then apply a slow correction to stay aligned with the wall clock.
- *
- * Native: The audio callback can read the wall clock directly, so it runs an
- * IIR low-pass filter (alpha=0.01) every ~2.7ms audio block:
- *     baseNTP += (wallNow - sampleNTP) * 0.01
- * This smooths out OS scheduling jitter and clock quantisation.
- *
- * Web: The AudioWorklet cannot read the wall clock, so the main-thread JS
- * measures drift via getOutputTimestamp() every 1s and writes the correction
- * to SharedArrayBuffer. The WASM audio thread reads the correction each frame:
- *     currentNTP = currentTime + ntpStart + driftUs/1e6 + globalOffset
- * Drift is stored in microseconds (Int32) to avoid the 1ms quantisation
- * artifacts that would come from integer milliseconds.
+ * WallClock.h — current wall-clock time as NTP seconds.
  */
 #pragma once
 

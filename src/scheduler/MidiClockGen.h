@@ -4,7 +4,7 @@
  * No threads, no allocation, no IO. The host drives it from its render context
  * (native audio thread, wasm worklet, embedded timer) with the current musical
  * beat from SuperClock and routes each emitted pulse-beat to a deferred MIDI
- * sink (the EventScheduler). Pulse position is tracked in integer 1/24-beat
+ * sink (the EngineScheduler). Pulse position is tracked in integer 1/24-beat
  * units so the core is fixed-point friendly; only the beat<->pulse boundary
  * touches floating point, which is the single thing an esp32 port would swap.
  */

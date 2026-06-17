@@ -5,7 +5,7 @@
  * everything platform-specific behind this interface: how a token resolves to a
  * destination, what the notify/link subscriber audiences actually are, and how a
  * packet physically leaves (UDP socket / in-process callback). This is the
- * *only* place address/socket/pid knowledge lives. Implementations: OscUdpServer
+ * *only* place address/socket/pid knowledge lives. Implementations: UdpOscTransport
  * (UDP), NifTransport (BEAM — fans out to the registered Erlang pids via
  * enif_send), and CallbackTransport (in-process — embedders and tests, surfacing
  * through the engine's onReply callback).
@@ -59,4 +59,11 @@ public:
     virtual void broadcastGamepad(const uint8_t* data, uint32_t size) = 0;
     virtual bool subscribeGamepad(uint32_t token) = 0;
     virtual void unsubscribeGamepad(uint32_t token) = 0;
+
+    // OSC-cue audience: receives /external-osc-cue pushes (external OSC arriving
+    // on the cue server). Caller-relative, like the MIDI audience. Default no-ops;
+    // UdpOscTransport and CallbackTransport override them (the NIF bridge does not).
+    virtual void broadcastOsc(const uint8_t*, uint32_t) {}
+    virtual bool subscribeOsc(uint32_t) { return false; }
+    virtual void unsubscribeOsc(uint32_t) {}
 };

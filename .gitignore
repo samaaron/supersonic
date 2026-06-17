@@ -36,3 +36,6 @@ external/midir/target/
 
 # Erlang crash dumps (NIF test failures)
 erl_crash.dump
+
+# Standalone scheduler host cargo target dir
+/rust/target-host/

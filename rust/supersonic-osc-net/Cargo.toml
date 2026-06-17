@@ -1,0 +1,19 @@
+[package]
+name = "supersonic-osc-net"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sam Aaron"]
+description = "SuperSonic OSC networking subsystem (std::net): the external OSC cue server (inbound → re-framed /external-osc-cue) and outbound user OSC. Native-only; C ABI in cpp/ss_osc.h. Replaces the Tau/BEAM OSC server and the JUCE OSC sockets."
+# Dual-licensed like SuperSonic's other OSC-only client libraries: no GPL-derived
+# code; talks to the engine purely via the /osc/* + /external-osc-cue OSC schema.
+license = "MIT OR GPL-3.0-or-later"
+
+[lib]
+# rlib → folded into the supersonic-native staticlib (the engine link) + host
+# unit tests. No cdylib: UDP networking is native-only (no wasm target).
+crate-type = ["rlib"]
+
+[dependencies]
+socket2 = "0.6.4"
+# Complete OSC 1.0 codec (messages + bundles) + the shared C-ABI scaffolding.
+supersonic-osc = { path = "../supersonic-osc" }

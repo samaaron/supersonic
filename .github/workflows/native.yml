@@ -109,11 +109,11 @@ jobs:
 
   # ── Freestanding engine (no JUCE, no Emscripten) ────────────────────────────
   # Compiles the shared engine (core + lanes ABI + scsynth + oscpack) against the
-  # compile-shim stubs only and drives it purely through ss_init/ss_tick. Guards
-  # the "one C ABI for all build targets" invariant: it fails the moment a
-  # JUCE/Emscripten dependency leaks into the shared engine, the ABI breaks, or a
-  # shared symbol stops resolving without a full host — the regressions that
-  # would otherwise only surface on the embedded build, which CI can't compile.
+  # compile-shim stubs only and drives it purely through ss_init/ss_tick. Checks
+  # the "one C ABI for all build targets" invariant: it fails if a JUCE/Emscripten
+  # dependency is pulled into the shared engine, the ABI breaks, or a shared
+  # symbol stops resolving without a full host — regressions that would otherwise
+  # only surface on the embedded build, which CI can't compile.
   #
   # The supersonic_freestanding BINARY links no JUCE — that's the whole point —
   # but the monolithic CMakeLists configures every target, so `cmake -B` still
@@ -165,6 +165,39 @@ jobs:
           esp_idf_version: v5.4
           target: esp32s3
           path: esp32s3
+
+  # ── MIT scheduler host (no synth, no JUCE, no Ableton Link) ─────────────────
+  # The MIT-licensed scheduler host build: the shared scheduler core + the Rust
+  # OSC/MIDI subsystems only — no synthesis, no JUCE, no Link. The boundary is
+  # structural: this build configures with synth and Link off, and the host
+  # target lists none of those sources. Configuring the monolithic project still
+  # pulls JUCE (hence the Linux configure deps); the supersonic-scheduler binary
+  # links none of it. Runs the host's own unit tests.
+  host:
+    runs-on: ubuntu-latest
+    name: scheduler-host-mit
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libasound2-dev libudev-dev \
+            libjack-dev \
+            libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxcomposite-dev
+
+      - name: Configure (host on, synth/Link off)
+        run: cmake -B build/host -DCMAKE_BUILD_TYPE=Release -DSUPERSONIC_BUILD_SCHEDULER_HOST=ON -DSUPERSONIC_ENABLE_LINK=OFF
+
+      - name: Build host + tests
+        run: cmake --build build/host --config Release --parallel --target supersonic-scheduler host_tests
+
+      - name: Run host tests
+        working-directory: build/host
+        run: ctest --output-on-failure -R "host_tests"
 
   # ── BEAM NIF shared library ─────────────────────────────────────────────────
   nif:

@@ -1,9 +1,8 @@
 /*
-    SuperSonic - SuperCollider AudioWorklet WebAssembly port
+    SuperSonic
     Copyright (c) 2025 Sam Aaron
 
-    Based on SuperCollider by James McCartney and community
-    GPL v3 or later
+    Dual-licensed MIT OR GPL-3.0-or-later (see repo LICENSE).
 */
 
 /*
@@ -14,7 +13,7 @@
  * lanes egress drains (lanes.cpp) and the native RingReader thread. The JS
  * reader (ring_buffer_core.js) is a separate implementation of the same
  * wire protocol, held equivalent by the ring-wire conformance fixtures.
- * Header-only; standard C++ and shared_memory.h only, no platform
+ * Header-only; standard C++ and ring/ring.h only, no platform
  * dependencies, no allocation, no copying.
  *
  * Wire invariant: frames are contiguous — writers never wrap a frame across
@@ -38,7 +37,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "../shared_memory.h"  // Message, MESSAGE_MAGIC, PADDING_MAGIC
+#include "../ring/ring.h"  // Message, MESSAGE_MAGIC, PADDING_MAGIC
 
 // Callback verdict: Consume advances the tail past the frame; Retain leaves
 // the frame in the ring and stops the drain (deliver it again next call).
@@ -173,9 +172,8 @@ inline uint32_t ss_drain_ring(uint8_t*              buffer,
         // Length sanity, including the never-wrap invariant: the frame's
         // 4-aligned footprint (header.length is exact; the writer rounds the
         // occupancy up to 4) must lie entirely before the ring boundary —
-        // in-place delivery must never read past the ring's end (this also
-        // fences off frames from legacy wrap-split writers and hostile
-        // shared-memory peers).
+        // in-place delivery must never read past the ring's end, even if a
+        // shared-memory writer publishes a malformed frame.
         uint32_t totalLen   = hdr.length;
         uint32_t footprint  = (totalLen + 3u) & ~3u;
         // avail < footprint is corruption too: writers publish head only after

@@ -79,28 +79,27 @@ echo "STACK_SIZE: $((WASM_STACK_SIZE / 1024))KB"
 # Collect all scsynth source files
 # Note: Platform-specific and unused files have been removed from the repo entirely
 # (SC_ComPort.cpp, XenomaiLock.cpp, SC_PaUtils.cpp, sc_popen.cpp, strtod.c)
-SCSYNTH_SERVER_SOURCES=$(find "$SRC_DIR/scsynth/server" -name "*.cpp" ! -name "SC_*Plugins.cpp" ! -name "scsynth_main.cpp" ! -name "SC_WebAudio.cpp" ! -name "SC_Wasm.cpp" ! -name "SC_WasmOscBuilder.cpp" 2>/dev/null | tr '\n' ' ')
-SCSYNTH_COMMON_SOURCES=$(find "$SRC_DIR/scsynth/common" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
-SCSYNTH_COMMON_C_SOURCES=$(find "$SRC_DIR/scsynth/common" -name "*.c" 2>/dev/null | tr '\n' ' ')
+SCSYNTH_SERVER_SOURCES=$(find "$SRC_DIR/synth/server" -name "*.cpp" ! -name "SC_*Plugins.cpp" ! -name "scsynth_main.cpp" ! -name "SC_WebAudio.cpp" ! -name "SC_Wasm.cpp" ! -name "SC_WasmOscBuilder.cpp" 2>/dev/null | tr '\n' ' ')
+SCSYNTH_COMMON_SOURCES=$(find "$SRC_DIR/synth/common" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
+SCSYNTH_COMMON_C_SOURCES=$(find "$SRC_DIR/synth/common" -name "*.c" 2>/dev/null | tr '\n' ' ')
 # MdaUGens.cpp excluded: its pianoData array (586k shorts) embeds 1.1MB of piano samples
 # directly in the WASM binary, nearly doubling its size (2.6MB → 1.4MB without it).
 # TODO: Re-implement MdaPiano with sample data loaded at runtime (like a buffer/sample)
 # rather than statically compiled into the WASM. The data is just PCM — it can be fetched
 # and loaded into a scsynth buffer on demand.
-SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/scsynth/plugins" -name "*.cpp" ! -name "MdaUGens.cpp" 2>/dev/null | tr '\n' ' ')
+SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/synth/plugins" -name "*.cpp" ! -name "MdaUGens.cpp" 2>/dev/null | tr '\n' ' ')
 
 # Compile audio processor with all scsynth sources and oscpack (standalone WASM for AudioWorklet)
 # Memory can grow on demand from INITIAL_MEMORY up to MAXIMUM_MEMORY (for buffer pool expansion)
 emcc "$SRC_DIR/audio_processor.cpp" \
     "$SRC_DIR/lanes/lanes.cpp" \
-    "$SRC_DIR/scheduler/EventScheduler.cpp" \
     "$SRC_DIR/scheduler/MidiClockOut.cpp" \
     "$SRC_DIR/buffer_commands.cpp" \
     "$SRC_DIR/node_tree.cpp" \
     "$SRC_DIR/SuperClock.cpp" \
     "$SRC_DIR/SuperClockLean.cpp" \
     "$SRC_DIR/EngineClock.cpp" \
-    "$SRC_DIR/scsynth/server/SC_OscUnroll.cpp" \
+    "$SRC_DIR/synth/server/SC_OscUnroll.cpp" \
     $SCSYNTH_SERVER_SOURCES \
     $SCSYNTH_COMMON_SOURCES \
     $SCSYNTH_COMMON_C_SOURCES \
@@ -109,13 +108,13 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     "$SRC_DIR/vendor/oscpack/osc/OscOutboundPacketStream.cpp" \
     "$SRC_DIR/vendor/oscpack/osc/OscReceivedElements.cpp" \
     -I"$SRC_DIR" \
-    -I"$SRC_DIR/scsynth/include/common" \
-    -I"$SRC_DIR/scsynth/include/plugin_interface" \
-    -I"$SRC_DIR/scsynth/include/server" \
-    -I"$SRC_DIR/scsynth/server" \
-    -I"$SRC_DIR/scsynth/common" \
-    -I"$SRC_DIR/scsynth/external_libraries/boost" \
-    -I"$SRC_DIR/scsynth/external_libraries/nova-simd" \
+    -I"$SRC_DIR/synth/include/common" \
+    -I"$SRC_DIR/synth/include/plugin_interface" \
+    -I"$SRC_DIR/synth/include/server" \
+    -I"$SRC_DIR/synth/server" \
+    -I"$SRC_DIR/synth/common" \
+    -I"$SRC_DIR/synth/external_libraries/boost" \
+    -I"$SRC_DIR/synth/external_libraries/nova-simd" \
     -I"$SRC_DIR/vendor/oscpack" \
     -DNO_LIBSNDFILE \
     -DSUPERSONIC \

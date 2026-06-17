@@ -1580,7 +1580,7 @@ void SuperClock::publishLinkMetrics(PerformanceMetrics* m, double quantum) {
         }
     }
 #else
-    (void)m; (void)ntpSeconds; (void)quantum;
+    (void)m; (void)quantum;
 #endif
 }
 
