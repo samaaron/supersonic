@@ -50,6 +50,9 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     name: native-${{ matrix.name }}
+    # A healthy build+test run is ~20 min; cap it so a teardown/test hang fails
+    # fast instead of holding a runner to GitHub's 6-hour default.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -232,6 +235,9 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     name: nif-${{ matrix.name }}
+    # A healthy build + mix test run is a few minutes; cap it so a NIF teardown
+    # hang fails fast instead of holding a runner to GitHub's 6-hour default.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
