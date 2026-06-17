@@ -1211,7 +1211,9 @@ void SupersonicEngine::shutdown() {
     // Tear down the MIDI subsystem before mEgress/mSuperClock: ss_midi_destroy
     // closes its midir connections (stopping midir's input thread), so no MIDI
     // callback can fire into mEgress/mSuperClock after this returns.
+    fprintf(stderr, "[ss-teardown-probe] shutdown begin\n"); fflush(stderr);
 #ifdef SUPERSONIC_MIDI
+    fprintf(stderr, "[ss-teardown-probe] midi...\n"); fflush(stderr);
     mMidiControl.shutdown();
     // Drop clock-out state so a generated clock can't resume with stale ports on
     // the next boot (the coordinator is a process-wide singleton).
@@ -1221,6 +1223,7 @@ void SupersonicEngine::shutdown() {
     // Tear down the OSC cue server (joins its recv thread, closes the socket)
     // before mEgress, so no inbound cue can fire into mEgress after this returns.
 #ifdef SUPERSONIC_OSC
+    fprintf(stderr, "[ss-teardown-probe] osc...\n"); fflush(stderr);
     mOscControl.shutdown();
 #endif
 
@@ -1229,6 +1232,7 @@ void SupersonicEngine::shutdown() {
     // emission lock), so no gamepad callback can fire into mEgress after this
     // returns. The subsystem's poll thread itself is process-global and parks.
 #ifdef SUPERSONIC_GAMEPAD
+    fprintf(stderr, "[ss-teardown-probe] gamepad...\n"); fflush(stderr);
     mGamepadControl.shutdown();
 #endif
 
@@ -1237,6 +1241,7 @@ void SupersonicEngine::shutdown() {
     // in-flight callbacks complete), then clear the callback wrappers.
     // Clearing earlier leaves the wrapper closure installed during the
     // brief window before Link quiesces.
+    fprintf(stderr, "[ss-teardown-probe] link...\n"); fflush(stderr);
     mLinkCallbacksAlive.store(false, std::memory_order_release);
     mSuperClock.setLinkVisibility(SuperClock::LinkVisibility::Off);
     mSuperClock.setTempoChangedCallback({});
@@ -1248,10 +1253,12 @@ void SupersonicEngine::shutdown() {
     // below while the gateway could still spawn it is a data race, so drain the
     // gateway to a stop before touching the device-orchestration workers.
     // stop() bumps + notifies its wake word (processCount) and joins.
+    fprintf(stderr, "[ss-teardown-probe] gateway...\n"); fflush(stderr);
     mNrtGateway.stop();
 
     // No control command can run now — join the device-orchestration workers
     // before tearing down the device manager + egress they call into.
+    fprintf(stderr, "[ss-teardown-probe] device-workers...\n"); fflush(stderr);
     mDebounceSwitchStop.store(true);
     if (mDebounceSwitchThread.joinable()) mDebounceSwitchThread.join();
     if (mReopenThread.joinable()) mReopenThread.join();
@@ -1290,6 +1297,7 @@ void SupersonicEngine::shutdown() {
     AggregateDeviceHelper::destroy();
 #endif
 
+    fprintf(stderr, "[ss-teardown-probe] drivers...\n"); fflush(stderr);
     mHeadlessDriver.stopThread(2000);
     mSampleLoader.stopThread(2000);
 
@@ -1312,6 +1320,7 @@ void SupersonicEngine::shutdown() {
     g_external_shared_memory = nullptr;
     g_external_segment = nullptr;
     mShmemCreator.reset();
+    fprintf(stderr, "[ss-teardown-probe] shutdown done\n"); fflush(stderr);
 }
 
 // --- OSC send with cache interception ---

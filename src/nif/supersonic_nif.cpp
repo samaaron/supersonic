@@ -510,19 +510,24 @@ static void on_unload(ErlNifEnv*, void*) {
         g_worker_exit = true;
     }
     g_worker_cv.notify_one();
+    fprintf(stderr, "[ss-teardown-probe] on_unload: joining worker...\n"); fflush(stderr);
     if (g_worker_thread) {
         if (g_worker_thread->joinable())
             g_worker_thread->join();
         delete g_worker_thread;
         g_worker_thread = nullptr;
     }
+    fprintf(stderr, "[ss-teardown-probe] on_unload: worker joined\n"); fflush(stderr);
 
     // Tear down a still-running engine inline (VM is exiting; blocking is fine).
     std::unique_ptr<SupersonicEngine> local;
     { std::lock_guard<std::mutex> lk(g_engine_mutex); local = std::move(g_engine); }
+    fprintf(stderr, "[ss-teardown-probe] on_unload: engine %s\n",
+            local ? "running -> shutdown" : "already stopped"); fflush(stderr);
     if (local)
         local->shutdown();
 
+    fprintf(stderr, "[ss-teardown-probe] on_unload: done\n"); fflush(stderr);
     g_subs.clear();
 
     // shutdownJuce_GUI() is deliberately not called. on_unload runs on an
