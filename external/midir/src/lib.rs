@@ -59,6 +59,14 @@ impl MidiMessage {
 
 pub mod os; // include platform-specific behaviour
 
+/// Shared-client ALSA I/O: one sequencer client hosting many ports, instead of
+/// midir's default one-client-per-port. Avoids exhausting ALSA's per-system
+/// client/queue limits when many ports are open (see sonic-pi#3543). Linux only.
+#[cfg(all(target_os = "linux", not(feature = "jack"), not(target_arch = "wasm32")))]
+pub mod shared {
+    pub use crate::backend::shared::{SharedInput, SharedInputCallback, SharedOutput};
+}
+
 mod errors;
 pub use errors::*;
 
