@@ -6,12 +6,23 @@
 //! Ports are addressed by their normalized handle (see [`crate::normalize`]).
 //! Devices are opened explicitly via `enable_*`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
+use midir::{MidiInput, MidiOutput};
 
 use crate::normalize::{normalize_ports, PortInfo};
+
+// MIDI port storage is backed differently per platform. On Linux a single ALSA
+// sequencer client hosts every input port and a second hosts every output port
+// (see `linux_ports` / midir's `shared` module): opening one client per port
+// exhausts ALSA's per-system client/queue limits (sonic-pi#3543). Elsewhere
+// (CoreMIDI/WinMM) there is no such cap, so we keep midir's one-connection-per-
+// port model unchanged.
+#[cfg(target_os = "linux")]
+use linux_ports::{Inputs, Outputs};
+#[cfg(not(target_os = "linux"))]
+use per_port::{Inputs, Outputs};
 
 /// Invoked for each inbound message on midir's input thread:
 /// `(normalized_port, raw_os_name, timestamp_us, raw_bytes)`. The raw OS name
@@ -21,9 +32,8 @@ pub type InputCallback = Arc<dyn Fn(&str, &str, u64, &[u8]) + Send + Sync + 'sta
 /// Owns all open MIDI connections plus the last-enumerated port lists.
 pub struct MidiIo {
     client_name: String,
-    on_input: InputCallback,
-    inputs: HashMap<String, MidiInputConnection<()>>,
-    outputs: HashMap<String, MidiOutputConnection>,
+    inputs: Inputs,
+    outputs: Outputs,
     in_ports: Vec<PortInfo>,
     out_ports: Vec<PortInfo>,
     // "Open everything" intent (set by enable_all). When set, refresh() re-opens
@@ -34,11 +44,11 @@ pub struct MidiIo {
 
 impl MidiIo {
     pub fn new(client_name: impl Into<String>, on_input: InputCallback) -> Self {
+        let client_name = client_name.into();
         let mut io = Self {
-            client_name: client_name.into(),
-            on_input,
-            inputs: HashMap::new(),
-            outputs: HashMap::new(),
+            inputs: Inputs::new(&client_name, on_input),
+            outputs: Outputs::new(&client_name),
+            client_name,
             in_ports: Vec::new(),
             out_ports: Vec::new(),
             want_all_in: false,
@@ -62,10 +72,10 @@ impl MidiIo {
         {
             let live_in: HashSet<&str> =
                 self.in_ports.iter().map(|p| p.normalized.as_str()).collect();
-            self.inputs.retain(|k, _| live_in.contains(k.as_str()));
+            self.inputs.retain_live(&live_in);
             let live_out: HashSet<&str> =
                 self.out_ports.iter().map(|p| p.normalized.as_str()).collect();
-            self.outputs.retain(|k, _| live_out.contains(k.as_str()));
+            self.outputs.retain_live(&live_out);
         }
         if self.want_all_in {
             self.enable_all(true, true);
@@ -80,12 +90,12 @@ impl MidiIo {
         let ins = self
             .in_ports
             .iter()
-            .map(|p| (p.normalized.clone(), self.inputs.contains_key(&p.normalized)))
+            .map(|p| (p.normalized.clone(), self.inputs.is_open(&p.normalized)))
             .collect();
         let outs = self
             .out_ports
             .iter()
-            .map(|p| (p.normalized.clone(), self.outputs.contains_key(&p.normalized)))
+            .map(|p| (p.normalized.clone(), self.outputs.is_open(&p.normalized)))
             .collect();
         (ins, outs)
     }
@@ -94,66 +104,19 @@ impl MidiIo {
     /// (or if already in the requested state).
     pub fn enable_input(&mut self, norm: &str, enable: bool) -> bool {
         if !enable {
-            self.inputs.remove(norm); // dropping the connection closes the port
+            self.inputs.disable(norm);
             return true;
         }
-        if self.inputs.contains_key(norm) {
-            return true;
-        }
-        let mut midi_in = match MidiInput::new(&self.client_name) {
-            Ok(m) => m,
-            Err(_) => return false,
-        };
-        midi_in.ignore(Ignore::None); // we want sysex, timing and active-sensing
-        let ports = midi_in.ports();
-        let infos = normalize_ports(&port_names_in(&midi_in));
-        let idx = match infos.iter().position(|pi| pi.normalized == norm) {
-            Some(i) => i,
-            None => return false,
-        };
-        let cb = self.on_input.clone();
-        let name = norm.to_string();
-        let raw = infos[idx].raw.clone();
-        match midi_in.connect(
-            &ports[idx],
-            "supersonic-midi-in",
-            move |ts, bytes, _| cb(&name, &raw, ts, bytes),
-            (),
-        ) {
-            Ok(conn) => {
-                self.inputs.insert(norm.to_string(), conn);
-                true
-            }
-            Err(_) => false,
-        }
+        self.inputs.enable(&self.client_name, norm)
     }
 
     /// Open (or close) an output port by normalized name.
     pub fn enable_output(&mut self, norm: &str, enable: bool) -> bool {
         if !enable {
-            self.outputs.remove(norm); // dropping the connection closes the port
+            self.outputs.disable(norm);
             return true;
         }
-        if self.outputs.contains_key(norm) {
-            return true;
-        }
-        let midi_out = match MidiOutput::new(&self.client_name) {
-            Ok(m) => m,
-            Err(_) => return false,
-        };
-        let ports = midi_out.ports();
-        let infos = normalize_ports(&port_names_out(&midi_out));
-        let idx = match infos.iter().position(|pi| pi.normalized == norm) {
-            Some(i) => i,
-            None => return false,
-        };
-        match midi_out.connect(&ports[idx], "supersonic-midi-out") {
-            Ok(conn) => {
-                self.outputs.insert(norm.to_string(), conn);
-                true
-            }
-            Err(_) => false,
-        }
+        self.outputs.enable(&self.client_name, norm)
     }
 
     /// Enable (or disable) every available input/output port, and remember the
@@ -180,18 +143,12 @@ impl MidiIo {
 
     /// Send raw bytes to an open output (`"*"` = all open outputs).
     pub fn send(&mut self, port: &str, bytes: &[u8]) {
-        if port == "*" {
-            for conn in self.outputs.values_mut() {
-                let _ = conn.send(bytes);
-            }
-        } else if let Some(conn) = self.outputs.get_mut(port) {
-            let _ = conn.send(bytes);
-        }
+        self.outputs.send(port, bytes);
     }
 
     /// Names of currently open output ports (used to fan out generated clock).
     pub fn open_outputs(&self) -> Vec<String> {
-        self.outputs.keys().cloned().collect()
+        self.outputs.open_keys()
     }
 }
 
@@ -207,4 +164,288 @@ fn port_names_out(mo: &MidiOutput) -> Vec<String> {
         .iter()
         .map(|p| mo.port_name(p).unwrap_or_default())
         .collect()
+}
+
+/// Linux/ALSA storage: all inputs share one sequencer client, all outputs share
+/// another (midir's `shared` module). This keeps the count of ALSA seq clients
+/// and queues constant no matter how many ports are open — the fix for
+/// sonic-pi#3543. Each `enable` still enumerates with a throwaway client to
+/// resolve the device address for a normalized handle, then subscribes the port
+/// onto the persistent shared client.
+#[cfg(target_os = "linux")]
+mod linux_ports {
+    use std::collections::HashSet;
+
+    use midir::shared::{SharedInput, SharedOutput};
+    use midir::Ignore;
+
+    use super::{normalize_ports, port_names_in, port_names_out, InputCallback};
+    use midir::{MidiInput, MidiOutput};
+
+    pub struct Inputs {
+        // None if the shared ALSA client could not be opened; all enables then
+        // no-op to false, mirroring the per-port path's graceful degradation.
+        shared: Option<SharedInput>,
+        open: HashSet<String>,
+    }
+
+    impl Inputs {
+        pub fn new(client_name: &str, on_input: InputCallback) -> Self {
+            let shared = SharedInput::new(client_name, Ignore::None, on_input).ok();
+            Inputs {
+                shared,
+                open: HashSet::new(),
+            }
+        }
+
+        pub fn is_open(&self, norm: &str) -> bool {
+            self.open.contains(norm)
+        }
+
+        pub fn disable(&mut self, norm: &str) {
+            if let Some(shared) = &self.shared {
+                shared.remove_port(norm);
+            }
+            self.open.remove(norm);
+        }
+
+        pub fn retain_live(&mut self, live: &HashSet<&str>) {
+            let gone: Vec<String> = self
+                .open
+                .iter()
+                .filter(|n| !live.contains(n.as_str()))
+                .cloned()
+                .collect();
+            for n in gone {
+                self.disable(&n);
+            }
+        }
+
+        pub fn enable(&mut self, client_name: &str, norm: &str) -> bool {
+            if self.open.contains(norm) {
+                return true;
+            }
+            let shared = match &self.shared {
+                Some(s) => s,
+                None => return false,
+            };
+            let midi_in = match MidiInput::new(client_name) {
+                Ok(m) => m,
+                Err(_) => return false,
+            };
+            let ports = midi_in.ports();
+            let infos = normalize_ports(&port_names_in(&midi_in));
+            let idx = match infos.iter().position(|pi| pi.normalized == norm) {
+                Some(i) => i,
+                None => return false,
+            };
+            if shared.add_port(&ports[idx].id(), "supersonic-midi-in", norm, &infos[idx].raw) {
+                self.open.insert(norm.to_string());
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    pub struct Outputs {
+        shared: Option<SharedOutput>,
+    }
+
+    impl Outputs {
+        pub fn new(client_name: &str) -> Self {
+            Outputs {
+                shared: SharedOutput::new(client_name).ok(),
+            }
+        }
+
+        pub fn is_open(&self, norm: &str) -> bool {
+            self.shared.as_ref().is_some_and(|s| s.contains(norm))
+        }
+
+        pub fn disable(&mut self, norm: &str) {
+            if let Some(shared) = &mut self.shared {
+                shared.remove_port(norm);
+            }
+        }
+
+        pub fn retain_live(&mut self, live: &HashSet<&str>) {
+            let shared = match &mut self.shared {
+                Some(s) => s,
+                None => return,
+            };
+            for n in shared.labels() {
+                if !live.contains(n.as_str()) {
+                    shared.remove_port(&n);
+                }
+            }
+        }
+
+        pub fn enable(&mut self, client_name: &str, norm: &str) -> bool {
+            let midi_out = match MidiOutput::new(client_name) {
+                Ok(m) => m,
+                Err(_) => return false,
+            };
+            let ports = midi_out.ports();
+            let infos = normalize_ports(&port_names_out(&midi_out));
+            let idx = match infos.iter().position(|pi| pi.normalized == norm) {
+                Some(i) => i,
+                None => return false,
+            };
+            let shared = match &mut self.shared {
+                Some(s) => s,
+                None => return false,
+            };
+            shared.add_port(&ports[idx].id(), "supersonic-midi-out", norm)
+        }
+
+        pub fn send(&mut self, port: &str, bytes: &[u8]) {
+            let shared = match &mut self.shared {
+                Some(s) => s,
+                None => return,
+            };
+            if port == "*" {
+                for label in shared.labels() {
+                    shared.send(&label, bytes);
+                }
+            } else {
+                shared.send(port, bytes);
+            }
+        }
+
+        pub fn open_keys(&self) -> Vec<String> {
+            self.shared.as_ref().map(|s| s.labels()).unwrap_or_default()
+        }
+    }
+}
+
+/// Default storage (CoreMIDI/WinMM): midir's one-connection-per-port model,
+/// unchanged. These platforms have no per-client kernel cap, so there is nothing
+/// to share.
+#[cfg(not(target_os = "linux"))]
+mod per_port {
+    use std::collections::{HashMap, HashSet};
+
+    use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
+
+    use super::{normalize_ports, port_names_in, port_names_out, InputCallback};
+
+    pub struct Inputs {
+        conns: HashMap<String, MidiInputConnection<()>>,
+        on_input: InputCallback,
+    }
+
+    impl Inputs {
+        pub fn new(_client_name: &str, on_input: InputCallback) -> Self {
+            Inputs {
+                conns: HashMap::new(),
+                on_input,
+            }
+        }
+
+        pub fn is_open(&self, norm: &str) -> bool {
+            self.conns.contains_key(norm)
+        }
+
+        pub fn disable(&mut self, norm: &str) {
+            self.conns.remove(norm); // dropping the connection closes the port
+        }
+
+        pub fn retain_live(&mut self, live: &HashSet<&str>) {
+            self.conns.retain(|k, _| live.contains(k.as_str()));
+        }
+
+        pub fn enable(&mut self, client_name: &str, norm: &str) -> bool {
+            if self.conns.contains_key(norm) {
+                return true;
+            }
+            let mut midi_in = match MidiInput::new(client_name) {
+                Ok(m) => m,
+                Err(_) => return false,
+            };
+            midi_in.ignore(Ignore::None); // we want sysex, timing and active-sensing
+            let ports = midi_in.ports();
+            let infos = normalize_ports(&port_names_in(&midi_in));
+            let idx = match infos.iter().position(|pi| pi.normalized == norm) {
+                Some(i) => i,
+                None => return false,
+            };
+            let cb = self.on_input.clone();
+            let name = norm.to_string();
+            let raw = infos[idx].raw.clone();
+            match midi_in.connect(
+                &ports[idx],
+                "supersonic-midi-in",
+                move |ts, bytes, _| cb(&name, &raw, ts, bytes),
+                (),
+            ) {
+                Ok(conn) => {
+                    self.conns.insert(norm.to_string(), conn);
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+    }
+
+    pub struct Outputs {
+        conns: HashMap<String, MidiOutputConnection>,
+    }
+
+    impl Outputs {
+        pub fn new(_client_name: &str) -> Self {
+            Outputs {
+                conns: HashMap::new(),
+            }
+        }
+
+        pub fn is_open(&self, norm: &str) -> bool {
+            self.conns.contains_key(norm)
+        }
+
+        pub fn disable(&mut self, norm: &str) {
+            self.conns.remove(norm); // dropping the connection closes the port
+        }
+
+        pub fn retain_live(&mut self, live: &HashSet<&str>) {
+            self.conns.retain(|k, _| live.contains(k.as_str()));
+        }
+
+        pub fn enable(&mut self, client_name: &str, norm: &str) -> bool {
+            if self.conns.contains_key(norm) {
+                return true;
+            }
+            let midi_out = match MidiOutput::new(client_name) {
+                Ok(m) => m,
+                Err(_) => return false,
+            };
+            let ports = midi_out.ports();
+            let infos = normalize_ports(&port_names_out(&midi_out));
+            let idx = match infos.iter().position(|pi| pi.normalized == norm) {
+                Some(i) => i,
+                None => return false,
+            };
+            match midi_out.connect(&ports[idx], "supersonic-midi-out") {
+                Ok(conn) => {
+                    self.conns.insert(norm.to_string(), conn);
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+
+        pub fn send(&mut self, port: &str, bytes: &[u8]) {
+            if port == "*" {
+                for conn in self.conns.values_mut() {
+                    let _ = conn.send(bytes);
+                }
+            } else if let Some(conn) = self.conns.get_mut(port) {
+                let _ = conn.send(bytes);
+            }
+        }
+
+        pub fn open_keys(&self) -> Vec<String> {
+            self.conns.keys().cloned().collect()
+        }
+    }
 }

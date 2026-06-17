@@ -32,7 +32,15 @@ fn input_loopback_via_virtual_port() {
         }),
     );
     io.refresh();
-    assert!(io.enable_input("ss-loop-in", true), "open virtual input port");
+    // The handle is the normalised, dedup'd form of the full OS port name, not
+    // the bare virtual-port name — discover it from the enumeration.
+    let (ins, _) = io.port_lists();
+    let norm = ins
+        .iter()
+        .find(|(n, _)| n.contains("ss-loop-in"))
+        .map(|(n, _)| n.clone())
+        .expect("virtual input port enumerated");
+    assert!(io.enable_input(&norm, true), "open virtual input port");
 
     let expected = MidiMessage::NoteOn { channel: 1, note: 60, velocity: 100 };
     vconn.send(&expected.encode()).unwrap();
@@ -41,7 +49,7 @@ fn input_loopback_via_virtual_port() {
     let got = got.lock().unwrap();
     assert!(
         got.iter()
-            .any(|(p, b)| p == "ss-loop-in" && MidiMessage::parse(b) == Some(expected.clone())),
+            .any(|(p, b)| *p == norm && MidiMessage::parse(b) == Some(expected.clone())),
         "expected note-on loopback, got {got:?}"
     );
 }
@@ -63,10 +71,16 @@ fn output_loopback_via_virtual_port() {
 
     let mut io = MidiIo::new("SuperSonic-test", Arc::new(|_, _, _, _: &[u8]| {}));
     io.refresh();
-    assert!(io.enable_output("ss-loop-out", true), "open virtual output port");
+    let (_, outs) = io.port_lists();
+    let norm = outs
+        .iter()
+        .find(|(n, _)| n.contains("ss-loop-out"))
+        .map(|(n, _)| n.clone())
+        .expect("virtual output port enumerated");
+    assert!(io.enable_output(&norm, true), "open virtual output port");
 
     let expected = MidiMessage::ControlChange { channel: 1, controller: 7, value: 42 };
-    io.send("ss-loop-out", &expected.encode());
+    io.send(&norm, &expected.encode());
     std::thread::sleep(Duration::from_millis(200));
 
     let got = got.lock().unwrap();

@@ -134,6 +134,9 @@ mod helpers {
 
 const INITIAL_CODER_BUFFER_SIZE: usize = 32;
 
+// Shared-client I/O (one seq client for many ports); see module docs.
+pub mod shared;
+
 pub struct MidiInput {
     ignore_flags: Ignore,
     seq: Option<Seq>,
