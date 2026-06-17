@@ -524,19 +524,11 @@ static void on_unload(ErlNifEnv*, void*) {
         local->shutdown();
 
     g_subs.clear();
-#ifdef __APPLE__
-    // Do NOT call shutdownJuce_GUI() on macOS.  The teardown path
-    // (MessageManager::doPlatformSpecificShutdown → ~AppDelegate) calls
-    // NSRunLoop/NSNotificationCenter/NSApp APIs that require the main
-    // thread.  on_unload runs on an arbitrary BEAM scheduler, causing
-    // an abort (trap 6). on_unload only fires at VM shutdown (reload and
-    // upgrade are NULL in ERL_NIF_INIT), so the OS reclaims memory at exit.
-#else
-    if (g_juce_initialised.load()) {
-        juce::shutdownJuce_GUI();
-        g_juce_initialised.store(false);
-    }
-#endif
+
+    // shutdownJuce_GUI() is deliberately not called. on_unload runs on an
+    // arbitrary BEAM scheduler thread, where JUCE's MessageManager teardown is
+    // unsafe off the message thread (aborts on macOS, hangs on Linux), and it is
+    // unneeded at VM shutdown — the process is exiting, so the OS reclaims it.
 }
 
 // ─── Function table ────────────────────────────────────────────────────────
