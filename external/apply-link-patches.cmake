@@ -12,6 +12,7 @@ set(PATCHES
     "${LINK_PATCH_DIR}/link-loopback-mode.patch"
     "${LINK_PATCH_DIR}/link-peer-enumeration.patch"
     "${LINK_PATCH_DIR}/link-monotonic-commit-timestamp.patch"
+    "${LINK_PATCH_DIR}/link-linkaudio-teardown-race.patch"
 )
 
 find_package(Git REQUIRED)

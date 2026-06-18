@@ -1,0 +1,59 @@
+Fix flaky LinkAudio teardown crash (std::bad_function_call -> terminate).
+
+BasicLinkAudio's constructor installs a channels-changed callback on the
+Controller that captures `this` and forwards into the derived members
+mCallbackMutex / mChannelsChangedCallback. The destructor tries to neutralise
+it via mController.setChannelsChangedCallback([]{}), but that call posts the
+reset to the Link io thread asynchronously (mIo->async) and returns
+immediately. The base BasicLink (which owns and joins the io thread) is torn
+down only AFTER this derived destructor returns, so there is a window in which
+the io thread can run Controller::updateApiChannels() and invoke the old
+forwarding lambda after the derived members have been destroyed -> calling an
+empty std::function -> std::bad_function_call -> unhandled on the io thread ->
+std::terminate(). On Windows this surfaces as a rare FAST_FAIL_FATAL_APP_EXIT
+(0xC0000409) when a peer's channel set changes while a LinkAudio instance is
+being destroyed (e.g. a still-publishing peer during engine teardown).
+
+Make the destructor block until the io thread has both applied the no-op reset
+and drained every handler queued before it. setChannelsChangedCallback() and
+callOnLinkThread() post to the same FIFO io queue, so a task enqueued after the
+reset is guaranteed to run after it; waiting on it closes the race.
+
+diff --git a/include/ableton/LinkAudio.ipp b/include/ableton/LinkAudio.ipp
+index 0cd9159..e0a4bd8 100644
+--- a/include/ableton/LinkAudio.ipp
++++ b/include/ableton/LinkAudio.ipp
+@@ -19,6 +19,7 @@
+ 
+ #pragma once
+ 
++#include <future>
+ #include <string>
+ 
+ namespace ableton
+@@ -40,7 +41,25 @@ inline BasicLinkAudio<Clock>::BasicLinkAudio(const double bpm, std::string name)
+ template <typename Clock>
+ inline BasicLinkAudio<Clock>::~BasicLinkAudio()
+ {
++  // Replace the channels-changed forwarding callback (installed in the ctor,
++  // which captures `this` and touches mCallbackMutex / mChannelsChangedCallback)
++  // with a no-op, then BLOCK until the Link io thread has both applied that reset
++  // and drained every handler queued before it. setChannelsChangedCallback() and
++  // callOnLinkThread() post to the same FIFO io queue, so a task enqueued after
++  // the reset is guaranteed to run after it.
++  //
++  // Without this drain the reset is fire-and-forget: an in-flight
++  // Controller::updateApiChannels() on the io thread can invoke the forwarding
++  // lambda after the derived members below are destroyed (the base BasicLink,
++  // which owns and joins the io thread, is torn down only AFTER this derived
++  // destructor returns). That calls an empty std::function -> std::bad_function_call
++  // -> unhandled on the io thread -> std::terminate(). Observed as a flaky Windows
++  // teardown crash (FAST_FAIL_FATAL_APP_EXIT, 0xC0000409) when a peer's channels
++  // change while a LinkAudio instance is being destroyed.
++  std::promise<void> drained;
+   this->mController.setChannelsChangedCallback([]() {});
++  this->mController.callOnLinkThread([&drained]() { drained.set_value(); });
++  drained.get_future().wait();
+ }
+ 
+ template <typename Clock>
