@@ -309,15 +309,24 @@ struct LifecycleCmd {
     bool                     notify;  // false for VM-shutdown-initiated teardown
 };
 
-static std::mutex               g_worker_mutex;
-static std::condition_variable  g_worker_cv;
-static std::deque<LifecycleCmd> g_worker_queue;
-static bool                     g_worker_exit = false;
-// Heap-owned, never a static std::thread object: erl_nif's on_unload is not
-// reliably called at VM halt, so a static std::thread could reach its destructor
-// still-joinable and std::terminate(). As a pointer it's joined+deleted when
-// on_unload does run, and merely leaked (no terminate) when it doesn't.
-static std::thread*             g_worker_thread = nullptr;
+// Lifecycle-worker shared state, heap-allocated once and intentionally never
+// freed. erl_nif's on_unload is not reliably called at VM halt (the BEAM does
+// not purge the module on a normal `halt`), so a file-static std::mutex /
+// std::condition_variable here would reach its destructor with the worker still
+// parked in wait(): glibc's pthread_cond_destroy then blocks forever on the live
+// waiter, wedging process exit (Linux only; macOS and Windows do not wait). A
+// std::thread member would likewise reach its destructor still-joinable and
+// std::terminate(). Leaking the whole struct sidesteps every such teardown: the
+// OS reclaims it at exit, no destructor runs. on_unload, when it does run, still
+// wakes + joins the worker through these fields; it just never destroys them.
+struct WorkerState {
+    std::mutex               mutex;
+    std::condition_variable  cv;
+    std::deque<LifecycleCmd> queue;
+    bool                     exit = false;
+    std::thread*             thread = nullptr;
+};
+static WorkerState* const       g_worker = new WorkerState;
 
 // Post one message to a single pid from this (non-scheduler) worker thread.
 template <typename MakeMsg>
@@ -399,11 +408,11 @@ static void worker_loop() {
     for (;;) {
         LifecycleCmd cmd;
         {
-            std::unique_lock<std::mutex> lk(g_worker_mutex);
-            g_worker_cv.wait(lk, [] { return g_worker_exit || !g_worker_queue.empty(); });
-            if (g_worker_exit) return;  // drop any still-queued ops at VM shutdown
-            cmd = std::move(g_worker_queue.front());
-            g_worker_queue.pop_front();
+            std::unique_lock<std::mutex> lk(g_worker->mutex);
+            g_worker->cv.wait(lk, [] { return g_worker->exit || !g_worker->queue.empty(); });
+            if (g_worker->exit) return;  // drop any still-queued ops at VM shutdown
+            cmd = std::move(g_worker->queue.front());
+            g_worker->queue.pop_front();
         }
         if (cmd.op == LifecycleOp::Start) worker_do_start(cmd);
         else                              worker_do_stop(cmd);
@@ -411,8 +420,8 @@ static void worker_loop() {
 }
 
 static void worker_enqueue(LifecycleCmd cmd) {
-    { std::lock_guard<std::mutex> lk(g_worker_mutex); g_worker_queue.push_back(std::move(cmd)); }
-    g_worker_cv.notify_one();
+    { std::lock_guard<std::mutex> lk(g_worker->mutex); g_worker->queue.push_back(std::move(cmd)); }
+    g_worker->cv.notify_one();
 }
 
 // ─── NIF functions ─────────────────────────────────────────────────────────
@@ -497,8 +506,8 @@ static ERL_NIF_TERM nif_clear_notification_pid(ErlNifEnv* env, int, const ERL_NI
 static int on_load(ErlNifEnv*, void**, ERL_NIF_TERM) {
     // Spin up the lifecycle worker (idle until the first start). JUCE/audio init
     // is deferred to the worker on the first boot.
-    g_worker_exit = false;
-    g_worker_thread = new std::thread(worker_loop);
+    g_worker->exit = false;
+    g_worker->thread = new std::thread(worker_loop);
     return 0;
 }
 
@@ -506,28 +515,23 @@ static void on_unload(ErlNifEnv*, void*) {
     // Stop the lifecycle worker: it finishes any in-flight op, then exits without
     // touching the (shutting-down) BEAM, so no enif_send races VM teardown.
     {
-        std::lock_guard<std::mutex> lk(g_worker_mutex);
-        g_worker_exit = true;
+        std::lock_guard<std::mutex> lk(g_worker->mutex);
+        g_worker->exit = true;
     }
-    g_worker_cv.notify_one();
-    fprintf(stderr, "[ss-teardown-probe] on_unload: joining worker...\n"); fflush(stderr);
-    if (g_worker_thread) {
-        if (g_worker_thread->joinable())
-            g_worker_thread->join();
-        delete g_worker_thread;
-        g_worker_thread = nullptr;
+    g_worker->cv.notify_one();
+    if (g_worker->thread) {
+        if (g_worker->thread->joinable())
+            g_worker->thread->join();
+        delete g_worker->thread;
+        g_worker->thread = nullptr;
     }
-    fprintf(stderr, "[ss-teardown-probe] on_unload: worker joined\n"); fflush(stderr);
 
     // Tear down a still-running engine inline (VM is exiting; blocking is fine).
     std::unique_ptr<SupersonicEngine> local;
     { std::lock_guard<std::mutex> lk(g_engine_mutex); local = std::move(g_engine); }
-    fprintf(stderr, "[ss-teardown-probe] on_unload: engine %s\n",
-            local ? "running -> shutdown" : "already stopped"); fflush(stderr);
     if (local)
         local->shutdown();
 
-    fprintf(stderr, "[ss-teardown-probe] on_unload: done\n"); fflush(stderr);
     g_subs.clear();
 
     // shutdownJuce_GUI() is deliberately not called. on_unload runs on an
