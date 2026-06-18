@@ -12,7 +12,8 @@
  *
  * This is the desktop stand-in for an embedded host: it supplies the one piece
  * of host glue the engine needs (a null external-shared-memory pointer) and
- * shares the lean SuperClockLean.cpp for the clock platform methods. Its job in
+ * links the SuperClock composition root (Link-free: no SUPERSONIC_LINK, so the
+ * session/bridge are inline no-ops) for the clock platform methods. Its job in
  * CI is to fail the moment a JUCE/Emscripten dependency
  * leaks into the shared engine, the lanes ABI breaks, or a shared symbol stops
  * resolving without a full host — i.e. it makes "one C ABI for all build
@@ -32,8 +33,9 @@
 // On native this is SupersonicEngine.cpp; embedded defines it too. The
 // freestanding host has no public shm segment, so the engine uses its own
 // ring_buffer_storage arena. (The SuperClock platform methods — including
-// state() — come from the shared lean SuperClockLean.cpp this target compiles;
-// g_active_superclock stays unset, so the engine's clock/MIDI paths are skipped.)
+// state() — come from the composition root this target compiles
+// (SuperClockNative + TimeSource + MidiTimelines); g_active_superclock stays
+// unset, so the engine's clock/MIDI paths are skipped.)
 extern "C" {
 void* g_external_shared_memory = nullptr;
 }

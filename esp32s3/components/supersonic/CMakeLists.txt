@@ -45,12 +45,16 @@ idf_component_register(
     "${SS_SRC}/node_tree.cpp"
     "${SS_SRC}/buffer_commands.cpp"
     "${SS_SRC}/SuperClock.cpp"
-    # SuperClockLean.cpp is the lean/self-driven SuperClock backend shared by
-    # every non-native host (web, freestanding, embedded). process_audio's
-    # MidiClockOut path references SuperClock's platform methods (now(),
-    # timelineBpm, …), which live here — so the link gets a real definition
-    # rather than leaning on --gc-sections to drop the device-dead branch.
-    "${SS_SRC}/SuperClockLean.cpp"
+    # The SuperClock composition root + its self-driven axes. SUPERSONIC_WORKLET_CLOCK
+    # (set below) selects the worklet TimeSource (SAB time formula, no wall clock);
+    # without SUPERSONIC_LINK the LinkSession/LinkAudioBridge headers are inline
+    # no-ops, so no extra TU. process_audio's MidiClockOut path references
+    # SuperClock's platform methods (now(), timelineBpm, …), defined across these
+    # units, so the link gets real definitions rather than leaning on --gc-sections
+    # to drop the device-dead branch.
+    "${SS_SRC}/native/SuperClockNative.cpp"
+    "${SS_SRC}/native/TimeSource.cpp"
+    "${SS_SRC}/native/MidiTimelines.cpp"
     "${SS_SRC}/synth/external_libraries/TLSF-2.4.6/src/tlsf.c"
     ${SCSYNTH_SERVER}
     ${SCSYNTH_COMMON_CPP}
@@ -80,9 +84,14 @@ idf_component_register(
 # MAX_BLOCK_SIZE 64 -> 512 B, vs 512 KB on the desktop profile). The sizing knobs
 # all live in memory_profile.h, so they are NOT set here (an explicit -D would
 # override the profile).
+# SUPERSONIC_SYNTH=1 compiles the scsynth engine (World + DSP render); this
+# component globs the scsynth sources and main.cpp boots a World, so the synth
+# guards in audio_processor.cpp must be on. SUPERSONIC_WORKLET_CLOCK=1 selects the
+# self-driven TimeSource (no WallClock/threads on the device).
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     SUPERSONIC=1 STATIC_PLUGINS=1 NOVA_SIMD=1 SC_FFT_GREEN=1 NO_LIBSNDFILE=1
-    SC_AUDIO_API=3 SUPERSONIC_DEVICE_PROFILE=1)
+    SC_AUDIO_API=3 SUPERSONIC_DEVICE_PROFILE=1 SUPERSONIC_WORKLET_CLOCK=1
+    SUPERSONIC_SYNTH=1)
 
 # The engine is a large C++ codebase — SuperSonic's own core plus the
 # scsynth-derived DSP/server and vendored libs (oscpack, TLSF) — and trips many

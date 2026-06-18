@@ -97,7 +97,9 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     "$SRC_DIR/buffer_commands.cpp" \
     "$SRC_DIR/node_tree.cpp" \
     "$SRC_DIR/SuperClock.cpp" \
-    "$SRC_DIR/SuperClockLean.cpp" \
+    "$SRC_DIR/native/SuperClockNative.cpp" \
+    "$SRC_DIR/native/TimeSource.cpp" \
+    "$SRC_DIR/native/MidiTimelines.cpp" \
     "$SRC_DIR/EngineClock.cpp" \
     "$SRC_DIR/synth/server/SC_OscUnroll.cpp" \
     $SCSYNTH_SERVER_SOURCES \
@@ -118,6 +120,8 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -I"$SRC_DIR/vendor/oscpack" \
     -DNO_LIBSNDFILE \
     -DSUPERSONIC \
+    -DSUPERSONIC_SYNTH=1 \
+    -DSUPERSONIC_WORKLET_CLOCK=1 \
     -DNDEBUG \
     -DSCHEDULER_DATA_POOL_SIZE=$SCHEDULER_DATA_POOL_SIZE \
     -DSCHEDULER_SLOT_COUNT=$SCHEDULER_SLOT_COUNT \

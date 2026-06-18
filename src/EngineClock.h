@@ -2,9 +2,9 @@
  * EngineClock.h — the portable clock-core /clock verbs, shared by every build.
  *
  * tempo, transport, start/stop sync, the rpc beat/time conversions, peer count
- * and the enabled/now queries — all expressed against SuperClock, which exists
- * on native (SuperClockNative) AND the lean hosts (SuperClockLean). The native engine calls this from
- * EngineControl (UDP egress); the web worklet calls it from audio_processor's
+ * and the enabled/now queries — all expressed against SuperClock, whose one
+ * composition root (SuperClockNative) backs every build. The native engine calls
+ * this from EngineControl (UDP egress); the web worklet calls it from audio_processor's
  * IN-drain (OUT-ring egress). One implementation, so /clock behaves identically
  * everywhere. Replies leave through `reply`. Native-only Link-session verbs
  * (visibility, peers, Link Audio, notify) are NOT here — they stay in

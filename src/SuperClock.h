@@ -355,11 +355,21 @@ public:
     SuperClockState*       state();
     const SuperClockState* state() const;
 
-    // Native: point the clock state at the shared arena's SUPERCLOCK_STATE
-    // region (copying current state into it) so the native SHM matches web's
-    // shape, instead of hiding state in a private member. No-op on WASM, which
-    // binds its SAB region via superclock_wasm_init.
+    // Point the clock state at a shared arena's SUPERCLOCK_STATE region (copying
+    // current state into it) so the SHM has one shape on every build. Native
+    // binds the cross-process arena at engine init; the worklet (WASM) binds its
+    // SAB region at boot via superclock_wasm_init. Called once before the audio
+    // thread runs — no concurrency.
     void bindStateToShm(SuperClockState* region);
+
+#if SUPERSONIC_WORKLET_CLOCK
+    // Worklet builds only: hand the worklet TimeSource its SAB offset pointers
+    // (NTP start / drift µs / global ms) so nowAt() can evaluate the SAB time
+    // formula. Wired by superclock_wasm_init at boot.
+    void bindWorkletClock(const double* ntpStartTime,
+                          const std::atomic<int32_t>* driftOffset,
+                          const std::atomic<int32_t>* globalOffset);
+#endif
 
     // Audio-thread accessor for the underlying LinkAudio instance.
     // Used by scsynth plugins (LinkTempo / LinkPhase / LinkJump
@@ -377,12 +387,6 @@ private:
     // steady micros and NTP seconds.
     double  linkMicrosToNtpSeconds(int64_t linkMicros) const;
     int64_t ntpSecondsToLinkMicros(double ntpSeconds) const;
-
-    // Native-only midi-registry helpers (SuperClockNative.cpp); not
-    // referenced on WASM, so intentionally left undefined there. Callers
-    // must hold mImpl->midiMtx.
-    int  midiSlotForPortLocked(const char* port) const;  // 0 if no slot
-    void recomputePrimaryLocked();
 };
 
 // Active SuperClock pointer for the /superclock_get OSC verb (queryable

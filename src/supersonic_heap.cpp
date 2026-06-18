@@ -4,7 +4,7 @@
  * Creates an AllocPool whose backing memory comes from the tiered placement
  * allocator (mem_region.h): the initial area from Tier::Fast, growth areas from
  * Tier::Bulk. On desktop/WASM/NIF both tiers are plain std::malloc, so the pool
- * is one region and behaviour is unchanged; an embedded build maps Fast to
+ * is one region; an embedded build maps Fast to
  * internal SRAM (the boot-time hot set) and grows into Bulk (PSRAM).
  *
  * All allocations via supersonic_heap_alloc/free use this pool instead of
@@ -16,8 +16,16 @@
  */
 
 #include "supersonic_heap.h"
-#include "SC_AllocPool.h"
 #include "memory_profile.h"
+
+// The growable heap is backed by scsynth's AllocPool, so its body belongs to the
+// synth build. The no-synth core has no World to feed (the only callers — the
+// World bring-up in audio_processor and SC_World.cpp's sc_malloc — are themselves
+// synth-only), so the public API degrades to inert stubs: no AllocPool, no
+// scsynth dependency, allocations return nullptr.
+#if SUPERSONIC_SYNTH
+
+#include "SC_AllocPool.h"
 #include "mem_region.h"
 #include "SC_Platform.h"
 #include <atomic>
@@ -34,8 +42,8 @@ static void*      g_heap_backing = nullptr;
 
 // Spinlock protecting AllocPool operations. The Xtensa toolchain provides
 // 32-bit atomics (S32C1I) but not std::atomic_flag's byte test-and-set
-// (__atomic_test_and_set), so embedded uses a 4-byte atomic. Desktop/WASM keep
-// std::atomic_flag, byte-for-byte as before.
+// (__atomic_test_and_set), so embedded uses a 4-byte atomic. Desktop/WASM use
+// std::atomic_flag.
 #if !SC_HAS_BYTE_ATOMICS
 static std::atomic<uint32_t> g_heap_lock{0};
 static inline void heap_lock() {
@@ -179,3 +187,14 @@ size_t supersonic_heap_total_allocated() {
 size_t supersonic_heap_growth_count() {
     return g_growth_count;
 }
+
+#else // !SUPERSONIC_SYNTH — inert stubs (no AllocPool, no scsynth dependency)
+
+void   supersonic_heap_init(size_t)        {}
+void*  supersonic_heap_alloc(size_t)       { return nullptr; }
+void   supersonic_heap_free(void*)         {}
+void   supersonic_heap_destroy()           {}
+size_t supersonic_heap_total_allocated()   { return 0; }
+size_t supersonic_heap_growth_count()      { return 0; }
+
+#endif // SUPERSONIC_SYNTH

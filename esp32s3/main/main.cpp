@@ -29,8 +29,9 @@ static const char* TAG = "ss-smoke";
 
 // Host glue the shared engine expects a host to define (see the "Minimal host"
 // contract in lanes.h). No external shm segment on a self-driven device, so the
-// engine uses its own ring_buffer_storage arena; the lean SuperClockLean.cpp
-// (compiled into the supersonic component) supplies the clock platform methods.
+// engine uses its own ring_buffer_storage arena; the SuperClock composition root
+// with the worklet clock (SUPERSONIC_WORKLET_CLOCK, compiled into the supersonic
+// component) supplies the clock platform methods.
 extern "C" {
 void* g_external_shared_memory = nullptr;
 }

@@ -6,7 +6,7 @@ import { test, expect, skipIfPostMessage } from './fixtures.mjs';
  * A timestamped OSC bundle is scheduled by the engine's EngineScheduler against
  * SuperClock, where
  *
- *     engine_now_ntp = audioContextTime + ntp_start + drift + global   (SuperClockLean.cpp)
+ *     engine_now_ntp = audioContextTime + ntp_start + drift + global   (the worklet TimeSource)
  *
  * The hazard: nowAt() silently falls back to `ntp_start = 0.0` when the SAB
  * NTP-start field isn't published yet. With ntp_start = 0, the engine's clock

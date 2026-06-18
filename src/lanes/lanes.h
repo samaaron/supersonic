@@ -35,8 +35,10 @@
  *   - g_external_shared_memory: set null unless pointing the arena at an external
  *     segment (native cross-process shm); a self-driven host leaves it null and
  *     the engine uses its own ring_buffer_storage.
- *   - a SuperClock backend TU: link SuperClockLean.cpp (the lean, Link-free impl
- *     shared by every self-driven host) — NOT the native Link-backed one. Leave
+ *   - the SuperClock composition root: link SuperClockNative.cpp + TimeSource.cpp
+ *     + MidiTimelines.cpp (a self-driven host defines SUPERSONIC_WORKLET_CLOCK to
+ *     get the SAB-formula clock; the LinkSession/LinkAudioBridge headers are
+ *     inline no-ops without SUPERSONIC_LINK, so no extra TU). Leave
  *     g_active_superclock null and the engine's clock/MIDI paths stay inert.
  * test/freestanding/freestanding_main.cpp is the reference minimal host: it is
  * the whole contract in ~60 lines, exercised in CI.

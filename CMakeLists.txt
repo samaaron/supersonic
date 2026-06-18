@@ -13,6 +13,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ─── Options ─────────────────────────────────────────────────────────────────
 option(BUILD_TESTS "Build native Catch2 test suite" OFF)
 option(BUILD_NIF   "Build BEAM NIF shared library"  OFF)
+# SUPERSONIC_ENABLE_SYNTH: compile the scsynth audio engine (GPL). ON (default)
+# is the full audio engine — behaviourally identical to the shipping product.
+# OFF builds the MIT scheduler/router core only: no scsynth sources, no audio
+# render, no synth route, no JUCE link. The macro SUPERSONIC_SYNTH is defined
+# (=1) only when ON, so the #if SUPERSONIC_SYNTH guards through the engine are
+# no-ops in the ON build (ON stays identical) and compile the synth paths out
+# when OFF. Peer to ENABLE_LINK/MIDI/GAMEPAD/OSC.
+option(SUPERSONIC_ENABLE_SYNTH "Compile the scsynth audio engine (GPL); OFF = MIT scheduler/router core" ON)
 # SUPERSONIC_ENABLE_LINK: integrate the Ableton Link library on native.
 # When ON, SuperClockNative wraps an ableton::LinkAudio instance (real
 # cross-machine session sync + audio sharing). When OFF, SuperClockNative
@@ -231,7 +239,6 @@ set(ENGINE_SOURCES
     ${NATIVE_SRC}/SupersonicEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/SuperClock.cpp
     ${CMAKE_SOURCE_DIR}/src/EngineClock.cpp
-    ${NATIVE_SRC}/SuperClockNative.cpp
     ${NATIVE_SRC}/DevicePolicy.cpp
     ${NATIVE_SRC}/AggregateDeviceHelper.cpp
     ${NATIVE_SRC}/StateCache.cpp
@@ -435,9 +442,8 @@ endif()
 # EXCLUDE_FROM_ALL keeps it out of every native build.
 #
 # Source set mirrors the embedded component's recipe: core + scsynth + oscpack +
-# the Link-free SuperClock/EngineClock base TUs (the Link-touching methods live
-# in SuperClockNative.cpp, deliberately excluded). The freestanding driver
-# supplies the only host glue these need — a null external-shared-memory pointer.
+# the SuperClock composition root. The freestanding driver supplies the only host
+# glue these need — a null external-shared-memory pointer.
 add_executable(supersonic_freestanding EXCLUDE_FROM_ALL
     ${CMAKE_CURRENT_SOURCE_DIR}/test/freestanding/freestanding_main.cpp
     ${SUPERSONIC_CORE_SOURCES}
@@ -446,11 +452,13 @@ add_executable(supersonic_freestanding EXCLUDE_FROM_ALL
     ${SCSYNTH_PLUGIN_SOURCES}
     ${OSCPACK_SOURCES}
     ${SUPERSONIC_SRC}/SuperClock.cpp
-    # SuperClockLean.cpp is the lean/self-driven SuperClock implementation shared
-    # by every non-native host (web, freestanding, embedded). The freestanding
-    # build uses it rather than the native (Link-backed) SuperClockNative.cpp, so
-    # the lean clock path is the same one the web ships.
-    ${SUPERSONIC_SRC}/SuperClockLean.cpp
+    # The SuperClock composition root + its lean-compatible axes. With neither
+    # SUPERSONIC_LINK nor WORKLET_CLOCK defined, LinkSession/LinkAudioBridge are
+    # header-inline no-ops and TimeSource is the native WallClock+IIR clock — so
+    # this is a self-driven, Link-free clock that links without Ableton.
+    ${NATIVE_SRC}/SuperClockNative.cpp
+    ${NATIVE_SRC}/TimeSource.cpp
+    ${NATIVE_SRC}/MidiTimelines.cpp
     ${SUPERSONIC_SRC}/EngineClock.cpp
 )
 target_include_directories(supersonic_freestanding PRIVATE ${SUPERSONIC_INCLUDE_DIRS})
@@ -459,8 +467,12 @@ target_include_directories(supersonic_freestanding PRIVATE ${SUPERSONIC_INCLUDE_
 # build compiles are exercised — no Ableton Link, no host-FS synthdef loading, no
 # cross-process shm. NO_LIBSNDFILE stubs out libsndfile (no file IO), so the build
 # needs neither the sndfile headers nor the link — exactly as the embedded build.
+# SUPERSONIC_SYNTH=1: the freestanding smoke target is always the full audio
+# engine (its source set includes scsynth) — it is the synth-ON, JUCE-free guard,
+# deliberately not gated by SUPERSONIC_ENABLE_SYNTH, so the #if SUPERSONIC_SYNTH
+# paths in audio_processor.cpp stay compiled in.
 target_compile_definitions(supersonic_freestanding PRIVATE
-    ${SUPERSONIC_COMPILE_DEFS} NO_LIBSNDFILE=1 SUPERSONIC_FREESTANDING=1)
+    ${SUPERSONIC_COMPILE_DEFS} NO_LIBSNDFILE=1 SUPERSONIC_FREESTANDING=1 SUPERSONIC_SYNTH=1)
 target_link_libraries(supersonic_freestanding PRIVATE tlsf)
 # macOS-only: a few scsynth TUs (SC_Filesystem_macos, the Accelerate FFT path)
 # carry platform references even in the lean profile. They are inert on the
@@ -473,53 +485,137 @@ endif()
 
 # ─── supersonic_engine static library ────────────────────────────────────────
 # Shared between the executable and the test suite.
+#
+# Source set is split by SUPERSONIC_ENABLE_SYNTH:
+#   ON  — the full audio engine: scheduler/router core + scsynth + the JUCE host
+#         glue (identical to the shipping product).
+#   OFF — the MIT scheduler/router core only: no scsynth (server/common/plugin),
+#         no buffer_commands/node_tree, and no JUCE/Link/SndFile-dependent host
+#         sources. audio_processor.cpp stays in (its synth paths are compiled out
+#         by the #if SUPERSONIC_SYNTH guards) so the IN-ring drain + scheduler
+#         fire still run; OSC with no backend hits dispatch()'s terminal.
+#
+# SuperClock is the one composition root on every native cell. It composes its
+# axes from separate units: the audio-thread time-source (native WallClock + IIR)
+# through TimeSource, the MIDI follower-timeline registry through MidiTimelines
+# (clock-core only; no JUCE/Link/scsynth), the Ableton Link clock-sync session
+# through LinkSession, and the Link-Audio bus bridge through LinkAudioBridge.
+#
+# The two Link TUs are added only when Link/synth is on: LinkSession.cpp's
+# body is guarded by SUPERSONIC_LINK and LinkAudioBridge.cpp's by
+# SUPERSONIC_LINK_AUDIO (Link && Synth). In the OFF/OFF cell the LinkSession
+# header supplies the session-of-one and the bridge header the no-op bridge —
+# header-inline, so the two TUs are dropped entirely rather than compiled empty.
+set(SUPERSONIC_SUPERCLOCK_SRC
+    ${NATIVE_SRC}/SuperClockNative.cpp
+    ${NATIVE_SRC}/TimeSource.cpp
+    ${NATIVE_SRC}/MidiTimelines.cpp)
+if(SUPERSONIC_ENABLE_SYNTH OR SUPERSONIC_ENABLE_LINK)
+    list(APPEND SUPERSONIC_SUPERCLOCK_SRC
+        ${NATIVE_SRC}/LinkSession.cpp
+        ${NATIVE_SRC}/LinkAudioBridge.cpp)
+endif()
+
+if(SUPERSONIC_ENABLE_SYNTH)
+    set(SUPERSONIC_ENGINE_SOURCES
+        ${ENGINE_SOURCES}
+        ${SUPERSONIC_SUPERCLOCK_SRC}
+        ${SUPERSONIC_CORE_SOURCES}
+        ${SCSYNTH_SERVER_SOURCES}
+        ${SCSYNTH_COMMON_SOURCES}
+        ${SCSYNTH_PLUGIN_SOURCES}
+        ${OSCPACK_SOURCES}
+    )
+else()
+    # Host sources that hard-depend on scsynth, JUCE or libsndfile are dropped;
+    # what remains links JUCE-free through the lanes ABI. SuperClockNative is not
+    # synth-coupled (it backs the Link-on cell), so it is not excluded here — the
+    # backend is chosen above by SUPERSONIC_SUPERCLOCK_SRC.
+    set(SUPERSONIC_SYNTH_HOST_SOURCES
+        ${NATIVE_SRC}/HeadlessDriver.cpp     # drives JuceAudioCallback + SampleLoader + SuperClockNative
+        ${NATIVE_SRC}/JuceAudioCallback.cpp  # JUCE audio device callback
+        ${NATIVE_SRC}/EngineControl.cpp      # JUCE
+        ${NATIVE_SRC}/SupersonicEngine.cpp   # JUCE + World + SampleLoader + SuperClockNative
+        ${NATIVE_SRC}/SampleLoader.cpp       # libsndfile + World + buffer_commands
+    )
+    if(APPLE)
+        list(APPEND SUPERSONIC_SYNTH_HOST_SOURCES ${NATIVE_SRC}/MicPermission.mm)  # JUCE permission
+    endif()
+    set(SUPERSONIC_CORE_NO_SYNTH ${SUPERSONIC_CORE_SOURCES})
+    list(REMOVE_ITEM SUPERSONIC_CORE_NO_SYNTH
+        ${SUPERSONIC_SRC}/buffer_commands.cpp
+        ${SUPERSONIC_SRC}/node_tree.cpp
+    )
+    set(SUPERSONIC_ENGINE_SOURCES_NO_SYNTH ${ENGINE_SOURCES})
+    list(REMOVE_ITEM SUPERSONIC_ENGINE_SOURCES_NO_SYNTH ${SUPERSONIC_SYNTH_HOST_SOURCES})
+    set(SUPERSONIC_ENGINE_SOURCES
+        ${SUPERSONIC_ENGINE_SOURCES_NO_SYNTH}
+        ${SUPERSONIC_SUPERCLOCK_SRC}
+        ${SUPERSONIC_CORE_NO_SYNTH}
+        ${OSCPACK_SOURCES}
+    )
+endif()
+
 add_library(supersonic_engine STATIC
-    ${ENGINE_SOURCES}
-    ${SUPERSONIC_CORE_SOURCES}
-    ${SCSYNTH_SERVER_SOURCES}
-    ${SCSYNTH_COMMON_SOURCES}
-    ${SCSYNTH_PLUGIN_SOURCES}
-    ${OSCPACK_SOURCES}
+    ${SUPERSONIC_ENGINE_SOURCES}
 )
 
 target_include_directories(supersonic_engine PUBLIC ${SUPERSONIC_INCLUDE_DIRS})
 target_compile_definitions(supersonic_engine PUBLIC ${SUPERSONIC_COMPILE_DEFS})
 
-# Disable JUCE modules we don't need (avoids curl dependency on Linux)
-target_compile_definitions(supersonic_engine PUBLIC
-    JUCE_USE_CURL=0
-    JUCE_WEB_BROWSER=0
-)
-
-# Enable JUCE's JACK backend on Linux. JUCE dlopens libjack.so.0 at
-# runtime, so this just compiles in the code path — no hard link to
-# jack-dev. Users with jackd (or pipewire-jack) running will see
-# "JACK" in /supersonic/drivers/list; users without it still get ALSA.
-if(UNIX AND NOT APPLE)
-    target_compile_definitions(supersonic_engine PUBLIC JUCE_JACK=1)
+# Synth (scsynth) is gated by SUPERSONIC_ENABLE_SYNTH. The macro guards the
+# synth code paths (World lifecycle, per-block render, synth route): ON compiles
+# them in, OFF compiles them out.
+if(SUPERSONIC_ENABLE_SYNTH)
+    target_compile_definitions(supersonic_engine PUBLIC SUPERSONIC_SYNTH=1)
 endif()
 
-# Enable JUCE's ASIO backend on Windows. The Steinberg ASIO SDK lives
-# under external_libs/ASIOSDK2.3.4 (dual-licensed Steinberg-proprietary
-# OR GPLv3 since 2.3.4 — we take it under GPLv3). Only headers from
-# common/ are needed; the .cpp files in there are for ASIO driver
-# development, not hosts. JUCE's juce_ASIO_windows.cpp wrapper #includes
-# the SDK headers and is compiled into juce_audio_devices when JUCE_ASIO=1.
-if(WIN32)
-    target_compile_definitions(supersonic_engine PUBLIC JUCE_ASIO=1)
-    target_include_directories(supersonic_engine PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/external_libs/ASIOSDK2.3.4/common")
+# tlsf is the only non-JUCE library the core always needs.
+target_link_libraries(supersonic_engine PUBLIC tlsf)
+
+# JUCE, libsndfile and Ableton Link are pulled in only by the synth host glue,
+# so they are linked only when the synth engine is compiled. When OFF the engine
+# is JUCE-/Link-/SndFile-free (the supersonic_freestanding target proves the
+# scheduler/router core links without them through the lanes ABI).
+if(SUPERSONIC_ENABLE_SYNTH)
+    # Disable JUCE modules we don't need (avoids curl dependency on Linux)
+    target_compile_definitions(supersonic_engine PUBLIC
+        JUCE_USE_CURL=0
+        JUCE_WEB_BROWSER=0
+    )
+
+    # Enable JUCE's JACK backend on Linux. JUCE dlopens libjack.so.0 at
+    # runtime, so this just compiles in the code path — no hard link to
+    # jack-dev. Users with jackd (or pipewire-jack) running will see
+    # "JACK" in /supersonic/drivers/list; users without it still get ALSA.
+    if(UNIX AND NOT APPLE)
+        target_compile_definitions(supersonic_engine PUBLIC JUCE_JACK=1)
+    endif()
+
+    # Enable JUCE's ASIO backend on Windows. The Steinberg ASIO SDK lives
+    # under external_libs/ASIOSDK2.3.4 (dual-licensed Steinberg-proprietary
+    # OR GPLv3 since 2.3.4 — we take it under GPLv3). Only headers from
+    # common/ are needed; the .cpp files in there are for ASIO driver
+    # development, not hosts. JUCE's juce_ASIO_windows.cpp wrapper #includes
+    # the SDK headers and is compiled into juce_audio_devices when JUCE_ASIO=1.
+    if(WIN32)
+        target_compile_definitions(supersonic_engine PUBLIC JUCE_ASIO=1)
+        target_include_directories(supersonic_engine PUBLIC
+            "${CMAKE_CURRENT_SOURCE_DIR}/external_libs/ASIOSDK2.3.4/common")
+    endif()
+
+    target_link_libraries(supersonic_engine PUBLIC
+        juce::juce_core
+        juce::juce_audio_basics
+        juce::juce_audio_devices
+        juce::juce_audio_formats
+        SndFile::sndfile
+    )
 endif()
 
-target_link_libraries(supersonic_engine PUBLIC
-    juce::juce_core
-    juce::juce_audio_basics
-    juce::juce_audio_devices
-    juce::juce_audio_formats
-    SndFile::sndfile
-    tlsf
-)
-
+# Ableton Link is gated by SUPERSONIC_ENABLE_LINK, independent of the synth: the
+# Link clock-sync path in SuperClockNative needs only Ableton::Link. The PUBLIC
+# link also carries the Ableton include dirs onto SuperClockNative.
 if(SUPERSONIC_ENABLE_LINK)
     target_link_libraries(supersonic_engine PUBLIC Ableton::Link)
     target_compile_definitions(supersonic_engine PUBLIC SUPERSONIC_LINK=1)
@@ -661,6 +757,18 @@ else()
         -Wno-deprecated-declarations -Wno-unused-parameter
         -fno-math-errno -fsigned-zeros
     )
+endif()
+
+# ─── No-synth runtime smoke (MIT scheduler/router core) ──────────────────────
+# Built only when SUPERSONIC_ENABLE_SYNTH=OFF. Drives the lanes ABI + scheduler
+# to prove the drivebelt turns the clock with no synth linked (see
+# test/freestanding/nosynth_smoke.cpp). The synth-ON runtime smoke is
+# supersonic_freestanding.
+if(NOT SUPERSONIC_ENABLE_SYNTH)
+    add_executable(supersonic_nosynth_smoke
+        ${CMAKE_CURRENT_SOURCE_DIR}/test/freestanding/nosynth_smoke.cpp)
+    target_include_directories(supersonic_nosynth_smoke PRIVATE ${SUPERSONIC_INCLUDE_DIRS})
+    target_link_libraries(supersonic_nosynth_smoke PRIVATE supersonic_engine tlsf)
 endif()
 
 # ─── SuperSonic executable (thin wrapper) ────────────────────────────────────

@@ -14,6 +14,10 @@
 #include "OscIngress.h"
 #include "IngressCallCtx.h"
 #include "ReplyChannel.h"
+// Platform macros (SC_COLD_BSS, tiered-memory attributes). Header-only and
+// scsynth-free, so it is included in both builds — the no-synth core still
+// places the ring arena + scheduler pool in bulk RAM on tiered targets.
+#include "SC_Platform.h"
 
 // The ingress the audio-thread drain classifies through (extern in OscIngress.h).
 // Defined here — compiled by both native and wasm. Published by the engine at
@@ -45,7 +49,10 @@ static SuperClock& superClock() {
 #include <wasm_simd128.h>
 #endif
 
-// scsynth includes
+// scsynth includes — only the synth engine (SUPERSONIC_SYNTH) pulls scsynth.
+// The no-synth build keeps this file for its IN-ring drain + scheduler fire, so
+// every World/scsynth touch below is guarded by #if SUPERSONIC_SYNTH.
+#if SUPERSONIC_SYNTH
 #include "SC_World.h"              // from synth/include/plugin_interface/
 #include "SC_WorldOptions.h"       // from synth/include/server/
 #include "SC_Prototypes.h"         // from synth/server/
@@ -59,6 +66,7 @@ static SuperClock& superClock() {
 #include "SC_HiddenWorld.h"        // from synth/server/
 #include "sc_msg_iter.h"           // from synth/include/plugin_interface/
 #include "Samp.hpp"                // for sine table initialization
+#endif // SUPERSONIC_SYNTH
 
 // Scheduler includes
 #include "scheduler/EngineScheduler.h"  // unified scheduler: synth + MIDI/OSC
@@ -86,9 +94,11 @@ static SuperClock& superClock() {
 // Assigned once at init; AudioOut2 instances read it to locate their slot.
 shm_audio_buffer* g_shm_audio_buffers = nullptr;
 
-// Forward declarations
+// Forward declarations (synth perform entry points)
+#if SUPERSONIC_SYNTH
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket);
+#endif
 
 // Audio-thread /clock handler (the wasm ingress route). Handles the cheap
 // clock-core verbs inline and replies via the OUT ring. /clock is the control
@@ -108,9 +118,14 @@ static bool clockCoreRoute(void* routeCtx, const void* callCtx,
     return true;
 }
 
-// Forward declare UnrollOSCPacket from SC_ComPort.cpp (in scsynth namespace)
+// The scsynth namespace. Kept declared in both builds so the `using namespace
+// scsynth;` in the scheduler-bridge functions below resolves either way; only
+// the World-typed UnrollOSCPacket forward-declare is synth-only.
 namespace scsynth {
+#if SUPERSONIC_SYNTH
+    // Forward declare UnrollOSCPacket from SC_ComPort.cpp.
     bool UnrollOSCPacket(World* inWorld, int inSize, char* inData, OSC_Packet* inPacket);
+#endif
 }
 
 // Forward declare ring buffer write function (defined after namespace).
@@ -277,7 +292,9 @@ extern "C" {
     // The engine's standard reply channel: replies go out the OUT ring. Carries
     // the caller's `origin` token in mReplyData so osc_reply_to_ring_buffer can
     // route the reply back to that client (0 = broadcast). Used for every synth
-    // perform (immediate and scheduled), so it lives in one place.
+    // perform (immediate and scheduled), so it lives in one place. ReplyAddress
+    // is a scsynth type, so this is synth-only.
+#if SUPERSONIC_SYNTH
     ReplyAddress ring_reply(uint32_t origin) {
         ReplyAddress r = {};
         r.mProtocol  = kWeb;
@@ -285,6 +302,7 @@ extern "C" {
         r.mReplyData = reinterpret_cast<void*>(static_cast<uintptr_t>(origin));
         return r;
     }
+#endif
 
 #ifdef __EMSCRIPTEN__
     // The RT egress as a generic ReplyChannel: emit one OSC to the OUT ring,
@@ -423,13 +441,15 @@ extern "C" {
         global_offset->store(0, std::memory_order_relaxed);
 
 #ifdef __EMSCRIPTEN__
-        // Hand SAB pointers to the lean SuperClock impl (SuperClockLean) at boot.
+        // Hand SAB pointers to the composition-root SuperClock at boot. Publish
+        // the instance first: superclock_wasm_init binds the SAB region + the
+        // worklet clock onto whatever g_active_superclock points at.
         SuperClockState* superclock_state =
             reinterpret_cast<SuperClockState*>(shared_memory + SUPERCLOCK_STATE_START);
         SuperClockState::initDefaults(*superclock_state);
 
-        superclock_wasm_init(superclock_state, ntp_start_time, drift_offset, global_offset);
         g_active_superclock.store(&superClock(), std::memory_order_release);
+        superclock_wasm_init(superclock_state, ntp_start_time, drift_offset, global_offset);
 
         // The wasm audio-thread ingress: /clock is the only control namespace
         // here (no NRT thread for /supersonic or Link-session verbs). The synth
@@ -487,8 +507,12 @@ extern "C" {
         tree_header->version.store(0, std::memory_order_relaxed);
         tree_header->dropped_count.store(0, std::memory_order_relaxed);
 
-        // Initialize free list and hash table for O(1) node tree operations
+        // Initialize free list and hash table for O(1) node tree operations.
+        // The index machinery (node_tree.cpp) only exists in the synth build;
+        // the empty header written above keeps the SAB layout valid either way.
+#if SUPERSONIC_SYNTH
         NodeTree_InitIndices();
+#endif
 
         ss_log("[NodeTree] Initialized at offset %u, size %u bytes",
                      NODE_TREE_START, NODE_TREE_SIZE);
@@ -537,6 +561,7 @@ extern "C" {
 
         // Boot message shown after ASCII art below
 
+#if SUPERSONIC_SYNTH
         // Read worldOptions from the arena at WORLD_OPTIONS_START. Must use
         // `shared_memory` (the arena — the public segment when one was supplied,
         // else ring_buffer_storage), NOT ring_buffer_storage directly: the host
@@ -699,11 +724,31 @@ extern "C" {
         ss_log("");
         ss_log("> scsynth ready...");
 #endif
+#else  // !SUPERSONIC_SYNTH
+        // No-synth core: no World, no audio render. The scheduler/router still
+        // runs — derive the block-time constants from the AudioContext rate and a
+        // default block size so the fire loop's OSC-time window is correct.
+        const int buf_length = sonicpi::kDefaultBlockSize;
+        g_osc_increment_numerator = (double)buf_length;
+        g_osc_increment = (int64_t)(g_osc_increment_numerator / sample_rate * 4294967296.0);
+        g_osc_to_samples = sample_rate / 4294967296.0;
+
+        metrics->supersonic_version_major.store(SUPERSONIC_VERSION_MAJOR, std::memory_order_relaxed);
+        metrics->supersonic_version_minor.store(SUPERSONIC_VERSION_MINOR, std::memory_order_relaxed);
+        metrics->supersonic_version_patch.store(SUPERSONIC_VERSION_PATCH, std::memory_order_relaxed);
+        metrics->audio_sample_rate.store(static_cast<uint32_t>(sample_rate + 0.5), std::memory_order_relaxed);
+        metrics->audio_block_size.store(static_cast<uint32_t>(buf_length), std::memory_order_relaxed);
+
+        g_scheduler.clear();
+        update_scheduler_depth_metric(0);
+#endif // SUPERSONIC_SYNTH
     }
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && SUPERSONIC_SYNTH
     // destroy_world / rebuild_world — for native cold swap (device sample rate change).
     // Tears down the World (keeping UGen plugins loaded) and rebuilds with new sample rate.
+    // Synth-only — the no-synth core has no World to cold-swap. The sole caller
+    // (SupersonicEngine) is itself excluded from the no-synth build.
     // Cold-swap entry/exit — the engine's state-transition lines
     // ([supersonic] state: restarting -> running) already record when these
     // fire, so separate tracing here is redundant.
@@ -731,9 +776,16 @@ extern "C" {
     // active_output_channels / active_input_channels: live channel counts
     EMSCRIPTEN_KEEPALIVE
     bool process_audio(double current_time, uint32_t active_output_channels, uint32_t active_input_channels) {
+#if SUPERSONIC_SYNTH
         if (!memory_initialized || !g_world) {
             return true; // Not ready or world destroyed during cold swap — output silence
         }
+#else
+        // No-synth core: there is no World; the scheduler/router still ticks.
+        if (!memory_initialized) {
+            return true;
+        }
+#endif
 
         if (!metrics) {
             return false;
@@ -763,8 +815,10 @@ extern "C" {
         // at a low rate — the synthdef count is O(1) but the SndBuf scan is
         // O(numBufs), so throttle to ~every 64 blocks to keep the audio thread
         // light. Declared in SC_World.cpp.
+#if SUPERSONIC_SYNTH
         extern void World_UpdateNativeStats(World*);
         if (g_world && (pc & 63u) == 0u) World_UpdateNativeStats(g_world);
+#endif
 
         // Calculate and write ring buffer usage to metrics BEFORE consuming messages
         // so the metric reflects actual queue depth as seen by the audio thread
@@ -802,12 +856,17 @@ extern "C" {
             }
         }
 
-        // Process incoming OSC messages if scsynth is ready. The walk —
-        // header validation, untrusted-cursor repair, padding markers, gap
-        // tracking, tail resync on corruption — is the shared lanes walker
-        // (ring_drain.h); only the perform/schedule/classify policy lives
-        // here, in the callback.
-        if (g_world) {
+        // Process incoming OSC messages. The walk — header validation,
+        // untrusted-cursor repair, padding markers, gap tracking, tail resync on
+        // corruption — is the shared lanes walker (ring_drain.h); only the
+        // perform/schedule/classify policy lives here, in the callback. The drain
+        // and the scheduler fire below run on every build; only the audio render
+        // (gated by #if SUPERSONIC_SYNTH) needs a World. ON keeps the original
+        // `if (g_world)` guard so post-init behaviour is unchanged.
+#if SUPERSONIC_SYNTH
+        if (g_world)
+#endif
+        {
             // Off-thread reset request (purge → clear_scheduler): apply it
             // here so g_in_drain stays audio-thread-only.
             if (g_in_seq_reset.exchange(false, std::memory_order_relaxed))
@@ -902,6 +961,7 @@ extern "C" {
                     control->status_flags.fetch_or(STATUS_FRAGMENTED_MSG, std::memory_order_relaxed);
             }
 
+#if SUPERSONIC_SYNTH
             // Block size from scsynth's World options. Web: always 128
             // (AudioWorklet render quantum). Native: chosen at boot —
             // typically equal to the hardware callback buffer size.
@@ -913,6 +973,7 @@ extern "C" {
 
             // Zero static_audio_bus to prevent accumulation across frames.
             memset(static_audio_bus, 0, QUANTUM_SIZE * g_world->mNumOutputs * sizeof(float));
+#endif
 
             // This block's OSC time window, for draining due scheduled events.
             int64_t currentOscTime = ntp_to_osc_timetag(current_ntp);
@@ -937,6 +998,7 @@ extern "C" {
             // released slots — a per-event read would lag release and never reach 0).
             update_scheduler_depth_metric(g_scheduler.size());
 
+#if SUPERSONIC_SYNTH
             // Run the graph (DSP pass): resets the event-time offset, marks the
             // live input buses touched so In.ar reads them (the JS worklet copies
             // input into the input-bus region before this call), and runs scsynth.
@@ -995,7 +1057,8 @@ extern "C" {
                     w.write(channel_data, QUANTUM_SIZE);
                 }
             }
-#endif
+#endif // __EMSCRIPTEN__
+#endif // SUPERSONIC_SYNTH
         }
 
         return true; // Keep processor alive
@@ -1080,6 +1143,10 @@ extern "C" {
         return control ? control->status_flags.load(std::memory_order_relaxed) : 0;
     }
 
+    // Audio-bus accessors below dereference the World; they only exist in the
+    // synth build. (Their Link-Audio callers — SuperClockNative / SupersonicEngine
+    // — are themselves excluded from the no-synth build.)
+#if SUPERSONIC_SYNTH
     // Whole audio-bus pool — base + count — so Link Audio sinks/sources
     // can tap arbitrary bus indices the user picks (publishAuxSinks /
     // drainLinkAudioInputsToBuses).
@@ -1123,9 +1190,11 @@ extern "C" {
         if (busIdx >= static_cast<uint32_t>(g_world->mNumAudioBusChannels)) return;
         g_world->mAudioBusTouched[busIdx] = g_world->mBufCounter + 1;
     }
+#endif // SUPERSONIC_SYNTH
 
-    // scsynth audio output accessors
-    // Returns the accumulated audio buffer (128 samples per channel)
+    // scsynth audio output accessor — the master mix staging buffer. In the
+    // no-synth build it is never written (no render), so the host reads silence;
+    // the symbol stays so lanes.cpp's ss_audio_out() links either way.
     EMSCRIPTEN_KEEPALIVE
     uintptr_t get_audio_output_bus() {
         if (!memory_initialized) {
@@ -1139,15 +1208,21 @@ extern "C" {
     int get_audio_buffer_samples() {
         // Block size currently in use. On web this is always 128
         // (AudioWorklet render quantum). On native it reflects whatever
-        // was configured when the World was built.
+        // was configured when the World was built. No-synth: the default block.
+#if SUPERSONIC_SYNTH
         return g_world ? g_world->mBufLength : sonicpi::kDefaultBlockSize;
+#else
+        return sonicpi::kDefaultBlockSize;
+#endif
     }
 
     // scsynth audio input accessor
     // Returns pointer to input bus area in mAudioBus (after output buses)
-    // Layout: mAudioBus = [output buses][input buses][internal buses]
+    // Layout: mAudioBus = [output buses][input buses][internal buses].
+    // No-synth: no World/input bus, so always 0.
     EMSCRIPTEN_KEEPALIVE
     uintptr_t get_audio_input_bus() {
+#if SUPERSONIC_SYNTH
         if (!memory_initialized || !g_world) {
             return 0;
         }
@@ -1157,6 +1232,9 @@ extern "C" {
         return reinterpret_cast<uintptr_t>(
             g_world->mAudioBus + (g_world->mNumOutputs * g_world->mBufLength)
         );
+#else
+        return 0;
+#endif
     }
 
     // Return version string combining Supersonic and SuperCollider versions
@@ -1301,6 +1379,8 @@ bool ring_buffer_write(
 
 // OSC reply callback for scsynth
 // This is called by scsynth when it needs to send OSC replies (e.g., /done, /n_go, etc.)
+// ReplyAddress is a scsynth type, so the reply callback is part of the synth build.
+#if SUPERSONIC_SYNTH
 void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
     using namespace scsynth;  // Access globals from scsynth namespace
 
@@ -1330,6 +1410,7 @@ void osc_reply_to_ring_buffer(ReplyAddress* addr, char* msg, int size) {
         metrics                            // metrics
     );
 }
+#endif // SUPERSONIC_SYNTH
 
 // ── Unified scheduler bridge (global linkage; see EngineScheduler.h) ──────────
 
@@ -1349,7 +1430,9 @@ extern "C" void ss_defer_schedule(double ntp_seconds, uint32_t tag, uint32_t ori
 // lateness in the metrics. `when` is the message's OSC timetag and `blockTime`
 // this block's start — both from the call ctx (threaded by the fire loop, no
 // global). Owned by the synth backend — the only handler that reads them; the
-// generic dispatcher and every other backend ignore them.
+// generic dispatcher and every other backend ignore them. Synth-only: the
+// no-synth core registers no default route, so this is never called or linked.
+#if SUPERSONIC_SYNTH
 //
 // Immediate messages (the OSC sentinels 0/1) leave the offset untouched: only
 // timed events set a sub-block offset, and the graph's DSP pass resets it
@@ -1414,3 +1497,4 @@ bool ss_synth_default_route(void* /*routeCtx*/, const void* callCtx,
     }
     return true;
 }
+#endif // SUPERSONIC_SYNTH
