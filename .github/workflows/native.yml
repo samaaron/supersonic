@@ -147,6 +147,33 @@ jobs:
       - name: Run freestanding smoke test
         run: ./build/freestanding/supersonic_freestanding
 
+  # ── Embedded-consumer guard (add_subdirectory from a foreign tree) ──────────
+  # SuperSonic supports being consumed as a subproject (the BEAM NIF host, any
+  # external embedder) via add_subdirectory() from a tree whose CMAKE_SOURCE_DIR
+  # is NOT the SuperSonic root. Every other job here configures SuperSonic as
+  # the top-level project, where CMAKE_SOURCE_DIR == CMAKE_CURRENT_SOURCE_DIR,
+  # so a CMAKE_SOURCE_DIR/CMAKE_CURRENT_SOURCE_DIR mix-up in a source path can
+  # never be caught — it only breaks the embedded build. This job is the guard.
+  #
+  # Configure-only: a misanchored source path fails the generate step ("Cannot
+  # find source file"), so reaching "Generating done" is the whole assertion.
+  # test/embed forces synth + Link off, so this configures fast and JUCE-free.
+  embed-guard:
+    runs-on: ubuntu-latest
+    name: embed-consumer-guard
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libasound2-dev libudev-dev
+
+      - name: Configure as embedded subproject
+        run: cmake -S test/embed -B build/embed-guard
+
   # ── ESP32-S3 engine build (real Xtensa, build-only) ─────────────────────────
   # Compiles the shared engine for the esp32s3 target through ESP-IDF — the
   # SCP_TARGET_ESP32 profile the desktop freestanding guard cannot reach: the

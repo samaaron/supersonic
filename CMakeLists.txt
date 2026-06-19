@@ -237,8 +237,8 @@ set(ENGINE_SOURCES
     ${NATIVE_SRC}/EngineControl.cpp
     ${NATIVE_SRC}/SampleLoader.cpp
     ${NATIVE_SRC}/SupersonicEngine.cpp
-    ${CMAKE_SOURCE_DIR}/src/SuperClock.cpp
-    ${CMAKE_SOURCE_DIR}/src/EngineClock.cpp
+    ${SUPERSONIC_SRC}/SuperClock.cpp
+    ${SUPERSONIC_SRC}/EngineClock.cpp
     ${NATIVE_SRC}/DevicePolicy.cpp
     ${NATIVE_SRC}/AggregateDeviceHelper.cpp
     ${NATIVE_SRC}/StateCache.cpp
