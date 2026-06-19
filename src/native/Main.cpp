@@ -72,8 +72,27 @@ static void printBanner(const char* version, const CurrentDeviceInfo& dev, int u
         "  ░▀▀█░█░█░█▀▀░█▀▀░█▀▄░▀▀█░█░█░█░█░░█░░█░░\n"
         "  ░▀▀▀░▀▀▀░▀░░░▀▀▀░▀░▀░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀\n"
         "\n"
-        "  SuperSonic v%s (scsynth 3.14.1)\n"
+        "  SuperSonic v%s (SuperCollider scsynth-compatible 3.14.1)\n"
         "\n", version);
+
+    // What this build was compiled with (feature flags can disable things).
+    fprintf(stderr, "  Compiled:");
+#if SUPERSONIC_SYNTH
+    fprintf(stderr, " synth");
+#endif
+#if SUPERSONIC_LINK
+    fprintf(stderr, " Link");
+#endif
+#if SUPERSONIC_LINK && SUPERSONIC_SYNTH
+    fprintf(stderr, " Link-Audio");
+#endif
+#if SUPERSONIC_MIDI
+    fprintf(stderr, " MIDI");
+#endif
+#if SUPERSONIC_GAMEPAD
+    fprintf(stderr, " Gamepad");
+#endif
+    fprintf(stderr, "\n");
 
     if (!dev.name.empty()) {
         // "out A/M in B/N" — A channels currently routed / M available on
