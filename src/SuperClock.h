@@ -32,6 +32,15 @@ public:
     SuperClock(SuperClock&&) = delete;
     SuperClock& operator=(SuperClock&&) = delete;
 
+    // ─── Teardown (app-thread) ────────────────────────────────────────────
+    // Stop and join the session's background worker (the ~250 ms MIDI-staleness
+    // tick / async Link enable). Idempotent. The host MUST call this before
+    // tearing down anything the worker reaches — the SHM arena the clock state
+    // is bound into, the Link Audio bus — because the worker drives MIDI
+    // staleness through the clock and would otherwise run against freed state in
+    // the window before ~SuperClock joins it. No-op on thread-free builds.
+    void stopBackgroundWork();
+
     // ─── Session mutators (app-thread) ────────────────────────────────────
 
     void setBpm(double bpm, double atNtpSeconds);

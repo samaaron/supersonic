@@ -1204,6 +1204,15 @@ void SupersonicEngine::shutdown() {
     if (wasRunning)
         setEngineState(EngineState::Stopped, "shutdown");
 
+    // Join the SuperClock session worker first. It drives MIDI-staleness through
+    // the clock (~every 250 ms) and reaches the SHM arena the clock state binds
+    // into plus the Link Audio bus — both freed below (mShmemCreator.reset / the
+    // setLinkVisibility(Off) teardown). The worker is otherwise only joined when
+    // mSuperClock is destroyed, which runs *after* this returns, leaving a window
+    // where it runs against freed state. Same early-stop discipline as the MIDI /
+    // OSC / gamepad / device threads below.
+    mSuperClock.stopBackgroundWork();
+
     // Stop recording if active
     if (isRecording())
         stopRecording();

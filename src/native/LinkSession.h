@@ -53,6 +53,13 @@ public:
     LinkSession(const LinkSession&) = delete;
     LinkSession& operator=(const LinkSession&) = delete;
 
+    // Stop and join the deferred worker. Idempotent (a no-op once joined), so
+    // the host can call it early in teardown and ~LinkSession's own join then
+    // finds nothing to do. Must run before any sibling the worker reaches
+    // (MidiTimelines via the periodic tick, LinkAudioBridge via applyVisibility)
+    // is torn down.
+    void stopWorker();
+
     using LinkVisibility = SuperClock::LinkVisibility;
     using PeerInfo       = SuperClock::PeerInfo;
 
@@ -138,6 +145,9 @@ public:
 
     LinkSession(const LinkSession&) = delete;
     LinkSession& operator=(const LinkSession&) = delete;
+
+    // Session-of-one has no worker thread.
+    void stopWorker() {}
 
     void setBpm(double bpm) {
         if (SuperClockState* s = mClock.state())

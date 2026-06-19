@@ -111,7 +111,18 @@ SuperClock::SuperClock() : mImpl(std::make_unique<Impl>(*this)) {
         [this](LinkVisibility v) { setLinkVisibility(v); });
 }
 
-SuperClock::~SuperClock() = default;
+SuperClock::~SuperClock() {
+    // Join the session worker before any Impl member it reaches is destroyed.
+    // Member reverse-destruction tears down linkAudioBridge (and would expose
+    // midiTimelines) while linkSession — and its still-live worker — has not yet
+    // been reached, so the worker could run applyVisibility/the staleness tick
+    // against a half-destroyed Impl. Stopping it first closes that window.
+    mImpl->linkSession.stopWorker();
+}
+
+void SuperClock::stopBackgroundWork() {
+    mImpl->linkSession.stopWorker();
+}
 
 SuperClockState*       SuperClock::state()       { return mImpl->boundState; }
 const SuperClockState* SuperClock::state() const { return mImpl->boundState; }

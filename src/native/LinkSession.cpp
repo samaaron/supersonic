@@ -147,10 +147,15 @@ LinkSession::LinkSession(SuperClock& clock, std::function<void()> periodicTick)
 }
 
 LinkSession::~LinkSession() {
+    stopWorker();
+}
+
+void LinkSession::stopWorker() {
     // Set the quit flag under the same mutex the worker waits on: a notify_all()
     // issued in the window between the worker's predicate check and its park in
     // wait() would otherwise be lost, leaving the worker asleep forever and this
-    // join() hung.
+    // join() hung. Idempotent: once joined, joinable() is false and re-entry is
+    // a cheap flag-set + notify with nothing to join.
     {
         std::lock_guard<std::mutex> lk(mImpl->deferredMtx);
         mImpl->deferredQuit.store(true, std::memory_order_release);

@@ -68,28 +68,40 @@ endif()
 # ─── JUCE via FetchContent ────────────────────────────────────────────────────
 include(FetchContent)
 
-FetchContent_Declare(
-    JUCE
-    GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-    GIT_TAG        8.0.13
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(JUCE)
-
-# Reset JUCE to pristine on every configure — defensive cleanup in case
-# a previous build applied a (now-removed) local patch.
-if(APPLE)
-    execute_process(
-        COMMAND git checkout -- .
-        WORKING_DIRECTORY "${juce_SOURCE_DIR}"
-        ERROR_QUIET
+# JUCE is the synth host's audio-device + format layer; it is only consumed when
+# the synth engine is compiled (see the SUPERSONIC_ENABLE_SYNTH link block and the
+# SuperSonic console app below). Gate the fetch on it so the no-synth core stays
+# genuinely JUCE-free — pulling JUCE here unconditionally drags juceaide (and its
+# X11 GUI dependency on headless Linux) into a configure that links none of it.
+if(SUPERSONIC_ENABLE_SYNTH)
+    FetchContent_Declare(
+        JUCE
+        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+        GIT_TAG        8.0.13
+        GIT_SHALLOW    TRUE
     )
+    FetchContent_MakeAvailable(JUCE)
+
+    # Reset JUCE to pristine on every configure — defensive cleanup in case
+    # a previous build applied a (now-removed) local patch.
+    if(APPLE)
+        execute_process(
+            COMMAND git checkout -- .
+            WORKING_DIRECTORY "${juce_SOURCE_DIR}"
+            ERROR_QUIET
+        )
+    endif()
 endif()
 
 # ─── libsndfile + audio codecs via FetchContent ──────────────────────────────
 # Needed for /b_allocRead, /b_write, sample loading from disk.
 # OVERRIDE_FIND_PACKAGE lets libsndfile's find_package() discover these
 # FetchContent-built dependencies automatically (CMake 3.24+).
+#
+# Sample IO belongs to the synth host (SampleLoader links SndFile::sndfile under
+# SUPERSONIC_ENABLE_SYNTH), so gate the fetch on it — the no-synth core does no
+# file IO and must not drag the codec sub-projects into its configure.
+if(SUPERSONIC_ENABLE_SYNTH)
 
 # Some codec libs have old cmake_minimum_required — CMake 4.x needs this
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
@@ -182,6 +194,8 @@ FetchContent_MakeAvailable(libsndfile)
 if(TARGET sndfile AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_compile_options(sndfile PRIVATE -Wno-format-truncation)
 endif()
+
+endif()  # SUPERSONIC_ENABLE_SYNTH — libsndfile + audio codecs
 
 # ─── Ableton Link ────────────────────────────────────────────────────────────
 # Header-only library — consumes asio in standalone header-only mode via
@@ -772,19 +786,24 @@ if(NOT SUPERSONIC_ENABLE_SYNTH)
 endif()
 
 # ─── SuperSonic executable (thin wrapper) ────────────────────────────────────
-juce_add_console_app(SuperSonic
-    PRODUCT_NAME    "supersonic"
-    VERSION         "0.1.0"
-    COMPANY_NAME    "SuperSonic"
-)
+# JUCE console app, so synth-only: juce_add_console_app needs JUCE (unavailable
+# in the no-synth core, which links no JUCE). The no-synth runtime entry point is
+# supersonic_nosynth_smoke above; the synth host's is this binary.
+if(SUPERSONIC_ENABLE_SYNTH)
+    juce_add_console_app(SuperSonic
+        PRODUCT_NAME    "supersonic"
+        VERSION         "0.1.0"
+        COMPANY_NAME    "SuperSonic"
+    )
 
-target_sources(SuperSonic PRIVATE ${NATIVE_SRC}/Main.cpp ${NATIVE_SRC}/UdpOscTransport.cpp)
-target_link_libraries(SuperSonic PRIVATE supersonic_engine)
+    target_sources(SuperSonic PRIVATE ${NATIVE_SRC}/Main.cpp ${NATIVE_SRC}/UdpOscTransport.cpp)
+    target_link_libraries(SuperSonic PRIVATE supersonic_engine)
 
-target_compile_definitions(SuperSonic PRIVATE
-    JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SuperSonic,JUCE_PRODUCT_NAME>"
-    JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SuperSonic,JUCE_VERSION>"
-)
+    target_compile_definitions(SuperSonic PRIVATE
+        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SuperSonic,JUCE_PRODUCT_NAME>"
+        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SuperSonic,JUCE_VERSION>"
+    )
+endif()
 
 # ─── BEAM NIF shared library ─────────────────────────────────────────────────
 # Bundled Erlang NIF headers from OTP 29-rc1 (Apache-2.0).
