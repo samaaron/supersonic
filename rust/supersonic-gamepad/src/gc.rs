@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use block2::RcBlock;
-use objc2::rc::Retained;
+use objc2::rc::{autoreleasepool, Retained};
 use objc2_game_controller::{
     GCController, GCControllerAxisInput, GCControllerButtonInput, GCControllerElement, GCDevice,
     GCExtendedGamepad,
@@ -81,15 +81,21 @@ impl GamepadIo {
     /// replay a stale edge) but emit nothing.
     pub fn poll(&mut self, timeout: Duration) -> Vec<Out> {
         std::thread::sleep(timeout);
-        let mut out = Vec::new();
-        if self.tick % SYNC_EVERY == 0 {
-            self.sync_controllers(&mut out);
-        }
-        self.tick = self.tick.wrapping_add(1);
-        for i in 0..self.pads.len() {
-            self.read_pad(i, &mut out);
-        }
-        out
+        // `GCController::controllers()` (called from `sync_controllers`) returns
+        // an autoreleased NSArray. This thread has no run loop to drain the
+        // autorelease pool, so without an explicit one it leaks. Drain per tick;
+        // the Retained<_> handles we keep hold their own retain and survive it.
+        autoreleasepool(|_| {
+            let mut out = Vec::new();
+            if self.tick % SYNC_EVERY == 0 {
+                self.sync_controllers(&mut out);
+            }
+            self.tick = self.tick.wrapping_add(1);
+            for i in 0..self.pads.len() {
+                self.read_pad(i, &mut out);
+            }
+            out
+        })
     }
 
     /// Reconcile our pad list against `GCController.controllers()`. The
