@@ -192,6 +192,8 @@ TEST_CASE("metrics: osc_in_messages_received increments on reply",
     fx.send(osc_test::message("/status"));
     OscReply r;
     REQUIRE(fx.waitForReply("/status.reply", r));
+    // The drain counts the reply before delivering it, so the counter is
+    // already bumped by the time this thread is woken with the reply.
     CHECK(metrics(fx).osc_in_messages_received.load() > before);
 }
 
@@ -202,6 +204,8 @@ TEST_CASE("metrics: osc_in_bytes_received grows when replies arrive",
     fx.send(osc_test::message("/status"));
     OscReply r;
     REQUIRE(fx.waitForReply("/status.reply", r));
+    // The drain counts the reply before delivering it, so the counter is
+    // already bumped by the time this thread is woken with the reply.
     CHECK(metrics(fx).osc_in_bytes_received.load() > before);
 }
 

@@ -191,11 +191,23 @@ inline uint32_t ss_drain_ring(uint8_t*              buffer,
         uint32_t payloadSize = totalLen - static_cast<uint32_t>(sizeof(Message));
         const uint8_t* payload = buffer + ut + sizeof(Message);
 
+        // Count before delivering. onMessage may hand the frame to a consumer
+        // that reads these counters; counting first sequences the increment
+        // before the delivery, so any consumer that observes the delivered
+        // frame also observes the count. Deliver-then-count would instead let a
+        // consumer see the frame with a stale count. Rolled back below if the
+        // frame is retained rather than consumed.
+        if (metrics.received) metrics.received->fetch_add(1, std::memory_order_relaxed);
+        if (metrics.bytes)    metrics.bytes->fetch_add(payloadSize, std::memory_order_relaxed);
+
         if (payloadSize > 0) {
             SsDrainVerdict verdict = onMessage(hdr.sourceId, payload, payloadSize, hdr.sequence);
             if (verdict == SsDrainVerdict::Retain) {
-                // Frame stays at the head of the ring; no counters, no gap
-                // tracking — the next drain call sees it as brand new.
+                // Frame stays at the head of the ring; undo the speculative
+                // counts and skip gap tracking — the next drain call sees it
+                // as brand new.
+                if (metrics.received) metrics.received->fetch_sub(1, std::memory_order_relaxed);
+                if (metrics.bytes)    metrics.bytes->fetch_sub(payloadSize, std::memory_order_relaxed);
                 stop = SsDrainStop::Retained;
                 break;
             }
@@ -220,8 +232,6 @@ inline uint32_t ss_drain_ring(uint8_t*              buffer,
             st.lastSeq = seq;
         }
 
-        if (metrics.received) metrics.received->fetch_add(1, std::memory_order_relaxed);
-        if (metrics.bytes)    metrics.bytes->fetch_add(payloadSize, std::memory_order_relaxed);
         ++consumed;
     }
     if (stop == SsDrainStop::Empty && maxFrames != 0 && consumed >= maxFrames)
