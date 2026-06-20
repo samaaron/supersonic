@@ -235,7 +235,6 @@ extern "C" {
     std::atomic<uint32_t> local_in_peak{0};
     std::atomic<uint32_t> local_out_peak{0};
     std::atomic<uint32_t> local_nrt_out_peak{0};
-    std::atomic<uint32_t> metrics_cycle{0};
     std::atomic<uint32_t> corruption_count{0};
     std::atomic<uint32_t> gap_log_count{0};
     std::atomic<int> late_count{0};
@@ -354,7 +353,6 @@ extern "C" {
         local_in_peak.store(0, std::memory_order_relaxed);
         local_out_peak.store(0, std::memory_order_relaxed);
         local_nrt_out_peak.store(0, std::memory_order_relaxed);
-        metrics_cycle.store(0, std::memory_order_relaxed);
         corruption_count.store(0, std::memory_order_relaxed);
         gap_log_count.store(0, std::memory_order_relaxed);
         late_count.store(0, std::memory_order_relaxed);
@@ -801,10 +799,6 @@ extern "C" {
         // already the SuperClock-derived NTP from JuceAudioCallback.
 #ifdef __EMSCRIPTEN__
         const double current_ntp = superClock().nowAt(current_time);
-        // Mirror the SuperClock readout into the cross-platform clock metrics
-        // (slots 65-68) each block. Native publishes via mSuperClock in
-        // JuceAudioCallback, which owns the Link-driven SuperClock instance.
-        superClock().publishClockMetrics(metrics, current_ntp, 4.0);
 #else
         const double current_ntp = current_time;
 #endif
@@ -820,38 +814,53 @@ extern "C" {
         if (g_world && (pc & 63u) == 0u) World_UpdateNativeStats(g_world);
 #endif
 
-        // Calculate and write ring buffer usage to metrics BEFORE consuming messages
-        // so the metric reflects actual queue depth as seen by the audio thread
+        // Host telemetry. Sample the ring fill every block so peaks stay a true
+        // high-water mark (a burst can fill and drain within a few blocks); this is cheap
+        // — the control reads overlap the drain and peaks are local. Flush the SAB (clock
+        // readout + ring used/peaks) only at the poll rate below: a consumer reads it at
+        // display rate, and per-block flushing is costly where the metrics struct is in
+        // slow memory (PSRAM on ESP32). process_count stays per-block as the block counter.
         {
             int32_t in_head = control->in_head.load(std::memory_order_relaxed);
             int32_t in_tail = control->in_tail.load(std::memory_order_relaxed);
             uint32_t in_used = (in_head - in_tail + IN_BUFFER_SIZE) % IN_BUFFER_SIZE;
-            metrics->in_buffer_used_bytes.store(in_used, std::memory_order_relaxed);
-            if (in_used > local_in_peak.load(std::memory_order_relaxed)) {
+            if (in_used > local_in_peak.load(std::memory_order_relaxed))
                 local_in_peak.store(in_used, std::memory_order_relaxed);
-            }
 
             int32_t out_head = control->out_head.load(std::memory_order_relaxed);
             int32_t out_tail = control->out_tail.load(std::memory_order_relaxed);
             uint32_t out_used = (out_head - out_tail + OUT_BUFFER_SIZE) % OUT_BUFFER_SIZE;
-            metrics->out_buffer_used_bytes.store(out_used, std::memory_order_relaxed);
-            if (out_used > local_out_peak.load(std::memory_order_relaxed)) {
+            if (out_used > local_out_peak.load(std::memory_order_relaxed))
                 local_out_peak.store(out_used, std::memory_order_relaxed);
-            }
 
             int32_t nrt_out_head = control->nrt_out_head.load(std::memory_order_relaxed);
             int32_t nrt_out_tail = control->nrt_out_tail.load(std::memory_order_relaxed);
             uint32_t nrt_out_used = (nrt_out_head - nrt_out_tail + NRT_OUT_BUFFER_SIZE) % NRT_OUT_BUFFER_SIZE;
-            metrics->nrt_out_buffer_used_bytes.store(nrt_out_used, std::memory_order_relaxed);
-            if (nrt_out_used > local_nrt_out_peak.load(std::memory_order_relaxed)) {
+            if (nrt_out_used > local_nrt_out_peak.load(std::memory_order_relaxed))
                 local_nrt_out_peak.store(nrt_out_used, std::memory_order_relaxed);
-            }
 
-            // Write peaks to atomics every 16 cycles (~43ms at 48kHz/128)
-            if (metrics_cycle.fetch_add(1, std::memory_order_relaxed) + 1 >= 16) {
-                metrics_cycle.store(0, std::memory_order_relaxed);
+            // Flush period in blocks, derived once from the audio rate to target ~30Hz
+            // (tracks sample rate / block size instead of a fixed divisor); 16 until the
+            // audio config is published.
+            static uint32_t s_flush_period = 0;
+            if (s_flush_period == 0u) {
+                const uint32_t blk = metrics->audio_block_size.load(std::memory_order_relaxed);
+                const uint32_t sr  = metrics->audio_sample_rate.load(std::memory_order_relaxed);
+                if (blk && sr) {            // round(sr / (30 * blk)) in integer math
+                    uint32_t p = (sr + 15u * blk) / (30u * blk);
+                    s_flush_period = (p < 1u) ? 1u : p;
+                }
+            }
+            const uint32_t flush_period = (s_flush_period != 0u) ? s_flush_period : 16u;
+            if ((pc % flush_period) == 0u) {
+#ifdef __EMSCRIPTEN__
+                superClock().publishClockMetrics(metrics, current_ntp, 4.0);
+#endif
+                metrics->in_buffer_used_bytes.store(in_used, std::memory_order_relaxed);
                 metrics->in_buffer_peak_bytes.store(local_in_peak.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                metrics->out_buffer_used_bytes.store(out_used, std::memory_order_relaxed);
                 metrics->out_buffer_peak_bytes.store(local_out_peak.load(std::memory_order_relaxed), std::memory_order_relaxed);
+                metrics->nrt_out_buffer_used_bytes.store(nrt_out_used, std::memory_order_relaxed);
                 metrics->nrt_out_buffer_peak_bytes.store(local_nrt_out_peak.load(std::memory_order_relaxed), std::memory_order_relaxed);
             }
         }

@@ -247,11 +247,15 @@ test.describe("Buffer Peak Metrics", () => {
       // Now wait for all to complete
       await Promise.all(sendPromises);
 
-      // Brief additional wait for metrics to update (peaks written every ~43ms)
-      await new Promise(r => setTimeout(r, 100));
-
-      // Get metrics after burst
-      const after = sonic.getMetrics();
+      // Poll until the peak registers (up to 2s) rather than a fixed sleep: the metrics
+      // SAB is flushed at the poll rate (~30Hz), not every block, so a fixed wait is racy.
+      // The peak is a monotonic high-water mark, so once it appears it stays.
+      let after = sonic.getMetrics();
+      const peakDeadline = Date.now() + 2000;
+      while ((after.inBufferUsed?.peakBytes ?? 0) === 0 && Date.now() < peakDeadline) {
+        await new Promise(r => setTimeout(r, 20));
+        after = sonic.getMetrics();
+      }
 
       // Clean up
       for (const nodeId of nodeIds) {

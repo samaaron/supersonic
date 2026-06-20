@@ -5,7 +5,7 @@
  * tick loop, then calls process_audio() in a tight loop to measure pure
  * DSP throughput without timer jitter.
  *
- * Run with:  ./SuperSonicNativeTests "[benchmark]" 2>&1
+ * Run with:  ./SuperSonicNativeTests "[benchmark]" 2>&1   (hidden from the default run)
  *
  * All times use std::chrono::steady_clock for nanosecond precision.
  * Results are displayed in both nanoseconds and microseconds.
@@ -218,7 +218,7 @@ static void waitForSynths(EngineFixture& fx, int expectedCount) {
 // Benchmark cases
 // =========================================================================
 
-TEST_CASE("benchmark: idle engine", "[benchmark]") {
+TEST_CASE("benchmark: idle engine", "[.][benchmark]") {
     EngineFixture fx;
 
     fprintf(stderr, "\n");
@@ -241,7 +241,7 @@ TEST_CASE("benchmark: idle engine", "[benchmark]") {
     CHECK(r.avgNs < r.budgetNs);  // Must be faster than real-time
 }
 
-TEST_CASE("benchmark: beep synths", "[benchmark]") {
+TEST_CASE("benchmark: beep synths", "[.][benchmark]") {
     EngineFixture fx;
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
@@ -254,7 +254,7 @@ TEST_CASE("benchmark: beep synths", "[benchmark]") {
     CHECK(r1.avgNs < r1.budgetNs);
 }
 
-TEST_CASE("benchmark: 10 beep synths", "[benchmark]") {
+TEST_CASE("benchmark: 10 beep synths", "[.][benchmark]") {
     EngineFixture fx;
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
@@ -266,7 +266,7 @@ TEST_CASE("benchmark: 10 beep synths", "[benchmark]") {
     CHECK(r.avgNs < r.budgetNs);
 }
 
-TEST_CASE("benchmark: 50 beep synths", "[benchmark]") {
+TEST_CASE("benchmark: 50 beep synths", "[.][benchmark]") {
     EngineFixture fx;
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
@@ -278,7 +278,7 @@ TEST_CASE("benchmark: 50 beep synths", "[benchmark]") {
     CHECK(r.avgNs < r.budgetNs);
 }
 
-TEST_CASE("benchmark: prophet synths", "[benchmark]") {
+TEST_CASE("benchmark: prophet synths", "[.][benchmark]") {
     EngineFixture fx;
     REQUIRE(fx.loadSynthDef("sonic-pi-prophet"));
 
@@ -289,7 +289,7 @@ TEST_CASE("benchmark: prophet synths", "[benchmark]") {
     CHECK(r.avgNs < r.budgetNs);
 }
 
-TEST_CASE("benchmark: 10 prophet synths", "[benchmark]") {
+TEST_CASE("benchmark: 10 prophet synths", "[.][benchmark]") {
     EngineFixture fx;
     REQUIRE(fx.loadSynthDef("sonic-pi-prophet"));
 
@@ -301,7 +301,7 @@ TEST_CASE("benchmark: 10 prophet synths", "[benchmark]") {
     CHECK(r.avgNs < r.budgetNs);
 }
 
-TEST_CASE("benchmark: mixed load", "[benchmark]") {
+TEST_CASE("benchmark: mixed load", "[.][benchmark]") {
     EngineFixture fx;
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
     REQUIRE(fx.loadSynthDef("sonic-pi-prophet"));
@@ -316,7 +316,7 @@ TEST_CASE("benchmark: mixed load", "[benchmark]") {
     CHECK(r.avgNs < r.budgetNs);
 }
 
-TEST_CASE("benchmark: reproducibility check", "[benchmark]") {
+TEST_CASE("benchmark: reproducibility check", "[.][benchmark]") {
     // Run the same benchmark twice and verify results are within 15%
     // If this fails, the benchmark environment is too noisy
     EngineFixture fx;
@@ -336,7 +336,7 @@ TEST_CASE("benchmark: reproducibility check", "[benchmark]") {
     CHECK(diff < 15.0);  // Runs should be within 15%
 }
 
-TEST_CASE("benchmark: linearity check", "[benchmark]") {
+TEST_CASE("benchmark: linearity check", "[.][benchmark]") {
     // Verify DSP cost scales roughly linearly with synth count.
     // Uses 10 vs 100 synths (not 1 vs 10) so the signal is well above
     // the ~400ns timer/overhead noise floor on fast machines.
@@ -387,7 +387,7 @@ TEST_CASE("benchmark: linearity check", "[benchmark]") {
     CHECK(ratio < 35.0);
 }
 
-TEST_CASE("benchmark: callback jitter (simulated real-time)", "[benchmark]") {
+TEST_CASE("benchmark: callback jitter (simulated real-time)", "[.][benchmark]") {
     // Simulate real-time callback scheduling: sleep between blocks just like
     // the HeadlessDriver does, and measure the actual inter-callback interval.
     // This tells us how much OS scheduling jitter we experience.
@@ -447,7 +447,7 @@ TEST_CASE("benchmark: callback jitter (simulated real-time)", "[benchmark]") {
     SUCCEED();
 }
 
-TEST_CASE("benchmark: scaling test", "[benchmark]") {
+TEST_CASE("benchmark: scaling test", "[.][benchmark]") {
     EngineFixture fx;
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
