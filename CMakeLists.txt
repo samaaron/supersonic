@@ -244,6 +244,7 @@ set(WORKERS_SRC     "${CMAKE_CURRENT_SOURCE_DIR}/src/workers")
 set(ENGINE_SOURCES
     ${NATIVE_SRC}/HeadlessDriver.cpp
     ${NATIVE_SRC}/JuceAudioCallback.cpp
+    ${NATIVE_SRC}/RealtimeThread.cpp
     # UdpOscTransport.cpp builds into the SuperSonic exe (below), not this shared
     # lib — the UDP transport belongs to the standalone server, so the NIF and
     # the in-process test suite don't compile it.

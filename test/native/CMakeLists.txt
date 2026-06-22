@@ -76,6 +76,7 @@ add_executable(SuperSonicNativeTests
     test_in_ring_drain.cpp
     test_server_shm_security.cpp
     test_buffer_alloc_bounds.cpp
+    test_realtime_thread.cpp
     test_lanes.cpp
     test_ring_wire_conformance.cpp
     OscTestUtils.cpp
