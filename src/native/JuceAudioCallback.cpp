@@ -2,11 +2,13 @@
  * JuceAudioCallback.cpp
  */
 #include "JuceAudioCallback.h"
+#include "RealtimeThread.h"
 #include "WallClock.h"
 #include "SampleLoader.h"
 #include "SuperClock.h"
 #include "shared_memory.h"
 #include "audio_config.h"
+#include "supersonic_config.h"   // ss_log
 #include "lanes/lanes.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
@@ -128,6 +130,11 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
     mInputAccumCount = 0;
     mSuperClock->resetAudioThreadTime(mSamplePosition, mSampleRate);
     std::fill(mPrefetchBuf.begin(), mPrefetchBuf.end(), 0.0f);
+
+    // A device (re)start can hand the callback to a brand-new audio thread, so
+    // re-arm realtime promotion; the first IO callback below performs it on the
+    // audio thread itself (this function runs on the control thread).
+    mRealtimeElevated.store(false, std::memory_order_relaxed);
 
     // Sync our internal channel counts from what the device actually opened.
     // mNumInput/OutputChannels are what we tell scsynth (via process_audio's
@@ -265,6 +272,16 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     int numSamples,
     const juce::AudioIODeviceCallbackContext& context)
 {
+    // Promote the audio thread to realtime once per device start. Done here
+    // rather than in audioDeviceAboutToStart (control thread) because this
+    // callback runs on the audio thread. A denied request (no rtprio
+    // permission) leaves the thread unchanged; see RealtimeThread.h.
+    if (!mRealtimeElevated.exchange(true, std::memory_order_relaxed)) {
+        const auto rt = supersonic::elevateCurrentThreadToRealtime();
+        ss_log("[juce] audio thread realtime: status=%d policy=%d prio=%d err=%d",
+               static_cast<int>(rt.status), rt.policy, rt.priority, rt.error);
+    }
+
     // Denormal flush-to-zero is a per-thread flag, and scsynth only arms it on
     // the boot thread (sc_SetDenormalFlags in World_New). Arm it on this audio
     // thread too, else denormal reverb tails take the slow path and spike CPU.

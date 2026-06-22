@@ -156,6 +156,12 @@ private:
 
     std::atomic<bool> mPaused{false};
 
+    // One-shot guard for promoting the audio thread to realtime. Reset in
+    // audioDeviceAboutToStart (control thread) so each device (re)start
+    // re-promotes the possibly-new audio thread; acted on in the first
+    // audioDeviceIOCallbackWithContext, which runs on the audio thread itself.
+    std::atomic<bool> mRealtimeElevated{false};
+
     // Audio thread timing stats (accessed only from audio thread, no atomics needed)
     uint32_t mCallbackCount = 0;
     uint32_t mOverrunCount  = 0;
