@@ -162,6 +162,11 @@ private:
     double   mTotalUs       = 0.0;
     double   mMaxUs         = 0.0;
 
+    // DSP load published to native-stats: a smoothed average (EMA) and a decaying
+    // peak of per-callback load (callback time / time budget), in percent.
+    double   mLoadAvgPct    = 0.0;
+    double   mLoadPeakPct   = 0.0;
+
     // Inter-callback gap detector baseline (used by sleep/wake recovery)
     std::chrono::high_resolution_clock::time_point mLastCbTime{};
 

@@ -15,6 +15,8 @@
 // The engine's segment-resident metrics block (defined in audio_processor.cpp,
 // C linkage). Used to mirror Link clock + stream-health into the dashboard.
 extern "C" PerformanceMetrics* metrics;
+extern "C" void World_PublishAudioLoad(uint32_t cpuAvgCenti, uint32_t cpuPeakCenti,
+                                       uint32_t callbackOverruns);
 
 // Shared per-scsynth-block render (see JuceAudioCallback.h). One copy of the
 // drain → process_audio → publish sequence for both HeadlessDriver and the
@@ -549,6 +551,19 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     mTotalUs += cbUs;
     if (cbUs > mMaxUs) mMaxUs = cbUs;
     if (cbUs > budgetUs) mOverrunCount++;
+
+    // DSP load = how much of the callback's time budget the render consumed.
+    // Smooth the average (EMA) and let the peak decay, so both track recent
+    // behaviour rather than pinning to a one-off lifetime spike. Published to
+    // native-stats as percent * 100 for the GUI dashboard.
+    if (budgetUs > 0.0) {
+        const double instPct = (cbUs / budgetUs) * 100.0;
+        mLoadAvgPct  += (instPct - mLoadAvgPct) * 0.1;            // ~10-callback EMA
+        mLoadPeakPct = std::max(instPct, mLoadPeakPct * 0.95);   // decaying peak
+        World_PublishAudioLoad(static_cast<uint32_t>(mLoadAvgPct * 100.0 + 0.5),
+                               static_cast<uint32_t>(mLoadPeakPct * 100.0 + 0.5),
+                               mOverrunCount);
+    }
 
     // ── 5. Notify worker threads (one tick per JUCE callback) ─────────────────
     processCount.fetch_add(1, std::memory_order_release);

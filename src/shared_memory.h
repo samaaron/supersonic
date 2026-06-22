@@ -139,18 +139,23 @@ constexpr uint32_t SHM_SCOPE_START = WORLD_OPTIONS_START + WORLD_OPTIONS_SIZE;
 //   [12..15] u32  _in (writer's current triple-buffer region index)
 //   [16..]   float data[3][framesPerScope * channels]  — triple-buffered audio
 
-// Native-only live engine stats (loaded synthdef count, allocated sample
-// buffers + their bytes). Appended at the very END of the layout on purpose:
-// adding it shifts NO existing offset, so the WASM metric layout / JS offset
-// map is completely untouched (the web build never reads this region — it has
-// its own JS-context equivalents). The native engine writes it; the GUI reads
-// it via the self-describing segment header.
-constexpr uint32_t NATIVE_STATS_SIZE  = 16;  // u32 x4: synthdefs, buffers, buffer_bytes, reserved
+// Native-only live engine stats. Appended at the very END of the layout on
+// purpose: adding fields here shifts NO existing offset, so the WASM metric
+// layout / JS offset map is completely untouched (the web build never reads this
+// region — it has its own JS-context equivalents). The native engine writes it;
+// the GUI reads it via the self-describing segment header. This is the home for
+// native-only observability that has no WASM counterpart (DSP load, JUCE audio
+// callback overruns), which keeps PerformanceMetrics a clean cross-platform
+// surface rather than a pile of fields that are 0 on half the runtimes.
+constexpr uint32_t NATIVE_STATS_SIZE  = 32;  // u32 x8 (see field offsets below; last two reserved)
 constexpr uint32_t NATIVE_STATS_START = SHM_SCOPE_START + SHM_SCOPE_TOTAL_SIZE;
 // Field byte offsets within the native-stats region.
-constexpr uint32_t NATIVE_STAT_SYNTHDEFS    = 0;
-constexpr uint32_t NATIVE_STAT_BUFFERS      = 4;
-constexpr uint32_t NATIVE_STAT_BUFFER_BYTES = 8;
+constexpr uint32_t NATIVE_STAT_SYNTHDEFS      = 0;
+constexpr uint32_t NATIVE_STAT_BUFFERS        = 4;
+constexpr uint32_t NATIVE_STAT_BUFFER_BYTES   = 8;
+constexpr uint32_t NATIVE_STAT_CPU_AVG_CENTI  = 12;  // DSP load, percent * 100 (smoothed average)
+constexpr uint32_t NATIVE_STAT_CPU_PEAK_CENTI = 16;  // DSP load, percent * 100 (decaying peak)
+constexpr uint32_t NATIVE_STAT_CB_OVERRUNS    = 20;  // audio callbacks that overran their time budget
 
 // Total buffer size (for validation)
 constexpr uint32_t TOTAL_BUFFER_SIZE  = NATIVE_STATS_START + NATIVE_STATS_SIZE;
@@ -220,14 +225,20 @@ struct alignas(4) PerformanceMetrics {
     std::atomic<uint32_t> wasm_errors;             // 7: WASM execution errors (JS-only)
     std::atomic<uint32_t> scheduler_lates;         // 8: Bundles executed after scheduled time
 
-    // OSC Out metrics [9-10]
-    // Writers: native — UdpOscTransport.cpp (onDatagram); web — sab_transport.js.
+    // OSC Out metrics [9-10] — client perspective: messages the host SENDS to the
+    // engine (written into the IN ring). Counted at the producer end, so this is
+    // the host→engine direction and pairs with `messages_processed` (#1), which
+    // counts the same stream as the engine drains it off the IN ring.
+    // Writers: native — SupersonicEngine::ingest(); web — sab_transport.js.
     std::atomic<uint32_t> osc_out_messages_sent;   // 9
     std::atomic<uint32_t> osc_out_bytes_sent;      // 10
 
-    // OSC In metrics [11-14]
-    // Writers: native — src/workers/ReplyReader.cpp; web — js/workers/osc_in_worker.js.
-    // osc_in_dropped_messages is JS-only (no native writer).
+    // OSC In metrics [11-14] — client perspective: messages the host RECEIVES from
+    // the engine (drained from the OUT ring as replies/notifications). This is the
+    // engine→host direction — the OPPOSITE of the "in" ring (host→engine); the
+    // names follow the client's point of view, the ring-usage block below the
+    // engine's. osc_in_dropped_messages is JS-only (no native writer).
+    // Writers: native — ss_egress_rt_drain() (lanes.cpp); web — js/workers/osc_in_worker.js.
     std::atomic<uint32_t> osc_in_messages_received; // 11
     std::atomic<uint32_t> osc_in_bytes_received;    // 12
     std::atomic<uint32_t> osc_in_dropped_messages;  // 13 (JS-only)

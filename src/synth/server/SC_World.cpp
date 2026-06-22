@@ -1315,6 +1315,23 @@ extern "C" void World_UpdateNativeStats(World* inWorld) {
         ->store(static_cast<uint32_t>(bufBytes), std::memory_order_relaxed);
 }
 
+// Publish the audio-thread DSP load + overrun count into the same native-stats
+// region. Split from World_UpdateNativeStats because the source (audio callback
+// timing) lives in the platform driver, not the World. Native-only; relaxed
+// stores, best-effort display values. avg/peak are percent * 100.
+extern "C" void World_PublishAudioLoad(uint32_t cpuAvgCenti, uint32_t cpuPeakCenti,
+                                       uint32_t callbackOverruns) {
+    uint8_t* base = reinterpret_cast<uint8_t*>(get_shared_memory_base());
+    if (!base) return;
+    uint8_t* ns = base + NATIVE_STATS_START;
+    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_CPU_AVG_CENTI)
+        ->store(cpuAvgCenti, std::memory_order_relaxed);
+    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_CPU_PEAK_CENTI)
+        ->store(cpuPeakCenti, std::memory_order_relaxed);
+    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_CB_OVERRUNS)
+        ->store(callbackOverruns, std::memory_order_relaxed);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 
