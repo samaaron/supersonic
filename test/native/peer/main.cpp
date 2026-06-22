@@ -33,6 +33,13 @@
 #include <thread>
 #include <vector>
 
+#if !defined(_WIN32)
+#  include <unistd.h>     // getppid
+#endif
+#if defined(__linux__)
+#  include <sys/prctl.h>  // PR_SET_PDEATHSIG
+#endif
+
 namespace {
 
 std::atomic<bool> gShouldQuit{false};
@@ -147,6 +154,24 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, handleSignal);
     std::signal(SIGINT, handleSignal);
 
+    // Orphan guard. A leaked peer keeps broadcasting on the Link mesh
+    // indefinitely, which pollutes discovery for every later test run
+    // (multiple stale "FakeLive" peers → channel enumeration stalls →
+    // flaky waitForChannelVisible). The parent reaps us on a clean
+    // teardown, but a crash / `timeout` / Ctrl-C kills the parent without
+    // running its destructors, stranding us. Tie our lifetime to the
+    // parent's so that can never happen.
+#if !defined(_WIN32)
+    const pid_t parentAtStart = ::getppid();
+#endif
+#if defined(__linux__)
+    // Kernel kills us the instant the parent dies — no poll latency.
+    ::prctl(PR_SET_PDEATHSIG, SIGKILL);
+    // Race: the parent may have died between fork/exec and the prctl above,
+    // in which case the signal will never fire. Detect the reparent and bail.
+    if (::getppid() != parentAtStart) return 0;
+#endif
+
 #if defined(_WIN32)
     ableton::platforms::windows::loopbackOnly().store(
         loopbackOnly, std::memory_order_relaxed);
@@ -187,6 +212,12 @@ int main(int argc, char** argv) {
     uint64_t frameOffset = 0;
 
     while (!gShouldQuit.load(std::memory_order_relaxed)) {
+#if !defined(_WIN32)
+        // Portable backstop (covers macOS, where PR_SET_PDEATHSIG doesn't
+        // exist): if the parent died we get reparented to init/launchd, so
+        // our parent pid changes. Caught within one block (~tens of ms).
+        if (::getppid() != parentAtStart) break;
+#endif
         for (auto& a : sinks) {
             ableton::LinkAudioSink::BufferHandle buf(a.sink);
             if (!buf) continue;  // No subscriber → skip silently.
