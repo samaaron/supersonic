@@ -47,6 +47,7 @@ add_executable(SuperSonicNativeTests
     test_scheduling_accuracy.cpp
     test_engine_state.cpp
     test_cold_swap.cpp
+    test_rebuild_contract.cpp
     test_cold_swap_recovery.cpp
     test_cold_swap_scope.cpp
     test_cold_swap_sampleloader.cpp

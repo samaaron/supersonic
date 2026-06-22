@@ -163,7 +163,26 @@ For full details, see [SCSYNTH_COMMAND_REFERENCE.md](SCSYNTH_COMMAND_REFERENCE.m
 
 ---
 
-## SuperSonic Extensions
+## OSC Command Behaviour Differences
+
+Commands that exist in scsynth but behave differently in SuperSonic.
+
+### `/notify` is idempotent
+
+In upstream scsynth, sending `/notify 1` from a client that is **already**
+registered replies with `/fail "notify: already registered"`. In SuperSonic it
+instead replies `/done /notify <clientID> <maxClients>` — the same success
+reply as a first-time registration, returning the existing client ID.
+
+Why: SuperSonic **preserves notify registrations across an audio-device rebuild**
+(a sample-rate or driver change destroys and rebuilds the scsynth World, which
+would otherwise empty the registered-client list and silently stop `/n_go` /
+`/n_end` delivery). The registrations are captured before the rebuild and
+restored after it. A host that *also* re-sends `/notify` after such a rebuild
+(harmlessly, not knowing the engine already restored it) must therefore get a
+success, not an error — so re-registration is idempotent. This matches the
+original code's own intent (its comment already read "already in table — don't
+fail though").
 
 SuperSonic adds functionality not present in standard scsynth:
 

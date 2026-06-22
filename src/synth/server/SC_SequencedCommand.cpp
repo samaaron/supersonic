@@ -54,6 +54,12 @@
 // 6. RecvSynthDefCmd::Stage2: Null check for mDefs to prevent null pointer crash
 // 7. RecvSynthDefCmd::Stage4: Sends /supersonic/synthdef/loaded messages
 // 8. RecvSynthDefCmd::Init: Added ss_log for empty synthdef error
+// 9. NotifyCmd::Stage2: /notify on an already-registered client replies /done
+//    (idempotent) instead of upstream's /fail "already registered". Lets a
+//    redundant re-registration succeed — needed because a device rebuild
+//    (destroy_world/rebuild_world) preserves the notify clients, so a host that
+//    also re-sends /notify afterwards must not get an error. See
+//    capture_notify_clients/restore_notify_clients in audio_processor.cpp.
 // =============================================================================
 
 // From audio_processor.cpp
@@ -1299,10 +1305,13 @@ bool NotifyCmd::Stage2() {
     if (mOnOff) {
         for (auto addr : *hw->mUsers) {
             if (mReplyAddress == addr) {
-                // already in table - don't fail though..
-                SendFailureWithIntValue(&mReplyAddress, "/notify", "notify: already registered\n",
-                                        hw->mClientIDdict->at(mReplyAddress));
-                ss_log("/notify : already registered\n");
+                // Already registered — idempotent: reply /done with the existing
+                // clientID rather than failing. DIVERGES FROM UPSTREAM scsynth,
+                // which replies /fail "already registered" here. A redundant
+                // /notify (e.g. a host re-registering after a device rebuild that
+                // already preserved the registration) must succeed, not error.
+                SendDoneWithVarArgs(&mReplyAddress, "/notify", "ii",
+                                    hw->mClientIDdict->at(mReplyAddress), (int)hw->mMaxUsers);
                 return false;
             }
         }

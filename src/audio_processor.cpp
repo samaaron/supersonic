@@ -750,8 +750,49 @@ extern "C" {
     // Cold-swap entry/exit — the engine's state-transition lines
     // ([supersonic] state: restarting -> running) already record when these
     // fire, so separate tracing here is redundant.
+    // Notify-client registrations (hw->mUsers) gate /n_go//n_end delivery and
+    // live in the World, so a destroy/rebuild empties them — clients stop
+    // receiving node notifications until they re-/notify. Capture the registered
+    // (token, clientID) pairs across the rebuild and re-insert them, so notify
+    // survives transparently. The transport's token→address map persists, so the
+    // saved tokens stay routable.
+    std::vector<std::pair<uint32_t, int>> g_savedNotifyClients;
+
+    void capture_notify_clients() {
+        g_savedNotifyClients.clear();
+        if (!g_world || !g_world->hw || !g_world->hw->mUsers) return;
+        HiddenWorld* hw = g_world->hw;
+        for (auto addr : *hw->mUsers) {
+            const uint32_t token =
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(addr.mReplyData));
+            int clientID = 0;
+            auto it = hw->mClientIDdict->find(addr);
+            if (it != hw->mClientIDdict->end()) clientID = it->second;
+            g_savedNotifyClients.emplace_back(token, clientID);
+        }
+    }
+
+    void restore_notify_clients() {
+        if (!g_world || !g_world->hw || !g_world->hw->mUsers) { g_savedNotifyClients.clear(); return; }
+        HiddenWorld* hw = g_world->hw;
+        for (const auto& c : g_savedNotifyClients) {
+            ReplyAddress r = ring_reply(c.first);
+            bool present = false;
+            for (auto a : *hw->mUsers) { if (a == r) { present = true; break; } }
+            if (present) continue;
+            // Mirror NotifyCmd::Stage2's registration, preserving the original
+            // clientID so the host's view (node-id range, etc.) stays consistent.
+            hw->mClientIDdict->insert(std::make_pair(r, c.second));
+            hw->mUsers->insert(r);
+            auto& avail = *hw->mAvailableClientIDs;
+            avail.erase(std::remove(avail.begin(), avail.end(), c.second), avail.end());
+        }
+        g_savedNotifyClients.clear();
+    }
+
     void destroy_world() {
         if (g_world) {
+            capture_notify_clients();        // preserve /notify across the rebuild
             World_Cleanup(g_world, false);  // false = keep UGen plugins loaded
             g_world = nullptr;
         }
@@ -765,6 +806,7 @@ extern "C" {
         // Re-read worldOptions from ring_buffer_storage + WORLD_OPTIONS_START
         // (caller must update opts[WorldOpts::kSampleRate] before calling)
         init_memory(sample_rate);
+        restore_notify_clients();            // re-register the pre-rebuild clients
     }
 #endif
 
