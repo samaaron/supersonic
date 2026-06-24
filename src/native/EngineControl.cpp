@@ -12,6 +12,7 @@
 #include "osc/OscOutboundPacketStream.h"
 #include "osc/OscReceivedElements.h"
 #include "DevicePolicy.h"
+#include "supersonic_config.h"  // SUPERSONIC_VERSION_MAJOR / _MINOR
 #ifdef __APPLE__
 #include "AggregateDeviceHelper.h"
 #include "JuceAudioCallback.h"  // get_audio_first_private_bus_idx()
@@ -484,31 +485,31 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
 #else
             const bool kGamepad = false;
 #endif
-            // Boot-banner status list, one component per line:
-            //   [NAME] ................. [x]
-            // The state is right-aligned via a dot-leader to a fixed width, so it
-            // reads like a startup panel under the ascii banner. The Link row is
-            // labelled "LINK AUDIO" when audio streaming is available (which
-            // implies Link), otherwise just "LINK". The leading \x01 byte marks
-            // this as a banner so the GUI renders it without a log timestamp.
-            // "[NAME] ....... VALUE" right-aligned to a fixed width with a dot-leader.
-            auto row = [](std::string& out, const char* name, const char* val) {
-                std::string left = "[";
-                left += name;
-                left += "] ";
-                const int W = 40;
-                int dots = W - static_cast<int>(left.size()) - static_cast<int>(std::strlen(val));
-                if (dots < 1) dots = 1;
-                out += '\n';
-                out += left;
-                out.append(static_cast<size_t>(dots), '.');
-                out += val;
+            // Boot-banner shown in the GUI Info pane, under the ascii logo
+            // (which the GUI seeds): a single centred line of the modules
+            // compiled into this build, then a "vMAJOR.MINOR Ready..." line.
+            // The leading \x01 byte marks this as a banner so the GUI renders
+            // it verbatim (no log timestamp). The logo is kLogoWidth display
+            // columns wide; the module line is left-padded to centre it.
+            constexpr int kLogoWidth = 40;
+            auto centred = [&](const std::string& line) {
+                int pad = (kLogoWidth - static_cast<int>(line.size())) / 2;
+                if (pad < 0) pad = 0;
+                return std::string(static_cast<size_t>(pad), ' ') + line;
             };
+            // Active modules as a single line, in display order.
+            std::string mods;
+            if (kSynth)   mods += "[SYNTH] ";
+            if (kLink)    mods += kSynth ? "[LINK AUDIO] " : "[LINK] ";
+            if (kGamepad) mods += "[GAMEPAD] ";
+            if (kMidi)    mods += "[MIDI] ";
+            if (!mods.empty() && mods.back() == ' ') mods.pop_back();
+
             std::string s = "\x01";   // banner sentinel (stripped by the GUI)
-            row(s, "SYNTH",                            kSynth ? "[x]" : "[-]");
-            row(s, (kLink && kSynth) ? "LINK AUDIO" : "LINK", kLink ? "[x]" : "[-]");
-            row(s, "MIDI",                             kMidi ? "[x]" : "[-]");
-            row(s, "GAMEPAD",                          kGamepad ? "[x]" : "[-]");
+            s += centred(mods);
+            s += "\n\n";
+            s += "v" + std::to_string(SUPERSONIC_VERSION_MAJOR) + "."
+               + std::to_string(SUPERSONIC_VERSION_MINOR) + " Ready...";
             mEgress->debug(s.c_str(), static_cast<uint32_t>(s.size()));
             return true;
 
