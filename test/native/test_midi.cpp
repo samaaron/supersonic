@@ -70,13 +70,9 @@ TEST_CASE("/midi out + clock dispatch is robust with no devices open", "[midi]")
         << static_cast<osc::int32>(100);
     fx.send(noteOn.end());
 
-    fx.send(osc_test::message("/midi/clock/start", "out"));
-
     osc_test::Builder beat;
     beat.begin("/midi/clock/beat") << "out" << 500.0f;
     fx.send(beat.end());
-
-    fx.send(osc_test::message("/midi/clock/stop", "out"));
 
     osc_test::Builder sync;
     sync.begin("/midi/clock/sync") << "in" << static_cast<osc::int32>(1);
@@ -151,24 +147,24 @@ TEST_CASE("/schedule-wrapped /midi/clock/beat reaches the engine clock-out", "[m
     CHECK(fx.waitForReply("/midi/ports.reply", r));
 }
 
-TEST_CASE("Engine init clears leftover MIDI clock-out ports", "[midi][midi_clock]") {
+TEST_CASE("Engine init clears leftover MIDI clock bursts", "[midi][midi_clock]") {
     // MidiClockOut is a process-wide singleton shared across the whole test
     // binary. Tests that drive it directly (test_midi_clock_out.cpp) reset only
-    // at their start, so they can leave a continuous port running. A fresh
-    // engine must start with no clock-out ports, or that stale port floods the
-    // shared OUT ring under any later fixture — making exact tick-count
+    // at their start, so they can leave a pending beat-burst queued. A fresh
+    // engine must start with that queue cleared, or the stale ticks leak into
+    // the shared OUT ring under a later fixture — making exact tick-count
     // assertions flaky on a slow box.
     SuperClock ghost;
-    get_midi_clock_out().onClockOutTempo(ghost, "ghost", 120.0);   // pollute
+    get_midi_clock_out().onBeat(ghost, "ghost", 1.0);   // pollute: a queued burst
 
     EngineFixture fx;                  // init() must reset the singleton
     fx.stopHeadlessDriver();           // test thread becomes the sole scheduler writer
 
-    // Drive generation deterministically 10 s past the ghost's origin: a
-    // surviving port floods the ring with ticks; a cleared one emits none.
+    // Drive generation deterministically 10 s past the burst's origin: a
+    // surviving burst schedules its ticks; a cleared queue emits none.
     EngineScheduler& es = get_scheduler();
     ring_test::drainDue(es, INT64_MAX);            // clear anything already pending
-    get_midi_clock_out().generate(ghost, ghost.now() + 10.0);
+    get_midi_clock_out().generate(ghost.now() + 10.0);
     auto fired = ring_test::drainDue(es, INT64_MAX);
 
     CHECK(countByAddr(fired, "/midi/clock/tick") == 0);

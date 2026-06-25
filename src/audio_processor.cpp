@@ -1030,11 +1030,11 @@ extern "C" {
             int64_t currentOscTime = ntp_to_osc_timetag(current_ntp);
             int64_t nextOscTime = currentOscTime + g_osc_increment;
 
-            // Generate the MIDI clock pulses due in the look-ahead window and
-            // schedule them (SuperClock-timed) into the same scheduler, so the
-            // generated clock is sample-locked to audio.
-            if (SuperClock* clk = g_active_superclock.load(std::memory_order_acquire))
-                get_midi_clock_out().generate(*clk, current_ntp);
+            // Schedule any midi_clock_beat burst ticks due in the look-ahead
+            // window (SuperClock-timed) into the same scheduler, so they stay
+            // sample-locked to audio.
+            if (g_active_superclock.load(std::memory_order_acquire))
+                get_midi_clock_out().generate(current_ntp);
 
             // Fire: drain every event due this block in time order through the
             // shared fire loop, handing each to the SAME dispatch() the immediate

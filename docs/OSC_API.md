@@ -343,16 +343,16 @@ dispatches it on time. (A `d:ntpSeconds` form is also accepted, e.g. by tests.)
 
 ### Clock output
 
-The engine generates a rock-solid 24-PPQN clock locked to SuperClock (so it
-tracks tempo and Link peers):
+A beat of MIDI clock is scheduled off SuperClock (into the deferred-event
+scheduler, so the ticks stay sample-locked to scsynth audio). The beat verb is
+clock-only — no transport byte is sent; drive `Start` / `Stop` / `Continue`
+separately via `/midi/out/start|stop|continue`. `port = "*"` fans the ticks to
+every open output port.
 
 | `→` Request | Effect |
 | --- | --- |
-| `/midi/clock/start s:port` | Send `Start` (0xFA), then continuous 24-PPQN on `port`. |
-| `/midi/clock/continue s:port` | Send `Continue` (0xFB) + resume clock. |
-| `/midi/clock/stop s:port` | Send `Stop` (0xFC) + halt clock. |
-| `/midi/clock/beat s:port f:durationMs` | One beat of 24 evenly-spaced ticks (Sonic Pi's `midi_clock_beat`). |
-| `/midi/clock/tick s:port` | One immediate tick. |
+| `/midi/clock/beat s:port f:durationMs` | One beat of 24 evenly-spaced ticks spread over `durationMs` (Sonic Pi's `midi_clock_beat`). |
+| `/midi/clock/tick s:port` | One immediate tick (`0xF8`); also the address the beat verb's scheduled ticks re-enter the dispatch path on. |
 
 ### Input (device → engine → subscribers)
 

@@ -41,8 +41,8 @@ private:
                                const uint8_t* raw, uint32_t rawLen, int32_t kind, double beat);
     // Broadcast a /clock/timelines push when the timeline set changes.
     void           broadcastTimelines();
-    // Route a /midi/clock/ clock-OUT verb (out/bpm, out/follow, out/off, beat)
-    // to MidiClockOut. Returns false if the message is not a clock-OUT verb.
+    // Route /midi/clock/beat (Sonic Pi's midi_clock_beat) to MidiClockOut.
+    // Returns false if the message is not the beat verb.
     // Safe on any non-RT thread (command path and deferred dispatch).
     bool           handleClockOutVerb(const uint8_t* data, uint32_t size);
 

@@ -4,8 +4,8 @@
 //!   * incoming clock — a precise virtual clock master, BPM estimate checked
 //!   * note round-trip — /midi/out → device and device → /midi/in
 //!
-//! (Outgoing clock generation lives engine-side in C++ MidiClockOut, covered by
-//! the native MidiClockGen / MidiClockOut tests.)
+//! (The midi_clock_beat burst lives engine-side in C++ MidiClockOut, covered by
+//! the native MidiClockOut tests.)
 //!
 //! Ignored by default (needs virtual MIDI + real time). Run on a dev box with:
 //!     cargo test --test clock_accuracy -- --ignored --nocapture
