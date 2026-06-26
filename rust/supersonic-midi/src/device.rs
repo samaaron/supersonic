@@ -63,16 +63,15 @@ impl MidiIo {
     /// same name reconnects instead of being treated as already-open), and if an
     /// "open all" intent is set, newly-appeared ports are reopened.
     pub fn refresh(&mut self) {
-        // Exclude our own ports so "open everything" can't subscribe our inputs to
+        // Skip our own ports so "open everything" can't subscribe our inputs to
         // our own outputs (self-wired feedback loops + duplicate ports, #3543).
-        let mine = self.client_name.clone();
         if let Ok(mi) = MidiInput::new(&self.client_name) {
             self.in_ports = normalize_ports(&port_names_in(&mi));
-            self.in_ports.retain(|p| !is_own_port(&p.raw, &mine));
+            self.in_ports.retain(|p| !is_own_port(&p.raw));
         }
         if let Ok(mo) = MidiOutput::new(&self.client_name) {
             self.out_ports = normalize_ports(&port_names_out(&mo));
-            self.out_ports.retain(|p| !is_own_port(&p.raw, &mine));
+            self.out_ports.retain(|p| !is_own_port(&p.raw));
         }
         {
             let live_in: HashSet<&str> =
@@ -171,12 +170,17 @@ fn port_names_out(mo: &MidiOutput) -> Vec<String> {
         .collect()
 }
 
-/// True when a raw midir port name ("client:port client_id:port_id") belongs to
-/// our own ALSA client, which must be skipped so we never wire ourselves to
-/// ourselves (sonic-pi#3543). Matches the client name only up to its `:` so a
-/// device whose name merely starts with ours isn't mistaken for us.
-fn is_own_port(raw: &str, client_name: &str) -> bool {
-    raw.starts_with(client_name) && raw.as_bytes().get(client_name.len()) == Some(&b':')
+/// The names we give our own MIDI ports on every backend (the add_port / connect
+/// sites below). The enumeration filter skips ports bearing these names so "open
+/// everything" can't wire us to ourselves (sonic-pi#3543) — keyed on the name we
+/// assign, not the client name, so it works across ALSA/CoreMIDI/WinMM and also
+/// skips a second SuperSonic instance's internal ports.
+const OWN_IN_PORT: &str = "supersonic-midi-in";
+const OWN_OUT_PORT: &str = "supersonic-midi-out";
+
+/// True when an enumerated raw port name is one of our own ports.
+fn is_own_port(raw: &str) -> bool {
+    raw.contains(OWN_IN_PORT) || raw.contains(OWN_OUT_PORT)
 }
 
 /// Linux/ALSA storage: all inputs share one sequencer client, all outputs share
@@ -192,7 +196,7 @@ mod linux_ports {
     use midir::shared::{SharedInput, SharedOutput};
     use midir::Ignore;
 
-    use super::{normalize_ports, port_names_in, port_names_out, InputCallback};
+    use super::{normalize_ports, port_names_in, port_names_out, InputCallback, OWN_IN_PORT, OWN_OUT_PORT};
     use midir::{MidiInput, MidiOutput};
 
     pub struct Inputs {
@@ -252,7 +256,7 @@ mod linux_ports {
                 Some(i) => i,
                 None => return false,
             };
-            if shared.add_port(&ports[idx].id(), "supersonic-midi-in", norm, &infos[idx].raw) {
+            if shared.add_port(&ports[idx].id(), OWN_IN_PORT, norm, &infos[idx].raw) {
                 self.open.insert(norm.to_string());
                 true
             } else {
@@ -309,7 +313,7 @@ mod linux_ports {
                 Some(s) => s,
                 None => return false,
             };
-            shared.add_port(&ports[idx].id(), "supersonic-midi-out", norm)
+            shared.add_port(&ports[idx].id(), OWN_OUT_PORT, norm)
         }
 
         pub fn send(&mut self, port: &str, bytes: &[u8]) {
@@ -341,7 +345,7 @@ mod per_port {
 
     use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 
-    use super::{normalize_ports, port_names_in, port_names_out, InputCallback};
+    use super::{normalize_ports, port_names_in, port_names_out, InputCallback, OWN_IN_PORT, OWN_OUT_PORT};
 
     pub struct Inputs {
         conns: HashMap<String, MidiInputConnection<()>>,
@@ -388,7 +392,7 @@ mod per_port {
             let raw = infos[idx].raw.clone();
             match midi_in.connect(
                 &ports[idx],
-                "supersonic-midi-in",
+                OWN_IN_PORT,
                 move |ts, bytes, _| cb(&name, &raw, ts, bytes),
                 (),
             ) {
@@ -438,7 +442,7 @@ mod per_port {
                 Some(i) => i,
                 None => return false,
             };
-            match midi_out.connect(&ports[idx], "supersonic-midi-out") {
+            match midi_out.connect(&ports[idx], OWN_OUT_PORT) {
                 Ok(conn) => {
                     self.conns.insert(norm.to_string(), conn);
                     true
@@ -473,26 +477,29 @@ mod tests {
     // creating ~N× MIDI feedback and a bank of duplicate self-wired ports).
     #[test]
     fn own_ports_excluded_external_kept() {
-        let me = "SuperSonic";
         let raws = vec![
             "SuperSonic:supersonic-midi-out 130:50".to_string(), // own -> drop
             "SuperSonic:supersonic-midi-in 129:3".to_string(),   // own -> drop
-            "Midi Through:Midi Through Port-0 14:0".to_string(), // ext -> keep
-            "nanoKONTROL2:nanoKONTROL2 MIDI 1 24:0".to_string(), // ext -> keep
-            "SuperSonicSynth:out 40:0".to_string(),              // not us (no ':' after name) -> keep
+            "Midi Through:Midi Through Port-0 14:0".to_string(),  // ext -> keep
+            "nanoKONTROL2:nanoKONTROL2 MIDI 1 24:0".to_string(),  // ext -> keep
         ];
         let kept: Vec<_> = normalize_ports(&raws)
             .into_iter()
-            .filter(|p| !is_own_port(&p.raw, me))
+            .filter(|p| !is_own_port(&p.raw))
             .collect();
-        assert_eq!(kept.len(), 3, "kept: {:?}", kept.iter().map(|p| &p.raw).collect::<Vec<_>>());
-        assert!(kept.iter().all(|p| !p.raw.starts_with("SuperSonic:")));
+        assert_eq!(kept.len(), 2, "kept: {:?}", kept.iter().map(|p| &p.raw).collect::<Vec<_>>());
+        assert!(kept.iter().all(|p| !p.raw.contains("supersonic-midi-")));
     }
 
+    // Keyed on the port name we assign, not the client name — so a real device on
+    // a client coincidentally named "SuperSonic" is still kept, and our own ports
+    // are caught on any backend (ALSA/CoreMIDI/WinMM name formats differ).
     #[test]
-    fn is_own_port_matches_on_client_boundary() {
-        assert!(is_own_port("SuperSonic:foo 1:0", "SuperSonic"));
-        assert!(!is_own_port("SuperSonicSynth:foo 1:0", "SuperSonic")); // boundary
-        assert!(!is_own_port("Other:foo 1:0", "SuperSonic"));
+    fn matches_assigned_port_name_not_client_name() {
+        assert!(is_own_port("SuperSonic:supersonic-midi-in 1:0"));
+        assert!(is_own_port("SuperSonic:supersonic-midi-out 1:0"));
+        assert!(is_own_port("supersonic-midi-out")); // bare CoreMIDI-style name
+        assert!(!is_own_port("SuperSonic:Launchpad MIDI 1 1:0")); // client-name collision, real device kept
+        assert!(!is_own_port("nanoKONTROL2:nanoKONTROL2 MIDI 1 1:0"));
     }
 }
