@@ -14,6 +14,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#include <filesystem>
 #include <sndfile.h>
 
 // scsynth headers for World / SndBuf access
@@ -221,9 +222,10 @@ void SampleLoader::processRequest(const Request& req) {
         return;
     }
 
-    debugLog("[SampleLoader] decoded buf %d: %s (%lld frames, %d ch, %d Hz)",
-                  req.bufnum, req.path, (long long)framesRead,
-                  numChannels, info.samplerate);
+    std::string fileName = std::filesystem::path(req.path).filename().string();
+    debugLog("[SampleLoader] loaded %s - buf %d, [%lld frames, %d ch, %d Hz], path: %s",
+                  fileName.c_str(), req.bufnum, (long long)framesRead,
+                  numChannels, info.samplerate, req.path);
 
     enqueueCompleted({
         req.world,
@@ -270,6 +272,8 @@ void SampleLoader::installPendingBuffers() {
             // The data was allocated from the supersonic heap which has been
             // reset by FreeAllInternal() during the cold swap. Calling zfree()
             // on abandoned pool memory would corrupt the allocator.
+            debugLog("[SampleLoader] discarded stale buf %d (gen %u != %u)",
+                          load.bufnum, load.generation, currentGen);
         } else if (load.success) {
             installBuffer(load);
             writeDoneReply(load.bufnum);
@@ -293,9 +297,6 @@ void SampleLoader::installBuffer(const CompletedLoad& load) {
                     load.numChannels, load.sampleRate, false);
 
     zfree(oldData);
-
-    debugLog("[SampleLoader] installed buf %d (%d frames, %d ch, %d Hz)",
-                  load.bufnum, load.numFrames, load.numChannels, load.sampleRate);
 }
 
 void SampleLoader::writeDoneReply(int bufnum) {
