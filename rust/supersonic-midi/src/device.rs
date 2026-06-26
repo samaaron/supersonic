@@ -63,11 +63,16 @@ impl MidiIo {
     /// same name reconnects instead of being treated as already-open), and if an
     /// "open all" intent is set, newly-appeared ports are reopened.
     pub fn refresh(&mut self) {
+        // Exclude our own ports so "open everything" can't subscribe our inputs to
+        // our own outputs (self-wired feedback loops + duplicate ports, #3543).
+        let mine = self.client_name.clone();
         if let Ok(mi) = MidiInput::new(&self.client_name) {
             self.in_ports = normalize_ports(&port_names_in(&mi));
+            self.in_ports.retain(|p| !is_own_port(&p.raw, &mine));
         }
         if let Ok(mo) = MidiOutput::new(&self.client_name) {
             self.out_ports = normalize_ports(&port_names_out(&mo));
+            self.out_ports.retain(|p| !is_own_port(&p.raw, &mine));
         }
         {
             let live_in: HashSet<&str> =
@@ -164,6 +169,14 @@ fn port_names_out(mo: &MidiOutput) -> Vec<String> {
         .iter()
         .map(|p| mo.port_name(p).unwrap_or_default())
         .collect()
+}
+
+/// True when a raw midir port name ("client:port client_id:port_id") belongs to
+/// our own ALSA client, which must be skipped so we never wire ourselves to
+/// ourselves (sonic-pi#3543). Matches the client name only up to its `:` so a
+/// device whose name merely starts with ours isn't mistaken for us.
+fn is_own_port(raw: &str, client_name: &str) -> bool {
+    raw.starts_with(client_name) && raw.as_bytes().get(client_name.len()) == Some(&b':')
 }
 
 /// Linux/ALSA storage: all inputs share one sequencer client, all outputs share
@@ -447,5 +460,39 @@ mod per_port {
         pub fn open_keys(&self) -> Vec<String> {
             self.conns.keys().cloned().collect()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_own_port;
+    use crate::normalize::normalize_ports;
+
+    // Regression guard for sonic-pi#3543: enumeration must drop SuperSonic's own
+    // ports (else "open everything" subscribes our inputs to our own outputs,
+    // creating ~N× MIDI feedback and a bank of duplicate self-wired ports).
+    #[test]
+    fn own_ports_excluded_external_kept() {
+        let me = "SuperSonic";
+        let raws = vec![
+            "SuperSonic:supersonic-midi-out 130:50".to_string(), // own -> drop
+            "SuperSonic:supersonic-midi-in 129:3".to_string(),   // own -> drop
+            "Midi Through:Midi Through Port-0 14:0".to_string(), // ext -> keep
+            "nanoKONTROL2:nanoKONTROL2 MIDI 1 24:0".to_string(), // ext -> keep
+            "SuperSonicSynth:out 40:0".to_string(),              // not us (no ':' after name) -> keep
+        ];
+        let kept: Vec<_> = normalize_ports(&raws)
+            .into_iter()
+            .filter(|p| !is_own_port(&p.raw, me))
+            .collect();
+        assert_eq!(kept.len(), 3, "kept: {:?}", kept.iter().map(|p| &p.raw).collect::<Vec<_>>());
+        assert!(kept.iter().all(|p| !p.raw.starts_with("SuperSonic:")));
+    }
+
+    #[test]
+    fn is_own_port_matches_on_client_boundary() {
+        assert!(is_own_port("SuperSonic:foo 1:0", "SuperSonic"));
+        assert!(!is_own_port("SuperSonicSynth:foo 1:0", "SuperSonic")); // boundary
+        assert!(!is_own_port("Other:foo 1:0", "SuperSonic"));
     }
 }
