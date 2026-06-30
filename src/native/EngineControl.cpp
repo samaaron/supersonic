@@ -461,53 +461,12 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
             // what it's currently running with, and push it down the debug
             // channel so the GUI shows it in its info pane. The GUI requests
             // this once it is tailing the debug ring.
-            // A component dashboard: one row per subsystem with an on/off mark,
-            // so it's clear at a glance what this build includes. Compile-time
-            // facts only — nothing a hot-swap could make stale (live audio
-            // params live in the metric cards).
-#if SUPERSONIC_SYNTH
-            const bool kSynth = true;
-#else
-            const bool kSynth = false;
-#endif
-#if SUPERSONIC_LINK
-            const bool kLink = true;
-#else
-            const bool kLink = false;
-#endif
-#if SUPERSONIC_MIDI
-            const bool kMidi = true;
-#else
-            const bool kMidi = false;
-#endif
-#if SUPERSONIC_GAMEPAD
-            const bool kGamepad = true;
-#else
-            const bool kGamepad = false;
-#endif
             // Boot-banner shown in the GUI Info pane, under the ascii logo
-            // (which the GUI seeds): a single centred line of the modules
-            // compiled into this build, then a "vMAJOR.MINOR Ready..." line.
-            // The leading \x01 byte marks this as a banner so the GUI renders
-            // it verbatim (no log timestamp). The logo is kLogoWidth display
-            // columns wide; the module line is left-padded to centre it.
-            constexpr int kLogoWidth = 40;
-            auto centred = [&](const std::string& line) {
-                int pad = (kLogoWidth - static_cast<int>(line.size())) / 2;
-                if (pad < 0) pad = 0;
-                return std::string(static_cast<size_t>(pad), ' ') + line;
-            };
-            // Active modules as a single line, in display order.
-            std::string mods;
-            if (kSynth)   mods += "[SYNTH] ";
-            if (kLink)    mods += kSynth ? "[LINK AUDIO] " : "[LINK] ";
-            if (kGamepad) mods += "[GAMEPAD] ";
-            if (kMidi)    mods += "[MIDI] ";
-            if (!mods.empty() && mods.back() == ' ') mods.pop_back();
-
+            // (which the GUI seeds): a single blank line then a
+            // "vMAJOR.MINOR Ready..." line. The leading \x01 byte marks this as
+            // a banner so the GUI renders it verbatim (no log timestamp).
             std::string s = "\x01";   // banner sentinel (stripped by the GUI)
-            s += centred(mods);
-            s += "\n\n";
+            s += "\n";                // single blank line under the logo
             s += "v" + std::to_string(SUPERSONIC_VERSION_MAJOR) + "."
                + std::to_string(SUPERSONIC_VERSION_MINOR) + " Ready...";
             mEgress->debug(s.c_str(), static_cast<uint32_t>(s.size()));
