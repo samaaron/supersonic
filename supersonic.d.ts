@@ -323,14 +323,14 @@ export interface SuperSonicMetrics {
   inBufferUsedBytes: number;
   /** Bytes used in OUT ring buffer (scsynth → JS). */
   outBufferUsedBytes: number;
-  /** Bytes used in DEBUG ring buffer. */
-  debugBufferUsedBytes: number;
+  /** Bytes used in NRT-out ring buffer. */
+  nrtOutBufferUsedBytes: number;
   /** Peak bytes used in IN ring buffer. */
   inBufferPeakBytes: number;
   /** Peak bytes used in OUT ring buffer. */
   outBufferPeakBytes: number;
-  /** Peak bytes used in DEBUG ring buffer. */
-  debugBufferPeakBytes: number;
+  /** Peak bytes used in NRT-out ring buffer. */
+  nrtOutBufferPeakBytes: number;
 
   // scsynth late timing diagnostics
   /** Maximum lateness observed in scsynth scheduler (ms). */
@@ -369,6 +369,34 @@ export interface SuperSonicMetrics {
   /** Transport playing (0 = stopped, 1 = playing). */
   clockPlaying: number;
 
+  // Link (native only; 0 on web, where there is no Link session)
+  /** Connected Ableton Link peers on the network. */
+  linkPeers: number;
+  /** Shared Link session tempo in milli-BPM (bpm * 1000). */
+  linkTempoMbpm: number;
+  /** Current Link beat position * 100. */
+  linkBeatCenti: number;
+  /** Phase within the Link quantum * 100. */
+  linkPhaseCenti: number;
+  /** Link transport playing (0 = stopped, 1 = playing). */
+  linkPlaying: number;
+
+  // Link Audio stream health (native only; 0 on web)
+  /** Active received Link Audio channels. */
+  linkAudioInChannels: number;
+  /** Received Link Audio stream sample rate in Hz. */
+  linkAudioStreamRate: number;
+  /** Receiver queue underruns — stream audio arrived too late to play. */
+  linkAudioUnderruns: number;
+  /** Received Link Audio queued in the receiver (ms). */
+  linkAudioBufferedMs: number;
+  /** Read-rate deviation from the sender's clock (parts per million, signed). */
+  linkAudioDriftPpm: number;
+  /** Link Audio publishing enabled (0 = off, 1 = on). */
+  linkAudioPublish: number;
+  /** Active Link Audio output sinks. */
+  linkAudioSinks: number;
+
   // Context metrics (main thread only)
   /** Clock drift between AudioContext and wall clock (ms, signed). */
   driftOffsetMs: number;
@@ -398,8 +426,8 @@ export interface SuperSonicMetrics {
   inBufferCapacity: number;
   /** OUT ring buffer capacity (bytes). */
   outBufferCapacity: number;
-  /** DEBUG ring buffer capacity (bytes). */
-  debugBufferCapacity: number;
+  /** NRT-out ring buffer capacity (bytes). */
+  nrtOutBufferCapacity: number;
   /** Transport mode as enum index: 0=sab, 1=postMessage. */
   mode: number;
 
@@ -414,6 +442,10 @@ export interface SuperSonicMetrics {
   maxLatencyUs: number;
   /** Audio health: fraction of expected audio frames delivered, 0-100 (cross-browser). */
   audioHealthPct: number;
+  /** Chrome only: total audio rendered duration in ms. */
+  totalFramesDurationMs: number;
+  /** 1 if the Chrome playbackStats API is available, 0 otherwise. */
+  hasPlaybackStats: number;
 }
 
 /** Schema entry describing a single metric field. */
@@ -455,9 +487,10 @@ export interface NativeStatDefinition {
  * a declarative UI layout for rendering metrics panels, and sentinel values.
  */
 export interface MetricsSchema {
-  /** Each key maps to offset, type, unit, and description for the merged Uint32Array.
-   * Includes native-only fields (marked `nativeOnly`) beyond SuperSonicMetrics. */
-  metrics: Record<keyof SuperSonicMetrics, MetricDefinition> & Record<string, MetricDefinition>;
+  /** Each key maps to offset, type, unit, and description for the merged
+   * Uint32Array. Keys are exactly the SuperSonicMetrics fields (native-only
+   * ones are marked `nativeOnly` and read 0 on web). */
+  metrics: Record<keyof SuperSonicMetrics, MetricDefinition>;
   /** NATIVE_STATS shm segment descriptions (native backend only). `index` is
    * the u32 slot within that segment, not a PerformanceMetrics offset. */
   nativeStats: Record<string, NativeStatDefinition>;
