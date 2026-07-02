@@ -37,6 +37,7 @@
 #define SC_HAS_HOSTED_OS      SCP_HOSTED_OS
 #define SC_HAS_BYTE_ATOMICS   SCP_BYTE_ATOMICS
 #define SC_HAS_TIERED_MEMORY  SCP_TIERED_MEMORY
+#define SC_HAS_HW_FLOAT64     SCP_HW_FLOAT64
 
 // ── Derived ───────────────────────────────────────────────────────────────────
 // Self-driven targets (no hosted OS) build lean: no boost::asio, no cross-process
@@ -45,6 +46,11 @@
 #if !SC_HAS_HOSTED_OS
 #    define SC_LEAN_TARGET 1
 #endif
+
+// sc_calc_t (DSP-recursion precision) + sc_calc_guard() live in a re-includable
+// table so the native test can exercise both precisions on the host. Depends only
+// on SC_HAS_HW_FLOAT64 (defined just above).
+#include "SC_CalcType.inc"
 
 // Cold-BSS attribute: push large, rarely-touched static tables (FFT/polar LUTs,
 // the cold sine wavetables) into bulk RAM so the audio path keeps fast RAM.

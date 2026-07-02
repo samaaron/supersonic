@@ -19,6 +19,7 @@ struct Caps {
     int hosted_os;
     int byte_atomics;
     int tiered_memory;
+    int hw_float64;
 };
 
 // ── Matrix: probe each target profile via the re-includable capability table ──
@@ -30,22 +31,22 @@ struct Caps {
 #undef SCP_TARGET_ESP32
 #define SCP_TARGET_DESKTOP 1
 #include "SC_PlatformProfile.inc"
-constexpr Caps kDesktop{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY };
+constexpr Caps kDesktop{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY, SCP_HW_FLOAT64 };
 #undef SCP_TARGET_DESKTOP
 
 #define SCP_TARGET_WASM 1
 #include "SC_PlatformProfile.inc"
-constexpr Caps kWasm{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY };
+constexpr Caps kWasm{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY, SCP_HW_FLOAT64 };
 #undef SCP_TARGET_WASM
 
 #define SCP_TARGET_ESP32 1
 #include "SC_PlatformProfile.inc"
-constexpr Caps kEsp32{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY };
+constexpr Caps kEsp32{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY, SCP_HW_FLOAT64 };
 #undef SCP_TARGET_ESP32
 
 #define SCP_TARGET_FREESTANDING 1
 #include "SC_PlatformProfile.inc"
-constexpr Caps kFreestanding{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY };
+constexpr Caps kFreestanding{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY, SCP_HW_FLOAT64 };
 #undef SCP_TARGET_FREESTANDING
 
 // Desktop: full OS, byte atomics, single-tier RAM.
@@ -61,10 +62,17 @@ static_assert(kEsp32.hosted_os == 0, "esp32 is lean");
 static_assert(kEsp32.byte_atomics  == 0, "esp32 lacks byte atomics");
 static_assert(kEsp32.tiered_memory == 1, "esp32 is two-tier");
 // Freestanding: the lean profile compiled natively (the CI build guard) —
-// mirrors WASM: lean, byte atomics OK, single-tier.
+// mirrors WASM: lean, byte atomics OK, single-tier, hardware f64.
 static_assert(kFreestanding.hosted_os == 0, "freestanding is lean");
 static_assert(kFreestanding.byte_atomics  == 1, "freestanding has byte atomics");
 static_assert(kFreestanding.tiered_memory == 0, "freestanding is single-tier");
+static_assert(kFreestanding.hw_float64 == 1, "freestanding is native: hardware f64");
+// Hardware double FPU: desktop + WASM yes (sc_calc_t == double, byte-identical
+// upstream DSP); ESP32 LX7 no (sc_calc_t degrades to float). Freestanding mirrors
+// WASM (native CPU → hardware f64).
+static_assert(kDesktop.hw_float64 == 1, "desktop has a hardware double FPU");
+static_assert(kWasm.hw_float64 == 1, "wasm f64 is hardware-fast");
+static_assert(kEsp32.hw_float64 == 0, "esp32 LX7 FPU is single-precision");
 
 // ── Active build: SC_Platform.h as compiled for the host (= desktop) ──────────
 #include "SC_Platform.h"
@@ -102,5 +110,8 @@ TEST_CASE("SC_Platform exposes a coherent capability matrix", "[platform]") {
     CHECK(kEsp32.tiered_memory == 1);
     CHECK(kFreestanding.hosted_os == 0);
     CHECK(kFreestanding.byte_atomics == 1);
+    CHECK(kFreestanding.hw_float64 == 1);
+    CHECK(kDesktop.hw_float64 == 1);
+    CHECK(kEsp32.hw_float64 == 0);
     (void)sc_cold_bss_probe;
 }

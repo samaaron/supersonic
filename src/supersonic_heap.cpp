@@ -115,11 +115,31 @@ void supersonic_heap_init(size_t bytes) {
         return;
     }
 
+    // Bound the Fast initial area by the largest free Fast block (minus a reserve
+    // for Fast allocations made later) so we never request more contiguous internal
+    // SRAM than exists. A larger request would fall back to Bulk and put the whole
+    // pool — including the per-sample audio buses and wire scratch — in slow RAM.
+    // Overflow still grows into Bulk on demand via heap_new_area. On desktop/WASM/
+    // NIF largest_free() is SIZE_MAX, so bytes is unchanged.
+    {
+        const size_t avail = supersonic::mem::largest_free(supersonic::mem::Tier::Fast);
+        const size_t reserve = (size_t)SUPERSONIC_FAST_RESERVE + kAreaOverhead;
+        const size_t cap = (avail > reserve) ? (avail - reserve) : 0;
+        if (bytes > cap)
+            bytes = cap;
+    }
+
     // AllocPool::NewArea requests areaInitSize + kAreaOverhead from the callback,
     // so we must allocate enough to cover both the usable pool and the overhead.
     size_t total = bytes + kAreaOverhead;
-    // Initial area — Fast tier (internal SRAM on embedded, malloc on desktop)
-    g_heap_backing = supersonic::mem::alloc(supersonic::mem::Tier::Fast, total);
+    // Initial area — Fast tier (internal SRAM on embedded, malloc on desktop),
+    // requested strictly so a Fast placement failure is logged before we fall back
+    // to Bulk ourselves. On desktop both tiers are malloc.
+    g_heap_backing = supersonic::mem::alloc(supersonic::mem::Tier::Fast, total, /*allow_spill=*/false);
+    if (!g_heap_backing) {
+        fprintf(stderr, "supersonic_heap_init: %zu bytes did not fit Fast, falling back to Bulk\n", total);
+        g_heap_backing = supersonic::mem::alloc(supersonic::mem::Tier::Bulk, total);
+    }
     if (!g_heap_backing) {
         fprintf(stderr, "supersonic_heap_init: failed to allocate %zu bytes\n", total);
         return;

@@ -12,6 +12,7 @@ list(APPEND CMAKE_MODULE_PATH "${Catch2_SOURCE_DIR}/extras")
 add_executable(SuperSonicNativeTests
     test_main.cpp
     test_platform.cpp
+    test_sc_calc.cpp
     test_boot.cpp
     test_osc_commands.cpp
     test_synthdef.cpp

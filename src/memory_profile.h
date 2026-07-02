@@ -103,7 +103,29 @@
   #define SUPERSONIC_HEAP_GROWTH_SIZE 262144       // 256 KB growth (into Bulk/PSRAM)
   #endif
   #ifndef SUPERSONIC_HEAP_FAST_SIZE
-  #define SUPERSONIC_HEAP_FAST_SIZE 49152          // 48 KB internal-SRAM initial area
+  #define SUPERSONIC_HEAP_FAST_SIZE 81920          // 80 KB internal-SRAM initial area. Sized to
+                                                    // hold the World_New hot working set (audio/
+                                                    // control buses, per-sample wire scratch,
+                                                    // SndBuf arrays) so the render reads SRAM.
+                                                    // Measured on the ESP32-S3: 48 KB overflows
+                                                    // into PSRAM growth (heapGrow=1) and the
+                                                    // render distorts; 64 KB is the heapGrow=0
+                                                    // floor; 80 KB adds headroom for larger
+                                                    // scenes.
+  #endif
+  // Internal SRAM to leave free for allocations made after the engine boots: the
+  // audio task's stack (32 KB, internal — it runs scsynth's deep render call chain),
+  // I2S DMA descriptors, display/touch drivers. The heap and RT-pool initial areas
+  // are bounded by largest_free(Fast) minus this reserve; without it they can claim
+  // the whole largest block, and the audio task's xTaskCreate then fails and the
+  // engine is never ticked.
+  #ifndef SUPERSONIC_FAST_RESERVE
+  #define SUPERSONIC_FAST_RESERVE 45056            // 44 KB (32 KB audio task stack + I2S DMA + margin)
+  #endif
+  // RT AllocPool growth-area size (Bulk/PSRAM) when the Fast initial is exhausted.
+  // Non-zero => the pool grows into PSRAM on overflow instead of failing /s_new.
+  #ifndef SUPERSONIC_RT_POOL_GROWTH_SIZE
+  #define SUPERSONIC_RT_POOL_GROWTH_SIZE 65536     // 64 KB
   #endif
   #ifndef SUPERSONIC_MAX_BLOCK_SIZE
   #define SUPERSONIC_MAX_BLOCK_SIZE 64
@@ -174,6 +196,16 @@
 // in fast internal SRAM and later/large buffers grow into Bulk (PSRAM).
 #ifndef SUPERSONIC_HEAP_FAST_SIZE
 #define SUPERSONIC_HEAP_FAST_SIZE SUPERSONIC_HEAP_SIZE
+#endif
+// Fast-tier reserve + RT-pool growth. Both 0 on single-tier targets: largest_free()
+// returns SIZE_MAX there so the boot-time bounding never clamps, and growth 0 keeps
+// the RT pool a fixed region with no allocation after boot (the desktop/NIF shape).
+// An embedded profile sets both non-zero.
+#ifndef SUPERSONIC_FAST_RESERVE
+#define SUPERSONIC_FAST_RESERVE 0
+#endif
+#ifndef SUPERSONIC_RT_POOL_GROWTH_SIZE
+#define SUPERSONIC_RT_POOL_GROWTH_SIZE 0
 #endif
 
 // Audio graph caps (non-WASM; the WASM render quantum is fixed at 128)

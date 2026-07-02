@@ -15,11 +15,11 @@
 #include "SC_Platform.h"
 
 #include <cstdlib>
+#include <cstdint>
 
 #if SC_HAS_TIERED_MEMORY
 
 #include <atomic>
-#include <cstdint>
 #include "esp_heap_caps.h"
 
 namespace supersonic::mem {
@@ -28,6 +28,13 @@ namespace {
 // Per-tier bytes currently handed out (requested sizes). Atomic because areas
 // are (re)allocated from control/loader threads, never the audio thread.
 std::atomic<size_t> g_in_use[2] = {{0}, {0}};
+
+// Fast requests that fell back to Bulk (Fast exhausted); read via spill_count()
+// so a host can report that data intended for internal SRAM landed in PSRAM.
+std::atomic<size_t> g_spill_count{0};
+
+constexpr uint32_t kCapsFast = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+constexpr uint32_t kCapsBulk = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
 
 // Every allocation carries a 16-byte header so free() is tier-agnostic and
 // accounting stays exact. 16 bytes == one alignment slot, so given a 16-aligned
@@ -40,25 +47,30 @@ struct alignas(16) Header {
 static_assert(sizeof(Header) == 16, "Header must occupy exactly one 16-byte slot");
 constexpr uint32_t kMagic = 0x4D454D52; // 'MEMR'
 
-// Allocate `total` bytes, >= 16-byte aligned, from the physical memory that
-// backs `tier`. Spills to the other region rather than failing outright.
-void* backend_alloc(Tier tier, size_t total) {
-    const uint32_t caps_fast = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-    const uint32_t caps_bulk = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
-    const uint32_t first = (tier == Tier::Fast) ? caps_fast : caps_bulk;
-    const uint32_t second = (tier == Tier::Fast) ? caps_bulk : caps_fast;
+// Allocate `total` bytes, >= 16-byte aligned, from the physical memory that backs
+// `tier`. With allow_spill, an unsatisfiable request falls back to the other
+// region (Fast->Bulk fall-backs are counted); without it, returns nullptr so the
+// caller can react to the placement failure itself.
+void* backend_alloc(Tier tier, size_t total, bool allow_spill) {
+    const uint32_t first  = (tier == Tier::Fast) ? kCapsFast : kCapsBulk;
     void* p = heap_caps_aligned_alloc(16, total, first);
-    if (!p)
-        p = heap_caps_aligned_alloc(16, total, second); // graceful spill
+    if (p)
+        return p;
+    if (!allow_spill)
+        return nullptr;
+    const uint32_t second = (tier == Tier::Fast) ? kCapsBulk : kCapsFast;
+    p = heap_caps_aligned_alloc(16, total, second); // graceful spill
+    if (p && tier == Tier::Fast)
+        g_spill_count.fetch_add(1, std::memory_order_relaxed);
     return p;
 }
 
 } // namespace
 
-void* alloc(Tier tier, size_t bytes) {
+void* alloc(Tier tier, size_t bytes, bool allow_spill) {
     if (bytes == 0)
         return nullptr;
-    void* base = backend_alloc(tier, bytes + sizeof(Header));
+    void* base = backend_alloc(tier, bytes + sizeof(Header), allow_spill);
     if (!base)
         return nullptr;
     auto* h = static_cast<Header*>(base);
@@ -85,6 +97,14 @@ size_t in_use(Tier tier) {
     return g_in_use[static_cast<int>(tier) & 1].load(std::memory_order_relaxed);
 }
 
+size_t largest_free(Tier tier) {
+    return heap_caps_get_largest_free_block(tier == Tier::Fast ? kCapsFast : kCapsBulk);
+}
+
+size_t spill_count() {
+    return g_spill_count.load(std::memory_order_relaxed);
+}
+
 } // namespace supersonic::mem
 
 #else  // single-region platforms (desktop / WASM / NIF)
@@ -92,10 +112,13 @@ size_t in_use(Tier tier) {
 namespace supersonic::mem {
 
 // std::malloc already returns max_align_t-aligned memory (16 on 64-bit targets),
-// satisfying the alignment contract; both tiers map to it with no wrapper.
-void* alloc(Tier, size_t bytes) { return bytes ? std::malloc(bytes) : nullptr; }
+// satisfying the alignment contract; both tiers map to it with no wrapper. There
+// is no second tier to spill to, so allow_spill is irrelevant.
+void* alloc(Tier, size_t bytes, bool /*allow_spill*/) { return bytes ? std::malloc(bytes) : nullptr; }
 void free(void* ptr) { std::free(ptr); }
 size_t in_use(Tier) { return 0; }
+size_t largest_free(Tier) { return SIZE_MAX; } // single region: nothing to bound by
+size_t spill_count() { return 0; }
 
 } // namespace supersonic::mem
 
