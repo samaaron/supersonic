@@ -28,6 +28,22 @@
 
 namespace {
 
+// Sanitizer builds (ASAN/TSAN) run ~2-3x slower, so a fixed wall-clock wait
+// for out-of-process peer discovery / buffer fill can expire before the work
+// completes — a false failure that means "the sanitized build was slow", not
+// "it never happened". Scale such waits up under a sanitizer build only.
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+constexpr int kTimeoutScale = 3;
+#elif defined(__has_feature)
+#  if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+constexpr int kTimeoutScale = 3;
+#  else
+constexpr int kTimeoutScale = 1;
+#  endif
+#else
+constexpr int kTimeoutScale = 1;
+#endif
+
 // Connection-state enum mirrors SuperClock::LinkAudioConnectionState.
 constexpr int kStateNotSubscribed = 0;
 constexpr int kStateConnecting    = 1;
@@ -41,6 +57,7 @@ bool waitForChannelVisible(EngineFixture& fx,
                            const std::string& channelName,
                            std::chrono::milliseconds timeout) {
     using clock = std::chrono::steady_clock;
+    timeout *= kTimeoutScale;  // sanitizer builds run slower; scale the wait
     const auto deadline = clock::now() + timeout;
     while (clock::now() < deadline) {
         fx.clearReplies();
@@ -106,7 +123,6 @@ TEST_CASE("LinkAudio: receives audio from peer with 1024-frame buffers",
           "[Link][LinkAudio][integration]") {
     FakeLinkPeerProcess::Options peerOpts;
     peerOpts.name         = "FakeLive";
-    peerOpts.loopbackOnly = false;  // TODO: loopback-only once lo0 multicast works
     peerOpts.blockSize    = 1024;   // matches Live's typical engine size
     peerOpts.sampleRate   = 48000;
     peerOpts.channels     = {{"Main", 2, "sine440-880"}};

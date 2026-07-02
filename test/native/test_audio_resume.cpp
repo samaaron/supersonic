@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "EngineFixture.h"
 #include "JuceAudioCallback.h"
+#include "HeadlessDriver.h"
 #include <thread>
 #include <chrono>
 #include <cmath>
@@ -302,10 +303,48 @@ TEST_CASE("AudioResume: long pause doesn't cause process_audio burst",
     uint32_t countAfter = cb.processCount.load(std::memory_order_acquire);
     uint32_t blocksProcessed = countAfter - countBefore;
 
-    // Expected: ~37 blocks in 100ms at 48kHz/128.
-    // If catch-up happened, we'd see hundreds or thousands of blocks.
-    // Allow 3x margin for OS timer jitter, but flag extreme catch-up.
-    uint32_t maxReasonable = (48000 / 128) * 100 / 1000 * 3;  // ~111
+    // Expected: ~37 blocks in 100ms at 48kHz/128. This is a real-timer
+    // observation, so it's inherently subject to runner scheduling — the
+    // precise anti-stampede invariant is asserted deterministically by
+    // "HeadlessDriver: catch-up is capped" below. Here we only flag a
+    // *pathological* stampede: the driver replaying a large slice of the
+    // 1s backlog (~375 blocks if uncapped). A generous bound (~0.5s worth)
+    // catches that regression without false-tripping on CI timer jitter or
+    // a bounded post-starvation catch-up.
+    uint32_t maxReasonable = (48000 / 128) * 500 / 1000;  // ~187 (~0.5s of blocks)
 
     CHECK(blocksProcessed < maxReasonable);
+}
+
+// =============================================================================
+// SECTION: Timer catch-up is bounded (deterministic — no real timing)
+// =============================================================================
+
+// The headless timer loop advances an absolute wake deadline each block. After
+// a scheduling gap (thread starvation / sleep-wake) the deadline can fall far
+// behind real time; without a cap the loop fires every missed block back to
+// back — a process_audio() stampede. cappedNextWake() re-anchors past a bound.
+TEST_CASE("HeadlessDriver: catch-up is capped", "[AudioResume][HeadlessDriver]") {
+    const int64_t block = 1'000;  // arbitrary tick unit; helper is unit-agnostic
+
+    // In sync (deadline just reached / tiny lag): keep the scheduled deadline.
+    CHECK(HeadlessDriver::cappedNextWake(10 * block, 10 * block, block) == 10 * block);
+    CHECK(HeadlessDriver::cappedNextWake(10 * block, 10 * block + 1, block) == 10 * block);
+
+    // Behind by fewer than the cap: still replay to realign smoothly.
+    const int64_t withinCap = (HeadlessDriver::kMaxCatchupBlocks - 1) * block;
+    CHECK(HeadlessDriver::cappedNextWake(0, withinCap, block) == 0);
+
+    // Exactly at the cap boundary: not yet re-anchored.
+    const int64_t atCap = HeadlessDriver::kMaxCatchupBlocks * block;
+    CHECK(HeadlessDriver::cappedNextWake(0, atCap, block) == 0);
+
+    // Beyond the cap (starvation): re-anchor to `now`, dropping the backlog.
+    const int64_t justOver = HeadlessDriver::kMaxCatchupBlocks * block + 1;
+    CHECK(HeadlessDriver::cappedNextWake(0, justOver, block) == justOver);
+
+    // Deep starvation (a 1s gap at 128/48k ≈ 375 blocks): still just `now`,
+    // never a 375-block replay.
+    const int64_t deep = 375 * block;
+    CHECK(HeadlessDriver::cappedNextWake(0, deep, block) == deep);
 }

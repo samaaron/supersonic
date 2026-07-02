@@ -64,10 +64,33 @@ void HeadlessDriver::processBlock(double& samplePos) {
     mCallback->processCount.notify_all();
 }
 
+// Re-anchor the wake deadline when the loop has fallen more than
+// kMaxCatchupBlocks behind, so a scheduling gap can't turn into a back-to-back
+// catch-up burst. Unit-agnostic (see header); the caller passes now, deadline,
+// and block period in one consistent tick unit.
+int64_t HeadlessDriver::cappedNextWake(int64_t nextWake, int64_t now,
+                                       int64_t blockTicks) {
+    const int64_t maxLag = blockTicks * kMaxCatchupBlocks;
+    if (now - nextWake > maxLag)
+        return now;  // drop the backlog rather than replaying every missed block
+    return nextWake;
+}
+
 // Each platform implements run() using its highest-resolution timer.
-// Only the sleep mechanism differs; the loop body is shared via processBlock().
+// Only the sleep mechanism differs; the loop body is shared via processBlock(),
+// and each loop caps catch-up via cappedNextWake() after advancing the deadline.
 
 #if defined(__linux__)
+
+static int64_t timespecToNs(const struct timespec& ts) {
+    return static_cast<int64_t>(ts.tv_sec) * 1'000'000'000LL + ts.tv_nsec;
+}
+static struct timespec nsToTimespec(int64_t ns) {
+    struct timespec ts;
+    ts.tv_sec  = static_cast<time_t>(ns / 1'000'000'000LL);
+    ts.tv_nsec = static_cast<long>(ns % 1'000'000'000LL);
+    return ts;
+}
 
 void HeadlessDriver::run() {
     const int64_t blockNs = 1'000'000'000LL * mBlockSize / mSampleRate;
@@ -78,11 +101,10 @@ void HeadlessDriver::run() {
 
     while (!threadShouldExit()) {
         processBlock(samplePos);
-        next.tv_nsec += blockNs;
-        while (next.tv_nsec >= 1'000'000'000L) {
-            next.tv_nsec -= 1'000'000'000L;
-            next.tv_sec++;
-        }
+        struct timespec nowTs;
+        clock_gettime(CLOCK_MONOTONIC, &nowTs);
+        next = nsToTimespec(cappedNextWake(timespecToNs(next) + blockNs,
+                                           timespecToNs(nowTs), blockNs));
         clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, nullptr);
     }
 }
@@ -100,7 +122,10 @@ void HeadlessDriver::run() {
 
     while (!threadShouldExit()) {
         processBlock(samplePos);
-        nextWake += blockTicks;
+        nextWake = static_cast<uint64_t>(cappedNextWake(
+            static_cast<int64_t>(nextWake + blockTicks),
+            static_cast<int64_t>(mach_absolute_time()),
+            static_cast<int64_t>(blockTicks)));
         mach_wait_until(nextWake);
     }
 }
@@ -125,8 +150,8 @@ void HeadlessDriver::run() {
 
     while (!threadShouldExit()) {
         processBlock(samplePos);
-        nextWake += blockTicks;
         QueryPerformanceCounter(&now);
+        nextWake = cappedNextWake(nextWake + blockTicks, now.QuadPart, blockTicks);
         LONGLONG remaining = nextWake - now.QuadPart;
         if (remaining > 0) {
             LARGE_INTEGER due;

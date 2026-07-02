@@ -38,6 +38,24 @@ public:
 
     void run() override;
 
+    // Bound on how far the timer loop replays missed blocks after a scheduling
+    // gap (thread starvation, sleep/wake). Beyond this the loop re-anchors to
+    // the current time and drops the backlog rather than firing a back-to-back
+    // "catch-up" burst of process_audio() calls. ~8 blocks (~21 ms at 128/48k)
+    // is far beyond normal timer jitter (<1 block) yet caps a stampede hard.
+    static constexpr int kMaxCatchupBlocks = 8;
+
+    // Given the just-advanced wake deadline, the current time, and the block
+    // period — all in the SAME tick unit (ns, mach ticks, or QPC ticks) —
+    // return the deadline to actually sleep until. If the loop has fallen more
+    // than kMaxCatchupBlocks behind `now`, re-anchor to `now` (drop backlog);
+    // otherwise keep the scheduled deadline so small lags realign smoothly.
+    // Pure and unit-agnostic so the anti-stampede rule is unit-testable without
+    // real timing. Sample position is unaffected — only the wall-clock deadline
+    // moves, so audio stays sample-continuous; it just stops sprinting.
+    static int64_t cappedNextWake(int64_t nextWake, int64_t now,
+                                  int64_t blockTicks);
+
 private:
     // Shared loop body: install buffers, derive NTP via SuperClock,
     // process audio, wake workers. Called once per block.
