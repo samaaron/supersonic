@@ -113,6 +113,9 @@ private:
     // When true, updateAudioThreadNTP skips the wall-clock drift IIR and
     // returns a pure sample-derived NTP (deterministic; see setFreewheelClock).
     std::atomic<bool>     mFreewheelClock{false};
+    // Drift-step logging state (audio-thread only).
+    double   mLastDriftLogNTP{0.0};
+    uint32_t mDriftOverCount{0};
 };
 
 #endif  // SUPERSONIC_WORKLET_CLOCK
