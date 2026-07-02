@@ -24,7 +24,13 @@
 // init (native: SupersonicEngine::mIngress; wasm: a file-static, see init_memory).
 std::atomic<OscIngress*> g_active_ingress{nullptr};
 
-#ifdef __EMSCRIPTEN__
+// The composition-root SuperClock for a worklet self-clock host (WASM + the
+// self-driven device). superclock_wasm_init binds the SAB region + the worklet
+// TimeSource onto g_active_superclock; superClock() is the host-owned instance.
+// (External-clock hosts — native/JUCE — own their SuperClock elsewhere and never
+// reach this.) Capability-gated, not __EMSCRIPTEN__, so WASM and the device share
+// ONE codepath that every worklet target's tests exercise.
+#if SUPERSONIC_WORKLET_CLOCK
 extern "C" void superclock_wasm_init(SuperClockState* superclock_state,
                                       const double* ntp_start_time_ptr,
                                       const std::atomic<int32_t>* drift_offset_ptr,
@@ -318,10 +324,11 @@ extern "C" {
     }
 #endif
 
-#ifdef __EMSCRIPTEN__
+#if SUPERSONIC_WORKLET_CLOCK && SUPERSONIC_SYNTH
     // The RT egress as a generic ReplyChannel: emit one OSC to the OUT ring,
-    // routed by the per-call token. Lets the audio-thread control routes (wasm
-    // /clock) reply through the backend contract without any scsynth reply type.
+    // routed by the per-call token. Lets the worklet audio-thread control routes
+    // (the /clock namespace) reply through the backend contract without any scsynth
+    // reply type. Shared by every worklet synth host (WASM + the self-driven device).
     void rt_reply_emit(void*, uint32_t token, const uint8_t* osc, uint32_t len) {
         ReplyAddress addr = ring_reply(token);
         osc_reply_to_ring_buffer(
@@ -464,26 +471,31 @@ extern "C" {
         drift_offset->store(0, std::memory_order_relaxed);
         global_offset->store(0, std::memory_order_relaxed);
 
-#ifdef __EMSCRIPTEN__
-        // Hand SAB pointers to the composition-root SuperClock at boot. Publish
-        // the instance first: superclock_wasm_init binds the SAB region + the
-        // worklet clock onto whatever g_active_superclock points at.
+#if SUPERSONIC_WORKLET_CLOCK
+        // Hand SAB pointers to the composition-root SuperClock at boot — shared by
+        // every worklet self-clock host (WASM + the self-driven device). Publish the
+        // instance first: superclock_wasm_init binds the SAB region + the worklet
+        // clock onto whatever g_active_superclock points at. (External-clock hosts —
+        // native/JUCE — bind their own SuperClock elsewhere, never here.)
         SuperClockState* superclock_state =
             reinterpret_cast<SuperClockState*>(shared_memory + SUPERCLOCK_STATE_START);
         SuperClockState::initDefaults(*superclock_state);
 
         g_active_superclock.store(&superClock(), std::memory_order_release);
         superclock_wasm_init(superclock_state, ntp_start_time, drift_offset, global_offset);
+#endif
 
-        // The wasm audio-thread ingress: /clock is the only control namespace
+#if SUPERSONIC_WORKLET_CLOCK && SUPERSONIC_SYNTH
+        // The worklet audio-thread ingress: /clock is the only control namespace
         // here (no NRT thread for /supersonic or Link-session verbs). The synth
-        // plane is the default route, so unmatched packets perform inline.
-        static OscIngress wasm_ingress;
-        if (wasm_ingress.routeCount() == 0) {
-            wasm_ingress.registerRoute("/clock/", &clockCoreRoute, &g_rt_reply);
-            wasm_ingress.setDefault(&ss_synth_default_route, nullptr);
+        // plane is the default route, so unmatched packets perform inline. ONE
+        // codepath for every worklet synth host (WASM + the self-driven device).
+        static OscIngress worklet_ingress;
+        if (worklet_ingress.routeCount() == 0) {
+            worklet_ingress.registerRoute("/clock/", &clockCoreRoute, &g_rt_reply);
+            worklet_ingress.setDefault(&ss_synth_default_route, nullptr);
         }
-        g_active_ingress.store(&wasm_ingress, std::memory_order_release);
+        g_active_ingress.store(&worklet_ingress, std::memory_order_release);
 #endif
 
         // Initialize all atomics to 0
@@ -868,7 +880,12 @@ extern "C" {
         // (no caching - ensures immediate response to timing resync after resume)
         // WASM derives NTP via SuperClock; on native, current_time is
         // already the SuperClock-derived NTP from JuceAudioCallback.
-#ifdef __EMSCRIPTEN__
+#if SUPERSONIC_WORKLET_CLOCK
+        // Worklet self-clock host (WASM + the self-driven device): derive NTP from
+        // the sample clock via the bound SuperClock, and mirror the readout into the
+        // cross-platform clock metrics (slots 65-68). External-clock hosts (native/
+        // JUCE) take the #else: current_time is already the SuperClock-derived NTP
+        // from the callback.
         const double current_ntp = superClock().nowAt(current_time);
 #else
         const double current_ntp = current_time;
@@ -924,7 +941,7 @@ extern "C" {
             }
             const uint32_t flush_period = (s_flush_period != 0u) ? s_flush_period : 16u;
             if ((pc % flush_period) == 0u) {
-#ifdef __EMSCRIPTEN__
+#if SUPERSONIC_WORKLET_CLOCK
                 superClock().publishClockMetrics(metrics, current_ntp, 4.0);
 #endif
                 metrics->in_buffer_used_bytes.store(in_used, std::memory_order_relaxed);
