@@ -635,7 +635,7 @@ extern "C" {
         options.mVerbosity = worldOptionsPtr[15];                   // From JS
 #ifdef __EMSCRIPTEN__
         {
-            uint32_t rtPoolOffset = worldOptionsPtr[16];
+            uint32_t rtPoolOffset = worldOptionsPtr[sonicpi::WorldOpts::kWebRtPoolOffset];
             uint32_t rtPoolBytes = options.mRealTimeMemorySize * 1024;
             if (rtPoolOffset > 0 && rtPoolBytes > 0) {
                 g_rt_pool_ptr = (void*)(shared_memory + rtPoolOffset);
@@ -756,7 +756,8 @@ extern "C" {
                      SUPERSONIC_VERSION_MAJOR, SUPERSONIC_VERSION_MINOR, SUPERSONIC_VERSION_PATCH,
                      SC_VersionMajor, SC_VersionMinor, SC_VersionPatch);
         {
-            const char* transport_mode = worldOptionsPtr[17] ? "PM" : "SAB";
+            const char* transport_mode =
+                worldOptionsPtr[sonicpi::WorldOpts::kWebTransportFlag] ? "PM" : "SAB";
             ss_log("%.0fkHz %dch [%s]",
                          sample_rate / 1000, options.mNumOutputBusChannels, transport_mode);
         }

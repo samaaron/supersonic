@@ -181,7 +181,10 @@ void ss_init(const SsWorldOptions* o, double sample_rate) {
     // NRT / self-driven invariants — not host-tunable.
     a[kRealTime]              = 0;
     a[kMemoryLocking]         = 0;
-    a[kMode]                  = 0;
+    // Web-owned slot: the SAB RT-pool offset. Struct-based hosts have no
+    // external pool, so it is an explicit 0 — the web boots via init_memory
+    // directly and writes a real offset here instead of calling ss_init.
+    a[kWebRtPoolOffset]       = 0;
     init_memory(sample_rate);
 }
 

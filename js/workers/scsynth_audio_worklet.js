@@ -339,8 +339,8 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         uint32View[13] = this.worldOptions.loadGraphDefs || 0;
         uint32View[14] = this.worldOptions.preferredSampleRate || 0;
         uint32View[15] = this.worldOptions.verbosity || 0;
-        uint32View[16] = this.worldOptions.rtPoolOffset || 0;  // RT pool byte offset in SAB
-        uint32View[17] = this.mode === 'postMessage' ? 1 : 0;  // 0 = SAB, 1 = PM
+        uint32View[16] = this.worldOptions.rtPoolOffset || 0;  // RT pool byte offset in SAB (WorldOpts::kWebRtPoolOffset)
+        uint32View[17] = this.mode === 'postMessage' ? 1 : 0;  // 0 = SAB, 1 = PM (WorldOpts::kWebTransportFlag)
     }
 
 
