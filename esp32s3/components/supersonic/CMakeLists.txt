@@ -55,6 +55,9 @@ idf_component_register(
     "${SS_SRC}/native/SuperClockNative.cpp"
     "${SS_SRC}/native/TimeSource.cpp"
     "${SS_SRC}/native/MidiTimelines.cpp"
+    # SUPERSONIC_WORKLET_CLOCK hosts register the inline /clock route
+    # (audio_processor's clockCoreRoute), whose verbs live here.
+    "${SS_SRC}/EngineClock.cpp"
     "${SS_SRC}/synth/external_libraries/TLSF-2.4.6/src/tlsf.c"
     ${SCSYNTH_SERVER}
     ${SCSYNTH_COMMON_CPP}

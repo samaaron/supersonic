@@ -40,9 +40,10 @@
  *   - the SuperClock composition root: link SuperClockNative.cpp + TimeSource.cpp
  *     + MidiTimelines.cpp, then pick the clock profile — define
  *     SUPERSONIC_WORKLET_CLOCK for the SAB-formula clock (the host publishes
- *     NTP anchors into the arena; the web and esp32s3 hosts do this), or leave
- *     it undefined for the wall-clock+IIR native TimeSource (the freestanding
- *     CI host does this). The LinkSession/LinkAudioBridge headers are inline
+ *     NTP anchors into the arena; the web and esp32s3 hosts do this — it also
+ *     registers the inline /clock route, so link EngineClock.cpp too), or
+ *     leave it undefined for the wall-clock+IIR native TimeSource (the
+ *     freestanding CI host does this). The LinkSession/LinkAudioBridge headers are inline
  *     no-ops without SUPERSONIC_LINK, so no extra TU. Leave
  *     g_active_superclock null and the engine's clock/MIDI paths stay inert.
  * test/freestanding/freestanding_main.cpp is the reference minimal host: the
