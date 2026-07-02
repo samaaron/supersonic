@@ -849,6 +849,20 @@ extern "C" {
         init_memory(sample_rate);
         restore_notify_clients();            // re-register the pre-rebuild clients
     }
+
+    // Mirror of init_memory for engine shutdown: tear down the World and drop
+    // the engine's global view of the arena while it is still mapped, so the
+    // lanes guards (memory_initialized / control) reject post-shutdown calls
+    // instead of touching a freed or unmapped segment. Saved /notify clients
+    // only make sense across a cold-swap rebuild, never across engines.
+    void teardown_memory() {
+        destroy_world();
+        g_savedNotifyClients.clear();
+        memory_initialized = false;
+        shared_memory = nullptr;
+        control = nullptr;
+        metrics = nullptr;
+    }
 #endif
 
     // Main audio processing function - called once per block (the lanes tick,

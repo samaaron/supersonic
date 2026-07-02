@@ -1317,7 +1317,12 @@ void SupersonicEngine::shutdown() {
             expected, nullptr, std::memory_order_release);
     }
 
-    // Destroy engine-owned shared memory (after World is gone)
+    // Tear down the World and the engine's global arena view while the
+    // segment is still mapped — after this the lanes entry points reject,
+    // so nothing can dereference the arena once it is unmapped below.
+    teardown_memory();
+
+    // Destroy engine-owned shared memory (after the World is gone).
     g_external_shared_memory = nullptr;
     g_external_segment = nullptr;
     mShmemCreator.reset();

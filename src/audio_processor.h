@@ -58,6 +58,10 @@ extern "C" {
     // Native-only: world teardown/rebuild for cold swap
     void destroy_world();
     void rebuild_world(double sample_rate);
+    // Native-only: full arena teardown for engine shutdown — destroys the
+    // World and clears memory_initialized/shared_memory/control/metrics so
+    // the lanes entry points reject before the host unmaps the segment.
+    void teardown_memory();
 #endif
 
     // scsynth audio bus functions

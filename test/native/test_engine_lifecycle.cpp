@@ -5,6 +5,7 @@
  * round-trips that verify the engine is alive and well after boot.
  */
 #include "EngineFixture.h"
+#include "lanes/lanes.h"   // post-shutdown ABI guard tests
 #include <thread>
 #include <chrono>
 
@@ -69,6 +70,43 @@ TEST_CASE("Double shutdown is safe", "[lifecycle]") {
     // Second shutdown should not crash
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
+}
+
+// shutdown() must not leave the lanes entry points armed against a dead
+// engine: memory_initialized gates ss_ingress_write/ss_tick, and with the
+// shm-backed arena the segment is unmapped at the end of shutdown — a write
+// that passes the guard afterwards touches unmapped memory.
+TEST_CASE("Lanes entry points reject after shutdown (process-local arena)",
+          "[lifecycle][lanes]") {
+    SupersonicEngine engine;
+    SupersonicEngine::Config cfg;
+    cfg.headless = true;
+    cfg.udpPort  = 0;   // process-local arena
+
+    engine.init(cfg);
+    REQUIRE(engine.isRunning());
+    engine.shutdown();
+
+    auto pkt = osc_test::message("/status");
+    CHECK_FALSE(ss_ingress_write(pkt.ptr(), pkt.size(), 0));
+}
+
+TEST_CASE("Lanes entry points reject after shutdown (shm-backed arena)",
+          "[lifecycle][lanes]") {
+    SupersonicEngine engine;
+    SupersonicEngine::Config cfg;
+    cfg.headless = true;
+    cfg.udpPort  = 57123;   // non-zero → arena lives in the public shm segment
+
+    engine.init(cfg);
+    REQUIRE(engine.isRunning());
+    engine.shutdown();   // unmaps the segment
+
+    // A write that passes the guards here dereferences the unmapped segment
+    // (SIGSEGV/SIGBUS), so "returns false" also proves "does not touch the
+    // dead arena".
+    auto pkt = osc_test::message("/status");
+    CHECK_FALSE(ss_ingress_write(pkt.ptr(), pkt.size(), 0));
 }
 
 TEST_CASE("Null onReply callback does not crash", "[lifecycle]") {
