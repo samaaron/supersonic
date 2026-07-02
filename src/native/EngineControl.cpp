@@ -432,6 +432,7 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/supersonic/notify.reply")
               << static_cast<osc::int32>(1)
+              << SUPERSONIC_VERSION_STRING
               << osc::EndMessage;
             mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
