@@ -36,4 +36,17 @@ echo "=== WASM tests ==="
 "$SCRIPT_DIR/test-web.sh"
 echo ""
 
+echo "=== No-synth runtime smoke (MIT core) ==="
+# Mirrors CI's scheduler-host-mit job: the only runtime exercise of the
+# no-synth engine core (boot, tick, scheduler fire).
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+NOSYNTH_BUILD="$ROOT_DIR/build/nosynth-smoke"
+if [ -n "$CLEAN_FLAG" ]; then rm -rf "$NOSYNTH_BUILD"; fi
+cmake -B "$NOSYNTH_BUILD" -DCMAKE_BUILD_TYPE=Release \
+    -DSUPERSONIC_ENABLE_SYNTH=OFF -DSUPERSONIC_ENABLE_LINK=OFF \
+    > /dev/null
+cmake --build "$NOSYNTH_BUILD" --parallel --target supersonic_nosynth_smoke > /dev/null
+"$NOSYNTH_BUILD/supersonic_nosynth_smoke"
+echo ""
+
 echo "=== All test suites passed ==="

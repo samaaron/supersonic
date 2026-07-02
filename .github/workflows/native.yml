@@ -196,13 +196,14 @@ jobs:
           target: esp32s3
           path: esp32s3
 
-  # ── MIT scheduler host (no synth, no JUCE, no Ableton Link) ─────────────────
-  # The MIT-licensed scheduler host build: the shared scheduler core + the Rust
-  # OSC/MIDI subsystems only — no synthesis, no JUCE, no Link. The boundary is
-  # structural: this build configures with synth and Link off, and the host
-  # target lists none of those sources. Configuring the monolithic project still
-  # pulls JUCE (hence the Linux configure deps); the supersonic-scheduler binary
-  # links none of it. Runs the host's own unit tests.
+  # ── MIT scheduler host + no-synth core (no synth, no JUCE, no Ableton Link) ─
+  # The MIT-licensed cell: the shared scheduler core + the Rust OSC/MIDI
+  # subsystems only — no synthesis, no JUCE, no Link. The boundary is
+  # structural: SUPERSONIC_ENABLE_SYNTH=OFF compiles the scsynth sources out
+  # entirely (JUCE is never fetched), and the host target lists none of them.
+  # Runs the host's own unit tests plus supersonic_nosynth_smoke — the only
+  # runtime exercise of the no-synth engine core (boot, tick, scheduler
+  # fire), which no other job builds or runs.
   host:
     runs-on: ubuntu-latest
     name: scheduler-host-mit
@@ -220,14 +221,17 @@ jobs:
             libxinerama-dev libxcursor-dev libxcomposite-dev
 
       - name: Configure (host on, synth/Link off)
-        run: cmake -B build/host -DCMAKE_BUILD_TYPE=Release -DSUPERSONIC_BUILD_SCHEDULER_HOST=ON -DSUPERSONIC_ENABLE_LINK=OFF
+        run: cmake -B build/host -DCMAKE_BUILD_TYPE=Release -DSUPERSONIC_BUILD_SCHEDULER_HOST=ON -DSUPERSONIC_ENABLE_SYNTH=OFF -DSUPERSONIC_ENABLE_LINK=OFF
 
-      - name: Build host + tests
-        run: cmake --build build/host --config Release --parallel --target supersonic-scheduler host_tests
+      - name: Build host + tests + no-synth smoke
+        run: cmake --build build/host --config Release --parallel --target supersonic-scheduler host_tests supersonic_nosynth_smoke
 
       - name: Run host tests
         working-directory: build/host
         run: ctest --output-on-failure -R "host_tests"
+
+      - name: Run no-synth runtime smoke
+        run: ./build/host/supersonic_nosynth_smoke
 
   # ── BEAM NIF shared library ─────────────────────────────────────────────────
   nif:
