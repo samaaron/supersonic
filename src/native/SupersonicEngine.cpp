@@ -4440,12 +4440,12 @@ bool SupersonicEngine::isRecording() const {
 // --- Purge ---
 
 void SupersonicEngine::purge() {
-    uint8_t* base = sp_arena();
-    ControlPointers* ctrl = reinterpret_cast<ControlPointers*>(base + CONTROL_START);
-
-    // Reset IN ring buffer
-    ctrl->in_head.store(0, std::memory_order_release);
-    ctrl->in_tail.store(0, std::memory_order_release);
+    // Discard pending IN-ring messages. Callers arrive on two threads — the
+    // wake hook pre-tick on the audio thread, cold swap on a control thread
+    // while audio is still live — so this only requests; the audio thread,
+    // the IN ring's single consumer, applies the flush at the top of its
+    // next drain.
+    ss_ingress_flush_request();
 
     // Drop all pending scheduled events
     clear_scheduler();

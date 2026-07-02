@@ -49,6 +49,11 @@ extern "C" {
     // Scheduler control
     EMSCRIPTEN_KEEPALIVE void clear_scheduler();
 
+    // Ask the audio thread to discard everything pending in the IN ring at
+    // the top of its next drain. Callable from any thread — the consuming
+    // thread applies the flush, so it cannot race producers or the drain.
+    void ss_ingress_flush_request();
+
 #ifndef __EMSCRIPTEN__
     // Native-only: world teardown/rebuild for cold swap
     void destroy_world();

@@ -202,6 +202,21 @@ extern "C" {
     // its next drain so g_in_drain stays single-threaded.
     std::atomic<bool> g_in_seq_reset{false};
 
+    // IN-ring flush request (native purge: sleep/wake recovery, cold swap;
+    // callable from any thread). Holds the in_sequence snapshot taken at
+    // request time, -1 = no request. The drain discards pending frames whose
+    // seq predates the snapshot and dispatches everything newer, so the flush
+    // removes exactly what was queued at request time. The ring cursors have
+    // fixed owners — producers advance head under in_write_lock, the drain
+    // owns tail — so the discard runs on the consuming thread via the normal
+    // consume path; no cursor is written from the requesting thread.
+    std::atomic<int64_t> g_in_flush_below{-1};
+
+    // Audio-thread-only discard state armed from g_in_flush_below: while
+    // active, frames with seq before the threshold are consumed undispatched.
+    bool     g_in_discard_active = false;
+    uint32_t g_in_discard_below  = 0;
+
     void* g_rt_pool_ptr = nullptr;
     size_t g_rt_pool_size = 0;
 
@@ -347,6 +362,17 @@ extern "C" {
     // message handler (immediately on receiving clearSched), not here. Draining
     // eagerly in JS ensures stale messages are discarded before the ack is sent,
     // so new messages written after purge() resolves are not affected.
+    // Request that the audio thread discard everything pending in the IN ring
+    // as of NOW: frames sequenced before this snapshot are dropped by the
+    // drain, later ones dispatch normally. Callable from any thread; the
+    // caller only requests — the consuming thread applies (see g_in_flush_below).
+    void ss_ingress_flush_request() {
+        if (!memory_initialized || !control) return;
+        g_in_flush_below.store(
+            control->in_sequence.load(std::memory_order_acquire),
+            std::memory_order_release);
+    }
+
     EMSCRIPTEN_KEEPALIVE
     void clear_scheduler() {
         g_in_seq_reset.store(true, std::memory_order_relaxed);
@@ -474,9 +500,12 @@ extern "C" {
         control->in_write_lock.store(0, std::memory_order_relaxed);  // 0 = unlocked
 
         // Ring sequences restarted → restart the lanes drains' gap tracking,
-        // and the IN drain's alongside.
+        // and the IN drain's alongside. A flush requested against the old
+        // ring must not carry over and discard fresh writes.
         ss_lanes_reset_drains();
         g_in_drain.lastSeq = -1;
+        g_in_flush_below.store(-1, std::memory_order_relaxed);
+        g_in_discard_active = false;
 
         // Initialize metrics
         metrics->process_count.store(0, std::memory_order_relaxed);
@@ -918,6 +947,17 @@ extern "C" {
         if (g_world)
 #endif
         {
+            // Flush request (purge): arm the discard threshold here so
+            // g_in_discard_* stays audio-thread-only, like g_in_drain below.
+            {
+                const int64_t below =
+                    g_in_flush_below.exchange(-1, std::memory_order_acquire);
+                if (below >= 0) {
+                    g_in_discard_active = true;
+                    g_in_discard_below  = static_cast<uint32_t>(below);
+                }
+            }
+
             // Off-thread reset request (purge → clear_scheduler): apply it
             // here so g_in_drain stays audio-thread-only.
             if (g_in_seq_reset.exchange(false, std::memory_order_relaxed))
@@ -940,7 +980,17 @@ extern "C" {
                                 &metrics->messages_sequence_gaps },
                 MAX_MESSAGES_PER_FRAME,
                 [current_ntp](uint32_t sourceId, const uint8_t* payload,
-                              uint32_t payload_size, uint32_t) -> SsDrainVerdict {
+                              uint32_t payload_size, uint32_t seq) -> SsDrainVerdict {
+                    // Purge in progress: frames sequenced before the flush
+                    // snapshot are stale — consume them undispatched. The
+                    // signed delta stays correct across uint32 seq rollover
+                    // (pending frames are always far fewer than 2^31 apart).
+                    if (g_in_discard_active) {
+                        if (static_cast<int32_t>(seq - g_in_discard_below) < 0)
+                            return SsDrainVerdict::Consume;
+                        g_in_discard_active = false;
+                    }
+
                     // In-place delivery: the payload points into the IN ring
                     // (the consumer owns the region until we return Consume).
                     // scsynth's perform path is synchronous and copies what

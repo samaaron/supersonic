@@ -7,9 +7,14 @@
  */
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
+#include <atomic>
+#include <cstring>
 #include "EngineFixture.h"
 #include "src/engine_state.h"
 #include "synth/common/server_shm.hpp"
+#include "audio_processor.h"   // control / shared_memory arena globals
+#include "shared_memory.h"     // IN ring layout
+#include "ring/ring.h"         // Message wire header
 
 #ifdef _WIN32
 #else
@@ -143,6 +148,75 @@ TEST_CASE("EngineState: purge clears stale messages after cold swap",
     // Verify /status.reply has valid data (not stale)
     auto p = r.parsed();
     CHECK(p.argCount() >= 5);
+}
+
+// A producer preempted inside ss_ingress_write holds in_write_lock with the
+// old head already loaded. If purge() moves the IN-ring cursors underneath
+// it, the producer's completed write re-publishes head past the reset point,
+// re-exposing every already-consumed frame between offset 0 and the old head
+// — the next drain then replays messages the engine already performed.
+// Manual pump makes the interleaving deterministic: the test thread is the
+// producer, the purger, and the audio thread.
+TEST_CASE("EngineState: purge with a producer mid-write does not replay consumed frames",
+          "[EngineState][purge]") {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    EngineFixture fix(cfg);
+
+    // Park some consumed frames at the front of the ring: send /syncs and
+    // wait for their replies, so [0, h0) holds performed frames.
+    OscReply r;
+    for (int i = 0; i < 3; ++i) {
+        fix.send(osc_test::message("/sync", 4200 + i));
+        REQUIRE(fix.waitForReply("/synced", r));
+    }
+    fix.clearReplies();
+
+    const int32_t h0 = control->in_head.load(std::memory_order_acquire);
+    REQUIRE(h0 > 0);
+    REQUIRE(static_cast<uint32_t>(h0) + 64 < IN_BUFFER_SIZE);  // room for the frame below
+
+    // Producer stalls mid-write: lock held, head loaded, payload not yet copied.
+    int32_t unlocked = 0;
+    REQUIRE(control->in_write_lock.compare_exchange_strong(unlocked, 1));
+
+    fix.engine().purge();
+
+    // Producer resumes: completes the frame at its pre-loaded head and
+    // publishes, following RingBufferWriter::write's sequence (header +
+    // payload memcpy, then head store, then unlock).
+    {
+        auto pkt = osc_test::message("/sync", 4299);
+        Message hdr;
+        hdr.magic    = MESSAGE_MAGIC;
+        hdr.length   = static_cast<uint32_t>(sizeof(Message)) + pkt.size();
+        hdr.sequence = static_cast<uint32_t>(
+            control->in_sequence.fetch_add(1, std::memory_order_relaxed));
+        hdr.sourceId = 0;
+        uint8_t* slot = shared_memory + IN_BUFFER_START + h0;
+        std::memcpy(slot, &hdr, sizeof(Message));
+        std::memcpy(slot + sizeof(Message), pkt.ptr(), pkt.size());
+        const uint32_t aligned = (hdr.length + 3u) & ~3u;
+        control->in_head.store(
+            static_cast<int32_t>((static_cast<uint32_t>(h0) + aligned) % IN_BUFFER_SIZE),
+            std::memory_order_release);
+        control->in_write_lock.store(0, std::memory_order_release);
+    }
+
+    // Drain. Frames performed before the purge must not run again.
+    fix.pumpBlock(8);
+    for (auto& reply : fix.allReplies()) {
+        if (reply.address != "/synced") continue;
+        const int32_t id = reply.parsed().argInt(0);
+        CHECK(id != 4200);
+        CHECK(id != 4201);
+        CHECK(id != 4202);
+    }
+
+    // Engine must still be fully functional.
+    fix.clearReplies();
+    fix.send(osc_test::message("/status"));
+    REQUIRE(fix.waitForReply("/status.reply", r));
 }
 
 TEST_CASE("EngineState: sequential swaps in headless both succeed cleanly",
