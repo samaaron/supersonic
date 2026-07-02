@@ -32,16 +32,21 @@
  * ss_ingress_write() → ss_tick() → read ss_audio_out() → ss_egress_rt_drain().
  * Beyond the ABI calls it must supply a little link-time glue the engine expects
  * a host to define:
- *   - g_external_shared_memory: set null unless pointing the arena at an external
- *     segment (native cross-process shm); a self-driven host leaves it null and
- *     the engine uses its own ring_buffer_storage.
+ *   - g_external_shared_memory (synth builds only — the no-synth core never
+ *     references it): the native cross-process shm handle. A self-driven host
+ *     defines it null and the engine uses its own ring_buffer_storage arena.
+ *     Hosts that link the full native SupersonicEngine get this (and the
+ *     SuperClock root) from it already.
  *   - the SuperClock composition root: link SuperClockNative.cpp + TimeSource.cpp
- *     + MidiTimelines.cpp (a self-driven host defines SUPERSONIC_WORKLET_CLOCK to
- *     get the SAB-formula clock; the LinkSession/LinkAudioBridge headers are
- *     inline no-ops without SUPERSONIC_LINK, so no extra TU). Leave
+ *     + MidiTimelines.cpp, then pick the clock profile — define
+ *     SUPERSONIC_WORKLET_CLOCK for the SAB-formula clock (the host publishes
+ *     NTP anchors into the arena; the web and esp32s3 hosts do this), or leave
+ *     it undefined for the wall-clock+IIR native TimeSource (the freestanding
+ *     CI host does this). The LinkSession/LinkAudioBridge headers are inline
+ *     no-ops without SUPERSONIC_LINK, so no extra TU. Leave
  *     g_active_superclock null and the engine's clock/MIDI paths stay inert.
- * test/freestanding/freestanding_main.cpp is the reference minimal host: it is
- * the whole contract in ~60 lines, exercised in CI.
+ * test/freestanding/freestanding_main.cpp is the reference minimal host: the
+ * whole contract in ~60 lines of code, exercised in CI.
  */
 #pragma once
 
@@ -138,7 +143,10 @@ uint32_t     ss_block_size(void);  /* frames per block (web: 128)        */
  * Hosts that hold their options as a struct (native, embedded) call ss_init.
  * The web fills the arena's options block over its SharedArrayBuffer and calls
  * the init_memory export directly — it writes across the JS/wasm boundary, so
- * it stays offset-based. ss_init writes the WHOLE positional options block by
+ * it stays offset-based. The options land in the arena the engine resolves
+ * itself (the native backend's public segment when one exists — the
+ * engine-defined g_external_segment — else the engine's own storage); hosts
+ * never pick the arena here. ss_init writes the WHOLE positional options block by
  * named field, so struct-based hosts never hand-write magic indices at boot
  * (the off-by-one that silently created a stray shm segment lived in those
  * hand-written index sites). Runtime single-field updates on a rebuilt World
