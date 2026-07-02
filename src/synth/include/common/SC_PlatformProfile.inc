@@ -3,7 +3,8 @@
  *
  * Input:  exactly one of SCP_TARGET_DESKTOP / SCP_TARGET_WASM / SCP_TARGET_ESP32
  *         / SCP_TARGET_FREESTANDING.
- * Output: SCP_HOSTED_OS / SCP_BYTE_ATOMICS / SCP_TIERED_MEMORY  (each 0 or 1).
+ * Output: SCP_HOSTED_OS / SCP_BYTE_ATOMICS / SCP_TIERED_MEMORY / SCP_HW_FLOAT64
+ *         (each 0 or 1).
  *
  * Re-includable BY DESIGN (no include guard): the outputs are #undef'd at the top
  * so a host build can include this once per forced target and validate every
@@ -20,37 +21,46 @@
 #undef SCP_HOSTED_OS
 #undef SCP_BYTE_ATOMICS
 #undef SCP_TIERED_MEMORY
+#undef SCP_HW_FLOAT64
 
 #if defined(SCP_TARGET_DESKTOP)
 // Full desktop/native OS: boost::asio networking, cross-process shared memory,
-// host-filesystem synthdef loading; std::atomic_flag; a single RAM tier.
+// host-filesystem synthdef loading; std::atomic_flag; a single RAM tier;
+// hardware double-precision FPU.
 #    define SCP_HOSTED_OS     1
 #    define SCP_BYTE_ATOMICS  1
 #    define SCP_TIERED_MEMORY 0
+#    define SCP_HW_FLOAT64    1
 #elif defined(SCP_TARGET_WASM)
 // Browser / AudioWorklet: self-driven, OSC exchanged in-process (no sockets, no
-// host FS); byte atomics are fine; a single heap (SAB pool / inline passthrough).
+// host FS); byte atomics are fine; a single heap (SAB pool / inline passthrough);
+// the Wasm f64 type is hardware-fast.
 #    define SCP_HOSTED_OS     0
 #    define SCP_BYTE_ATOMICS  1
 #    define SCP_TIERED_MEMORY 0
+#    define SCP_HW_FLOAT64    1
 #elif defined(SCP_TARGET_ESP32)
 // ESP32-S3: self-driven; Xtensa has 32-bit S32C1I but no byte test-and-set
 // (std::atomic_flag won't link); fast internal SRAM + slow PSRAM => two-tier
-// placement allocator.
+// placement allocator. The LX7 FPU is single-precision only — every double op is
+// software-emulated, so audio code uses float where double is just headroom.
 #    define SCP_HOSTED_OS     0
 #    define SCP_BYTE_ATOMICS  0
 #    define SCP_TIERED_MEMORY 1
+#    define SCP_HW_FLOAT64    0
 #elif defined(SCP_TARGET_FREESTANDING)
 // Lean engine on a desktop CPU: the self-driven (hosted-OS-off) profile a
 // browser/embedded host sees, but compiled and run natively. Exists so a normal
 // CI runner can build + boot the shared engine through the lanes ABI with no
 // JUCE, no Emscripten and no embedded toolchain — the "one C ABI for all build
 // targets" guard. Capabilities INTENTIONALLY mirror WASM (lean, real byte
-// atomics, single RAM tier) — it's "WASM's caps, native toolchain". Keep this
-// triple in sync with the SCP_TARGET_WASM row above; test_platform.cpp pins both.
+// atomics, single RAM tier, hardware f64) — it's "WASM's caps, native
+// toolchain". Keep this row in sync with the SCP_TARGET_WASM row above;
+// test_platform.cpp pins both.
 #    define SCP_HOSTED_OS     0
 #    define SCP_BYTE_ATOMICS  1
 #    define SCP_TIERED_MEMORY 0
+#    define SCP_HW_FLOAT64    1
 #else
 #    error "SC_PlatformProfile.inc: define exactly one SCP_TARGET_*"
 #endif
