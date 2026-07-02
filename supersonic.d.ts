@@ -426,8 +426,24 @@ export interface MetricDefinition {
   unit?: string;
   /** Whether the value should be read as signed int32. */
   signed?: boolean;
+  /** Native (JUCE) backend only — no web writer; reads 0 on WASM. */
+  nativeOnly?: boolean;
   /** Enum value names (for type 'enum'). */
   values?: string[];
+  /** Human-readable description. */
+  description: string;
+}
+
+/**
+ * A NATIVE_STATS segment entry (native/JUCE backend only).
+ */
+export interface NativeStatDefinition {
+  /** u32 slot within the NATIVE_STATS segment. */
+  index: number;
+  /** Metric type: counter (cumulative) or gauge (current). */
+  type: 'counter' | 'gauge';
+  /** Unit of measurement. */
+  unit?: string;
   /** Human-readable description. */
   description: string;
 }
@@ -439,8 +455,12 @@ export interface MetricDefinition {
  * a declarative UI layout for rendering metrics panels, and sentinel values.
  */
 export interface MetricsSchema {
-  /** Each key maps to offset, type, unit, and description for the merged Uint32Array. */
-  metrics: Record<keyof SuperSonicMetrics, MetricDefinition>;
+  /** Each key maps to offset, type, unit, and description for the merged Uint32Array.
+   * Includes native-only fields (marked `nativeOnly`) beyond SuperSonicMetrics. */
+  metrics: Record<keyof SuperSonicMetrics, MetricDefinition> & Record<string, MetricDefinition>;
+  /** NATIVE_STATS shm segment descriptions (native backend only). `index` is
+   * the u32 slot within that segment, not a PerformanceMetrics offset. */
+  nativeStats: Record<string, NativeStatDefinition>;
   /** Panel structure for rendering a metrics UI. Used by `<supersonic-metrics>`. */
   layout: {
     panels: Array<{

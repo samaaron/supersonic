@@ -19,7 +19,8 @@
     "prepublishOnly": "./scripts/build-web.sh --release",
     "test:types": "tsd",
     "docs:api": "typedoc && mv docs/api-generated/README.md docs/API.md && rm -rf docs/api-generated",
-    "docs:npm-readme": "node scripts/build-npm-readme.mjs"
+    "docs:npm-readme": "node scripts/build-npm-readme.mjs",
+    "gen:metrics-header": "node scripts/gen-metrics-schema-header.mjs"
   },
   "tsd": {
     "compilerOptions": {
