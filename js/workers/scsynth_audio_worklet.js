@@ -455,9 +455,10 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
         // Authoritative never-wrap fit test (frames need contiguous room
         // before the boundary or, after padding, before the tail at 0).
+        // Full ring → drop. postMessage senders got no backpressure signal
+        // (their send already "succeeded"), so callers must account for the
+        // false return in the drop metrics.
         if (!canWriteMessage(head, tail, IN_BUFFER_SIZE, alignedLength)) {
-            // Buffer full - message is dropped
-            // This shouldn't happen with proper backpressure
             console.error('[AudioWorklet] Ring buffer full, dropping OSC message');
             return false;
         }
@@ -656,6 +657,16 @@ class ScsynthProcessor extends AudioWorkletProcessor {
         }
     }
 
+    // Record an inbound OSC message dropped at the IN ring (ring full),
+    // into the same counter the native engine's ingest uses for ingress
+    // drops (messages_dropped), so the loss appears in metrics snapshots.
+    recordOscDropped() {
+        if (!this.metricsView) return;
+        // PM-mode only: SAB senders write the ring themselves and see the
+        // failure synchronously.
+        this.metricsView[MetricsOffsets.SCSYNTH_MESSAGES_DROPPED]++;
+    }
+
     // Read metrics + node tree from WASM memory and send via postMessage
     // Sends immediately on tree version change, OR on interval (for metrics updates)
     // METRICS and NODE_TREE are contiguous in memory - copy as one atomic unit
@@ -798,10 +809,15 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             // Handle OSC messages (postMessage mode)
             if (data.type === 'osc') {
                 if (this.mode === 'postMessage') {
-                    // Write OSC message directly to ring buffer (no allocation in process())
+                    // Write OSC message directly to ring buffer (no allocation
+                    // in process()). Count it as received only if it landed;
+                    // a full ring counts as a drop instead.
                     if (data.oscData) {
-                        this.writeOscToRingBuffer(data.oscData, data.sourceId ?? 0);
-                        this.recordOscReceived(data.oscData.byteLength);
+                        if (this.writeOscToRingBuffer(data.oscData, data.sourceId ?? 0)) {
+                            this.recordOscReceived(data.oscData.byteLength);
+                        } else {
+                            this.recordOscDropped();
+                        }
                     }
                 }
                 return;
@@ -818,11 +834,16 @@ class ScsynthProcessor extends AudioWorkletProcessor {
 
                     port.onmessage = (e) => {
                         if (e.data.type === 'osc' && e.data.oscData) {
-                            // Write OSC message directly to ring buffer (no allocation in process())
-                            // Use sourceId from message or port's assigned sourceId
+                            // Write OSC message directly to ring buffer (no
+                            // allocation in process()). sourceId comes from the
+                            // message or the port's assignment. As above: only
+                            // a landed write counts as received.
                             const msgSourceId = e.data.sourceId ?? this.portSourceIds.get(port) ?? 0;
-                            this.writeOscToRingBuffer(e.data.oscData, msgSourceId);
-                            this.recordOscReceived(e.data.oscData.byteLength);
+                            if (this.writeOscToRingBuffer(e.data.oscData, msgSourceId)) {
+                                this.recordOscReceived(e.data.oscData.byteLength);
+                            } else {
+                                this.recordOscDropped();
+                            }
                         }
                     };
                     this.oscPorts.push(port);
