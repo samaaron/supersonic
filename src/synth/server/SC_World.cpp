@@ -136,13 +136,23 @@ inline void* sc_malloc(size_t size) { return nova::malloc_aligned(size); }
 
 #if defined(SUPERSONIC) && !defined(__EMSCRIPTEN__)
 #include "mem_region.h"
+#include "memory_profile.h"
 // Backing-area callbacks for scsynth's real-time AllocPool (world->hw->mAllocPool,
 // the per-block-hot graph state: Nodes, Graphs, per-synth wire buffers, Units).
-// Drawn from mem::Tier::Fast — internal SRAM on embedded, plain std::malloc on
-// desktop/NIF (identical to upstream). WASM uses its own pre-allocated SAB pool,
-// so this is native-only.
+// The initial area is Tier::Fast (internal SRAM on embedded); overflow grows into
+// Tier::Bulk (PSRAM) instead of failing, mirroring supersonic_heap. The first
+// callback call hands back the pre-sized initial area (g_rt_pool_pending, set at
+// pool construction below); later calls are growth and draw from Bulk. On
+// desktop/NIF both tiers are std::malloc, so the pool behaves as one region.
+// WASM uses its own pre-allocated SAB pool, so this is native-only.
+static void* g_rt_pool_pending = nullptr;
 static void* supersonic_rt_pool_area_alloc(size_t size) {
-    return supersonic::mem::alloc(supersonic::mem::Tier::Fast, size);
+    if (g_rt_pool_pending) {
+        void* p = g_rt_pool_pending;
+        g_rt_pool_pending = nullptr;
+        return p;
+    }
+    return supersonic::mem::alloc(supersonic::mem::Tier::Bulk, size); // growth -> PSRAM
 }
 static void supersonic_rt_pool_area_free(void* ptr) { supersonic::mem::free(ptr); }
 #endif
@@ -417,13 +427,30 @@ World* World_New(WorldOptions* inOptions) {
             }
         }
 #elif defined(SUPERSONIC)
-        // RT pool backed by Tier::Fast (internal SRAM on embedded; std::malloc on
-        // desktop/NIF — identical to the upstream malloc path below). Fixed size
-        // (growth = 0): no system allocation on the audio thread once booted;
-        // exhaustion fails the command gracefully rather than allocating
-        // mid-render.
-        world->hw->mAllocPool = new AllocPool(supersonic_rt_pool_area_alloc, supersonic_rt_pool_area_free,
-                                              inOptions->mRealTimeMemorySize * 1024, 0);
+        // RT pool: a Fast (internal-SRAM) initial area, growing into Bulk (PSRAM) on
+        // overflow. The initial area is bounded by the largest free Fast block (minus
+        // the reserve) so it never requests more contiguous SRAM than exists; a
+        // fixed-size request larger than that used to fall back to PSRAM in full,
+        // making graph traversal PSRAM-bus-bound. Overflow grows into Bulk
+        // (areaMoreSize > 0) rather than failing /s_new. On desktop/NIF largest_free()
+        // is SIZE_MAX and SUPERSONIC_RT_POOL_GROWTH_SIZE is 0, so this reduces to the
+        // fixed malloc-backed pool as before.
+        {
+            size_t want = (size_t)inOptions->mRealTimeMemorySize * 1024;
+            const size_t avail = supersonic::mem::largest_free(supersonic::mem::Tier::Fast);
+            const size_t reserve = (size_t)SUPERSONIC_FAST_RESERVE + kAreaOverhead;
+            const size_t cap = (avail > reserve) ? (avail - reserve) : 0;
+            const size_t fastInit = (want < cap) ? want : cap;
+            const size_t total = fastInit + kAreaOverhead;
+            // Strict Fast (no silent spill); fall back to Bulk visibly if it won't fit.
+            g_rt_pool_pending = supersonic::mem::alloc(supersonic::mem::Tier::Fast, total, /*allow_spill=*/false);
+            if (!g_rt_pool_pending) {
+                scprintf("World_New: RT pool (%zu bytes) did not fit Fast, falling back to Bulk\n", total);
+                g_rt_pool_pending = supersonic::mem::alloc(supersonic::mem::Tier::Bulk, total);
+            }
+            world->hw->mAllocPool = new AllocPool(supersonic_rt_pool_area_alloc, supersonic_rt_pool_area_free,
+                                                  fastInit, SUPERSONIC_RT_POOL_GROWTH_SIZE);
+        }
 #else
         world->hw->mAllocPool = new AllocPool(malloc, free, inOptions->mRealTimeMemorySize * 1024, 0);
 #endif

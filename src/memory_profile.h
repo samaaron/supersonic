@@ -122,6 +122,11 @@
   #ifndef SUPERSONIC_FAST_RESERVE
   #define SUPERSONIC_FAST_RESERVE 45056            // 44 KB (32 KB audio task stack + I2S DMA + margin)
   #endif
+  // RT AllocPool growth-area size (Bulk/PSRAM) when the Fast initial is exhausted.
+  // Non-zero => the pool grows into PSRAM on overflow instead of failing /s_new.
+  #ifndef SUPERSONIC_RT_POOL_GROWTH_SIZE
+  #define SUPERSONIC_RT_POOL_GROWTH_SIZE 65536     // 64 KB
+  #endif
   #ifndef SUPERSONIC_MAX_BLOCK_SIZE
   #define SUPERSONIC_MAX_BLOCK_SIZE 64
   #endif
@@ -192,11 +197,15 @@
 #ifndef SUPERSONIC_HEAP_FAST_SIZE
 #define SUPERSONIC_HEAP_FAST_SIZE SUPERSONIC_HEAP_SIZE
 #endif
-// Fast-tier reserve. 0 on single-tier targets: largest_free() returns SIZE_MAX
-// there, so the boot-time bounding never clamps and the compile-time sizes win.
-// An embedded profile sets a real reserve.
+// Fast-tier reserve + RT-pool growth. Both 0 on single-tier targets: largest_free()
+// returns SIZE_MAX there so the boot-time bounding never clamps, and growth 0 keeps
+// the RT pool a fixed region with no allocation after boot (the desktop/NIF shape).
+// An embedded profile sets both non-zero.
 #ifndef SUPERSONIC_FAST_RESERVE
 #define SUPERSONIC_FAST_RESERVE 0
+#endif
+#ifndef SUPERSONIC_RT_POOL_GROWTH_SIZE
+#define SUPERSONIC_RT_POOL_GROWTH_SIZE 0
 #endif
 
 // Audio graph caps (non-WASM; the WASM render quantum is fixed at 128)
