@@ -59,6 +59,22 @@ Anything else is treated as a literal device name. JUCE may append
 `" (N)"` to disambiguate duplicate CoreAudio names; SuperSonic's
 matcher accepts either the bare name or the suffixed form.
 
+### Correlation tokens (`/clock` request/reply verbs)
+
+OSC replies carry no correlation id, so with address-only matching a
+reply that arrives after its caller gave up is indistinguishable from
+the reply to the *next* request on that address — fatal for a clock
+API, where a stale time answer silently poisons the client's
+beat↔wall mapping.
+
+Any `/clock` request may therefore carry an **int32 correlation token
+as its final argument** (after the verb's own args). The reply echoes
+it as *its* final argument. Handlers read their arguments
+positionally, so the trailing int is invisible to them; requests
+without a token receive the byte-identical legacy reply format. A
+client that sends tokens must match on them and treat a mismatch as a
+stale reply to be discarded.
+
 ---
 
 ## Notify registration

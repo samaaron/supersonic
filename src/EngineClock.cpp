@@ -34,6 +34,31 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
                   static_cast<uint32_t>(s.Size()));
         };
 
+        // ── Optional correlation token ───────────────────────────────────
+        // A request MAY carry an int32 as its FINAL argument (after the
+        // verb's own args); every reply then echoes it as ITS final
+        // argument. This lets clients match replies to requests exactly:
+        // with address-only matching, a reply delayed past its caller's
+        // timeout gets delivered to the NEXT caller — and a seconds-stale
+        // clock reading silently poisons a client's timeline. Handlers read
+        // their args positionally, so the extra trailing int is invisible
+        // to them; clients that send no token get the unchanged wire format.
+        bool    hasToken  = false;
+        int32_t echoToken = 0;
+        for (auto it = msg.ArgumentsBegin(); it != msg.ArgumentsEnd(); ++it) {
+            auto next = it; ++next;
+            if (next == msg.ArgumentsEnd() && it->IsInt32()) {
+                hasToken  = true;
+                echoToken = it->AsInt32Unchecked();
+            }
+        }
+        // Append the echoed token (if any), close and send the reply.
+        auto finish = [&](osc::OutboundPacketStream& s) {
+            if (hasToken) s << static_cast<osc::int32>(echoToken);
+            s << osc::EndMessage;
+            send(s);
+        };
+
         // ── Optional <timeline> segment ──────────────────────────────────
         // /clock/<tl>/<verb> where <tl> ∈ {link, midi, midi:<handle>}. Omitted
         // ⇒ link (back-compat: /clock/tempo/get ≡ /clock/link/tempo/get).
@@ -83,8 +108,8 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("tempo.reply", ra, sizeof(ra)))
-              << clock.timelineBpm(id) << osc::EndMessage;
-            send(s);
+              << clock.timelineBpm(id);
+            finish(s);
             return true;
         }
 
@@ -113,16 +138,16 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("transport.reply", ra, sizeof(ra)))
               << static_cast<int32_t>(clock.timelineIsPlaying(id) ? 1 : 0)
-              << static_cast<int32_t>(clock.timelineIsAnchored(id) ? 1 : 0) << osc::EndMessage;
-            send(s);
+              << static_cast<int32_t>(clock.timelineIsAnchored(id) ? 1 : 0);
+            finish(s);
             return true;
         }
         if (std::strcmp(verb, "transport/time/get") == 0) {
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("transport/time.reply", ra, sizeof(ra)))
-              << static_cast<osc::int64>(clock.timelineTimeForIsPlayingMicros(id)) << osc::EndMessage;
-            send(s);
+              << static_cast<osc::int64>(clock.timelineTimeForIsPlayingMicros(id));
+            finish(s);
             return true;
         }
 
@@ -136,8 +161,8 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("rpc/beat_at_time.reply", ra, sizeof(ra)))
-              << clock.timelineBeatAtLinkTime(id, t, q) << osc::EndMessage;
-            send(s);
+              << clock.timelineBeatAtLinkTime(id, t, q);
+            finish(s);
             return true;
         }
         if (std::strcmp(verb, "rpc/phase_at_time") == 0) {
@@ -149,8 +174,8 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("rpc/phase_at_time.reply", ra, sizeof(ra)))
-              << clock.timelinePhaseAtLinkTime(id, t, q) << osc::EndMessage;
-            send(s);
+              << clock.timelinePhaseAtLinkTime(id, t, q);
+            finish(s);
             return true;
         }
         if (std::strcmp(verb, "rpc/time_at_beat") == 0) {
@@ -162,8 +187,8 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("rpc/time_at_beat.reply", ra, sizeof(ra)))
-              << static_cast<osc::int64>(clock.timelineTimeAtBeatLinkMicros(id, b, q)) << osc::EndMessage;
-            send(s);
+              << static_cast<osc::int64>(clock.timelineTimeAtBeatLinkMicros(id, b, q));
+            finish(s);
             return true;
         }
 
@@ -178,8 +203,7 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/timelines.reply");
             appendTimelineRows(s, tls);
-            s << osc::EndMessage;
-            send(s);
+            finish(s);
             return true;
         }
 
@@ -194,8 +218,8 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/start_stop_sync.reply")
-              << static_cast<int32_t>(clock.isStartStopSyncEnabled() ? 1 : 0) << osc::EndMessage;
-            send(s);
+              << static_cast<int32_t>(clock.isStartStopSyncEnabled() ? 1 : 0);
+            finish(s);
             return true;
         }
 
@@ -204,24 +228,24 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/enabled.reply")
-              << static_cast<int32_t>(clock.isLinkEnabled() ? 1 : 0) << osc::EndMessage;
-            send(s);
+              << static_cast<int32_t>(clock.isLinkEnabled() ? 1 : 0);
+            finish(s);
             return true;
         }
         if (std::strcmp(verb, "time/now/get") == 0) {
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/time/now.reply")
-              << static_cast<osc::int64>(clock.linkClockMicros()) << osc::EndMessage;
-            send(s);
+              << static_cast<osc::int64>(clock.linkClockMicros());
+            finish(s);
             return true;
         }
         if (std::strcmp(verb, "peers/count/get") == 0) {
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/peers/count.reply")
-              << static_cast<int32_t>(clock.numPeers()) << osc::EndMessage;
-            send(s);
+              << static_cast<int32_t>(clock.numPeers());
+            finish(s);
             return true;
         }
     } catch (...) {

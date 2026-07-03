@@ -43,6 +43,19 @@ bool EngineControl::handleLinkCommand(const DrainCallCtx& meta, const uint8_t* d
         osc::ReceivedMessage msg(pkt);
         const char* addr = msg.AddressPattern();
 
+        // Correlation-token echo, same convention as EngineClock.cpp: a
+        // request may carry an int32 as its FINAL argument; the reply echoes
+        // it as ITS final argument so clients can match replies exactly.
+        int32_t echoToken = 0;
+        bool    hasEchoToken = false;
+        for (auto it = msg.ArgumentsBegin(); it != msg.ArgumentsEnd(); ++it) {
+            auto next = it; ++next;
+            if (next == msg.ArgumentsEnd() && it->IsInt32()) {
+                hasEchoToken = true;
+                echoToken = it->AsInt32Unchecked();
+            }
+        }
+
         if (std::strcmp(addr, "/clock/visibility") == 0) {
             // Write: /clock/visibility <int 0|1|2> = Off | LoopbackOnly | NetworkWide.
             auto it = msg.ArgumentsBegin();
@@ -63,8 +76,9 @@ bool EngineControl::handleLinkCommand(const DrainCallCtx& meta, const uint8_t* d
             char buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/visibility.reply")
-              << static_cast<int32_t>(mSuperClock->getLinkVisibility())
-              << osc::EndMessage;
+              << static_cast<int32_t>(mSuperClock->getLinkVisibility());
+            if (hasEchoToken) s << static_cast<osc::int32>(echoToken);
+            s << osc::EndMessage;
             mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
@@ -82,8 +96,9 @@ bool EngineControl::handleLinkCommand(const DrainCallCtx& meta, const uint8_t* d
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/audio/publish.reply")
-              << static_cast<int32_t>(mSuperClock->isLinkAudioPublishEnabled() ? 1 : 0)
-              << osc::EndMessage;
+              << static_cast<int32_t>(mSuperClock->isLinkAudioPublishEnabled() ? 1 : 0);
+            if (hasEchoToken) s << static_cast<osc::int32>(echoToken);
+            s << osc::EndMessage;
             mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
@@ -102,8 +117,9 @@ bool EngineControl::handleLinkCommand(const DrainCallCtx& meta, const uint8_t* d
             char buf[512];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/peer_name.reply")
-              << mSuperClock->peerName()
-              << osc::EndMessage;
+              << mSuperClock->peerName();
+            if (hasEchoToken) s << static_cast<osc::int32>(echoToken);
+            s << osc::EndMessage;
             mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
             return true;
