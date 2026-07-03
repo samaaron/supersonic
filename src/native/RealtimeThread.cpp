@@ -4,6 +4,11 @@
 #include <cerrno>
 #include <pthread.h>
 #include <sched.h>
+#elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <avrt.h>
+#pragma comment(lib, "avrt")
 #endif
 
 namespace supersonic {
@@ -40,7 +45,37 @@ RealtimeResult elevateCurrentThreadToRealtime() {
     return {status, currentPolicy, currentParam.sched_priority, rc};
 }
 
-#else  // non-Linux: the audio thread is left to its existing OS/JUCE behaviour.
+#elif defined(_WIN32)
+
+RealtimeResult elevateCurrentThreadToRealtime() {
+    // Windows audio threads are NOT protected by default: JUCE's DirectSound
+    // backend polls from an ordinary Priority::highest juce::Thread, and even
+    // ASIO driver threads aren't necessarily MMCSS-registered. Under CPU load
+    // (a compile, a browser) the callback gets preempted for multi-ms bursts
+    // → DSP overruns → audible stutter with no callback gap.
+    //
+    // Two independent measures; either alone is a win:
+    //  * MMCSS "Pro Audio" registration — the OS-blessed audio-thread
+    //    protection (the same scheduler class the WASAPI engine uses).
+    //  * THREAD_PRIORITY_TIME_CRITICAL — the classic boost scsynth has
+    //    always applied on Windows.
+    DWORD taskIndex = 0;
+    HANDLE mmcss = AvSetMmThreadCharacteristicsW(L"Pro Audio", &taskIndex);
+    if (mmcss)
+        AvSetMmThreadPriority(mmcss, AVRT_PRIORITY_CRITICAL);
+    const BOOL boosted =
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    const int resulting = GetThreadPriority(GetCurrentThread());
+
+    // `policy` reports MMCSS engagement (1 = registered); `priority` the
+    // resulting Win32 thread priority.
+    if (mmcss || boosted)
+        return {RealtimeStatus::Applied, mmcss ? 1 : 0, resulting, 0};
+    return {RealtimeStatus::Failed, 0, resulting,
+            static_cast<int>(GetLastError())};
+}
+
+#else  // other platforms: the audio thread keeps its existing OS/JUCE behaviour.
 
 RealtimeResult elevateCurrentThreadToRealtime() {
     return {RealtimeStatus::NotSupported, 0, 0, 0};

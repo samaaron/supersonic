@@ -66,10 +66,47 @@ TEST_CASE("elevateCurrentThreadToRealtime: idempotent and never throws", "[realt
     REQUIRE(first == second);
 }
 
-#else  // non-Linux
+#elif defined(_WIN32)
 
-TEST_CASE("elevateCurrentThreadToRealtime is a no-op off Linux", "[realtime]") {
-    // The helper does nothing off Linux.
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+TEST_CASE("elevateCurrentThreadToRealtime: Windows gets MMCSS + "
+          "time-critical, never a silent no-op", "[realtime]") {
+    // Windows must actively protect the audio thread: JUCE's DirectSound
+    // backend polls from an ordinary-priority thread with no MMCSS
+    // registration, so without elevation any CPU load preempts the render
+    // into audible overruns. On a dedicated thread (the promotion is
+    // permanent) with plain-value capture; assertions on the runner thread.
+    supersonic::RealtimeResult result{};
+    int win32Priority = 0;
+    std::thread([&] {
+        result        = supersonic::elevateCurrentThreadToRealtime();
+        win32Priority = GetThreadPriority(GetCurrentThread());
+    }).join();
+
+    REQUIRE(result.status == supersonic::RealtimeStatus::Applied);
+    REQUIRE(win32Priority == THREAD_PRIORITY_TIME_CRITICAL);
+    // policy carries MMCSS engagement (1 = "Pro Audio" registered). Stripped
+    // environments can lack the MMCSS service, and TIME_CRITICAL alone still
+    // counts as Applied — assert the field is well-formed, not its value.
+    REQUIRE((result.policy == 0 || result.policy == 1));
+    REQUIRE(result.error == 0);
+}
+
+TEST_CASE("elevateCurrentThreadToRealtime: idempotent on Windows", "[realtime]") {
+    supersonic::RealtimeStatus first{}, second{};
+    std::thread([&] {
+        first  = supersonic::elevateCurrentThreadToRealtime().status;
+        second = supersonic::elevateCurrentThreadToRealtime().status;
+    }).join();
+    REQUIRE(first == supersonic::RealtimeStatus::Applied);
+    REQUIRE(first == second);
+}
+
+#else  // other platforms (macOS): the helper stays a documented no-op.
+
+TEST_CASE("elevateCurrentThreadToRealtime is a no-op on this platform", "[realtime]") {
     REQUIRE(supersonic::elevateCurrentThreadToRealtime().status
             == supersonic::RealtimeStatus::NotSupported);
 }
