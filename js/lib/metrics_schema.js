@@ -75,7 +75,7 @@ export const METRICS_SCHEMA = {
     // Link Audio stream health [32-38] — native-only (no web writer)
     linkAudioInChannels:          { offset: 32, type: 'gauge',    unit: 'count', nativeOnly: true, description: 'Active received Link Audio channels' },
     linkAudioStreamRate:          { offset: 33, type: 'gauge',    unit: 'Hz',    nativeOnly: true, description: 'Received Link Audio stream sample rate' },
-    linkAudioUnderruns:           { offset: 34, type: 'counter',  unit: 'count', nativeOnly: true, description: 'Receiver queue underruns — stream audio arrived too late to play' },
+    linkAudioUnderruns:           { offset: 34, type: 'counter',  unit: 'count', nativeOnly: true, description: 'Receiver queue underruns (stream audio arrived too late to play)' },
     linkAudioBufferedMs:          { offset: 35, type: 'gauge',    unit: 'ms',    nativeOnly: true, description: 'Received Link Audio queued in the receiver (ms)' },
     linkAudioDriftPpm:            { offset: 36, type: 'gauge',    unit: 'ppm',   signed: true, nativeOnly: true, description: "Read-rate deviation from the sender's clock (parts per million)" },
     linkAudioPublish:             { offset: 37, type: 'gauge',    unit: 'bool',  nativeOnly: true, description: 'Link Audio publishing enabled (0/1)' },
@@ -91,7 +91,7 @@ export const METRICS_SCHEMA = {
     audioInputChannels:           { offset: 45, type: 'constant', unit: 'count', description: 'Input bus channels' },
 
     // SuperClock readouts [46-49] — cross-platform; written per block.
-    clockTempoMbpm:               { offset: 46, type: 'gauge',    unit: 'milliBpm', description: "SuperClock tempo — the engine's internal timeline" },
+    clockTempoMbpm:               { offset: 46, type: 'gauge',    unit: 'milliBpm', description: "Tempo of the engine's internal SuperClock" },
     clockBeatCenti:               { offset: 47, type: 'gauge',    unit: 'centi',    description: 'Current SuperClock beat position' },
     clockPhaseCenti:              { offset: 48, type: 'gauge',    unit: 'centi',    description: 'Phase within the quantum' },
     clockPlaying:                 { offset: 49, type: 'gauge',    unit: 'bool',     description: 'Transport playing (0/1)' },
@@ -133,7 +133,7 @@ export const METRICS_SCHEMA = {
     synthDefs:    { index: 0, type: 'gauge',   unit: 'count', description: 'Synth definitions currently loaded in the engine' },
     buffers:      { index: 1, type: 'gauge',   unit: 'count', description: 'Allocated sample buffers' },
     bufferBytes:  { index: 2, type: 'gauge',   unit: 'bytes', description: 'Total memory held by sample buffers' },
-    cpuAvgCenti:  { index: 3, type: 'gauge',   unit: 'centi', description: "Average DSP load — how much of each audio callback's time budget is used (% * 100)" },
+    cpuAvgCenti:  { index: 3, type: 'gauge',   unit: 'centi', description: 'Average DSP load as a share of the audio callback time budget (% * 100)' },
     cpuPeakCenti: { index: 4, type: 'gauge',   unit: 'centi', description: 'Decaying peak DSP load (% * 100). Sustained values near 100% risk audible glitches' },
     cbOverruns:   { index: 5, type: 'counter', unit: 'count', description: 'Audio callbacks that overran their time budget' },
   },
