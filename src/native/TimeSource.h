@@ -105,7 +105,22 @@ public:
 
     void   setFreewheelClock(bool enabled);
 
+    // Test seam: when non-zero, the IIR reads this instead of wallClockNTP(),
+    // so scenario tests (test_time_source.cpp) can drive exact stall /
+    // rate-mismatch shapes against exact expected answers. Costs one relaxed
+    // atomic load on the audio path; zero (the default) = real clock.
+    void setTestWallClock(double ntpSeconds) {
+        mTestWallBits.store(supersonic::doubleToBits(ntpSeconds),
+                            std::memory_order_relaxed);
+    }
+
 private:
+    double readWallClock() const {
+        const uint64_t bits = mTestWallBits.load(std::memory_order_relaxed);
+        return bits ? supersonic::bitsToDouble(bits) : wallClockNTP();
+    }
+
+    std::atomic<uint64_t> mTestWallBits{0};
     // IIR-smoothed audio-thread NTP. Bit-pattern in uint64 because
     // std::atomic<double> isn't lock-free everywhere.
     std::atomic<uint64_t> mBaseNTPBits{0};

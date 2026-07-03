@@ -57,6 +57,7 @@ add_executable(SuperSonicNativeTests
     test_driver_switch.cpp
     test_rapid_switching.cpp
     test_callback_watchdog.cpp
+    test_time_source.cpp
     test_device_selection.cpp
     test_aggregate_buffer_clamp.cpp
     test_device_policy.cpp

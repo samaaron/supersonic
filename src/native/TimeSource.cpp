@@ -65,7 +65,7 @@ void TimeSource::setFreewheelClock(bool enabled) {
 double TimeSource::now() const {
     const uint64_t bits =
         mCurrentAudioThreadNTPBits.load(std::memory_order_acquire);
-    if (bits == 0) return wallClockNTP();
+    if (bits == 0) return readWallClock();
     return bitsToDouble(bits);
 }
 
@@ -75,7 +75,7 @@ double TimeSource::nowAt(double audioCurrentTime) const {
 }
 
 double TimeSource::wallNow() const {
-    return wallClockNTP();
+    return readWallClock();
 }
 
 double TimeSource::updateAudioThreadNTP(double samplePosition,
@@ -101,7 +101,7 @@ double TimeSource::updateAudioThreadNTP(double samplePosition,
     //   drift     = wallNow - sampleNTP
     //   mBaseNTP += drift * 0.01   (low-pass converge ~1% per call)
     //   result    = mBaseNTP + samplePosition / sampleRate
-    const double wallNow = wallClockNTP();
+    const double wallNow = readWallClock();
     const double baseNTP = bitsToDouble(
         mBaseNTPBits.load(std::memory_order_relaxed));
     const double drift = wallNow - (baseNTP + sampleOffsetSec);
@@ -131,7 +131,7 @@ double TimeSource::updateAudioThreadNTP(double samplePosition,
 
 void TimeSource::resetAudioThreadTime(double samplePosition, double sampleRate) {
     const double sampleOffsetSec = samplePosition / sampleRate;
-    const double newBaseNTP = wallClockNTP() - sampleOffsetSec;
+    const double newBaseNTP = readWallClock() - sampleOffsetSec;
     mBaseNTPBits.store(doubleToBits(newBaseNTP), std::memory_order_relaxed);
     mCurrentAudioThreadNTPBits.store(
         doubleToBits(newBaseNTP + sampleOffsetSec),
