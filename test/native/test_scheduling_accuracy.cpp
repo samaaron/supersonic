@@ -23,6 +23,21 @@ extern "C" {
     extern uint8_t ring_buffer_storage[];
 }
 
+// Sanitizer builds (ASAN/TSAN) render several times slower, so the render-
+// completion deadline below must scale with them or it becomes the flake it
+// exists to prevent. Mirrors kTimeoutScale in test_link_audio_integration.cpp.
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+constexpr int kTimeoutScale = 4;
+#elif defined(__has_feature)
+#  if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+constexpr int kTimeoutScale = 4;
+#  else
+constexpr int kTimeoutScale = 1;
+#  endif
+#else
+constexpr int kTimeoutScale = 1;
+#endif
+
 // Find the first sample frame where audio exceeds threshold (onset detection)
 static int findOnsetFrame(const float* interleaved, uint32_t numFrames,
                           uint32_t channels, float threshold = 0.001f) {
@@ -33,6 +48,28 @@ static int findOnsetFrame(const float* interleaved, uint32_t numFrames,
         }
     }
     return -1;
+}
+
+// Wait for the WORK to finish rather than a fixed wall-clock span: poll the
+// capture ring until at least `neededFrames` have been rendered since
+// `startFrame`. A fixed sleep assumes the headless driver keeps real-time
+// pace, which a loaded/virtualised CI runner does not — under starvation it
+// renders slower than wall-clock, so a fixed sleep ends before the last
+// bundles render and their onsets are lost. Polling a completion signal makes
+// the measurement independent of runner speed while leaving the downstream
+// assertions untouched. The deadline is only a deadlock guard, not the
+// expected wait; returns false if it expires.
+static bool waitUntilRendered(const shm_audio_buffer* capture,
+                              uint64_t startFrame, uint32_t neededFrames) {
+    const auto deadline = std::chrono::steady_clock::now()
+                        + std::chrono::seconds(30) * kTimeoutScale;
+    while (std::chrono::steady_clock::now() < deadline) {
+        uint64_t rendered = capture->write_position.load(std::memory_order_acquire)
+                          - startFrame;
+        if (rendered >= neededFrames) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return false;
 }
 
 TEST_CASE("relative scheduling accuracy across multiple bundles",
@@ -110,10 +147,9 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
         });
     }
 
-    // Wait for all synths to execute and release
-    auto totalWaitMs = static_cast<int>(
-        (FIRST_DELAY_SEC + NUM_BUNDLES * SPACING_SEC) * 1000.0 + 300);
-    std::this_thread::sleep_for(std::chrono::milliseconds(totalWaitMs));
+    const uint32_t neededFrames = static_cast<uint32_t>(
+        (FIRST_DELAY_SEC + NUM_BUNDLES * SPACING_SEC + 0.1) * sampleRate);
+    REQUIRE(waitUntilRendered(capture, captureStartFrame, neededFrames));
 
     capture->enabled.store(0, std::memory_order_release);
     uint64_t captureEndFrame = capture->write_position.load(std::memory_order_acquire);
@@ -269,9 +305,9 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
         });
     }
 
-    auto totalWaitMs = static_cast<int>(
-        (FIRST_DELAY_SEC + NUM_BUNDLES * SPACING_SEC) * 1000.0 + 300);
-    std::this_thread::sleep_for(std::chrono::milliseconds(totalWaitMs));
+    const uint32_t neededFrames = static_cast<uint32_t>(
+        (FIRST_DELAY_SEC + NUM_BUNDLES * SPACING_SEC + 0.1) * sampleRate);
+    REQUIRE(waitUntilRendered(capture, captureStartFrame, neededFrames));
 
     capture->enabled.store(0, std::memory_order_release);
     uint64_t captureEndFrame = capture->write_position.load(std::memory_order_acquire);
