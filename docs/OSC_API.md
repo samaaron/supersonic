@@ -63,8 +63,8 @@ matcher accepts either the bare name or the suffixed form.
 
 OSC replies carry no correlation id, so with address-only matching a
 reply that arrives after its caller gave up is indistinguishable from
-the reply to the *next* request on that address — fatal for a clock
-API, where a stale time answer silently poisons the client's
+the reply to the *next* request on that address. For a clock API this
+matters: a stale time answer delivered that way corrupts the client's
 beat↔wall mapping.
 
 Any `/clock` request may therefore carry an **int32 correlation token

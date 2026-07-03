@@ -348,9 +348,9 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
         } else if (gapUs > 150'000.0) {
             // Sub-wake stall: long enough to snap the timeline and push
             // scheduled client threads past their sched-ahead window (Spider
-            // kills live loops with TimingError), too short for the wake
-            // path. One line names the location and size of the stall —
-            // without it, such a stall surfaces only as unexplained LATEs.
+            // raises TimingError on the affected live loops), too short for
+            // the wake path above. Log its size — without this, such a stall
+            // surfaces only as unexplained LATEs downstream.
             fprintf(stderr, "  [gap] audio callback stalled %.0fms\n", gapUs / 1000.0);
             fflush(stderr);
         }

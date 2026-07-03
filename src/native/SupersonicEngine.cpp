@@ -2700,11 +2700,11 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
     int prevBufSize = prevSetup.bufferSize;
 
 #ifdef _WIN32
-    // "System default" has no meaning under ASIO — JUCE's ASIO type has no
+    // "System default" has no meaning under ASIO: JUCE's ASIO type has no
     // default device, so initialiseWithDefaultDevices from an ASIO session
-    // stops the current device and opens NOTHING, leaving the engine with
-    // no device and no callbacks. Return to the boot-time type (DirectSound
-    // — see init's type selection) before asking for defaults.
+    // stops the current device and opens none, leaving the engine with no
+    // device and no callbacks. Return to the boot-time type (DirectSound —
+    // see init's type selection) before asking for defaults.
     {
         auto curType = mDeviceManager->getCurrentAudioDeviceType();
         if (curType == "ASIO") {
@@ -2727,10 +2727,10 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
     }
     if (err.isNotEmpty()) return err;
 
-    // A "successful" init that opened no device is still a failure for us —
-    // callers assume a current device afterwards, and without one the audio
-    // callback never restarts (the engine would go deaf). Report it so the
-    // caller can recover instead of sailing on.
+    // An init that reports success but opens no device is still a failure
+    // here: callers assume a current device afterwards, and without one the
+    // audio callback never restarts and the engine produces no sound. Report
+    // it so the caller can recover.
     if (!mDeviceManager->getCurrentAudioDevice())
         return "system default init opened no device";
 

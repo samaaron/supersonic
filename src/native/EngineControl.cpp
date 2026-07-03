@@ -44,8 +44,8 @@ bool EngineControl::handleLinkCommand(const DrainCallCtx& meta, const uint8_t* d
         const char* addr = msg.AddressPattern();
 
         // Correlation-token echo, same convention as EngineClock.cpp: a
-        // request may carry an int32 as its FINAL argument; the reply echoes
-        // it as ITS final argument so clients can match replies exactly.
+        // request may carry an int32 as its last argument; the reply echoes
+        // it as its last argument so clients can match replies exactly.
         int32_t echoToken = 0;
         bool    hasEchoToken = false;
         for (auto it = msg.ArgumentsBegin(); it != msg.ArgumentsEnd(); ++it) {

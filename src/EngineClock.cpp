@@ -35,14 +35,14 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
         };
 
         // ── Optional correlation token ───────────────────────────────────
-        // A request MAY carry an int32 as its FINAL argument (after the
-        // verb's own args); every reply then echoes it as ITS final
-        // argument. This lets clients match replies to requests exactly:
-        // with address-only matching, a reply delayed past its caller's
-        // timeout gets delivered to the NEXT caller — and a seconds-stale
-        // clock reading silently poisons a client's timeline. Handlers read
-        // their args positionally, so the extra trailing int is invisible
-        // to them; clients that send no token get the unchanged wire format.
+        // A request may carry an int32 as its last argument (after the verb's
+        // own args); the reply then echoes it as its last argument, letting
+        // clients match replies to requests exactly. With address-only
+        // matching a reply delayed past its caller's timeout is delivered to
+        // the next caller instead, so a stale clock reading corrupts that
+        // client's timeline. Handlers read their args positionally, so the
+        // trailing int is invisible to them, and clients that send no token
+        // get the unchanged wire format.
         bool    hasToken  = false;
         int32_t echoToken = 0;
         for (auto it = msg.ArgumentsBegin(); it != msg.ArgumentsEnd(); ++it) {
