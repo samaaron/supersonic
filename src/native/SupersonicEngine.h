@@ -423,10 +423,12 @@ private:
     // never called.
 public:
     enum class AudioSource { None, RealCallback, Headless };
-    AudioSource audioSource() const { return mActiveSource; }
+    AudioSource audioSource() const { return mActiveSource.load(std::memory_order_acquire); }
 
 private:
-    AudioSource mActiveSource = AudioSource::None;
+    // Atomic: written by the watchdog thread (start/stopAudioSource) and read
+    // lock-free by audioSource() and status paths on other threads.
+    std::atomic<AudioSource> mActiveSource{AudioSource::None};
 
     AudioSource desiredAudioSource() const;
 

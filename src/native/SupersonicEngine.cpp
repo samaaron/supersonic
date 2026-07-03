@@ -1170,7 +1170,7 @@ void SupersonicEngine::init(const Config& cfg) {
     // connect/disconnect, not "user changed default in System Settings".
     // Only install on a real device; a headless-fallback engine has no
     // system default to track.
-    if (mActiveSource == AudioSource::RealCallback &&
+    if (mActiveSource.load() == AudioSource::RealCallback &&
         !mDefaultDevicePropertyListenerInstalled) {
         AudioObjectPropertyAddress pa = {
             kAudioHardwarePropertyDefaultOutputDevice,
@@ -1583,7 +1583,7 @@ void SupersonicEngine::watchdogLoop() {
             mAudioCallback.processCount.load(std::memory_order_acquire);
         bool healthy = false;
         if (!mRunning.load() || count != lastCount
-            || mActiveSource == AudioSource::None
+            || mActiveSource.load() == AudioSource::None
             || mReopenInProgress.load()) {
             healthy = true;
         } else if (mSwapMutex.try_lock()) {
@@ -1605,18 +1605,18 @@ void SupersonicEngine::watchdogLoop() {
                 "(source=%s, processCount=%u) — recovering\n",
                 (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
                     now - lastHealthy).count(),
-                mActiveSource == AudioSource::RealCallback ? "device" : "headless",
+                mActiveSource.load() == AudioSource::RealCallback ? "device" : "headless",
                 count);
         fflush(stderr);
 
         mWatchdogRecoveries.fetch_add(1, std::memory_order_release);
 
-        if (mActiveSource == AudioSource::Headless) {
+        if (mActiveSource.load() == AudioSource::Headless) {
             // The headless driver thread died or wedged: restart it, under
             // the swap gate so we can't race a device transition.
             std::unique_lock<std::mutex> lk;
             if (tryAcquireSwapGate(lk, 1, 0)
-                && mActiveSource == AudioSource::Headless) {
+                && mActiveSource.load() == AudioSource::Headless) {
                 stopAudioSource();
                 startAudioSource();
             }
@@ -1633,7 +1633,7 @@ void SupersonicEngine::watchdogLoop() {
             if (tryAcquireSwapGate(lk, 1, 0)) {
                 const bool hasDevice =
                     mDeviceManager && mDeviceManager->getCurrentAudioDevice();
-                if (!hasDevice && mActiveSource != AudioSource::None) {
+                if (!hasDevice && mActiveSource.load() != AudioSource::None) {
                     fprintf(stderr, "[watchdog] no current device — restarting "
                             "audio source (headless fallback)\n");
                     fflush(stderr);
@@ -2598,14 +2598,14 @@ SupersonicEngine::AudioSource SupersonicEngine::desiredAudioSource() const {
 }
 
 void SupersonicEngine::startAudioSource() {
-    if (mActiveSource != AudioSource::None) {
+    if (mActiveSource.load() != AudioSource::None) {
         // Should be unreachable: every caller stops before starting.
         // Assert in debug so a regression fails CI loudly; log+return in
         // release so we don't crash a user session.
         jassertfalse;
         fprintf(stderr,
                 "[supersonic] BUG: startAudioSource called while %s already active\n",
-                mActiveSource == AudioSource::RealCallback ? "RealCallback" : "Headless");
+                mActiveSource.load() == AudioSource::RealCallback ? "RealCallback" : "Headless");
         fflush(stderr);
         return;
     }
@@ -2621,7 +2621,7 @@ void SupersonicEngine::startAudioSource() {
                 "[supersonic] manual audio pump — no audio source started; "
                 "caller drives process_audio()\n");
         fflush(stderr);
-        mActiveSource = AudioSource::None;
+        mActiveSource.store(AudioSource::None, std::memory_order_release);
         return;
     }
 
@@ -2632,7 +2632,7 @@ void SupersonicEngine::startAudioSource() {
         // addChangeListener is idempotent (JUCE's ListenerList dedupes), so
         // re-attaching across hot-plug / swap sequences is harmless.
         mDeviceManager->addChangeListener(this);
-        mActiveSource = AudioSource::RealCallback;
+        mActiveSource.store(AudioSource::RealCallback, std::memory_order_release);
     } else {
         if (mDeviceManager) {
             fprintf(stderr,
@@ -2647,14 +2647,14 @@ void SupersonicEngine::startAudioSource() {
                                    mCurrentConfig.numInputChannels);
         mHeadlessDriver.setSuperClock(&mSuperClock);
         mHeadlessDriver.startThread(juce::Thread::Priority::highest);
-        mActiveSource = AudioSource::Headless;
+        mActiveSource.store(AudioSource::Headless, std::memory_order_release);
     }
 
     waitForFirstAudioTick(before);
 }
 
 void SupersonicEngine::stopAudioSource() {
-    switch (mActiveSource) {
+    switch (mActiveSource.load()) {
     case AudioSource::None:
         return;
     case AudioSource::RealCallback:
@@ -2669,7 +2669,7 @@ void SupersonicEngine::stopAudioSource() {
         mHeadlessDriver.stopThread(2000);
         break;
     }
-    mActiveSource = AudioSource::None;
+    mActiveSource.store(AudioSource::None, std::memory_order_release);
 }
 
 void SupersonicEngine::waitForFirstAudioTick(uint32_t before) {
@@ -4416,7 +4416,7 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
                 // replacement: restart the audio source (falls back to the
                 // headless driver when no device is open) so commands keep
                 // draining — silent audio beats a deaf server.
-                if (mActiveSource != AudioSource::None) {
+                if (mActiveSource.load() != AudioSource::None) {
                     stopAudioSource();
                     startAudioSource();
                 }
