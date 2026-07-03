@@ -250,6 +250,9 @@ int main(int argc, char* argv[]) {
     cfg.sampleRate           = 48000;
     cfg.bufferSize           = 0;
     cfg.udpPort              = 57110;
+    // The standalone server must never go silently deaf: if the device's
+    // callback thread wedges (e.g. DirectSound cursor-poll spin), recover.
+    cfg.callbackWatchdog     = true;
 
 
     for (int i = 1; i < argc; ++i) {

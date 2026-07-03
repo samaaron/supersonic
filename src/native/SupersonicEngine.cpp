@@ -1192,6 +1192,13 @@ void SupersonicEngine::init(const Config& cfg) {
 
     mRunning.store(true);
     setEngineState(EngineState::Running, "boot");
+
+    // Callback-starvation watchdog (see watchdogLoop). Pointless in manual-
+    // pump mode, where the test owns process_audio and long gaps are normal.
+    if (mCurrentConfig.callbackWatchdog && !mCurrentConfig.manualAudioPump) {
+        mWatchdogStop.store(false);
+        mWatchdogThread = std::thread(&SupersonicEngine::watchdogLoop, this);
+    }
 }
 
 void SupersonicEngine::shutdown() {
@@ -1258,6 +1265,11 @@ void SupersonicEngine::shutdown() {
     // gateway to a stop before touching the device-orchestration workers.
     // stop() bumps + notifies its wake word (processCount) and joins.
     mNrtGateway.stop();
+
+    // Stop the watchdog before joining the reopen worker — it can spawn a
+    // reopen (requestReopen) right up until it observes mWatchdogStop.
+    mWatchdogStop.store(true);
+    if (mWatchdogThread.joinable()) mWatchdogThread.join();
 
     // No control command can run now — join the device-orchestration workers
     // before tearing down the device manager + egress they call into.
@@ -1523,6 +1535,124 @@ void SupersonicEngine::executePendingSwitch() {
     sendSwitchDone(result, devName, inputDevName);
 
     mDebounceSwitchRunning.store(false);
+}
+
+bool SupersonicEngine::tryAcquireSwapGate(std::unique_lock<std::mutex>& lk,
+                                          int attempts, int sleepMs) {
+    lk = std::unique_lock<std::mutex>(mSwapMutex, std::defer_lock);
+    for (int i = 0; i < attempts; ++i) {
+        if (lk.try_lock()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
+    }
+    return false;
+}
+
+std::unique_lock<std::mutex> SupersonicEngine::testHoldSwapGate() {
+    return std::unique_lock<std::mutex>(mSwapMutex);
+}
+
+// Callback-starvation watchdog. The audio callback is the sole drain for
+// synth commands (process_audio consumes the IN ring), so a device whose
+// callback thread wedges — e.g. DirectSound spinning in its cursor poll
+// after a mid-reconfigure race — leaves the server deaf forever while its
+// control socket stays up. Sample processCount; when it freezes past the
+// stall window with a source nominally active and no swap/reopen in
+// flight, restart the source (headless) or request a device reopen (real).
+void SupersonicEngine::watchdogLoop() {
+    const auto stallWindow =
+        std::chrono::milliseconds(std::max(1, mCurrentConfig.watchdogStallMs));
+    const int pollMs = std::max(10, mCurrentConfig.watchdogPollMs);
+
+    uint32_t lastCount   = mAudioCallback.processCount.load(std::memory_order_acquire);
+    auto     lastHealthy = std::chrono::steady_clock::now();
+
+    while (!mWatchdogStop.load()) {
+        // Sleep in small slices so shutdown joins quickly.
+        for (int slept = 0; slept < pollMs && !mWatchdogStop.load(); slept += 20)
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(std::min(20, pollMs - slept)));
+        if (mWatchdogStop.load()) return;
+
+        const auto now = std::chrono::steady_clock::now();
+
+        // Anything below counts as "healthy/expected", resetting the timer:
+        // engine not running, callbacks ticking, no source supposed to be
+        // active (manual pump / mid-transition), a swap holding the gate,
+        // or a reopen already in flight.
+        const uint32_t count =
+            mAudioCallback.processCount.load(std::memory_order_acquire);
+        bool healthy = false;
+        if (!mRunning.load() || count != lastCount
+            || mActiveSource == AudioSource::None
+            || mReopenInProgress.load()) {
+            healthy = true;
+        } else if (mSwapMutex.try_lock()) {
+            mSwapMutex.unlock();
+        } else {
+            healthy = true;  // swap in flight — callbacks legitimately paused
+        }
+        lastCount = count;
+        if (healthy) {
+            lastHealthy = now;
+            continue;
+        }
+        if (now - lastHealthy < stallWindow) continue;
+
+        // Stalled: the source claims to be active but nothing has ticked for
+        // the whole window. Recover.
+        fprintf(stderr,
+                "[watchdog] audio callbacks stalled for %lld ms "
+                "(source=%s, processCount=%u) — recovering\n",
+                (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - lastHealthy).count(),
+                mActiveSource == AudioSource::RealCallback ? "device" : "headless",
+                count);
+        fflush(stderr);
+
+        mWatchdogRecoveries.fetch_add(1, std::memory_order_release);
+
+        if (mActiveSource == AudioSource::Headless) {
+            // The headless driver thread died or wedged: restart it, under
+            // the swap gate so we can't race a device transition.
+            std::unique_lock<std::mutex> lk;
+            if (tryAcquireSwapGate(lk, 1, 0)
+                && mActiveSource == AudioSource::Headless) {
+                stopAudioSource();
+                startAudioSource();
+            }
+        } else {
+            // Real device. If JUCE still has a current device, reopen it via
+            // the existing gated worker (self-rejects during cooldown; we
+            // retry on the next stall window). If it does NOT — a failed
+            // transition stopped the old device and opened nothing (e.g.
+            // "system default" from ASIO) — there is nothing to reopen:
+            // restart the audio source instead, which falls back to the
+            // headless driver and keeps the engine draining commands until
+            // a device comes back.
+            std::unique_lock<std::mutex> lk;
+            if (tryAcquireSwapGate(lk, 1, 0)) {
+                const bool hasDevice =
+                    mDeviceManager && mDeviceManager->getCurrentAudioDevice();
+                if (!hasDevice && mActiveSource != AudioSource::None) {
+                    fprintf(stderr, "[watchdog] no current device — restarting "
+                            "audio source (headless fallback)\n");
+                    fflush(stderr);
+                    stopAudioSource();
+                    startAudioSource();
+                } else {
+                    lk.unlock();
+                    std::string reason;
+                    requestReopen(reason);
+                    fprintf(stderr, "[watchdog] reopen request: %s\n",
+                            reason.c_str());
+                    fflush(stderr);
+                }
+            }
+        }
+
+        lastHealthy = std::chrono::steady_clock::now();
+        lastCount   = mAudioCallback.processCount.load(std::memory_order_acquire);
+    }
 }
 
 bool SupersonicEngine::requestReopen(std::string& reason) {
@@ -2569,6 +2699,24 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
     auto prevSetup = mDeviceManager->getAudioDeviceSetup();
     int prevBufSize = prevSetup.bufferSize;
 
+#ifdef _WIN32
+    // "System default" has no meaning under ASIO — JUCE's ASIO type has no
+    // default device, so initialiseWithDefaultDevices from an ASIO session
+    // stops the current device and opens NOTHING, leaving the engine with
+    // no device and no callbacks. Return to the boot-time type (DirectSound
+    // — see init's type selection) before asking for defaults.
+    {
+        auto curType = mDeviceManager->getCurrentAudioDeviceType();
+        if (curType == "ASIO") {
+            fprintf(stderr, "[device-setup] system default requested from ASIO "
+                    "— returning to DirectSound first\n");
+            fflush(stderr);
+            mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+            mDeviceManager->setCurrentAudioDeviceType("DirectSound", true);
+        }
+    }
+#endif
+
     // Refresh suppression timestamp before each JUCE call to prevent
     // changeListenerCallback feedback storms.
     mLastSelfTriggeredChange = std::chrono::steady_clock::now();
@@ -2578,6 +2726,13 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
         err = mDeviceManager->initialiseWithDefaultDevices(0, 0);
     }
     if (err.isNotEmpty()) return err;
+
+    // A "successful" init that opened no device is still a failure for us —
+    // callers assume a current device afterwards, and without one the audio
+    // callback never restarts (the engine would go deaf). Report it so the
+    // caller can recover instead of sailing on.
+    if (!mDeviceManager->getCurrentAudioDevice())
+        return "system default init opened no device";
 
     // Don't second-guess JUCE's negotiation on wireless devices. AirPlay
     // / Bluetooth negotiate a specific buffer size with the remote end
@@ -4239,10 +4394,32 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
                 fflush(stderr);
             }
 #endif
+            // Serialise against in-flight swaps. Without the gate this
+            // reinit runs concurrently with a debounced switchDevice (which
+            // holds mSwapMutex on its worker thread) — two threads driving
+            // JUCE's AudioDeviceManager teardown/reopen at once, which can
+            // wedge DirectSound's callback thread in a cursor-poll spin and
+            // leave the whole server deaf. Bounded retry mirrors
+            // executePendingSwitch (~3 s).
+            std::unique_lock<std::mutex> swapGate;
+            if (!tryAcquireSwapGate(swapGate, 30, 100)) {
+                fprintf(stderr, "[device-setup] system mode init refused: "
+                        "swap already in progress\n");
+                return "swap already in progress";
+            }
+
             auto err = reinitialiseWithDefaultsPreservingConfig();
             if (err.isNotEmpty()) {
                 fprintf(stderr, "[device-setup] system mode init failed: %s\n",
                         err.toRawUTF8());
+                // Never leave the engine with a stopped device and no
+                // replacement: restart the audio source (falls back to the
+                // headless driver when no device is open) so commands keep
+                // draining — silent audio beats a deaf server.
+                if (mActiveSource != AudioSource::None) {
+                    stopAudioSource();
+                    startAudioSource();
+                }
                 return err.toStdString();
             }
 
@@ -4256,6 +4433,10 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
                 newRate = dev->getCurrentSampleRate();
                 newDevName = dev->getName().toStdString();
             }
+
+            // Release before the cold swap below — switchDevice acquires the
+            // gate itself (try_lock) and would otherwise self-deadlock.
+            swapGate.unlock();
 
             if (newRate > 0 && static_cast<int>(newRate) != mCurrentConfig.sampleRate) {
                 fprintf(stderr,

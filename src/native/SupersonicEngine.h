@@ -96,6 +96,16 @@ public:
         bool   freewheelClock           = false;   // deterministic sample-derived
                                                    // NTP (no wall-clock drift IIR);
                                                    // for offline/accuracy tests.
+        bool   callbackWatchdog         = false;   // monitor audio-callback liveness:
+                                                   // when processCount freezes for
+                                                   // watchdogStallMs the source is
+                                                   // restarted / device reopened.
+                                                   // The audio callback is the sole
+                                                   // drain for synth commands, so a
+                                                   // stalled device otherwise leaves
+                                                   // the server deaf forever.
+        int    watchdogStallMs          = 2500;    // frozen this long => recovery
+        int    watchdogPollMs           = 250;     // liveness sampling interval
         std::string bindAddress       = "127.0.0.1"; // localhost only; use -B to override
         std::string hardwareDevice;                // -H flag: fuzzy match on "Driver : Device"
     };
@@ -309,6 +319,23 @@ public:
     // fallback path actually starts and that process_audio runs so OSC
     // commands aren't queued forever in the IN ring buffer.
     bool testForceNoCurrentDeviceAfterInit = false;
+
+    // Times the callback watchdog has recovered a stalled audio source
+    // (restarted the headless driver / requested a device reopen). See
+    // Config::callbackWatchdog.
+    uint32_t watchdogRecoveryCount() const { return mWatchdogRecoveries.load(); }
+
+    // Bounded acquisition of the swap gate: up to `attempts` try_locks,
+    // `sleepMs` apart, mirroring executePendingSwitch's retry discipline.
+    // Used by setDeviceMode's system-default reinit so it cannot interleave
+    // with an in-flight switchDevice — two threads driving JUCE's
+    // AudioDeviceManager concurrently can wedge the device's callback
+    // thread. Public so tests can exercise the gate without a device.
+    bool tryAcquireSwapGate(std::unique_lock<std::mutex>& lk,
+                            int attempts, int sleepMs);
+
+    // Test-only: hold the swap gate to simulate "a swap is in flight".
+    std::unique_lock<std::mutex> testHoldSwapGate();
 
     // --- State cache ---
     StateCache& stateCache() { return mStateCache; }
@@ -562,6 +589,13 @@ private:
     std::chrono::steady_clock::time_point mLastReopenFinishedAt{};
     std::thread                mReopenThread;
     void executeReopen();
+
+    // Callback-starvation watchdog (Config::callbackWatchdog) — samples
+    // processCount and recovers a source whose callbacks stopped.
+    std::thread                mWatchdogThread;
+    std::atomic<bool>          mWatchdogStop{false};
+    std::atomic<uint32_t>      mWatchdogRecoveries{0};
+    void watchdogLoop();
 
     HeadlessDriver               mHeadlessDriver;
     std::unique_ptr<juce::AudioDeviceManager> mDeviceManager;
