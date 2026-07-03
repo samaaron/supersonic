@@ -494,6 +494,9 @@ export interface MetricsSchema {
   /** NATIVE_STATS shm segment descriptions (native backend only). `index` is
    * the u32 slot within that segment, not a PerformanceMetrics offset. */
   nativeStats: Record<string, NativeStatDefinition>;
+  /** Descriptions for rows combining several metrics in one reading
+   * ("current | peak", ...), shared by web and native layouts. */
+  composites: Record<string, { description: string }>;
   /** Panel structure for rendering a metrics UI. Used by `<supersonic-metrics>`. */
   layout: {
     panels: Array<{

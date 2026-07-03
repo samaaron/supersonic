@@ -28,6 +28,12 @@ export function renderHeader(schema = METRICS_SCHEMA) {
     .map(([key, def]) => ({ key, ...def }))
     .sort((a, b) => a.index - b.index);
 
+  const composites = Object.entries(schema.composites)
+    .map(([key, def]) => ({ key, ...def }));
+
+  const compositeLines = composites.map((m) =>
+    `    { "${cEscape(m.key)}", "${cEscape(m.description)}" },`);
+
   const fieldLines = metrics.map((m) =>
     `    { ${String(m.offset).padStart(2)}, "${cEscape(m.key)}", "${cEscape(m.unit ?? '')}", "${cEscape(m.description)}" },`);
 
@@ -50,6 +56,7 @@ export function renderHeader(schema = METRICS_SCHEMA) {
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 
 namespace supersonic {
 namespace metrics_schema {
@@ -77,6 +84,25 @@ struct NativeStatInfo
 inline constexpr NativeStatInfo kNativeStats[] = {
 ${nativeLines.join('\n')}
 };
+
+// Rows combining several metrics in one reading ("current | peak", ...).
+struct CompositeInfo
+{
+    const char* key;
+    const char* description;
+};
+
+inline constexpr CompositeInfo kComposites[] = {
+${compositeLines.join('\n')}
+};
+
+inline const char* descriptionForComposite(const char* key)
+{
+    for (const CompositeInfo& c : kComposites)
+        if (std::strcmp(c.key, key) == 0)
+            return c.description;
+    return nullptr;
+}
 
 inline const char* descriptionForOffset(uint32_t offset)
 {

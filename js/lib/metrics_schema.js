@@ -20,6 +20,24 @@
  * Regenerate (and commit the header) whenever this file changes.
  */
 
+// Descriptions for readings that combine several metrics in one row
+// (e.g. "current | peak"). Referenced by the web layout below and exported
+// so native GUIs can label their equivalent rows with the same words.
+const COMPOSITES = {
+  schedulerQueueCurrentPeak: { description: 'Current | peak scheduler queue depth' },
+  schedulerLateWorstLast:    { description: 'Worst | most recent late bundle execution (ms)' },
+  debugCountBytes:           { description: 'Debug messages from scsynth (count and bytes)' },
+  oscSentCountBytes:         { description: 'Messages | bytes sent from host to scsynth' },
+  oscRecvCountBytes:         { description: 'Messages | bytes received back from scsynth' },
+  inRingUsedPeak:            { description: 'Used / peak bytes in the IN ring buffer (host to scsynth)' },
+  outRingUsedPeak:           { description: 'Used / peak bytes in the OUT ring buffer (scsynth replies to host)' },
+  nrtRingUsedPeak:           { description: 'Used / peak bytes in the NRT-out ring buffer (replies, notifications, debug)' },
+  linkAudioChannelsRate:     { description: 'Received Link Audio channels and their sample rate' },
+  linkAudioPublishSinks:     { description: 'Link Audio publishing state (1 = on) | active output sinks' },
+  engineVersion:             { description: 'SuperSonic engine version' },
+  busChannelsOutIn:          { description: 'Output | input audio bus channels' },
+};
+
 export const METRICS_SCHEMA = {
   metrics: {
     // scsynth metrics [0-8]
@@ -138,6 +156,8 @@ export const METRICS_SCHEMA = {
     cbOverruns:   { index: 5, type: 'counter', unit: 'count', description: 'Audio callbacks that overran their time budget' },
   },
 
+  composites: COMPOSITES,
+
   layout: {
     panels: [
       {
@@ -160,10 +180,10 @@ export const METRICS_SCHEMA = {
       {
         title: 'scsynth Scheduler',
         rows: [
-          { label: 'queue',   tooltip: 'Current scheduler queue depth | peak depth', cells: [{ key: 'scsynthSchedulerDepth' }, { sep: ' | ' }, { key: 'scsynthSchedulerPeakDepth', kind: 'muted' }] },
+          { label: 'queue',   tooltip: COMPOSITES.schedulerQueueCurrentPeak.description, cells: [{ key: 'scsynthSchedulerDepth' }, { sep: ' | ' }, { key: 'scsynthSchedulerPeakDepth', kind: 'muted' }] },
           { label: 'dropped', cells: [{ key: 'scsynthSchedulerDropped', kind: 'error' }] },
           { label: 'lates',   cells: [{ key: 'scsynthSchedulerLates', kind: 'error' }] },
-          { label: 'max | last', tooltip: 'Maximum lateness observed | most recent late magnitude (ms)', cells: [{ key: 'scsynthSchedulerMaxLateMs', kind: 'error' }, { sep: ' | ' }, { key: 'scsynthSchedulerLastLateMs', kind: 'dim' }, { text: ' ms', kind: 'muted' }] },
+          { label: 'max | last', tooltip: COMPOSITES.schedulerLateWorstLast.description, cells: [{ key: 'scsynthSchedulerMaxLateMs', kind: 'error' }, { sep: ' | ' }, { key: 'scsynthSchedulerLastLateMs', kind: 'dim' }, { text: ' ms', kind: 'muted' }] },
         ]
       },
       {
@@ -172,7 +192,7 @@ export const METRICS_SCHEMA = {
           { label: 'ticks',       tooltip: 'Audio process() callback count and OSC messages processed', cells: [{ key: 'scsynthProcessCount', kind: 'dim' }, { sep: ' | ' }, { key: 'scsynthMessagesProcessed', kind: 'muted' }, { text: ' msgs', kind: 'muted' }] },
           { label: 'dropped',     cells: [{ key: 'scsynthMessagesDropped', kind: 'error' }] },
           { label: 'drift',       cells: [{ key: 'driftOffsetMs', format: 'signed' }, { text: ' ms', kind: 'muted' }] },
-          { label: 'debug',       tooltip: 'Debug messages from scsynth (count and bytes)', cells: [{ key: 'debugMessagesReceived', kind: 'muted' }, { text: ' (' }, { key: 'debugBytesReceived', kind: 'muted', format: 'bytes' }, { text: ')' }] },
+          { label: 'debug',       tooltip: COMPOSITES.debugCountBytes.description, cells: [{ key: 'debugMessagesReceived', kind: 'muted' }, { text: ' (' }, { key: 'debugBytesReceived', kind: 'muted', format: 'bytes' }, { text: ')' }] },
         ]
       },
       {
@@ -209,7 +229,7 @@ export const METRICS_SCHEMA = {
           { label: 'version',  cells: [{ key: 'supersonicVersionMajor' }, { text: '.' }, { key: 'supersonicVersionMinor' }, { text: '.' }, { key: 'supersonicVersionPatch' }] },
           { label: 'rate',     cells: [{ key: 'audioSampleRate' }, { text: ' Hz', kind: 'muted' }] },
           { label: 'block',    cells: [{ key: 'audioBlockSize' }, { text: ' frames', kind: 'muted' }] },
-          { label: 'channels', tooltip: 'output | input bus channels', cells: [{ key: 'audioOutputChannels' }, { sep: ' | ' }, { key: 'audioInputChannels', kind: 'muted' }] },
+          { label: 'channels', tooltip: COMPOSITES.busChannelsOutIn.description, cells: [{ key: 'audioOutputChannels' }, { sep: ' | ' }, { key: 'audioInputChannels', kind: 'muted' }] },
         ]
       },
       {

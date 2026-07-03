@@ -14,6 +14,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 
 namespace supersonic {
 namespace metrics_schema {
@@ -118,6 +119,36 @@ inline constexpr NativeStatInfo kNativeStats[] = {
     { 4, "cpuPeakCenti", "centi", "Decaying peak DSP load (% * 100). Sustained values near 100% risk audible glitches" },
     { 5, "cbOverruns", "count", "Audio callbacks that overran their time budget" },
 };
+
+// Rows combining several metrics in one reading ("current | peak", ...).
+struct CompositeInfo
+{
+    const char* key;
+    const char* description;
+};
+
+inline constexpr CompositeInfo kComposites[] = {
+    { "schedulerQueueCurrentPeak", "Current | peak scheduler queue depth" },
+    { "schedulerLateWorstLast", "Worst | most recent late bundle execution (ms)" },
+    { "debugCountBytes", "Debug messages from scsynth (count and bytes)" },
+    { "oscSentCountBytes", "Messages | bytes sent from host to scsynth" },
+    { "oscRecvCountBytes", "Messages | bytes received back from scsynth" },
+    { "inRingUsedPeak", "Used / peak bytes in the IN ring buffer (host to scsynth)" },
+    { "outRingUsedPeak", "Used / peak bytes in the OUT ring buffer (scsynth replies to host)" },
+    { "nrtRingUsedPeak", "Used / peak bytes in the NRT-out ring buffer (replies, notifications, debug)" },
+    { "linkAudioChannelsRate", "Received Link Audio channels and their sample rate" },
+    { "linkAudioPublishSinks", "Link Audio publishing state (1 = on) | active output sinks" },
+    { "engineVersion", "SuperSonic engine version" },
+    { "busChannelsOutIn", "Output | input audio bus channels" },
+};
+
+inline const char* descriptionForComposite(const char* key)
+{
+    for (const CompositeInfo& c : kComposites)
+        if (std::strcmp(c.key, key) == 0)
+            return c.description;
+    return nullptr;
+}
 
 inline const char* descriptionForOffset(uint32_t offset)
 {
