@@ -1606,8 +1606,17 @@ static void synth_apply_offset(int64_t when, int64_t blockTime) {
     metrics->scheduler_last_late_ms.store(late_ms, std::memory_order_relaxed);
     metrics->scheduler_last_late_tick.store(
         metrics->process_count.load(std::memory_order_relaxed), std::memory_order_relaxed);
-    if (late_now == 1 || late_now % 100 == 0)
+    // Count-based sampling alone hides lates 2..99 — a stutter's worth of
+    // events with zero log trace. Keep the count milestones but also emit at
+    // most one line per second of block time so every late burst leaves
+    // evidence.
+    static int64_t last_late_log_osc = 0;
+    const bool second_elapsed =
+        (blockTime - last_late_log_osc) >= (int64_t)4294967296LL;
+    if (late_now == 1 || late_now % 100 == 0 || second_elapsed) {
+        last_late_log_osc = blockTime;
         ss_log("LATE: %.1fms (count=%d)", -time_diff_ms, late_now);
+    }
 }
 
 bool ss_synth_default_route(void* /*routeCtx*/, const void* callCtx,

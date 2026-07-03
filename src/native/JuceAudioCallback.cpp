@@ -345,6 +345,14 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
             fflush(stderr);
             mSuperClock->resetAudioThreadTime(mSamplePosition, mSampleRate);
             if (onWake) onWake();
+        } else if (gapUs > 150'000.0) {
+            // Sub-wake stall: long enough to snap the timeline and push
+            // scheduled client threads past their sched-ahead window (Spider
+            // kills live loops with TimingError), too short for the wake
+            // path. One line names the location and size of the stall —
+            // without it, such a stall surfaces only as unexplained LATEs.
+            fprintf(stderr, "  [gap] audio callback stalled %.0fms\n", gapUs / 1000.0);
+            fflush(stderr);
         }
     }
     mLastCbTime = cbStart;
@@ -567,7 +575,20 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     mCallbackCount++;
     mTotalUs += cbUs;
     if (cbUs > mMaxUs) mMaxUs = cbUs;
-    if (cbUs > budgetUs) mOverrunCount++;
+    if (cbUs > budgetUs) {
+        mOverrunCount++;
+        // An overrun (render missed its budget) is audible as a stutter but
+        // produces no callback gap and no clock drift, so it needs its own
+        // log line to be diagnosable. Rate-limited to one line per second.
+        const double nowSec =
+            std::chrono::duration<double>(cbEnd.time_since_epoch()).count();
+        if (nowSec - mLastOverrunLogSec >= 1.0) {
+            mLastOverrunLogSec = nowSec;
+            ss_log("[overrun] render took %.1fms of %.1fms budget "
+                   "(total overruns: %u)",
+                   cbUs / 1000.0, budgetUs / 1000.0, mOverrunCount);
+        }
+    }
 
     // DSP load = how much of the callback's time budget the render consumed.
     // Smooth the average (EMA) and let the peak decay, so both track recent

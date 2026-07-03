@@ -167,6 +167,7 @@ private:
     uint32_t mOverrunCount  = 0;
     double   mTotalUs       = 0.0;
     double   mMaxUs         = 0.0;
+    double   mLastOverrunLogSec = 0.0;  // rate-limits [overrun] log lines
 
     // DSP load published to native-stats: a smoothed average (EMA) and a decaying
     // peak of per-callback load (callback time / time budget), in percent.
