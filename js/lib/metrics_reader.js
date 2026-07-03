@@ -163,6 +163,21 @@ export class MetricsReader {
       clockPhaseCenti: m[MetricsOffsets.CLOCK_PHASE_CENTI],
       clockPlaying: m[MetricsOffsets.CLOCK_PLAYING],
 
+      // Link + Link Audio (native-only; no web writer, so always 0 on WASM —
+      // present here so getMetrics() keys are mode-independent).
+      linkPeers: m[MetricsOffsets.LINK_PEERS],
+      linkTempoMbpm: m[MetricsOffsets.LINK_TEMPO_MBPM],
+      linkBeatCenti: m[MetricsOffsets.LINK_BEAT_CENTI],
+      linkPhaseCenti: m[MetricsOffsets.LINK_PHASE_CENTI],
+      linkPlaying: m[MetricsOffsets.LINK_PLAYING],
+      linkAudioInChannels: m[MetricsOffsets.LINK_AUDIO_IN_CHANNELS],
+      linkAudioStreamRate: m[MetricsOffsets.LINK_AUDIO_STREAM_RATE],
+      linkAudioUnderruns: m[MetricsOffsets.LINK_AUDIO_UNDERRUNS],
+      linkAudioBufferedMs: m[MetricsOffsets.LINK_AUDIO_BUFFERED_MS],
+      linkAudioDriftPpm: m[MetricsOffsets.LINK_AUDIO_DRIFT_PPM],
+      linkAudioPublish: m[MetricsOffsets.LINK_AUDIO_PUBLISH],
+      linkAudioSinks: m[MetricsOffsets.LINK_AUDIO_SINKS],
+
       // Mode
       mode: this.#mode,
     };
