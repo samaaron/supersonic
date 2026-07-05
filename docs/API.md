@@ -8,7 +8,7 @@
 
 * [osc](#osc)
 
-* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [Snapshot](#snapshot) · [SuperClock](#superclock-1) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
+* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [NativeStatDefinition](#nativestatdefinition) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [Snapshot](#snapshot) · [SuperClock](#superclock-1) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
 
 * **Type Aliases** — [AddAction](#addaction) · [BlockedCommand](#blockedcommand) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
 
@@ -2833,6 +2833,7 @@ Schema entry describing a single metric field.
 | Property                               | Type                                                 | Description                                                            |
 | -------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------- |
 | <a id="description"></a> `description` | `string`                                             | Human-readable description.                                            |
+| <a id="nativeonly"></a> `nativeOnly?`  | `boolean`                                            | Native (JUCE) backend only — no web writer; reads 0 on WASM.           |
 | <a id="offset"></a> `offset`           | `number`                                             | Offset into the flat metrics Uint32Array.                              |
 | <a id="signed"></a> `signed?`          | `boolean`                                            | Whether the value should be read as signed int32.                      |
 | <a id="type"></a> `type`               | `"counter"` \| `"gauge"` \| `"constant"` \| `"enum"` | Metric type: counter (cumulative), gauge (current), constant, or enum. |
@@ -2850,11 +2851,28 @@ a declarative UI layout for rendering metrics panels, and sentinel values.
 
 #### Properties
 
-| Property                       | Type                                                                                                | Description                                                                      |
-| ------------------------------ | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| <a id="layout"></a> `layout`   | `object`                                                                                            | Panel structure for rendering a metrics UI. Used by `<supersonic-metrics>`.      |
-| `layout.panels`                | `object`\[]                                                                                         | -                                                                                |
-| <a id="metrics"></a> `metrics` | `Record`\<keyof [`SuperSonicMetrics`](#supersonicmetrics), [`MetricDefinition`](#metricdefinition)> | Each key maps to offset, type, unit, and description for the merged Uint32Array. |
+| Property                               | Type                                                                                                | Description                                                                                                                                                                                  |                                                |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| <a id="composites"></a> `composites`   | `Record`<`string`, { `description`: `string`; }>                                                    | Descriptions for rows combining several metrics in one reading ("current                                                                                                                     | peak", ...), shared by web and native layouts. |
+| <a id="layout"></a> `layout`           | `object`                                                                                            | Panel structure for rendering a metrics UI. Used by `<supersonic-metrics>`.                                                                                                                  |                                                |
+| `layout.panels`                        | `object`\[]                                                                                         | -                                                                                                                                                                                            |                                                |
+| <a id="metrics"></a> `metrics`         | `Record`\<keyof [`SuperSonicMetrics`](#supersonicmetrics), [`MetricDefinition`](#metricdefinition)> | Each key maps to offset, type, unit, and description for the merged Uint32Array. Keys are exactly the SuperSonicMetrics fields (native-only ones are marked `nativeOnly` and read 0 on web). |                                                |
+| <a id="nativestats"></a> `nativeStats` | `Record`<`string`, [`NativeStatDefinition`](#nativestatdefinition)>                                 | NATIVE\_STATS shm segment descriptions (native backend only). `index` is the u32 slot within that segment, not a PerformanceMetrics offset.                                                  |                                                |
+
+***
+
+### NativeStatDefinition
+
+A NATIVE\_STATS segment entry (native/JUCE backend only).
+
+#### Properties
+
+| Property                                 | Type                     | Description                                           |
+| ---------------------------------------- | ------------------------ | ----------------------------------------------------- |
+| <a id="description-1"></a> `description` | `string`                 | Human-readable description.                           |
+| <a id="index"></a> `index`               | `number`                 | u32 slot within the NATIVE\_STATS segment.            |
+| <a id="type-1"></a> `type`               | `"counter"` \| `"gauge"` | Metric type: counter (cumulative) or gauge (current). |
+| <a id="unit-1"></a> `unit?`              | `string`                 | Unit of measurement.                                  |
 
 ***
 
@@ -3404,20 +3422,33 @@ descriptions, units, and UI layout metadata.
 | <a id="clockphasecenti"></a> `clockPhaseCenti`                           | `number` | Phase within the quantum \* 100. Divide by 100 for the phase.                                 |
 | <a id="clockplaying"></a> `clockPlaying`                                 | `number` | Transport playing (0 = stopped, 1 = playing).                                                 |
 | <a id="clocktempombpm"></a> `clockTempoMbpm`                             | `number` | Tempo in milli-BPM (bpm \* 1000). Divide by 1000 for BPM.                                     |
-| <a id="debugbuffercapacity"></a> `debugBufferCapacity`                   | `number` | DEBUG ring buffer capacity (bytes).                                                           |
-| <a id="debugbufferpeakbytes"></a> `debugBufferPeakBytes`                 | `number` | Peak bytes used in DEBUG ring buffer.                                                         |
-| <a id="debugbufferusedbytes"></a> `debugBufferUsedBytes`                 | `number` | Bytes used in DEBUG ring buffer.                                                              |
 | <a id="debugbytesreceived"></a> `debugBytesReceived`                     | `number` | Debug bytes received from scsynth.                                                            |
 | <a id="debugmessagesreceived"></a> `debugMessagesReceived`               | `number` | Debug messages received from scsynth.                                                         |
 | <a id="driftoffsetms"></a> `driftOffsetMs`                               | `number` | Clock drift between AudioContext and wall clock (ms, signed).                                 |
 | <a id="glitchcount"></a> `glitchCount`                                   | `number` | Audio underrun/glitch events (Chrome playbackStats, 0 on other browsers).                     |
 | <a id="glitchdurationms"></a> `glitchDurationMs`                         | `number` | Total silence from audio underruns in ms (Chrome playbackStats, 0 on other browsers).         |
+| <a id="hasplaybackstats"></a> `hasPlaybackStats`                         | `number` | 1 if the Chrome playbackStats API is available, 0 otherwise.                                  |
 | <a id="inbuffercapacity"></a> `inBufferCapacity`                         | `number` | IN ring buffer capacity (bytes).                                                              |
 | <a id="inbufferpeakbytes"></a> `inBufferPeakBytes`                       | `number` | Peak bytes used in IN ring buffer.                                                            |
 | <a id="inbufferusedbytes"></a> `inBufferUsedBytes`                       | `number` | Bytes used in IN ring buffer (JS → scsynth).                                                  |
+| <a id="linkaudiobufferedms"></a> `linkAudioBufferedMs`                   | `number` | Received Link Audio queued in the receiver (ms).                                              |
+| <a id="linkaudiodriftppm"></a> `linkAudioDriftPpm`                       | `number` | Read-rate deviation from the sender's clock (parts per million, signed).                      |
+| <a id="linkaudioinchannels"></a> `linkAudioInChannels`                   | `number` | Active received Link Audio channels.                                                          |
+| <a id="linkaudiopublish"></a> `linkAudioPublish`                         | `number` | Link Audio publishing enabled (0 = off, 1 = on).                                              |
+| <a id="linkaudiosinks"></a> `linkAudioSinks`                             | `number` | Active Link Audio output sinks.                                                               |
+| <a id="linkaudiostreamrate"></a> `linkAudioStreamRate`                   | `number` | Received Link Audio stream sample rate in Hz.                                                 |
+| <a id="linkaudiounderruns"></a> `linkAudioUnderruns`                     | `number` | Receiver queue underruns — stream audio arrived too late to play.                             |
+| <a id="linkbeatcenti"></a> `linkBeatCenti`                               | `number` | Current Link beat position \* 100.                                                            |
+| <a id="linkpeers"></a> `linkPeers`                                       | `number` | Connected Ableton Link peers on the network.                                                  |
+| <a id="linkphasecenti"></a> `linkPhaseCenti`                             | `number` | Phase within the Link quantum \* 100.                                                         |
+| <a id="linkplaying"></a> `linkPlaying`                                   | `number` | Link transport playing (0 = stopped, 1 = playing).                                            |
+| <a id="linktempombpm"></a> `linkTempoMbpm`                               | `number` | Shared Link session tempo in milli-BPM (bpm \* 1000).                                         |
 | <a id="loadedsynthdefs-1"></a> `loadedSynthDefs`                         | `number` | Number of loaded synthdefs.                                                                   |
 | <a id="maxlatencyus"></a> `maxLatencyUs`                                 | `number` | Maximum audio output latency in microseconds (Chrome playbackStats, 0 on other browsers).     |
 | <a id="mode-4"></a> `mode`                                               | `number` | Transport mode as enum index: 0=sab, 1=postMessage.                                           |
+| <a id="nrtoutbuffercapacity"></a> `nrtOutBufferCapacity`                 | `number` | NRT-out ring buffer capacity (bytes).                                                         |
+| <a id="nrtoutbufferpeakbytes"></a> `nrtOutBufferPeakBytes`               | `number` | Peak bytes used in NRT-out ring buffer.                                                       |
+| <a id="nrtoutbufferusedbytes"></a> `nrtOutBufferUsedBytes`               | `number` | Bytes used in NRT-out ring buffer.                                                            |
 | <a id="oscinbytesreceived"></a> `oscInBytesReceived`                     | `number` | Total bytes received from scsynth.                                                            |
 | <a id="oscincorrupted"></a> `oscInCorrupted`                             | `number` | Corrupted messages detected from scsynth.                                                     |
 | <a id="oscinmessagesdropped"></a> `oscInMessagesDropped`                 | `number` | Replies lost in transit from scsynth to JS.                                                   |
@@ -3444,6 +3475,7 @@ descriptions, units, and UI layout metadata.
 | <a id="supersonicversionmajor"></a> `supersonicVersionMajor`             | `number` | SuperSonic major version.                                                                     |
 | <a id="supersonicversionminor"></a> `supersonicVersionMinor`             | `number` | SuperSonic minor version.                                                                     |
 | <a id="supersonicversionpatch"></a> `supersonicVersionPatch`             | `number` | SuperSonic patch version.                                                                     |
+| <a id="totalframesdurationms"></a> `totalFramesDurationMs`               | `number` | Chrome only: total audio rendered duration in ms.                                             |
 
 ### SystemReport
 
@@ -3526,7 +3558,7 @@ Groups contain children; synths are leaves.
 | <a id="children"></a> `children` | [`TreeNode`](#treenode)\[] | Child nodes (groups only, empty array for synths).    |
 | <a id="defname-1"></a> `defName` | `string`                   | SynthDef name (synths only, empty string for groups). |
 | <a id="id-1"></a> `id`           | `number`                   | Unique node ID.                                       |
-| <a id="type-1"></a> `type`       | `"group"` \| `"synth"`     | `'group'` for groups, `'synth'` for synth nodes.      |
+| <a id="type-2"></a> `type`       | `"group"` \| `"synth"`     | `'group'` for groups, `'synth'` for synth nodes.      |
 
 ## Type Aliases
 
