@@ -8,8 +8,8 @@
  * #ifdefs".
  *
  * Capability values per target live in the re-includable SC_PlatformProfile.inc
- * (single source of truth). That lets this host build validate ALL THREE target
- * profiles at compile time — by re-including the table under each forced target —
+ * (single source of truth). That lets this host build validate every target
+ * profile at compile time — by re-including the table under each forced target —
  * without cross-compiling. The active build's derived macros (SC_LEAN_TARGET,
  * SC_COLD_BSS) are checked directly, since the host compiles the desktop branch.
  */
@@ -44,6 +44,11 @@ constexpr Caps kWasm{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY, SCP_HW
 constexpr Caps kEsp32{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY, SCP_HW_FLOAT64 };
 #undef SCP_TARGET_ESP32
 
+#define SCP_TARGET_TEENSY4 1
+#include "SC_PlatformProfile.inc"
+constexpr Caps kTeensy4{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY, SCP_HW_FLOAT64 };
+#undef SCP_TARGET_TEENSY4
+
 #define SCP_TARGET_FREESTANDING 1
 #include "SC_PlatformProfile.inc"
 constexpr Caps kFreestanding{ SCP_HOSTED_OS, SCP_BYTE_ATOMICS, SCP_TIERED_MEMORY, SCP_HW_FLOAT64 };
@@ -61,6 +66,12 @@ static_assert(kWasm.tiered_memory == 0, "wasm is single-tier");
 static_assert(kEsp32.hosted_os == 0, "esp32 is lean");
 static_assert(kEsp32.byte_atomics  == 0, "esp32 lacks byte atomics");
 static_assert(kEsp32.tiered_memory == 1, "esp32 is two-tier");
+// Teensy 4.x: lean, byte atomics (ARMv7-M byte exclusives), single-tier (no
+// PSRAM unless soldered to the 4.1 pads), hardware f64 (RT1062 FPv5-D16 FPU).
+static_assert(kTeensy4.hosted_os == 0, "teensy4 is lean");
+static_assert(kTeensy4.byte_atomics  == 1, "teensy4 has byte atomics");
+static_assert(kTeensy4.tiered_memory == 0, "teensy4 is single-tier");
+static_assert(kTeensy4.hw_float64 == 1, "teensy4 FPv5-D16 has hardware f64");
 // Freestanding: the lean profile compiled natively (the CI build guard) —
 // mirrors WASM: lean, byte atomics OK, single-tier, hardware f64.
 static_assert(kFreestanding.hosted_os == 0, "freestanding is lean");
@@ -108,6 +119,10 @@ TEST_CASE("SC_Platform exposes a coherent capability matrix", "[platform]") {
     CHECK(kWasm.hosted_os == 0);
     CHECK(kEsp32.byte_atomics == 0);
     CHECK(kEsp32.tiered_memory == 1);
+    CHECK(kTeensy4.hosted_os == 0);
+    CHECK(kTeensy4.byte_atomics == 1);
+    CHECK(kTeensy4.tiered_memory == 0);
+    CHECK(kTeensy4.hw_float64 == 1);
     CHECK(kFreestanding.hosted_os == 0);
     CHECK(kFreestanding.byte_atomics == 1);
     CHECK(kFreestanding.hw_float64 == 1);

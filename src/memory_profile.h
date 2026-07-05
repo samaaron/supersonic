@@ -62,6 +62,7 @@
 // Numeric ids so they can be compared in the preprocessor.
 #define SUPERSONIC_PROFILE_DEFAULT 0
 #define SUPERSONIC_PROFILE_ESP32S3 1
+#define SUPERSONIC_PROFILE_TEENSY41 2
 
 #ifndef SUPERSONIC_DEVICE_PROFILE
 #define SUPERSONIC_DEVICE_PROFILE SUPERSONIC_PROFILE_DEFAULT
@@ -148,6 +149,81 @@
   #endif
 
 #endif // SUPERSONIC_PROFILE_ESP32S3
+
+// ── Teensy 4.1 profile ──────────────────────────────────────────────────────
+// PJRC Teensy 4.1 (NXP i.MX RT1062: 1 MiB RAM as 512 KiB ITCM/DTCM + 512 KiB
+// OCRAM, 8 MiB flash; PSRAM pads unpopulated, so single-tier RAM). The tiered
+// knobs (FAST_SIZE/FAST_RESERVE/RT_POOL_GROWTH) stay at their single-region
+// defaults. The RT heap is drawn from the OCRAM malloc heap, so
+// SUPERSONIC_HEAP_SIZE plus the host's own allocations must fit in ~512 KiB;
+// growth is 0 so exhaustion fails the OSC command loudly instead of creeping
+// into the audio-library heap. Block size is 128 to match the Teensy audio
+// library's per-update frame count (one engine tick per AudioStream update).
+// Values retuned against an on-device build.
+#if SUPERSONIC_DEVICE_PROFILE == SUPERSONIC_PROFILE_TEENSY41
+
+  #ifndef SUPERSONIC_IN_BUFFER_SIZE
+  #define SUPERSONIC_IN_BUFFER_SIZE 32768          // 32 KB
+  #endif
+  #ifndef SUPERSONIC_OUT_BUFFER_SIZE
+  #define SUPERSONIC_OUT_BUFFER_SIZE 8192          // 8 KB
+  #endif
+  #ifndef SUPERSONIC_NRT_OUT_BUFFER_SIZE
+  #define SUPERSONIC_NRT_OUT_BUFFER_SIZE 4096      // 4 KB
+  #endif
+  #ifndef NODE_TREE_MIRROR_MAX_NODES
+  #define NODE_TREE_MIRROR_MAX_NODES 128
+  #endif
+  #ifndef SHM_SCOPE_MAX_SCOPES
+  #define SHM_SCOPE_MAX_SCOPES 1
+  #endif
+  #ifndef SHM_SCOPE_FRAMES_PER_SCOPE
+  #define SHM_SCOPE_FRAMES_PER_SCOPE 128
+  #endif
+  #ifndef SC_MAX_TIMELINES
+  #define SC_MAX_TIMELINES 2
+  #endif
+  #ifndef SCHEDULER_DATA_POOL_SIZE
+  #define SCHEDULER_DATA_POOL_SIZE 65536           // 64 KB
+  #endif
+  // Notification FIFOs (inside HiddenWorld): 64 deep is ample for a device
+  // scene; the desktop 1024s would make sizeof(HiddenWorld) dominate the pool.
+  #ifndef SC_TRIGGERS_FIFO_SIZE
+  #define SC_TRIGGERS_FIFO_SIZE 64
+  #endif
+  #ifndef SC_NODE_REPLY_FIFO_SIZE
+  #define SC_NODE_REPLY_FIFO_SIZE 64
+  #endif
+  #ifndef SC_NODE_ENDS_FIFO_SIZE
+  #define SC_NODE_ENDS_FIFO_SIZE 64
+  #endif
+  #ifndef SUPERSONIC_HEAP_SIZE
+  #define SUPERSONIC_HEAP_SIZE 98304               // 96 KB engine pool (world buses, SndBufs,
+                                                    // wire buffers, /b_alloc). OCRAM (~338 KB
+                                                    // after the cold .bss) must also hold the
+                                                    // RT pool (host WorldOptions) and the
+                                                    // library's registration mallocs.
+  #endif
+  #ifndef SUPERSONIC_HEAP_GROWTH_SIZE
+  #define SUPERSONIC_HEAP_GROWTH_SIZE 0            // no growth: fail loud, keep OCRAM predictable
+  #endif
+  #ifndef SUPERSONIC_MAX_BLOCK_SIZE
+  #define SUPERSONIC_MAX_BLOCK_SIZE 128
+  #endif
+  #ifndef SUPERSONIC_DEFAULT_BLOCK_SIZE
+  #define SUPERSONIC_DEFAULT_BLOCK_SIZE 128
+  #endif
+  #ifndef SUPERSONIC_MAX_CHANNELS
+  #define SUPERSONIC_MAX_CHANNELS 2
+  #endif
+  #ifndef SUPERSONIC_MAX_SHM_AUDIO_BUFFERS
+  #define SUPERSONIC_MAX_SHM_AUDIO_BUFFERS 1
+  #endif
+  #ifndef SUPERSONIC_SHM_AUDIO_FRAMES
+  #define SUPERSONIC_SHM_AUDIO_FRAMES 128
+  #endif
+
+#endif // SUPERSONIC_PROFILE_TEENSY41
 
 // ── Universal defaults (desktop / WASM / NIF / tests) ───────────────────────
 // Anything left unset by an explicit -D or by the selected profile falls

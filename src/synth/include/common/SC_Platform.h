@@ -27,6 +27,8 @@
 #    define SCP_TARGET_WASM 1
 #elif defined(ESP_PLATFORM)
 #    define SCP_TARGET_ESP32 1
+#elif defined(__IMXRT1062__)
+#    define SCP_TARGET_TEENSY4 1
 #else
 #    define SCP_TARGET_DESKTOP 1
 #endif

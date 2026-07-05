@@ -66,6 +66,16 @@
 #    define BYTE_ORDER LITTLE_ENDIAN
 #    define SC_NO_ENDIAN_FUNCTIONS
 
+#elif defined(__IMXRT1062__)
+
+// Teensy 4.x (i.MX RT1062, Cortex-M7) is little-endian; the bare-metal newlib
+// toolchain has no htonl/ntohl, so define the endian macros and use the
+// self-contained byte swaps below (as on the ESP32 branch above).
+#    define LITTLE_ENDIAN 1234
+#    define BIG_ENDIAN 4321
+#    define BYTE_ORDER LITTLE_ENDIAN
+#    define SC_NO_ENDIAN_FUNCTIONS
+
 #else
 
 #    error cannot find endianess on this platform

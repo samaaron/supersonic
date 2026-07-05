@@ -2,7 +2,7 @@
  * SC_PlatformProfile.inc — re-includable capability table (single source of truth).
  *
  * Input:  exactly one of SCP_TARGET_DESKTOP / SCP_TARGET_WASM / SCP_TARGET_ESP32
- *         / SCP_TARGET_FREESTANDING.
+ *         / SCP_TARGET_TEENSY4 / SCP_TARGET_FREESTANDING.
  * Output: SCP_HOSTED_OS / SCP_BYTE_ATOMICS / SCP_TIERED_MEMORY / SCP_HW_FLOAT64
  *         (each 0 or 1).
  *
@@ -48,6 +48,16 @@
 #    define SCP_BYTE_ATOMICS  0
 #    define SCP_TIERED_MEMORY 1
 #    define SCP_HW_FLOAT64    0
+#elif defined(SCP_TARGET_TEENSY4)
+// Teensy 4.x (NXP i.MX RT1062, Cortex-M7 @ 600 MHz): self-driven; ARMv7-M has
+// byte exclusives (LDREXB/STREXB), so std::atomic_flag links; a single RAM tier
+// (512 KiB DTCM/ITCM + 512 KiB OCRAM; PSRAM only if soldered to the 4.1 pads).
+// The FPv5-D16 FPU is hardware double-precision, so the upstream double DSP runs
+// at full speed (unlike the single-precision LX7).
+#    define SCP_HOSTED_OS     0
+#    define SCP_BYTE_ATOMICS  1
+#    define SCP_TIERED_MEMORY 0
+#    define SCP_HW_FLOAT64    1
 #elif defined(SCP_TARGET_FREESTANDING)
 // Lean engine on a desktop CPU: the self-driven (hosted-OS-off) profile a
 // browser/embedded host sees, but compiled and run natively. Exists so a normal
