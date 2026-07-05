@@ -32,6 +32,10 @@ using std::memory_order_relaxed;
 using std::memory_order_release;
 
 template <class MsgType, int N> class MsgFifo {
+    // NextPos() indexes with `& (N - 1)`, so a non-power-of-two N aliases out of
+    // bounds; usable capacity is N - 1, so N < 2 can never hold a message.
+    static_assert(N >= 2 && (N & (N - 1)) == 0, "MsgFifo depth must be a power of two >= 2");
+
 public:
     MsgFifo(): mReadHead(0), mWriteHead(0), mFreeHead(0) {}
 
@@ -82,6 +86,10 @@ private:
 /////////////////////////////////////////////////////////////////////
 
 template <class MsgType, int N> class MsgFifoNoFree {
+    // NextPos() indexes with `& (N - 1)`, so a non-power-of-two N aliases out of
+    // bounds; usable capacity is N - 1, so N < 2 can never hold a message.
+    static_assert(N >= 2 && (N & (N - 1)) == 0, "MsgFifoNoFree depth must be a power of two >= 2");
+
 public:
     MsgFifoNoFree(): mReadHead(0), mWriteHead(0) {}
 

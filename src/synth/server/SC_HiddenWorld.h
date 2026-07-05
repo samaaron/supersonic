@@ -29,6 +29,7 @@
 #include "SC_World.h"
 #include "SC_Reply.h"
 #include "MsgFifo.h"
+#include "memory_profile.h"
 #include <map>
 #include <deque>
 #include <set>
@@ -82,9 +83,13 @@ struct NodeEndMsg {
     void Perform();
 };
 
-typedef MsgFifoNoFree<TriggerMsg, 1024> TriggersFifo;
-typedef MsgFifoNoFree<NodeReplyMsg, 1024> NodeReplyFifo;
-typedef MsgFifoNoFree<NodeEndMsg, 1024> NodeEndsFifo;
+// Fixed-capacity notification FIFOs, allocated inline in HiddenWorld. At the
+// default depths they dominate sizeof(HiddenWorld) (~120 KiB on 64-bit); the
+// depths come from memory_profile.h and default to upstream scsynth's fixed
+// sizes. MsgFifo enforces the power-of-two / minimum-depth invariant itself.
+typedef MsgFifoNoFree<TriggerMsg, SC_TRIGGERS_FIFO_SIZE> TriggersFifo;
+typedef MsgFifoNoFree<NodeReplyMsg, SC_NODE_REPLY_FIFO_SIZE> NodeReplyFifo;
+typedef MsgFifoNoFree<NodeEndMsg, SC_NODE_ENDS_FIFO_SIZE> NodeEndsFifo;
 typedef HashTable<struct GraphDef, Malloc> GrafDefTable;
 
 typedef std::map<struct ReplyAddress, uint32> ClientIDDict;

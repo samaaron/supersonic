@@ -36,6 +36,10 @@
  *   Scheduler pool ....................... shared_memory.h / scheduler/EngineScheduler.h
  *     SCHEDULER_DATA_POOL_SIZE             bundle data pool bytes
  *     SCHEDULER_SLOT_COUNT                 max scheduled bundles
+ *   Notification FIFOs ................... synth/server/SC_HiddenWorld.h
+ *     SC_TRIGGERS_FIFO_SIZE               /tr trigger queue depth
+ *     SC_NODE_REPLY_FIFO_SIZE             node-reply queue depth
+ *     SC_NODE_ENDS_FIFO_SIZE              /n_go,/n_end queue depth
  *   RT heap (AllocPool) .................. supersonic_config.h / supersonic_heap.cpp
  *     SUPERSONIC_HEAP_SIZE                 nominal pool bytes
  *     SUPERSONIC_HEAP_GROWTH_SIZE          growth-area bytes when exhausted (Bulk tier)
@@ -181,6 +185,18 @@
 #endif
 #ifndef SCHEDULER_SLOT_COUNT
 #define SCHEDULER_SLOT_COUNT 512
+#endif
+
+// Notification FIFO depths (SC_HiddenWorld.h). Defaults match upstream scsynth's
+// fixed sizes; MsgFifo requires each to be a power of two >= 2.
+#ifndef SC_TRIGGERS_FIFO_SIZE
+#define SC_TRIGGERS_FIFO_SIZE 1024
+#endif
+#ifndef SC_NODE_REPLY_FIFO_SIZE
+#define SC_NODE_REPLY_FIFO_SIZE 1024
+#endif
+#ifndef SC_NODE_ENDS_FIFO_SIZE
+#define SC_NODE_ENDS_FIFO_SIZE 1024
 #endif
 
 // RT heap (AllocPool)
