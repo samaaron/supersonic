@@ -24,16 +24,29 @@ Copyright (c) 2008 Dan Stowell. All rights reserved.
 #include "SC_Types.h"
 
 // These specify the min & max FFT sizes expected (used when creating windows, also allocating some other arrays).
+// SC_FFT_LOG2_MAXSIZE bounds the window + twiddle tables that
+// scfft_global_initialization() precomputes eagerly at static-init (~0.6 MB at
+// the default 15 / 32768-point transform). It is overridable so a memory-
+// constrained build can cap it (e.g. -DSC_FFT_LOG2_MAXSIZE=11 for 2048-point,
+// ~40 KB of tables); larger transforms are still created lazily on first use.
 #define SC_FFT_MINSIZE 8
 #define SC_FFT_LOG2_MINSIZE 3
-#define SC_FFT_MAXSIZE 32768
+#ifndef SC_FFT_LOG2_MAXSIZE
 #define SC_FFT_LOG2_MAXSIZE 15
+#endif
+#define SC_FFT_MAXSIZE (1 << (SC_FFT_LOG2_MAXSIZE))
 
 
 // Note that things like *fftWindow actually allow for other sizes, to be created on user request.
 #define SC_FFT_ABSOLUTE_MAXSIZE 262144
 #define SC_FFT_LOG2_ABSOLUTE_MAXSIZE 18
 #define SC_FFT_LOG2_ABSOLUTE_MAXSIZE_PLUS1 19
+
+// The eager-init loops and the fftWindow/cosTable arrays are sized to the
+// absolute max, so a raised SC_FFT_LOG2_MAXSIZE must not exceed it.
+#if SC_FFT_LOG2_MAXSIZE > SC_FFT_LOG2_ABSOLUTE_MAXSIZE
+#error "SC_FFT_LOG2_MAXSIZE exceeds SC_FFT_LOG2_ABSOLUTE_MAXSIZE"
+#endif
 
 struct scfft;
 
