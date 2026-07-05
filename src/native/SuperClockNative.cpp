@@ -27,7 +27,10 @@
 #include "native/LinkSession.h"
 #include "native/MidiTimelines.h"
 #include "native/TimeSource.h"
+#include "native/WallClock.h"
 #include "shared_memory.h"
+
+#include <cmath>
 
 #if SUPERSONIC_WORKLET_CLOCK
 // Resolves to the real emscripten header on WASM and to the NativeShim stub on
@@ -312,6 +315,22 @@ size_t SuperClock::numPeers() const {
 
 int64_t SuperClock::linkClockMicros() const {
     return mImpl->linkSession.clockMicros();
+}
+
+int64_t SuperClock::ntpNowMicros() const {
+    return (int64_t)std::llround(wallClockNTP() * 1e6);
+}
+
+int64_t SuperClock::linkMicrosToNtpMicros(int64_t linkMicros) const {
+    // Offset sampled fresh in-process: wallClockNTP() and the Link clock are
+    // read microseconds apart, so there's no drift to accumulate and no per-boot
+    // epoch to track on the client. Recomputed every call, so it's always
+    // current — including right after a wake, once the Link clock resumes.
+    return linkMicros + (ntpNowMicros() - linkClockMicros());
+}
+
+int64_t SuperClock::ntpMicrosToLinkMicros(int64_t ntpMicros) const {
+    return ntpMicros - (ntpNowMicros() - linkClockMicros());
 }
 
 int64_t SuperClock::timeForIsPlayingMicros() const {

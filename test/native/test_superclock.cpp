@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <string>
@@ -332,6 +333,57 @@ TEST_CASE("SuperClock: midi tempo feed sets bpm and advances beats",
     const int64_t back = sc.timelineTimeAtBeatLinkMicros(id, b1, 4.0);
     CHECK(static_cast<double>(back) == Catch::Approx(t + 1'000'000).epsilon(1e-6));
 }
+
+TEST_CASE("SuperClock: NTP conversion is wall-clock domain and round-trips",
+          "[SuperClock]") {
+    SuperClock sc;
+    auto near = [](int64_t a, int64_t b, int64_t tol) {
+        const int64_t d = a - b; return (d < 0 ? -d : d) <= tol;
+    };
+
+    // ntpNowMicros is the current wall time in NTP micros — a large value
+    // (micros since 1900), proving it is the wall-clock domain, NOT the mach
+    // Link clock (a small per-boot epoch). This is the domain Spider schedules
+    // in, so it never carries a measured mach->wall offset.
+    const int64_t ntpNow = sc.ntpNowMicros();
+    const int64_t link   = sc.linkClockMicros();
+    CHECK(ntpNow > 3'000'000'000LL * 1'000'000LL);   // > 3e9 s since 1900 → year ~1995+
+    CHECK(ntpNow > link);                            // NTP epoch (1900) >> per-boot mach
+
+    // The live Link clock converts to ~now (both clocks read microseconds apart
+    // inside the call), and NTP <-> Link round-trips losslessly within jitter.
+    CHECK(near(sc.linkMicrosToNtpMicros(link), ntpNow, 50'000));   // 50ms
+    const int64_t future = link + 5'000'000;                       // +5s (mach micros)
+    CHECK(near(sc.ntpMicrosToLinkMicros(sc.linkMicrosToNtpMicros(future)), future, 50'000));
+}
+
+#ifdef SUPERSONIC_LINK
+// Regression: a LOCAL tempo change must fire the tempo-changed callback EXACTLY
+// ONCE. Link posts async session-timing work on every commitAppSessionState —
+// local commits included (see eventuallyBpm above) — and that async handler
+// invokes the tempo callback. setBpm must therefore NOT also fire it directly,
+// or every local set (widget / use_bpm / set_link_bpm) double-broadcasts
+// /clock/notify/tempo and re-anchors beat_origin twice.
+TEST_CASE("SuperClock: a local setBpm fires the tempo callback exactly once",
+          "[SuperClock][Link]") {
+    SuperClock sc;
+    std::atomic<int> notifications{0};
+    sc.setTempoChangedCallback([&](double) { notifications.fetch_add(1); });
+
+    sc.setBpm(90.0, 0.0);   // 90 != default 60, so it is a real change
+
+    // Wait for the notification to land (Link's handler runs on its io thread),
+    // then give any duplicate a generous window to surface before asserting.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (notifications.load() < 1
+           && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    REQUIRE(notifications.load() >= 1);   // the notify happened at all
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));  // let a dup show
+    CHECK(notifications.load() == 1);     // exactly one — no double-fire
+}
+#endif  // SUPERSONIC_LINK
 
 TEST_CASE("SuperClock: midi tempo change preserves the current beat",
           "[SuperClock][midi]") {

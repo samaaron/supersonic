@@ -136,6 +136,17 @@ public:
     double  timelinePhaseAtLinkTime(int id, int64_t timeMicros, double quantum) const;
     int64_t timelineTimeAtBeatLinkMicros(int id, double beat, double quantum) const;
 
+    // NTP (wall-clock) domain, for scheduling clients (Spider). The Link clock is
+    // a per-boot monotonic clock (mach_absolute_time on macOS) — an arbitrary
+    // epoch that freezes during system sleep — so a remote client mapping it to
+    // wall time must carry a measured, drift-prone offset. These convert at the
+    // engine, sampling both clocks in-process microseconds apart (exact, always
+    // fresh), so the client needs only the fixed NTP<->Unix epoch constant.
+    // ntpNowMicros() is the current wall time in NTP micros.
+    int64_t ntpNowMicros() const;
+    int64_t linkMicrosToNtpMicros(int64_t linkMicros) const;
+    int64_t ntpMicrosToLinkMicros(int64_t ntpMicros) const;
+
     // Enumeration snapshot for /clock/timelines/get.
     struct TimelineInfo {
         std::string name;            // wire identity: "link" | "midi:<handle>"

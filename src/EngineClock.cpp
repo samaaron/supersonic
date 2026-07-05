@@ -161,7 +161,7 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("rpc/beat_at_time.reply", ra, sizeof(ra)))
-              << clock.timelineBeatAtLinkTime(id, t, q);
+              << clock.timelineBeatAtLinkTime(id, clock.ntpMicrosToLinkMicros(t), q);
             finish(s);
             return true;
         }
@@ -174,7 +174,7 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("rpc/phase_at_time.reply", ra, sizeof(ra)))
-              << clock.timelinePhaseAtLinkTime(id, t, q);
+              << clock.timelinePhaseAtLinkTime(id, clock.ntpMicrosToLinkMicros(t), q);
             finish(s);
             return true;
         }
@@ -187,7 +187,8 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("rpc/time_at_beat.reply", ra, sizeof(ra)))
-              << static_cast<osc::int64>(clock.timelineTimeAtBeatLinkMicros(id, b, q));
+              << static_cast<osc::int64>(
+                     clock.linkMicrosToNtpMicros(clock.timelineTimeAtBeatLinkMicros(id, b, q)));
             finish(s);
             return true;
         }
@@ -236,7 +237,7 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/time/now.reply")
-              << static_cast<osc::int64>(clock.linkClockMicros());
+              << static_cast<osc::int64>(clock.ntpNowMicros());
             finish(s);
             return true;
         }

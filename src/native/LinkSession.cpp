@@ -104,6 +104,32 @@ struct LinkSession::Impl {
     std::atomic<int>        deferredLinkEnableReq{-1};
     std::atomic<bool>       deferredQuit{false};
 
+    // App tempo-changed callback (→ /clock/notify/tempo broadcast). Set once at
+    // boot; invoked for BOTH remote peer changes (via Link's setTempoCallback)
+    // and local sets (via setBpm) so Spider's cached tempo never goes stale.
+    std::function<void(double)> appTempoCb;
+
+    // Mirror a new session tempo into the SAB, re-anchor beat_origin so mirror-
+    // domain beatAtTime stays coherent with Link-domain beatAtTime under the new
+    // tempo, then fire the app callback. Runs on Link's network thread (remote)
+    // or the caller thread (local setBpm) — both non-RT, both use the app-safe
+    // captureAppSessionState.
+    void applyTempoChange(double bpmIn) {
+        double bpm = bpmIn;
+        if (!(bpm >= 1.0)) bpm = 1.0;
+        SuperClockState* s = clock.state();
+        if (s) s->bpm.store(doubleToBits(bpm), std::memory_order_relaxed);
+        auto st = link.captureAppSessionState();
+        const auto now = link.clock().micros();
+        constexpr double kBeatOriginQuantum = 4.0;
+        const double currentBeat = st.beatAtTime(now, kBeatOriginQuantum);
+        const double wallNow = wallClockNTP();
+        const double newOrigin = wallNow - currentBeat * 60.0 / bpm;
+        if (s) s->beat_origin_ntp.store(doubleToBits(newOrigin),
+                                        std::memory_order_relaxed);
+        if (appTempoCb) appTempoCb(bpm);
+    }
+
     explicit Impl(SuperClock& c, std::function<void()> tick)
         : clock(c), periodicTick(std::move(tick)) {}
 };
@@ -170,11 +196,15 @@ void LinkSession::setBpm(double bpm) {
     auto st = mImpl->link.captureAppSessionState();
     st.setTempo(bpm, mImpl->link.clock().micros());
     mImpl->link.commitAppSessionState(st);
-    // Mirror the input. Link's tempo callback re-syncs the mirror to Link's
-    // converged value when peers exist.
+    // Mirror the input synchronously so getBpm() reflects it immediately. Link's
+    // tempo callback (applyTempoChange) then re-syncs the mirror to Link's
+    // converged value and re-anchors beat_origin. commitAppSessionState posts
+    // async session-timing work on EVERY tempo change — local commits included,
+    // not just remote peers — so that callback also delivers the
+    // /clock/notify/tempo broadcast for this local set. Firing appTempoCb here
+    // as well would double-notify (and double re-anchor) on every local set.
     SuperClockState* s = mImpl->clock.state();
-    if (!s) return;
-    s->bpm.store(doubleToBits(bpm), std::memory_order_relaxed);
+    if (s) s->bpm.store(doubleToBits(bpm), std::memory_order_relaxed);
 }
 
 void LinkSession::setIsPlaying(bool playing, double atNtpSeconds) {
@@ -376,28 +406,15 @@ const char* LinkSession::peerName() const {
 // ─── Event callbacks (fired on Link's network thread; mirror into SAB) ───────
 
 void LinkSession::setTempoChangedCallback(std::function<void(double)> cb) {
-    // Mirror remote-peer tempo into the SAB and recompute beat_origin_ntp under
-    // the new tempo so mirror-domain beatAtTime stays coherent with Link-domain
-    // beatAtTime.
+    // One shared path for tempo changes (applyTempoChange): mirror into the SAB,
+    // re-anchor beat_origin, then fire cb. Link invokes it for remote peers; the
+    // local setBpm invokes it directly. cb may be empty (shutdown clears it) —
+    // applyTempoChange null-checks it, and clamps bpm so a corrupt peer's NaN
+    // can't leak out.
     auto* impl = mImpl.get();
-    mImpl->link.setTempoCallback(
-        [cb = std::move(cb), impl](const double bpmIn) {
-            double bpm = bpmIn;
-            if (!(bpm >= 1.0)) bpm = 1.0;
-            SuperClockState* s = impl->clock.state();
-            if (s) s->bpm.store(doubleToBits(bpm), std::memory_order_relaxed);
-            auto st = impl->link.captureAppSessionState();
-            const auto now = impl->link.clock().micros();
-            constexpr double kBeatOriginQuantum = 4.0;
-            const double currentBeat = st.beatAtTime(now, kBeatOriginQuantum);
-            const double wallNow = wallClockNTP();
-            const double newOrigin = wallNow - currentBeat * 60.0 / bpm;
-            if (s) s->beat_origin_ntp.store(doubleToBits(newOrigin),
-                                            std::memory_order_relaxed);
-            // cb may be empty (shutdown's setTempoChangedCallback({})). Pass
-            // clamped bpm so a corrupt peer's NaN doesn't leak out.
-            if (cb) cb(bpm);
-        });
+    impl->appTempoCb = std::move(cb);
+    impl->link.setTempoCallback(
+        [impl](const double bpmIn) { impl->applyTempoChange(bpmIn); });
 }
 
 void LinkSession::setNumPeersChangedCallback(std::function<void(std::size_t)> cb) {
