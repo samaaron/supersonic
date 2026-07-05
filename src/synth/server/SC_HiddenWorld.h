@@ -82,17 +82,9 @@ struct NodeEndMsg {
     void Perform();
 };
 
-struct DeleteGraphDefMsg {
-    struct GraphDef* mDef;
-
-    void Perform();
-};
-
-
 typedef MsgFifoNoFree<TriggerMsg, 1024> TriggersFifo;
 typedef MsgFifoNoFree<NodeReplyMsg, 1024> NodeReplyFifo;
 typedef MsgFifoNoFree<NodeEndMsg, 1024> NodeEndsFifo;
-typedef MsgFifoNoFree<DeleteGraphDefMsg, 512> DeleteGraphDefsFifo;
 typedef HashTable<struct GraphDef, Malloc> GrafDefTable;
 
 typedef std::map<struct ReplyAddress, uint32> ClientIDDict;
@@ -117,7 +109,6 @@ struct HiddenWorld {
     TriggersFifo mTriggers;
     NodeReplyFifo mNodeMsgs;
     NodeEndsFifo mNodeEnds;
-    DeleteGraphDefsFifo mDeleteGraphDefs;
 
 #ifndef SC_LEAN_TARGET
     boost::sync::semaphore* mQuitProgram;

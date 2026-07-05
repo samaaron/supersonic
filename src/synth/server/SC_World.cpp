@@ -1501,8 +1501,6 @@ void NodeEndMsg::Perform() {
         SendReply(&addr, packet.data(), packet.size());
 }
 
-void DeleteGraphDefMsg::Perform() { GraphDef_Free(mDef); }
-
 void NotifyNoArgs(World* inWorld, char* inString);
 void NotifyNoArgs(World* inWorld, char* inString) {
     small_scpacket packet;

@@ -73,6 +73,7 @@ add_executable(SuperSonicNativeTests
     test_input_fallback.cpp
     test_no_audio_device.cpp
     test_rt_alloc.cpp
+    test_graphdef_leak.cpp
     test_superclock.cpp
     test_event_scheduler.cpp
     test_reply_routing.cpp

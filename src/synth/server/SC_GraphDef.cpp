@@ -452,16 +452,16 @@ SCErr SendReplyCmd_d_removed(World* inWorld, int inSize, char* inData, ReplyAddr
 }
 
 SCErr GraphDef_DeleteMsg(World* inWorld, GraphDef* inDef) {
-    DeleteGraphDefMsg msg;
-    msg.mDef = inDef;
-    inWorld->hw->mDeleteGraphDefs.Write(msg);
-
     small_scpacket packet;
     packet.adds("/d_removed");
     packet.maketags(2);
     packet.addtag(',');
     packet.addtag('s');
     packet.adds((char*)inDef->mNodeDef.mName);
+
+    // Single-threaded engine: free the def inline. inDef is unused past this
+    // point — its name is already copied into packet.
+    GraphDef_Free(inDef);
 
     for (auto addr : *inWorld->hw->mUsers) {
         SCErr const err = SendReplyCmd_d_removed(inWorld, packet.size(), packet.data(), &addr);
