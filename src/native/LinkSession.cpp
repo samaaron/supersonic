@@ -80,7 +80,7 @@ struct LinkSession::Impl {
     // Link starts disabled; setLinkVisibility(non-Off) flips peer discovery on.
     // While disabled the instance still hosts session state — we read
     // tempo/transport from it even with no peers.
-    ableton::LinkAudio link{120.0, "SuperSonic"};
+    ableton::LinkAudio link{supersonic::kDefaultBpm, "SuperSonic"};
 
     // RT priority for Link's network thread. Without it the receiver hears
     // periodic packet-burst pulsing when the OS preempts the thread (mirrors

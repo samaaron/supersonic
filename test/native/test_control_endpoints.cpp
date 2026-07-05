@@ -10,6 +10,7 @@
  * transport into an engine module without a silent regression slipping through.
  */
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
@@ -41,6 +42,32 @@ TEST_CASE("link control commands route through the ingress to their handlers",
     expectReply(fx, "/clock/peers/count/get", "/clock/peers/count.reply");
     expectReply(fx, "/clock/peer_name/get", "/clock/peer_name.reply");
     expectReply(fx, "/clock/time/now/get", "/clock/time/now.reply");
+}
+
+// Config::defaultBpm seeds the session tempo at init, so the engine opens at the
+// embedder's tempo (Sonic Pi boots at 60) instead of the built-in default (120).
+// Seeded at init — NOT a post-boot /clock/tempo/set — so bpm and beat_origin are
+// consistent from the first read (a set re-anchors beat_origin asynchronously,
+// leaving a window where the two disagree).
+TEST_CASE("clock: engine opens at Config::defaultBpm", "[control][clock]") {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.defaultBpm = 60.0;
+    EngineFixture fx(cfg);
+
+    fx.send(osc_test::message("/clock/tempo/get"));
+    OscReply r;
+    REQUIRE(fx.waitForReply("/clock/tempo.reply", r));
+    CHECK(r.parsed().argDouble(0) == Catch::Approx(60.0).epsilon(1e-6));
+}
+
+// No override → the built-in 120 default is unchanged.
+TEST_CASE("clock: default tempo is 120 when Config::defaultBpm is unset",
+          "[control][clock]") {
+    EngineFixture fx;  // defaultConfig(): defaultBpm == kDefaultBpm (120)
+    fx.send(osc_test::message("/clock/tempo/get"));
+    OscReply r;
+    REQUIRE(fx.waitForReply("/clock/tempo.reply", r));
+    CHECK(r.parsed().argDouble(0) == Catch::Approx(120.0).epsilon(1e-6));
 }
 
 // The optional <timeline> segment routes /clock/<tl>/<verb> to a timeline:

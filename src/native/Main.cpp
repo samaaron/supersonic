@@ -197,6 +197,7 @@ int main(int argc, char* argv[]) {
                 "  -B <addr>    Bind address (default: all interfaces)\n"
                 "  -H <words>   Audio device (fuzzy match on 'Driver : Device')\n"
                 "  -v           Print version and exit\n"
+                "  --default-bpm <n>  Opening session tempo (default 120)\n"
                 "  --list-devices     List audio devices and exit\n\n"
             );
             return 0;
@@ -258,6 +259,14 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         const char* arg = argv[i];
         const char* val = nextArg(i, argc, argv);
+
+        // Opening session tempo (BPM). Long flag — the single-char switch below
+        // only matches "-x". Seeded at init so the engine opens at this tempo
+        // consistently; embedders (Sonic Pi) pass it to boot at their default.
+        if (std::strcmp(arg, "--default-bpm") == 0) {
+            if (val) { cfg.defaultBpm = std::atof(val); ++i; }
+            continue;
+        }
 
         if (arg[0] == '-' && arg[1] != '\0' && arg[2] == '\0' && val) {
             switch (arg[1]) {

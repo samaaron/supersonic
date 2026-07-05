@@ -97,6 +97,11 @@ public:
         bool   freewheelClock           = false;   // deterministic sample-derived
                                                    // NTP (no wall-clock drift IIR);
                                                    // for offline/accuracy tests.
+        double defaultBpm               = supersonic::kDefaultBpm;  // tempo the engine
+                                                   // opens at; embedders (e.g. Sonic
+                                                   // Pi) override. Seeded at init so
+                                                   // it is consistent from the first
+                                                   // clock read — not a post-boot set.
         bool   callbackWatchdog         = false;   // monitor audio-callback liveness:
                                                    // when processCount freezes for
                                                    // watchdogStallMs the source is

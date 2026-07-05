@@ -117,6 +117,21 @@ float ParsedReply::argFloat(int index) const {
     return 0.0f;
 }
 
+double ParsedReply::argDouble(int index) const {
+    try {
+        osc::ReceivedPacket pkt(reinterpret_cast<const char*>(raw.data()), raw.size());
+        osc::ReceivedMessage msg(pkt);
+        auto it = msg.ArgumentsBegin();
+        for (int i = 0; i < index && it != msg.ArgumentsEnd(); ++i, ++it) {}
+        if (it != msg.ArgumentsEnd()) {
+            if (it->IsDouble()) return it->AsDoubleUnchecked();
+            if (it->IsFloat())  return it->AsFloatUnchecked();
+            if (it->IsInt32())  return static_cast<double>(it->AsInt32Unchecked());
+        }
+    } catch (...) {}
+    return 0.0;
+}
+
 std::string ParsedReply::argString(int index) const {
     try {
         osc::ReceivedPacket pkt(reinterpret_cast<const char*>(raw.data()), raw.size());

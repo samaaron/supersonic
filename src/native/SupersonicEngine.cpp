@@ -931,6 +931,17 @@ void SupersonicEngine::init(const Config& cfg) {
     mSuperClock.bindStateToShm(
         reinterpret_cast<SuperClockState*>(arena + SUPERCLOCK_STATE_START));
 
+    // Seed the session tempo before any consumer can read the clock (the audio
+    // source and /clock RPCs come up later) and before the tempo-changed callback
+    // is installed, so the engine opens at the embedder's tempo with no notify and
+    // no transient. Seeding here — rather than a post-boot /clock/tempo/set — is
+    // what keeps bpm and beat_origin consistent from the first read: a later set
+    // mirrors bpm immediately but re-anchors beat_origin on Link's thread async,
+    // leaving a window where the two disagree. Skip when it equals the constructed
+    // default so that path stays byte-for-byte unchanged.
+    if (cfg.defaultBpm != supersonic::kDefaultBpm)
+        mSuperClock.setBpm(cfg.defaultBpm, 0.0);
+
     // The arena is populated by init_memory() (run synchronously inside
     // initialiseWorld). Publish the segment — store MAGIC last — so a
     // cross-process reader that observes MAGIC sees fully-initialised regions

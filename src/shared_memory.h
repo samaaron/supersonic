@@ -37,6 +37,12 @@ inline double bitsToDouble(uint64_t bits) {
     return v;
 }
 
+// Session tempo a fresh boot opens at, before any peer, local set, or embedder
+// override. Matches Ableton Link's own default; single source for the SAB seed,
+// the Link session ctor, and Config::defaultBpm. An embedder (e.g. Sonic Pi)
+// overrides it at construction via Config::defaultBpm.
+constexpr double kDefaultBpm = 120.0;
+
 }  // namespace supersonic
 
 // ============================================================================
@@ -338,7 +344,7 @@ struct alignas(8) SuperClockState {
     std::atomic<uint32_t> flags;                // 28-31: bit-packed session flags
 
     static void initDefaults(SuperClockState& s) {
-        s.bpm.store(supersonic::doubleToBits(120.0), std::memory_order_relaxed);
+        s.bpm.store(supersonic::doubleToBits(supersonic::kDefaultBpm), std::memory_order_relaxed);
         s.beat_origin_ntp.store(0u,                  std::memory_order_relaxed);
         s.is_playing_at_ntp.store(0u,                std::memory_order_relaxed);
         s.is_playing.store(0u,                       std::memory_order_relaxed);
