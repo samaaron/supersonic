@@ -60,6 +60,20 @@ TEST_CASE("clock: engine opens at Config::defaultBpm", "[control][clock]") {
     CHECK(r.parsed().argDouble(0) == Catch::Approx(60.0).epsilon(1e-6));
 }
 
+// transport/time must share the NTP wall-clock domain of its sibling /clock time
+// RPCs (time/now, time_at_beat), so a client can treat every /clock reply time
+// uniformly. It streams a raw Link-clock (mach) time otherwise — off by the
+// Link<->NTP offset. NTP-1900 micros are ~3.99e15; the raw mach clock is ~1e12
+// (µs since boot), so a 1e15 threshold cleanly separates the domains.
+TEST_CASE("clock: transport/time is in the NTP wall-clock domain like its siblings",
+          "[control][clock]") {
+    EngineFixture fx;
+    fx.send(osc_test::message("/clock/transport/time/get"));
+    OscReply r;
+    REQUIRE(fx.waitForReply("/clock/transport/time.reply", r));
+    CHECK(r.parsed().argInt64(0) > 1'000'000'000'000'000LL);
+}
+
 // No override → the built-in 120 default is unchanged.
 TEST_CASE("clock: default tempo is 120 when Config::defaultBpm is unset",
           "[control][clock]") {

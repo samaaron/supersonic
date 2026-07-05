@@ -50,6 +50,7 @@ struct ParsedReply {
 
     // Access typed arguments by index. Returns 0/0.0f/"" on out-of-range.
     int32_t     argInt(int index) const;
+    int64_t     argInt64(int index) const;
     float       argFloat(int index) const;
     double      argDouble(int index) const;
     std::string argString(int index) const;

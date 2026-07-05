@@ -146,7 +146,8 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("transport/time.reply", ra, sizeof(ra)))
-              << static_cast<osc::int64>(clock.timelineTimeForIsPlayingMicros(id));
+              << static_cast<osc::int64>(
+                     clock.linkMicrosToNtpMicros(clock.timelineTimeForIsPlayingMicros(id)));
             finish(s);
             return true;
         }

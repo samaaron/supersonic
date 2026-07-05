@@ -117,6 +117,20 @@ float ParsedReply::argFloat(int index) const {
     return 0.0f;
 }
 
+int64_t ParsedReply::argInt64(int index) const {
+    try {
+        osc::ReceivedPacket pkt(reinterpret_cast<const char*>(raw.data()), raw.size());
+        osc::ReceivedMessage msg(pkt);
+        auto it = msg.ArgumentsBegin();
+        for (int i = 0; i < index && it != msg.ArgumentsEnd(); ++i, ++it) {}
+        if (it != msg.ArgumentsEnd()) {
+            if (it->IsInt64()) return it->AsInt64Unchecked();
+            if (it->IsInt32()) return static_cast<int64_t>(it->AsInt32Unchecked());
+        }
+    } catch (...) {}
+    return 0;
+}
+
 double ParsedReply::argDouble(int index) const {
     try {
         osc::ReceivedPacket pkt(reinterpret_cast<const char*>(raw.data()), raw.size());
