@@ -337,7 +337,7 @@ TEST_CASE("SuperClock: midi tempo feed sets bpm and advances beats",
 TEST_CASE("SuperClock: NTP conversion is wall-clock domain and round-trips",
           "[SuperClock]") {
     SuperClock sc;
-    auto near = [](int64_t a, int64_t b, int64_t tol) {
+    auto approxEq = [](int64_t a, int64_t b, int64_t tol) {
         const int64_t d = a - b; return (d < 0 ? -d : d) <= tol;
     };
 
@@ -352,9 +352,9 @@ TEST_CASE("SuperClock: NTP conversion is wall-clock domain and round-trips",
 
     // The live Link clock converts to ~now (both clocks read microseconds apart
     // inside the call), and NTP <-> Link round-trips losslessly within jitter.
-    CHECK(near(sc.linkMicrosToNtpMicros(link), ntpNow, 50'000));   // 50ms
-    const int64_t future = link + 5'000'000;                       // +5s (mach micros)
-    CHECK(near(sc.ntpMicrosToLinkMicros(sc.linkMicrosToNtpMicros(future)), future, 50'000));
+    CHECK(approxEq(sc.linkMicrosToNtpMicros(link), ntpNow, 50'000));   // 50ms
+    const int64_t future = link + 5'000'000;                          // +5s (mach micros)
+    CHECK(approxEq(sc.ntpMicrosToLinkMicros(sc.linkMicrosToNtpMicros(future)), future, 50'000));
 }
 
 #ifdef SUPERSONIC_LINK
