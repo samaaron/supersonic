@@ -606,7 +606,7 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
             // (accepted=1|0 + reason) immediately; .done (success, device,
             // rate, buffer, error) when the swap finishes.
             std::string reason;
-            const bool accepted = mEngine->requestReopen(reason);
+            const bool accepted = mEngine->requestAudioRecovery(reason);
             char buf[512];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/supersonic/devices/reopen.reply")

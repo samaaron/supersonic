@@ -61,6 +61,8 @@ add_executable(SuperSonicNativeTests
     test_device_selection.cpp
     test_aggregate_buffer_clamp.cpp
     test_device_policy.cpp
+    test_audio_recovery.cpp
+    test_recover_audio.cpp
     test_scope_race.cpp
     test_heap_growth.cpp
     test_scheduler.cpp
@@ -69,7 +71,7 @@ add_executable(SuperSonicNativeTests
     test_benchmark.cpp
     test_bundle_sequential.cpp
     test_input_fallback.cpp
-    test_headless_fallback.cpp
+    test_no_audio_device.cpp
     test_rt_alloc.cpp
     test_superclock.cpp
     test_event_scheduler.cpp

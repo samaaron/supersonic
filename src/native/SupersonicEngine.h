@@ -41,6 +41,7 @@
 #include "SampleLoader.h"
 #include "SuperClock.h"
 #include "DeviceInfo.h"
+#include "AudioRecovery.h"
 #include "StateCache.h"
 #include "OscBuilder.h"
 #include "HeadlessDriver.h"
@@ -181,9 +182,11 @@ public:
     void scheduleDeviceSwitch(const std::string& devName,
                               const std::string& inputDevName,
                               double sampleRate, int bufferSize);
-    // Accept-or-reject a device reopen (in-flight + cooldown gated). On accept,
-    // launches the reopen worker and returns true; on reject fills `reason`.
-    bool requestReopen(std::string& reason);
+    // Accept-or-reject an audio-recovery attempt (in-flight + cooldown gated).
+    // On accept, launches recoverAudio() on mReopenThread and returns true; on
+    // reject fills `reason`. Called by the watchdog on a real-device stall and by
+    // the external /reopen OSC command.
+    bool requestAudioRecovery(std::string& reason);
 
     // --- Engine lifecycle state ---
     EngineState engineState() const { return mEngineState.load(); }
@@ -331,11 +334,11 @@ public:
     // with an in-flight switchDevice — two threads driving JUCE's
     // AudioDeviceManager concurrently can wedge the device's callback
     // thread. Public so tests can exercise the gate without a device.
-    bool tryAcquireSwapGate(std::unique_lock<std::mutex>& lk,
+    bool tryAcquireSwapGate(std::unique_lock<std::recursive_mutex>& lk,
                             int attempts, int sleepMs);
 
     // Test-only: hold the swap gate to simulate "a swap is in flight".
-    std::unique_lock<std::mutex> testHoldSwapGate();
+    std::unique_lock<std::recursive_mutex> testHoldSwapGate();
 
     // --- State cache ---
     StateCache& stateCache() { return mStateCache; }
@@ -403,6 +406,19 @@ private:
 
     juce::String reinitialiseWithDefaultsPreservingConfig();
 
+    // Destroy and recreate mDeviceManager, then re-open the default device and
+    // re-attach the audio callback. Unlike a reopen (which reuses the existing
+    // CoreAudio/HAL client), this forces a brand-new connection — the recovery
+    // for a hibernate-killed device where the IO thread is no longer driven by
+    // coreaudiod. Called only from recoverAudio() on mReopenThread under the swap
+    // gate — leaves the fresh manager initialised to the default device for the
+    // cold swap that follows. Empty return on success.
+    juce::String recreateDeviceManager();
+
+    // Detach listeners/callback, close the device, and release mDeviceManager.
+    // Shared by shutdown() and recreateDeviceManager().
+    void teardownDeviceManager();
+
     // ── Audio source state machine ──────────────────────────────────────────
     //
     // process_audio() runs from exactly one of two drivers:
@@ -425,9 +441,23 @@ public:
     enum class AudioSource { None, RealCallback, Headless };
     AudioSource audioSource() const { return mActiveSource.load(std::memory_order_acquire); }
 
+    // True when the running engine has no audio source because no real device
+    // could be opened — the recoverable "waiting for audio device" state. Not a
+    // deliberate headless / manual-pump build, and not a stopped engine. The
+    // watchdog drives recovery out of it so the engine self-heals when a device
+    // appears.
+    bool waitingForAudioDevice() const {
+        return mRunning.load()
+            && mActiveSource.load() == AudioSource::None
+            && !mHeadless
+            && !mCurrentConfig.manualAudioPump;
+    }
+
 private:
-    // Atomic: written by the watchdog thread (start/stopAudioSource) and read
-    // lock-free by audioSource() and status paths on other threads.
+    // Atomic: written on whichever thread runs start/stopAudioSource (boot,
+    // the watchdog, mReopenThread during recoverAudio, and the device-switch
+    // workers) and read lock-free by audioSource() and status paths on other
+    // threads.
     std::atomic<AudioSource> mActiveSource{AudioSource::None};
 
     AudioSource desiredAudioSource() const;
@@ -586,11 +616,24 @@ private:
     void executePendingSwitch();
 
     // Device reopen — rejected while one is in flight or within a short cooldown
-    // after completion; accepted requests run on a worker thread.
+    // after completion; accepted requests run on mReopenThread.
     std::atomic<bool>          mReopenInProgress{false};
-    std::chrono::steady_clock::time_point mLastReopenFinishedAt{};
+    // steady_clock millis at the last recovery's completion. Atomic: written by
+    // the recovery worker, read by the watchdog / control threads. 0 = never.
+    std::atomic<int64_t>       mLastReopenFinishedAtMs{0};
+    // Recreate the device manager, rebuild the real device, and promote back to
+    // it — or, if none opens, settle into the idle "waiting for audio device"
+    // state. Runs on mReopenThread (a dedicated worker, launched by
+    // requestAudioRecovery) so it works on every platform: the Linux standalone
+    // loop never pumps the JUCE message queue, and this keeps the multi-second
+    // swap off the message thread everywhere.
     std::thread                mReopenThread;
-    void executeReopen();
+    void recoverAudio();
+    // Broadcast /supersonic/devices/reopen.done to Spider/GUI. Every accepted
+    // recovery reports exactly one of these so a /reopen caller never hangs.
+    void broadcastReopenDone(bool success, const std::string& deviceName,
+                             double sampleRate, int bufferSize,
+                             const std::string& error);
 
     // Callback-starvation watchdog (Config::callbackWatchdog) — samples
     // processCount and recovers a source whose callbacks stopped.
@@ -633,7 +676,12 @@ private:
     std::string              mLastInputDeviceName;    // saved on disable, restored on re-enable
     std::string              mRealOutputDeviceName;   // actual output device behind aggregate
     std::string              mRealInputDeviceName;    // actual input device behind aggregate
-    std::mutex               mSwapMutex;
+    // Recursive so the device readers (currentDevice/listDevices/currentDriver/
+    // listDrivers/sendDeviceReport) can take it to serialise against device
+    // mutations without deadlocking the mutation paths that call those readers
+    // while already holding it, and so a recovery can hold it across
+    // reopenCurrentDevice (which re-takes it). mutable for the const readers.
+    mutable std::recursive_mutex mSwapMutex;
     std::chrono::steady_clock::time_point mLastSelfTriggeredChange{}; // suppress async change notifications from our own setAudioDeviceSetup
 
     // listDrivers() cache — avoids re-scanning every AudioIODeviceType

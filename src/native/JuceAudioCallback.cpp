@@ -287,6 +287,24 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     // thread too, else denormal reverb tails take the slow path and spike CPU.
     const juce::ScopedNoDenormals scopedNoDenormals;
 
+    // ── If paused, output silence and touch nothing else ──────────────────────
+    // Placed before the warmup counter, mSamplePosition and mLastCbTime reads
+    // below: during a device swap/recovery the control thread runs resume(),
+    // which resets exactly those fields, and a freshly-opened device can already
+    // be delivering callbacks on its own IO thread before resume() clears
+    // mPaused. Gating here keeps that callback off every resume-mutated field
+    // (the acquire pairs with resume()'s release, publishing the reset), so
+    // there's no data race — and no need to make those hot-path fields atomic.
+    if (mPaused.load(std::memory_order_acquire)) {
+        for (int ch = 0; ch < numOutputChannels; ++ch)
+            if (outputChannelData[ch])
+                std::memset(outputChannelData[ch], 0,
+                            static_cast<size_t>(numSamples) * sizeof(float));
+        processCount.fetch_add(1, std::memory_order_release);
+        processCount.notify_all();
+        return;
+    }
+
     int nIn  = juce::jmin(numInputChannels,  mNumInputChannels);
     int nOut = juce::jmin(numOutputChannels, mNumOutputChannels);
 
@@ -316,17 +334,6 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
                 std::memset(outputChannelData[ch], 0,
                             static_cast<size_t>(numSamples) * sizeof(float));
         mCallbackCount++;
-        processCount.fetch_add(1, std::memory_order_release);
-        processCount.notify_all();
-        return;
-    }
-
-    // ── If paused, output silence but keep worker threads alive ───────────
-    if (mPaused.load(std::memory_order_acquire)) {
-        for (int ch = 0; ch < nOut; ++ch)
-            if (outputChannelData[ch])
-                std::memset(outputChannelData[ch], 0,
-                            static_cast<size_t>(numSamples) * sizeof(float));
         processCount.fetch_add(1, std::memory_order_release);
         processCount.notify_all();
         return;

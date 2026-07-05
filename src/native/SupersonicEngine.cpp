@@ -2,6 +2,7 @@
  * SupersonicEngine.cpp
  */
 #include "SupersonicEngine.h"
+#include "supersonic_config.h"   // ss_log
 #include "scheduler/MidiClockOut.h"
 #include "AggregateDeviceHelper.h"
 #include "DevicePolicy.h"
@@ -1076,13 +1077,14 @@ void SupersonicEngine::init(const Config& cfg) {
             this, 0 /* drain everything available */);
     });
 
-    // Test hook for issue #3526: close the device before the source
-    // decision so startAudioSource() sees no current device and falls
-    // back to the headless driver.
+    // Test hook: close the device before the source decision so
+    // startAudioSource() sees no current device and enters the "waiting for
+    // audio device" state (the default engine never falls back to a silent
+    // driver — see desiredAudioSource).
     if (testForceNoCurrentDeviceAfterInit && mDeviceManager) {
         fprintf(stderr,
                 "[supersonic] testForceNoCurrentDeviceAfterInit: closing device "
-                "to exercise headless fallback path\n");
+                "to exercise the no-audio-device path\n");
         fflush(stderr);
         mDeviceManager->closeAudioDevice();
     }
@@ -1266,16 +1268,20 @@ void SupersonicEngine::shutdown() {
     // stop() bumps + notifies its wake word (processCount) and joins.
     mNrtGateway.stop();
 
-    // Stop the watchdog before joining the reopen worker — it can spawn a
-    // reopen (requestReopen) right up until it observes mWatchdogStop.
+    // Stop the watchdog before tearing down — it can launch a recovery
+    // (requestAudioRecovery) right up until it observes mWatchdogStop. The NRT
+    // gateway (the other requester) is already stopped above, so once the
+    // watchdog joins no new recovery can start. Join mReopenThread before
+    // teardownDeviceManager frees what it operates on: a recovery that already
+    // passed its mRunning check runs to completion and is waited on here.
     mWatchdogStop.store(true);
     if (mWatchdogThread.joinable()) mWatchdogThread.join();
+    if (mReopenThread.joinable())   mReopenThread.join();
 
-    // No control command can run now — join the device-orchestration workers
-    // before tearing down the device manager + egress they call into.
+    // No control command can run now — join the device-orchestration worker
+    // before tearing down the device manager + egress it calls into.
     mDebounceSwitchStop.store(true);
     if (mDebounceSwitchThread.joinable()) mDebounceSwitchThread.join();
-    if (mReopenThread.joinable()) mReopenThread.join();
 
     mHeadlessDriver.signalThreadShouldExit();
     mSampleLoader.signalThreadShouldExit();
@@ -1288,12 +1294,7 @@ void SupersonicEngine::shutdown() {
     // Wake SampleLoader's WaitableEvent so it can see threadShouldExit
     mSampleLoader.wake();
 
-    if (mDeviceManager) {
-        mDeviceManager->removeChangeListener(this);
-        mDeviceManager->removeAudioCallback(&mAudioCallback);
-        mDeviceManager->closeAudioDevice();
-        mDeviceManager.reset();
-    }
+    teardownDeviceManager();
 
 #ifdef __APPLE__
     if (mDefaultDevicePropertyListenerInstalled) {
@@ -1537,9 +1538,9 @@ void SupersonicEngine::executePendingSwitch() {
     mDebounceSwitchRunning.store(false);
 }
 
-bool SupersonicEngine::tryAcquireSwapGate(std::unique_lock<std::mutex>& lk,
+bool SupersonicEngine::tryAcquireSwapGate(std::unique_lock<std::recursive_mutex>& lk,
                                           int attempts, int sleepMs) {
-    lk = std::unique_lock<std::mutex>(mSwapMutex, std::defer_lock);
+    lk = std::unique_lock<std::recursive_mutex>(mSwapMutex, std::defer_lock);
     for (int i = 0; i < attempts; ++i) {
         if (lk.try_lock()) return true;
         std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
@@ -1547,8 +1548,8 @@ bool SupersonicEngine::tryAcquireSwapGate(std::unique_lock<std::mutex>& lk,
     return false;
 }
 
-std::unique_lock<std::mutex> SupersonicEngine::testHoldSwapGate() {
-    return std::unique_lock<std::mutex>(mSwapMutex);
+std::unique_lock<std::recursive_mutex> SupersonicEngine::testHoldSwapGate() {
+    return std::unique_lock<std::recursive_mutex>(mSwapMutex);
 }
 
 // Callback-starvation watchdog. The audio callback is the sole drain for
@@ -1559,12 +1560,18 @@ std::unique_lock<std::mutex> SupersonicEngine::testHoldSwapGate() {
 // stall window with a source nominally active and no swap/reopen in
 // flight, restart the source (headless) or request a device reopen (real).
 void SupersonicEngine::watchdogLoop() {
-    const auto stallWindow =
-        std::chrono::milliseconds(std::max(1, mCurrentConfig.watchdogStallMs));
-    const int pollMs = std::max(10, mCurrentConfig.watchdogPollMs);
+    const int64_t stallMs = std::max(1, mCurrentConfig.watchdogStallMs);
+    const int     pollMs  = std::max(10, mCurrentConfig.watchdogPollMs);
 
-    uint32_t lastCount   = mAudioCallback.processCount.load(std::memory_order_acquire);
-    auto     lastHealthy = std::chrono::steady_clock::now();
+    // Liveness by SUSTAINED ticks: a lone tick (one callback per failed attempt)
+    // reads as Confirming, not Live, so it can't masquerade as recovered. Ticks
+    // must sustain for a stall window to count as live.
+    sonicpi::audio::LivenessMonitor liveness(stallMs, stallMs);
+
+    auto nowMs = [] {
+        return (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    };
 
     while (!mWatchdogStop.load()) {
         // Sleep in small slices so shutdown joins quickly.
@@ -1573,137 +1580,228 @@ void SupersonicEngine::watchdogLoop() {
                 std::chrono::milliseconds(std::min(20, pollMs - slept)));
         if (mWatchdogStop.load()) return;
 
-        const auto now = std::chrono::steady_clock::now();
-
-        // Anything below counts as "healthy/expected", resetting the timer:
-        // engine not running, callbacks ticking, no source supposed to be
-        // active (manual pump / mid-transition), a swap holding the gate,
-        // or a reopen already in flight.
-        const uint32_t count =
-            mAudioCallback.processCount.load(std::memory_order_acquire);
-        bool healthy = false;
-        if (!mRunning.load() || count != lastCount
-            || mActiveSource.load() == AudioSource::None
-            || mReopenInProgress.load()) {
-            healthy = true;
-        } else if (mSwapMutex.try_lock()) {
-            mSwapMutex.unlock();
-        } else {
-            healthy = true;  // swap in flight — callbacks legitimately paused
-        }
-        lastCount = count;
-        if (healthy) {
-            lastHealthy = now;
-            continue;
-        }
-        if (now - lastHealthy < stallWindow) continue;
-
-        // Stalled: the source claims to be active but nothing has ticked for
-        // the whole window. Recover.
-        fprintf(stderr,
-                "[watchdog] audio callbacks stalled for %lld ms "
-                "(source=%s, processCount=%u) — recovering\n",
-                (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now - lastHealthy).count(),
-                mActiveSource.load() == AudioSource::RealCallback ? "device" : "headless",
-                count);
-        fflush(stderr);
-
-        mWatchdogRecoveries.fetch_add(1, std::memory_order_release);
-
-        if (mActiveSource.load() == AudioSource::Headless) {
-            // The headless driver thread died or wedged: restart it, under
-            // the swap gate so we can't race a device transition.
-            std::unique_lock<std::mutex> lk;
-            if (tryAcquireSwapGate(lk, 1, 0)
-                && mActiveSource.load() == AudioSource::Headless) {
-                stopAudioSource();
-                startAudioSource();
-            }
-        } else {
-            // Real device. If JUCE still has a current device, reopen it via
-            // the existing gated worker (self-rejects during cooldown; we
-            // retry on the next stall window). If it does NOT — a failed
-            // transition stopped the old device and opened nothing (e.g.
-            // "system default" from ASIO) — there is nothing to reopen:
-            // restart the audio source instead, which falls back to the
-            // headless driver and keeps the engine draining commands until
-            // a device comes back.
-            std::unique_lock<std::mutex> lk;
-            if (tryAcquireSwapGate(lk, 1, 0)) {
-                const bool hasDevice =
-                    mDeviceManager && mDeviceManager->getCurrentAudioDevice();
-                if (!hasDevice && mActiveSource.load() != AudioSource::None) {
-                    fprintf(stderr, "[watchdog] no current device — restarting "
-                            "audio source (headless fallback)\n");
-                    fflush(stderr);
-                    stopAudioSource();
-                    startAudioSource();
-                } else {
-                    lk.unlock();
-                    std::string reason;
-                    requestReopen(reason);
-                    fprintf(stderr, "[watchdog] reopen request: %s\n",
-                            reason.c_str());
-                    fflush(stderr);
+        // Waiting for an audio device (no device open, not a headless / manual-
+        // pump build). Keep trying to open one so the engine self-heals the
+        // moment a device appears (plug in / wake). requestAudioRecovery is
+        // cooldown-gated.
+        if (waitingForAudioDevice() && !mReopenInProgress.load()) {
+            // Skip while a swap holds the gate — the same guard the benign block
+            // below applies. A normal switchDevice passes through a transient
+            // mActiveSource==None window with the gate held and will bring a
+            // device up itself; racing a recovery into that window would, on
+            // winning the gate, recreate the device manager and revert to the
+            // system default — silently undoing the switch. The next poll retries
+            // once the gate frees.
+            bool swapInFlight = false;
+            if (mSwapMutex.try_lock()) mSwapMutex.unlock();
+            else swapInFlight = true;
+            if (!swapInFlight) {
+                std::string reason;
+                if (requestAudioRecovery(reason)) {
+                    mWatchdogRecoveries.fetch_add(1, std::memory_order_release);
+                    ss_log("[watchdog] no audio device — attempting to open one");
                 }
             }
+            continue;
         }
 
-        lastHealthy = std::chrono::steady_clock::now();
-        lastCount   = mAudioCallback.processCount.load(std::memory_order_acquire);
+        // States where a gap in ticks is expected, not a stall: engine not
+        // running, no source active (manual pump / mid-transition), a recovery
+        // already in flight, or a swap holding the gate. Skip sampling entirely
+        // so a legitimately-paused callback can't drift the monitor to a false
+        // stall.
+        bool benign = !mRunning.load()
+                   || mActiveSource.load() == AudioSource::None
+                   || mReopenInProgress.load();
+        if (!benign) {
+            if (mSwapMutex.try_lock()) mSwapMutex.unlock();
+            else benign = true;  // swap in flight — callbacks legitimately paused
+        }
+        if (benign) continue;
+
+        const int64_t  t     = nowMs();
+        const uint32_t count = mAudioCallback.processCount.load(std::memory_order_acquire);
+        liveness.observe(count, t);
+        const auto ph = liveness.phase(t);
+
+        if (mActiveSource.load() == AudioSource::Headless) {
+            // Explicit-headless build (tests / non-JUCE backends). If its timer
+            // thread died/wedged, restart it under the swap gate; otherwise it's
+            // ticking fine and there's no real device to recover.
+            if (ph == sonicpi::audio::LivenessPhase::Stalled) {
+                std::unique_lock<std::recursive_mutex> lk;
+                if (tryAcquireSwapGate(lk, 1, 0)
+                    && mActiveSource.load() == AudioSource::Headless) {
+                    mWatchdogRecoveries.fetch_add(1, std::memory_order_release);
+                    ss_log("[watchdog] headless driver stalled — restarting");
+                    stopAudioSource();
+                    startAudioSource();
+                }
+            }
+            continue;
+        }
+
+        // Real device source.
+        if (ph != sonicpi::audio::LivenessPhase::Stalled)
+            continue;  // Live (healthy) or Confirming (give the ticks the window)
+
+        // The device stopped delivering. Recover with a cold swap on a fresh
+        // connection. requestAudioRecovery is in-flight/cooldown gated, so only
+        // log (and count) when one actually starts — not on every poll of the
+        // stall.
+        std::string reason;
+        if (requestAudioRecovery(reason)) {
+            mWatchdogRecoveries.fetch_add(1, std::memory_order_release);
+            ss_log("[watchdog] audio device stalled (processCount=%u) — recovering", count);
+        }
     }
 }
 
-bool SupersonicEngine::requestReopen(std::string& reason) {
-    // Cooldown covers Spider's cold_swap_reinit — which reloads synthdefs,
-    // recreates groups + mixer + scope, and takes roughly 1-3 seconds. A
-    // shorter cooldown lets a second reopen race a still-running reinit and
-    // leaves Spider with missing synthdefs / groups.
-    constexpr int kReopenCooldownMs = 3000;
-    if (mReopenInProgress.load()) {
+bool SupersonicEngine::requestAudioRecovery(std::string& reason) {
+    // Space recoveries: the cooldown covers Spider's cold_swap_reinit after a
+    // successful promotion (reloads synthdefs / groups / mixer / scope, ~1-3 s);
+    // a tighter cooldown would race a still-running reinit.
+    constexpr int kRecoveryCooldownMs = 3000;
+
+    // Claim the in-flight slot atomically: the watchdog and the /reopen control
+    // thread can both reach here, and a load-then-store would let both pass and
+    // launch two recoveries back-to-back (the second interrupting the first's
+    // cold_swap_reinit — exactly what the cooldown exists to prevent).
+    bool expected = false;
+    if (!mReopenInProgress.compare_exchange_strong(expected, true)) {
         reason = "already in progress";
         return false;
     }
-    const auto sinceLast = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - mLastReopenFinishedAt).count();
-    if (sinceLast < kReopenCooldownMs) {
+
+    const int64_t now = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    const int64_t last = mLastReopenFinishedAtMs.load();
+    const int64_t sinceLast = last ? now - last : kRecoveryCooldownMs;
+    if (sinceLast < kRecoveryCooldownMs) {
+        mReopenInProgress.store(false);   // release the slot we just claimed
         char msg[96];
         snprintf(msg, sizeof(msg), "cooldown (%lld ms since last)",
                  (long long)sinceLast);
         reason = msg;
         return false;
     }
-    mReopenInProgress.store(true);
+
+    // Run on a dedicated worker (not the JUCE message thread): the Linux
+    // standalone loop never pumps that queue, so a posted recovery would never
+    // run there — and off the message thread the multi-second swap can't starve
+    // it anywhere. recoverAudio holds the swap gate throughout, which the
+    // message-thread device handlers (changeListenerCallback) already respect,
+    // so there's no race with them. The prior worker has long finished (the
+    // cooldown guarantees a gap); join it before reusing the handle.
     if (mReopenThread.joinable()) mReopenThread.join();
-    mReopenThread = std::thread(&SupersonicEngine::executeReopen, this);
+    mReopenThread = std::thread([this]() { recoverAudio(); });
     reason = "started";
     return true;
 }
 
-void SupersonicEngine::executeReopen() {
-    SwapResult result = reopenCurrentDevice();
+void SupersonicEngine::recoverAudio() {
+    // A recovery can still be queued/starting when shutdown begins; skip rather
+    // than operate on a torn-down engine. shutdown() sets mRunning=false and then
+    // joins mReopenThread: a recovery already past this check completes and is
+    // waited on, while one that hasn't started yet early-returns here.
+    if (!mRunning.load()) {
+        mReopenInProgress.store(false);
+        return;
+    }
 
+    // Recovery is a full cold swap on a FRESH connection:
+    //   1. recreateDeviceManager — a reopen reuses the hibernate-dead CoreAudio
+    //      connection; only a brand-new AudioDeviceManager gets a live,
+    //      coreaudiod-driven IO thread.
+    //   2. reopenCurrentDevice — the normal cold swap on that fresh manager:
+    //      it rebuilds the scsynth World and emits /supersonic/setup, which makes
+    //      Spider stop the now-dead jobs (the pre-outage timeline is closed by
+    //      hibernation) and rebuild its groups to match — so a fresh Run works
+    //      with no manual Stop, and there's no World/Spider mismatch.
+    // Hold the swap gate across the whole swap so recreateDeviceManager's
+    // mDeviceManager reset() is serialised against the device readers
+    // (currentDevice/listDevices/sendDeviceReport, which now take the gate) and
+    // any other swap. The gate is recursive, so reopenCurrentDevice re-taking it
+    // is fine; and it must be released before the reopen.done broadcast below
+    // (sendDeviceReport re-takes it) — hence the inner scope.
+    juce::String err;
+    bool restored = false;
+    SwapResult swap;   // device name/rate/buffer from the cold swap — reused below
+    {
+        std::unique_lock<std::recursive_mutex> lk;
+        if (!tryAcquireSwapGate(lk, 20, 50)) {
+            // Another thread genuinely holds the gate (a swap in flight) — it will
+            // re-establish audio. Tell any /reopen caller it didn't run (so it
+            // isn't left waiting), but DON'T stamp the cooldown: no recovery
+            // happened, so the watchdog must stay free to retry the moment the
+            // gate frees rather than sitting out a 3 s window for nothing.
+            broadcastReopenDone(false, {}, 0, 0,
+                                "device busy — another swap in progress");
+            mReopenInProgress.store(false);
+            return;
+        }
+        try {
+            stopAudioSource();                      // detach the dead callback
+            err = recreateDeviceManager();
+            if (err.isEmpty()) swap = reopenCurrentDevice();
+            restored = err.isEmpty() && swap.success
+                    && mActiveSource.load() == AudioSource::RealCallback;
+        } catch (const std::exception& ex) {
+            err = juce::String("recovery exception: ") + ex.what();
+        } catch (...) {
+            err = "recovery exception (unknown)";
+        }
+
+        // If the swap couldn't bring a source up (recreate opened no device, or
+        // an exception aborted mid-swap), run startAudioSource to settle into the
+        // right idle state: an explicit-headless build restarts its driver; the
+        // default build enters the "waiting for audio device" state, and the
+        // watchdog keeps retrying until a device appears.
+        if (mActiveSource.load() == AudioSource::None) {
+            try { startAudioSource(); } catch (...) {}
+        }
+    }   // release the gate before sendDeviceReport (which re-takes it)
+
+    ss_log("[recover] %s (err='%s')",
+           restored ? "restored real audio" : "device down — watchdog will retry",
+           err.toRawUTF8());
+
+    // Report to Spider/GUI over the reopen.done channel. On success Spider runs
+    // its cold-swap reinit; otherwise it's an informational failure. Report the
+    // fields the cold swap already resolved (single source of truth, and no
+    // ungated mDeviceManager read out here).
+    if (restored)
+        broadcastReopenDone(true, swap.deviceName, swap.sampleRate, swap.bufferSize, {});
+    else
+        broadcastReopenDone(false, {}, 0, 0,
+                            err.isEmpty() ? "audio device not yet recovered"
+                                          : err.toStdString());
+
+    if (restored) sendDeviceReport();
+
+    // ALWAYS clear the in-flight flag + stamp the cooldown, even after an
+    // exception above — otherwise mReopenInProgress leaks true and the watchdog
+    // (which treats it as benign) never recovers again for the rest of the session.
+    mLastReopenFinishedAtMs.store(
+        (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    mReopenInProgress.store(false);
+}
+
+void SupersonicEngine::broadcastReopenDone(bool success, const std::string& deviceName,
+                                           double sampleRate, int bufferSize,
+                                           const std::string& error) {
     char buf[1024];
     osc::OutboundPacketStream s(buf, sizeof(buf));
     s << osc::BeginMessage("/supersonic/devices/reopen.done")
-      << static_cast<osc::int32>(result.success ? 1 : 0)
-      << result.deviceName.c_str()
-      << static_cast<float>(result.sampleRate)
-      << static_cast<osc::int32>(result.bufferSize)
-      << (result.error.empty() ? "" : result.error.c_str())
+      << static_cast<osc::int32>(success ? 1 : 0)
+      << deviceName.c_str()
+      << static_cast<float>(sampleRate)
+      << static_cast<osc::int32>(bufferSize)
+      << (error.empty() ? "" : error.c_str())
       << osc::EndMessage;
-    // Deferred reply: broadcast reopen.done to the notify subscribers (which
-    // includes the requester). Broadcasting is robust to the origin token being
-    // evicted during the 1–3 s reopen, and frames into the NRT-out ring like all
-    // other off-thread egress — no socket touched here.
     mEgress.broadcastToTargets(reinterpret_cast<const uint8_t*>(s.Data()),
                                static_cast<uint32_t>(s.Size()));
-
-    if (result.success) sendDeviceReport();
-
-    mLastReopenFinishedAt = std::chrono::steady_clock::now();
-    mReopenInProgress.store(false);
 }
 
 void SupersonicEngine::sendSwitchDone(const SwapResult& result,
@@ -1736,6 +1834,9 @@ void SupersonicEngine::sendSwitchDone(const SwapResult& result,
 
 void SupersonicEngine::sendDeviceReport() {
     if (!mEgress.hasSubscribers()) return;
+    // Serialise mDeviceManager access against device mutations / recovery's
+    // recreate. Recursive: the mutation paths call this while holding the gate.
+    std::lock_guard<std::recursive_mutex> gate(mSwapMutex);
 
     // Skip rescan — sendDeviceReport() is usually called right after a
     // device switch, when rescanning would disrupt the freshly-opened device.
@@ -2181,6 +2282,10 @@ void SupersonicEngine::sendBundle(double ntpTimeSec, std::initializer_list<OscPa
 // --- Device management ---
 
 std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
+    // Serialise mDeviceManager access against device mutations / recovery's
+    // recreate (see mSwapMutex). Recursive: mutation paths call this under the
+    // gate. Lock order is always gate-then-mListDevicesMutex.
+    std::lock_guard<std::recursive_mutex> gate(mSwapMutex);
     std::vector<DeviceInfo> result;
     if (!mDeviceManager) return result;
 
@@ -2479,6 +2584,9 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
 }
 
 CurrentDeviceInfo SupersonicEngine::currentDevice() const {
+    // Serialise mDeviceManager access against device mutations / recovery's
+    // recreate (see mSwapMutex). Recursive: mutation paths call this under gate.
+    std::lock_guard<std::recursive_mutex> gate(mSwapMutex);
     CurrentDeviceInfo info;
     if (!mDeviceManager) return info;
 
@@ -2594,7 +2702,12 @@ CurrentDeviceInfo SupersonicEngine::currentDevice() const {
 SupersonicEngine::AudioSource SupersonicEngine::desiredAudioSource() const {
     if (mDeviceManager && mDeviceManager->getCurrentAudioDevice())
         return AudioSource::RealCallback;
-    return AudioSource::Headless;
+    // Headless is an EXPLICIT mode only — the test harness and future non-JUCE /
+    // WASM backends. For the default engine, no open device means None: a waiting
+    // state the watchdog recovers from when a device appears.
+    if (mHeadless)
+        return AudioSource::Headless;
+    return AudioSource::None;
 }
 
 void SupersonicEngine::startAudioSource() {
@@ -2627,19 +2740,15 @@ void SupersonicEngine::startAudioSource() {
 
     uint32_t before = mAudioCallback.processCount.load(std::memory_order_acquire);
 
-    if (desiredAudioSource() == AudioSource::RealCallback) {
+    const AudioSource desired = desiredAudioSource();
+    if (desired == AudioSource::RealCallback) {
         mDeviceManager->addAudioCallback(&mAudioCallback);
         // addChangeListener is idempotent (JUCE's ListenerList dedupes), so
         // re-attaching across hot-plug / swap sequences is harmless.
         mDeviceManager->addChangeListener(this);
         mActiveSource.store(AudioSource::RealCallback, std::memory_order_release);
-    } else {
-        if (mDeviceManager) {
-            fprintf(stderr,
-                    "[supersonic] no audio device opened, running via "
-                    "headless fallback driver\n");
-            fflush(stderr);
-        }
+    } else if (desired == AudioSource::Headless) {
+        // Explicit headless (mHeadless): tests and future non-JUCE backends.
         mHeadlessDriver.configure(&mAudioCallback, &mSampleLoader,
                                    mCurrentConfig.sampleRate,
                                    mCurrentConfig.bufferSize,
@@ -2648,6 +2757,16 @@ void SupersonicEngine::startAudioSource() {
         mHeadlessDriver.setSuperClock(&mSuperClock);
         mHeadlessDriver.startThread(juce::Thread::Priority::highest);
         mActiveSource.store(AudioSource::Headless, std::memory_order_release);
+    } else {
+        // No audio device on the default (JUCE) engine: stay sourceless and
+        // surface it. The watchdog keeps trying to open a device and cold-swaps
+        // in when one appears (plug in / wake). audioSource()==None with a live
+        // device manager is the "waiting for audio device" state.
+        mActiveSource.store(AudioSource::None, std::memory_order_release);
+        ss_log("[supersonic] no audio device available — engine is idle and will "
+               "recover when one appears");
+        sendDeviceReport();   // GUI sees an empty current device
+        return;               // nothing will tick; don't wait for a first block
     }
 
     waitForFirstAudioTick(before);
@@ -2803,14 +2922,15 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
     }
 
     // Post-init cleanup: we just switched away from whatever device we
-    // were on (aggregate or otherwise) to JUCE's default. If we were on
-    // an aggregate, drop the stale real-device-name state so
-    // currentDevice() reports the actual new device, not the previous
-    // aggregate's sub-devices. Same story for leftover aggregates in
-    // CoreAudio — clean them up now that JUCE has switched away.
-#ifdef __APPLE__
+    // were on (aggregate or otherwise) to JUCE's default. Drop the stale
+    // real-device-name state so currentDevice() and any following reopen target
+    // the actual new device, not the previous pinned/aggregate names. This must
+    // run on every platform — a later reopenCurrentDevice reads
+    // mRealOutputDeviceName, so a stale name on Win/Linux would reopen a gone
+    // device. The aggregate teardown itself is macOS-only.
     mRealOutputDeviceName.clear();
     mRealInputDeviceName.clear();
+#ifdef __APPLE__
     AggregateDeviceHelper::destroyPrevious();
     if (AggregateDeviceHelper::exists()) {
         AggregateDeviceHelper::destroy();
@@ -2897,7 +3017,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         result.error = "swap already in progress";
         return result;
     }
-    std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
+    std::lock_guard<std::recursive_mutex> guard(mSwapMutex, std::adopt_lock);
 
     // Resolve the requested device name(s) against the scoped driver:
     // mIntendedDriver if a switchDriver-no-pref pick is pending, else
@@ -3768,6 +3888,42 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     return result;
 }
 
+void SupersonicEngine::teardownDeviceManager() {
+    if (mDeviceManager) {
+        mDeviceManager->removeChangeListener(this);
+        mDeviceManager->removeAudioCallback(&mAudioCallback);
+        mDeviceManager->closeAudioDevice();
+        mDeviceManager.reset();
+    }
+}
+
+juce::String SupersonicEngine::recreateDeviceManager() {
+    // Release the stale, hibernate-killed CoreAudio/HAL client completely, then
+    // build a fresh manager. A reopen keeps this same dead connection; only a
+    // new manager gets a new IsolatedCoreAudioClient + AudioObjectIDs that
+    // coreaudiod will actually drive with a live IO thread. Runs on mReopenThread
+    // (the recovery worker — see requestAudioRecovery), holding the swap gate.
+    teardownDeviceManager();
+    mDeviceManager = std::make_unique<juce::AudioDeviceManager>();
+
+    // Open the device via the shared system-default reinit: it preserves the
+    // session sample rate, drops the now-stale aggregate / real-device names,
+    // and cleans up leftover aggregates — so the engine's cached device state
+    // stays consistent with what actually opened and a later reopen can't chase
+    // a dead aggregate.
+    juce::String err = reinitialiseWithDefaultsPreservingConfig();
+    if (err.isNotEmpty()) return err;
+    if (!mDeviceManager->getCurrentAudioDevice())
+        return "recreate: opened no device";
+
+    // Device is open but no callback/listener is attached yet — the caller
+    // (recoverAudio) promotes to it via startAudioSource() once it's confirmed
+    // this fresh connection actually ticks. Recovery falls back to the default
+    // output with no inputs (a pinned device / mic is not restored), but the
+    // cache cleared above keeps the rest of the engine consistent with that.
+    return {};
+}
+
 SwapResult SupersonicEngine::reopenCurrentDevice() {
     SwapResult result;
 
@@ -3922,6 +4078,10 @@ SwapResult SupersonicEngine::enableInputChannels(int numChannels) {
 // --- Audio driver management ---
 
 std::vector<std::string> SupersonicEngine::listDrivers() const {
+    // Serialise mDeviceManager access against device mutations / recovery's
+    // recreate (see mSwapMutex). Recursive: mutation paths call this under the
+    // gate. Lock order is always gate-then-mListDriversMutex.
+    std::lock_guard<std::recursive_mutex> gate(mSwapMutex);
     if (!mDeviceManager) return {};
 
     // Cache hit — skip the rescan. sendDeviceReport() is called many
@@ -3964,6 +4124,9 @@ std::vector<std::string> SupersonicEngine::listDrivers() const {
 }
 
 std::string SupersonicEngine::currentDriver() const {
+    // Serialise mDeviceManager access against device mutations / recovery's
+    // recreate (see mSwapMutex). Recursive: mutation paths call this under gate.
+    std::lock_guard<std::recursive_mutex> gate(mSwapMutex);
     if (!mDeviceManager) return "";
     if (auto* dev = mDeviceManager->getCurrentAudioDevice())
         return dev->getTypeName().toStdString();
@@ -4075,15 +4238,20 @@ SwapResult SupersonicEngine::switchDriver(const std::string& driverName) {
 // --- Device change detection ---
 
 void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
-    if (source != mDeviceManager.get()) return;
     if (!mRunning.load()) return;
 
     auto elapsed = std::chrono::steady_clock::now() - mLastSelfTriggeredChange;
     if (elapsed < std::chrono::seconds(1)) return;
+    // Non-blocking: if a swap/recovery holds the gate, skip this event rather
+    // than stall the message thread. The gate also serialises the mDeviceManager
+    // reads below — including the source-vs-current comparison — against
+    // recovery's recreateDeviceManager() reset(); that comparison used to run
+    // ungated at the top of this function.
     if (!mSwapMutex.try_lock()) {
         DEV_LOG("[hotplug] changeListenerCallback skipped — swap in progress\n");
         return;
     }
+    if (source != mDeviceManager.get()) { mSwapMutex.unlock(); return; }
 
     mLastSelfTriggeredChange = std::chrono::steady_clock::now();
 
@@ -4101,7 +4269,7 @@ void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
     bool scheduleInputReattach = false;
 
     {
-        std::lock_guard<std::mutex> guard(mSwapMutex, std::adopt_lock);
+        std::lock_guard<std::recursive_mutex> guard(mSwapMutex, std::adopt_lock);
 
         auto devices = listDevices(true);
         auto* dev = mDeviceManager->getCurrentAudioDevice();
@@ -4401,7 +4569,7 @@ std::string SupersonicEngine::setDeviceMode(const std::string& mode) {
             // wedge DirectSound's callback thread in a cursor-poll spin and
             // leave the whole server deaf. Bounded retry mirrors
             // executePendingSwitch (~3 s).
-            std::unique_lock<std::mutex> swapGate;
+            std::unique_lock<std::recursive_mutex> swapGate;
             if (!tryAcquireSwapGate(swapGate, 30, 100)) {
                 fprintf(stderr, "[device-setup] system mode init refused: "
                         "swap already in progress\n");

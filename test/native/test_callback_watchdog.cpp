@@ -19,6 +19,7 @@
 #include <chrono>
 #include <mutex>
 #include <thread>
+#include <condition_variable>
 
 namespace {
 
@@ -98,12 +99,28 @@ TEST_CASE("SwapGate: bounded acquisition fails while held, succeeds after releas
     // what's testable headlessly).
     EngineFixture fix;  // watchdog off
 
-    auto held = fix.engine().testHoldSwapGate();
-    std::unique_lock<std::mutex> lk;
-    REQUIRE_FALSE(fix.engine().tryAcquireSwapGate(lk, 3, 10));
+    // The gate is recursive, so it must be held by ANOTHER thread to contend a
+    // tryAcquireSwapGate from this one (same-thread re-entry is allowed — that's
+    // what lets recovery hold it across reopenCurrentDevice). Hold it on a helper
+    // thread for the duration of the "held" assertion.
+    std::mutex m;
+    std::condition_variable cv;
+    bool holding = false, release = false;
+    std::thread holder([&] {
+        auto held = fix.engine().testHoldSwapGate();
+        { std::lock_guard<std::mutex> g(m); holding = true; } cv.notify_all();
+        std::unique_lock<std::mutex> g(m);
+        cv.wait(g, [&] { return release; });
+    });
+    { std::unique_lock<std::mutex> g(m); cv.wait(g, [&] { return holding; }); }
+
+    std::unique_lock<std::recursive_mutex> lk;
+    REQUIRE_FALSE(fix.engine().tryAcquireSwapGate(lk, 3, 10));   // held by holder thread
     REQUIRE_FALSE(lk.owns_lock());
 
-    held.unlock();
-    REQUIRE(fix.engine().tryAcquireSwapGate(lk, 3, 10));
+    { std::lock_guard<std::mutex> g(m); release = true; } cv.notify_all();
+    holder.join();
+
+    REQUIRE(fix.engine().tryAcquireSwapGate(lk, 3, 10));         // now free
     REQUIRE(lk.owns_lock());
 }

@@ -255,6 +255,7 @@ set(ENGINE_SOURCES
     ${SUPERSONIC_SRC}/SuperClock.cpp
     ${SUPERSONIC_SRC}/EngineClock.cpp
     ${NATIVE_SRC}/DevicePolicy.cpp
+    ${NATIVE_SRC}/AudioRecovery.cpp
     ${NATIVE_SRC}/AggregateDeviceHelper.cpp
     ${NATIVE_SRC}/StateCache.cpp
     ${WORKERS_SRC}/RingReader.cpp
