@@ -53,6 +53,14 @@ public:
     LinkSession(const LinkSession&) = delete;
     LinkSession& operator=(const LinkSession&) = delete;
 
+    // Spawn the deferred worker. Deliberately NOT started in the constructor: the
+    // worker's periodic tick reaches back through the owning SuperClock (mClock)
+    // into SuperClock::mImpl, which is still being assigned by make_unique while
+    // this LinkSession — a member of *Impl — is constructing. Starting it there is
+    // a data race on mImpl (worker read vs main-thread write, no happens-before).
+    // SuperClock calls this once from its constructor body, after mImpl is live.
+    void startWorker();
+
     // Stop and join the deferred worker. Idempotent (a no-op once joined), so
     // the host can call it early in teardown and ~LinkSession's own join then
     // finds nothing to do. Must run before any sibling the worker reaches
@@ -147,6 +155,7 @@ public:
     LinkSession& operator=(const LinkSession&) = delete;
 
     // Session-of-one has no worker thread.
+    void startWorker() {}
     void stopWorker() {}
 
     void setBpm(double bpm) {

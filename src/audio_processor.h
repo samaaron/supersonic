@@ -10,6 +10,7 @@
 #define SCSYNTH_AUDIO_PROCESSOR_H
 
 #include <emscripten/emscripten.h>
+#include <atomic>
 #include <cstdint>
 #include <cstdarg>
 #include "shared_memory.h"
@@ -18,6 +19,12 @@
 struct World;
 struct WorldOptions;
 struct ReplyAddress;
+
+// Published true by a backend that drains the NRT-out ring (the native NRT
+// gateway). While true, off-audio-thread debug (ss_log) is routed to the locked
+// NRT-out ring instead of the single-writer RT-out ring. False on worklet targets
+// (WASM / self-driven device), which have no NRT-out drainer, so they use RT-out.
+extern std::atomic<bool> g_nrt_egress_drained;
 
 extern "C" {
     // Static ring buffer (allocated in WASM data segment)

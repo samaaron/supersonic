@@ -137,8 +137,14 @@ struct LinkSession::Impl {
 // ─── ctor/dtor ─────────────────────────────────────────────────────────────
 
 LinkSession::LinkSession(SuperClock& clock, std::function<void()> periodicTick)
-    : mImpl(std::make_unique<Impl>(clock, std::move(periodicTick))) {
+    : mImpl(std::make_unique<Impl>(clock, std::move(periodicTick))) {}
+
+void LinkSession::startWorker() {
     auto* impl = mImpl.get();
+    // Guard against a double-start: the worker owns a std::thread and assigning
+    // over a joinable one calls std::terminate. SuperClock starts it exactly once,
+    // after its mImpl is live (see the header note on the construction-order race).
+    if (impl->deferredWorker.joinable()) return;
     impl->deferredWorker = std::thread([impl] {
         for (;;) {
             {

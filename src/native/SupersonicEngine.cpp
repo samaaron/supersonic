@@ -1169,6 +1169,11 @@ void SupersonicEngine::init(const Config& cfg) {
     // OUT/NRT-out ring buffers can back up during the audio thread's first
     // few hundred ticks (~ms) before any reader is draining them.
     mNrtGateway.start();
+    // The gateway now drains NRT-out — off-audio-thread debug (ss_log) routes there
+    // instead of the single-writer RT-out ring. Kept true through shutdown's thread
+    // teardown so off-thread logging never falls back to racing RT-out; cleared
+    // once every egress producer and the audio device are stopped (see shutdown).
+    g_nrt_egress_drained.store(true, std::memory_order_relaxed);
     mSampleLoader.startThread(juce::Thread::Priority::normal);
 
     // -- Start the audio source (real callback or headless fallback) -------
@@ -1247,12 +1252,6 @@ void SupersonicEngine::shutdown() {
     get_midi_clock_out().reset();
 #endif
 
-    // Tear down the OSC cue server (joins its recv thread, closes the socket)
-    // before mEgress, so no inbound cue can fire into mEgress after this returns.
-#ifdef SUPERSONIC_OSC
-    mOscControl.shutdown();
-#endif
-
     // Tear down the gamepad subsystem before mEgress for the same reason:
     // ss_gamepad_destroy deregisters the host callback (synchronising on the
     // emission lock), so no gamepad callback can fire into mEgress after this
@@ -1278,6 +1277,16 @@ void SupersonicEngine::shutdown() {
     // gateway to a stop before touching the device-orchestration workers.
     // stop() bumps + notifies its wake word (processCount) and joins.
     mNrtGateway.stop();
+
+    // Tear down the OSC cue server (joins its recv thread, closes the socket)
+    // only now the gateway reader is joined: that reader drains inbound commands
+    // through mControlIngress into OscControl::handleOscCommand, which reads mOsc.
+    // Destroying mOsc (ss_osc_destroy → mOsc=nullptr) while the reader still ran
+    // was a data race on mOsc. Still before mEgress, so no inbound cue can fire
+    // into mEgress after this returns.
+#ifdef SUPERSONIC_OSC
+    mOscControl.shutdown();
+#endif
 
     // Stop the watchdog before tearing down — it can launch a recovery
     // (requestAudioRecovery) right up until it observes mWatchdogStop. The NRT
@@ -1340,6 +1349,11 @@ void SupersonicEngine::shutdown() {
         g_active_ingress.compare_exchange_strong(
             expected, nullptr, std::memory_order_release);
     }
+
+    // NRT-out is no longer drained (gateway stopped above) and every egress
+    // producer plus the audio device are now stopped, so off-thread debug can
+    // safely fall back to RT-out again — and the flag is reset for the next engine.
+    g_nrt_egress_drained.store(false, std::memory_order_relaxed);
 
     // Tear down the World and the engine's global arena view while the
     // segment is still mapped — after this the lanes entry points reject,

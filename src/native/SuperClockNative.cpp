@@ -112,6 +112,11 @@ SuperClock::SuperClock() : mImpl(std::make_unique<Impl>(*this)) {
     // Audio sinks / subs / thread priority all tear down and bring up together.
     mImpl->linkSession.setApplyVisibility(
         [this](LinkVisibility v) { setLinkVisibility(v); });
+    // Start the session worker only now that mImpl is assigned. The worker's
+    // periodic tick calls back through this SuperClock (linkClockMicros → mImpl),
+    // so spawning it inside the LinkSession member ctor — while make_unique is
+    // still writing mImpl — is a data race on mImpl with no happens-before edge.
+    mImpl->linkSession.startWorker();
 }
 
 SuperClock::~SuperClock() {

@@ -14,6 +14,7 @@
 #include "OscIngress.h"
 #include "IngressCallCtx.h"
 #include "ReplyChannel.h"
+#include "lanes/lanes_internal.h"   // ss_egress_nrt_write — off-thread debug egress
 // Platform macros (SC_COLD_BSS, tiered-memory attributes). Header-only and
 // scsynth-free, so it is included in both builds — the no-synth core still
 // places the ring arena + scheduler pool in bulk RAM on tiered targets.
@@ -23,6 +24,14 @@
 // Defined here — compiled by both native and wasm. Published by the engine at
 // init (native: SupersonicEngine::mIngress; wasm: a file-static, see init_memory).
 std::atomic<OscIngress*> g_active_ingress{nullptr};
+
+// Published true by a backend that drains the NRT-out ring (the native NRT
+// gateway). While true, emit_debug_osc routes OFF-audio-thread debug to the
+// locked NRT-out ring instead of the single-writer RT-out ring, keeping RT-out's
+// sole-writer invariant. Stays false on single-threaded worklet targets (WASM /
+// self-driven device), which have no NRT-out drainer and no second RT-out writer,
+// so those always use RT-out. A capability signal, not an __EMSCRIPTEN__ branch.
+std::atomic<bool> g_nrt_egress_drained{false};
 
 // The composition-root SuperClock for a worklet self-clock host (WASM + the
 // self-driven device). superclock_wasm_init binds the SAB region + the worklet
@@ -242,6 +251,17 @@ extern "C" {
     std::atomic<int32_t>* global_offset = nullptr;
     bool memory_initialized = false;
     World* g_world = nullptr;
+
+    // True only while this thread is inside process_audio(). emit_debug_osc()
+    // reads it to keep the RT-out ring single-writer: the audio thread logs to
+    // the lock-free RT-out ring; any other thread (watchdog, recovery, boot on
+    // native) routes to the locked NRT-out ring, so RT-out never gets a second
+    // concurrent writer. Set via AudioThreadScope at the top of process_audio.
+    thread_local bool t_on_audio_thread = false;
+    struct AudioThreadScope {
+        AudioThreadScope()  { t_on_audio_thread = true;  }
+        ~AudioThreadScope() { t_on_audio_thread = false; }
+    };
 
     // Unified event scheduler: one timed queue fanning out to the synth graph
     // (run inline) and outbound MIDI/OSC (re-dispatched inline through
@@ -872,6 +892,7 @@ extern "C" {
     // active_output_channels / active_input_channels: live channel counts
     EMSCRIPTEN_KEEPALIVE
     bool process_audio(double current_time, uint32_t active_output_channels, uint32_t active_input_channels) {
+        AudioThreadScope _audio_thread_scope;   // this thread owns RT-out for ss_log routing
 #if SUPERSONIC_SYNTH
         if (!memory_initialized || !g_world) {
             return true; // Not ready or world destroyed during cold swap — output silence
@@ -1197,10 +1218,14 @@ extern "C" {
         return true; // Keep processor alive
     }
 
-    // Frame a log line as a `/supersonic/debug <text>` OSC message and write it to
-    // the OUT (egress) ring. The audio thread is the sole OUT writer, so this is
-    // lock-free; the line leaves the engine as an ordinary addressed OSC message,
-    // and the host dispatches /supersonic/debug to its debug channel.
+    // Frame a log line as a `/supersonic/debug <text>` OSC message and emit it.
+    // Routing keeps the RT-out ring single-writer: on the audio thread the line
+    // goes to the lock-free RT-out ring; off the audio thread (watchdog, recovery,
+    // boot on native) it goes to the locked multi-producer NRT-out ring, so RT-out
+    // never gets a second concurrent writer. The NRT gateway drains and forwards
+    // both, so delivery is identical. WASM is single-threaded with no NRT-out
+    // drainer, so it always uses RT-out. Either way the line leaves as an ordinary
+    // addressed OSC message the host dispatches to its debug channel.
     static void emit_debug_osc(const char* text, uint32_t len) {
         if (!memory_initialized) return;
         if (len > 960) len = 960;  // matches buildDebugOsc's clamp; keeps the metric in sync
@@ -1208,11 +1233,26 @@ extern "C" {
         char pkt[1024];
         uint32_t p = supersonic::buildDebugOsc(pkt, text, len);
 
-        ::ring_buffer_write(
-            shared_memory + OUT_BUFFER_START, OUT_BUFFER_SIZE,
-            &control->out_head, &control->out_tail, &control->out_sequence,
-            EGRESS_BROADCAST_NOTIFY, 0,  // route, source_id (debug broadcasts)
-            pkt, p, &control->status_flags);
+        // The audio thread owns the lock-free RT-out ring, so it logs there. Any
+        // other thread routes to the locked NRT-out ring instead — but only where a
+        // backend drains it (g_nrt_egress_drained, published by the native NRT
+        // gateway). A single-threaded worklet target (WASM / self-driven device)
+        // never drains NRT-out and has no second RT-out writer, so it always uses
+        // the always-safe RT-out. Capability signal, not an __EMSCRIPTEN__ branch,
+        // so every target shares one codepath.
+        const bool useRtOut =
+            t_on_audio_thread ||
+            !g_nrt_egress_drained.load(std::memory_order_relaxed);
+        if (useRtOut) {
+            ::ring_buffer_write(
+                shared_memory + OUT_BUFFER_START, OUT_BUFFER_SIZE,
+                &control->out_head, &control->out_tail, &control->out_sequence,
+                EGRESS_BROADCAST_NOTIFY, 0,  // route, source_id (debug broadcasts)
+                pkt, p, &control->status_flags);
+        } else {
+            ss_egress_nrt_write(EGRESS_BROADCAST_NOTIFY, 0,
+                                reinterpret_cast<const uint8_t*>(pkt), p);
+        }
 
         // Count the debug line for the metrics view.
         if (metrics) {
