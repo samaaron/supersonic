@@ -129,6 +129,37 @@ TEST_CASE("clock: capabilities/get reports the compiled backends",
     CHECK(p.argInt(5) == 1);
 }
 
+// The combined RPCs answer time+beat+phase in one round-trip and agree with
+// each other: beat_phase_at_time re-queried at the timestamp beat_phase_now
+// returned must land on the same beat (same beat origin, same tempo).
+TEST_CASE("clock: combined beat_phase RPCs", "[control][clock]") {
+    EngineFixture fx;
+
+    osc_test::Builder b;
+    b.begin("/clock/rpc/beat_phase_now") << 4.0f;
+    fx.send(b.end());
+    OscReply r;
+    REQUIRE(fx.waitForReply("/clock/rpc/beat_phase_now.reply", r));
+    auto p = r.parsed();
+    const int64_t t    = p.argInt64(0);
+    const double beat  = p.argDouble(1);
+    const double phase = p.argDouble(2);
+    CHECK(t > 1'000'000'000'000'000LL);   // NTP-1900 micros domain
+    CHECK(phase >= 0.0);
+    CHECK(phase < 4.0);
+    double expectPhase = std::fmod(beat, 4.0);
+    if (expectPhase < 0.0) expectPhase += 4.0;
+    CHECK(phase == Catch::Approx(expectPhase).margin(1e-6));
+
+    osc_test::Builder b2;
+    b2.begin("/clock/rpc/beat_phase_at_time")
+        << static_cast<osc::int64>(t) << 4.0f;
+    fx.send(b2.end());
+    OscReply r2;
+    REQUIRE(fx.waitForReply("/clock/rpc/beat_phase_at_time.reply", r2));
+    CHECK(r2.parsed().argDouble(0) == Catch::Approx(beat).margin(0.01));
+}
+
 // A /clock verb nothing owns must refuse explicitly (echoing the offending
 // address) instead of vanishing, so clients can tell "unsupported" from
 // "lost datagram".

@@ -320,6 +320,21 @@ session surface: visibility, peers, notify), `link_audio` (the
 follower timelines). The clock core (tempo / transport / rpc /
 timelines / start_stop_sync / time) is answered on every build.
 
+### `→ /clock/[tl/]rpc/beat_phase_at_time h:ntpMicros f:quantum`
+
+**Reply:** `← …rpc/beat_phase_at_time.reply d:beat d:phase`
+
+Beat and phase at a time in one round-trip (equivalent to chaining
+`rpc/beat_at_time` + `rpc/phase_at_time`).
+
+### `→ /clock/[tl/]rpc/beat_phase_now f:quantum`
+
+**Reply:** `← …rpc/beat_phase_now.reply h:ntpMicros d:beat d:phase`
+
+The engine's "now" (NTP micros) plus beat and phase at that instant —
+one round-trip where clients previously chained `time/now/get` +
+`rpc/beat_at_time` + `rpc/phase_at_time`.
+
 ### `← /clock/unsupported s:address`
 
 Sent in place of a reply when a `/clock` verb reaches a build that

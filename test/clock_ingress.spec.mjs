@@ -192,6 +192,37 @@ test.describe("/clock ingress (web)", () => {
     expect(Math.abs(result.tNow - result.after)).toBeLessThan(30_000_000);
   });
 
+  test("/clock/rpc/beat_phase_now answers time+beat+phase in one round-trip", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+    await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await new Promise((r) => setTimeout(r, 200));
+
+      const reply = await new Promise((resolve) => {
+        const timer = setTimeout(() => { sonic.off("in", handler); resolve(null); }, 2000);
+        const handler = (msg) => {
+          if (msg[0] === "/clock/rpc/beat_phase_now.reply") {
+            clearTimeout(timer); sonic.off("in", handler); resolve(msg);
+          }
+        };
+        sonic.on("in", handler);
+        sonic.send("/clock/rpc/beat_phase_now", { type: "float", value: 4 });
+      });
+      if (!reply) return { failed: true };
+      return { t: Number(reply[1]), beat: reply[2], phase: reply[3] };
+    }, sonicConfig);
+
+    expect(result.failed).toBeUndefined();
+    expect(result.t).toBeGreaterThan(3.9e15);
+    expect(result.phase).toBeGreaterThanOrEqual(0);
+    expect(result.phase).toBeLessThan(4);
+    const expectPhase = ((result.beat % 4) + 4) % 4;
+    expect(result.phase).toBeCloseTo(expectPhase, 5);
+  });
+
   test("capabilities report no link/midi on web; native-only verbs are refused", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });

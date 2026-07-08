@@ -215,6 +215,37 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             finish(s);
             return true;
         }
+        // Combined variants — one round-trip where clients previously chained
+        // two or three serial RPCs (every Spider sleep/sync boundary).
+        if (std::strcmp(verb, "rpc/beat_phase_at_time") == 0) {
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsInt64()) return true;
+            const int64_t t = it->AsInt64Unchecked(); ++it;
+            if (it == msg.ArgumentsEnd() || !it->IsFloat()) return true;
+            const float q = it->AsFloatUnchecked();
+            const double beat =
+                clock.timelineBeatAtLinkTime(id, clock.ntpMicrosToLinkMicros(t), q);
+            char ra[96], buf[160];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage(replyAddr("rpc/beat_phase_at_time.reply", ra, sizeof(ra)))
+              << beat << supersonic::wrapPhase(beat, q);
+            finish(s);
+            return true;
+        }
+        if (std::strcmp(verb, "rpc/beat_phase_now") == 0) {
+            auto it = msg.ArgumentsBegin();
+            if (it == msg.ArgumentsEnd() || !it->IsFloat()) return true;
+            const float q = it->AsFloatUnchecked();
+            const int64_t t = clock.ntpNowMicros();
+            const double beat =
+                clock.timelineBeatAtLinkTime(id, clock.ntpMicrosToLinkMicros(t), q);
+            char ra[96], buf[160];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage(replyAddr("rpc/beat_phase_now.reply", ra, sizeof(ra)))
+              << static_cast<osc::int64>(t) << beat << supersonic::wrapPhase(beat, q);
+            finish(s);
+            return true;
+        }
 
         // ── Enumerate timelines ──────────────────────────────────────────
         // /clock/timelines/get → /clock/timelines.reply with a flattened
