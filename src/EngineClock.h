@@ -23,3 +23,11 @@ using ClockReply = std::function<void(const uint8_t* data, uint32_t size)>;
 // stops), false for a non-/clock message or a /clock verb it doesn't own.
 bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
                         const ClockReply& reply);
+
+// The one refusal for a /clock verb no route owns: replies
+// "/clock/unsupported s:address", echoing the request's trailing int32
+// correlation token like every other /clock reply. Both dispatch tails
+// (native EngineControl, wasm audio_processor) call this so the refusal
+// wire contract has a single authoring site.
+void replyClockUnsupported(const uint8_t* data, uint32_t size,
+                           const ClockReply& reply);

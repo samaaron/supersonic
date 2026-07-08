@@ -341,6 +341,8 @@ Sent in place of a reply when a `/clock` verb reaches a build that
 does not answer it (e.g. the native-only Link-session verbs on the
 web build) or matches nothing at all. Distinguishes "unsupported
 here" from a lost datagram; pair with `/clock/capabilities/get`.
+Echoes the request's trailing correlation token like any other
+`/clock` reply.
 
 ### `← /clock/notify/transport i:playing h:atNtpMicros`
 

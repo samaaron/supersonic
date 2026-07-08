@@ -137,19 +137,10 @@ static bool clockCoreRoute(void* routeCtx, const void* callCtx,
         // surface, or a typo): refuse explicitly instead of dropping silently,
         // so clients can tell "unsupported here" from "lost datagram". Pair
         // with /clock/capabilities/get for feature detection.
-        const char* addr = reinterpret_cast<const char*>(data);
-        if (strnlen(addr, len) < len) {
-            try {
-                char buf[192];
-                osc::OutboundPacketStream s(buf, sizeof(buf));
-                s << osc::BeginMessage("/clock/unsupported") << addr
-                  << osc::EndMessage;
-                chan->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
-                            static_cast<uint32_t>(s.Size()));
-            } catch (...) {
-                // Oversized address — drop rather than reply.
-            }
-        }
+        replyClockUnsupported(data, static_cast<uint32_t>(len),
+            [chan, token](const uint8_t* d, uint32_t n) {
+                chan->reply(token, d, n);
+            });
     }
     return true;
 }

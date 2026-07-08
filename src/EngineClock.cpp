@@ -323,3 +323,30 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
     }
     return false;  // a /clock verb this handler doesn't own (native Link-session)
 }
+
+void replyClockUnsupported(const uint8_t* data, uint32_t size,
+                           const ClockReply& reply) {
+    try {
+        osc::ReceivedPacket pkt(reinterpret_cast<const char*>(data),
+                                static_cast<osc::osc_bundle_element_size_t>(size));
+        osc::ReceivedMessage msg(pkt);
+        bool    hasToken  = false;
+        int32_t echoToken = 0;
+        for (auto it = msg.ArgumentsBegin(); it != msg.ArgumentsEnd(); ++it) {
+            auto next = it; ++next;
+            if (next == msg.ArgumentsEnd() && it->IsInt32()) {
+                hasToken  = true;
+                echoToken = it->AsInt32Unchecked();
+            }
+        }
+        char buf[192];
+        osc::OutboundPacketStream s(buf, sizeof(buf));
+        s << osc::BeginMessage("/clock/unsupported") << msg.AddressPattern();
+        if (hasToken) s << static_cast<osc::int32>(echoToken);
+        s << osc::EndMessage;
+        reply(reinterpret_cast<const uint8_t*>(s.Data()),
+              static_cast<uint32_t>(s.Size()));
+    } catch (...) {
+        // Unparseable or oversized address — drop rather than reply.
+    }
+}
