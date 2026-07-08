@@ -18,12 +18,12 @@ static constexpr int32_t kCapLink = 1;
 #else
 static constexpr int32_t kCapLink = 0;
 #endif
-#if defined(SUPERSONIC_LINK) && SUPERSONIC_SYNTH
+#if SUPERSONIC_LINK && SUPERSONIC_SYNTH
 static constexpr int32_t kCapLinkAudio = 1;
 #else
 static constexpr int32_t kCapLinkAudio = 0;
 #endif
-#if defined(SUPERSONIC_MIDI)
+#if SUPERSONIC_MIDI
 static constexpr int32_t kCapMidi = 1;
 #else
 static constexpr int32_t kCapMidi = 0;
