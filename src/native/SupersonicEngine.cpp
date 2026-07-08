@@ -11,6 +11,7 @@
 #include "audio_config.h"
 #include "src/shared_memory.h"
 #include "src/osc_debug.h"
+#include "src/clock_math.h"
 #include "osc/OscReceivedElements.h"
 #include "osc/OscOutboundPacketStream.h"
 #include "RingBufferWriter.h"
@@ -2298,11 +2299,8 @@ void SupersonicEngine::interceptForCache(const uint8_t* data, uint32_t size) {
 // --- Variadic send helpers ---
 
 void SupersonicEngine::sendBundle(double ntpTimeSec, std::initializer_list<OscPacket> messages) {
-    // Convert NTP seconds (double) to NTP timetag (uint64)
-    // NTP timetag: upper 32 bits = seconds, lower 32 bits = fractional
-    uint32_t secs = static_cast<uint32_t>(ntpTimeSec);
-    uint32_t frac = static_cast<uint32_t>((ntpTimeSec - secs) * 4294967296.0);
-    uint64_t tag = (static_cast<uint64_t>(secs) << 32) | frac;
+    const uint64_t tag =
+        static_cast<uint64_t>(supersonic::ntpToOscTimetag(ntpTimeSec));
     auto pkt = OscBuilder::bundle(tag, messages);
     sendOSC(pkt.ptr(), pkt.size());
 }

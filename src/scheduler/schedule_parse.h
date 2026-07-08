@@ -16,11 +16,11 @@
 #include <cstdint>
 #include <cstring>
 
+#include "../clock_math.h"
+
 // NTP-seconds (double) → OSC int64 timetag (seconds<<32 | fraction).
 inline int64_t ss_ntp_to_timetag(double ntp) {
-    uint32_t s = static_cast<uint32_t>(ntp);
-    uint32_t f = static_cast<uint32_t>((ntp - static_cast<double>(s)) * 4294967296.0);
-    return static_cast<int64_t>((static_cast<uint64_t>(s) << 32) | f);
+    return supersonic::ntpToOscTimetag(ntp);
 }
 
 // A timestamped OSC bundle: "#bundle" + an 8-byte timetag.
