@@ -1148,15 +1148,18 @@ void SupersonicEngine::init(const Config& cfg) {
                 reinterpret_cast<const uint8_t*>(s.Data()),
                 static_cast<uint32_t>(s.Size()));
         });
-        mSuperClock.setStartStopChangedCallback([egr, alive](bool playing, int64_t t) {
+        mSuperClock.setStartStopChangedCallback([this, egr, alive](bool playing, int64_t t) {
             if (!alive->load(std::memory_order_acquire)) return;
             fprintf(stderr, "[link] transport -> %s\n", playing ? "playing" : "stopped");
             fflush(stderr);
             char buf[64];
             osc::OutboundPacketStream s(buf, sizeof(buf));
+            // Timestamp in NTP micros, like every other /clock wire time — the
+            // Link-domain micros the callback hands us are per-boot and
+            // meaningless to a client.
             s << osc::BeginMessage("/clock/notify/transport")
               << static_cast<int32_t>(playing ? 1 : 0)
-              << static_cast<osc::int64>(t)
+              << static_cast<osc::int64>(mSuperClock.linkMicrosToNtpMicros(t))
               << osc::EndMessage;
             egr->broadcastLinkNotify(
                 reinterpret_cast<const uint8_t*>(s.Data()),

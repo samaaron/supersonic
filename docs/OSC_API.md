@@ -342,6 +342,12 @@ does not answer it (e.g. the native-only Link-session verbs on the
 web build) or matches nothing at all. Distinguishes "unsupported
 here" from a lost datagram; pair with `/clock/capabilities/get`.
 
+### `← /clock/notify/transport i:playing h:atNtpMicros`
+
+Transport push to notify subscribers. The timestamp is in NTP micros
+like every other `/clock` wire time (it was previously raw Link-clock
+micros, which are per-boot and meaningless to a client).
+
 ---
 
 ## MIDI
