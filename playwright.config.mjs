@@ -42,6 +42,6 @@ export default defineConfig({
   webServer: {
     command: "node test/server.mjs",
     port: 8003,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
   },
 });
