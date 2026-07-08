@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 // Copyright (c) 2025 Sam Aaron
 
-// NTP epoch offset: seconds between 1900-01-01 (NTP epoch) and 1970-01-01 (Unix epoch)
-const NTP_EPOCH_OFFSET = 2208988800;
+// NTP epoch offset: seconds between 1900-01-01 (NTP epoch) and 1970-01-01 (Unix epoch).
+// Exported as the single JS-side definition (C++ twin: clock_math.h kNtpEpochOffset).
+export const NTP_EPOCH_OFFSET = 2208988800;
 
 // Drift offset update interval in milliseconds.
 // At 100 ppm crystal drift, this keeps error within ~0.1ms.

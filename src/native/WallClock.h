@@ -3,13 +3,13 @@
  */
 #pragma once
 
-#include <chrono>
+#include "clock_math.h"
 
-static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
+#include <chrono>
 
 inline double wallClockNTP() {
     auto now = std::chrono::system_clock::now();
     double secsSinceEpoch = std::chrono::duration<double>(
         now.time_since_epoch()).count();
-    return secsSinceEpoch + NTP_EPOCH_OFFSET;
+    return secsSinceEpoch + supersonic::kNtpEpochOffset;
 }

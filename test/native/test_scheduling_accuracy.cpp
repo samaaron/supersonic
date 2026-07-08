@@ -134,7 +134,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     REQUIRE(sampleRate > 0);
 
     double ntpNow = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                  + NTP_EPOCH_OFFSET;
+                  + supersonic::kNtpEpochOffset;
 
     // Schedule NUM_BUNDLES synths at regular intervals
     for (int i = 0; i < NUM_BUNDLES; i++) {
@@ -293,7 +293,7 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     REQUIRE(sampleRate > 0);
 
     double ntpNow = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                  + NTP_EPOCH_OFFSET;
+                  + supersonic::kNtpEpochOffset;
 
     for (int i = 0; i < NUM_BUNDLES; i++) {
         double t = ntpNow + FIRST_DELAY_SEC + i * SPACING_SEC;

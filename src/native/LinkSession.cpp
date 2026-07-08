@@ -10,6 +10,7 @@
  * (sink/sub teardown ordering) is composed by SuperClock::setLinkVisibility.
  */
 #include "native/LinkSession.h"
+#include "clock_math.h"
 
 #if SUPERSONIC_LINK
 
@@ -123,8 +124,7 @@ struct LinkSession::Impl {
         const auto now = link.clock().micros();
         constexpr double kBeatOriginQuantum = 4.0;
         const double currentBeat = st.beatAtTime(now, kBeatOriginQuantum);
-        const double wallNow = wallClockNTP();
-        const double newOrigin = wallNow - currentBeat * 60.0 / bpm;
+        const double newOrigin = supersonic::originFor(currentBeat, wallClockNTP(), bpm);
         if (s) s->beat_origin_ntp.store(doubleToBits(newOrigin),
                                         std::memory_order_relaxed);
         if (appTempoCb) appTempoCb(bpm);
@@ -239,7 +239,7 @@ void LinkSession::requestBeatAtTime(double beat, double atNtpSeconds, double qua
     mImpl->link.commitAppSessionState(st);
     // Mirror the implied NTP beat origin so snapshot's beatAtTime math works
     // against NTP (Link stores in mClock domain, not NTP).
-    const double newOrigin = atNtpSeconds - beat * 60.0 / tempo;
+    const double newOrigin = supersonic::originFor(beat, atNtpSeconds, tempo);
     SuperClockState* s = mImpl->clock.state();
     if (!s) return;
     s->beat_origin_ntp.store(doubleToBits(newOrigin), std::memory_order_relaxed);
@@ -251,7 +251,7 @@ void LinkSession::forceBeatAtTime(double beat, double atNtpSeconds, double quant
     double tempo = st.tempo();
     if (!(tempo >= 1.0)) tempo = 1.0;
     mImpl->link.commitAppSessionState(st);
-    const double newOrigin = atNtpSeconds - beat * 60.0 / tempo;
+    const double newOrigin = supersonic::originFor(beat, atNtpSeconds, tempo);
     SuperClockState* s = mImpl->clock.state();
     if (!s) return;
     s->beat_origin_ntp.store(doubleToBits(newOrigin), std::memory_order_relaxed);

@@ -28,8 +28,10 @@
 #pragma once
 
 #include "SuperClock.h"
+#include "clock_math.h"
 
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -179,7 +181,7 @@ public:
         SuperClockState* s = mClock.state();
         if (!s) return;
         const double bpm = supersonic::bitsToDouble(s->bpm.load(std::memory_order_relaxed));
-        const double newOrigin = atNtpSeconds - beat * 60.0 / bpm;
+        const double newOrigin = supersonic::originFor(beat, atNtpSeconds, bpm);
         s->beat_origin_ntp.store(supersonic::doubleToBits(newOrigin), std::memory_order_relaxed);
     }
     // No peers in session-of-one — identical to requestBeatAtTime.

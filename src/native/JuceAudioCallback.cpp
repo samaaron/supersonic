@@ -480,7 +480,7 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
 
         // Pre-tick hook (for tau integration)
         if (preTick)
-            preTick(mSamplePosition, wallNTP * 1000.0 - NTP_EPOCH_OFFSET * 1000.0);
+            preTick(mSamplePosition, wallNTP * 1000.0 - supersonic::kNtpEpochOffset * 1000.0);
 
         // Drain pending Link Audio input into the listen bus before
         // scsynth's In.ar reads it. No-op without an active subscription.

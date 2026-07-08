@@ -7,6 +7,7 @@
  * match the Link timeline. The id==0 Link reads route to mClock.
  */
 #include "native/MidiTimelines.h"
+#include "clock_math.h"
 
 #include <algorithm>
 #include <cmath>
@@ -287,11 +288,7 @@ double MidiTimelines::timelineBeatAtLinkTime(int id, int64_t timeMicros, double 
 }
 
 double MidiTimelines::timelinePhaseAtLinkTime(int id, int64_t timeMicros, double quantum) const {
-    const double beat = timelineBeatAtLinkTime(id, timeMicros, quantum);
-    if (quantum <= 0.0) return 0.0;
-    double phase = std::fmod(beat, quantum);
-    if (phase < 0.0) phase += quantum;
-    return phase;
+    return supersonic::wrapPhase(timelineBeatAtLinkTime(id, timeMicros, quantum), quantum);
 }
 
 int64_t MidiTimelines::timelineTimeAtBeatLinkMicros(int id, double beat, double quantum) const {

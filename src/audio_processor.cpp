@@ -8,6 +8,7 @@
 
 #include "audio_processor.h"
 #include "audio_config.h"
+#include "clock_math.h"
 #include "osc_debug.h"
 #include "SuperClock.h"
 #include "EngineClock.h"
@@ -324,9 +325,7 @@ extern "C" {
 
     // Convert NTP double (seconds since 1900) to OSC timetag (int64)
     inline int64_t ntp_to_osc_timetag(double ntp) {
-        uint32_t s = static_cast<uint32_t>(ntp);
-        uint32_t f = static_cast<uint32_t>((ntp - s) * 4294967296.0);
-        return static_cast<int64_t>((static_cast<uint64_t>(s) << 32) | f);
+        return supersonic::ntpToOscTimetag(ntp);
     }
 
     // The engine's standard reply channel: replies go out the OUT ring. Carries

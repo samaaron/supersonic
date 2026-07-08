@@ -13,6 +13,7 @@
  * no freewheel.
  */
 #include "native/TimeSource.h"
+#include "clock_math.h"
 
 using supersonic::doubleToBits;
 using supersonic::bitsToDouble;
@@ -121,7 +122,7 @@ double TimeSource::updateAudioThreadNTP(double samplePosition,
         }
     }
 
-    const double newBaseNTP = baseNTP + drift * 0.01;
+    const double newBaseNTP = baseNTP + drift * supersonic::kDriftIirGain;
     const double wallNTP = newBaseNTP + sampleOffsetSec;
     mBaseNTPBits.store(doubleToBits(newBaseNTP), std::memory_order_relaxed);
     mCurrentAudioThreadNTPBits.store(doubleToBits(wallNTP),

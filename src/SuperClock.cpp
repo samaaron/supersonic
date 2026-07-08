@@ -8,6 +8,7 @@
  * atomics + the NTP-domain beat math composed from them.
  */
 #include "SuperClock.h"
+#include "clock_math.h"
 #include "shared_memory.h"
 
 #include <atomic>
@@ -55,19 +56,16 @@ bool SuperClock::isPlaying() const {
 
 double SuperClock::beatAtTime(double ntpSeconds, double quantum) const {
     (void)quantum;
-    return (ntpSeconds - getBeatOriginNtp()) * getBpm() / 60.0;
+    return supersonic::beatAt(ntpSeconds, getBeatOriginNtp(), getBpm());
 }
 
 double SuperClock::phaseAtTime(double ntpSeconds, double quantum) const {
-    const double beat = beatAtTime(ntpSeconds, quantum);
-    double phase = std::fmod(beat, quantum);
-    if (phase < 0.0) phase += quantum;
-    return phase;
+    return supersonic::wrapPhase(beatAtTime(ntpSeconds, quantum), quantum);
 }
 
 double SuperClock::timeAtBeat(double beat, double quantum) const {
     (void)quantum;
-    return getBeatOriginNtp() + beat * 60.0 / getBpm();
+    return supersonic::timeAtBeat(beat, getBeatOriginNtp(), getBpm());
 }
 
 // ── Cross-platform clock metrics ────────────────────────────────────────
@@ -88,9 +86,8 @@ void SuperClock::publishClockMetrics(PerformanceMetrics* m, double ntpNow, doubl
     const double beatOrigin = bitsToDouble(s->beat_origin_ntp.load(std::memory_order_relaxed));
     const bool playing = s->is_playing.load(std::memory_order_relaxed) != 0u;
 
-    const double beat = (bpm > 0.0) ? (ntpNow - beatOrigin) * bpm / 60.0 : 0.0;
-    double phase = (quantum > 0.0) ? std::fmod(beat, quantum) : 0.0;
-    if (phase < 0.0) phase += quantum;
+    const double beat = (bpm > 0.0) ? supersonic::beatAt(ntpNow, beatOrigin, bpm) : 0.0;
+    const double phase = supersonic::wrapPhase(beat, quantum);
 
     m->clock_tempo_mbpm.store(bpm > 0.0 ? static_cast<uint32_t>(bpm * 1000.0 + 0.5) : 0u,
                               std::memory_order_relaxed);

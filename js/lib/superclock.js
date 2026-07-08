@@ -13,7 +13,7 @@
  *     private NTPTiming helper.
  */
 
-import { NTPTiming } from './ntp_timing.js';
+import { NTPTiming, NTP_EPOCH_OFFSET } from './ntp_timing.js';
 import {
   SC_BPM_I64,
   SC_BEAT_ORIGIN_NTP_I64,
@@ -242,7 +242,7 @@ export class SuperClock {
    * {@link now} so the audio thread and the scheduler agree.
    */
   wallNow() {
-    return (performance.timeOrigin + performance.now()) / 1000 + 2208988800;
+    return (performance.timeOrigin + performance.now()) / 1000 + NTP_EPOCH_OFFSET;
   }
 
   // ── Beat math ──────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@
  * needs a single-instant pair.
  */
 #include "SuperClock.h"
+#include "clock_math.h"
 #include "native/LinkAudioBridge.h"
 #include "native/LinkSession.h"
 #include "native/MidiTimelines.h"
@@ -603,10 +604,10 @@ int64_t SuperClock::linkAudioHostMicros(double samplePosition, double sampleRate
         mImpl->linkAudioHostBaseMicros = linkNow - sampleOffsetMicros;
         mImpl->linkAudioHostAnchored = true;
     } else {
-        // baseMicros += (linkNow - (base + sampleOffset)) * 0.01
+        // baseMicros += (linkNow - (base + sampleOffset)) * gain
         const double drift =
             linkNow - (mImpl->linkAudioHostBaseMicros + sampleOffsetMicros);
-        mImpl->linkAudioHostBaseMicros += drift * 0.01;
+        mImpl->linkAudioHostBaseMicros += drift * supersonic::kDriftIirGain;
     }
     return static_cast<int64_t>(mImpl->linkAudioHostBaseMicros + sampleOffsetMicros);
 }

@@ -197,7 +197,7 @@ static void probeSlide(EngineFixture& fx, float& earlyPeak, float& latePeak) {
 
 // ──────────────────────────────────────────────────────────────────────────
 // NTP timetag helpers for bundle scheduling. Epoch = 1900-01-01 UTC.
-// (WallClock.h already defines NTP_EPOCH_OFFSET as a double — we redefine
+// (clock_math.h already defines supersonic::kNtpEpochOffset as a double — we redefine
 // the same value with a distinct name to avoid the clash.)
 // ──────────────────────────────────────────────────────────────────────────
 
