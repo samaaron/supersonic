@@ -94,7 +94,7 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             if (it == msg.ArgumentsEnd() || !it->IsFloat()) return true;
             const double bpm = it->AsFloatUnchecked();
             if (id == 0) {
-                clock.setBpm(bpm, 0.0);                 // Link timeline
+                clock.setBpm(bpm);                      // Link timeline
             } else {
                 // Manual set on a midi timeline (claim the slot if this port
                 // hasn't clocked yet). A live external clock pulse overrides it

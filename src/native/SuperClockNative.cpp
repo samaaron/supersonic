@@ -16,11 +16,12 @@
  * is the self-driven worklet clock. superclock_wasm_init (below, on
  * worklet builds) binds the SAB region + the worklet clock's offset pointers.
  *
- * State coherence: single-atomic-per-field is sufficient. The audio thread reads
- * tempo + isPlaying from Link's captureAudioSessionState (already coherent) and
- * beat_origin / is_playing_at_ntp from individual atomics. There's no
- * torn-multi-field hazard — independent fields, single-atomic loads, no consumer
- * needs a single-instant pair.
+ * State coherence: single-atomic-per-field, with one ordered pair. The audio
+ * thread reads tempo + isPlaying from Link's captureAudioSessionState (already
+ * coherent) and beat_origin from an individual atomic. is_playing +
+ * is_playing_at_ntp are written as timestamp-then-flag(release) and read as
+ * flag(acquire)-then-timestamp, so a reader that sees a new flag sees the
+ * matching timestamp.
  */
 #include "SuperClock.h"
 #include "clock_math.h"
@@ -260,8 +261,7 @@ void SuperClock::setTimelinesChangedCallback(std::function<void()> cb) {
 // sync (writes through Link + its callbacks on the Ableton path; direct SAB
 // writes on the session-of-one path).
 
-void SuperClock::setBpm(double bpm, double atNtpSeconds) {
-    (void)atNtpSeconds;
+void SuperClock::setBpm(double bpm) {
     // Guard div-by-zero in beat math (timeAtBeat / requestBeatAtTime).
     if (!(bpm >= 1.0)) bpm = 1.0;
     mImpl->linkSession.setBpm(bpm);
@@ -353,15 +353,6 @@ double SuperClock::phaseAtLinkTime(int64_t timeMicros, double quantum) const {
 
 int64_t SuperClock::timeAtBeatLinkMicros(double beat, double quantum) const {
     return mImpl->linkSession.timeAtBeatLinkMicros(beat, quantum);
-}
-
-// Link micros ↔ NTP seconds: a plain 1e6 scale. The Link RPC methods above work
-// directly in Link micros and don't route through these.
-double SuperClock::linkMicrosToNtpSeconds(int64_t linkMicros) const {
-    return static_cast<double>(linkMicros) / 1'000'000.0;
-}
-int64_t SuperClock::ntpSecondsToLinkMicros(double ntpSeconds) const {
-    return static_cast<int64_t>(ntpSeconds * 1'000'000.0);
 }
 
 // ─── Link event callbacks ────────────────────────────────────────────────────

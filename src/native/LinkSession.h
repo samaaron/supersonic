@@ -167,9 +167,10 @@ public:
     void setIsPlaying(bool playing, double atNtpSeconds) {
         SuperClockState* s = mClock.state();
         if (!s) return;
+        // Timestamp first, then flag with release — see LinkSession.cpp.
         s->is_playing_at_ntp.store(supersonic::doubleToBits(atNtpSeconds),
                                    std::memory_order_relaxed);
-        s->is_playing.store(playing ? 1u : 0u, std::memory_order_relaxed);
+        s->is_playing.store(playing ? 1u : 0u, std::memory_order_release);
     }
     void setStartStopSyncEnabled(bool enabled) {
         SuperClockState* s = mClock.state();

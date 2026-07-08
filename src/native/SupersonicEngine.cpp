@@ -940,7 +940,7 @@ void SupersonicEngine::init(const Config& cfg) {
     // leaving a window where the two disagree. Skip when it equals the constructed
     // default so that path stays byte-for-byte unchanged.
     if (cfg.defaultBpm != supersonic::kDefaultBpm)
-        mSuperClock.setBpm(cfg.defaultBpm, 0.0);
+        mSuperClock.setBpm(cfg.defaultBpm);
 
     // The arena is populated by init_memory() (run synchronously inside
     // initialiseWorld). Publish the segment — store MAGIC last — so a

@@ -43,7 +43,7 @@ public:
 
     // ─── Session mutators (app-thread) ────────────────────────────────────
 
-    void setBpm(double bpm, double atNtpSeconds);
+    void setBpm(double bpm);
     void setIsPlaying(bool playing, double atNtpSeconds);
     void setLinkEnabled(bool enabled);
 
@@ -83,7 +83,9 @@ public:
     double  phaseAtLinkTime(int64_t timeMicros, double quantum) const;
     int64_t timeAtBeatLinkMicros(double beat, double quantum) const;
 
-    // ─── MIDI-clock follower timelines (native; stubs on WASM) ───────────
+    // ─── MIDI-clock follower timelines ────────────────────────────────────
+    // Compiled on every build; fed by the MIDI subsystem on native, or by the
+    // manual /clock/midi:<port>/ OSC set-verbs elsewhere.
     // SuperClock owns a fixed registry of midi:<port> follower timelines,
     // separate from the Link timeline. The MIDI subsystem feeds tempo /
     // transport per port; OSC clients read them via /clock/midi:<port>/*.
@@ -401,12 +403,6 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> mImpl;
-
-    // Platform-specific Link↔NTP domain mapping. Used by the shared
-    // Link-clock-domain RPC implementations to convert between Link's
-    // steady micros and NTP seconds.
-    double  linkMicrosToNtpSeconds(int64_t linkMicros) const;
-    int64_t ntpSecondsToLinkMicros(double ntpSeconds) const;
 };
 
 // Active SuperClock pointer for the /superclock_get OSC verb (queryable

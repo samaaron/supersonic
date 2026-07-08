@@ -219,8 +219,10 @@ void LinkSession::setIsPlaying(bool playing, double atNtpSeconds) {
     mImpl->link.commitAppSessionState(st);
     SuperClockState* s = mImpl->clock.state();
     if (!s) return;
+    // Timestamp first, then flag with release: a reader that acquire-loads the
+    // new flag is guaranteed to see the matching timestamp.
     s->is_playing_at_ntp.store(doubleToBits(atNtpSeconds), std::memory_order_relaxed);
-    s->is_playing.store(playing ? 1u : 0u, std::memory_order_relaxed);
+    s->is_playing.store(playing ? 1u : 0u, std::memory_order_release);
 }
 
 void LinkSession::setStartStopSyncEnabled(bool enabled) {
@@ -434,14 +436,16 @@ void LinkSession::setStartStopChangedCallback(std::function<void(bool, int64_t)>
         [cb = std::move(cb), impl](const bool playing) {
             SuperClockState* s = impl->clock.state();
             if (s) {
-                s->is_playing.store(playing ? 1u : 0u, std::memory_order_relaxed);
                 // Mirror is_playing_at_ntp too so consumers reading both (e.g.
                 // /superclock_get → beats-since-transport-start math) don't see
-                // new is_playing paired with stale timestamp. wallClockNTP() is
-                // the closest NTP-domain timestamp to "right now" we have on the
+                // new is_playing paired with stale timestamp: timestamp first,
+                // then flag with release, so an acquire-load of the new flag
+                // guarantees the matching timestamp. wallClockNTP() is the
+                // closest NTP-domain timestamp to "right now" we have on the
                 // Link network thread.
                 s->is_playing_at_ntp.store(doubleToBits(wallClockNTP()),
                                            std::memory_order_relaxed);
+                s->is_playing.store(playing ? 1u : 0u, std::memory_order_release);
             }
             const auto t = impl->link.captureAppSessionState()
                                      .timeForIsPlaying().count();

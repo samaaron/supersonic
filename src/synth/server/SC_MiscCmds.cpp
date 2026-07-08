@@ -1403,8 +1403,11 @@ SCErr meth_superclock_get(World* inWorld, int /*inSize*/, char* /*inData*/, Repl
 
     const double   bpm        = supersonic::bitsToDouble(s->bpm.load(std::memory_order_relaxed));
     const double   beatOrigin = supersonic::bitsToDouble(s->beat_origin_ntp.load(std::memory_order_relaxed));
+    // Acquire-load the flag BEFORE the timestamp: writers store the timestamp
+    // first and release the flag, so a new flag here guarantees the matching
+    // is_playing_at_ntp below.
+    const uint32_t playing    = s->is_playing.load(std::memory_order_acquire);
     const double   playAtNtp  = supersonic::bitsToDouble(s->is_playing_at_ntp.load(std::memory_order_relaxed));
-    const uint32_t playing    = s->is_playing.load(std::memory_order_relaxed);
     const uint32_t flags      = s->flags.load(std::memory_order_relaxed);
     // numPeers isn't mirrored in SAB and reading it live needs a Link
     // RPC (not RT-safe). App-thread consumers should use /clock/peers/get.

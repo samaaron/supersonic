@@ -77,9 +77,9 @@ TEST_CASE("SuperClock: default state on construction", "[SuperClock]") {
 
 TEST_CASE("SuperClock: setBpm round-trips (eventually)", "[SuperClock]") {
     SuperClock sc;
-    sc.setBpm(140.0, 0.0); CHECK(eventuallyBpm(sc, 140.0));
-    sc.setBpm(60.5,  0.0); CHECK(eventuallyBpm(sc, 60.5));
-    sc.setBpm(120.0, 0.0); CHECK(eventuallyBpm(sc, 120.0));
+    sc.setBpm(140.0); CHECK(eventuallyBpm(sc, 140.0));
+    sc.setBpm(60.5); CHECK(eventuallyBpm(sc, 60.5));
+    sc.setBpm(120.0); CHECK(eventuallyBpm(sc, 120.0));
 }
 
 TEST_CASE("SuperClock: setIsPlaying round-trips", "[SuperClock]") {
@@ -183,23 +183,23 @@ TEST_CASE("SuperClock: setBpm rejects non-finite and sub-1 values",
           "[SuperClock]") {
     // Guards beat math (timeAtBeat divides by bpm).
     SuperClock sc;
-    sc.setBpm(120.0, 0.0);
+    sc.setBpm(120.0);
 
-    sc.setBpm(0.0, 0.0);
+    sc.setBpm(0.0);
     CHECK(sc.getBpm() >= 1.0);
     CHECK(std::isfinite(sc.getBpm()));
 
-    sc.setBpm(std::nan(""), 0.0);
+    sc.setBpm(std::nan(""));
     CHECK(sc.getBpm() >= 1.0);
     CHECK(std::isfinite(sc.getBpm()));
 
-    sc.setBpm(-5.0, 0.0);
+    sc.setBpm(-5.0);
     CHECK(sc.getBpm() >= 1.0);
 }
 
 TEST_CASE("SuperClock: beatAtTime at non-integer-ratio BPM", "[SuperClock]") {
     SuperClock sc;
-    sc.setBpm(137.0, 0.0);
+    sc.setBpm(137.0);
     // beatAtTime(t) = t * 137/60 — pick non-trivial values.
     CHECK(std::abs(sc.beatAtTime(3.0, 4.0) - (3.0 * 137.0 / 60.0)) < 1e-12);
     CHECK(std::abs(sc.beatAtTime(1.5, 4.0) - (1.5 * 137.0 / 60.0)) < 1e-12);
@@ -208,7 +208,7 @@ TEST_CASE("SuperClock: beatAtTime at non-integer-ratio BPM", "[SuperClock]") {
 
 TEST_CASE("SuperClock: timeAtBeat is inverse of beatAtTime", "[SuperClock]") {
     SuperClock sc;
-    sc.setBpm(140.0, 0.0);
+    sc.setBpm(140.0);
     for (double b : {0.0, 0.5, 1.0, 4.0, 17.25}) {
         CHECK(std::abs(sc.beatAtTime(sc.timeAtBeat(b, 4.0), 4.0) - b) < 1e-12);
     }
@@ -217,7 +217,7 @@ TEST_CASE("SuperClock: timeAtBeat is inverse of beatAtTime", "[SuperClock]") {
 TEST_CASE("SuperClock: phaseAtTime is non-negative and < quantum",
           "[SuperClock]") {
     SuperClock sc;
-    sc.setBpm(120.0, 0.0);
+    sc.setBpm(120.0);
     for (double t : {0.0, 0.5, 1.0, 2.5, 7.0}) {
         const double phase = sc.phaseAtTime(t, 4.0);
         CHECK(phase >= 0.0);
@@ -232,7 +232,7 @@ TEST_CASE("SuperClock: phaseAtTime is non-negative and < quantum",
 
 TEST_CASE("SuperClock: requestBeatAtTime maps beat to time", "[SuperClock]") {
     SuperClock sc;
-    sc.setBpm(120.0, 0.0);
+    sc.setBpm(120.0);
 
     // beat 4 at time 2.0 with bpm 120 → beat_origin = 0
     sc.requestBeatAtTime(4.0, 2.0, 4.0);
@@ -247,8 +247,8 @@ TEST_CASE("SuperClock: requestBeatAtTime maps beat to time", "[SuperClock]") {
 TEST_CASE("SuperClock: forceBeatAtTime == requestBeatAtTime in session-of-one",
           "[SuperClock]") {
     SuperClock scA, scB;
-    scA.setBpm(140.0, 0.0);
-    scB.setBpm(140.0, 0.0);
+    scA.setBpm(140.0);
+    scB.setBpm(140.0);
     scA.requestBeatAtTime(8.0, 5.0, 4.0);
     scB.forceBeatAtTime(8.0, 5.0, 4.0);
     CHECK(scA.beatAtTime(7.0, 4.0)  == scB.beatAtTime(7.0, 4.0));
@@ -370,7 +370,7 @@ TEST_CASE("SuperClock: a local setBpm fires the tempo callback exactly once",
     std::atomic<int> notifications{0};
     sc.setTempoChangedCallback([&](double) { notifications.fetch_add(1); });
 
-    sc.setBpm(90.0, 0.0);   // 90 != default 60, so it is a real change
+    sc.setBpm(90.0);   // 90 != default 60, so it is a real change
 
     // Wait for the notification to land (Link's handler runs on its io thread),
     // then give any duplicate a generous window to surface before asserting.
