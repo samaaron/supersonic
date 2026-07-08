@@ -1401,7 +1401,9 @@ SCErr meth_superclock_get(World* inWorld, int /*inSize*/, char* /*inData*/, Repl
         return kSCErr_Failed;
     }
 
-    const double   bpm        = supersonic::bitsToDouble(s->bpm.load(std::memory_order_relaxed));
+    // Acquire-load bpm BEFORE origin: applyTempoChange stores the origin first
+    // and releases bpm, so a new bpm here guarantees the matching origin.
+    const double   bpm        = supersonic::bitsToDouble(s->bpm.load(std::memory_order_acquire));
     const double   beatOrigin = supersonic::bitsToDouble(s->beat_origin_ntp.load(std::memory_order_relaxed));
     // Acquire-load the flag BEFORE the timestamp: writers store the timestamp
     // first and release the flag, so a new flag here guarantees the matching

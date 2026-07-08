@@ -118,15 +118,19 @@ struct LinkSession::Impl {
     void applyTempoChange(double bpmIn) {
         double bpm = bpmIn;
         if (!(bpm >= 1.0)) bpm = 1.0;
-        SuperClockState* s = clock.state();
-        if (s) s->bpm.store(doubleToBits(bpm), std::memory_order_relaxed);
         auto st = link.captureAppSessionState();
         const auto now = link.clock().micros();
         constexpr double kBeatOriginQuantum = 4.0;
         const double currentBeat = st.beatAtTime(now, kBeatOriginQuantum);
         const double newOrigin = supersonic::originFor(currentBeat, wallClockNTP(), bpm);
-        if (s) s->beat_origin_ntp.store(doubleToBits(newOrigin),
-                                        std::memory_order_relaxed);
+        SuperClockState* s = clock.state();
+        if (s) {
+            // Origin first, then bpm with release: a reader that acquire-loads
+            // this bpm is guaranteed to see the origin anchored for it.
+            s->beat_origin_ntp.store(doubleToBits(newOrigin),
+                                     std::memory_order_relaxed);
+            s->bpm.store(doubleToBits(bpm), std::memory_order_release);
+        }
         if (appTempoCb) appTempoCb(bpm);
     }
 

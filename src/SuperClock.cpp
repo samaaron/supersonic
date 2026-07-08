@@ -82,7 +82,9 @@ void SuperClock::publishClockMetrics(PerformanceMetrics* m, double ntpNow, doubl
     const SuperClockState* s = state();
     if (!s) return;
 
-    const double bpm = bitsToDouble(s->bpm.load(std::memory_order_relaxed));
+    // Acquire-load bpm BEFORE origin: applyTempoChange stores the origin first
+    // and releases bpm, so a new bpm here guarantees the matching origin.
+    const double bpm = bitsToDouble(s->bpm.load(std::memory_order_acquire));
     const double beatOrigin = bitsToDouble(s->beat_origin_ntp.load(std::memory_order_relaxed));
     const bool playing = s->is_playing.load(std::memory_order_relaxed) != 0u;
 
