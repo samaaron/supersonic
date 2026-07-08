@@ -143,11 +143,13 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             return true;
         }
         if (std::strcmp(verb, "transport/time/get") == 0) {
+            // 0 = no transition yet; preserve the sentinel rather than
+            // converting it into a plausible-looking NTP time.
+            const int64_t lm = clock.timelineTimeForIsPlayingMicros(id);
             char ra[96], buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage(replyAddr("transport/time.reply", ra, sizeof(ra)))
-              << static_cast<osc::int64>(
-                     clock.linkMicrosToNtpMicros(clock.timelineTimeForIsPlayingMicros(id)));
+              << static_cast<osc::int64>(lm == 0 ? 0 : clock.linkMicrosToNtpMicros(lm));
             finish(s);
             return true;
         }

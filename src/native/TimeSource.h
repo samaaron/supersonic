@@ -12,7 +12,8 @@
  *   defined (WASM / ESP32) — the self-driven worklet clock. now()/nowAt() evaluate
  *     the SAB time formula (audioCurrentTime + ntp_start + drift + global) from
  *     offset pointers bound by the host at boot (bindOffsets). There is no headless
- *     driver thread or wall clock here, so freewheel is a no-op and wallNow() is 0.
+ *     driver thread or wall clock here, so freewheel is a no-op and wallNow()
+ *     returns the cached now() (0 only before the first nowAt()).
  *
  * Both shapes depend only on the centralised double↔uint64 bit-cast — no JUCE,
  * no Ableton, no scsynth. The native shape additionally pulls WallClock. The

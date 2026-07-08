@@ -20,7 +20,8 @@
  *   undefined — the inline session-of-one (this header): thread-free,
  *               Ableton-free. setBpm / transport / beat-origin write straight to
  *               the SAB; isEnabled / getVisibility / isStartStopSyncEnabled read
- *               those flags back; peers / clock RPC return zero/empty.
+ *               those flags back; clock RPC answers from the SAB mirror in the
+ *               NTP domain; peers return zero/empty.
  *
  * Dispatch is link-time-concrete (no vtable) so the RT-adjacent calls stay
  * branch-free at the call site.
@@ -143,8 +144,8 @@ private:
 
 // Session-of-one: no Ableton, no thread. Mutators write the SAB mirror directly
 // (the same fields the Ableton path converges onto); isEnabled / getVisibility /
-// isStartStopSyncEnabled read those flags back; peer / clock reads are zero/empty.
-// Header-inline — no separate TU.
+// isStartStopSyncEnabled read those flags back; clock RPC answers from the SAB
+// mirror; peer reads are zero/empty. Header-inline — no separate TU.
 class LinkSession {
 public:
     using LinkVisibility = SuperClock::LinkVisibility;
@@ -212,10 +213,31 @@ public:
         return std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
     }
-    int64_t timeForIsPlayingMicros() const { return 0; }
-    double  beatAtLinkTime(int64_t, double) const { return 0.0; }
-    double  phaseAtLinkTime(int64_t, double) const { return 0.0; }
-    int64_t timeAtBeatLinkMicros(double, double) const { return 0; }
+
+    // Clock RPC answered from the SAB mirror. The Link-domain micros convert
+    // through the owning clock's freshly-sampled offset — the inverse of the
+    // conversion EngineClock wraps around these calls — so the beat math runs
+    // in the NTP mirror domain and the round-trip is exact to the µs-level
+    // resampling error.
+    int64_t timeForIsPlayingMicros() const {
+        const double atNtp = mClock.getIsPlayingAtNtp();
+        if (atNtp == 0.0) return 0;   // no transition yet — keep the 0 sentinel
+        return mClock.ntpMicrosToLinkMicros(
+            static_cast<int64_t>(std::llround(atNtp * 1e6)));
+    }
+    double beatAtLinkTime(int64_t timeMicros, double quantum) const {
+        const double ntpSeconds =
+            static_cast<double>(mClock.linkMicrosToNtpMicros(timeMicros)) * 1e-6;
+        return mClock.beatAtTime(ntpSeconds, quantum);
+    }
+    double phaseAtLinkTime(int64_t timeMicros, double quantum) const {
+        return supersonic::wrapPhase(beatAtLinkTime(timeMicros, quantum), quantum);
+    }
+    int64_t timeAtBeatLinkMicros(double beat, double quantum) const {
+        const double ntpSeconds = mClock.timeAtBeat(beat, quantum);
+        return mClock.ntpMicrosToLinkMicros(
+            static_cast<int64_t>(std::llround(ntpSeconds * 1e6)));
+    }
 
     bool   isStartStopSyncEnabled() const {
         const SuperClockState* s = mClock.state();

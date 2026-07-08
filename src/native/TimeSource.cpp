@@ -39,7 +39,11 @@ double TimeSource::nowAt(double audioCurrentTime) const {
 }
 
 double TimeSource::wallNow() const {
-    return 0.0;
+    // No wall clock on the worklet; the last audio-thread NTP is the best
+    // available "right now" (0.0 only before the first nowAt()). Callers that
+    // stamp events with wallNow() (e.g. /clock/transport/set) would otherwise
+    // record NTP epoch 1900.
+    return now();
 }
 
 double TimeSource::updateAudioThreadNTP(double samplePosition,
