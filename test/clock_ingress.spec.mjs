@@ -191,4 +191,37 @@ test.describe("/clock ingress (web)", () => {
     expect(result.after).toBeGreaterThan(3.9e15);
     expect(Math.abs(result.tNow - result.after)).toBeLessThan(30_000_000);
   });
+
+  test("capabilities report no link/midi on web; native-only verbs are refused", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+    await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
+
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+      await new Promise((r) => setTimeout(r, 200));
+
+      const rpc = (addr, replyAddr, ...args) => new Promise((resolve) => {
+        const timer = setTimeout(() => { sonic.off("in", handler); resolve(null); }, 2000);
+        const handler = (msg) => {
+          if (msg[0] === replyAddr) { clearTimeout(timer); sonic.off("in", handler); resolve(msg); }
+        };
+        sonic.on("in", handler);
+        sonic.send(addr, ...args);
+      });
+
+      const caps = await rpc("/clock/capabilities/get", "/clock/capabilities.reply");
+      // /clock/visibility/get is native-only (Link session surface) — the web
+      // build must refuse it explicitly rather than dropping it.
+      const refused = await rpc("/clock/visibility/get", "/clock/unsupported");
+
+      return { caps, refused };
+    }, sonicConfig);
+
+    expect(result.caps).not.toBeNull();
+    // Pairs: link 0, link_audio 0, midi 0 on the web build.
+    expect(result.caps.slice(1)).toEqual(["link", 0, "link_audio", 0, "midi", 0]);
+    expect(result.refused).not.toBeNull();
+    expect(result.refused[1]).toBe("/clock/visibility/get");
+  });
 });

@@ -309,6 +309,24 @@ Apply a global NTP-time offset to the engine's scheduler. Used by
 Sonic Pi's Spider layer to align SuperSonic's clock with its own
 event time. No reply.
 
+### `→ /clock/capabilities/get` *(no args)*
+
+**Reply:** `← /clock/capabilities.reply s:name i:value …`
+
+Compile-time backend capabilities as name/value pairs (extensible —
+match by name, not position). Current pairs: `link` (the Ableton
+session surface: visibility, peers, notify), `link_audio` (the
+`/clock/audio/*` surface), `midi` (the MIDI subsystem feeding the
+follower timelines). The clock core (tempo / transport / rpc /
+timelines / start_stop_sync / time) is answered on every build.
+
+### `← /clock/unsupported s:address`
+
+Sent in place of a reply when a `/clock` verb reaches a build that
+does not answer it (e.g. the native-only Link-session verbs on the
+web build) or matches nothing at all. Distinguishes "unsupported
+here" from a lost datagram; pair with `/clock/capabilities/get`.
+
 ---
 
 ## MIDI

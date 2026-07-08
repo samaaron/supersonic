@@ -10,6 +10,7 @@
 #include "audio_config.h"
 #include "clock_math.h"
 #include "osc_debug.h"
+#include "osc/OscOutboundPacketStream.h"
 #include "SuperClock.h"
 #include "EngineClock.h"
 #include "OscIngress.h"
@@ -127,10 +128,29 @@ static bool clockCoreRoute(void* routeCtx, const void* callCtx,
     auto* cc  = static_cast<const DrainCallCtx*>(callCtx);
     auto* chan = static_cast<ReplyChannel*>(routeCtx);   // RT egress, bound at registration
     uint32_t token = cc ? cc->sourceId : 0;              // reply metadata, threaded in
-    handleClockCoreOsc(*clk, data, static_cast<uint32_t>(len),
+    const bool handled = handleClockCoreOsc(*clk, data, static_cast<uint32_t>(len),
         [chan, token](const uint8_t* d, uint32_t n) {
             if (chan) chan->reply(token, d, n);
         });
+    if (!handled && chan) {
+        // A /clock verb this build doesn't answer (native-only Link-session
+        // surface, or a typo): refuse explicitly instead of dropping silently,
+        // so clients can tell "unsupported here" from "lost datagram". Pair
+        // with /clock/capabilities/get for feature detection.
+        const char* addr = reinterpret_cast<const char*>(data);
+        if (strnlen(addr, len) < len) {
+            try {
+                char buf[192];
+                osc::OutboundPacketStream s(buf, sizeof(buf));
+                s << osc::BeginMessage("/clock/unsupported") << addr
+                  << osc::EndMessage;
+                chan->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
+                            static_cast<uint32_t>(s.Size()));
+            } catch (...) {
+                // Oversized address — drop rather than reply.
+            }
+        }
+    }
     return true;
 }
 

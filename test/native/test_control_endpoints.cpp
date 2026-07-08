@@ -15,6 +15,8 @@
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
 
+#include <cmath>
+
 namespace {
 
 // Send a no-arg command through the ingress and require its reply comes back.
@@ -107,4 +109,33 @@ TEST_CASE("supersonic control commands route through the ingress to their handle
           "[control][supersonic]") {
     EngineFixture fx;
     expectReply(fx, "/supersonic/notify", "/supersonic/notify.reply");
+}
+
+// Capability discovery: compile-time facts as name/value pairs. This test
+// build compiles Link + synth + MIDI, so all three report 1.
+TEST_CASE("clock: capabilities/get reports the compiled backends",
+          "[control][clock]") {
+    EngineFixture fx;
+    fx.send(osc_test::message("/clock/capabilities/get"));
+    OscReply r;
+    REQUIRE(fx.waitForReply("/clock/capabilities.reply", r));
+    auto p = r.parsed();
+    REQUIRE(p.argCount() >= 6);
+    CHECK(p.argString(0) == "link");
+    CHECK(p.argInt(1) == 1);
+    CHECK(p.argString(2) == "link_audio");
+    CHECK(p.argInt(3) == 1);
+    CHECK(p.argString(4) == "midi");
+    CHECK(p.argInt(5) == 1);
+}
+
+// A /clock verb nothing owns must refuse explicitly (echoing the offending
+// address) instead of vanishing, so clients can tell "unsupported" from
+// "lost datagram".
+TEST_CASE("clock: unknown verbs are refused explicitly", "[control][clock]") {
+    EngineFixture fx;
+    fx.send(osc_test::message("/clock/definitely/not/a/verb"));
+    OscReply r;
+    REQUIRE(fx.waitForReply("/clock/unsupported", r));
+    CHECK(r.parsed().argString(0) == "/clock/definitely/not/a/verb");
 }

@@ -4,10 +4,30 @@
 #include "EngineClock.h"
 
 #include "SuperClock.h"
+#include "clock_math.h"
 #include "timeline_osc.h"
 #include "osc/OscOutboundPacketStream.h"
 #include "osc/OscReceivedElements.h"
 #include <cstring>
+
+// Compile-time backend capabilities, answered by /clock/capabilities/get so a
+// client can feature-detect which parts of the /clock surface this build
+// answers (the native-only Link-session verbs live outside the shared core).
+#if SUPERSONIC_LINK
+static constexpr int32_t kCapLink = 1;
+#else
+static constexpr int32_t kCapLink = 0;
+#endif
+#if defined(SUPERSONIC_LINK) && SUPERSONIC_SYNTH
+static constexpr int32_t kCapLinkAudio = 1;
+#else
+static constexpr int32_t kCapLinkAudio = 0;
+#endif
+#if defined(SUPERSONIC_MIDI)
+static constexpr int32_t kCapMidi = 1;
+#else
+static constexpr int32_t kCapMidi = 0;
+#endif
 
 // THREADING CONTRACT — this handler calls clock mutators (setBpm/setIsPlaying)
 // and Link-app-session reads (beatAtLinkTime, numPeers, …) that are NOT
@@ -249,6 +269,21 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/clock/peers/count.reply")
               << static_cast<int32_t>(clock.numPeers());
+            finish(s);
+            return true;
+        }
+        // ── Capability discovery ─────────────────────────────────────────
+        // Compile-time facts as name/value pairs (extensible without breaking
+        // positional readers). link = the Ableton session (visibility / peers /
+        // notify verbs); link_audio = the /clock/audio/* surface; midi = the
+        // MIDI subsystem feeding the follower timelines.
+        if (std::strcmp(verb, "capabilities/get") == 0) {
+            char buf[192];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/clock/capabilities.reply")
+              << "link"       << kCapLink
+              << "link_audio" << kCapLinkAudio
+              << "midi"       << kCapMidi;
             finish(s);
             return true;
         }

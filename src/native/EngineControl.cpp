@@ -418,6 +418,19 @@ bool EngineControl::handleLinkCommand(const DrainCallCtx& meta, const uint8_t* d
                       static_cast<uint32_t>(s.Size()));
             return true;
         }
+        // A /clock verb nothing owns (typo, or a verb from a newer client):
+        // refuse explicitly instead of dropping silently, mirroring the WASM
+        // route's refusal. Pair with /clock/capabilities/get.
+        {
+            char buf[192];
+            osc::OutboundPacketStream s(buf, sizeof(buf));
+            s << osc::BeginMessage("/clock/unsupported") << addr;
+            if (hasEchoToken) s << static_cast<osc::int32>(echoToken);
+            s << osc::EndMessage;
+            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
+                      static_cast<uint32_t>(s.Size()));
+            return true;
+        }
     } catch (...) {
         // The packet was /clock/* but reply generation threw (typically
         // OutboundPacketStream overflow). Return true to consume it
