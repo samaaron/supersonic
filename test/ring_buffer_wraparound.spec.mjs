@@ -35,7 +35,8 @@ test.describe("Ring Buffer Wrap-around", () => {
       }
       if (text.includes("Command not found:") ||
           text.includes("Invalid magic") ||
-          text.includes("FAILURE IN SERVER")) {
+          text.includes("FAILURE IN SERVER") ||
+          text.includes("WARNING: /")) {
         errors.push(text);
       }
     });
@@ -219,6 +220,7 @@ test.describe("Ring Buffer Wrap-around", () => {
           msg.text?.includes("Command not found:") ||
           msg.text?.includes("Invalid magic") ||
           msg.text?.includes("FAILURE IN SERVER") ||
+          msg.text?.includes("WARNING: /") ||
           msg.text?.includes("OSC parse error")
         );
 

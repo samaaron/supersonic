@@ -214,7 +214,11 @@ SCErr SC_LibCmd::Perform(struct World* inWorld, int inSize, char* inData, ReplyA
         SC_ErrorString(err, errstr);
 #ifdef SUPERSONIC
         SendFailure(inReply, (char*)Name(), errstr);
-        ss_log("FAILURE IN SERVER %s %s", (char*)Name(), errstr);
+        // An SCErr from a command usually means a stale client reference
+        // (e.g. freeing a node that already ended), not server distress —
+        // log a warning, unlike the exception path above. The /fail wire
+        // reply is unchanged either way.
+        ss_log("WARNING: %s failed - %s", (char*)Name(), errstr);
 #else
         CallSendFailureCommand(inWorld, (char*)Name(), errstr, inReply);
         scprintf("FAILURE IN SERVER %s %s\n", (char*)Name(), errstr);

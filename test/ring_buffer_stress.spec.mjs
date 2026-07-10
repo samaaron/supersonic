@@ -32,7 +32,8 @@ test.describe("Ring Buffer Stress Test", () => {
           text.includes("Bundle too large") ||
           text.includes("Invalid magic") ||
           text.includes("Node -") ||  // Negative node IDs are garbage
-          text.includes("FAILURE IN SERVER")) {
+          text.includes("FAILURE IN SERVER") ||
+          text.includes("WARNING: /")) {
         errors.push(text);
       }
     });
@@ -112,7 +113,8 @@ test.describe("Ring Buffer Stress Test", () => {
           msg.text?.includes("Command not found:") ||
           msg.text?.includes("Bundle too large") ||
           msg.text?.includes("Invalid magic") ||
-          msg.text?.includes("FAILURE IN SERVER")
+          msg.text?.includes("FAILURE IN SERVER") ||
+          msg.text?.includes("WARNING: /")
         );
 
         return {
@@ -278,7 +280,8 @@ test.describe("Ring Buffer Stress Test", () => {
       if (text.includes("Command not found:") ||
           text.includes("Bundle too large") ||
           text.includes("Invalid magic") ||
-          text.includes("FAILURE IN SERVER")) {
+          text.includes("FAILURE IN SERVER") ||
+          text.includes("WARNING: /")) {
         errors.push(text);
       }
     });
@@ -377,7 +380,8 @@ test.describe("Ring Buffer Stress Test", () => {
           msg.text?.includes("Command not found:") ||
           msg.text?.includes("Bundle too large") ||
           msg.text?.includes("Invalid magic") ||
-          msg.text?.includes("FAILURE IN SERVER")
+          msg.text?.includes("FAILURE IN SERVER") ||
+          msg.text?.includes("WARNING: /")
         );
 
         return {
