@@ -8,9 +8,30 @@ The mda plug-ins are released under the MIT license or under the GPL
 */
 #include "SC_PlugIn.h"
 #include "mdaPiano_sc3.h"
-#include "mdaPianoData.h"
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#define SS_KEEPALIVE EMSCRIPTEN_KEEPALIVE
+#else
+#define SS_KEEPALIVE
+#endif
 
 static InterfaceTable *ft;
+
+// The ~1.1MB piano sample table used to be compiled in via mdaPianoData.h.
+// That blob is too big for embedded / WASM binaries, so it now lives in an
+// external asset (piano_wavetable.dat, raw little-endian int16) that the host
+// loads at boot and injects here. Native passes it on the boot thread via
+// --piano-wavetable; WASM copies it into the heap from JS. Until injected,
+// MdaPiano outputs silence rather than reading a null pointer.
+static const short* gPianoData = nullptr;
+
+extern "C" SS_KEEPALIVE
+void supersonic_set_piano_wavetable(const short* data, size_t count) {
+	// Reject a short/absent table so the audio thread never reads past the
+	// end (max index touched is kgrp.end + 1).
+	gPianoData = (data && count >= (size_t)WAVELEN) ? data : nullptr;
+}
 
 struct MdaPiano : public Unit
 {
@@ -69,6 +90,15 @@ void MdaPiano_next(MdaPiano *unit, int inNumSamples)
 	// get the pointer to the output buffer
 	float *out0 = OUT(0);
 	float *out1 = OUT(1);
+
+	// No wavetable injected (e.g. a deployment that ships without the piano
+	// asset): stay silent instead of dereferencing a null table.
+	const short* pianoData = gPianoData;
+	if(!pianoData){
+		for (int iter=0; iter < inNumSamples; ++iter){ *out0++ = 0.f; *out1++ = 0.f; }
+		unit->prevgate = IN0(1);
+		return;
+	}
 
 	// grab some input controls
 	float freq = IN0(0);
@@ -230,16 +260,10 @@ void MdaPiano_next(MdaPiano *unit, int inNumSamples)
 
 ////////////////////////////////////////////////////////////////////
 
-int dummy;
-
 // the load function is called by the host when the plug-in is loaded
 extern "C"
 PluginLoad(Mda)
 {
-	// touch every sample to force the buffer into physical ram
-	for (size_t i = 0; i != sizeof(pianoData)/sizeof(short); ++i)
-		dummy += pianoData[i];
-
 	ft = inTable;
 
 	DefineDtorUnit(MdaPiano);

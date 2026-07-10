@@ -114,6 +114,10 @@ public:
         int    watchdogPollMs           = 250;     // liveness sampling interval
         std::string bindAddress       = "127.0.0.1"; // localhost only; use -B to override
         std::string hardwareDevice;                // -H flag: fuzzy match on "Driver : Device"
+        std::string pianoWavetablePath;            // --piano-wavetable: raw int16 sample
+                                                   // table for the MdaPiano UGen, loaded on
+                                                   // the boot thread and injected. Empty =>
+                                                   // :piano stays silent (no asset shipped).
     };
 
     SupersonicEngine();
@@ -755,4 +759,9 @@ private:
     // Recording
     juce::TimeSliceThread    mRecordThread{"SuperSonic-RecordIO"};
     std::string              mRecordPath;
+
+    // MdaPiano sample table (loaded once from cfg.pianoWavetablePath on the boot
+    // thread). Held for the engine lifetime — the UGen reads it directly.
+    std::vector<short>       mPianoWavetable;
+    void loadPianoWavetable(const std::string& path);
 };

@@ -23,6 +23,7 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <thread>
 #ifdef __linux__
 #include <dlfcn.h>
@@ -331,6 +332,34 @@ SupersonicEngine::~SupersonicEngine() {
     shutdown();
 }
 
+// Defined in MdaUGens.cpp — sets the global sample table the MdaPiano UGen reads.
+extern "C" void supersonic_set_piano_wavetable(const short* data, size_t count);
+
+// Read the raw little-endian int16 piano sample table into mPianoWavetable and
+// hand it to the UGen. Runs on the boot thread (never the audio thread). On any
+// failure the table stays empty and :piano simply plays silence.
+void SupersonicEngine::loadPianoWavetable(const std::string& path) {
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f) {
+        ssLifecycleLog("[piano] could not open wavetable: %s\n", path.c_str());
+        return;
+    }
+    std::streamsize bytes = f.tellg();
+    if (bytes <= 0 || (bytes % (std::streamsize)sizeof(short)) != 0) {
+        ssLifecycleLog("[piano] bad wavetable size (%lld bytes): %s\n", (long long)bytes, path.c_str());
+        return;
+    }
+    f.seekg(0);
+    mPianoWavetable.resize((size_t)(bytes / (std::streamsize)sizeof(short)));
+    if (!f.read(reinterpret_cast<char*>(mPianoWavetable.data()), bytes)) {
+        ssLifecycleLog("[piano] failed reading wavetable: %s\n", path.c_str());
+        mPianoWavetable.clear();
+        return;
+    }
+    supersonic_set_piano_wavetable(mPianoWavetable.data(), mPianoWavetable.size());
+    ssLifecycleLog("[piano] wavetable loaded: %zu samples\n", mPianoWavetable.size());
+}
+
 
 void SupersonicEngine::init(const Config& cfg) {
     if (mRunning.load()) return;
@@ -342,6 +371,12 @@ void SupersonicEngine::init(const Config& cfg) {
     // mBootInputChannels may be kAutoChannelCount (-1) here — resolved to a
     // concrete count when enableInputChannels() is eventually called.
     mBootInputChannels = cfg.numInputChannels;
+
+    // Load the MdaPiano sample table off the audio thread (we're on the boot
+    // thread here). Injected into the UGen; safe to call before World_New since
+    // the setter only stores a global pointer.
+    if (mPianoWavetable.empty() && !cfg.pianoWavetablePath.empty())
+        loadPianoWavetable(cfg.pianoWavetablePath);
 
     // Seed the pre-wireless rate from the boot config so that a user who
     // boots directly into a wireless default (e.g. AirPlay because no

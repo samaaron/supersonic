@@ -82,7 +82,7 @@ extern "C" {
     // void iPhone_Load(InterfaceTable* table);      // Not needed for WASM
     // sc3-plugins
     void Distortion_Load(InterfaceTable* table);
-    // void Mda_Load(InterfaceTable* table);  // Excluded from build (see build.sh)
+    void Mda_Load(InterfaceTable* table);
 }
 // demo plugins (for testing plugin/unit commands)
 // Note: NOT extern "C" - must match C++ linkage of PluginLoad() macro
@@ -139,7 +139,7 @@ void initialize_library(const char* uGensPluginPath) {
     FFT_UGens_Load(&gInterfaceTable);
     // sc3-plugins
     Distortion_Load(&gInterfaceTable);
-    // Mda_Load(&gInterfaceTable);  // Excluded from build (see build.sh)
+    Mda_Load(&gInterfaceTable);
     // demo plugins (for testing plugin/unit commands)
     DemoUGens_Load(&gInterfaceTable);
     LinkUGen_Load(&gInterfaceTable);

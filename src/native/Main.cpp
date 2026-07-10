@@ -198,6 +198,7 @@ int main(int argc, char* argv[]) {
                 "  -H <words>   Audio device (fuzzy match on 'Driver : Device')\n"
                 "  -v           Print version and exit\n"
                 "  --default-bpm <n>  Opening session tempo (default 120)\n"
+                "  --piano-wavetable <path>  MdaPiano sample table (raw int16)\n"
                 "  --list-devices     List audio devices and exit\n\n"
             );
             return 0;
@@ -265,6 +266,13 @@ int main(int argc, char* argv[]) {
         // consistently; embedders (Sonic Pi) pass it to boot at their default.
         if (std::strcmp(arg, "--default-bpm") == 0) {
             if (val) { cfg.defaultBpm = std::atof(val); ++i; }
+            continue;
+        }
+
+        // Path to the MdaPiano sample table (raw int16). Loaded on the boot
+        // thread; if absent, :piano plays silence.
+        if (std::strcmp(arg, "--piano-wavetable") == 0) {
+            if (val) { cfg.pianoWavetablePath = val; ++i; }
             continue;
         }
 

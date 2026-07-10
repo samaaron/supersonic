@@ -82,12 +82,11 @@ echo "STACK_SIZE: $((WASM_STACK_SIZE / 1024))KB"
 SCSYNTH_SERVER_SOURCES=$(find "$SRC_DIR/synth/server" -name "*.cpp" ! -name "SC_*Plugins.cpp" ! -name "scsynth_main.cpp" ! -name "SC_WebAudio.cpp" ! -name "SC_Wasm.cpp" ! -name "SC_WasmOscBuilder.cpp" 2>/dev/null | tr '\n' ' ')
 SCSYNTH_COMMON_SOURCES=$(find "$SRC_DIR/synth/common" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
 SCSYNTH_COMMON_C_SOURCES=$(find "$SRC_DIR/synth/common" -name "*.c" 2>/dev/null | tr '\n' ' ')
-# MdaUGens.cpp excluded: its pianoData array (586k shorts) embeds 1.1MB of piano samples
-# directly in the WASM binary, nearly doubling its size (2.6MB → 1.4MB without it).
-# TODO: Re-implement MdaPiano with sample data loaded at runtime (like a buffer/sample)
-# rather than statically compiled into the WASM. The data is just PCM — it can be fetched
-# and loaded into a scsynth buffer on demand.
-SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/synth/plugins" -name "*.cpp" ! -name "MdaUGens.cpp" 2>/dev/null | tr '\n' ' ')
+# MdaUGens.cpp (MdaPiano) is compiled in, but its 1.1MB pianoData sample table is NOT:
+# the table lives in an external asset (piano_wavetable.dat) that the JS host copies into
+# the heap and hands to supersonic_set_piano_wavetable() after boot. Keeps the WASM binary
+# small while still shipping the piano where the asset is served.
+SCSYNTH_PLUGIN_SOURCES=$(find "$SRC_DIR/synth/plugins" -name "*.cpp" 2>/dev/null | tr '\n' ' ')
 
 # Compile audio processor with all scsynth sources and oscpack (standalone WASM for AudioWorklet)
 # Memory can grow on demand from INITIAL_MEMORY up to MAXIMUM_MEMORY (for buffer pool expansion)
@@ -138,7 +137,7 @@ emcc "$SRC_DIR/audio_processor.cpp" \
     -sINITIAL_MEMORY=$FIXED_MEMORY \
     -sMAXIMUM_MEMORY=$MAX_MEMORY \
     -sSTACK_SIZE=$WASM_STACK_SIZE \
-    -sEXPORTED_FUNCTIONS="['___wasm_call_ctors','_get_ring_buffer_base','_get_buffer_layout','_init_memory','_ss_tick','_process_audio','_get_audio_output_bus','_get_audio_buffer_samples','_get_supersonic_version_string','_set_time_offset','_get_time_offset','_ss_log','_ss_log_va','_get_process_count','_get_messages_processed','_get_messages_dropped','_get_status_flags']" \
+    -sEXPORTED_FUNCTIONS="['___wasm_call_ctors','_get_ring_buffer_base','_get_buffer_layout','_init_memory','_ss_tick','_process_audio','_get_audio_output_bus','_get_audio_buffer_samples','_get_supersonic_version_string','_set_time_offset','_get_time_offset','_ss_log','_ss_log_va','_get_process_count','_get_messages_processed','_get_messages_dropped','_get_status_flags','_supersonic_set_piano_wavetable','_malloc','_free']" \
     --no-entry \
     -Wl,--import-memory,--shared-memory,--allow-multiple-definition \
     -fcommon \

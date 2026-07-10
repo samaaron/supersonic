@@ -366,7 +366,7 @@ set(SCSYNTH_PLUGIN_SOURCES
     ${SUPERSONIC_SRC}/synth/plugins/UnaryOpUGens.cpp
     ${SUPERSONIC_SRC}/synth/plugins/UnpackFFTUGens.cpp
     ${SUPERSONIC_SRC}/synth/plugins/sc3-plugins/DistortionUGens.cpp
-    # MdaUGens.cpp excluded from build (see upstream commit faff87a)
+    ${SUPERSONIC_SRC}/synth/plugins/sc3-plugins/MdaUGens.cpp
 )
 
 # oscpack vendor (same sources as build.sh)
