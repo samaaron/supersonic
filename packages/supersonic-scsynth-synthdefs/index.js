@@ -116,7 +116,6 @@ export const SYNTHDEF_NAMES = [
   "sonic-pi-pretty_bell",
   "sonic-pi-prophet",
   "sonic-pi-pulse",
-  "sonic-pi-recorder",
   "sonic-pi-rhodey",
   "sonic-pi-rodeo",
   "sonic-pi-saw",
