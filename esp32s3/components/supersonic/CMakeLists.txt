@@ -21,9 +21,8 @@ list(FILTER SCSYNTH_SERVER EXCLUDE REGEX
 file(GLOB SCSYNTH_COMMON_CPP "${SS_SRC}/synth/common/*.cpp")
 file(GLOB SCSYNTH_COMMON_C   "${SS_SRC}/synth/common/*.c")
 
-# All UGen plugins except MdaUGens (1.1 MB of embedded piano samples).
+# All UGen plugins. (sc3-plugins live in a subdir and are added explicitly below.)
 file(GLOB SCSYNTH_PLUGINS "${SS_SRC}/synth/plugins/*.cpp")
-list(FILTER SCSYNTH_PLUGINS EXCLUDE REGEX "MdaUGens\\.cpp$")
 
 set(OSCPACK
     "${SS_SRC}/vendor/oscpack/osc/OscTypes.cpp"
@@ -65,6 +64,10 @@ idf_component_register(
     ${SCSYNTH_PLUGINS}
     # sc3-plugins: Decimator (sample-rate/bit reduction) — sonic-pi-fx_bitcrusher.
     "${SS_SRC}/synth/plugins/sc3-plugins/DistortionUGens.cpp"
+    # sc3-plugins: MdaPiano. The 1.1 MB piano wavetable is no longer compiled in;
+    # it loads from an external asset at boot, so the UGen is small and outputs
+    # silence until a wavetable is injected (never injected on device today).
+    "${SS_SRC}/synth/plugins/sc3-plugins/MdaUGens.cpp"
     ${OSCPACK}
   INCLUDE_DIRS
     "${SS_SRC}/native/NativeShim"  # emscripten.h / boost stubs for the lean build
