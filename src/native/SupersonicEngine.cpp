@@ -1336,6 +1336,9 @@ void SupersonicEngine::shutdown() {
     mWatchdogStop.store(true);
     if (mWatchdogThread.joinable()) mWatchdogThread.join();
     if (mReopenThread.joinable())   mReopenThread.join();
+    // Boot device-report worker: it only reads devices + broadcasts to egress,
+    // both of which are still alive here (torn down further below).
+    if (mBootDeviceReportThread.joinable()) mBootDeviceReportThread.join();
 
     // No control command can run now — join the device-orchestration worker
     // before tearing down the device manager + egress it calls into.
@@ -1894,6 +1897,19 @@ void SupersonicEngine::sendSwitchDone(const SwapResult& result,
       << osc::EndMessage;
     mEgress.broadcastToTargets(reinterpret_cast<const uint8_t*>(s.Data()),
                                static_cast<uint32_t>(s.Size()));
+}
+
+void SupersonicEngine::sendDeviceReportAsync() {
+    // Move the report build off the caller's thread. On Windows the first
+    // listDevices() activates every WASAPI device via COM (~10 s total); doing
+    // that inline on the OSC drain thread stalls every packet spider sends
+    // right after boot. The worker builds the list, warms the device cache, and
+    // broadcasts the report to subscribers when it's ready. sendDeviceReport()
+    // already runs on the recovery worker (mReopenThread), so the underlying
+    // path is thread-safe. Only fired once (boot); join any prior instance
+    // defensively before reassigning, mirroring mReopenThread's launch pattern.
+    if (mBootDeviceReportThread.joinable()) mBootDeviceReportThread.join();
+    mBootDeviceReportThread = std::thread([this]() { sendDeviceReport(); });
 }
 
 void SupersonicEngine::sendDeviceReport() {

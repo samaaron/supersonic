@@ -182,6 +182,11 @@ public:
     // Device control surface (called by EngineControl + engine lifecycle).
     // Builds the device/input/info report and pushes it to notify subscribers.
     void sendDeviceReport();
+    // Same, but run on an owned background worker so the caller's thread never
+    // blocks on the build. Used for the boot report, where the first
+    // listDevices() on Windows is a ~10 s per-device WASAPI/COM activation and
+    // must stay off the OSC drain thread. Joined in shutdown().
+    void sendDeviceReportAsync();
     // Push the truthful outcome of a debounced switch to subscribers.
     void sendSwitchDone(const SwapResult& result,
                         const std::string& requestedOutput,
@@ -638,6 +643,10 @@ private:
     // swap off the message thread everywhere.
     std::thread                mReopenThread;
     void recoverAudio();
+    // One-shot worker for the boot device report (sendDeviceReportAsync).
+    // Keeps the ~10 s first Windows device probe off the OSC drain thread.
+    // Only one is ever in flight (boot registration); joined in shutdown().
+    std::thread                mBootDeviceReportThread;
     // Broadcast /supersonic/devices/reopen.done to Spider/GUI. Every accepted
     // recovery reports exactly one of these so a /reopen caller never hangs.
     void broadcastReopenDone(bool success, const std::string& deviceName,

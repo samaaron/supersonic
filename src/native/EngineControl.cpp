@@ -468,7 +468,20 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
             // Windows that probes every WASAPI device via createDevice +
             // initialise (full COM activation per device), taking ~10 s
             // per call and starving the OSC thread for new packets.
-            if (firstRegistration) mEngine->sendDeviceReport();
+            if (firstRegistration) {
+#ifdef _WIN32
+                // On Windows the first listDevices() activates every WASAPI
+                // device via COM (~10 s total). Running it inline here would
+                // block this OSC drain thread for that whole time, stalling
+                // every packet spider sends right after the boot handshake.
+                // Hand it to a background worker so the drain continues
+                // immediately; the device report reaches subscribers when the
+                // probe finishes (macOS/Linux stay synchronous — cheap there).
+                mEngine->sendDeviceReportAsync();
+#else
+                mEngine->sendDeviceReport();
+#endif
+            }
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/notify/unregister") == 0) {
