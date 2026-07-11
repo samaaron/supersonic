@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 
 // memory_profile.h is a pure-macro leaf header with no further dependencies,
 // so including it here keeps this header standalone while ensuring every
@@ -177,7 +178,12 @@ private:
 class shm_audio_buffer_reader {
 public:
     shm_audio_buffer_reader() = default;
-    explicit shm_audio_buffer_reader(shm_audio_buffer* buf) : _buf(buf) {}
+    // keepalive pins the mapping the slot pointer reaches into (see
+    // server_shared_memory_client): reader copies survive the client that
+    // minted them. Engine-side readers pass nothing — their arena is static.
+    explicit shm_audio_buffer_reader(shm_audio_buffer* buf,
+                                     std::shared_ptr<const void> keepalive = nullptr)
+        : _buf(buf), _keepalive(std::move(keepalive)) {}
 
     bool valid() const { return _buf != nullptr; }
     bool is_active() const {
@@ -246,6 +252,7 @@ public:
 
 private:
     shm_audio_buffer* _buf = nullptr;
+    std::shared_ptr<const void> _keepalive;
     uint64_t      _last_read_pos = 0;
 };
 

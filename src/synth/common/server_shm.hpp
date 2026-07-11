@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -340,7 +341,12 @@ private:
 
 class shm_scope_buffer_reader {
 public:
-    shm_scope_buffer_reader(uint8_t* slot = nullptr): slot_(slot) {}
+    // keepalive pins the mapping the slot pointer reaches into (see the
+    // client's get_scope_buffer_reader): reader copies handed to long-lived
+    // observers stay safe even after the client that minted them is destroyed.
+    shm_scope_buffer_reader(uint8_t* slot = nullptr,
+                            std::shared_ptr<const void> keepalive = nullptr)
+        : slot_(slot), keepalive_(std::move(keepalive)) {}
 
     bool valid() {
         if (!slot_) return false;
@@ -370,6 +376,9 @@ public:
         if (!slot_) return nullptr;
         auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slot_ + 8);
         int s = stage->load(std::memory_order_acquire);
+        // Untrusted runtime value re-read from the segment on every call:
+        // only 0..2 keeps the pointer inside the triple buffer.
+        if (s < 0 || s > 2) return nullptr;
         float* base = reinterpret_cast<float*>(slot_ + SHM_SCOPE_SLOT_HEADER_SIZE);
         return base + static_cast<size_t>(s)
              * (SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS);
@@ -377,7 +386,38 @@ public:
 
 private:
     uint8_t* slot_;
+    std::shared_ptr<const void> keepalive_;
     int      last_stage_ = -1;
+};
+
+// ──── Observer views (GUI / passive reader side) ────────────────────────
+//
+// Byte-level views onto observable regions, for consumers that render them
+// generically (e.g. the Sonic Pi GUI panels). The observer tails rings with
+// its own local cursor — head/tail here are the engine's, for reference.
+
+struct ring_view {
+    uint8_t* base = nullptr;
+    uint32_t size = 0;
+    std::atomic<int32_t>* head = nullptr;
+    std::atomic<int32_t>* tail = nullptr;
+};
+
+struct node_tree_view {
+    uint8_t* header      = nullptr;  // NodeTreeHeader
+    uint8_t* entries     = nullptr;  // NodeEntry[]
+    uint32_t max_nodes   = 0;
+    uint32_t entry_bytes = 0;
+};
+
+// Native-only live engine stats snapshot.
+struct native_stats {
+    uint32_t synthdefs           = 0;
+    uint32_t buffers             = 0;
+    uint32_t buffer_bytes        = 0;
+    uint32_t cpu_load_avg_centi  = 0;  // DSP load, percent * 100 (smoothed average)
+    uint32_t cpu_load_peak_centi = 0;  // DSP load, percent * 100 (decaying peak)
+    uint32_t callback_overruns   = 0;  // audio callbacks that overran their budget
 };
 
 // ──── Creator (audio engine side) ───────────────────────────────────────
@@ -444,35 +484,37 @@ private:
 class server_shared_memory_client {
 public:
     server_shared_memory_client(unsigned int port_number):
-        shmem_name(make_shmem_name(port_number)),
-        handle(shm_open_existing(shmem_name))
+        shmem_name(make_shmem_name(port_number))
     {
-        // Size check before touching any field: a foreign or truncated segment
-        // must not be dereferenced via header offsets. On throw the destructor
-        // never runs, so the mapping is released here.
-        if (handle.size < SEGMENT_SIZE) {
+        shm_handle handle = shm_open_existing(shmem_name);
+        // The mapping is owned by a shared_ptr so readers minted from this
+        // client can pin it beyond the client's own lifetime (a GUI destroys
+        // and re-opens its client on engine cold swap while reader copies
+        // live on in widgets). Until map_ owns it, close on any throw — the
+        // destructor doesn't run for a throwing constructor.
+        try {
+            map_ = std::make_shared<mapping>(handle);
+        } catch (...) {
             shm_close(handle);
-            throw std::runtime_error(
-                "Shared memory segment smaller than expected — stale or foreign segment?");
+            throw;
         }
 
+        // Size check before touching any field: a foreign or truncated segment
+        // must not be dereferenced via header offsets.
+        if (handle.size < SEGMENT_SIZE)
+            throw std::runtime_error(
+                "Shared memory segment smaller than expected — stale or foreign segment?");
+
         auto* header = static_cast<shm_segment_header*>(handle.ptr);
-        if (header->magic != shm_segment_header::MAGIC) {
-            shm_close(handle);
+        if (header->magic != shm_segment_header::MAGIC)
             throw std::runtime_error(
                 "Invalid shared memory magic — is the audio engine running?");
-        }
 
         // Acquire pairs with the creator's release before the MAGIC store, so
         // observing MAGIC implies a fully-published header.
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        shm = new server_shared_memory(handle.ptr, false);
-    }
-
-    ~server_shared_memory_client() {
-        shm_close(handle);
-        delete shm;
+        shm.reset(new server_shared_memory(handle.ptr, false));
     }
 
     uint8_t*            get_base() { return shm->get_base(); }
@@ -480,8 +522,49 @@ public:
     NodeTreeHeader*     get_node_tree_header()  { return shm->get_node_tree_header();  }
     NodeEntry*          get_node_tree_entries() { return shm->get_node_tree_entries(); }
 
+    // Flat atomic u32 view of PerformanceMetrics, for observers that render
+    // the fields generically.
+    const std::atomic<uint32_t>* get_metrics_flat() {
+        return reinterpret_cast<const std::atomic<uint32_t>*>(
+            shm->get_base() + METRICS_START);
+    }
+    static constexpr uint32_t metrics_field_count() { return METRICS_SIZE / 4; }
+
+    ring_view get_in_ring() {
+        return { shm->get_base() + IN_BUFFER_START, IN_BUFFER_SIZE,
+                 &control()->in_head, &control()->in_tail };
+    }
+    ring_view get_out_ring() {
+        return { shm->get_base() + OUT_BUFFER_START, OUT_BUFFER_SIZE,
+                 &control()->out_head, &control()->out_tail };
+    }
+    ring_view get_nrt_out_ring() {
+        return { shm->get_base() + NRT_OUT_BUFFER_START, NRT_OUT_BUFFER_SIZE,
+                 &control()->nrt_out_head, &control()->nrt_out_tail };
+    }
+
+    node_tree_view get_node_tree() {
+        return { shm->get_base() + NODE_TREE_START,
+                 shm->get_base() + NODE_TREE_START + NODE_TREE_HEADER_SIZE,
+                 NODE_TREE_MIRROR_MAX_NODES, NODE_TREE_ENTRY_SIZE };
+    }
+
+    native_stats get_native_stats() {
+        auto field = [this](uint32_t off) {
+            return reinterpret_cast<const std::atomic<uint32_t>*>(
+                shm->get_base() + NATIVE_STATS_START + off)
+                ->load(std::memory_order_relaxed);
+        };
+        return { field(NATIVE_STAT_SYNTHDEFS),     field(NATIVE_STAT_BUFFERS),
+                 field(NATIVE_STAT_BUFFER_BYTES),  field(NATIVE_STAT_CPU_AVG_CENTI),
+                 field(NATIVE_STAT_CPU_PEAK_CENTI), field(NATIVE_STAT_CB_OVERRUNS) };
+    }
+    // Native segments always carry the stats region; a web-origin arena has no
+    // shm client at all. Kept for observer-API symmetry.
+    bool has_native_stats() const { return true; }
+
     shm_scope_buffer_reader get_scope_buffer_reader(unsigned int index) {
-        return shm_scope_buffer_reader(shm->get_scope_slot(index));
+        return shm_scope_buffer_reader(shm->get_scope_slot(index), map_);
     }
 
     shm_audio_buffer* get_audio_buffer(unsigned int index) {
@@ -489,13 +572,25 @@ public:
     }
 
     shm_audio_buffer_reader get_audio_buffer_reader(unsigned int index) {
-        return shm_audio_buffer_reader(shm->get_audio_buffer(index));
+        return shm_audio_buffer_reader(shm->get_audio_buffer(index), map_);
     }
 
 private:
-    string                shmem_name;
-    shm_handle            handle;
-    server_shared_memory* shm = nullptr;
+    struct mapping {
+        explicit mapping(const shm_handle& h): handle(h) {}
+        mapping(const mapping&) = delete;
+        mapping& operator=(const mapping&) = delete;
+        ~mapping() { shm_close(handle); }
+        shm_handle handle;
+    };
+
+    ControlPointers* control() {
+        return reinterpret_cast<ControlPointers*>(shm->get_base() + CONTROL_START);
+    }
+
+    string                                shmem_name;
+    std::shared_ptr<mapping>              map_;
+    std::unique_ptr<server_shared_memory> shm;
 };
 
 } /* namespace detail_server_shm */
@@ -503,4 +598,7 @@ private:
 using detail_server_shm::shm_scope_buffer_reader;
 using detail_server_shm::server_shared_memory_client;
 using detail_server_shm::server_shared_memory_creator;
+using detail_server_shm::ring_view;
+using detail_server_shm::node_tree_view;
+using detail_server_shm::native_stats;
 // shm_audio_buffer + AUDIO_* names are exported by shm_audio_buffer.hpp.

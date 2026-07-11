@@ -1218,6 +1218,12 @@ void World_NRTUnlock(World* world) { reinterpret_cast<SC_Lock*>(world->mNRTLock)
 //   [8..11]  i32 stage (atomic triple-buffer swap index)
 //   [12..15] u32 _in (writer's current region)
 //   [16..]   float data[3][SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS]
+// Current owner of each scope slot (the ScopeBufferHnd that most recently
+// initialised it). Graph ctors/dtors run on the RT thread, so plain pointers
+// suffice. A slot may be re-claimed while a superseded unit still lives — its
+// late dtor must not stomp the new owner's slot state (see releaseScopeBuffer).
+static void* gScopeSlotOwners[SHM_SCOPE_MAX_SCOPES] = {};
+
 SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, ScopeBufferHnd* hnd) {
     (void)inWorld;
     uint8_t* base = reinterpret_cast<uint8_t*>(get_shared_memory_base());
@@ -1265,6 +1271,7 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
     hnd->internalData = slotBase;  // Store slot pointer for push/release
     hnd->channels = channels;
     hnd->maxFrames = maxFrames;
+    gScopeSlotOwners[index] = hnd;
     return kSCTrue;
 }
 
@@ -1294,16 +1301,39 @@ void releaseScopeBuffer(World* inWorld, ScopeBufferHnd* hnd) {
     (void)inWorld;
     if (!hnd->internalData) return;
     uint8_t* slotBase = reinterpret_cast<uint8_t*>(hnd->internalData);
-    auto* state = reinterpret_cast<std::atomic<uint32_t>*>(slotBase + 0);
-    state->store(0, std::memory_order_relaxed);  // free
 
     uint8_t* base = reinterpret_cast<uint8_t*>(get_shared_memory_base());
+
+    // Only the slot's current owner may mark it free. A superseded unit's late
+    // dtor (e.g. the previous run's scope node tearing down under FX kill-delay
+    // tails after a re-run re-claimed the same slot) otherwise stomps state=0
+    // under the live writer, and readers gate on state==1 — the scope greys
+    // out forever while the audio plays on.
+    ptrdiff_t index = -1;
+    if (base) {
+        uint8_t* slots = base + SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE;
+        index = (slotBase - slots) / SHM_SCOPE_SLOT_SIZE;
+        if (index < 0 || index >= (ptrdiff_t)SHM_SCOPE_MAX_SCOPES)
+            index = -1;
+    }
+    bool isOwner = (index < 0) || gScopeSlotOwners[index] == hnd;
+    if (isOwner) {
+        auto* state = reinterpret_cast<std::atomic<uint32_t>*>(slotBase + 0);
+        state->store(0, std::memory_order_relaxed);  // free
+        if (index >= 0)
+            gScopeSlotOwners[index] = nullptr;
+        if (base) {
+            auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 12);
+            version->fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
+    // Every getScopeBuffer incremented the active count, so every release
+    // decrements it — owner or not — to keep the pairing balanced.
     if (base) {
         auto* activeCount = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 4);
         if (activeCount->load(std::memory_order_relaxed) > 0)
             activeCount->fetch_sub(1, std::memory_order_relaxed);
-        auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 12);
-        version->fetch_add(1, std::memory_order_relaxed);
     }
     // Null the handle so a stale holder sees NULL, not a dangling pointer. The
     // ScopeOut2_next defensive checks rely on both being nullable.

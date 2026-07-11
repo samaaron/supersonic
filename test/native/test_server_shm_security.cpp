@@ -97,4 +97,86 @@ TEST_CASE("shm-security: reader rejects a too-small segment before dereferencing
     ::shm_unlink(posixName(kPort).c_str());
 }
 
+TEST_CASE("shm-security: scope readers pin the client mapping (no dangling reads)",
+          "[shm][security]") {
+    constexpr unsigned kPort = 57314;
+    server_shared_memory_creator::cleanup(kPort);
+    server_shared_memory_creator creator(kPort, 0);
+    creator.publish();
+
+    // A GUI hands reader copies to long-lived widgets, then remaps on engine
+    // cold swap by destroying its client. The reader must keep the old mapping
+    // alive: 2026-07-11 this exact sequence was a GUI segfault (poll timer →
+    // atomic load through the munmapped slot pointer).
+    auto client = std::make_unique<server_shared_memory_client>(kPort);
+    auto reader = client->get_scope_buffer_reader(0);
+    client.reset();
+
+    unsigned frames = 0;
+    (void)reader.valid();
+    (void)reader.pull(frames);
+    (void)reader.data();
+    SUCCEED("reader survived client teardown without touching unmapped memory");
+}
+
+TEST_CASE("shm-security: scope reader rejects an out-of-range stage index",
+          "[shm][security]") {
+    constexpr unsigned kPort = 57315;
+    server_shared_memory_creator::cleanup(kPort);
+    server_shared_memory_creator creator(kPort, 0);
+    creator.publish();
+    server_shared_memory_client client(kPort);
+    auto reader = client.get_scope_buffer_reader(0);
+
+    // stage is re-read from shared memory on every data() call and multiplies
+    // into the returned pointer; only 0..2 stays inside the triple buffer.
+    uint8_t* slot = creator.get_base() + SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE;
+    reinterpret_cast<std::atomic<int32_t>*>(slot + 8)
+        ->store(999, std::memory_order_release);
+    CHECK(reader.data() == nullptr);
+    reinterpret_cast<std::atomic<int32_t>*>(slot + 8)
+        ->store(-7, std::memory_order_release);
+    CHECK(reader.data() == nullptr);
+    reinterpret_cast<std::atomic<int32_t>*>(slot + 8)
+        ->store(2, std::memory_order_release);
+    CHECK(reader.data() != nullptr);
+}
+
+TEST_CASE("shm client exposes the observer views inside its own mapping",
+          "[shm]") {
+    constexpr unsigned kPort = 57316;
+    server_shared_memory_creator::cleanup(kPort);
+    server_shared_memory_creator creator(kPort, 0);
+    creator.publish();
+    server_shared_memory_client client(kPort);
+    uint8_t* base = client.get_base();
+
+    auto in = client.get_in_ring();
+    CHECK(in.base == base + IN_BUFFER_START);
+    CHECK(in.size == IN_BUFFER_SIZE);
+    REQUIRE(in.head != nullptr);
+    REQUIRE(in.tail != nullptr);
+
+    auto out = client.get_out_ring();
+    CHECK(out.base == base + OUT_BUFFER_START);
+    CHECK(out.size == OUT_BUFFER_SIZE);
+
+    auto nrt = client.get_nrt_out_ring();
+    CHECK(nrt.base == base + NRT_OUT_BUFFER_START);
+    CHECK(nrt.size == NRT_OUT_BUFFER_SIZE);
+
+    CHECK(client.get_metrics_flat()
+          == reinterpret_cast<const std::atomic<uint32_t>*>(base + METRICS_START));
+    CHECK(client.metrics_field_count() == METRICS_SIZE / 4);
+
+    auto tree = client.get_node_tree();
+    CHECK(tree.header == base + NODE_TREE_START);
+    CHECK(tree.entries == base + NODE_TREE_START + NODE_TREE_HEADER_SIZE);
+    CHECK(tree.max_nodes == NODE_TREE_MIRROR_MAX_NODES);
+    CHECK(tree.entry_bytes == NODE_TREE_ENTRY_SIZE);
+
+    CHECK(client.has_native_stats());
+    (void)client.get_native_stats();
+}
+
 #endif  // !_WIN32
