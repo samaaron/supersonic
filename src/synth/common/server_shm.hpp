@@ -12,6 +12,7 @@
 
 #include "shm_audio_buffer.hpp"
 #include "src/shared_memory.h"
+#include "src/shm_peer_plane.h"
 
 #include <algorithm>
 #include <atomic>
@@ -46,9 +47,15 @@ static constexpr int    MAX_SHM_SCOPE_BUFFERS = 128;  // retained for compat; sc
 // The public segment is a small handshake header followed by the unified
 // shared_memory.h arena blob — the SAME layout the engine uses in
 // ring_buffer_storage (native) / the WASM SAB. One layout, one source of
-// truth; no separate native layout to drift.
+// truth; no separate native layout to drift. The peer command plane
+// (shm_peer_plane.h) sits after the blob: it is native-segment-only (its
+// consumers are the native host and an external peer), so the arena layout —
+// and with it the web SAB and embedded profiles — is untouched by it.
 static constexpr size_t SHM_BLOB_OFFSET = 128;  // aligned, >= sizeof(shm_segment_header)
-static constexpr size_t SEGMENT_SIZE    = SHM_BLOB_OFFSET + TOTAL_BUFFER_SIZE;
+// Rounded up to 8: the arena total is only guaranteed 4-aligned, and the peer
+// plane header is alignas(8).
+static constexpr size_t SHM_PEER_OFFSET = (SHM_BLOB_OFFSET + TOTAL_BUFFER_SIZE + 7u) & ~size_t{7};
+static constexpr size_t SEGMENT_SIZE    = SHM_PEER_OFFSET + SHM_PEER_PLANE_TOTAL_SIZE;
 
 static inline string make_shmem_name(unsigned int port_number) {
     return string("SuperSonic_") + std::to_string(port_number);
@@ -175,6 +182,9 @@ inline void shm_remove(const string& name) {
 //   0x5C09E003  added shm_audio_buffer multi-slot ring
 //   0x5C09E004  unified: segment == shared_memory.h arena blob (rings in
 //               segment; scope fixed-inline; TLSF pool + control busses removed)
+//   0x5C09E006  + Link metrics fields (METRICS_SIZE 184→232)
+//   0x5C09E007  appended the peer command plane after the arena blob
+//               (shm_peer_plane.h: SPSC command + reply rings)
 //
 // Publication: the creator zeroes the whole segment and writes the header
 // geometry, but defers the MAGIC store. The engine then populates the arena
@@ -192,7 +202,7 @@ inline void shm_remove(const string& name) {
 // changes propagate through the header rather than requiring a hand-synced copy.
 // All offsets are relative to the arena blob base (segment + blob_offset).
 struct shm_segment_header {
-    static constexpr uint32_t MAGIC = 0x5C09E006;  // E006: + Link metrics fields (METRICS_SIZE 184→232)
+    static constexpr uint32_t MAGIC = 0x5C09E007;  // E007: + peer command plane after the arena
 
     uint32_t magic;
     uint32_t blob_offset;          // segment base → arena blob
@@ -227,9 +237,19 @@ struct shm_segment_header {
     uint32_t scope_channels;       // SHM_SCOPE_CHANNELS
 
     uint32_t native_stats_offset;  // native-only live stats (synthdefs, buffers, buffer_bytes)
+
+    // Peer command plane (shm_peer_plane.h). peer_offset is SEGMENT-relative
+    // (the plane sits after the arena blob, so a blob-relative offset would
+    // point past the region the blob offsets describe).
+    uint32_t peer_offset;
+    uint32_t peer_header_bytes;    // sizeof(ShmPeerPlaneHeader)
+    uint32_t peer_cmd_ring_bytes;  // SHM_PEER_CMD_RING_SIZE
+    uint32_t peer_rep_ring_bytes;  // SHM_PEER_REP_RING_SIZE
 };
 static_assert(sizeof(shm_segment_header) <= SHM_BLOB_OFFSET,
               "shm_segment_header must fit within SHM_BLOB_OFFSET");
+static_assert(SHM_PEER_OFFSET % 8 == 0,
+              "peer plane must be 8-byte aligned (ShmPeerPlaneHeader is alignas(8))");
 
 // ──── server_shared_memory ──────────────────────────────────────────────
 //
@@ -242,6 +262,12 @@ public:
         char* seg = static_cast<char*>(segment_base);
         header_ = reinterpret_cast<shm_segment_header*>(seg);
         blob_   = reinterpret_cast<uint8_t*>(seg) + SHM_BLOB_OFFSET;
+        // The creator places the plane at this build's offset; a reader
+        // locates it via the published header instead — its own build may
+        // disagree with the engine about arena sizing (e.g. the test builds'
+        // larger audio taps), and the header is the cross-build contract.
+        peer_ = reinterpret_cast<ShmPeerPlaneHeader*>(
+            init ? seg + SHM_PEER_OFFSET : seg + header_->peer_offset);
 
         if (init) {
             header_->blob_offset = static_cast<uint32_t>(SHM_BLOB_OFFSET);
@@ -276,6 +302,12 @@ public:
             header_->scope_channels     = SHM_SCOPE_CHANNELS;
 
             header_->native_stats_offset = NATIVE_STATS_START;
+
+            header_->peer_offset         = static_cast<uint32_t>(SHM_PEER_OFFSET);
+            header_->peer_header_bytes   = static_cast<uint32_t>(sizeof(ShmPeerPlaneHeader));
+            header_->peer_cmd_ring_bytes = SHM_PEER_CMD_RING_SIZE;
+            header_->peer_rep_ring_bytes = SHM_PEER_REP_RING_SIZE;
+            shm_peer_plane_init(peer_);
 
             // NOTE: MAGIC is deliberately NOT stored here. The geometry fields
             // above are written now (before init_memory()), but the arena blob
@@ -328,9 +360,13 @@ public:
              + static_cast<size_t>(index) * SHM_SCOPE_SLOT_SIZE;
     }
 
+    // Peer command plane (after the arena blob; see shm_peer_plane.h).
+    ShmPeerPlaneHeader* get_peer_plane() { return peer_; }
+
 private:
     shm_segment_header* header_;
     uint8_t*            blob_;
+    ShmPeerPlaneHeader* peer_;
 };
 
 // ──── Fixed-inline scope reader ─────────────────────────────────────────
@@ -463,6 +499,7 @@ public:
     NodeTreeHeader*     get_node_tree_header()  { return shm ? shm->get_node_tree_header()  : nullptr; }
     NodeEntry*          get_node_tree_entries() { return shm ? shm->get_node_tree_entries() : nullptr; }
     shm_audio_buffer*   get_audio_buffers()     { return shm ? shm->get_audio_buffers()     : nullptr; }
+    ShmPeerPlaneHeader* get_peer_plane()        { return shm ? shm->get_peer_plane()        : nullptr; }
 
     shm_audio_buffer* get_audio_buffer(unsigned int index) {
         return shm ? shm->get_audio_buffer(index) : nullptr;
@@ -521,6 +558,7 @@ public:
     PerformanceMetrics* get_metrics() { return shm->get_metrics(); }
     NodeTreeHeader*     get_node_tree_header()  { return shm->get_node_tree_header();  }
     NodeEntry*          get_node_tree_entries() { return shm->get_node_tree_entries(); }
+    ShmPeerPlaneHeader* get_peer_plane()        { return shm->get_peer_plane(); }
 
     // Flat atomic u32 view of PerformanceMetrics, for observers that render
     // the fields generically.

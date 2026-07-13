@@ -985,6 +985,18 @@ void SupersonicEngine::init(const Config& cfg) {
     if (mShmemCreator)
         mShmemCreator->publish();
 
+    // Publish the peer command plane only when enabled: the gateway task below
+    // drains its command ring and ShmTransport sends through this slot.
+    // Disabled (or no segment) ⇒ the slot stays null and both sides are inert.
+    if (cfg.shmCommands) {
+        if (mShmemCreator) {
+            mPeerPlane.store(mShmemCreator->get_peer_plane(), std::memory_order_release);
+        } else {
+            fprintf(stderr, "[supersonic] WARNING: shmCommands requested but there is "
+                            "no SHM segment (udpPort == 0) — command plane disabled\n");
+        }
+    }
+
     // Derive worker pointers from the arena. With the unified layout the rings,
     // control words and metrics all live in the arena (the public segment when
     // present), so external observers read the same structs with no redirect.
@@ -1006,6 +1018,39 @@ void SupersonicEngine::init(const Config& cfg) {
                     token, route, osc, len);
             },
             this, 0 /* drain everything available */);
+    });
+
+    // -- NRT gateway: peer command plane (SHM segment; shm_peer_plane.h) -----
+    // One trusted external peer writes OSC frames into the plane's SPSC
+    // command ring; this task feeds them into the ordinary ingest path (IN
+    // ring → audio-thread classify → control forward), stamped with the
+    // reserved SHM-peer origin token — identity is assigned here, never
+    // trusted from shared memory. Registered before the control-ring drain so
+    // a forwarded control command is handled the same wake. Bounded per wake
+    // so a flooding peer cannot starve the other drains (the remainder drains
+    // next block); a full IN ring Retains the frame — lossless backpressure
+    // through to the peer's own ring-full signal. Inert while mPeerPlane is
+    // null (shmCommands off).
+    mNrtGateway.addTask([this]() {
+        auto* plane = mPeerPlane.load(std::memory_order_acquire);
+        if (!plane) return;
+        constexpr uint32_t kPeerDrainMaxFrames = 256;
+        ss_drain_ring(
+            shm_peer_cmd_ring(plane), SHM_PEER_CMD_RING_SIZE,
+            &plane->cmd_head, &plane->cmd_tail, mPeerDrainState,
+            SsDrainMetrics{ nullptr, nullptr,
+                            mMetrics ? &mMetrics->osc_in_corrupted : nullptr,
+                            nullptr },
+            kPeerDrainMaxFrames,
+            [this](uint32_t /*frameSrc*/, const uint8_t* d, uint32_t n, uint32_t) {
+                if (!ss_ingress_write(d, n, SHM_PEER_ORIGIN_TOKEN))
+                    return SsDrainVerdict::Retain;   // IN ring full — retry next wake
+                if (mMetrics) {
+                    mMetrics->osc_out_messages_sent.fetch_add(1, std::memory_order_relaxed);
+                    mMetrics->osc_out_bytes_sent.fetch_add(n, std::memory_order_relaxed);
+                }
+                return SsDrainVerdict::Consume;
+            });
     });
 
     // -- Audio-plane ingress (engine-owned) ---------------------------------
@@ -1402,7 +1447,10 @@ void SupersonicEngine::shutdown() {
     // so nothing can dereference the arena once it is unmapped below.
     teardown_memory();
 
-    // Destroy engine-owned shared memory (after the World is gone).
+    // Destroy engine-owned shared memory (after the World is gone). The peer
+    // plane lives in the segment: null the published slot first so a late
+    // ShmTransport send observes null rather than an unmapped plane.
+    mPeerPlane.store(nullptr, std::memory_order_release);
     g_external_shared_memory = nullptr;
     g_external_segment = nullptr;
     mShmemCreator.reset();

@@ -670,6 +670,7 @@ version = "0.1.0"
 dependencies = [
  "socket2",
  "supersonic-osc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

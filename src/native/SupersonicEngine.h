@@ -26,6 +26,7 @@
 #include "RingBufferWriter.h"
 #include "src/OscIngress.h"
 #include "src/IngressCallCtx.h"
+#include "src/shm_peer_plane.h"
 #include "EngineControl.h"
 #ifdef SUPERSONIC_MIDI
 #include "MidiControl.h"
@@ -112,6 +113,12 @@ public:
                                                    // the server deaf forever.
         int    watchdogStallMs          = 2500;    // frozen this long => recovery
         int    watchdogPollMs           = 250;     // liveness sampling interval
+        bool   shmCommands              = false;   // drain the SHM segment's peer
+                                                   // command plane (shm_peer_plane.h)
+                                                   // on the NRT gateway and publish
+                                                   // the plane for ShmTransport.
+                                                   // Needs udpPort > 0 (the port
+                                                   // names the segment).
         std::string bindAddress       = "127.0.0.1"; // localhost only; use -B to override
         std::string hardwareDevice;                // -H flag: fuzzy match on "Driver : Device"
         std::string pianoWavetablePath;            // --piano-wavetable: raw int16 sample
@@ -133,6 +140,12 @@ public:
     // before init(); if unset, the engine uses the in-process CallbackTransport
     // (replies via onReply).
     void setTransport(IOscTransport* transport) { mTransport = transport; }
+
+    // The peer command plane slot (Config::shmCommands). Set to the segment's
+    // plane by init(), nulled by shutdown(). ShmTransport binds to the SLOT
+    // (not the plane) and loads it per send, so it always follows the engine's
+    // current segment.
+    std::atomic<ShmPeerPlaneHeader*>* peerPlaneSlot() { return &mPeerPlane; }
 
     void sendOSC(const uint8_t* data, uint32_t size);
 
@@ -612,6 +625,13 @@ private:
     // so no engine thread ever touches a socket. (Web has no NRT thread.)
     RingReader                mNrtGateway{"SuperSonic-NrtGateway"};
 
+    // Peer command plane (SHM segment; shm_peer_plane.h). init() publishes the
+    // segment's plane here when Config::shmCommands is set; shutdown() nulls it
+    // before the segment unmaps. The gateway task drains its command ring into
+    // the ingest path; ShmTransport (bound to this slot via peerPlaneSlot())
+    // produces its reply ring. Null ⇒ the plane is inert.
+    std::atomic<ShmPeerPlaneHeader*> mPeerPlane{nullptr};
+    SsDrainState                     mPeerDrainState;
 
     // Debounced device switch — rapid clicks settle into one final switch.
     struct PendingSwitch {

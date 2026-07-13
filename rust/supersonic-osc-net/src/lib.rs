@@ -10,3 +10,13 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ffi;
+
+// Kernel-ACL'd local transports (the UDP control port's owner-only siblings):
+// UDS datagram, length-prefix-framed stream servers (UDS + TCP), and the
+// Windows named-pipe analogue behind the same stream ABI.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod pipe;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod stream;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod uds;

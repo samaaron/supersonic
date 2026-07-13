@@ -798,7 +798,13 @@ if(SUPERSONIC_ENABLE_SYNTH)
         COMPANY_NAME    "SuperSonic"
     )
 
-    target_sources(SuperSonic PRIVATE ${NATIVE_SRC}/Main.cpp ${NATIVE_SRC}/UdpOscTransport.cpp)
+    target_sources(SuperSonic PRIVATE
+        ${NATIVE_SRC}/Main.cpp
+        ${NATIVE_SRC}/UdpOscTransport.cpp
+        ${NATIVE_SRC}/StreamOscTransport.cpp
+        ${NATIVE_SRC}/UdsDgramOscTransport.cpp
+        ${NATIVE_SRC}/ShmTransport.cpp
+    )
     target_link_libraries(SuperSonic PRIVATE supersonic_engine)
 
     target_compile_definitions(SuperSonic PRIVATE

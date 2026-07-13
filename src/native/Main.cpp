@@ -4,19 +4,26 @@
  * Accepts scsynth command-line flags so Sonic Pi (and other SC clients)
  * can launch this binary exactly like scsynth.exe.
  *
- * JUCE provides the audio driver (WASAPI/CoreAudio/ALSA),
- * SuperSonic's scsynth core handles synthesis, UDP/OSC for communication.
+ * JUCE provides the audio driver (WASAPI/CoreAudio/ALSA); SuperSonic's
+ * scsynth core handles synthesis. OSC commands arrive over UDP by default,
+ * or over TCP / Unix sockets / a named pipe via the --tcp/--uds/--uds-dgram/
+ * --pipe flags.
  */
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_core/juce_core.h>
 #include "SupersonicEngine.h"
+#include "ShmTransport.h"
+#include "StreamOscTransport.h"
 #include "UdpOscTransport.h"
+#include "UdsDgramOscTransport.h"
 #include "supersonic_config.h"
 
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
+#include <string>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -65,7 +72,8 @@ static const char* nextArg(int i, int argc, char* argv[]) {
     return (i + 1 < argc) ? argv[i + 1] : nullptr;
 }
 
-static void printBanner(const char* version, const CurrentDeviceInfo& dev, int udpPort) {
+static void printBanner(const char* version, const CurrentDeviceInfo& dev,
+                        const std::string& transportDesc) {
     fprintf(stderr,
         "\n"
         "  ░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀\n"
@@ -120,7 +128,7 @@ static void printBanner(const char* version, const CurrentDeviceInfo& dev, int u
         fprintf(stderr, "  headless (no audio device)\n");
     }
 
-    fprintf(stderr, "  UDP port %d\n\n", udpPort);
+    fprintf(stderr, "  %s\n\n", transportDesc.c_str());
     fflush(stderr);
 }
 
@@ -199,7 +207,20 @@ int main(int argc, char* argv[]) {
                 "  -v           Print version and exit\n"
                 "  --default-bpm <n>  Opening session tempo (default 120)\n"
                 "  --piano-wavetable <path>  MdaPiano sample table (raw int16)\n"
-                "  --list-devices     List audio devices and exit\n\n"
+                "  --list-devices     List audio devices and exit\n"
+                "\n"
+                "Command transports (pick at most one; it replaces the UDP command\n"
+                "port — the cue server and outbound OSC are unaffected, and -u still\n"
+                "numbers the server's SHM segment; -u 0 disables SHM):\n"
+                "  --tcp <port>        TCP, length-prefixed OSC (respects -B)\n"
+                "  --uds <path>        Unix socket, stream (macOS/Linux; file 0600)\n"
+                "  --uds-dgram <path>  Unix socket, datagram (macOS/Linux; file 0600)\n"
+                "  --pipe <name>       Named pipe (Windows; owner-only DACL)\n"
+                "  --shm-commands      SHM segment's peer command plane (one trusted\n"
+                "                      co-located peer; requires -u > 0)\n"
+                "  --max-connections <n>  Stream/pipe connection cap (default 4)\n"
+                "\n"
+                "  --headless   No audio device; timer-driven render (CI/tests)\n\n"
             );
             return 0;
         }
@@ -257,6 +278,15 @@ int main(int argc, char* argv[]) {
     cfg.callbackWatchdog     = true;
 
 
+    // Command transport selection: at most one of these replaces the UDP
+    // command port (the cue server + outbound OSC are independent sockets and
+    // stay available either way).
+    int         tcpPort = 0;
+    std::string udsStreamPath, udsDgramPath, pipeName;
+    bool        shmCommands = false;
+    uint32_t    maxConns = 4;
+    bool        headless = false;
+
     for (int i = 1; i < argc; ++i) {
         const char* arg = argv[i];
         const char* val = nextArg(i, argc, argv);
@@ -273,6 +303,44 @@ int main(int argc, char* argv[]) {
         // thread; if absent, :piano plays silence.
         if (std::strcmp(arg, "--piano-wavetable") == 0) {
             if (val) { cfg.pianoWavetablePath = val; ++i; }
+            continue;
+        }
+
+        if (std::strcmp(arg, "--tcp") == 0) {
+            if (val) { tcpPort = std::atoi(val); ++i; }
+            continue;
+        }
+        if (std::strcmp(arg, "--uds") == 0) {
+            if (val) { udsStreamPath = val; ++i; }
+            continue;
+        }
+        if (std::strcmp(arg, "--uds-dgram") == 0) {
+            if (val) { udsDgramPath = val; ++i; }
+            continue;
+        }
+        if (std::strcmp(arg, "--pipe") == 0) {
+            if (val) { pipeName = val; ++i; }
+            continue;
+        }
+        if (std::strcmp(arg, "--shm-commands") == 0) {
+            shmCommands = true;
+            continue;
+        }
+        if (std::strcmp(arg, "--max-connections") == 0) {
+            if (val) {
+                // Clamp: atoi of a negative/huge value would wrap to a giant
+                // uint32; the named-pipe backend pre-spawns one thread per
+                // connection slot, so an unclamped value is a thread bomb.
+                const long n = std::atol(val);
+                maxConns = static_cast<uint32_t>(n < 1 ? 1 : (n > 1024 ? 1024 : n));
+                ++i;
+            }
+            continue;
+        }
+        // No audio device: the HeadlessDriver renders on a timer thread, so
+        // OSC still drains and replies flow — for CI and the transport harness.
+        if (std::strcmp(arg, "--headless") == 0) {
+            headless = true;
             continue;
         }
 
@@ -340,12 +408,35 @@ int main(int argc, char* argv[]) {
     std::signal(SIGABRT, crashHandler);
     std::signal(SIGFPE,  crashHandler);
 
+    // At most one command transport may replace the UDP command port.
+    const int altTransports = (tcpPort > 0 ? 1 : 0) + (udsStreamPath.empty() ? 0 : 1)
+                            + (udsDgramPath.empty() ? 0 : 1) + (pipeName.empty() ? 0 : 1)
+                            + (shmCommands ? 1 : 0);
+    if (altTransports > 1) {
+        fprintf(stderr, "[supersonic] ERROR: pick at most one of --tcp / --uds / "
+                        "--uds-dgram / --pipe / --shm-commands\n");
+        return 1;
+    }
+    if (shmCommands && cfg.udpPort <= 0) {
+        fprintf(stderr, "[supersonic] ERROR: --shm-commands needs -u > 0 "
+                        "(the port names the SHM segment)\n");
+        return 1;
+    }
+    cfg.headless = headless;
+    cfg.shmCommands = shmCommands;
+
     // ── Engine + transport ─────────────────────────────────────────────────────
-    // The standalone server owns the UDP transport; the engine owns no socket.
-    // Declared before `engine` so it outlives the engine's teardown. Wired as
-    // ingress (recv → engine.ingest) and egress (engine → socket).
-    UdpOscTransport  udpServer;
-    SupersonicEngine engine;
+    // The standalone server owns the command transport; the engine owns no
+    // socket. UDP is the default; --tcp/--uds/--uds-dgram/--pipe swap in a
+    // connection-oriented or kernel-ACL'd alternative, leaving the UDP command
+    // port unbound (the cue server + outbound OSC are separate sockets and are
+    // unaffected). Declared before `engine` so they outlive its teardown. Wired
+    // as ingress (recv → engine.ingest) and egress (engine → socket).
+    UdpOscTransport      udpServer;
+    StreamOscTransport   streamServer;
+    UdsDgramOscTransport udsDgramServer;
+    ShmTransport         shmServer;
+    SupersonicEngine     engine;
 
     engine.onDebug = [](const std::string& s) {
         // Engine messages often carry their own trailing newline (scsynth
@@ -356,11 +447,69 @@ int main(int argc, char* argv[]) {
         fflush(stderr);
     };
 
-    udpServer.setIngest([&engine](const uint8_t* d, uint32_t n, uint32_t token) {
+    auto ingest = [&engine](const uint8_t* d, uint32_t n, uint32_t token) {
         engine.ingest(d, n, token);
-    });
-    engine.setTransport(&udpServer);
-    udpServer.initialise(cfg.udpPort, cfg.bindAddress);
+    };
+
+    // Select + configure the command transport; started after engine.init()
+    // (the engine's rings must exist before the first packet can be ingested).
+    IOscTransport* transport = &udpServer;
+    std::function<bool()> startTransport;
+    std::string transportDesc;
+    char descBuf[160];
+
+    if (altTransports > 0) {
+        if (shmCommands) {
+            // Ingest runs inside the engine (the NRT gateway drains the plane's
+            // command ring directly), so unlike the socket transports there is
+            // no recv wiring here — only the reply side. The plane exists once
+            // engine.init() has created the segment; bind then.
+            transport = &shmServer;
+            startTransport = [&] {
+                shmServer.bindPlaneSlot(engine.peerPlaneSlot());
+                return shmServer.ready();
+            };
+            snprintf(descBuf, sizeof(descBuf), "SHM command plane (segment SuperSonic_%d)",
+                     cfg.udpPort);
+        } else if (!udsDgramPath.empty()) {
+            udsDgramServer.setIngest(ingest);
+            udsDgramServer.initialise(udsDgramPath);
+            transport = &udsDgramServer;
+            startTransport = [&] { return udsDgramServer.start(); };
+            snprintf(descBuf, sizeof(descBuf), "UDS dgram socket %s", udsDgramPath.c_str());
+        } else {
+            streamServer.setIngest(ingest);
+            streamServer.setMaxConnections(maxConns);
+            if (tcpPort > 0) {
+                streamServer.initialiseTcp(tcpPort, cfg.bindAddress);
+                snprintf(descBuf, sizeof(descBuf), "TCP port %d (max %u connections)",
+                         tcpPort, maxConns);
+            } else if (!udsStreamPath.empty()) {
+                streamServer.initialiseUds(udsStreamPath);
+                snprintf(descBuf, sizeof(descBuf), "UDS stream socket %s (max %u connections)",
+                         udsStreamPath.c_str(), maxConns);
+            } else {
+                streamServer.initialisePipe(pipeName);
+                snprintf(descBuf, sizeof(descBuf), "named pipe %s (max %u connections)",
+                         pipeName.c_str(), maxConns);
+            }
+            transport = &streamServer;
+            startTransport = [&] { return streamServer.start(); };
+        }
+        transportDesc = descBuf;
+    } else {
+        udpServer.setIngest(ingest);
+        udpServer.initialise(cfg.udpPort, cfg.bindAddress);
+        // UDP stays forgiving (scsynth-compatible): a bind failure is logged
+        // but doesn't kill the server.
+        startTransport = [&] {
+            if (cfg.udpPort > 0) udpServer.start();
+            return true;
+        };
+        snprintf(descBuf, sizeof(descBuf), "UDP port %d", cfg.udpPort);
+        transportDesc = descBuf;
+    }
+    engine.setTransport(transport);
 
     try {
         engine.init(cfg);
@@ -372,9 +521,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Start the UDP recv now that the engine's rings exist for it to feed.
-    if (cfg.udpPort > 0)
-        udpServer.start();
+    // Start the command transport now that the engine's rings exist for it to
+    // feed. Unlike UDP, an alternative transport that can't bind is fatal —
+    // the caller chose it for its guarantees and must not get a deaf server.
+    if (!startTransport()) {
+        fprintf(stderr, "[supersonic] ERROR: command transport failed to start (%s)\n",
+                transportDesc.c_str());
+        engine.shutdown();
+        return 1;
+    }
 
     // Preserve the user's originally-requested input channel count across
     // the permission-pending zeroing above. Otherwise re-enable paths fall
@@ -387,7 +542,7 @@ int main(int argc, char* argv[]) {
     }
 
     auto dev = engine.currentDevice();
-    printBanner(VERSION, dev, cfg.udpPort);
+    printBanner(VERSION, dev, transportDesc);
 
     // On macOS, pump the CFRunLoop so AUHAL audio callbacks fire — and so
     // GameController discovery delivers: the gamepad subsystem's controller

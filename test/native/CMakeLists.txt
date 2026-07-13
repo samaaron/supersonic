@@ -105,9 +105,24 @@ if(SUPERSONIC_ENABLE_GAMEPAD)
 endif()
 
 # test_osc exercises the gated OSC subsystem (OscControl: cue server + outbound).
+# test_transports covers the command transports (stream + UDS dgram), which
+# build into the SuperSonic exe rather than the shared engine lib.
 if(SUPERSONIC_ENABLE_OSC)
-    target_sources(SuperSonicNativeTests PRIVATE test_osc.cpp)
+    target_sources(SuperSonicNativeTests PRIVATE
+        test_osc.cpp
+        test_transports.cpp
+        ${CMAKE_SOURCE_DIR}/src/native/StreamOscTransport.cpp
+        ${CMAKE_SOURCE_DIR}/src/native/UdsDgramOscTransport.cpp
+    )
 endif()
+
+# SHM command plane (shm_peer_plane.h): in-process round trips + the
+# cross-process crash-safety fuzz (spawns supersonic_test_shm_peer below).
+target_sources(SuperSonicNativeTests PRIVATE
+    test_shm_peer_plane.cpp
+    test_shm_peer_crash.cpp
+    ${CMAKE_SOURCE_DIR}/src/native/ShmTransport.cpp
+)
 
 target_link_libraries(SuperSonicNativeTests PRIVATE
     supersonic_engine
@@ -153,6 +168,27 @@ if(SUPERSONIC_ENABLE_LINK)
     )
     add_dependencies(SuperSonicNativeTests supersonic_test_link_peer)
 endif()
+
+# ─── Out-of-process SHM command-plane peer ──────────────────────────────────
+# Attaches to the engine's segment and writes /sync frames into the peer
+# command ring; test_shm_peer_crash.cpp spawns and SIGKILLs it to prove the
+# plane's crash-safety. Header-only dependencies (server_shm + ring writer).
+add_executable(supersonic_test_shm_peer
+    peer_shm/main.cpp
+)
+target_include_directories(supersonic_test_shm_peer PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src
+)
+find_package(Threads REQUIRED)
+target_link_libraries(supersonic_test_shm_peer PRIVATE Threads::Threads)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(supersonic_test_shm_peer PRIVATE rt)
+endif()
+target_compile_definitions(SuperSonicNativeTests PRIVATE
+    SUPERSONIC_TEST_SHM_PEER_BINARY="$<TARGET_FILE:supersonic_test_shm_peer>"
+)
+add_dependencies(SuperSonicNativeTests supersonic_test_shm_peer)
 
 include(CTest)
 include(Catch)

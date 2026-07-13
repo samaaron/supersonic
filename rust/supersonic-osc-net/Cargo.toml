@@ -17,3 +17,15 @@ crate-type = ["rlib"]
 socket2 = "0.6.4"
 # Complete OSC 1.0 codec (messages + bundles) + the shared C-ABI scaffolding.
 supersonic-osc = { path = "../supersonic-osc" }
+
+# Named-pipe stream server (pipe.rs): CreateNamedPipeW + owner-only DACL.
+# Already in the workspace lockfile transitively (other subsystem backends).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
