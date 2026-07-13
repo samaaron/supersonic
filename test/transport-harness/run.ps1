@@ -1,4 +1,4 @@
-# Transport harness (Windows) — boots the real SuperSonic binary once per
+# Transport harness (Windows) -- boots the real SuperSonic binary once per
 # command transport (UDP, TCP, named pipe), sends /status over that transport
 # with the transport_probe client, and requires a reply. Headless throughout.
 #
@@ -6,7 +6,7 @@
 #
 # Exit 0 = every transport answered. macOS/Linux (UDP/TCP/UDS) is run.sh.
 #
-# ⚠ Not yet exercised on a real Windows machine (CI runs it on the
+# WARNING: not yet exercised on a real Windows machine (CI runs it on the
 # windows-x64 runner).
 param([string]$Bin = "")
 
@@ -15,7 +15,7 @@ $Repo = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 if ($Bin -eq "") { $Bin = Join-Path $Repo "build\native\SuperSonic_artefacts\Release\SuperSonic.exe" }
 if (-not (Test-Path $Bin)) { Write-Error "harness: binary not found: $Bin"; exit 2 }
 
-Write-Host "harness: building transport_probe…"
+Write-Host "harness: building transport_probe..."
 Push-Location (Join-Path $Repo "rust")
 cargo build -q --example transport_probe -p supersonic-osc-net
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit 2 }
@@ -30,7 +30,7 @@ function Check($Name, $Proto, $Target, $ServerArgs) {
         -RedirectStandardError $log -RedirectStandardOutput "$log.out" -PassThru -NoNewWindow
     $ok = $false
     foreach ($i in 1..20) {
-        # The probe blocks ≤3s itself; treat a hung pipe read as failure too.
+        # The probe blocks <=3s itself; treat a hung pipe read as failure too.
         $p = Start-Process -FilePath $Probe -ArgumentList @($Proto, $Target) `
             -PassThru -NoNewWindow -Wait
         if ($p.ExitCode -eq 0) { $ok = $true; break }
@@ -40,7 +40,7 @@ function Check($Name, $Proto, $Target, $ServerArgs) {
     if ($ok) {
         Write-Host "PASS $Name"
     } else {
-        Write-Host "FAIL $Name — server log:"
+        Write-Host "FAIL $Name -- server log:"
         if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host "  | $_" } }
         $script:Failures++
     }

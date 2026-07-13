@@ -56,6 +56,14 @@ constexpr int kTimeoutScale = 1;
 constexpr int kTimeoutScale = 1;
 #endif
 
+// Engine-liveness waits (/status round trips, ring-drain checks) run against a
+// free-running headless driver whose audio thread a loaded CI runner can
+// preempt for long stretches — and each cycle also drains a peer's flood — so
+// a 2s ceiling is too tight there. Use a generous one: a genuinely wedged
+// engine still fails (the reply never arrives before the deadline); only real
+// slowness is absorbed.
+constexpr int kEngineWaitMs = 10000 * kTimeoutScale;
+
 namespace {
 
 SupersonicEngine::Config crashConfig(unsigned port) {
@@ -152,7 +160,7 @@ TEST_CASE("shm-peer crash: SIGKILL mid-traffic never corrupts the ring or stalls
         // The engine made progress on the peer's traffic…
         REQUIRE(fx.pollUntil([&] {
             return m.osc_out_messages_sent.load(std::memory_order_relaxed) > sentBefore;
-        }, 2000 * kTimeoutScale));
+        }, kEngineWaitMs));
         // …and never saw a torn frame: commit-publish means a partial write
         // is unpublished, and the drain's validation never fired.
         REQUIRE(m.osc_in_corrupted.load(std::memory_order_relaxed) == 0);
@@ -160,7 +168,7 @@ TEST_CASE("shm-peer crash: SIGKILL mid-traffic never corrupts the ring or stalls
         // The engine (audio + gateway) is fully alive after each corpse.
         OscReply reply;
         fx.send(osc_test::message("/status"));
-        REQUIRE(fx.waitForReply("/status.reply", reply, 2000 * kTimeoutScale));
+        REQUIRE(fx.waitForReply("/status.reply", reply, kEngineWaitMs));
     }
 }
 #endif // !SS_TSAN
@@ -183,7 +191,7 @@ TEST_CASE("shm-peer crash: a corpse holding the writer lock stalls nobody; reatt
     // The host never takes that lock: the engine stays fully responsive.
     OscReply reply;
     fx.send(osc_test::message("/status"));
-    REQUIRE(fx.waitForReply("/status.reply", reply, 2000 * kTimeoutScale));
+    REQUIRE(fx.waitForReply("/status.reply", reply, kEngineWaitMs));
 
     // A fresh peer attaches (resetting the stale lock) and completes a whole
     // burst — every committed frame is delivered, in order, none lost.
@@ -194,7 +202,7 @@ TEST_CASE("shm-peer crash: a corpse holding the writer lock stalls nobody; reatt
     REQUIRE(fx.pollUntil([&] {
         return m.osc_out_messages_sent.load(std::memory_order_relaxed)
                >= sentBefore + kBurst;
-    }, 2000 * kTimeoutScale));
+    }, kEngineWaitMs));
     CHECK(m.osc_in_corrupted.load(std::memory_order_relaxed) == 0);
 
     // Completeness + order: /synced ids 1..kBurst, monotone, none missing.
@@ -206,7 +214,7 @@ TEST_CASE("shm-peer crash: a corpse holding the writer lock stalls nobody; reatt
             if (r.parsed().argInt(0) == expected) ++expected;
         }
         return expected > kBurst;
-    }, 10000 * kTimeoutScale));
+    }, kEngineWaitMs));
 }
 
 #endif // !_WIN32
