@@ -8,8 +8,9 @@
 #include "RingBufferWriter.h"
 
 bool ShmTransport::writeReply(const uint8_t* data, uint32_t size) {
-    if (!mPlaneSlot) return false;
-    ShmPeerPlaneHeader* plane = mPlaneSlot->load(std::memory_order_acquire);
+    auto* slot = mPlaneSlot.load(std::memory_order_acquire);
+    if (!slot) return false;
+    ShmPeerPlaneHeader* plane = slot->load(std::memory_order_acquire);
     if (!plane) return false;
     bool ok = RingBufferWriter::write(
         shm_peer_rep_ring(plane), SHM_PEER_REP_RING_SIZE,

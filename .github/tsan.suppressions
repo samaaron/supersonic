@@ -38,3 +38,18 @@ race:ss_gamepad_
 # KNOWN BLIND SPOT: also hides reports against C++ code running on a Rust
 # thread (gilrs, midir) — remove this line when debugging Rust↔C++ memory.
 race:__rust_begin_short_backtrace
+
+# ── Stream transport socket fd reuse ──────────────────────────────────────────
+# Same uninstrumented-std class, on a file descriptor rather than a heap block.
+# The stream OSC servers (rust/supersonic-osc-net/src/stream.rs) read on the
+# accepted socket and write replies through a try_clone()'d (dup'd) fd; a reader
+# thread closes its fds on connection teardown and is joined via
+# std::thread::JoinHandle::join(). TSan cannot see join()'s happens-before edge
+# (std is precompiled without instrumentation), so when a closed fd NUMBER is
+# reused as a later connection's writer, it pairs the stale close() with a live
+# write_all_bytes() send() and reports a race a fully instrumented run would not.
+# A live connection's writer fd is never closed under an in-flight send (its
+# writer Arc is still in the registry), so these are fd-number reuse artifacts,
+# not real races. Scoped to the socket write seam so genuine races in the
+# transport's own bookkeeping still surface.
+race:supersonic_osc_net..stream..ConnWriter

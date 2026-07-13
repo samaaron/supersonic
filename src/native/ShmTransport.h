@@ -34,13 +34,19 @@
 
 class ShmTransport : public IOscTransport {
 public:
-    // Bind to the engine's published plane slot. Call once, after
-    // engine.init() (Main.cpp does this from its startTransport hook).
-    void bindPlaneSlot(std::atomic<ShmPeerPlaneHeader*>* slot) { mPlaneSlot = slot; }
+    // Bind to the engine's published plane slot. Main.cpp calls this from its
+    // startTransport hook — after engine.init(), which has already started the
+    // egress drain thread that calls send()/writeReply(). The slot pointer is
+    // therefore published across threads, so it is atomic (release here pairs
+    // with the acquire loads in writeReply/ready).
+    void bindPlaneSlot(std::atomic<ShmPeerPlaneHeader*>* slot) {
+        mPlaneSlot.store(slot, std::memory_order_release);
+    }
 
     // True once bound to a slot holding a live plane.
     bool ready() const {
-        return mPlaneSlot && mPlaneSlot->load(std::memory_order_acquire) != nullptr;
+        auto* slot = mPlaneSlot.load(std::memory_order_acquire);
+        return slot && slot->load(std::memory_order_acquire) != nullptr;
     }
 
     // ── IOscTransport ──────────────────────────────────────────────────────────
@@ -69,7 +75,9 @@ private:
     bool writeReply(const uint8_t* data, uint32_t size);
     bool subscribeFlag(std::atomic<bool>& flag, uint32_t token);
 
-    std::atomic<ShmPeerPlaneHeader*>* mPlaneSlot = nullptr;
+    // Points at the engine's plane slot; bound (main thread) after the egress
+    // drain thread is already running, so the pointer itself is atomic.
+    std::atomic<std::atomic<ShmPeerPlaneHeader*>*> mPlaneSlot{nullptr};
 
     // Host-side writer serialisation for the reply ring (see file header).
     std::atomic<int32_t> mRepWriteLock{0};
