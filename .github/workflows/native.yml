@@ -134,6 +134,37 @@ jobs:
   # but the monolithic CMakeLists configures every target, so `cmake -B` still
   # pulls JUCE and needs its Linux configure deps. They're installed only to let
   # the project configure; nothing here links them into the freestanding engine.
+  # Rust transport suite — load + unit tests for the leaf that owns every
+  # socket/pipe transport (supersonic-osc-net). The native build only *links*
+  # this crate, so its own tests never ran in CI; this job runs them on every
+  # OS x CPU. tests/load.rs hammers TCP / UDS stream / UDS datagram (+ the
+  # Windows named pipe) through the public C ABI at medium volume (100k msgs
+  # over 4 concurrent connections, mixed small/large/split frames) and asserts
+  # completeness, per-source ordering, and zero corruption under load. Rust ships
+  # on every GitHub runner, so no toolchain/JUCE setup is needed.
+  # (windows-arm64 mirrors the native matrix — disabled while its runner queue is
+  # slow; re-add the line below to cover it.)
+  rust-transports:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    name: linux-x64 }
+          - { os: ubuntu-24.04-arm, name: linux-arm64 }
+          - { os: macos-latest,     name: macos-arm64 }
+          - { os: macos-15-intel,   name: macos-x64 }
+          - { os: windows-latest,   name: windows-x64 }
+          # - { os: windows-arm64,  name: windows-arm64 }
+    runs-on: ${{ matrix.os }}
+    name: rust-transports-${{ matrix.name }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Transport load + unit tests (release)
+        working-directory: rust
+        run: cargo test --release -p supersonic-osc-net
+
   freestanding:
     runs-on: ubuntu-latest
     name: freestanding-engine
@@ -413,7 +444,10 @@ jobs:
         # which would otherwise sit silently until the 30-minute job timeout.
         # A green suite runs in ~3 minutes; 600s fails fast with the report
         # already flushed. -k covers a process stuck past SIGTERM.
-        run: timeout -k 30 600 ./build/native-sanitize/test/native/SuperSonicNativeTests "~[benchmark]"
+        # Exclude [load]: the high-volume load tests are for throughput/correctness
+        # under saturation (covered in the Release matrix + the rust-transports
+        # job), not races/UB — running them here only slows the sanitizer pass.
+        run: timeout -k 30 600 ./build/native-sanitize/test/native/SuperSonicNativeTests "~[benchmark]~[load]"
 
   # ── Attach artifacts to GitHub Release ──────────────────────────────────────
   release:

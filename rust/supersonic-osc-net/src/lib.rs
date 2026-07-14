@@ -20,3 +20,8 @@ pub mod pipe;
 pub mod stream;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod uds;
+
+// Cross-process SHM peer client (the peer side of the SHM command plane) — used
+// by the transport harness to drive --shm-commands end-to-end. Not a C ABI.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod shm;

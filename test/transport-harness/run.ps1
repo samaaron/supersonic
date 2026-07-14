@@ -37,6 +37,13 @@ function Check($Name, $Proto, $Target, $ServerArgs) {
         if ($proc.HasExited) { break }
         Start-Sleep -Milliseconds 500
     }
+    # Server is up (smoke answered) -> medium end-to-end load blast: many /sync
+    # ids through the real engine, verify the /synced replies.
+    if ($ok) {
+        $lp = Start-Process -FilePath $Probe -ArgumentList @("load", $Proto, $Target, "$LoadCount") `
+            -PassThru -NoNewWindow -Wait
+        if ($lp.ExitCode -ne 0) { $ok = $false }
+    }
     if ($ok) {
         Write-Host "PASS $Name"
     } else {
@@ -47,13 +54,20 @@ function Check($Name, $Proto, $Target, $ServerArgs) {
     if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
 }
 
+# Medium end-to-end load per transport (see run.sh for rationale).
+$LoadCount = 5000
+
 $UdpPort = Get-Random -Minimum 20000 -Maximum 40000
 $TcpPort = Get-Random -Minimum 20000 -Maximum 40000
+$ShmPort = Get-Random -Minimum 20000 -Maximum 40000
 $Pipe    = "ss-harness-$PID"
 
 Check "udp"  "udp"  "127.0.0.1:$UdpPort" @("-u", "$UdpPort")
 Check "tcp"  "tcp"  "127.0.0.1:$TcpPort" @("--tcp", "$TcpPort", "-B", "127.0.0.1")
 Check "pipe" "pipe" $Pipe                @("--pipe", $Pipe)
+# SHM command plane: --shm-commands needs -u > 0 (the port names the segment);
+# the trailing -u overrides the -u 0 in Check (last flag wins, as for udp).
+Check "shm"  "shm"  "$ShmPort"           @("-u", "$ShmPort", "--shm-commands")
 
 if ($Failures -gt 0) { Write-Host "harness: $Failures transport(s) failed"; exit 1 }
 Write-Host "harness: all transports answered"

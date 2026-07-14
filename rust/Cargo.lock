@@ -668,6 +668,7 @@ version = "0.1.0"
 name = "supersonic-osc-net"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "socket2",
  "supersonic-osc",
  "windows-sys 0.61.2",

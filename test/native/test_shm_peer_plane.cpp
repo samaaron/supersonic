@@ -172,3 +172,61 @@ TEST_CASE("shm-peer: ShmTransport routes replies into the reply ring",
     engine.shutdown();
     CHECK_FALSE(transport.ready());  // shutdown nulls the published plane
 }
+
+TEST_CASE("shm-peer load: high-volume commands round-trip losslessly through the plane",
+          "[shm][peer][load]") {
+    constexpr unsigned kPort = 57226;
+
+    // Same wiring as Main.cpp's --shm-commands, driven at volume.
+    ShmTransport     transport;
+    SupersonicEngine engine;
+    engine.onDebug = [](const std::string&) {};
+    engine.onReply = [](const uint8_t*, uint32_t) {};
+    engine.setTransport(&transport);
+    engine.init(planeConfig(kPort));
+    transport.bindPlaneSlot(engine.peerPlaneSlot());
+    REQUIRE(transport.ready());
+
+    server_shared_memory_client client(kPort);
+    ShmPeerPlaneHeader* plane = client.get_peer_plane();
+    REQUIRE(plane != nullptr);
+    shm_peer_attach(plane, 1);
+
+    const PerformanceMetrics& m = engine.getMetrics();
+    constexpr int N = 20000;   // medium load; both rings wrap many times over
+
+    SsDrainState repState;
+    std::vector<std::vector<uint8_t>> replies;
+
+    // Act as a real peer: keep the command ring full (the writer backpressures
+    // losslessly when it's full — retry as the engine drains) while continuously
+    // draining the reply ring so it never overflows (a slow peer would drop
+    // replies and bump rep_dropped). Lossless end-to-end when the peer keeps up.
+    int sent = 0;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (static_cast<int>(replies.size()) < N
+           && std::chrono::steady_clock::now() < deadline) {
+        while (sent < N && peerWrite(plane, osc_test::message("/sync", sent + 1)))
+            ++sent;
+        drainReplies(plane, repState, replies);
+        if (static_cast<int>(replies.size()) < N)
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+
+    REQUIRE(sent == N);
+    REQUIRE(static_cast<int>(replies.size()) == N);
+    // Completeness + strict order: /synced ids 1..N, monotone, none missing or
+    // duplicated. Verified in plain C++ so it's one assertion, not N.
+    bool ordered = true;
+    for (int i = 0; i < N && ordered; ++i) {
+        const auto& r = replies[i];
+        const auto sz = static_cast<uint32_t>(r.size());
+        ordered = osc_test::parseAddress(r.data(), sz) == "/synced"
+               && osc_test::parseReply(r.data(), sz).argInt(0) == i + 1;
+    }
+    REQUIRE(ordered);
+    CHECK(m.osc_in_corrupted.load(std::memory_order_relaxed) == 0);
+    CHECK(plane->rep_dropped.load(std::memory_order_relaxed) == 0);  // peer kept up
+
+    engine.shutdown();
+}

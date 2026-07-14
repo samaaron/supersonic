@@ -18,7 +18,13 @@ socket2 = "0.6.4"
 # Complete OSC 1.0 codec (messages + bundles) + the shared C-ABI scaffolding.
 supersonic-osc = { path = "../supersonic-osc" }
 
+# shm.rs (the cross-process SHM peer harness client) maps the server's segment
+# with shm_open/mmap; libc is already in the lockfile via socket2.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Named-pipe stream server (pipe.rs): CreateNamedPipeW + owner-only DACL.
+# Win32_System_Memory: shm.rs maps the segment with OpenFileMapping/MapViewOfFile.
 # Already in the workspace lockfile transitively (other subsystem backends).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
@@ -26,6 +32,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
+    "Win32_System_Memory",
     "Win32_System_Pipes",
     "Win32_System_Threading",
 ] }

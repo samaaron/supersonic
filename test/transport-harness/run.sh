@@ -47,13 +47,23 @@ probe_retry() {
     return 1
 }
 
+# Medium end-to-end load per transport: enough to exercise the real engine's
+# ring drain + reply path under saturation without dominating CI wall-time.
+LOAD_COUNT=5000
+
 check() {
     local name="$1" proto="$2" target="$3" log="$4"; shift 4
     boot "$log" "$@"
-    if probe_retry "$proto" "$target"; then
+    local why=""
+    if ! probe_retry "$proto" "$target"; then
+        why="no reply"
+    elif ! "$PROBE" load "$proto" "$target" "$LOAD_COUNT"; then
+        why="load failed"
+    fi
+    if [ -z "$why" ]; then
         echo "PASS $name"
     else
-        echo "FAIL $name — server log:"
+        echo "FAIL $name ($why) — server log:"
         sed 's/^/  | /' "$log"
         FAILURES=$((FAILURES + 1))
     fi
@@ -65,11 +75,15 @@ check() {
 # Distinct ports/paths per transport so a leaked server can't cross-answer.
 UDP_PORT=$((20000 + RANDOM % 20000))
 TCP_PORT=$((20000 + RANDOM % 20000))
+SHM_PORT=$((20000 + RANDOM % 20000))
 
 check "udp"       udp       "127.0.0.1:$UDP_PORT" "$WORK/udp.log"  -u "$UDP_PORT"
 check "tcp"       tcp       "127.0.0.1:$TCP_PORT" "$WORK/tcp.log"  --tcp "$TCP_PORT" -B 127.0.0.1
 check "uds"       uds       "$WORK/uds.sock"      "$WORK/uds.log"  --uds "$WORK/uds.sock"
 check "uds-dgram" uds-dgram "$WORK/dg.sock"       "$WORK/dg.log"   --uds-dgram "$WORK/dg.sock"
+# SHM command plane: --shm-commands needs -u > 0 (the port names the segment);
+# the trailing -u overrides boot()'s -u 0 (last flag wins, as for udp).
+check "shm"       shm       "$SHM_PORT"           "$WORK/shm.log"  -u "$SHM_PORT" --shm-commands
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "harness: $FAILURES transport(s) failed"
