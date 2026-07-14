@@ -28,6 +28,29 @@
 
 namespace {
 
+// recoverAudio() runs on a worker thread and ALWAYS ends by broadcasting
+// reopen.done (success or failure — it never hangs), so waiting for that reply
+// is an event-driven sync on the actual completion, not a fixed-sleep race.
+// The only job of the timeout is to bound a genuinely broken recovery that
+// never reports. It must therefore sit well ABOVE the worst-case latency of a
+// *healthy* recovery — which on a driverless / loaded CI runner is dominated by
+// JUCE spinning up a fresh AudioDeviceManager and enumerating (failing) real
+// devices, and can take several seconds — so the verdict tracks "did recovery
+// report completion?" rather than "how fast is this runner?". Scaled up under
+// sanitizers, which slow everything further.
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+constexpr int kReopenScale = 3;
+#elif defined(__has_feature)
+#  if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+constexpr int kReopenScale = 3;
+#  else
+constexpr int kReopenScale = 1;
+#  endif
+#else
+constexpr int kReopenScale = 1;
+#endif
+constexpr int kReopenTimeoutMs = 20000 * kReopenScale;
+
 SupersonicEngine::Config recoverConfig() {
     auto cfg = EngineFixture::defaultConfig();
     // Non-manual-pump: a real audio source (headless driver) actually runs, so
@@ -52,7 +75,7 @@ TEST_CASE("Recover: requestAudioRecovery runs recoverAudio and reports reopen.do
     REQUIRE(reason == "started");
 
     OscReply r;
-    REQUIRE(fix.waitForReply("/supersonic/devices/reopen.done", r, 5000));
+    REQUIRE(fix.waitForReply("/supersonic/devices/reopen.done", r, kReopenTimeoutMs));
 }
 
 // Use-after-free guard: recoverAudio -> recreateDeviceManager resets
@@ -93,7 +116,7 @@ TEST_CASE("Recover: mDeviceManager reset races concurrent device queries",
         std::string reason;
         fix.engine().requestAudioRecovery(reason);   // launches the worker
         OscReply r;
-        fix.waitForReply("/supersonic/devices/reopen.done", r, 3000);
+        fix.waitForReply("/supersonic/devices/reopen.done", r, kReopenTimeoutMs);
         std::this_thread::sleep_for(std::chrono::milliseconds(3200));
     }
 
@@ -117,6 +140,6 @@ TEST_CASE("Recover: recovery never strands the engine with no audio source",
     fix.engine().requestAudioRecovery(reason);
 
     OscReply r;
-    REQUIRE(fix.waitForReply("/supersonic/devices/reopen.done", r, 5000));
+    REQUIRE(fix.waitForReply("/supersonic/devices/reopen.done", r, kReopenTimeoutMs));
     CHECK(fix.engine().audioSource() != SupersonicEngine::AudioSource::None);
 }
