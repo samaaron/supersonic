@@ -837,3 +837,105 @@ TEST_CASE("UsableAggRates: output list empty → fall back to input",
           "[UsableAggRates]") {
     REQUIRE(aggRates({}, {44100, 48000}) == std::vector<int>{44100, 48000});
 }
+
+// =============================================================================
+// resolveSwapScope
+//
+// Which driver a switchDevice call resolves its device names under, and
+// whether it abandons a pending switchDriver intent. The intent is a USER
+// concept: the user picked Driver=ASIO but no ASIO device is open yet, so
+// the next user device pick scopes under ASIO. Engine-internal traffic
+// (recovery reopen after a failed swap, hotplug re-attach) must neither
+// consume that intent nor scope under it — otherwise a failed swap whose
+// recovery lands on the system default silently eats the pending pick,
+// and the user's next device pick is refused against the wrong driver.
+// =============================================================================
+
+using SS = sonicpi::device::SwapScopeDecision;
+
+namespace {
+// Each pick resolves under exactly one driver: the MOTU only under ASIO,
+// the remote-desktop redirect device only under Windows Audio.
+const std::vector<std::pair<std::string, std::string>> kScopeTable = {
+    {"Windows Audio", "Remote Audio"},
+    {"DirectSound",   "Primary Sound Driver"},
+    {"ASIO",          "MOTU Pro Audio"},
+};
+} // namespace
+
+static SS scope(bool user, const std::string& intended,
+                const std::string& current,
+                const std::string& out, const std::string& in) {
+    return sonicpi::device::resolveSwapScope(
+        user, intended, current, out, in, kScopeTable);
+}
+
+TEST_CASE("SwapScope: internal recovery reopen keeps the pending intent",
+          "[SwapScope]") {
+    // Recovery reopens the system default on the actual driver. Scope
+    // under what's actually open; the user's ASIO pick stays pending.
+    auto d = scope(false, "ASIO", "Windows Audio", "Remote Audio", "");
+    REQUIRE(d.scopedDriver == "Windows Audio");
+    REQUIRE_FALSE(d.abandonIntent);
+}
+
+TEST_CASE("SwapScope: internal call with no intent scopes to the current driver",
+          "[SwapScope]") {
+    auto d = scope(false, "", "Windows Audio", "Remote Audio", "");
+    REQUIRE(d.scopedDriver == "Windows Audio");
+    REQUIRE_FALSE(d.abandonIntent);
+}
+
+TEST_CASE("SwapScope: user pick under the intended driver scopes to the intent",
+          "[SwapScope]") {
+    // Driver=ASIO pending, user picks the ASIO device: the two-step
+    // driver→device flow commits.
+    auto d = scope(true, "ASIO", "Windows Audio", "MOTU Pro Audio", "");
+    REQUIRE(d.scopedDriver == "ASIO");
+    REQUIRE_FALSE(d.abandonIntent);
+}
+
+TEST_CASE("SwapScope: user pick on the current driver abandons the intent",
+          "[SwapScope]") {
+    // Driver=ASIO pending but the user picks a current-driver device —
+    // they've implicitly walked away from the driver swap.
+    auto d = scope(true, "ASIO", "Windows Audio", "Remote Audio", "");
+    REQUIRE(d.scopedDriver == "Windows Audio");
+    REQUIRE(d.abandonIntent);
+}
+
+TEST_CASE("SwapScope: user rate/buffer-only change keeps the intent",
+          "[SwapScope]") {
+    // Empty and sentinel names aren't device picks; they resolve anywhere.
+    auto d = scope(true, "ASIO", "Windows Audio", "", "");
+    REQUIRE(d.scopedDriver == "ASIO");
+    REQUIRE_FALSE(d.abandonIntent);
+
+    d = scope(true, "ASIO", "Windows Audio", "__system__", "__none__");
+    REQUIRE(d.scopedDriver == "ASIO");
+    REQUIRE_FALSE(d.abandonIntent);
+}
+
+TEST_CASE("SwapScope: user pick resolving under neither driver keeps the "
+          "intent scope", "[SwapScope]") {
+    // Unknown name: scope stays on the intent so the refusal names the
+    // driver the user actually chose.
+    auto d = scope(true, "ASIO", "Windows Audio", "Ghost Device", "");
+    REQUIRE(d.scopedDriver == "ASIO");
+    REQUIRE_FALSE(d.abandonIntent);
+}
+
+TEST_CASE("SwapScope: no pending intent scopes to the current driver",
+          "[SwapScope]") {
+    auto d = scope(true, "", "Windows Audio", "Remote Audio", "");
+    REQUIRE(d.scopedDriver == "Windows Audio");
+    REQUIRE_FALSE(d.abandonIntent);
+}
+
+TEST_CASE("SwapScope: input name participates in the resolution",
+          "[SwapScope]") {
+    // Input-only pick that lives under the intended driver: commit path.
+    auto d = scope(true, "ASIO", "Windows Audio", "", "MOTU Pro Audio");
+    REQUIRE(d.scopedDriver == "ASIO");
+    REQUIRE_FALSE(d.abandonIntent);
+}

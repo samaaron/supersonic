@@ -272,6 +272,44 @@ DeviceSwitchPlan planDeviceSwitch(
     return plan;
 }
 
+SwapScopeDecision resolveSwapScope(
+        bool userInitiated,
+        const std::string& intendedDriver,
+        const std::string& currentDriver,
+        const std::string& outputName,
+        const std::string& inputName,
+        const std::vector<std::pair<std::string, std::string>>& deviceTable) {
+    SwapScopeDecision decision;
+    decision.scopedDriver = currentDriver;
+
+    // Internal traffic never speaks for the user: current-driver scope,
+    // pending intent untouched.
+    if (!userInitiated) return decision;
+
+    if (intendedDriver.empty() || intendedDriver == currentDriver)
+        return decision;
+
+    auto resolvesUnder = [&](const std::string& drv, const std::string& n) {
+        if (n.empty() || n == "__system__" || n == "__none__") return true;
+        return planDeviceSwitch(drv, n, deviceTable).deviceFound;
+    };
+    bool intendedOk = resolvesUnder(intendedDriver, outputName)
+                   && resolvesUnder(intendedDriver, inputName);
+    bool currentOk  = resolvesUnder(currentDriver, outputName)
+                   && resolvesUnder(currentDriver, inputName);
+
+    // Picks that resolve only under the actually-open driver mean the user
+    // walked away from the pending driver swap. Anything else keeps the
+    // intended scope (including unresolvable names, so the refusal names
+    // the driver the user chose).
+    if (!intendedOk && currentOk) {
+        decision.abandonIntent = true;
+        return decision;
+    }
+    decision.scopedDriver = intendedDriver;
+    return decision;
+}
+
 std::string validateSwapDeviceNames(
         const std::string& deviceName,
         const std::string& inputDeviceName,

@@ -104,6 +104,45 @@ TEST_CASE("DeviceSelection: __none__ input sentinel clears preferred input",
     REQUIRE(fix.engine().preferredInputDevice().empty());
 }
 
+// ── Internal swaps don't impersonate the user ───────────────────────────────
+// Recovery reopens and hotplug re-attaches flow through switchDevice too,
+// but they are not user picks: recording them as preferences would let a
+// post-rollback fallback to the system default overwrite the device the
+// user actually chose (and, on the driver side, consume the pending
+// switchDriver intent — see resolveSwapScope).
+
+TEST_CASE("DeviceSelection: internal switch does not stomp preferred output",
+          "[DeviceSelection]") {
+    EngineFixture fix;
+
+    auto r1 = fix.engine().switchDevice("user-picked-device", 44100);
+    REQUIRE(r1.success);
+    REQUIRE(fix.engine().preferredOutputDevice() == "user-picked-device");
+
+    // Engine-internal fallback (e.g. recovery reopening the system
+    // default after a failed swap) must leave the user's pick intact.
+    auto r2 = fix.engine().switchDevice("fallback-device", 48000, 0, false,
+                                        "", SwapOrigin::Internal);
+    REQUIRE(r2.success);
+    REQUIRE(fix.engine().preferredOutputDevice() == "user-picked-device");
+}
+
+TEST_CASE("DeviceSelection: internal switch does not touch preferred input",
+          "[DeviceSelection]") {
+    EngineFixture fix;
+
+    auto r1 = fix.engine().switchDevice("out-dev", 44100, 0, false, "user-mic");
+    REQUIRE(r1.success);
+    REQUIRE(fix.engine().preferredInputDevice() == "user-mic");
+
+    // An internal swap passing __none__ is the engine dropping the input
+    // to survive, not the user asking for no input.
+    auto r2 = fix.engine().switchDevice("out-dev", 48000, 0, false,
+                                        "__none__", SwapOrigin::Internal);
+    REQUIRE(r2.success);
+    REQUIRE(fix.engine().preferredInputDevice() == "user-mic");
+}
+
 // ── Channel-count-change forces cold swap ───────────────────────────────────
 // enableInputChannels changes numInputChannels. A change from N → M (with
 // N != M) must force a cold swap so the scsynth World is rebuilt with the

@@ -100,6 +100,13 @@ struct CurrentDeviceInfo : DeviceInfo {
 
 enum class SwapType { Hot, Cold };
 
+// Who asked for a device swap. User swaps carry intent: they update the
+// preferred-device memory and can consume a pending switchDriver pick.
+// Internal swaps (recovery reopen after a failed swap, hotplug re-attach,
+// system-default follows) must do neither — they keep the engine alive
+// without impersonating the user.
+enum class SwapOrigin { User, Internal };
+
 struct SwapResult {
     bool        success = false;
     SwapType    type    = SwapType::Hot;

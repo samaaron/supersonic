@@ -107,7 +107,8 @@ SupersonicEngine::SupersonicEngine() = default;
 
 void SupersonicEngine::recordSwapPreferences(const std::string& deviceName,
                                              const std::string& inputDeviceName,
-                                             double sampleRate) {
+                                             double sampleRate,
+                                             SwapOrigin origin) {
     if (!deviceName.empty() && sampleRate > 0) {
         // Cap to avoid unbounded growth across long sessions of hot-plug
         // cycling (USB dock / AirPlay / Bluetooth churn can accumulate
@@ -120,6 +121,13 @@ void SupersonicEngine::recordSwapPreferences(const std::string& deviceName,
             mDeviceRateMemory.clear();
         mDeviceRateMemory[deviceName] = static_cast<int>(sampleRate);
     }
+
+    // Everything below is user-intent state. Internal swaps (recovery
+    // reopen, hotplug re-attach) record only the rate memory above — a
+    // recovery landing on the system default must not become the
+    // "preferred" device, and must not consume a pending driver intent.
+    if (origin != SwapOrigin::User)
+        return;
 
     // Track the user's long-lived preferred device for hot-plug re-attach.
     // An explicit deviceName means the caller picked it (GUI switch, OSC,
@@ -2169,7 +2177,8 @@ void SupersonicEngine::sendDeviceReport() {
     // Format: info_string, sampleRate(int32), bufferSize(int32),
     //         numRates(int32), rate1..rateN, numBufs(int32), buf1..bufN,
     //         numDrivers(int32), driver1..driverN, currentDriver(str),
-    //         outputChannels(int32), inputChannels(int32)
+    //         outputChannels(int32), inputChannels(int32),
+    //         intendedDriver(str — pending switchDriver pick, "" = none)
     auto drivers = listDrivers();
     auto curDriver = currentDriver();
 
@@ -2311,6 +2320,12 @@ void SupersonicEngine::sendDeviceReport() {
     // SuperSonic summary label.
     infoMsg << static_cast<osc::int32>(outCh);
     infoMsg << static_cast<osc::int32>(inCh);
+    // Pending driver pick (switchDriver with no openable device yet).
+    // curDriver stays truthful about the audio path; this lets the GUI
+    // keep its driver dropdown on the user's uncommitted choice — and,
+    // when empty, tells it no pick is pending so a stale local override
+    // must follow curDriver instead of pinning forever.
+    infoMsg << mIntendedDriver.c_str();
     infoMsg << osc::EndMessage;
 
     // Fan out to all registered notify subscribers via the transport.
@@ -3068,7 +3083,8 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                                            double sampleRate,
                                            int bufferSize,
                                            bool forceCold,
-                                           const std::string& rawInputName) {
+                                           const std::string& rawInputName,
+                                           SwapOrigin origin) {
     // Normalise raw CoreAudio names to JUCE's disambiguated form. Callers
     // that source names from CoreAudio APIs (setDeviceMode's default-
     // output resolution, platform property listeners) otherwise hand raw
@@ -3145,11 +3161,12 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     std::lock_guard<std::recursive_mutex> guard(mSwapMutex, std::adopt_lock);
 
     // Resolve the requested device name(s) against the scoped driver:
-    // mIntendedDriver if a switchDriver-no-pref pick is pending, else
-    // JUCE's actual current type. Pending-driver scoping is required
-    // for the two-step driver→device flow — a switchDevice for the
+    // for user swaps, mIntendedDriver if a switchDriver-no-pref pick is
+    // pending (the two-step driver→device flow — a switchDevice for the
     // intended driver's device would otherwise scope against JUCE's
-    // unchanged type and fail to resolve.
+    // unchanged type and fail to resolve), else JUCE's actual current
+    // type. Internal swaps always scope against the actual type and
+    // leave the pending intent alone — see resolveSwapScope.
     bool        crossDriver       = false;
     std::string crossDriverTarget;
     std::string crossDriverDevice;
@@ -3160,41 +3177,25 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         else
             juceCurrentType = mDeviceManager->getCurrentAudioDeviceType().toStdString();
 
-        std::string scopedDriver =
-            mIntendedDriver.empty() ? juceCurrentType : mIntendedDriver;
-
         std::vector<std::pair<std::string, std::string>> deviceTable;
         for (auto& d : listDevices(false))
             deviceTable.emplace_back(d.typeName, d.name);
 
-        // Intent abandonment: if mIntendedDriver is set but the picks
-        // resolve only under JUCE's actual current type, drop the
-        // intent and proceed on the current driver. The user clicked
-        // a driver in the GUI but has implicitly walked away from
-        // the swap by picking a device that belongs to the still-
-        // active driver.
-        if (!mIntendedDriver.empty() && mIntendedDriver != juceCurrentType) {
-            auto resolvesUnder = [&](const std::string& drv,
-                                     const std::string& n) {
-                if (n.empty() || n == "__system__" || n == "__none__")
-                    return true;
-                return sonicpi::device::planDeviceSwitch(
-                    drv, n, deviceTable).deviceFound;
-            };
-            bool intendedOk = resolvesUnder(mIntendedDriver, deviceName)
-                           && resolvesUnder(mIntendedDriver, inputDeviceName);
-            bool currentOk  = resolvesUnder(juceCurrentType, deviceName)
-                           && resolvesUnder(juceCurrentType, inputDeviceName);
-            if (!intendedOk && currentOk) {
-                fprintf(stderr,
-                    "[device-setup] abandoning pending driver intent '%s' "
-                    "— picks resolve under '%s'\n",
-                    mIntendedDriver.c_str(), juceCurrentType.c_str());
-                fflush(stderr);
-                mIntendedDriver.clear();
-                scopedDriver = juceCurrentType;
-            }
+        auto scopeDecision = sonicpi::device::resolveSwapScope(
+            origin == SwapOrigin::User, mIntendedDriver, juceCurrentType,
+            deviceName, inputDeviceName, deviceTable);
+        if (scopeDecision.abandonIntent) {
+            // The user picked a device that belongs to the still-active
+            // driver — they've implicitly walked away from the pending
+            // driver swap.
+            fprintf(stderr,
+                "[device-setup] abandoning pending driver intent '%s' "
+                "— picks resolve under '%s'\n",
+                mIntendedDriver.c_str(), scopeDecision.scopedDriver.c_str());
+            fflush(stderr);
+            mIntendedDriver.clear();
         }
+        const std::string scopedDriver = scopeDecision.scopedDriver;
 
         auto considerName = [&](const std::string& name) -> std::string {
             if (name.empty() || name == "__system__" || name == "__none__")
@@ -3990,7 +3991,7 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         result.bufferSize = mCurrentConfig.bufferSize;
     }
     result.success = true;
-    recordSwapPreferences(deviceName, inputDeviceName, result.sampleRate);
+    recordSwapPreferences(deviceName, inputDeviceName, result.sampleRate, origin);
     if (isCold) {
         if (recovered) {
             setEngineState(EngineState::Running, "swap-recovered");
@@ -4079,7 +4080,8 @@ SwapResult SupersonicEngine::reopenCurrentDevice() {
             outName.c_str(), inName.c_str(),
             mDeviceMode.empty() ? "system" : mDeviceMode.c_str());
     fflush(stderr);
-    return switchDevice(outName, 0, 0, /*forceCold=*/true, inName);
+    return switchDevice(outName, 0, 0, /*forceCold=*/true, inName,
+                        SwapOrigin::Internal);
 }
 
 // --- Input channel management ---
@@ -4456,7 +4458,7 @@ void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
                 "(preferred input='%s')\n", outName.c_str(), inName.c_str());
         fflush(stderr);
         juce::MessageManager::callAsync([this, outName, inName]() {
-            switchDevice(outName, 0, 0, false, inName);
+            switchDevice(outName, 0, 0, false, inName, SwapOrigin::Internal);
         });
     } else if (scheduleInputReattach) {
         std::string inName = pendingSwitchInput;
@@ -4464,7 +4466,7 @@ void SupersonicEngine::changeListenerCallback(juce::ChangeBroadcaster* source) {
                 inName.c_str());
         fflush(stderr);
         juce::MessageManager::callAsync([this, inName]() {
-            switchDevice("", 0, 0, false, inName);
+            switchDevice("", 0, 0, false, inName, SwapOrigin::Internal);
         });
     }
 

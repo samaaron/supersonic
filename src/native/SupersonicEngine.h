@@ -253,11 +253,16 @@ public:
     CurrentDeviceInfo        currentDevice() const;     // resolves aggregate to real names
     std::string              realOutputDeviceName() const { return mRealOutputDeviceName; }
     std::string              realInputDeviceName() const  { return mRealInputDeviceName; }
+    // origin: pass SwapOrigin::Internal for engine-originated swaps
+    // (recovery reopen, hotplug re-attach) — they scope against the
+    // driver actually open and leave the user's preferred-device memory
+    // and pending switchDriver intent untouched.
     SwapResult               switchDevice(const std::string& deviceName,
                                           double sampleRate = 0,
                                           int bufferSize = 0,
                                           bool forceCold = false,
-                                          const std::string& inputDeviceName = "");
+                                          const std::string& inputDeviceName = "",
+                                          SwapOrigin origin = SwapOrigin::User);
 
     // Re-open the current device (tear down and recreate without changing
     // selection). Use when an external config change — e.g. a MOTU Pro
@@ -549,10 +554,14 @@ private:
     // hot-plug re-attach, and caches the successfully-used sample rate
     // for this device name so a later switch back can restore it.
     // Called from switchDevice's success tail. deviceName empty means
-    // rate/buffer-only change — no preference update.
+    // rate/buffer-only change — no preference update. Internal-origin
+    // swaps record only the rate memory (a device fact): preference and
+    // pending-intent state belong to the user and survive recovery
+    // fallbacks untouched.
     void recordSwapPreferences(const std::string& deviceName,
                                const std::string& inputDeviceName,
-                               double sampleRate);
+                               double sampleRate,
+                               SwapOrigin origin);
 
 #ifdef __APPLE__
     void handleSystemDefaultOutputChanged();

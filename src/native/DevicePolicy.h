@@ -226,6 +226,40 @@ DeviceSwitchPlan planDeviceSwitch(
     const std::string& targetDeviceName,
     const std::vector<std::pair<std::string, std::string>>& deviceTable);
 
+// Which driver a switchDevice call resolves its device names under, and
+// whether it abandons a pending switchDriver intent.
+//
+// The pending intent is a USER concept: the user picked a driver whose
+// device isn't open yet (ASIO with no remembered device), so their next
+// device pick scopes under that driver — that's the two-step driver→device
+// flow. A user pick that instead resolves only under the driver actually
+// open means they've walked away from the swap: abandon the intent and
+// scope to the current driver.
+//
+// Engine-internal traffic (userInitiated=false: recovery reopen after a
+// failed swap, hotplug re-attach, system-default follows) is not a
+// statement of user intent. It always scopes under the driver actually
+// open and never consumes the pending intent — a recovery that lands on
+// the system default must not eat the user's driver pick, or their next
+// device pick gets refused against the wrong driver.
+//
+// Empty names and the "__system__" / "__none__" sentinels aren't device
+// picks; they resolve under any driver. A name resolving under neither
+// driver keeps the intended scope so the refusal names the driver the
+// user chose.
+struct SwapScopeDecision {
+    std::string scopedDriver;    // driver to resolve device names under
+    bool        abandonIntent = false;  // clear the pending driver intent
+};
+
+SwapScopeDecision resolveSwapScope(
+    bool userInitiated,
+    const std::string& intendedDriver,
+    const std::string& currentDriver,
+    const std::string& outputName,
+    const std::string& inputName,
+    const std::vector<std::pair<std::string, std::string>>& deviceTable);
+
 // Decide scsynth's block size (mBufLength) at boot given the hardware
 // callback buffer size. Matching them means the audio-thread loop
 // processes exactly one scsynth block per HW callback — no prefetch

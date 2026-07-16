@@ -122,7 +122,7 @@ Emitted when the World is (re)built — i.e. after a successful cold
 swap. Clients should use this signal to re-register for notifications
 and rebuild their mixer graph. Not emitted for hot swaps.
 
-### `← /supersonic/info s:banner i:sampleRate i:bufferSize`  `i:numRates f:rate1..rateN` `i:numBufs i:buf1..bufN` `i:numDrivers s:driver1..driverN` `s:currentDriver` `i:outputChannels i:inputChannels`
+### `← /supersonic/info s:banner i:sampleRate i:bufferSize`  `i:numRates f:rate1..rateN` `i:numBufs i:buf1..bufN` `i:numDrivers s:driver1..driverN` `s:currentDriver` `i:outputChannels i:inputChannels` `s:intendedDriver`
 
 Hardware info message. The banner is a multi-line pre-formatted
 string suitable for direct display (driver, sample rate, buffer,
@@ -134,6 +134,14 @@ and, on a drift-compensated aggregate, constrained to the current
 values only. **Channel counts** are per-device (not aggregate sums)
 so a user who picked 2-channel MBP Speakers sees `out 2` even if the
 engine is running on a `MBP + MOTU` aggregate.
+
+**`intendedDriver`** is the user's pending `/supersonic/drivers/switch`
+pick when it wasn't followed by a device open yet (ASIO with no
+remembered device, or a driver with no visible devices) — empty
+otherwise. `currentDriver` stays truthful about the audio path; a
+client's driver selector should show `intendedDriver` when non-empty
+and follow `currentDriver` when it's empty. Trailing arg: absent in
+reports from older engines, so read it optionally.
 
 ### `← /supersonic/devices s:mode s:current s:device1..deviceN i:sampleRate i:compat1..compatN`
 
