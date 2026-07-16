@@ -10,14 +10,63 @@
 #include "SuperClock.h"
 #include "clock_math.h"
 #include "shared_memory.h"
+#include "synth/common/shm_scope_stream.hpp"  // g_engine_frames (stream anchor)
 
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 using supersonic::bitsToDouble;
 
 std::atomic<SuperClock*> g_active_superclock{nullptr};
+
+// ── Sample clock (sample position ↔ wall-clock DAC time) ───────────────
+
+void SuperClock::bindSampleClockToShm(uint8_t* region) {
+    mSampleClockRegion = region;
+}
+
+void SuperClock::advanceEngineFrames(double samplePosition) {
+    g_engine_frames.store(static_cast<uint64_t>(samplePosition),
+                          std::memory_order_relaxed);
+}
+
+// Seqlock writer: odd seq, release fence (orders the odd store before the
+// field stores for any reader that sees them), relaxed atomic field stores,
+// even seq with release. Fields are atomics so no read tears; the seq guards
+// cross-field consistency. Audio thread only — single writer by construction.
+void SuperClock::publishSampleClock(double samplePosition, double sampleRate,
+                                    double renderNtp,
+                                    uint32_t outputLatencyFrames) {
+    const uint64_t frames = static_cast<uint64_t>(samplePosition);
+    // Streams anchor their per-block writes here whether or not a shm
+    // region is bound (headless/unit contexts).
+    g_engine_frames.store(frames, std::memory_order_relaxed);
+
+    uint8_t* sc = mSampleClockRegion;
+    if (!sc || sampleRate <= 0.0) return;
+    auto* seq = reinterpret_cast<std::atomic<uint32_t>*>(sc + SAMPLE_CLOCK_SEQ);
+    auto* sr  = reinterpret_cast<std::atomic<uint32_t>*>(sc + SAMPLE_CLOCK_SAMPLE_RATE);
+    auto* fr  = reinterpret_cast<std::atomic<uint64_t>*>(sc + SAMPLE_CLOCK_ENGINE_FRAMES);
+    auto* nb  = reinterpret_cast<std::atomic<uint64_t>*>(sc + SAMPLE_CLOCK_DAC_NTP);
+    auto* lat = reinterpret_cast<std::atomic<uint32_t>*>(sc + SAMPLE_CLOCK_OUT_LATENCY);
+
+    // The anchor is speaker-time: render NTP plus the device output latency
+    // (Link convention — "host time at speaker").
+    const double dacNtp = renderNtp
+        + static_cast<double>(outputLatencyFrames) / sampleRate;
+    const uint64_t ntpBits = supersonic::doubleToBits(dacNtp);
+
+    const uint32_t s = seq->load(std::memory_order_relaxed);
+    seq->store(s + 1, std::memory_order_relaxed);
+    std::atomic_thread_fence(std::memory_order_release);
+    sr->store(static_cast<uint32_t>(sampleRate), std::memory_order_relaxed);
+    fr->store(frames, std::memory_order_relaxed);
+    nb->store(ntpBits, std::memory_order_relaxed);
+    lat->store(outputLatencyFrames, std::memory_order_relaxed);
+    seq->store(s + 2, std::memory_order_release);
+}
 
 // ── NTP-domain getters ──────────────────────────────────────────────────
 

@@ -974,6 +974,7 @@ void SupersonicEngine::init(const Config& cfg) {
     // so a cross-process reader sees it populated.
     mSuperClock.bindStateToShm(
         reinterpret_cast<SuperClockState*>(arena + SUPERCLOCK_STATE_START));
+    mSuperClock.bindSampleClockToShm(arena + SAMPLE_CLOCK_START);
 
     // Seed the session tempo before any consumer can read the clock (the audio
     // source and /clock RPCs come up later) and before the tempo-changed callback
@@ -1457,7 +1458,10 @@ void SupersonicEngine::shutdown() {
 
     // Destroy engine-owned shared memory (after the World is gone). The peer
     // plane lives in the segment: null the published slot first so a late
-    // ShmTransport send observes null rather than an unmapped plane.
+    // ShmTransport send observes null rather than an unmapped plane. Same for
+    // the SuperClock sample-clock binding — a late pumpAudioBlock must
+    // publish into nothing rather than the unmapped segment.
+    mSuperClock.bindSampleClockToShm(nullptr);
     mPeerPlane.store(nullptr, std::memory_order_release);
     g_external_shared_memory = nullptr;
     g_external_segment = nullptr;
@@ -1500,6 +1504,12 @@ void SupersonicEngine::pumpAudioBlock() {
                               ? static_cast<uint32_t>(mCurrentConfig.numOutputChannels) : 2;
     const uint32_t nIn  = mCurrentConfig.numInputChannels  > 0
                               ? static_cast<uint32_t>(mCurrentConfig.numInputChannels)  : 0;
+
+    // Sample clock: the manual pump renders with no live device (idle /
+    // device-loss), so "audible" == render time (latency 0).
+    mSuperClock.publishSampleClock(mManualSamplePos,
+                                   static_cast<double>(mCurrentConfig.sampleRate),
+                                   ntp, 0);
 
     renderAudioBlock(mSuperClock, blockSize, nOut, nIn,
                      static_cast<uint32_t>(mCurrentConfig.sampleRate), ntp, hostMicros);
@@ -2178,7 +2188,10 @@ void SupersonicEngine::sendDeviceReport() {
     //         numRates(int32), rate1..rateN, numBufs(int32), buf1..bufN,
     //         numDrivers(int32), driver1..driverN, currentDriver(str),
     //         outputChannels(int32), inputChannels(int32),
+    //         outputLatencySamples(int32),
     //         intendedDriver(str — pending switchDriver pick, "" = none)
+    // Trailing fields are positional and optional: parsers pop in this
+    // exact order, so new fields append at the END only.
     auto drivers = listDrivers();
     auto curDriver = currentDriver();
 
@@ -2320,6 +2333,9 @@ void SupersonicEngine::sendDeviceReport() {
     // SuperSonic summary label.
     infoMsg << static_cast<osc::int32>(outCh);
     infoMsg << static_cast<osc::int32>(inCh);
+    // Device output latency: DSP-computed audio reaches the speaker this
+    // many samples later.
+    infoMsg << static_cast<osc::int32>(current.outputLatencySamples);
     // Pending driver pick (switchDriver with no openable device yet).
     // curDriver stays truthful about the audio path; this lets the GUI
     // keep its driver dropdown on the user's uncommitted choice — and,

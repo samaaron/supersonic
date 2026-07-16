@@ -132,6 +132,12 @@ uint32_t ss_egress_nrt_drain(SsEgressFn fn, void* ctx, uint32_t max_frames);
  */
 bool ss_tick(double ntp_now, uint32_t out_channels, uint32_t in_channels);
 
+/* Sample-clock publication (sample position ↔ DAC time, consumed by scope
+ * streams and any audible-time reader) lives on the clock subsystem:
+ * SuperClock::publishSampleClock once per hardware callback, plus
+ * advanceEngineFrames per rendered block. See
+ * docs/scope-streams-sample-clock.md. */
+
 const float* ss_audio_out(void);   /* rendered block, channel-major     */
 float*       ss_audio_in(void);    /* input bus region, fill before tick */
 uint32_t     ss_block_size(void);  /* frames per block (web: 128)        */

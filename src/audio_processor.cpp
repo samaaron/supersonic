@@ -111,6 +111,10 @@ static SuperClock& superClock() {
 // Assigned once at init; AudioOut2 instances read it to locate their slot.
 shm_audio_buffer* g_shm_audio_buffers = nullptr;
 
+// Engine sample position of the block being rendered (declared in
+// shm_scope_stream.hpp): anchors ScopeOut2 stream writes on the sample clock.
+std::atomic<uint64_t> g_engine_frames{0};
+
 // Forward declarations (synth perform entry points)
 #if SUPERSONIC_SYNTH
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
@@ -312,7 +316,7 @@ extern "C" {
     // runtime (the int-returning get_ring_buffer_base() above is WASM-only and
     // would truncate a 64-bit native pointer). Returns the arena base set by
     // init_memory(): ring_buffer_storage locally, or the public segment when an
-    // external arena was supplied. Used by the shared fixed-inline scope path.
+    // external arena was supplied. Used by the scope-stream claim path.
     void* get_shared_memory_base() {
         return shared_memory;
     }
@@ -601,32 +605,34 @@ extern "C" {
         slots[SHM_AUDIO_MASTER_SLOT].capacity_frames = SHM_AUDIO_FRAMES;
         g_shm_audio_buffers = slots;
 
-        // Scope global header (fixed-inline scope). The per-slot writer
-        // (SC_World.cpp) sets up its own slot on demand; here we just publish
-        // the layout so cross-process observers know the geometry. Slots
-        // themselves start zeroed (state=free) from the segment memset.
-        uint8_t* scope_hdr = shared_memory + SHM_SCOPE_START;
-        reinterpret_cast<std::atomic<uint32_t>*>(scope_hdr + 0)->store(
-            SHM_SCOPE_MAX_SCOPES, std::memory_order_relaxed);     // maxScopes
-        reinterpret_cast<std::atomic<uint32_t>*>(scope_hdr + 4)->store(
-            0, std::memory_order_relaxed);                        // activeCount
-        reinterpret_cast<std::atomic<uint32_t>*>(scope_hdr + 8)->store(
-            SHM_SCOPE_FRAMES_PER_SCOPE, std::memory_order_relaxed); // framesPerScope
-        reinterpret_cast<std::atomic<uint32_t>*>(scope_hdr + 12)->store(
-            0, std::memory_order_relaxed);                        // version
-
-        // Initialize scope buffers
+        // Scope streams: global header (geometry for cross-process observers)
+        // then the slot array. Slots start zeroed (state=free); ScopeOut2
+        // claims and activates them on demand via SC_World.cpp.
         {
             uint8_t* scopeBase = shared_memory + SHM_SCOPE_START;
             memset(scopeBase, 0, SHM_SCOPE_TOTAL_SIZE);
-            auto* maxScopes = reinterpret_cast<uint32_t*>(scopeBase + 0);
-            auto* framesPerScope = reinterpret_cast<uint32_t*>(scopeBase + 8);
-            *maxScopes = SHM_SCOPE_MAX_SCOPES;
-            *framesPerScope = SHM_SCOPE_FRAMES_PER_SCOPE;
+            reinterpret_cast<std::atomic<uint32_t>*>(scopeBase + 0)->store(
+                SHM_SCOPE_MAX_SCOPES, std::memory_order_relaxed);   // maxScopes
+            reinterpret_cast<std::atomic<uint32_t>*>(scopeBase + 4)->store(
+                0, std::memory_order_relaxed);                      // activeCount
+            reinterpret_cast<std::atomic<uint32_t>*>(scopeBase + 8)->store(
+                SHM_SCOPE_RING_FRAMES, std::memory_order_relaxed);  // ringFrames
+            reinterpret_cast<std::atomic<uint32_t>*>(scopeBase + 12)->store(
+                0, std::memory_order_relaxed);                      // version
         }
 
         // Enable ss_log
         memory_initialized = true;
+
+#if SUPERSONIC_SHM_AUDIO_SECONDS != 1
+        // Test-profile arena: capture rings are oversized, so every offset
+        // after them differs from a production reader's expectations. Loud
+        // banner so a test-sized engine staged as production is obvious.
+        ss_log("[memory] WARNING: test memory profile "
+               "(SUPERSONIC_SHM_AUDIO_SECONDS=%d) — arena layout differs from "
+               "production readers; do not ship this binary",
+               (int)SUPERSONIC_SHM_AUDIO_SECONDS);
+#endif
 
         // Boot message shown after ASCII art below
 

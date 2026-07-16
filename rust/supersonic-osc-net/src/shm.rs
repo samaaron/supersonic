@@ -19,17 +19,17 @@
 
 use std::sync::atomic::{fence, AtomicI32, AtomicU32, Ordering};
 
-const SEG_MAGIC: u32 = 0x5C09_E007; // shm_segment_header::MAGIC (E007)
+const SEG_MAGIC: u32 = 0x5C09_E008; // shm_segment_header::MAGIC (E008)
 const MESSAGE_MAGIC: u32 = 0xDEAD_BEEF; // ring/ring.h
 const PADDING_MAGIC: u32 = 0xBADD_CAFE;
 const MSG_HDR: usize = 16; // sizeof(Message)
 
 // shm_segment_header field byte offsets (all u32; see server_shm.hpp). magic is
-// field 0; peer_offset is field 27 (SEGMENT-relative), then the plane geometry.
+// field 0; peer_offset is field 28 (SEGMENT-relative), then the plane geometry.
 const HDR_MAGIC: usize = 0;
-const HDR_PEER_OFFSET: usize = 27 * 4;
-const HDR_PEER_CMD_BYTES: usize = 29 * 4;
-const HDR_PEER_REP_BYTES: usize = 30 * 4;
+const HDR_PEER_OFFSET: usize = 28 * 4;
+const HDR_PEER_CMD_BYTES: usize = 30 * 4;
+const HDR_PEER_REP_BYTES: usize = 31 * 4;
 
 // ShmPeerPlaneHeader field byte offsets (64-byte header; shm_peer_plane.h).
 const P_OWNER_PID: usize = 0;

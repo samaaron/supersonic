@@ -203,23 +203,25 @@ class ScsynthProcessor extends AudioWorkletProcessor {
             NODE_ID_COUNTER_SIZE: uint32View[31],
             WORLD_OPTIONS_START: uint32View[32],
             WORLD_OPTIONS_SIZE: uint32View[33],
-            // Scope buffer region (ScopeOut2 → SAB triple-buffer)
+            // Scope stream region (ScopeOut2 → SAB cursor rings; see
+            // docs/scope-streams-sample-clock.md)
             SHM_SCOPE_START: uint32View[34],
             SHM_SCOPE_TOTAL_SIZE: uint32View[35],
             SHM_SCOPE_HEADER_SIZE: uint32View[36],
             SHM_SCOPE_SLOT_SIZE: uint32View[37],
             SHM_SCOPE_SLOT_HEADER_SIZE: uint32View[38],
-            SHM_SCOPE_REGION_SIZE: uint32View[39],
+            SHM_SCOPE_RING_FRAMES: uint32View[39],
             SHM_SCOPE_MAX_SCOPES: uint32View[40],
-            SHM_SCOPE_FRAMES_PER_SCOPE: uint32View[41],
-            SHM_SCOPE_CHANNELS: uint32View[42],
-            TOTAL_BUFFER_SIZE: uint32View[43],
-            MAX_MESSAGE_SIZE: uint32View[44],
-            MESSAGE_MAGIC: uint32View[45],
-            PADDING_MAGIC: uint32View[46],
-            scheduler_data_pool_size: uint32View[47],
-            scheduler_slot_count: uint32View[48],
-            RING_PADDING_MARKER: uint8View[196],  // After 49 uint32s = 196 bytes
+            SHM_SCOPE_CHANNELS: uint32View[41],
+            SAMPLE_CLOCK_START: uint32View[42],
+            SAMPLE_CLOCK_SIZE: uint32View[43],
+            TOTAL_BUFFER_SIZE: uint32View[44],
+            MAX_MESSAGE_SIZE: uint32View[45],
+            MESSAGE_MAGIC: uint32View[46],
+            PADDING_MAGIC: uint32View[47],
+            scheduler_data_pool_size: uint32View[48],
+            scheduler_slot_count: uint32View[49],
+            RING_PADDING_MARKER: uint8View[200],  // After 50 uint32s = 200 bytes
             MESSAGE_HEADER_SIZE: 16  // sizeof(Message) - 4 x uint32_t (magic, length, sequence, sourceId)
         };
 

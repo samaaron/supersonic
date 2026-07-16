@@ -955,7 +955,7 @@ export class SuperSonic {
   // SCOPE API
   // ============================================================================
 
-  /** @returns {object} Cached TypedArray views for a scope slot (lazily created) */
+  /** @returns {object} Cached TypedArray views for a scope stream slot (lazily created) */
   #getScopeSlotViews(scopeNum) {
     if (!this.#scopeViews) {
       this.#scopeViews = new Array(this.#metricsReader.bufferConstants.SHM_SCOPE_MAX_SCOPES);
@@ -967,39 +967,34 @@ export class SuperSonic {
     const sab = this.#metricsReader.sharedBuffer;
     const base = this.#metricsReader.ringBufferBase;
     const slotOffset = base + bc.SHM_SCOPE_START + bc.SHM_SCOPE_HEADER_SIZE + scopeNum * bc.SHM_SCOPE_SLOT_SIZE;
-    const framesPerScope = bc.SHM_SCOPE_FRAMES_PER_SCOPE;
-    const regionSamples = framesPerScope * bc.SHM_SCOPE_CHANNELS;
-    const dataStart = slotOffset + bc.SHM_SCOPE_SLOT_HEADER_SIZE;
+    const ringFrames = bc.SHM_SCOPE_RING_FRAMES;
 
-    const regions = [];
-    for (let i = 0; i < 3; i++) {
-      const data = new Float32Array(sab, dataStart + i * regionSamples * 4, regionSamples);
-      regions.push({
-        left: data.subarray(0, framesPerScope),
-        right: data.subarray(framesPerScope, framesPerScope * 2),
-      });
-    }
-
+    // shm_scope_stream layout (shm_scope_stream.hpp): state u32, channels u32,
+    // capacity u32, pad u32, write_position u64, base_engine_frames u64, then
+    // an interleaved float ring of ringFrames * channels.
     views = {
       meta: new Uint32Array(sab, slotOffset, 4),
-      stage: new Int32Array(sab, slotOffset + 8, 1),
-      framesPerScope,
-      regions,
+      cursor: new BigUint64Array(sab, slotOffset + 16, 2), // [write_position, base_engine_frames]
+      data: new Float32Array(sab, slotOffset + bc.SHM_SCOPE_SLOT_HEADER_SIZE,
+                             ringFrames * bc.SHM_SCOPE_CHANNELS),
+      ringFrames,
     };
     this.#scopeViews[scopeNum] = views;
     return views;
   }
 
   /**
-   * Get scope data for a ScopeOut2 scope_num.
+   * Get the newest `frames` frames of a ScopeOut2 scope stream.
    *
-   * In SAB mode: zero-copy read from SharedArrayBuffer (always current).
-   * In PM mode: returns latest heartbeat snapshot (up to snapshotIntervalMs stale).
+   * The stream is a lossless interleaved ring with a monotonic write cursor
+   * (see docs/scope-streams-sample-clock.md); this copies out the window ending at
+   * the current cursor. SAB mode only for now.
    *
    * @param {number} scopeNum - Scope slot index (0 to maxScopes-1)
-   * @returns {{ frames: number, channels: number, left: Float32Array, right: Float32Array|null }|null}
+   * @param {number} [frames] - Window length; defaults to 1024
+   * @returns {{ frames: number, channels: number, writePosition: bigint, interleaved: Float32Array }|null}
    */
-  getScope(scopeNum) {
+  getScope(scopeNum, frames = 1024) {
     if (!this.#initialized) return null;
 
     const bc = this.#metricsReader.bufferConstants;
@@ -1010,21 +1005,39 @@ export class SuperSonic {
     if (!this.#metricsReader.sharedBuffer) return null;
 
     const views = this.#getScopeSlotViews(scopeNum);
-    if (views.meta[0] === 0) return null;  // free/inactive
+    if (Atomics.load(views.meta, 0) !== 1) return null;  // free/inactive
 
-    const channels = views.meta[1];
-    // Read the stage index atomically — slightly racy (writer might swap
-    // during our read) but for visualisation one stale frame is acceptable.
-    const stageIdx = Atomics.load(views.stage, 0);
-    if (stageIdx < 0 || stageIdx > 2) return null;  // corrupted/uninitialized
+    // Untrusted runtime value: clamp so a corrupt slot can't index outside
+    // the ring views.
+    const channels = Math.min(Math.max(views.meta[1], 1), bc.SHM_SCOPE_CHANNELS);
+    const cap = views.ringFrames;
+    const writer = Atomics.load(views.cursor, 0);
+    if (writer === 0n) return null;
 
-    const region = views.regions[stageIdx];
-    return {
-      frames: views.framesPerScope,
-      channels,
-      left: region.left,
-      right: channels >= 2 ? region.right : null,
-    };
+    const want = Math.min(frames, cap);
+    const end = writer;
+    let start = end > BigInt(want) ? end - BigInt(want) : 0n;
+    // Stay clear of the region the writer may currently be overwriting.
+    // Same margin formula as the native copy_window: the writer can append
+    // several blocks back-to-back per hardware callback, so stay
+    // SHM_SCOPE_READ_MARGIN_FRAMES (2048, clamped to cap/4 for small rings)
+    // behind the ring's oldest edge — keep in step with shm_scope_stream.hpp.
+    const margin = BigInt(Math.min(cap >> 2, 2048));
+    const oldest = end > BigInt(cap) ? end - BigInt(cap) + margin : 0n;
+    if (start < oldest) start = oldest;
+
+    const real = Number(end - start);
+    const out = new Float32Array(want * channels); // zero-filled lead-in
+    const fill = want - real;
+    let at = Number(start % BigInt(cap));
+    for (let i = 0; i < real; i++) {
+      for (let c = 0; c < channels; c++) {
+        out[(fill + i) * channels + c] = views.data[at * channels + c];
+      }
+      at = (at + 1) % cap;
+    }
+
+    return { frames: want, channels, writePosition: writer, interleaved: out };
   }
 
   /**
@@ -1049,15 +1062,15 @@ export class SuperSonic {
   }
 
   /**
-   * Get scope schema (capacity, frames per scope, SAB offsets).
-   * @returns {{ maxScopes: number, framesPerScope: number, channels: number }|null}
+   * Get scope schema (capacity, ring frames per slot, channels).
+   * @returns {{ maxScopes: number, ringFrames: number, channels: number }|null}
    */
   static getScopeSchema() {
     // Compile-time defaults — matches shared_memory.h SCOPE_ constants.
     // A proper implementation would read from the WASM buffer layout.
     return {
       maxScopes: 32,
-      framesPerScope: 1024,
+      ringFrames: 16384,
       channels: 2,
     };
   }

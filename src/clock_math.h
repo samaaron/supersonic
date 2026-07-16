@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 
@@ -35,6 +36,20 @@ inline double timeAtBeat(double beat, double origin, double bpm) {
 inline double originFor(double beat, double t, double bpm) {
     return t - beat * 60.0 / bpm;
 }
+
+}  // namespace supersonic
+
+// Current wall-clock time as NTP seconds (global name: pre-dates the
+// namespace and is referenced unqualified across the native tree and the
+// shm reader side). The engine's TimeSource and every cross-process
+// sample-clock reader must use this one formula.
+inline double wallClockNTP() {
+    return std::chrono::duration<double>(
+               std::chrono::system_clock::now().time_since_epoch()).count()
+         + supersonic::kNtpEpochOffset;
+}
+
+namespace supersonic {
 
 // Non-negative phase of `beat` within `quantum` (0 when quantum <= 0).
 inline double wrapPhase(double beat, double quantum) {

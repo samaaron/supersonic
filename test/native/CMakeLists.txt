@@ -81,6 +81,7 @@ add_executable(SuperSonicNativeTests
     test_midi_clock_out.cpp
     test_in_ring_drain.cpp
     test_scope_slot_ownership.cpp
+    test_scope_stream.cpp
     test_server_shm_security.cpp
     test_buffer_alloc_bounds.cpp
     test_realtime_thread.cpp

@@ -220,6 +220,8 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
             device->getInputLatencyInSamples());
     fflush(stderr);
 
+    mOutputLatencySamples = device->getOutputLatencyInSamples();
+
     // Native timing: set ntp_start and drift to 0. NTP is derived from sample
     // position with slow drift correction (see run loop), so these offsets are unused.
     if (mRingBufferStorage) {
@@ -433,6 +435,14 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     // ── 2. Generate 128-sample scsynth blocks until the JUCE buffer is full ──
     double wallNTP = mSuperClock->updateAudioThreadNTP(mSamplePosition, mSampleRate);
 
+    // Sample clock: one anchor per hardware callback (the line is linear
+    // across its sub-blocks); per-block cursor advances happen in the loop.
+    // Negative latency reports from flaky drivers clamp to 0 — a raw cast
+    // would push the anchor ~a day ahead.
+    mSuperClock->publishSampleClock(
+        mSamplePosition, static_cast<double>(mSampleRate), wallNTP,
+        static_cast<uint32_t>(std::max(0, mOutputLatencySamples)));
+
     // Mirror Link clock + stream-health into the dashboard metrics from one
     // lock-free session capture. `metrics` is the engine's segment-resident
     // metrics block.
@@ -501,6 +511,8 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
                 static_cast<uint32_t>(mNumInputChannels));
         wallNTP += static_cast<double>(mBufLen) / mSampleRate;
         mSamplePosition += mBufLen;
+        // Keep scope-stream writes anchored to the block being rendered.
+        mSuperClock->advanceEngineFrames(mSamplePosition);
 
         const float* outputBus = ss_audio_out();
         if (outputBus) {

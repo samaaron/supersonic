@@ -1934,6 +1934,40 @@ export class SuperSonic {
   getSnapshot(): Snapshot;
 
   /**
+   * Copy the newest `frames` frames of a ScopeOut2 scope stream.
+   *
+   * Scope slots are lossless interleaved rings with a monotonic write
+   * cursor (see docs/scope-streams-sample-clock.md); this returns the
+   * window ending at the current cursor. Allocates the output per call.
+   * SAB mode only; returns null when uninitialized, out of range, or the
+   * slot is inactive.
+   *
+   * @param scopeNum - Scope slot index (0 to maxScopes-1; 0 = master mix)
+   * @param frames - Window length in frames (default 1024)
+   */
+  getScope(scopeNum: number, frames?: number): {
+    frames: number;
+    channels: number;
+    writePosition: bigint;
+    interleaved: Float32Array;
+  } | null;
+
+  /**
+   * List the currently active scope slots.
+   */
+  getScopes(): Array<{ index: number; channels: number }>;
+
+  /**
+   * Scope geometry (compile-time defaults: slot count, per-slot ring
+   * frames, channels).
+   */
+  static getScopeSchema(): {
+    maxScopes: number;
+    ringFrames: number;
+    channels: number;
+  };
+
+  /**
    * Get a comprehensive system performance report.
    *
    * Includes hardware info, audio configuration, Chrome playbackStats (if available),

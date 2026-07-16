@@ -384,6 +384,25 @@ public:
     // thread runs — no concurrency.
     void bindStateToShm(SuperClockState* region);
 
+    // ─── Sample clock (engine sample position ↔ wall-clock DAC time) ─────
+    // The clock's sample↔time line, published for cross-process readers: one
+    // anchor (samplePosition, renderNtp + outputLatency/rate) plus the rate
+    // defines dac_time(frame) for every frame, like the beat↔time
+    // timelines above. Consumers (scope streams, any audible-time query)
+    // convert cursors through it via sample_clock_view (server_shm.hpp).
+    // Region layout: SAMPLE_CLOCK_* in shared_memory.h. Bind once at engine
+    // init; the driver publishes an anchor once per hardware callback and
+    // calls advanceEngineFrames per rendered block, on the audio thread
+    // (seqlock write, RT-safe, no allocation).
+    void bindSampleClockToShm(uint8_t* region);
+    void publishSampleClock(double samplePosition, double sampleRate,
+                            double renderNtp, uint32_t outputLatencyFrames);
+    // Advance the engine-frame counter that anchors scope-stream writes,
+    // without republishing the anchor. Drivers that render several engine
+    // blocks per publishSampleClock call this per block; the sample-clock
+    // line is linear, so one anchor per hardware callback suffices.
+    void advanceEngineFrames(double samplePosition);
+
 #if SUPERSONIC_WORKLET_CLOCK
     // Worklet builds only: hand the worklet TimeSource its SAB offset pointers
     // (NTP start / drift µs / global ms) so nowAt() can evaluate the SAB time
@@ -401,6 +420,10 @@ public:
     void* audioThreadLinkAudioPtr();
 
 private:
+    // Sample-clock arena region (bindSampleClockToShm); null until bound —
+    // publishSampleClock is a no-op then (headless/unit contexts without a
+    // segment). Plain pointer: bound once pre-audio, then single-writer.
+    uint8_t* mSampleClockRegion = nullptr;
     struct Impl;
     std::unique_ptr<Impl> mImpl;
 };

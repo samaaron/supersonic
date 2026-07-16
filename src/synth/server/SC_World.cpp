@@ -1206,18 +1206,11 @@ void World_NRTUnlock(World* world) { reinterpret_cast<SC_Lock*>(world->mNRTLock)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Unified fixed-inline scope (native + WASM). Backed by the SHM_SCOPE region of
-// the shared arena (SAB on WASM, public segment on native). Offsets only — no
-// relative_ptr, no TLSF — so the layout is identical and inherently
-// cross-process-safe on every runtime. Triple-buffered: the writer publishes by
-// swapping its region index (_in) with the atomic `stage`.
+// Unified scope streams (native + WASM). Each slot in the SHM_SCOPE region
+// of the shared arena is a shm_scope_stream — a lossless cursor ring; the
+// protocol (struct layout, writer, reader) lives in
+// synth/common/shm_scope_stream.hpp.
 //
-// Slot layout (at SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE + index * SHM_SCOPE_SLOT_SIZE):
-//   [0..3]   u32 state (0=free, 1=active)
-//   [4..7]   u32 channels
-//   [8..11]  i32 stage (atomic triple-buffer swap index)
-//   [12..15] u32 _in (writer's current region)
-//   [16..]   float data[3][SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS]
 // Current owner of each scope slot (the ScopeBufferHnd that most recently
 // initialised it). Graph ctors/dtors run on the RT thread, so plain pointers
 // suffice. A slot may be re-claimed while a superseded unit still lives — its
@@ -1226,6 +1219,7 @@ static void* gScopeSlotOwners[SHM_SCOPE_MAX_SCOPES] = {};
 
 SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, ScopeBufferHnd* hnd) {
     (void)inWorld;
+    (void)maxFrames;  // legacy: stream capacity is fixed at SHM_SCOPE_RING_FRAMES
     uint8_t* base = reinterpret_cast<uint8_t*>(get_shared_memory_base());
     if (!base) {
         hnd->internalData = nullptr;
@@ -1237,26 +1231,10 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
         return kSCFalse;
     }
 
-    if ((uint32_t)maxFrames > SHM_SCOPE_FRAMES_PER_SCOPE)
-        maxFrames = SHM_SCOPE_FRAMES_PER_SCOPE;
-    if (channels > (int)SHM_SCOPE_CHANNELS)
-        channels = SHM_SCOPE_CHANNELS;
-
-    uint8_t* slotBase = base + SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE + index * SHM_SCOPE_SLOT_SIZE;
-    auto* state = reinterpret_cast<std::atomic<uint32_t>*>(slotBase + 0);
-    auto* slotChannels = reinterpret_cast<uint32_t*>(slotBase + 4);
-    auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slotBase + 8);
-    auto* writerIn = reinterpret_cast<uint32_t*>(slotBase + 12);
-
-    // Initialize slot. Triple-buffer: the writer fills `writerIn`, publishes it
-    // into `stage`, then advances round-robin through all 3 regions (see
-    // pushScopeBuffer). Start the reader's `stage` on region 2 (a different,
-    // already-zeroed region) so it never observes the region the writer fills
-    // first.
-    state->store(1, std::memory_order_relaxed);  // active
-    *slotChannels = channels;
-    *writerIn = 0;                               // writer fills region 0 first
-    stage->store(2, std::memory_order_relaxed);  // reader starts on region 2
+    auto* slot = reinterpret_cast<shm_scope_stream*>(
+        base + SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE + index * SHM_SCOPE_SLOT_SIZE);
+    // activate() is the single authority on channel sanitisation.
+    shm_scope_stream_writer(slot).activate((uint32_t)channels);
 
     // Update global header
     auto* activeCount = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 4);
@@ -1264,37 +1242,24 @@ SCBool getScopeBuffer(World* inWorld, int index, int channels, int maxFrames, Sc
     auto* version = reinterpret_cast<std::atomic<uint32_t>*>(base + SHM_SCOPE_START + 12);
     version->fetch_add(1, std::memory_order_relaxed);
 
-    // Point hnd->data at the writer's current region (region 0)
-    float* dataBase = reinterpret_cast<float*>(slotBase + SHM_SCOPE_SLOT_HEADER_SIZE);
-    uint32_t regionSamples = SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS;
-    hnd->data = dataBase + (*writerIn) * regionSamples;
-    hnd->internalData = slotBase;  // Store slot pointer for push/release
-    hnd->channels = channels;
-    hnd->maxFrames = maxFrames;
+    // The stream writer appends via ScopeOut2's own shm_scope_stream_writer;
+    // hnd carries the slot identity for release-ownership only. data stays
+    // null — the legacy region-pointer contract has no stream equivalent
+    // (see the fGetScopeBuffer note in SC_InterfaceTable.h).
+    hnd->data = nullptr;
+    hnd->internalData = slot;
+    hnd->channels = 0;
+    hnd->maxFrames = 0;
     gScopeSlotOwners[index] = hnd;
     return kSCTrue;
 }
 
 void pushScopeBuffer(World* inWorld, ScopeBufferHnd* hnd, int frames) {
+    // Legacy interface entry: scope streams publish on every write (see
+    // shm_scope_stream_writer::write), so there is nothing to push.
     (void)inWorld;
-    (void)frames;  // fixed-inline regions are full-width; reader takes the whole region
-    if (!hnd->internalData) return;
-    uint8_t* slotBase = reinterpret_cast<uint8_t*>(hnd->internalData);
-    auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slotBase + 8);
-    auto* writerIn = reinterpret_cast<uint32_t*>(slotBase + 12);
-
-    // Publish the just-filled region into `stage`, then advance the write cursor
-    // round-robin through all 3 regions. Round-robin (rather than swapping with
-    // the old stage, which only ever cycles 2 regions) keeps two full regions
-    // between the writer and the reader's published `stage`, so the reader never
-    // reads a region the writer is mid-write on — true triple buffering.
-    stage->store((int)*writerIn, std::memory_order_release);
-    *writerIn = (*writerIn + 1u) % 3u;
-
-    // Update hnd->data to point at new write region
-    float* dataBase = reinterpret_cast<float*>(slotBase + SHM_SCOPE_SLOT_HEADER_SIZE);
-    uint32_t regionSamples = SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS;
-    hnd->data = dataBase + (*writerIn) * regionSamples;
+    (void)hnd;
+    (void)frames;
 }
 
 void releaseScopeBuffer(World* inWorld, ScopeBufferHnd* hnd) {

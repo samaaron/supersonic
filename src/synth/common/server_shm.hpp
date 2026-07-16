@@ -11,11 +11,14 @@
 #pragma once
 
 #include "shm_audio_buffer.hpp"
+#include "shm_scope_stream.hpp"
+#include "src/clock_math.h"   // wallClockNTP, kNtpEpochOffset
 #include "src/shared_memory.h"
 #include "src/shm_peer_plane.h"
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -42,7 +45,6 @@ namespace detail_server_shm {
 
 using std::string;
 
-static constexpr int    MAX_SHM_SCOPE_BUFFERS = 128;  // retained for compat; scope is fixed-inline (SHM_SCOPE_MAX_SCOPES)
 
 // The public segment is a small handshake header followed by the unified
 // shared_memory.h arena blob — the SAME layout the engine uses in
@@ -173,7 +175,7 @@ inline void shm_remove(const string& name) {
 //   shared_memory.h arena blob (TOTAL_BUFFER_SIZE) — the *same* layout the
 //   engine uses in ring_buffer_storage / the WASM SAB. The engine points its
 //   `shared_memory` base at this blob, so rings, control pointers, metrics,
-//   node-tree, audio taps and (fixed-inline) scope are all addressed by their
+//   node-tree, audio taps and scope streams are all addressed by their
 //   shared_memory.h offsets and observable cross-process for free.
 //
 // MAGIC history:
@@ -185,6 +187,9 @@ inline void shm_remove(const string& name) {
 //   0x5C09E006  + Link metrics fields (METRICS_SIZE 184→232)
 //   0x5C09E007  appended the peer command plane after the arena blob
 //               (shm_peer_plane.h: SPSC command + reply rings)
+//   0x5C09E008  scope slots became lossless cursor-ring streams
+//               (shm_scope_stream.hpp) + SuperClock sample-clock region appended
+//               to the arena (engine-frames ↔ DAC-NTP mapping)
 //
 // Publication: the creator zeroes the whole segment and writes the header
 // geometry, but defers the MAGIC store. The engine then populates the arena
@@ -202,7 +207,7 @@ inline void shm_remove(const string& name) {
 // changes propagate through the header rather than requiring a hand-synced copy.
 // All offsets are relative to the arena blob base (segment + blob_offset).
 struct shm_segment_header {
-    static constexpr uint32_t MAGIC = 0x5C09E007;  // E007: + peer command plane after the arena
+    static constexpr uint32_t MAGIC = 0x5C09E008;  // E008: scope streams + sample-clock region (E007: peer command plane)
 
     uint32_t magic;
     uint32_t blob_offset;          // segment base → arena blob
@@ -233,10 +238,11 @@ struct shm_segment_header {
     uint32_t scope_header_bytes;   // SHM_SCOPE_HEADER_SIZE (global header)
     uint32_t scope_slot_bytes;     // SHM_SCOPE_SLOT_SIZE
     uint32_t scope_slot_header;    // SHM_SCOPE_SLOT_HEADER_SIZE
-    uint32_t scope_frames;         // SHM_SCOPE_FRAMES_PER_SCOPE
+    uint32_t scope_ring_frames;    // SHM_SCOPE_RING_FRAMES (per-slot stream capacity)
     uint32_t scope_channels;       // SHM_SCOPE_CHANNELS
 
     uint32_t native_stats_offset;  // native-only live stats (synthdefs, buffers, buffer_bytes)
+    uint32_t sample_clock_offset;      // SuperClock sample clock (SAMPLE_CLOCK_*)
 
     // Peer command plane (shm_peer_plane.h). peer_offset is SEGMENT-relative
     // (the plane sits after the arena blob, so a blob-relative offset would
@@ -298,10 +304,11 @@ public:
             header_->scope_header_bytes = SHM_SCOPE_HEADER_SIZE;
             header_->scope_slot_bytes   = SHM_SCOPE_SLOT_SIZE;
             header_->scope_slot_header  = SHM_SCOPE_SLOT_HEADER_SIZE;
-            header_->scope_frames       = SHM_SCOPE_FRAMES_PER_SCOPE;
+            header_->scope_ring_frames  = SHM_SCOPE_RING_FRAMES;
             header_->scope_channels     = SHM_SCOPE_CHANNELS;
 
             header_->native_stats_offset = NATIVE_STATS_START;
+            header_->sample_clock_offset     = SAMPLE_CLOCK_START;
 
             header_->peer_offset         = static_cast<uint32_t>(SHM_PEER_OFFSET);
             header_->peer_header_bytes   = static_cast<uint32_t>(sizeof(ShmPeerPlaneHeader));
@@ -352,7 +359,7 @@ public:
         return nullptr;
     }
 
-    // Base of a fixed-inline scope slot, or nullptr if out of range.
+    // Base of a scope-stream slot, or nullptr if out of range.
     uint8_t* get_scope_slot(unsigned int index) {
         if (index >= SHM_SCOPE_MAX_SCOPES)
             return nullptr;
@@ -369,62 +376,84 @@ private:
     ShmPeerPlaneHeader* peer_;
 };
 
-// ──── Fixed-inline scope reader ─────────────────────────────────────────
+// ──── Sample-clock view ─────────────────────────────────────────────────
 //
-// Reads the triple-buffered scope slot written by SC_World.cpp's unified
-// fixed-inline scope path (offsets only, no relative_ptr). Best-effort: it
-// tracks the last-published region and reports new data when `stage` advances.
+// Seqlock-consistent snapshot of SuperClock's sample clock: the mapping
+// from sample position to wall-clock DAC time (see shared_memory.h and
+// docs/scope-streams-sample-clock.md). `valid` is false until the driver has
+// published at least once (headless/test runs may never publish).
 
-class shm_scope_buffer_reader {
-public:
-    // keepalive pins the mapping the slot pointer reaches into (see the
-    // client's get_scope_buffer_reader): reader copies handed to long-lived
-    // observers stay safe even after the client that minted them is destroyed.
-    shm_scope_buffer_reader(uint8_t* slot = nullptr,
-                            std::shared_ptr<const void> keepalive = nullptr)
-        : slot_(slot), keepalive_(std::move(keepalive)) {}
+struct sample_clock_view {
+    uint64_t engine_frames = 0;
+    double   dac_ntp = 0.0;
+    uint32_t sample_rate = 0;
+    uint32_t output_latency_frames = 0;
+    bool     valid = false;
 
-    bool valid() {
-        if (!slot_) return false;
-        auto* state = reinterpret_cast<std::atomic<uint32_t>*>(slot_ + 0);
-        return state->load(std::memory_order_acquire) == 1;
+    // Newest engine frame the listener has heard at wall time now_ntp.
+    double visible_frames(double now_ntp) const {
+        return static_cast<double>(engine_frames)
+             + (now_ntp - dac_ntp) * static_cast<double>(sample_rate);
     }
 
-    unsigned int channels() {
-        if (!slot_) return 0;
-        return *reinterpret_cast<uint32_t*>(slot_ + 4);
+    // Slot-local cursor of the newest AUDIBLE sample of a scope stream —
+    // the canonical window end for every scope consumer. Clamped to the
+    // stream's write position; a mapping that lands before the stream's
+    // anchor (engine counter reset, wall-clock step) yields 0 so consumers
+    // show silence rather than not-yet-heard audio. Falls back to the raw
+    // write position when this view is invalid (no publisher yet:
+    // headless engines, older builds).
+    uint64_t audible_end(const shm_scope_stream_reader& r, double now_ntp) const {
+        const uint64_t writer = r.write_position();
+        if (!valid)
+            return writer;
+        const double local = visible_frames(now_ntp)
+            - static_cast<double>(r.base_engine_frames());
+        if (local <= 0.0)
+            return 0;
+        const uint64_t end = static_cast<uint64_t>(local);
+        return end < writer ? end : writer;
     }
-
-    unsigned int max_frames() { return SHM_SCOPE_FRAMES_PER_SCOPE; }
-
-    bool pull(unsigned int& frames) {
-        if (!valid()) return false;
-        auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slot_ + 8);
-        int s = stage->load(std::memory_order_acquire);
-        if (s == last_stage_)
-            return false;            // nothing newly published since last pull
-        last_stage_ = s;
-        frames = SHM_SCOPE_FRAMES_PER_SCOPE;
-        return true;
+    // Readers share the host — and so the system clock — with the engine,
+    // which anchors against the same wallClockNTP(): no cross-process
+    // handshake needed.
+    uint64_t audible_end(const shm_scope_stream_reader& r) const {
+        return audible_end(r, wallClockNTP());
     }
-
-    float* data() {
-        if (!slot_) return nullptr;
-        auto* stage = reinterpret_cast<std::atomic<int32_t>*>(slot_ + 8);
-        int s = stage->load(std::memory_order_acquire);
-        // Untrusted runtime value re-read from the segment on every call:
-        // only 0..2 keeps the pointer inside the triple buffer.
-        if (s < 0 || s > 2) return nullptr;
-        float* base = reinterpret_cast<float*>(slot_ + SHM_SCOPE_SLOT_HEADER_SIZE);
-        return base + static_cast<size_t>(s)
-             * (SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS);
-    }
-
-private:
-    uint8_t* slot_;
-    std::shared_ptr<const void> keepalive_;
-    int      last_stage_ = -1;
 };
+
+// Field accesses are relaxed atomics (the DAC NTP travels as a u64 bit
+// pattern) so no read is torn; the seqlock guards cross-field consistency.
+inline sample_clock_view read_sample_clock(const uint8_t* tl) {
+    sample_clock_view v;
+    if (!tl) return v;
+    auto* seq = reinterpret_cast<const std::atomic<uint32_t>*>(tl + SAMPLE_CLOCK_SEQ);
+    auto* sr  = reinterpret_cast<const std::atomic<uint32_t>*>(tl + SAMPLE_CLOCK_SAMPLE_RATE);
+    auto* fr  = reinterpret_cast<const std::atomic<uint64_t>*>(tl + SAMPLE_CLOCK_ENGINE_FRAMES);
+    auto* nb  = reinterpret_cast<const std::atomic<uint64_t>*>(tl + SAMPLE_CLOCK_DAC_NTP);
+    auto* lat = reinterpret_cast<const std::atomic<uint32_t>*>(tl + SAMPLE_CLOCK_OUT_LATENCY);
+    for (int tries = 0; tries < 8; ++tries) {
+        const uint32_t s0 = seq->load(std::memory_order_acquire);
+        if (s0 == 0)
+            return v;  // never published (seq is monotonic from 0)
+        if (s0 & 1u)
+            continue;  // writer mid-update
+        const uint32_t r  = sr->load(std::memory_order_relaxed);
+        const uint64_t f  = fr->load(std::memory_order_relaxed);
+        const uint64_t nu = nb->load(std::memory_order_relaxed);
+        const uint32_t l  = lat->load(std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_acquire);
+        if (seq->load(std::memory_order_relaxed) == s0) {
+            v.engine_frames = f;
+            v.dac_ntp = supersonic::bitsToDouble(nu);
+            v.sample_rate = r;
+            v.output_latency_frames = l;
+            v.valid = r > 0;
+            return v;
+        }
+    }
+    return v;
+}
 
 // ──── Observer views (GUI / passive reader side) ────────────────────────
 //
@@ -551,6 +580,23 @@ public:
         // observing MAGIC implies a fully-published header.
         std::atomic_thread_fence(std::memory_order_acquire);
 
+        // Layout guard: this client addresses regions by compile-time
+        // constants, so any disagreement with the engine's self-described
+        // geometry (e.g. a different memory_profile / SHM_AUDIO_SECONDS
+        // sizing) means silent garbage reads. Readers must be built with
+        // the engine's exact profile until they address regions through
+        // the header's offsets instead.
+        if (header->blob_size       != TOTAL_BUFFER_SIZE
+            || header->metrics_offset  != METRICS_START
+            || header->node_tree_offset != NODE_TREE_START
+            || header->audio_offset    != SHM_AUDIO_START
+            || header->scope_offset    != SHM_SCOPE_START
+            || header->sample_clock_offset != SAMPLE_CLOCK_START)
+            throw std::runtime_error(
+                "Shared memory layout mismatch — engine and reader were built "
+                "with different memory profiles (test-sized build staged as "
+                "production? see memory_profile.h / BUILD_TESTS sizing)");
+
         shm.reset(new server_shared_memory(handle.ptr, false));
     }
 
@@ -601,8 +647,13 @@ public:
     // shm client at all. Kept for observer-API symmetry.
     bool has_native_stats() const { return true; }
 
-    shm_scope_buffer_reader get_scope_buffer_reader(unsigned int index) {
-        return shm_scope_buffer_reader(shm->get_scope_slot(index), map_);
+    shm_scope_stream_reader get_scope_stream_reader(unsigned int index) {
+        return shm_scope_stream_reader(
+            reinterpret_cast<shm_scope_stream*>(shm->get_scope_slot(index)), map_);
+    }
+
+    sample_clock_view get_sample_clock() {
+        return read_sample_clock(shm->get_base() + SAMPLE_CLOCK_START);
     }
 
     shm_audio_buffer* get_audio_buffer(unsigned int index) {
@@ -633,10 +684,10 @@ private:
 
 } /* namespace detail_server_shm */
 
-using detail_server_shm::shm_scope_buffer_reader;
 using detail_server_shm::server_shared_memory_client;
 using detail_server_shm::server_shared_memory_creator;
 using detail_server_shm::ring_view;
 using detail_server_shm::node_tree_view;
 using detail_server_shm::native_stats;
+using detail_server_shm::sample_clock_view;
 // shm_audio_buffer + AUDIO_* names are exported by shm_audio_buffer.hpp.

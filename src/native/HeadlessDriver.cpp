@@ -5,6 +5,7 @@
 #include "JuceAudioCallback.h"
 #include "SampleLoader.h"
 #include "SuperClock.h"
+#include "lanes/lanes.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -44,6 +45,11 @@ void HeadlessDriver::processBlock(double& samplePos) {
         mSampleLoader->installPendingBuffers();
 
     const double ntp = mSuperClock->updateAudioThreadNTP(samplePos, mSampleRate);
+
+    // Sample clock: headless has no DAC, so "audible" == render time
+    // (latency 0). Keeps scope streams and their tests time-anchored.
+    mSuperClock->publishSampleClock(samplePos, static_cast<double>(mSampleRate),
+                                    ntp, 0);
 
     // One Link-clock capture per block, passed to both drain and
     // publish. Two captures with process_audio between would let the

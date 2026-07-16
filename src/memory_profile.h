@@ -32,7 +32,7 @@
  *     SUPERSONIC_NRT_OUT_BUFFER_SIZE       NRT-thread egress ring
  *     NODE_TREE_MIRROR_MAX_NODES           node-tree mirror capacity
  *     SHM_SCOPE_MAX_SCOPES                 scope slots
- *     SHM_SCOPE_FRAMES_PER_SCOPE           frames per scope triple-buffer
+ *     SHM_SCOPE_RING_FRAMES                frames per scope stream ring
  *   Scheduler pool ....................... shared_memory.h / scheduler/EngineScheduler.h
  *     SCHEDULER_DATA_POOL_SIZE             bundle data pool bytes
  *     SCHEDULER_SLOT_COUNT                 max scheduled bundles
@@ -92,8 +92,8 @@
   #ifndef SHM_SCOPE_MAX_SCOPES
   #define SHM_SCOPE_MAX_SCOPES 1
   #endif
-  #ifndef SHM_SCOPE_FRAMES_PER_SCOPE
-  #define SHM_SCOPE_FRAMES_PER_SCOPE 128
+  #ifndef SHM_SCOPE_RING_FRAMES
+  #define SHM_SCOPE_RING_FRAMES 512
   #endif
   #ifndef SC_MAX_TIMELINES
   #define SC_MAX_TIMELINES 2
@@ -177,8 +177,8 @@
   #ifndef SHM_SCOPE_MAX_SCOPES
   #define SHM_SCOPE_MAX_SCOPES 1
   #endif
-  #ifndef SHM_SCOPE_FRAMES_PER_SCOPE
-  #define SHM_SCOPE_FRAMES_PER_SCOPE 128
+  #ifndef SHM_SCOPE_RING_FRAMES
+  #define SHM_SCOPE_RING_FRAMES 512
   #endif
   #ifndef SC_MAX_TIMELINES
   #define SC_MAX_TIMELINES 2
@@ -245,8 +245,11 @@
 #ifndef SHM_SCOPE_MAX_SCOPES
 #define SHM_SCOPE_MAX_SCOPES 32
 #endif
-#ifndef SHM_SCOPE_FRAMES_PER_SCOPE
-#define SHM_SCOPE_FRAMES_PER_SCOPE 1024
+// Per-slot scope stream ring, in frames. Sized for the longest display window
+// a consumer draws (Sonic Pi's inline scopes scroll ~250ms) plus output
+// latency and reader slack: 16384 ≈ 340ms @ 48k, 128KB per stereo slot.
+#ifndef SHM_SCOPE_RING_FRAMES
+#define SHM_SCOPE_RING_FRAMES 16384
 #endif
 
 // Max MIDI-clock follower timelines in the SuperClock registry (slot 0 is

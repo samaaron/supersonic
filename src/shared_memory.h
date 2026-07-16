@@ -17,6 +17,7 @@
 #include "memory_profile.h"
 #include "ring/ring.h"   // Message, MESSAGE_MAGIC, PADDING_MAGIC
 #include "synth/common/shm_audio_buffer.hpp"
+#include "synth/common/shm_scope_stream.hpp"
 
 namespace supersonic {
 
@@ -112,38 +113,33 @@ constexpr uint32_t NODE_ID_COUNTER_START = SHM_AUDIO_START + SHM_AUDIO_TOTAL_SIZ
 constexpr uint32_t WORLD_OPTIONS_SIZE  = 18 * sizeof(uint32_t);  // 72 bytes
 constexpr uint32_t WORLD_OPTIONS_START = NODE_ID_COUNTER_START + NODE_ID_COUNTER_SIZE;
 
-// Scope buffers — per-bus audio scope data for visualisation.
-// Uses the same triple-buffer algorithm as native shm_scope_buffer.hpp
-// but with fixed layout in the SAB (no TLSF pool, no relative_ptr).
-//
-// Each scope slot: header (16B) + 3 triple-buffer regions of audio data.
-// ScopeOut2 UGen writes here; main thread reads via getScope(n).
-// In PM mode, scope snapshots are included in the heartbeat postMessage.
-// SHM_SCOPE_MAX_SCOPES / SHM_SCOPE_FRAMES_PER_SCOPE are sized per device via
-// memory_profile.h (defaults 32 / 1024).
-constexpr uint32_t SHM_SCOPE_CHANNELS = 2;  // Always stereo (ScopeOut2 writes 2 channels)
+// Scope streams — per-slot lossless audio rings for visualisation.
+// Protocol (struct layout, writer/reader) lives in
+// synth/common/shm_scope_stream.hpp; rationale in docs/scope-streams-sample-clock.md.
+// ScopeOut2 UGen appends every block; readers combine a slot's cursor with the
+// sample-clock region (below) and their own wall clock to display exactly what
+// the listener is hearing. SHM_SCOPE_MAX_SCOPES / SHM_SCOPE_RING_FRAMES sized
+// per device via memory_profile.h (defaults 32 / 16384).
+constexpr uint32_t SHM_SCOPE_CHANNELS = SHM_SCOPE_STREAM_CHANNELS;
 constexpr uint32_t SHM_SCOPE_HEADER_SIZE = 32;  // Global header (16-aligned)
-constexpr uint32_t SHM_SCOPE_SLOT_HEADER_SIZE = 16;  // Per-slot metadata
-constexpr uint32_t SHM_SCOPE_REGION_SIZE = SHM_SCOPE_FRAMES_PER_SCOPE * SHM_SCOPE_CHANNELS * sizeof(float);  // One triple-buffer region
-constexpr uint32_t SCOPE_SLOT_DATA_SIZE = 3 * SHM_SCOPE_REGION_SIZE;  // Triple buffer (3 regions)
-constexpr uint32_t SHM_SCOPE_SLOT_SIZE = SHM_SCOPE_SLOT_HEADER_SIZE + SCOPE_SLOT_DATA_SIZE;  // ~24KB per slot
+constexpr uint32_t SHM_SCOPE_SLOT_HEADER_SIZE = SHM_SCOPE_STREAM_HEADER_SIZE;
+constexpr uint32_t SHM_SCOPE_SLOT_SIZE = SHM_SCOPE_STREAM_SLOT_SIZE;
 constexpr uint32_t SHM_SCOPE_TOTAL_SIZE = SHM_SCOPE_HEADER_SIZE + (SHM_SCOPE_MAX_SCOPES * SHM_SCOPE_SLOT_SIZE);
 
-constexpr uint32_t SHM_SCOPE_START = WORLD_OPTIONS_START + WORLD_OPTIONS_SIZE;
+// shm_scope_stream is alignas(16); align the region so slots stay aligned.
+constexpr uint32_t SHM_SCOPE_START =
+    (WORLD_OPTIONS_START + WORLD_OPTIONS_SIZE + 15u) & ~15u;
+static_assert((SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE) % 16 == 0,
+              "scope slots must be 16-byte aligned for shm_scope_stream");
 
 // Scope header layout (at SHM_SCOPE_START):
 //   [0..3]   u32  maxScopes
 //   [4..7]   u32  activeCount
-//   [8..11]  u32  framesPerScope
+//   [8..11]  u32  ringFrames (per-slot capacity)
 //   [12..15] u32  version (increments on scope add/remove)
 //   [16..31] reserved
 //
-// Per-scope slot (at SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE + index * SHM_SCOPE_SLOT_SIZE):
-//   [0..3]   u32  state (0=free, 1=active)
-//   [4..7]   u32  channels
-//   [8..11]  i32  stage (atomic: triple-buffer swap index 0/1/2)
-//   [12..15] u32  _in (writer's current triple-buffer region index)
-//   [16..]   float data[3][framesPerScope * channels]  — triple-buffered audio
+// Per-scope slot: a shm_scope_stream (see shm_scope_stream.hpp).
 
 // Native-only live engine stats. Appended at the very END of the layout on
 // purpose: adding fields here shifts NO existing offset, so the WASM metric
@@ -163,8 +159,27 @@ constexpr uint32_t NATIVE_STAT_CPU_AVG_CENTI  = 12;  // DSP load, percent * 100 
 constexpr uint32_t NATIVE_STAT_CPU_PEAK_CENTI = 16;  // DSP load, percent * 100 (decaying peak)
 constexpr uint32_t NATIVE_STAT_CB_OVERRUNS    = 20;  // audio callbacks that overran their time budget
 
+// SuperClock's sample clock — the engine's sample position anchored to
+// wall-clock DAC time. One anchor plus the rate defines the whole line
+//   dac_time(frame) = dac_ntp + (frame - engine_frames) / sample_rate
+// so any reader can compute e.g. "which sample is the listener hearing":
+//   visible = engine_frames + (now_ntp - dac_ntp) * sample_rate
+// Published once per hardware callback via SuperClock::publishSampleClock
+// (seqlock: odd SEQ, fields, even SEQ with release ordering). Consumers:
+// scope streams, plus anything needing audible-time alignment (recording
+// markers, visual sync). See docs/scope-streams-sample-clock.md.
+constexpr uint32_t SAMPLE_CLOCK_SIZE  = 32;
+constexpr uint32_t SAMPLE_CLOCK_START = (NATIVE_STATS_START + NATIVE_STATS_SIZE + 15u) & ~15u;
+// Field byte offsets within the sample-clock region.
+constexpr uint32_t SAMPLE_CLOCK_SEQ            = 0;   // u32 seqlock (odd = mid-update)
+constexpr uint32_t SAMPLE_CLOCK_SAMPLE_RATE    = 4;   // u32
+constexpr uint32_t SAMPLE_CLOCK_ENGINE_FRAMES  = 8;   // u64 engine frames at block start
+constexpr uint32_t SAMPLE_CLOCK_DAC_NTP        = 16;  // f64 NTP seconds when that frame hits the DAC
+constexpr uint32_t SAMPLE_CLOCK_OUT_LATENCY    = 24;  // u32 device output latency, frames
+                                                  // [28..31] reserved
+
 // Total buffer size (for validation)
-constexpr uint32_t TOTAL_BUFFER_SIZE  = NATIVE_STATS_START + NATIVE_STATS_SIZE;
+constexpr uint32_t TOTAL_BUFFER_SIZE  = SAMPLE_CLOCK_START + SAMPLE_CLOCK_SIZE;
 
 // Message frame (magic/length/sequence/sourceId) is defined in ring/ring.h.
 
@@ -455,10 +470,11 @@ struct BufferLayout {
     uint32_t shm_scope_header_size;
     uint32_t shm_scope_slot_size;
     uint32_t shm_scope_slot_header_size;
-    uint32_t shm_scope_region_size;
+    uint32_t shm_scope_ring_frames;
     uint32_t shm_scope_max_scopes;
-    uint32_t shm_scope_frames_per_scope;
     uint32_t shm_scope_channels;
+    uint32_t sample_clock_start;
+    uint32_t sample_clock_size;
     uint32_t total_buffer_size;
     uint32_t max_message_size;
     uint32_t message_magic;
@@ -510,10 +526,11 @@ constexpr BufferLayout BUFFER_LAYOUT = {
     SHM_SCOPE_HEADER_SIZE,
     SHM_SCOPE_SLOT_SIZE,
     SHM_SCOPE_SLOT_HEADER_SIZE,
-    SHM_SCOPE_REGION_SIZE,
+    SHM_SCOPE_RING_FRAMES,
     SHM_SCOPE_MAX_SCOPES,
-    SHM_SCOPE_FRAMES_PER_SCOPE,
     SHM_SCOPE_CHANNELS,
+    SAMPLE_CLOCK_START,
+    SAMPLE_CLOCK_SIZE,
     TOTAL_BUFFER_SIZE,
     MAX_MESSAGE_SIZE,
     MESSAGE_MAGIC,

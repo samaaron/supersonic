@@ -161,7 +161,14 @@ struct InterfaceTable {
     // destroy any resources held internally.
     void (*fSCfftDestroy)(struct scfft* f, struct SCFFT_Allocator* alloc);
 
-    // Get scope buffer. Returns the maximum number of possile frames.
+    // SuperSonic contract (diverges from upstream SC): scope slots are
+    // shm_scope_stream cursor rings, not writable regions. fGetScopeBuffer
+    // claims slot `index` and sets ONLY hnd->internalData (a
+    // shm_scope_stream*, for ownership + constructing a
+    // shm_scope_stream_writer); hnd->data stays null, channels/maxFrames 0,
+    // and channel_data() must not be used. fPushScopeBuffer is a no-op
+    // (streams publish on every write). fReleaseScopeBuffer is
+    // owner-guarded. See synth/common/shm_scope_stream.hpp and ScopeOut2.
     SCBool (*fGetScopeBuffer)(World* inWorld, int32 index, int32 channels, int32 maxFrames, struct ScopeBufferHnd*);
     void (*fPushScopeBuffer)(World* inWorld, struct ScopeBufferHnd*, int frames);
     void (*fReleaseScopeBuffer)(World* inWorld, struct ScopeBufferHnd*);

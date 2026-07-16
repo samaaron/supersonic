@@ -109,37 +109,68 @@ TEST_CASE("shm-security: scope readers pin the client mapping (no dangling reads
     // alive: 2026-07-11 this exact sequence was a GUI segfault (poll timer →
     // atomic load through the munmapped slot pointer).
     auto client = std::make_unique<server_shared_memory_client>(kPort);
-    auto reader = client->get_scope_buffer_reader(0);
+    auto reader = client->get_scope_stream_reader(0);
     client.reset();
 
-    unsigned frames = 0;
+    float scratch[64 * 2] = {};
     (void)reader.valid();
-    (void)reader.pull(frames);
-    (void)reader.data();
+    (void)reader.write_position();
+    (void)reader.copy_window(reader.write_position(), 64, scratch);
     SUCCEED("reader survived client teardown without touching unmapped memory");
 }
 
-TEST_CASE("shm-security: scope reader rejects an out-of-range stage index",
+TEST_CASE("shm-security: scope reader clamps corrupt slot geometry",
           "[shm][security]") {
     constexpr unsigned kPort = 57315;
     server_shared_memory_creator::cleanup(kPort);
     server_shared_memory_creator creator(kPort, 0);
     creator.publish();
     server_shared_memory_client client(kPort);
-    auto reader = client.get_scope_buffer_reader(0);
+    auto reader = client.get_scope_stream_reader(0);
 
-    // stage is re-read from shared memory on every data() call and multiplies
-    // into the returned pointer; only 0..2 stays inside the triple buffer.
-    uint8_t* slot = creator.get_base() + SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE;
-    reinterpret_cast<std::atomic<int32_t>*>(slot + 8)
-        ->store(999, std::memory_order_release);
-    CHECK(reader.data() == nullptr);
-    reinterpret_cast<std::atomic<int32_t>*>(slot + 8)
-        ->store(-7, std::memory_order_release);
-    CHECK(reader.data() == nullptr);
-    reinterpret_cast<std::atomic<int32_t>*>(slot + 8)
-        ->store(2, std::memory_order_release);
-    CHECK(reader.data() != nullptr);
+    // channels/capacity_frames are re-read from shared memory on every
+    // copy_window and index into the inline data array; a corrupt or hostile
+    // slot must clamp to the compile-time ring geometry rather than push
+    // reads out of bounds (or divide by a zero capacity).
+    auto* slot = reinterpret_cast<shm_scope_stream*>(
+        creator.get_base() + SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE);
+    slot->state.store(1, std::memory_order_release);
+    slot->channels = 0xFFFFu;
+    slot->capacity_frames = 0;
+    slot->write_position.store(1u << 20, std::memory_order_release);
+
+    CHECK(reader.channels() == SHM_SCOPE_STREAM_CHANNELS);
+    CHECK(reader.capacity_frames() == SHM_SCOPE_RING_FRAMES);
+    std::vector<float> scratch(1024 * SHM_SCOPE_STREAM_CHANNELS, 0.0f);
+    (void)reader.copy_window(reader.write_position(), 1024, scratch.data());
+    SUCCEED("copy_window stayed inside the inline ring under corrupt geometry");
+
+    slot->capacity_frames = 0x7FFFFFFFu;  // absurdly large
+    (void)reader.copy_window(reader.write_position(), 1024, scratch.data());
+    SUCCEED("oversized capacity clamped");
+}
+
+TEST_CASE("shm-security: client rejects a segment with a foreign layout",
+          "[shm][security]") {
+    constexpr unsigned kPort = 57318;
+    server_shared_memory_creator::cleanup(kPort);
+    server_shared_memory_creator creator(kPort, 0);
+    creator.publish();
+
+    // Tamper one self-described offset, as if the engine were built with a
+    // different memory profile (e.g. BUILD_TESTS capture-ring sizing). The
+    // client must refuse rather than read garbage at its compile-time offsets.
+    auto* hdr = reinterpret_cast<detail_server_shm::shm_segment_header*>(
+        creator.get_base() - detail_server_shm::SHM_BLOB_OFFSET);
+    hdr->scope_offset += 4096;
+
+    bool threw = false;
+    try {
+        server_shared_memory_client client(kPort);
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    CHECK(threw);
 }
 
 TEST_CASE("shm client exposes the observer views inside its own mapping",

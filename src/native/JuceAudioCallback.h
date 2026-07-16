@@ -138,6 +138,7 @@ private:
     // tracks the live device and can exceed it; the input-feed loop clamps to this.
     int        mWorldInputBusChannels = 0;
     double     mSamplePosition     = 0.0;   // cumulative samples (increments by mBufLen)
+    int        mOutputLatencySamples = 0;   // device DSP→DAC latency, captured at start
 
     // Prefetch buffer: channel-major, mBufLen samples per channel. Only
     // populated when the HW callback wants fewer samples than a scsynth

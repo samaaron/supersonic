@@ -67,15 +67,17 @@ test("WORLD_OPTIONS_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicP
       worldOptionsSize: bc.WORLD_OPTIONS_SIZE,
       scopeStart: bc.SHM_SCOPE_START,
       scopeTotalSize: bc.SHM_SCOPE_TOTAL_SIZE,
+      sampleClockStart: bc.SAMPLE_CLOCK_START,
+      sampleClockSize: bc.SAMPLE_CLOCK_SIZE,
       totalBufferSize: bc.TOTAL_BUFFER_SIZE,
     };
   }, sonicConfig);
 
-  // Scope is the last large region; the arena ends with a small fixed-size
-  // NATIVE_STATS tail (synthdef/buffer counters, written only by the native
-  // backend — see shared_memory.h NATIVE_STATS_SIZE). Update this if it changes.
-  const NATIVE_STATS_SIZE = 32;
-  expect(result.scopeStart + result.scopeTotalSize).toBe(result.totalBufferSize - NATIVE_STATS_SIZE);
+  // Scope is the last large region; the arena ends with the fixed-size
+  // NATIVE_STATS tail then the 16-aligned SAMPLE_CLOCK region (see
+  // shared_memory.h). Update this if the tail regions change.
+  expect(result.sampleClockStart + result.sampleClockSize).toBe(result.totalBufferSize);
+  expect(result.scopeStart + result.scopeTotalSize).toBeLessThanOrEqual(result.sampleClockStart);
   // WORLD_OPTIONS comes before the end of the buffer
   expect(result.worldOptionsStart + result.worldOptionsSize).toBeLessThan(result.totalBufferSize);
 });

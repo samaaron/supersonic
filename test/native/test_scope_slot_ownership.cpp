@@ -86,15 +86,15 @@ TEST_CASE("scope-ownership: late dtor of a superseded unit leaves the slot activ
     REQUIRE(fix.waitForReply("/n_end", reply, 3000));
 
     // The surviving writer's slot must still be live for readers: state == 1
-    // and the stage still advancing as blocks render.
+    // and the stream cursor still advancing as blocks render.
     server_shared_memory_client client(scopeOwnershipConfig().udpPort);
-    auto reader = client.get_scope_buffer_reader((unsigned)kSlot);
+    auto reader = client.get_scope_stream_reader((unsigned)kSlot);
     REQUIRE(fix.waitForBlocks(40, 3000));
     CHECK(reader.valid());
-    unsigned frames = 0;
+    const uint64_t before = reader.write_position();
     bool advanced = false;
     for (int i = 0; i < 50 && !advanced; ++i) {
-        advanced = reader.pull(frames);
+        advanced = reader.write_position() > before;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     CHECK(advanced);
