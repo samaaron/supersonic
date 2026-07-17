@@ -13,6 +13,7 @@
 #include "EngineFixture.h"
 #include "JuceAudioCallback.h"
 #include "HeadlessDriver.h"
+#include <algorithm>
 #include <thread>
 #include <chrono>
 #include <cmath>
@@ -197,40 +198,95 @@ TEST_CASE("AudioResume: LATE count does not spike after short pause",
 // =============================================================================
 // SECTION: Simulated JUCE callback produces clean output after resume
 // =============================================================================
+//
+// These two drive audioDeviceIOCallbackWithContext directly, which is the only
+// path that honours pause(): mPaused is read in JuceAudioCallback's device
+// callback and nowhere else. The HeadlessDriver renders via renderAudioBlock()
+// and never consults it, so a driver-backed fixture cannot exercise a pause at
+// all, and reading the shared output bus while that driver writes it is a data
+// race (TSan reports it under clang; gcc's libtsan did not).
+//
+// manualAudioPump starts no audio source (see SupersonicEngine::startAudioSource),
+// leaving the test thread the sole caller of process_audio() and of the callback,
+// which is what makes the buffers below safe to read.
+
+static SupersonicEngine::Config manualPumpConfig() {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    return cfg;
+}
+
+// One simulated device callback into caller-owned buffers. Inputs are declared
+// absent (nullptr, 0 channels) so the callback skips its input accumulator. A
+// default context carries hostTimeNs == nullptr, selecting the SuperClock host
+// time fallback, which is what a backend that supplies no timestamp produces.
+static void driveCallback(JuceAudioCallback& cb,
+                          float* left, float* right, int numSamples) {
+    float* outs[2] = { left, right };
+    juce::AudioIODeviceCallbackContext ctx{};
+    cb.audioDeviceIOCallbackWithContext(nullptr, 0, outs, 2, numSamples, ctx);
+}
+
+// The callback emits silence for its first few callbacks to absorb page faults,
+// and resume() re-arms that warmup by zeroing mCallbackCount, so a test must
+// drive past it before measuring real output. Keep in step with the warmup
+// bound in JuceAudioCallback::audioDeviceIOCallbackWithContext.
+static constexpr int kWarmupCallbacks = 4;
+static constexpr int kBlockSamples    = 128;
 
 TEST_CASE("AudioResume: simulated callback output is finite after resume",
           "[AudioResume]") {
-    EngineFixture fix;
+    EngineFixture fix(manualPumpConfig());
     auto& cb = fix.engine().audioCallback();
 
-    // Let the engine run for a bit to warm up
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // A synth has to be sounding for the assertions below to have any teeth: an
+    // empty graph renders zeros, so "paused" and "running" would be identical
+    // and neither check could ever fail.
+    REQUIRE(fix.loadSynthDef("sonic-pi-beep"));
+    {
+        osc_test::Builder b;
+        auto& s = b.begin("/s_new");
+        s << "sonic-pi-beep" << (int32_t)3100 << (int32_t)0 << (int32_t)1
+          << "note" << 69.0f << "out_bus" << 0.0f;
+        fix.send(b.end());
+    }
+    OscReply syncReply;
+    fix.send(osc_test::message("/sync", 61));
+    REQUIRE(fix.waitForReply("/synced", syncReply));
 
+    std::vector<float> left(kBlockSamples, 0.0f), right(kBlockSamples, 0.0f);
+    auto drive = [&] { driveCallback(cb, left.data(), right.data(), kBlockSamples); };
+    auto sounding = [&] {
+        return std::any_of(left.begin(),  left.end(),  [](float v) { return v != 0.0f; })
+            || std::any_of(right.begin(), right.end(), [](float v) { return v != 0.0f; });
+    };
+
+    for (int i = 0; i < kWarmupCallbacks; ++i) drive();
+    drive();
+
+    // Guards the guard: if the beep ever stops reaching the output, the pause
+    // assertion below silently stops testing anything.
+    REQUIRE(sounding());
+
+    // Paused, the callback must write exact silence over a sounding graph.
     cb.pause();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    drive();
+    CHECK_FALSE(sounding());
+
     cb.resume();
 
-    // Wait a few blocks for the headless driver to produce output
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    // resume() re-arms the warmup, so clear it again before measuring.
+    for (int i = 0; i < kWarmupCallbacks; ++i) drive();
+    drive();
 
-    // Read the output bus — check that samples are finite (no NaN/Inf)
-    auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus());
-    if (outputBus) {
-        int bufSamples = get_audio_buffer_samples();
-        bool allFinite = true;
-        for (int i = 0; i < bufSamples * 2; ++i) {  // 2 channels
-            if (!std::isfinite(outputBus[i])) {
-                allFinite = false;
-                break;
-            }
-        }
-        CHECK(allFinite);
-    }
+    // The point of the test: a resume must not leave NaN/Inf in the output.
+    CHECK(std::all_of(left.begin(),  left.end(),  [](float v) { return std::isfinite(v); }));
+    CHECK(std::all_of(right.begin(), right.end(), [](float v) { return std::isfinite(v); }));
 }
 
 TEST_CASE("AudioResume: output amplitude is reasonable after resume",
           "[AudioResume]") {
-    EngineFixture fix;
+    EngineFixture fix(manualPumpConfig());
     auto& cb = fix.engine().audioCallback();
 
     // Create a synth to produce some audio
@@ -247,32 +303,28 @@ TEST_CASE("AudioResume: output amplitude is reasonable after resume",
     fix.send(osc_test::message("/sync", 60));
     REQUIRE(fix.waitForReply("/synced", syncReply));
 
-    // Let it play
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::vector<float> left(kBlockSamples, 0.0f), right(kBlockSamples, 0.0f);
+    auto drive = [&] { driveCallback(cb, left.data(), right.data(), kBlockSamples); };
 
-    // Pause for 500ms — a realistic device swap duration
+    // Let it play past the warmup, then run a full pause/resume cycle.
+    for (int i = 0; i < kWarmupCallbacks; ++i) drive();
     cb.pause();
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    drive();
     cb.resume();
 
-    // Wait for a few blocks to be processed
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    // resume() re-arms the warmup, so clear it again before measuring.
+    for (int i = 0; i < kWarmupCallbacks; ++i) drive();
+    drive();
 
-    // Check output bus amplitude isn't absurdly large (no burst of
-    // overlapping catch-up synths)
-    auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus());
-    if (outputBus) {
-        int bufSamples = get_audio_buffer_samples();
-        float maxAmp = 0.0f;
-        for (int i = 0; i < bufSamples * 2; ++i) {
-            float v = std::fabs(outputBus[i]);
-            if (v > maxAmp) maxAmp = v;
-        }
+    float maxAmp = 0.0f;
+    for (float v : left)  maxAmp = std::max(maxAmp, std::fabs(v));
+    for (float v : right) maxAmp = std::max(maxAmp, std::fabs(v));
 
-        // Normal audio should be well under 10.0 amplitude.
-        // A catch-up burst would stack many synths and exceed this.
-        CHECK(maxAmp < 10.0f);
-    }
+    // Normal audio should be well under 10.0 amplitude. A resume that stacked
+    // overlapping catch-up synths would exceed this. No lower bound: the beep's
+    // envelope may well have decayed by now, and asserting audibility here would
+    // be a timing bet rather than the amplitude guard this test is for.
+    CHECK(maxAmp < 10.0f);
 }
 
 // =============================================================================
