@@ -20,6 +20,11 @@
  * sequence counters) are reset, so the egress drains' process-lifetime
  * consumer state (sequence-gap tracking) restarts with them — otherwise a
  * second engine boot in the same process counts a spurious sequence gap.
+ *
+ * ss_lanes_reset_rings: zero every ring's head/tail/sequence for a fresh
+ * epoch (boot and cold-swap rebuild), serialising against IN / NRT-out
+ * producers via their writer spinlocks — those producers keep running
+ * through a rebuild, so a bare store would race an in-flight write.
  */
 #pragma once
 
@@ -35,6 +40,8 @@ bool ss_egress_nrt_write(uint32_t route, uint32_t token,
                          const uint8_t* osc, uint32_t len);
 
 void ss_lanes_reset_drains(void);
+
+void ss_lanes_reset_rings(void);
 
 #ifdef __cplusplus
 }

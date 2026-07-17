@@ -49,6 +49,42 @@ void ss_lanes_reset_drains(void) {
     g_nrt_drain_state.lastSeq = -1;
 }
 
+// Fresh ring epoch. The RT-out ring's single producer (the audio thread) is
+// stopped by the caller, but IN and NRT-out producers run through a cold-swap
+// rebuild: transport ingress threads, and ss_log / ss_egress_nrt_write from
+// any engine worker. Each serialises its whole read-head→publish sequence on
+// its ring's writer spinlock (RingBufferWriter::write), so owning that lock
+// across the reset linearises it — an in-flight write lands wholly in the old
+// epoch (discarded here) or wholly in the fresh one, never interleaved with
+// the zeroing. The lock words are never zeroed: releasing the spinlock is
+// what returns them to 0, and a blind store would unlock under a holder.
+void ss_lanes_reset_rings(void) {
+    if (!shared_memory || !control) return;
+
+    const auto spin_acquire = [](std::atomic<int32_t>& lock) {
+        int32_t expected = 0;
+        while (!lock.compare_exchange_weak(expected, 1,
+                std::memory_order_acquire, std::memory_order_relaxed))
+            expected = 0;
+    };
+
+    spin_acquire(control->in_write_lock);
+    control->in_head.store(0, std::memory_order_relaxed);
+    control->in_tail.store(0, std::memory_order_relaxed);
+    control->in_sequence.store(0, std::memory_order_relaxed);
+    control->in_write_lock.store(0, std::memory_order_release);
+
+    spin_acquire(g_nrt_egress_lock);
+    control->nrt_out_head.store(0, std::memory_order_relaxed);
+    control->nrt_out_tail.store(0, std::memory_order_relaxed);
+    control->nrt_out_sequence.store(0, std::memory_order_relaxed);
+    g_nrt_egress_lock.store(0, std::memory_order_release);
+
+    control->out_head.store(0, std::memory_order_relaxed);
+    control->out_tail.store(0, std::memory_order_relaxed);
+    control->out_sequence.store(0, std::memory_order_relaxed);
+}
+
 // ── Ingress ─────────────────────────────────────────────────────────────────
 
 bool ss_ingress_write(const uint8_t* osc, uint32_t len, uint32_t source_id) {

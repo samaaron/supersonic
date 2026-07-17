@@ -488,17 +488,29 @@ extern "C" {
     // every region is addressed by its shared_memory.h offset from this base.
     EMSCRIPTEN_KEEPALIVE
     void init_memory(double sample_rate) {
-        shared_memory = g_external_segment ? g_external_segment : ring_buffer_storage;
-        control = reinterpret_cast<ControlPointers*>(shared_memory + CONTROL_START);
-        // Metrics live in the arena at their fixed offset — which is the public
-        // segment when one was supplied, so external observers read them with
-        // no redirect.
-        metrics = reinterpret_cast<PerformanceMetrics*>(shared_memory + METRICS_START);
+        // The arena base is fixed for the engine's whole threaded life: native
+        // binds g_external_segment before any engine thread starts (and nulls
+        // it only after they are all joined); the WASM arena is the static
+        // ring_buffer_storage. So on a cold-swap rebuild the pointer family
+        // below is already correct — and skipping the re-assignment is what
+        // makes this call safe while unquiesced producers (transport ingress,
+        // ss_log from any worker) read the same globals lock-free: pointers
+        // are only ever written here with no reader threads alive (first
+        // boot, or re-boot after teardown_memory).
+        uint8_t* base = g_external_segment ? g_external_segment : ring_buffer_storage;
+        if (shared_memory != base) {
+            shared_memory = base;
+            control = reinterpret_cast<ControlPointers*>(shared_memory + CONTROL_START);
+            // Metrics live in the arena at their fixed offset — which is the
+            // public segment when one was supplied, so external observers read
+            // them with no redirect.
+            metrics = reinterpret_cast<PerformanceMetrics*>(shared_memory + METRICS_START);
 
-        // Timing pointers
-        ntp_start_time = reinterpret_cast<double*>(shared_memory + NTP_START_TIME_START);
-        drift_offset = reinterpret_cast<std::atomic<int32_t>*>(shared_memory + DRIFT_OFFSET_START);
-        global_offset = reinterpret_cast<std::atomic<int32_t>*>(shared_memory + GLOBAL_OFFSET_START);
+            // Timing pointers
+            ntp_start_time = reinterpret_cast<double*>(shared_memory + NTP_START_TIME_START);
+            drift_offset = reinterpret_cast<std::atomic<int32_t>*>(shared_memory + DRIFT_OFFSET_START);
+            global_offset = reinterpret_cast<std::atomic<int32_t>*>(shared_memory + GLOBAL_OFFSET_START);
+        }
 
         // Initialize timing (NTP_START_TIME is write-once from JavaScript, don't touch it)
         // *ntp_start_time is written by JavaScript after AudioContext starts
@@ -532,18 +544,13 @@ extern "C" {
         g_active_ingress.store(&worklet_ingress, std::memory_order_release);
 #endif
 
-        // Initialize all atomics to 0
-        control->in_head.store(0, std::memory_order_relaxed);
-        control->in_tail.store(0, std::memory_order_relaxed);
-        control->out_head.store(0, std::memory_order_relaxed);
-        control->out_tail.store(0, std::memory_order_relaxed);
-        control->nrt_out_head.store(0, std::memory_order_relaxed);
-        control->nrt_out_tail.store(0, std::memory_order_relaxed);
-        control->in_sequence.store(0, std::memory_order_relaxed);
-        control->out_sequence.store(0, std::memory_order_relaxed);
-        control->nrt_out_sequence.store(0, std::memory_order_relaxed);
+        // Fresh ring epoch. Serialised against the IN / NRT-out producers that
+        // keep running through a cold-swap rebuild (details in
+        // ss_lanes_reset_rings). Note the IN writer lock is NOT re-zeroed: a
+        // producer may hold it right now, and its unlocked state is exactly
+        // the 0 its release store leaves behind.
+        ss_lanes_reset_rings();
         control->status_flags.store(STATUS_OK, std::memory_order_relaxed);
-        control->in_write_lock.store(0, std::memory_order_relaxed);  // 0 = unlocked
 
         // Ring sequences restarted → restart the lanes drains' gap tracking,
         // and the IN drain's alongside. A flush requested against the old
@@ -621,8 +628,11 @@ extern "C" {
                 0, std::memory_order_relaxed);                      // version
         }
 
-        // Enable ss_log
-        memory_initialized = true;
+        // Enable ss_log. Write-once per mapping (like the pointer family
+        // above): on a rebuild this is already true and producers read it
+        // concurrently, so don't store over it.
+        if (!memory_initialized)
+            memory_initialized = true;
 
 #if SUPERSONIC_SHM_AUDIO_SECONDS != 1
         // Test-profile arena: capture rings are oversized, so every offset

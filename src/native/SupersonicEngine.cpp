@@ -1335,6 +1335,18 @@ void SupersonicEngine::shutdown() {
     if (isRecording())
         stopRecording();
 
+    // Stop the NRT gateway before the subsystems its drains call into: the
+    // control drain routes /midi/ /gamepad/ /osc/ commands straight to the
+    // Rust FFI seams, so the reader must be joined before any ss_*_destroy —
+    // an ss_midi_handle_osc still on the gateway thread while ss_midi_destroy
+    // frees the SsMidi it reads is a use-after-free. The gateway also runs
+    // EngineControl, whose scheduleDeviceSwitch assigns mDebounceSwitchThread;
+    // joining that thread below while the gateway could still spawn it is a
+    // data race. stop() bumps + notifies its wake word (processCount) and
+    // joins. Late notifications the subsystems emit after this point sit
+    // undrained in the NRT-out ring — acceptable, the consumer is going away.
+    mNrtGateway.stop();
+
     // Tear down the MIDI subsystem before mEgress/mSuperClock: ss_midi_destroy
     // closes its midir connections (stopping midir's input thread), so no MIDI
     // callback can fire into mEgress/mSuperClock after this returns.
@@ -1364,19 +1376,12 @@ void SupersonicEngine::shutdown() {
     mSuperClock.setNumPeersChangedCallback({});
     mSuperClock.setStartStopChangedCallback({});
 
-    // Stop the NRT gateway first. It runs EngineControl, whose
-    // scheduleDeviceSwitch assigns mDebounceSwitchThread — joining that thread
-    // below while the gateway could still spawn it is a data race, so drain the
-    // gateway to a stop before touching the device-orchestration workers.
-    // stop() bumps + notifies its wake word (processCount) and joins.
-    mNrtGateway.stop();
-
-    // Tear down the OSC cue server (joins its recv thread, closes the socket)
-    // only now the gateway reader is joined: that reader drains inbound commands
-    // through mControlIngress into OscControl::handleOscCommand, which reads mOsc.
-    // Destroying mOsc (ss_osc_destroy → mOsc=nullptr) while the reader still ran
-    // was a data race on mOsc. Still before mEgress, so no inbound cue can fire
-    // into mEgress after this returns.
+    // Tear down the OSC cue server (joins its recv thread, closes the socket).
+    // The gateway reader is already joined above: that reader drains inbound
+    // commands through mControlIngress into OscControl::handleOscCommand, which
+    // reads mOsc — destroying mOsc (ss_osc_destroy → mOsc=nullptr) under a
+    // still-running reader would be a data race. Still before mEgress, so no
+    // inbound cue can fire into mEgress after this returns.
 #ifdef SUPERSONIC_OSC
     mOscControl.shutdown();
 #endif

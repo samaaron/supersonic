@@ -3,53 +3,10 @@
 # Format: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
 # Wired in via TSAN_OPTIONS=suppressions=... in .github/workflows/native.yml.
 #
-# ── Rust standard-library channels ────────────────────────────────────────────
-# The Rust std shipped with the toolchain is precompiled WITHOUT ThreadSanitizer
-# instrumentation, so TSan cannot see the atomic happens-before edges inside
-# std::sync::mpsc (its mpmc backend). It therefore reports false data races on
-# the channel's internal block alloc/free during concurrent send / recv / drop —
-# e.g. the MIDI hot-swap watcher's coalescer channel
-# (rust/supersonic-midi/src/watcher.rs): a sender thread's send() (calloc) versus
-# the receiver-drop's disconnect_receivers() (free) reusing the same heap block.
-# std's channel API is thread-safe by construction, so these are not real races.
-#
-# Scope is deliberately the std channel internals only: a genuine race in our own
-# code keeps a supersonic_midi::watcher frame on top and is still reported.
-race:std::sync::mpmc
-race:std::sync::mpsc
-
-# ── Gamepad C-ABI seam ────────────────────────────────────────────────────────
-# Same uninstrumented-std-channel class as above: ss_gamepad_create/destroy/
-# handle_osc (rust/supersonic-gamepad/src/ffi.rs) send commands over a std mpsc
-# channel to the process-global poll thread, which receives and drops them.
-# TSan flags the cross-thread alloc/free of the command payload as a race.
-# The std::sync::mpsc patterns above cannot match here because the gamepad
-# crate's channel frames are inlined away — the report shows only the seam
-# function on one side and an unsymbolized __rust_begin_short_backtrace thread
-# entry on the other. Scoped to the ss_gamepad_ seam functions so races in the
-# C++ callers (GamepadControl, SupersonicEngine) are still reported.
-race:ss_gamepad_
-
-# ── Uninstrumented Rust thread entry ──────────────────────────────────────────
-# Catch-all for the same channel class when inlining leaves no ss_gamepad_ or
-# mpsc symbol in either stack (e.g. a gamepad command payload malloc'd in the
-# NRT gateway's control-drain lambda, freed by the gilrs poll thread: one side
-# shows only alloc::raw_vec, the other only this thread trampoline).
-# KNOWN BLIND SPOT: also hides reports against C++ code running on a Rust
-# thread (gilrs, midir) — remove this line when debugging Rust↔C++ memory.
-race:__rust_begin_short_backtrace
-
-# ── Stream transport socket fd reuse ──────────────────────────────────────────
-# Same uninstrumented-std class, on a file descriptor rather than a heap block.
-# The stream OSC servers (rust/supersonic-osc-net/src/stream.rs) read on the
-# accepted socket and write replies through a try_clone()'d (dup'd) fd; a reader
-# thread closes its fds on connection teardown and is joined via
-# std::thread::JoinHandle::join(). TSan cannot see join()'s happens-before edge
-# (std is precompiled without instrumentation), so when a closed fd NUMBER is
-# reused as a later connection's writer, it pairs the stale close() with a live
-# write_all_bytes() send() and reports a race a fully instrumented run would not.
-# A live connection's writer fd is never closed under an in-flight send (its
-# writer Arc is still in the registry), so these are fd-number reuse artifacts,
-# not real races. Scoped to the socket write seam so genuine races in the
-# transport's own bookkeeping still surface.
-race:supersonic_osc_net..stream..ConnWriter
+# Currently empty. The sanitize job builds the Rust subsystems with
+# -Zsanitizer=thread and a from-source std (-Zbuild-std), so TSan sees the
+# happens-before edges inside std's channels, joins, and socket teardown.
+# The uninstrumented-std false-positive classes that used to be suppressed
+# here (std::sync::mpmc/mpsc block reuse, the ss_gamepad_ seam, the
+# __rust_begin_short_backtrace catch-all, ConnWriter fd-number reuse) no
+# longer occur — and a suppression on them would now mask real races.

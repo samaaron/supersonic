@@ -680,6 +680,63 @@ if(SUPERSONIC_ENABLE_MIDI OR SUPERSONIC_ENABLE_GAMEPAD OR SUPERSONIC_ENABLE_OSC)
         set(SS_RUST_CARGO_FLAGS --release)
     endif()
 
+    # Under TSan the Rust subsystems are instrumented too, std included
+    # (-Zbuild-std): the toolchain's precompiled std carries no TSan
+    # happens-before instrumentation, so its channel/join internals would
+    # otherwise surface as false races — and real races on Rust threads would
+    # stay invisible. Sanitizer + build-std are unstable, so this needs a
+    # nightly toolchain with rust-src. The process must contain exactly one
+    # TSan runtime: compile the C++ side with clang so the runtime the link
+    # provides is the LLVM one matching rustc's instrumentation (the CI
+    # sanitize job does this; see .github/workflows/native.yml).
+    set(SUPERSONIC_RUST_TSAN_TOOLCHAIN "nightly" CACHE STRING
+        "rustup toolchain for the TSan-instrumented Rust build (needs rust-src)")
+    if(SUPERSONIC_SANITIZER MATCHES "thread")
+        find_program(RUSTUP_EXECUTABLE rustup)
+        if(NOT RUSTUP_EXECUTABLE)
+            message(FATAL_ERROR "SUPERSONIC_SANITIZER=thread builds the Rust "
+                "subsystems with an instrumented std, which needs rustup. "
+                "Install rustup, then: rustup toolchain install "
+                "${SUPERSONIC_RUST_TSAN_TOOLCHAIN} --component rust-src")
+        endif()
+        # Resolve the toolchain's own rustc and pass it as RUSTC: cargo finds
+        # rustc via PATH, where a non-rustup rustc (e.g. homebrew) can shadow
+        # the nightly one and reject the -Z flags.
+        execute_process(
+            COMMAND ${RUSTUP_EXECUTABLE} which rustc
+                    --toolchain ${SUPERSONIC_RUST_TSAN_TOOLCHAIN}
+            OUTPUT_VARIABLE SS_RUST_TSAN_RUSTC OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _SS_RUSTC_RC ERROR_VARIABLE _SS_RUSTC_ERR)
+        if(NOT _SS_RUSTC_RC EQUAL 0)
+            message(FATAL_ERROR "rustup toolchain "
+                "'${SUPERSONIC_RUST_TSAN_TOOLCHAIN}' is unavailable "
+                "(${_SS_RUSTC_ERR}). Install it with: rustup toolchain install "
+                "${SUPERSONIC_RUST_TSAN_TOOLCHAIN} --component rust-src")
+        endif()
+        execute_process(
+            COMMAND ${SS_RUST_TSAN_RUSTC} -vV OUTPUT_VARIABLE _SS_RUSTC_VV)
+        string(REGEX MATCH "host: ([^\n]+)" _ "${_SS_RUSTC_VV}")
+        string(STRIP "${CMAKE_MATCH_1}" SS_RUST_HOST_TRIPLE)
+        execute_process(
+            COMMAND ${RUSTUP_EXECUTABLE} component list
+                    --toolchain ${SUPERSONIC_RUST_TSAN_TOOLCHAIN}
+            OUTPUT_VARIABLE _SS_RUST_COMPONENTS)
+        if(NOT _SS_RUST_COMPONENTS MATCHES "rust-src \\(installed\\)")
+            message(FATAL_ERROR "Toolchain '${SUPERSONIC_RUST_TSAN_TOOLCHAIN}' "
+                "lacks rust-src (required by -Zbuild-std). Add it with: rustup "
+                "component add rust-src --toolchain "
+                "${SUPERSONIC_RUST_TSAN_TOOLCHAIN}")
+        endif()
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            message(WARNING "TSan with instrumented Rust mixes GCC's libtsan "
+                "with rustc's LLVM TSan instrumentation in one process. Use "
+                "clang (CC=clang CXX=clang++) so a single LLVM runtime serves "
+                "both languages.")
+        endif()
+        message(STATUS "Rust TSan build: ${SUPERSONIC_RUST_TSAN_TOOLCHAIN} "
+            "(${SS_RUST_HOST_TRIPLE}), -Zsanitizer=thread -Zbuild-std")
+    endif()
+
     # Map the CMake options onto the umbrella crate's subsystem features.
     set(SS_RUST_FEATURES)
     if(SUPERSONIC_ENABLE_MIDI)
@@ -705,12 +762,29 @@ if(SUPERSONIC_ENABLE_MIDI OR SUPERSONIC_ENABLE_GAMEPAD OR SUPERSONIC_ENABLE_OSC)
 
     # Rust staticlib name is platform-dependent: libsupersonic_native.a on
     # Unix/GNU, supersonic_native.lib on Windows/MSVC. Use CMake's prefix/suffix.
-    set(SS_RUST_LIB ${SS_RUST_DIR}/target/${SS_RUST_PROFILE}/${CMAKE_STATIC_LIBRARY_PREFIX}supersonic_native${CMAKE_STATIC_LIBRARY_SUFFIX})
+    if(SUPERSONIC_SANITIZER MATCHES "thread")
+        # -Zbuild-std requires an explicit --target, which also moves cargo's
+        # output under the triple subdirectory — usefully keeping instrumented
+        # artifacts apart from normal builds' target/<profile> path.
+        set(SS_RUST_LIB ${SS_RUST_DIR}/target/${SS_RUST_HOST_TRIPLE}/${SS_RUST_PROFILE}/${CMAKE_STATIC_LIBRARY_PREFIX}supersonic_native${CMAKE_STATIC_LIBRARY_SUFFIX})
+        set(SS_RUST_BUILD_COMMAND
+            ${CMAKE_COMMAND} -E env
+                RUSTC=${SS_RUST_TSAN_RUSTC}
+                RUSTFLAGS=-Zsanitizer=thread
+            ${RUSTUP_EXECUTABLE} run ${SUPERSONIC_RUST_TSAN_TOOLCHAIN}
+            cargo build ${SS_RUST_CARGO_FLAGS}
+            -Zbuild-std --target ${SS_RUST_HOST_TRIPLE}
+            -p supersonic-native)
+    else()
+        set(SS_RUST_LIB ${SS_RUST_DIR}/target/${SS_RUST_PROFILE}/${CMAKE_STATIC_LIBRARY_PREFIX}supersonic_native${CMAKE_STATIC_LIBRARY_SUFFIX})
+        set(SS_RUST_BUILD_COMMAND
+            ${CARGO_EXECUTABLE} build ${SS_RUST_CARGO_FLAGS} -p supersonic-native)
+    endif()
 
     # cargo tracks incremental freshness itself, so run it every build.
     add_custom_target(supersonic_rust ALL
         BYPRODUCTS ${SS_RUST_LIB}
-        COMMAND ${CARGO_EXECUTABLE} build ${SS_RUST_CARGO_FLAGS} -p supersonic-native
+        COMMAND ${SS_RUST_BUILD_COMMAND}
         WORKING_DIRECTORY ${SS_RUST_DIR}
         COMMENT "Building Rust subsystems (cargo: supersonic-native)"
         VERBATIM)

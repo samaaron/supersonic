@@ -393,8 +393,20 @@ jobs:
         include:
           - sanitizer: address+undefined
             name: asan-ubsan
+            cc: gcc
+            cxx: g++
           - sanitizer: thread
             name: tsan
+            # clang, not gcc: the Rust staticlib is TSan-instrumented (std
+            # included; see the SUPERSONIC_RUST_TSAN_TOOLCHAIN block in
+            # CMakeLists.txt), and the final link must provide the single
+            # LLVM TSan runtime both languages share — gcc would link its
+            # own libtsan port alongside it instead.
+            cc: clang
+            cxx: clang++
+            # Pinned: -Zsanitizer / -Zbuild-std are unstable and occasionally
+            # break across nightlies. Bump deliberately.
+            rust_toolchain: nightly-2026-07-02
 
     runs-on: ubuntu-latest
     name: sanitize-${{ matrix.name }}
@@ -415,12 +427,20 @@ jobs:
             libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
             libxinerama-dev libxcursor-dev libxcomposite-dev
 
+      - name: Install Rust toolchain (TSan-instrumented std)
+        if: matrix.rust_toolchain
+        run: rustup toolchain install ${{ matrix.rust_toolchain }} --profile minimal --component rust-src
+
       - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
         run: |
           cmake -B build/native-sanitize \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DBUILD_TESTS=ON \
-            -DSUPERSONIC_SANITIZER=${{ matrix.sanitizer }}
+            -DSUPERSONIC_SANITIZER=${{ matrix.sanitizer }} \
+            -DSUPERSONIC_RUST_TSAN_TOOLCHAIN=${{ matrix.rust_toolchain || 'nightly' }}
 
       - name: Build tests
         # parallel 2 keeps memory usage in check (instrumented builds are
@@ -434,13 +454,12 @@ jobs:
           # set =0 to collect every report in one run.
           ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_leaks=0:symbolize=1"
           UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1:symbolize=1"
-          # suppressions: Rust code ships without TSan instrumentation, so TSan
-          # reports false races on std channel traffic (MIDI watcher, gamepad
-          # seam). See .github/tsan.suppressions.
+          # suppressions file is currently empty (the Rust build is fully
+          # TSan-instrumented, std included); the wiring stays so a future
+          # suppression only needs an entry in .github/tsan.suppressions.
           TSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:second_deadlock_stack=1:history_size=4:suppressions=${{ github.workspace }}/.github/tsan.suppressions"
           SUPERSONIC_QUIET: "1"   # silence per-boot lifecycle logging in CI
-        # timeout: a sanitizer abort can wedge instead of exiting (seen with
-        # TSan's abort_on_error while an uninstrumented Rust thread is live),
+        # timeout: a sanitizer abort can wedge instead of exiting,
         # which would otherwise sit silently until the 30-minute job timeout.
         # A green suite runs in ~3 minutes; 600s fails fast with the report
         # already flushed. -k covers a process stuck past SIGTERM.
