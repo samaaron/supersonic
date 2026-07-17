@@ -181,6 +181,12 @@ target_include_directories(supersonic_test_shm_peer PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
 )
+# The peer addresses shm regions by compile-time constants, so it must be built
+# with the engine's exact profile or server_shm's layout guard rejects it. Those
+# knobs (SUPERSONIC_SHM_AUDIO_SECONDS, NODE_TREE_MIRROR_MAX_NODES, ...) ride on
+# supersonic_engine as PUBLIC defs, which the peer can't inherit: it is
+# header-only by design and never links the engine. Apply the same list here.
+target_compile_definitions(supersonic_test_shm_peer PRIVATE ${SUPERSONIC_COMPILE_DEFS})
 find_package(Threads REQUIRED)
 target_link_libraries(supersonic_test_shm_peer PRIVATE Threads::Threads)
 if(UNIX AND NOT APPLE)
