@@ -57,6 +57,42 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # Publishing is irreversible, so hold here until every other check run on
+      # this commit is green — the native matrix (tag + main refs) and the web
+      # Build-Test-Deploy all attach to the same SHA. Our own check run is
+      # excluded by its job name. Cancelled or failed runs block the publish;
+      # re-run them to green (or re-push the tag) to release.
+      - name: Wait for all other CI on this commit to be green
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          for attempt in $(seq 1 240); do
+            if ! all=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" --paginate \
+                         --jq '.check_runs[] | select(.name != "publish") | [.status, (.conclusion // "-"), .name] | @tsv'); then
+              echo "check-runs API error; retrying"
+              sleep 30
+              continue
+            fi
+            bad=$(printf '%s\n' "$all" | awk -F'\t' '$1=="completed" && $2!="success" && $2!="neutral" && $2!="skipped"')
+            pending=$(printf '%s\n' "$all" | awk -F'\t' '$1!="completed"')
+            if [ -n "$bad" ]; then
+              echo "Not publishing — non-green check runs on ${GITHUB_SHA}:"
+              printf '%s\n' "$bad"
+              exit 1
+            fi
+            if [ -n "$all" ] && [ -z "$pending" ]; then
+              echo "All other check runs green:"
+              printf '%s\n' "$all"
+              exit 0
+            fi
+            echo "Attempt ${attempt}/240 — still waiting on:"
+            printf '%s\n' "${pending:-<no check runs reported yet>}"
+            sleep 30
+          done
+          echo "Timed out after 2h waiting for CI to complete"
+          exit 1
+
       - name: Generate npm README
         run: cp README.npm.md README.md
 
