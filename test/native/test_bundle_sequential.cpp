@@ -168,30 +168,51 @@ static uint32_t blocksForMs(int ms) {
     return static_cast<uint32_t>(static_cast<int64_t>(ms) * 48000 / 1000 / 128);
 }
 
-// Peak |sample| over a window measured in *rendered blocks*, not wall-clock.
-// Anchoring to processCount makes the captured ramp position deterministic
-// regardless of how slowly the audio thread is scheduled on a loaded runner
-// (a fixed wall sleep would catch the ramp at a different point under load).
+// Config for every test that probes the output bus. capturePeak() reads the
+// shared bus directly, so no audio thread may be writing it while we look:
+// manualAudioPump starts no audio source at all (see
+// SupersonicEngine::startAudioSource), leaving this thread the only caller of
+// process_audio. Reading the bus under the HeadlessDriver is a data race, which
+// is what TSan reports once it can see the C++ side (clang's runtime).
+//
+// It is also strictly more accurate than the processCount anchoring it replaces:
+// pumping renders exactly the blocks we ask for and we inspect every one of
+// them, rather than sampling a live bus every 200us and hoping to catch the
+// interesting block.
+//
+// freewheelClock makes NTP purely sample-derived (TimeSource bypasses its
+// converge-to-wall-clock IIR), so one pumped block advances engine time by
+// exactly one block. Without it, pumping a 1400 ms ramp in a few milliseconds
+// would let the IIR drag engine time back toward the wall clock and future
+// bundles would never come due.
+static SupersonicEngine::Config probeConfig() {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    cfg.freewheelClock  = true;
+    return cfg;
+}
+
+// Peak |sample| over a window measured in rendered blocks. The test thread
+// renders each block and inspects it before rendering the next, so the captured
+// ramp position is exact and nothing races the read.
 static float peakOverBlocks(EngineFixture& fx, uint32_t numBlocks) {
-    auto& pc = fx.engine().audioCallback().processCount;
-    const uint32_t start = pc.load(std::memory_order_acquire);
     float maxPeak = 0.0f;
-    do {
+    for (uint32_t i = 0; i < numBlocks; ++i) {
+        fx.pumpBlock();
         float p = capturePeak();
         if (p > maxPeak) maxPeak = p;
-        std::this_thread::sleep_for(std::chrono::microseconds(200));
-    } while (pc.load(std::memory_order_acquire) - start < numBlocks);
+    }
     return maxPeak;
 }
 
-// Probe the amp ramp at a deterministic early point (~50 ms of sample time in)
-// and a late point (~1450 ms in), both measured in rendered blocks so the
-// captured ramp positions don't drift under CI load. The long late wait gets a
-// generous timeout — it must wait for ~525 real blocks however slowly they tick.
+// Probe the amp ramp at an early point (~50 ms of sample time in) and a late
+// point (~1450 ms in). Both positions are exact: sample time only advances when
+// this thread pumps, so there is no wall-clock wait to drift under CI load and
+// the ~525-block gap costs microseconds rather than 1.4 real seconds.
 static void probeSlide(EngineFixture& fx, float& earlyPeak, float& latePeak) {
-    fx.waitForBlocks(blocksForMs(50));
+    fx.pumpBlock(blocksForMs(50));
     earlyPeak = peakOverBlocks(fx, blocksForMs(150));
-    fx.waitForBlocks(blocksForMs(1400), /*timeoutMs*/ 20000);
+    fx.pumpBlock(blocksForMs(1400));
     latePeak  = peakOverBlocks(fx, blocksForMs(200));
 }
 
@@ -312,7 +333,7 @@ TEST_CASE("Bundle /s_new + /n_setn: range set applies after node is created",
 
 TEST_CASE("Bundle /s_new + /n_set(amp_slide=2): amplitude slides from quiet to loud",
           "[bundle_sequential][slide]") {
-    EngineFixture fx;
+    EngineFixture fx(probeConfig());
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     // dsaw has a Normalizer after the LPF, so `cutoff` is a bad probe for
@@ -340,7 +361,7 @@ TEST_CASE("Bundle /s_new + /n_set(amp_slide=2): amplitude slides from quiet to l
 
 TEST_CASE("Bundle /s_new + /n_set(amp_slide=0): amplitude is immediately loud (no slide)",
           "[bundle_sequential][slide]") {
-    EngineFixture fx;
+    EngineFixture fx(probeConfig());
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     // slide=0 → /n_set takes effect instantly (VarLag counter=1 → one-sample jump).
@@ -349,7 +370,7 @@ TEST_CASE("Bundle /s_new + /n_set(amp_slide=0): amplitude is immediately loud (n
         nSetAmpSlide(2201, 0.0f, 1.0f),
     }));
 
-    fx.waitForBlocks(blocksForMs(50));
+    fx.pumpBlock(blocksForMs(50));
     float earlyPeak = peakOverBlocks(fx, blocksForMs(150));
 
     INFO("earlyPeak=" << earlyPeak);
@@ -360,7 +381,7 @@ TEST_CASE("Bundle /s_new + /n_set(amp_slide=0): amplitude is immediately loud (n
 
 TEST_CASE("/s_new alone (no /n_set): amp=0.02 stays quiet throughout",
           "[bundle_sequential][slide]") {
-    EngineFixture fx;
+    EngineFixture fx(probeConfig());
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     fx.send(sNewDsaw(2202, 1, 50.0f, 0.02f, 120.0f, 6.0f));
@@ -383,7 +404,7 @@ TEST_CASE("/s_new alone (no /n_set): amp=0.02 stays quiet throughout",
 
 TEST_CASE("Non-bundle: /s_new and /n_set as two back-to-back messages",
           "[bundle_sequential][category]") {
-    EngineFixture fx;
+    EngineFixture fx(probeConfig());
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     fx.send(sNewDsaw(2300, 1, 50.0f, 0.02f, 120.0f, 6.0f));
@@ -402,7 +423,7 @@ TEST_CASE("Non-bundle: /s_new and /n_set as two back-to-back messages",
 
 TEST_CASE("Immediate bundle (timetag=0): /s_new + /n_set slides correctly",
           "[bundle_sequential][category]") {
-    EngineFixture fx;
+    EngineFixture fx(probeConfig());
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     sendBundle(fx, bundleOf(0, {  // timetag 0 also means "immediate"
@@ -423,9 +444,7 @@ TEST_CASE("Immediate bundle (timetag=0): /s_new + /n_set slides correctly",
 
 TEST_CASE("Near-future scheduled bundle: /s_new + /n_set slides correctly",
           "[bundle_sequential][category]") {
-    auto cfg = EngineFixture::defaultConfig();
-    cfg.freewheelClock = true;   // deterministic future-bundle dispatch under load
-    EngineFixture fx(cfg);
+    EngineFixture fx(probeConfig());   // freewheel: deterministic future-bundle dispatch
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     // ~50ms in the future — past the bypass-lookahead threshold in practice,
@@ -436,9 +455,9 @@ TEST_CASE("Near-future scheduled bundle: /s_new + /n_set slides correctly",
         nSetAmpSlide(2302, 2.0f, 1.0f),
     }));
 
-    fx.waitForBlocks(blocksForMs(100));   // wait for the future bundle to fire
+    fx.pumpBlock(blocksForMs(100));   // render past the future bundle's timetag
     float earlyPeak = peakOverBlocks(fx, blocksForMs(150));
-    fx.waitForBlocks(blocksForMs(1400), /*timeoutMs*/ 20000);
+    fx.pumpBlock(blocksForMs(1400));
     float latePeak  = peakOverBlocks(fx, blocksForMs(200));
 
     INFO("earlyPeak=" << earlyPeak << " latePeak=" << latePeak);
@@ -451,9 +470,7 @@ TEST_CASE("Near-future scheduled bundle: /s_new + /n_set slides correctly",
 
 TEST_CASE("Two same-timetag bundles (/s_new then /n_set in separate bundles)",
           "[bundle_sequential][category]") {
-    auto cfg = EngineFixture::defaultConfig();
-    cfg.freewheelClock = true;   // deterministic future-bundle dispatch under load
-    EngineFixture fx(cfg);
+    EngineFixture fx(probeConfig());   // freewheel: deterministic future-bundle dispatch
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     // Two bundles targeting the same future timetag. They'll be drained
@@ -465,9 +482,9 @@ TEST_CASE("Two same-timetag bundles (/s_new then /n_set in separate bundles)",
     sendBundle(fx, bundleOf(when, { sNewDsaw(2303, 1, 50.0f, 0.02f, 120.0f, 6.0f) }));
     sendBundle(fx, bundleOf(when, { nSetAmpSlide(2303, 2.0f, 1.0f) }));
 
-    fx.waitForBlocks(blocksForMs(100));   // wait for the future bundles to fire
+    fx.pumpBlock(blocksForMs(100));   // render past the future bundles' timetag
     float earlyPeak = peakOverBlocks(fx, blocksForMs(150));
-    fx.waitForBlocks(blocksForMs(1400), /*timeoutMs*/ 20000);
+    fx.pumpBlock(blocksForMs(1400));
     float latePeak  = peakOverBlocks(fx, blocksForMs(200));
 
     INFO("earlyPeak=" << earlyPeak << " latePeak=" << latePeak);
@@ -480,7 +497,7 @@ TEST_CASE("Two same-timetag bundles (/s_new then /n_set in separate bundles)",
 
 TEST_CASE("Late bundle (modest NTP past): /s_new + /n_set still slides",
           "[bundle_sequential][category]") {
-    EngineFixture fx;
+    EngineFixture fx(probeConfig());
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     // Bundle with a timetag 50ms before "now". scsynth processes late
@@ -512,7 +529,7 @@ TEST_CASE("Late bundle (modest NTP past): /s_new + /n_set still slides",
 
 TEST_CASE("Bundle /s_new + /n_run=0: node is paused immediately (not waiting for first audio block)",
           "[bundle_sequential]") {
-    EngineFixture fx;
+    EngineFixture fx(probeConfig());
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     // With the eager-Ctor fix, /n_run=0 applied in the same bundle as /s_new
@@ -526,14 +543,14 @@ TEST_CASE("Bundle /s_new + /n_run=0: node is paused immediately (not waiting for
         osc_test::message("/n_run", 2400, 0),
     }));
 
-    fx.waitForBlocks(blocksForMs(100));
+    fx.pumpBlock(blocksForMs(100));
     float pausedPeak = peakOverBlocks(fx, blocksForMs(100));
     INFO("pausedPeak=" << pausedPeak);
     CHECK(pausedPeak < 0.02f);             // paused synth = near-silent
 
     // Resume: now audio should flow.
     fx.send(osc_test::message("/n_run", 2400, 1));
-    fx.waitForBlocks(blocksForMs(100));
+    fx.pumpBlock(blocksForMs(100));
     float resumedPeak = peakOverBlocks(fx, blocksForMs(150));
     INFO("resumedPeak=" << resumedPeak);
     CHECK(resumedPeak > 0.05f);
@@ -611,7 +628,7 @@ TEST_CASE("Bundle /g_new + /s_new + /n_set: group-then-synth ordering works",
 
 TEST_CASE("/s_new alone still emits /n_go and produces audio at /s_new-time cutoff",
           "[bundle_sequential][regression]") {
-    EngineFixture fx;
+    EngineFixture fx(probeConfig());
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     fx.send(osc_test::message("/notify", 1));
@@ -623,7 +640,7 @@ TEST_CASE("/s_new alone still emits /n_go and produces audio at /s_new-time cuto
     REQUIRE(fx.waitForReply("/n_go", go));
     CHECK(go.parsed().argInt(0) == 2600);
 
-    fx.waitForBlocks(blocksForMs(100));
+    fx.pumpBlock(blocksForMs(100));
     float peak = peakOverBlocks(fx, blocksForMs(100));
     CHECK(peak > 0.05f);
 
@@ -677,15 +694,16 @@ TEST_CASE("Multiple /s_new in one bundle: both nodes exist and can be controlled
 
 TEST_CASE("/s_new + long sustain: output is finite (no NaN / Inf from eager Ctor)",
           "[bundle_sequential][regression]") {
-    EngineFixture fx;
+    EngineFixture fx(probeConfig());
     REQUIRE(fx.loadSynthDef("sonic-pi-dsaw"));
 
     sendBundle(fx, bundleOf(1, {
         sNewDsaw(2800, 1, 50.0f, 1.0f, 110.0f, 5.0f),
     }));
 
-    // Let audio render some blocks, then scan the whole output buffer for sanity.
-    fx.waitForBlocks(blocksForMs(200));
+    // Render some blocks, then scan the whole output buffer for sanity. This
+    // thread is the only writer, so the scan below cannot race a fill.
+    fx.pumpBlock(blocksForMs(200));
 
     auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
     REQUIRE(bus != nullptr);

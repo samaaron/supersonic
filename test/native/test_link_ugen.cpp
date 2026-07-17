@@ -17,11 +17,35 @@
 
 namespace {
 
+// Config for the probes below. snapshotOutputBus() reads the shared output bus,
+// so no audio thread may be writing it while we look: manualAudioPump starts no
+// audio source (see SupersonicEngine::startAudioSource), leaving the test thread
+// the only caller of process_audio. Under the HeadlessDriver this read raced the
+// driver's clear-then-fill.
+//
+// Deliberately no freewheelClock. Freewheel only makes *NTP* sample-derived,
+// whereas beat phase comes from Ableton Link's own clock
+// (LinkSession::clockMicros -> link.clock().micros()), which is real time and
+// unaffected by either. So pumping decides when we render; only wall time
+// advances the phase, which is why the sleeps below must stay.
+SupersonicEngine::Config linkProbeConfig() {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    return cfg;
+}
+
 bool snapshotOutputBus(uint32_t blockSize, std::vector<float>& out) {
     const auto* outBus = reinterpret_cast<const float*>(get_audio_output_bus());
     if (!outBus) return false;
     out.assign(outBus, outBus + blockSize);
     return true;
+}
+
+// Render one block on this thread, then read it. Rendering and reading are
+// ordered on the same thread, so the snapshot is a whole, untorn block.
+bool pumpAndSnapshot(EngineFixture& fx, uint32_t blockSize, std::vector<float>& out) {
+    fx.pumpBlock();
+    return snapshotOutputBus(blockSize, out);
 }
 
 float peakAbs(const std::vector<float>& samples) {
@@ -56,7 +80,7 @@ bool allAbove(const std::vector<float>& samples, float threshold) {
 // assert on the local default (120 BPM → 2.0 CPS).
 TEST_CASE("LinkUGen: LinkTempo.kr outputs session tempo in CPS",
           "[Link][LinkUGen][integration]") {
-    EngineFixture fx;
+    EngineFixture fx(linkProbeConfig());
     fx.send(osc_test::message("/clock/visibility", int32_t{1}));   // LoopbackOnly
 
     REQUIRE(fx.loadSynthDef("link_tempo_probe"));
@@ -81,7 +105,7 @@ TEST_CASE("LinkUGen: LinkTempo.kr outputs session tempo in CPS",
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (std::chrono::steady_clock::now() < deadline) {
-        REQUIRE(snapshotOutputBus(kBlockSize, bus));
+        REQUIRE(pumpAndSnapshot(fx, kBlockSize, bus));
         observed = mean(bus);
         if (allAbove(bus, 0.0f) && std::fabs(observed - kExpectedCps) < 0.05f) {
             break;
@@ -97,7 +121,7 @@ TEST_CASE("LinkUGen: LinkTempo.kr outputs session tempo in CPS",
 
 TEST_CASE("LinkUGen: LinkPhase.kr outputs phase in [0, quantum)",
           "[Link][LinkUGen][integration]") {
-    EngineFixture fx;
+    EngineFixture fx(linkProbeConfig());
     fx.send(osc_test::message("/clock/visibility", int32_t{1}));   // LoopbackOnly
 
     REQUIRE(fx.loadSynthDef("link_phase_probe"));
@@ -121,7 +145,7 @@ TEST_CASE("LinkUGen: LinkPhase.kr outputs phase in [0, quantum)",
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (std::chrono::steady_clock::now() < deadline) {
-        REQUIRE(snapshotOutputBus(kBlockSize, bus));
+        REQUIRE(pumpAndSnapshot(fx, kBlockSize, bus));
         const float p = peakAbs(bus);
         if (allAbove(bus, -0.5f) && p > 0.001f && p < 4.0f) {
             sawValidPhase = true;
@@ -142,7 +166,7 @@ TEST_CASE("LinkUGen: LinkPhase.kr outputs phase in [0, quantum)",
 // in-band samples is evidence the UGen is re-pinning.
 TEST_CASE("LinkUGen: LinkJump.kr forces beat-at-time on trigger",
           "[Link][LinkUGen][integration]") {
-    EngineFixture fx;
+    EngineFixture fx(linkProbeConfig());
     fx.send(osc_test::message("/clock/visibility", int32_t{1}));   // LoopbackOnly
 
     REQUIRE(fx.loadSynthDef("link_phase_probe"));
@@ -168,7 +192,7 @@ TEST_CASE("LinkUGen: LinkJump.kr forces beat-at-time on trigger",
         std::chrono::steady_clock::now() + std::chrono::seconds(10);
     bool sessionUp = false;
     while (std::chrono::steady_clock::now() < sessionDeadline) {
-        REQUIRE(snapshotOutputBus(kBlockSize, bus));
+        REQUIRE(pumpAndSnapshot(fx, kBlockSize, bus));
         const float p = peakAbs(bus);
         if (allAbove(bus, -0.5f) && p > 0.001f && p < 4.0f) {
             sessionUp = true;
@@ -201,17 +225,17 @@ TEST_CASE("LinkUGen: LinkJump.kr forces beat-at-time on trigger",
     // cycle in [1.8, 2.2]; if the jump is re-pinning every block, the vast
     // majority of samples land in-band, so a >=50% in-band rate cleanly
     // separates the two regimes with headroom for K2A transients across the
-    // jump discontinuity and for CI scheduling jitter. The assertion is on
-    // that window fraction, never a single snapshot: snapshotOutputBus() reads
-    // the bus unsynchronized against the HeadlessDriver's clear-then-fill, so
-    // any isolated block (the trailing one included) can read torn or all-zero.
+    // jump discontinuity and for CI scheduling jitter. The assertion stays on
+    // that window fraction rather than a single snapshot: each block is now read
+    // whole (this thread renders it), but an isolated block can still sit on the
+    // jump discontinuity, and the regimes differ in rate, not in any one sample.
     int totalSamples = 0;
     int inBandSamples = 0;
     float lastMean = 0.0f;
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < deadline) {
-        REQUIRE(snapshotOutputBus(kBlockSize, bus));
+        REQUIRE(pumpAndSnapshot(fx, kBlockSize, bus));
         lastMean = mean(bus);
         ++totalSamples;
         if (std::fabs(lastMean - kJumpTarget) < 0.2f) ++inBandSamples;
