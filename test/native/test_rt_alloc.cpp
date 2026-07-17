@@ -26,6 +26,20 @@
 #include <cstdint>
 #include <new>
 
+// Under ThreadSanitizer the whole file reduces to one explicitly-skipped
+// case — the hooks cannot link there (see RT_ALLOC_HOOKS_UNAVAILABLE in
+// rt_alloc.h), and a skip keeps the suite reporting the coverage gap
+// instead of passing vacuously against hooks that never count.
+#if defined(RT_ALLOC_HOOKS_UNAVAILABLE)
+
+TEST_CASE("rt-alloc: unsupported under ThreadSanitizer", "[rt_alloc]") {
+    SKIP("global operator new/delete replacement conflicts with TSan's "
+         "statically linked runtime; RT-alloc coverage lives in the "
+         "Release matrix");
+}
+
+#else
+
 extern "C" {
     bool process_audio(double current_time, uint32_t active_output_channels,
                        uint32_t active_input_channels);
@@ -315,3 +329,5 @@ TEST_CASE("RT-alloc: synth /n_free inside guarded callback", "[rt_alloc]") {
     CHECK(snap.allocs == 0);
     CHECK(snap.frees == 0);
 }
+
+#endif  // !RT_ALLOC_HOOKS_UNAVAILABLE

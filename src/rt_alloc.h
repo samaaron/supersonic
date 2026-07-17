@@ -18,6 +18,23 @@
 #include <atomic>
 #include <cstdint>
 
+// The counting side of the pair — the test binary's global operator
+// new/delete overrides — cannot exist under ThreadSanitizer: clang links
+// TSan's C++ runtime statically, and it defines the replaceable global
+// allocation functions itself (tsan_new_delete), so a second strong
+// definition is a multiple-definition link error. Tests whose assertions
+// depend on the counters actually counting skip themselves behind this
+// macro; RT-alloc discipline is enforced by the uninstrumented Release
+// matrix on every OS.
+#if defined(__has_feature)
+#  if __has_feature(thread_sanitizer)
+#    define RT_ALLOC_HOOKS_UNAVAILABLE 1
+#  endif
+#endif
+#if !defined(RT_ALLOC_HOOKS_UNAVAILABLE) && defined(__SANITIZE_THREAD__)
+#  define RT_ALLOC_HOOKS_UNAVAILABLE 1
+#endif
+
 namespace rt_alloc {
 
 // Only the test binary reads this flag (via its new/delete overrides), and only

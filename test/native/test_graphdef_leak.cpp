@@ -44,6 +44,10 @@ void pump(int blocks, double& ntp) {
 } // namespace
 
 TEST_CASE("GraphDef: /d_free frees the def (no leak)", "[graphdef_leak]") {
+#if defined(RT_ALLOC_HOOKS_UNAVAILABLE)
+    SKIP("needs the operator new/delete counters from test_rt_alloc.cpp, "
+         "which cannot link under TSan (see rt_alloc.h)");
+#else
     EngineFixture fx;
     auto bytes = readSynthDef("sonic-pi-beep");
     REQUIRE(!bytes.empty());
@@ -67,4 +71,5 @@ TEST_CASE("GraphDef: /d_free frees the def (no leak)", "[graphdef_leak]") {
     INFO("allocs=" << allocs << " frees=" << frees);
     CHECK(allocs > 0);        // the def actually built under the guard
     CHECK(allocs == frees);   // and every build allocation was freed by the destroy
+#endif  // !RT_ALLOC_HOOKS_UNAVAILABLE
 }
