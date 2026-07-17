@@ -55,4 +55,59 @@ LivenessPhase LivenessMonitor::phase(int64_t now) const {
     return LivenessPhase::Confirming;
 }
 
+RateSkewMonitor::RateSkewMonitor(int64_t window, int64_t maxGap,
+                                 double tolerance, int badWindowsRequired)
+    : mWindow(window), mMaxGap(maxGap), mTolerance(tolerance),
+      mBadWindowsRequired(badWindowsRequired) {}
+
+void RateSkewMonitor::reset() {
+    mSeen      = false;
+    mBadStreak = 0;
+}
+
+void RateSkewMonitor::observe(uint64_t frames, double nominalFramesPerUnit,
+                              int64_t now) {
+    // No usable nominal rate (device mid-transition) — nothing measured now
+    // can be trusted later.
+    if (nominalFramesPerUnit <= 0.0) {
+        reset();
+        return;
+    }
+
+    const bool discontinuity = !mSeen
+        || (now - mLastTime) > mMaxGap
+        || frames < mLastFrames
+        || nominalFramesPerUnit != mRate;
+    if (discontinuity) {
+        mSeen        = true;
+        mStartFrames = frames;
+        mStartTime   = now;
+        mRate        = nominalFramesPerUnit;
+        mBadStreak   = 0;
+        mLastFrames  = frames;
+        mLastTime    = now;
+        return;
+    }
+
+    mLastFrames = frames;
+    mLastTime   = now;
+
+    const int64_t span = now - mStartTime;
+    if (span < mWindow) return;
+
+    const double delivered = static_cast<double>(frames - mStartFrames);
+    const double ratio =
+        delivered / (mRate * static_cast<double>(span));
+    mLastRatio = ratio;
+
+    const double deviation = ratio < 1.0 ? 1.0 - ratio : ratio - 1.0;
+    if (deviation > mTolerance) ++mBadStreak;
+    else                        mBadStreak = 0;
+
+    // Next window starts where this one ended — contiguous coverage, no
+    // overlap, so badWindowsRequired windows means that much sustained skew.
+    mStartFrames = frames;
+    mStartTime   = now;
+}
+
 } // namespace sonicpi::audio

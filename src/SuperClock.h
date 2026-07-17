@@ -402,6 +402,11 @@ public:
     // blocks per publishSampleClock call this per block; the sample-clock
     // line is linear, so one anchor per hardware callback suffices.
     void advanceEngineFrames(double samplePosition);
+    // Cumulative rendered engine frames (the advanceEngineFrames counter),
+    // readable from any thread. The watchdog's rate-skew check compares its
+    // advance against a monotonic clock to catch a device whose callbacks
+    // tick at the wrong rate.
+    uint64_t engineFrames() const;
 
 #if SUPERSONIC_WORKLET_CLOCK
     // Worklet builds only: hand the worklet TimeSource its SAB offset pointers

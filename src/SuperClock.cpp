@@ -32,6 +32,10 @@ void SuperClock::advanceEngineFrames(double samplePosition) {
                           std::memory_order_relaxed);
 }
 
+uint64_t SuperClock::engineFrames() const {
+    return g_engine_frames.load(std::memory_order_relaxed);
+}
+
 // Seqlock writer: odd seq, release fence (orders the odd store before the
 // field stores for any reader that sees them), relaxed atomic field stores,
 // even seq with release. Fields are atomics so no read tears; the seq guards

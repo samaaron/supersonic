@@ -1706,6 +1706,23 @@ void SupersonicEngine::watchdogLoop() {
     // must sustain for a stall window to count as live.
     sonicpi::audio::LivenessMonitor liveness(stallMs, stallMs);
 
+    // Rate skew by rendered frames vs a monotonic clock: a device can keep
+    // ticking (Live) while its timer free-runs fast or slow (post-sleep
+    // DirectSound), splitting the audio timebase seconds away from the wall
+    // clock. maxGap of a few polls makes any sampling pause (benign skip, swap,
+    // machine sleep) discard the window instead of reading as skew.
+    const bool rateCheck = mCurrentConfig.watchdogRateWindowMs > 0;
+    sonicpi::audio::RateSkewMonitor rateSkew(
+        mCurrentConfig.watchdogRateWindowMs,
+        /*maxGap*/ std::max<int64_t>(3 * pollMs, 1000),
+        mCurrentConfig.watchdogRateTolerance,
+        std::max(1, mCurrentConfig.watchdogRateBadWindows));
+    // Detection is logged once per skew episode, separately from the recovery
+    // action: requestAudioRecovery can be gated (cooldown / already in flight)
+    // for many polls, and a silent gated detection would leave user logs with
+    // no trace of WHY a later recovery fired.
+    bool rateSkewLogged = false;
+
     auto nowMs = [] {
         return (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -1780,8 +1797,39 @@ void SupersonicEngine::watchdogLoop() {
         }
 
         // Real device source.
-        if (ph != sonicpi::audio::LivenessPhase::Stalled)
+        if (ph != sonicpi::audio::LivenessPhase::Stalled) {
+            // Ticking — but at the right rate? Only judge while Live (a
+            // Confirming run is still settling) and not paused (stopRecording
+            // pauses the callback briefly: ticks continue, frames freeze — a
+            // false skew).
+            if (rateCheck && ph == sonicpi::audio::LivenessPhase::Live
+                && !mAudioCallback.isPaused()) {
+                const int nominal = mAudioCallback.nominalSampleRate();
+                rateSkew.observe(mSuperClock.engineFrames(),
+                                 static_cast<double>(nominal) / 1000.0, t);
+                if (rateSkew.skewed()) {
+                    if (!rateSkewLogged) {
+                        rateSkewLogged = true;
+                        ss_log("[watchdog] rate skew detected: device delivering "
+                               "%.2fx real-time (nominal %d Hz) — clock cannot "
+                               "converge, will recover with a cold swap",
+                               rateSkew.lastRatio(), nominal);
+                    }
+                    std::string reason;
+                    if (requestAudioRecovery(reason)) {
+                        mWatchdogRecoveries.fetch_add(1, std::memory_order_release);
+                        mRateSkewRecoveries.fetch_add(1, std::memory_order_release);
+                        ss_log("[watchdog] rate skew: recovering with a cold swap "
+                               "(%.2fx real-time)", rateSkew.lastRatio());
+                        rateSkew.reset();
+                        rateSkewLogged = false;
+                    }
+                } else {
+                    rateSkewLogged = false;
+                }
+            }
             continue;  // Live (healthy) or Confirming (give the ticks the window)
+        }
 
         // The device stopped delivering. Recover with a cold swap on a fresh
         // connection. requestAudioRecovery is in-flight/cooldown gated, so only

@@ -58,4 +58,55 @@ private:
     bool     mSeen        = false;
 };
 
+// Detects a device whose callbacks keep ticking (LivenessMonitor reads Live)
+// but deliver samples at the wrong rate — the post-sleep DirectSound failure
+// where the emulation timer free-runs fast or slow. The clock IIR
+// (TimeSource::updateAudioThreadNTP) then parks at a permanent equilibrium
+// offset between wall clock and audio timebase (drift where correction rate
+// equals inflow), which no NTP re-anchor can converge; only reopening the
+// device restores the rate.
+//
+// Feed cumulative rendered frames plus a monotonic `now`; every completed
+// window yields a delivered/nominal ratio, and only N CONSECUTIVE
+// out-of-tolerance windows produce a verdict. One window is never enough: a
+// single transient callback stall (the "[gap] audio callback stalled" case)
+// skews that window's ratio and must not trigger a cold swap.
+class RateSkewMonitor {
+public:
+    // window: measurement span per ratio. maxGap: observation gap that marks a
+    // discontinuity (the caller stopped sampling — swap in flight, benign
+    // states, machine asleep). tolerance: fractional deviation from nominal
+    // that makes a window bad. badWindowsRequired: consecutive bad windows
+    // before skewed() reports true. window/maxGap in the same unit as `now`.
+    RateSkewMonitor(int64_t window, int64_t maxGap, double tolerance,
+                    int badWindowsRequired);
+
+    // Feed cumulative rendered frames at time `now`, with the nominal device
+    // rate in frames per time-unit. An observation gap > maxGap, a frames
+    // rollback (device restart resets the counter) or a nominal-rate change
+    // discards the current window AND the bad streak — each marks a
+    // discontinuity the verdict must restart from.
+    void observe(uint64_t frames, double nominalFramesPerUnit, int64_t now);
+
+    bool   skewed()    const { return mBadStreak >= mBadWindowsRequired; }
+    // delivered/nominal of the last completed window (1.0 before the first).
+    double lastRatio() const { return mLastRatio; }
+    void   reset();
+
+private:
+    int64_t mWindow;
+    int64_t mMaxGap;
+    double  mTolerance;
+    int     mBadWindowsRequired;
+
+    bool     mSeen        = false;
+    uint64_t mStartFrames = 0;   // window anchor
+    int64_t  mStartTime   = 0;
+    uint64_t mLastFrames  = 0;   // previous observation (discontinuity checks)
+    int64_t  mLastTime    = 0;
+    double   mRate        = 0.0; // nominal frames-per-unit the window was anchored with
+    int      mBadStreak   = 0;
+    double   mLastRatio   = 1.0;
+};
+
 } // namespace sonicpi::audio

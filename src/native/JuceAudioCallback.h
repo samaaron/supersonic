@@ -76,6 +76,13 @@ public:
     // C++20 atomic wait — equivalent of JS Atomics.wait()/notify()
     std::atomic<uint32_t> processCount{0};
 
+    // Nominal rate of the currently-open device (set in
+    // audioDeviceAboutToStart; 0 before the first device). Atomic because the
+    // watchdog's rate-skew check reads it off the control thread.
+    int nominalSampleRate() const {
+        return mNominalRate.load(std::memory_order_relaxed);
+    }
+
     void audioDeviceAboutToStart(juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
     void audioDeviceIOCallbackWithContext(
@@ -156,6 +163,7 @@ private:
     int   mAccumPerChanCap = 0;
 
     std::atomic<bool> mPaused{false};
+    std::atomic<int>  mNominalRate{0};   // see nominalSampleRate()
 
     // One-shot guard for promoting the audio thread to realtime. Reset in
     // audioDeviceAboutToStart (control thread) so each device (re)start

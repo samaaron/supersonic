@@ -125,6 +125,7 @@ void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
 
 void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
     mSampleRate     = static_cast<int>(device->getCurrentSampleRate());
+    mNominalRate.store(mSampleRate, std::memory_order_relaxed);
     mSamplePosition = 0.0;
     mPrefetchCount  = 0;
     mInputAccumCount = 0;

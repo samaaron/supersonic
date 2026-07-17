@@ -113,6 +113,19 @@ public:
                                                    // the server deaf forever.
         int    watchdogStallMs          = 2500;    // frozen this long => recovery
         int    watchdogPollMs           = 250;     // liveness sampling interval
+        int    watchdogRateWindowMs     = 5000;    // rate-skew: measurement window
+                                                   // (0 disables the rate check).
+                                                   // Catches a device whose
+                                                   // callbacks tick at the wrong
+                                                   // rate (post-sleep DirectSound
+                                                   // timer free-run) — liveness
+                                                   // reads Live but the clock IIR
+                                                   // parks seconds off wall time.
+        double watchdogRateTolerance    = 0.05;    // fractional deviation from the
+                                                   // nominal rate counted as skew
+        int    watchdogRateBadWindows   = 2;       // consecutive bad windows =>
+                                                   // recovery (one window can be
+                                                   // skewed by a transient stall)
         bool   shmCommands              = false;   // drain the SHM segment's peer
                                                    // command plane (shm_peer_plane.h)
                                                    // on the NRT gateway and publish
@@ -359,6 +372,10 @@ public:
     // (restarted the headless driver / requested a device reopen). See
     // Config::callbackWatchdog.
     uint32_t watchdogRecoveryCount() const { return mWatchdogRecoveries.load(); }
+
+    // Subset of the above triggered by the rate-skew check (device ticking at
+    // the wrong rate rather than stalled). See Config::watchdogRateWindowMs.
+    uint32_t rateSkewRecoveryCount() const { return mRateSkewRecoveries.load(); }
 
     // Bounded acquisition of the swap gate: up to `attempts` try_locks,
     // `sleepMs` apart, mirroring executePendingSwitch's retry discipline.
@@ -687,6 +704,7 @@ private:
     std::thread                mWatchdogThread;
     std::atomic<bool>          mWatchdogStop{false};
     std::atomic<uint32_t>      mWatchdogRecoveries{0};
+    std::atomic<uint32_t>      mRateSkewRecoveries{0};
     void watchdogLoop();
 
     HeadlessDriver               mHeadlessDriver;
