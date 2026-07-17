@@ -298,59 +298,67 @@ mod dgram {
             .map(|i| {
                 let server = server.clone();
                 let cpath = dir.join(format!("c{i}.sock"));
-                std::thread::spawn(move || {
+                std::thread::spawn(move || -> i64 {
                     let _ = std::fs::remove_file(&cpath);
                     let sock = UnixDatagram::bind(&cpath).unwrap();
+                    let mut accepted = 0i64;
                     for id in 1..=DGRAM_PER {
                         let pkt = load_msg(id, false);
-                        // Ignore ENOBUFS-style transient send failures: datagram
-                        // backpressure is loss, which the assertions tolerate.
-                        let _ = sock.send_to(&pkt, &server);
+                        // A send the kernel refuses (ENOBUFS-style backpressure)
+                        // was never queued, so it is not the transport's to
+                        // deliver. Count only what was accepted: that is exactly
+                        // what the assertions below hold the transport to.
+                        if sock.send_to(&pkt, &server).is_ok() {
+                            accepted += 1;
+                        }
                         // Light pacing keeps loss modest without serialising.
                         if id % 256 == 0 {
                             std::thread::sleep(Duration::from_micros(50));
                         }
                     }
                     let _ = std::fs::remove_file(&cpath);
+                    accepted
                 })
             })
             .collect();
-        for c in clients {
-            c.join().unwrap();
-        }
+        let accepted: i64 = clients.into_iter().map(|c| c.join().unwrap()).sum();
 
-        // Let the receiver drain the tail, then take a stable snapshot.
-        let sent = DGRAM_CLIENTS as i64 * DGRAM_PER as i64;
+        // Wait for the accepted datagrams to arrive, rather than for the count to
+        // stop moving: a receiver that stalled for longer than one poll interval
+        // used to end the wait early and undercount. Falling out on the deadline
+        // is fine, the assertion below reports the shortfall.
+        let attempted = DGRAM_CLIENTS as i64 * DGRAM_PER as i64;
         let deadline = Instant::now() + Duration::from_secs(10);
-        let mut prev = -1;
-        loop {
-            let now = sink.total();
-            if now == prev || Instant::now() >= deadline {
-                break;
-            }
-            prev = now;
-            std::thread::sleep(Duration::from_millis(50));
+        while sink.total() < accepted && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
         }
 
         let map = sink.by_src.lock().unwrap();
         let delivered: i64 = map.values().map(|t| t.count).sum();
         let disorder: i64 = map.values().map(|t| t.disorder).sum();
         let corrupt: i64 = map.values().map(|t| t.corrupt).sum();
-        // Correctness is strict; delivery is best-effort (datagram contract).
         assert_eq!(corrupt, 0, "dgram: {corrupt} corrupt datagrams");
         assert_eq!(disorder, 0, "dgram: {disorder} out-of-order datagrams");
-        // Datagram loss under a saturating blast is expected and varies with the
-        // runner; the strict signals above (no corruption, no reordering) are what
-        // prove the transport correct. This floor only catches gross breakage — a
-        // transport that drops nearly everything.
-        assert!(
-            delivered > sent / 4,
-            "dgram: only {delivered}/{sent} delivered — gross loss suggests a real fault"
+        // Guards the assertion below. If the kernel accepted nothing there is no
+        // delivery claim left to make, and delivered == accepted would then pass
+        // on a completely dead transport.
+        assert!(accepted > 0, "dgram: kernel accepted no datagrams at all");
+        // How much a saturating blast loses to backpressure is the runner's
+        // business and varies hugely with the platform (Linux makes the sender
+        // wait, macOS refuses the send), so attempted-vs-delivered is not a stable
+        // ratio to assert on. What the transport owes is exact and portable: every
+        // datagram it accepted must arrive, uncorrupted and in order.
+        assert_eq!(
+            delivered, accepted,
+            "dgram: only {delivered}/{accepted} accepted datagrams delivered \
+             ({attempted} attempted) — the transport dropped what it took"
         );
         let secs = t0.elapsed().as_secs_f64();
         eprintln!(
-            "[load] uds-dgram: {delivered}/{sent} delivered ({:.1}% loss) in {secs:.2}s = {:.0} msg/s",
-            100.0 * (sent - delivered) as f64 / sent as f64,
+            "[load] uds-dgram: {delivered}/{accepted} accepted delivered, \
+             {attempted} attempted ({:.1}% refused by backpressure) \
+             in {secs:.2}s = {:.0} msg/s",
+            100.0 * (attempted - accepted) as f64 / attempted as f64,
             delivered as f64 / secs
         );
         drop(map);
