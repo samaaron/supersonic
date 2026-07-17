@@ -106,10 +106,13 @@ scsynth with low latency inside a web page.
 | [`superClock`](#superclock)               | Session-timeline service: tempo, beat origin, transport, NTP "now." See SuperClock for the full API surface. |
 | [`getEngineState()`](#getenginestate)     | Returns the current engine lifecycle state.                                                                  |
 | [`getLoadedBuffers()`](#getloadedbuffers) | Get info about all loaded audio buffers.                                                                     |
+| [`getScope()`](#getscope)                 | Copy the newest frames frames of a ScopeOut2 scope stream.                                                   |
+| [`getScopes()`](#getscopes)               | List the currently active scope slots.                                                                       |
 | [`getSystemReport()`](#getsystemreport)   | Get a comprehensive system performance report.                                                               |
 | [`isRunning()`](#isrunning)               | Returns true if the engine has finished booting and is ready to send and receive messages.                   |
 | [`nextNodeId()`](#nextnodeid)             | Get the next unique node ID.                                                                                 |
 | [`getRawTreeSchema()`](#getrawtreeschema) | Get schema describing the raw flat node tree structure.                                                      |
+| [`getScopeSchema()`](#getscopeschema)     | Scope geometry (compile-time defaults: slot count, per-slot ring frames, channels).                          |
 | [`getTreeSchema()`](#gettreeschema)       | Get schema describing the hierarchical node tree structure.                                                  |
 
 #### Examples
@@ -597,6 +600,46 @@ More efficient than [getTree](#gettree) for serialization or custom rendering.
 ###### Returns
 
 [`RawTree`](#rawtree)
+
+##### getScope()
+
+> **getScope**(`scopeNum`, `frames?`): `object`
+
+Copy the newest `frames` frames of a ScopeOut2 scope stream.
+
+Scope slots are lossless interleaved rings with a monotonic write
+cursor (see docs/scope-streams-sample-clock.md); this returns the
+window ending at the current cursor. Allocates the output per call.
+SAB mode only; returns null when uninitialized, out of range, or the
+slot is inactive.
+
+###### Parameters
+
+| Parameter  | Type     | Description                                         |
+| ---------- | -------- | --------------------------------------------------- |
+| `scopeNum` | `number` | Scope slot index (0 to maxScopes-1; 0 = master mix) |
+| `frames?`  | `number` | Window length in frames (default 1024)              |
+
+###### Returns
+
+`object`
+
+| Name            | Type           |
+| --------------- | -------------- |
+| `channels`      | `number`       |
+| `frames`        | `number`       |
+| `interleaved`   | `Float32Array` |
+| `writePosition` | `bigint`       |
+
+##### getScopes()
+
+> **getScopes**(): `object`\[]
+
+List the currently active scope slots.
+
+###### Returns
+
+`object`\[]
 
 ##### getSnapshot()
 
@@ -2443,6 +2486,23 @@ Get schema describing the raw flat node tree structure.
 ###### Returns
 
 `Record`<`string`, `unknown`>
+
+##### getScopeSchema()
+
+> `static` **getScopeSchema**(): `object`
+
+Scope geometry (compile-time defaults: slot count, per-slot ring
+frames, channels).
+
+###### Returns
+
+`object`
+
+| Name         | Type     |
+| ------------ | -------- |
+| `channels`   | `number` |
+| `maxScopes`  | `number` |
+| `ringFrames` | `number` |
 
 ##### getTreeSchema()
 
