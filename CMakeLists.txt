@@ -65,6 +65,29 @@ if(SUPERSONIC_SANITIZER)
     add_link_options(${_SS_SAN_FLAGS})
 endif()
 
+# ─── Release debug symbols ───────────────────────────────────────────────────
+# Always generate debug symbols for Release binaries so field crash dumps can
+# be symbolicated. Symbols are BUILD-side only — shipped artifacts (MSI,
+# releases, including BETA) must strip or exclude them at package time.
+#
+# MSVC: without a PDB the PE gets no debug directory and a dump cannot be
+# symbolicated at all (worse, dbghelp silently loads any same-named stale PDB,
+# yielding garbage frames). /Z7 (not /Zi) so debug info lives in the objects —
+# no mspdbsrv contention across the FetchContent deps. /OPT:REF,ICF preserves
+# the release-mode dead-stripping /DEBUG would otherwise disable, so codegen
+# stays identical to a PDB-less release. Set before deps so JUCE/codec frames
+# symbolicate too.
+#
+# Clang/GCC: -g leaves codegen untouched. On macOS DWARF stays in the objects
+# (the linked binary does not grow; run dsymutil to collect a .dSYM when one
+# is wanted). On Linux it lands in the binary — package-time strip removes it.
+if(MSVC)
+    add_compile_options("$<$<CONFIG:Release>:/Z7>")
+    add_link_options("$<$<CONFIG:Release>:/DEBUG;/OPT:REF;/OPT:ICF>")
+elseif(NOT EMSCRIPTEN)
+    add_compile_options("$<$<CONFIG:Release>:-g>")
+endif()
+
 # ─── JUCE via FetchContent ────────────────────────────────────────────────────
 include(FetchContent)
 
