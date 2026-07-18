@@ -468,6 +468,12 @@ private:
     // Shared by shutdown() and recreateDeviceManager().
     void teardownDeviceManager();
 
+    // Run fn on the JUCE message thread and wait for it. Returns true when it
+    // ran there (or the caller already is the message thread). If the queue
+    // never drains — embeddings with no pump (NIF/BEAM, Linux standalone) —
+    // falls back to running fn inline after timeoutMs and returns false.
+    bool runOnMessageThread(std::function<void()> fn, int timeoutMs);
+
     // ── Audio source state machine ──────────────────────────────────────────
     //
     // process_audio() runs from exactly one of two drivers:

@@ -4092,14 +4092,87 @@ void SupersonicEngine::teardownDeviceManager() {
     }
 }
 
+bool SupersonicEngine::runOnMessageThread(std::function<void()> fn, int timeoutMs) {
+    auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+    if (mm == nullptr || mm->isThisTheMessageThread()) {
+        fn();
+        return true;
+    }
+
+    // `claimed` decides who runs fn — exactly one of the queued lambda and the
+    // timeout fallback below. shared_ptr keeps the state alive if the queued
+    // lambda fires after this function has already returned.
+    struct Task {
+        std::function<void()> fn;
+        juce::WaitableEvent   done;
+        std::atomic<bool>     claimed{false};
+    };
+    auto task = std::make_shared<Task>();
+    task->fn = std::move(fn);
+    juce::MessageManager::callAsync([task] {
+        if (!task->claimed.exchange(true)) {
+            task->fn();
+            task->done.signal();
+        }
+    });
+    if (task->done.wait(timeoutMs)) return true;
+
+    if (!task->claimed.exchange(true)) {
+        // The queue never ran it — no pump on the message thread. Run inline.
+        task->fn();
+        return false;
+    }
+    // Lost the claim: fn is mid-run on the message thread — wait it out.
+    task->done.wait(-1);
+    return true;
+}
+
 juce::String SupersonicEngine::recreateDeviceManager() {
     // Release the stale, hibernate-killed CoreAudio/HAL client completely, then
     // build a fresh manager. A reopen keeps this same dead connection; only a
     // new manager gets a new IsolatedCoreAudioClient + AudioObjectIDs that
     // coreaudiod will actually drive with a live IO thread. Runs on mReopenThread
     // (the recovery worker — see requestAudioRecovery), holding the swap gate.
+#ifdef _WIN32
+    // The old manager's DeviceChangeDetector hidden windows are owned by the
+    // message thread (created there at boot). DestroyWindow from this worker
+    // fails silently cross-thread, leaving a zombie window whose GWLP_USERDATA
+    // points at the freed detector — the next WM_DEVICECHANGE broadcast
+    // (resume, hot-plug) then use-after-frees in Timer::startTimer. Tear down
+    // AND rebuild on the message thread so window ownership stays with the
+    // pump. Device types are created there too (lazily created on first
+    // touch, they'd otherwise land on this worker, which exits after
+    // recovery — killing hot-plug detection). Deadlock-safe: message-thread
+    // device handlers only try_lock the swap gate we hold. The message-thread
+    // work is fast (close + construct + enumerate); the open that follows
+    // stays on this worker.
+    constexpr int kRecreateOnMessageThreadTimeoutMs = 4000;
+    const bool marshalled = runOnMessageThread([this]() {
+        try {
+            teardownDeviceManager();
+            mDeviceManager = std::make_unique<juce::AudioDeviceManager>();
+            // A fresh manager defaults to WASAPI (JUCE's first type); restore
+            // the boot-time DirectSound choice (see init) so recovery doesn't
+            // silently change driver.
+            for (auto* t : mDeviceManager->getAvailableDeviceTypes()) {
+                if (t->getTypeName() == "DirectSound") {
+                    mDeviceManager->setCurrentAudioDeviceType("DirectSound", true);
+                    break;
+                }
+            }
+        } catch (...) {
+            ss_log("[recover] device manager rebuild threw on message thread");
+        }
+    }, kRecreateOnMessageThreadTimeoutMs);
+    if (!marshalled)
+        ss_log("[recover] message thread unresponsive — device manager rebuilt "
+               "on the recovery worker (hidden-window ownership degraded)");
+    if (!mDeviceManager)
+        return "recreate: device manager rebuild failed";
+#else
     teardownDeviceManager();
     mDeviceManager = std::make_unique<juce::AudioDeviceManager>();
+#endif
 
     // Open the device via the shared system-default reinit: it preserves the
     // session sample rate, drops the now-stale aggregate / real-device names,
