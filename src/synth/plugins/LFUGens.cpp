@@ -2414,6 +2414,15 @@ enum {
 // (sonic-pi#169)
 static inline double sc_signed_sqrt(double x) { return copysign(sqrt(fabs(x)), x); }
 static inline double sc_signed_square(double x) { return x * fabs(x); }
+// Exponential warp endpoints must be non-zero: upstream computes
+// grow = pow(end/start, 1/n) then level *= grow, so a zero-anchored
+// segment sticks at silence and clicks at the boundary. Substitute
+// +/-1e-4 (-80dB, inaudible but gentle enough that the control-rate
+// ramp still lands near the target), borrowing the other endpoint's
+// sign. (sonic-pi#881)
+static inline double sc_exp_safe(double x, double other) {
+    return (x == 0.0) ? ((other < 0.0) ? -1e-4 : 1e-4) : x;
+}
 #endif
 
 
@@ -2522,9 +2531,16 @@ static bool EnvGen_initSegment(EnvGen* unit, int& counter, double& level, double
     case shape_Linear: {
         unit->m_grow = (endLevel - level) / counter_fractional;
     } break;
+#ifdef SUPERSONIC
+    case shape_Exponential: {
+        level = sc_exp_safe(level, endLevel);
+        unit->m_grow = pow(sc_exp_safe(endLevel, level) / level, 1.0 / counter_fractional);
+    } break;
+#else
     case shape_Exponential: {
         unit->m_grow = pow(endLevel / level, 1.0 / counter_fractional);
     } break;
+#endif
     case shape_Sine: {
         double w = pi / counter_fractional;
 
@@ -3083,6 +3099,16 @@ void EnvFill(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) {
                 level += grow;
             }
         } break;
+#ifdef SUPERSONIC
+        case shape_Exponential: {
+            level = sc_exp_safe(level, endLevel);
+            double grow = pow(sc_exp_safe(endLevel, level) / level, 1.0 / nsmps);
+            for (int i = 0; i < nsmps; ++i) {
+                data[index++] = level;
+                level *= grow;
+            }
+        } break;
+#else
         case shape_Exponential: {
             double grow = pow(endLevel / level, 1.0 / nsmps);
             for (int i = 0; i < nsmps; ++i) {
@@ -3090,6 +3116,7 @@ void EnvFill(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) {
                 level *= grow;
             }
         } break;
+#endif
         case shape_Sine: {
             double w = pi / nsmps;
 
@@ -3232,9 +3259,11 @@ void IEnvGen_Dtor(IEnvGen* unit);
     default:                                                                                                           \
         level = unit->m_level = pos * (endLevel - begLevel) + begLevel;                                                \
         break;                                                                                                         \
-    case shape_Exponential:                                                                                            \
-        level = unit->m_level = begLevel * pow(endLevel / begLevel, pos);                                              \
+    case shape_Exponential: {                                                                                          \
+        double expBegLevel = sc_exp_safe(begLevel, endLevel);                                                          \
+        level = unit->m_level = expBegLevel * pow(sc_exp_safe(endLevel, expBegLevel) / expBegLevel, pos);              \
         break;                                                                                                         \
+    }                                                                                                                  \
     case shape_Sine:                                                                                                   \
         level = unit->m_level = begLevel + (endLevel - begLevel) * (-cos(pi * pos) * 0.5 + 0.5);                       \
         break;                                                                                                         \

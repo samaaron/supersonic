@@ -631,6 +631,15 @@ enum {
 // (sonic-pi#169)
 static inline double sc_signed_sqrt(double x) { return copysign(sqrt(fabs(x)), x); }
 static inline double sc_signed_square(double x) { return x * fabs(x); }
+// Exponential warp endpoints must be non-zero: upstream computes
+// grow = pow(end/start, 1/n) then level *= grow, so a zero-anchored
+// segment sticks at silence and clicks at the boundary. Substitute
+// +/-1e-4 (-80dB, inaudible but gentle enough that the control-rate
+// ramp still lands near the target), borrowing the other endpoint's
+// sign. (sonic-pi#881)
+static inline double sc_exp_safe(double x, double other) {
+    return (x == 0.0) ? ((other < 0.0) ? -1e-4 : 1e-4) : x;
+}
 #endif
 
 
@@ -739,9 +748,16 @@ void DemandEnvGen_next_k(DemandEnvGen* unit, int inNumSamples) {
                 case shape_Linear: {
                     unit->m_grow = (endLevel - level) / count;
                 } break;
+#ifdef SUPERSONIC
+                case shape_Exponential: {
+                    level = sc_exp_safe(level, endLevel);
+                    unit->m_grow = pow(sc_exp_safe(endLevel, level) / level, 1.0 / count);
+                } break;
+#else
                 case shape_Exponential: {
                     unit->m_grow = pow(endLevel / level, 1.0 / count);
                 } break;
+#endif
                 case shape_Sine: {
                     double w = pi / count;
 
@@ -1014,9 +1030,16 @@ void DemandEnvGen_next_a(DemandEnvGen* unit, int inNumSamples) {
                 case shape_Linear: {
                     unit->m_grow = (endLevel - level) / count;
                 } break;
+#ifdef SUPERSONIC
+                case shape_Exponential: {
+                    level = sc_exp_safe(level, endLevel);
+                    unit->m_grow = pow(sc_exp_safe(endLevel, level) / level, 1.0 / count);
+                } break;
+#else
                 case shape_Exponential: {
                     unit->m_grow = pow(endLevel / level, 1.0 / count);
                 } break;
+#endif
                 case shape_Sine: {
                     double w = pi / count;
 

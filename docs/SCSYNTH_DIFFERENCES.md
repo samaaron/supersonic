@@ -243,6 +243,21 @@ Guarded by `#ifdef SUPERSONIC` in `LFUGens.cpp` (EnvGen, `GET_ENV_VAL`) and
 `DemandUGens.cpp` (demand-rate envelopes), with upstream code preserved in the
 `#else` branches. Regression spec: `test/envgen_signed_shapes.spec.mjs`.
 
+### Exponential envelope warp with zero endpoints
+
+Upstream's exponential warp (shape 2, `\exp`) computes
+`grow = pow(end/start, 1/n)` then `level *= grow`, so a segment anchored at
+zero sticks at silence for its whole duration and jumps at the boundary — an
+audible click for any amp envelope, since those start and end at 0
+(sonic-pi#881).
+
+SuperSonic substitutes ±1e-4 (-80dB, inaudible) for zero endpoints, borrowing
+the other endpoint's sign, so zero-anchored exponential segments ramp
+smoothly. Envelopes with non-zero endpoints are bit-identical to upstream.
+Sign-crossing exponentials remain undefined, as upstream.
+
+Same guard convention as above. Regression spec: `test/envgen_exp_zero.spec.mjs`.
+
 ---
 
 ## Architectural Differences
