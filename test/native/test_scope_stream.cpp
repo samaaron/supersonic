@@ -13,9 +13,16 @@
 #include "src/synth/common/shm_scope_stream.hpp"
 #include "src/synth/common/server_shm.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <vector>
+
+// MSVC's <cmath> doesn't expose M_PI unless _USE_MATH_DEFINES is set
+// before the include — define it ourselves to keep portability simple.
+#ifndef M_PI
+#  define M_PI 3.14159265358979323846
+#endif
 
 using detail_server_shm::server_shared_memory_client;
 using detail_server_shm::sample_clock_view;
@@ -28,17 +35,48 @@ std::unique_ptr<shm_scope_stream> makeSlot() {
     return slot;
 }
 
-// One stereo block whose samples encode their absolute frame index, so
-// windows read back from any cursor position self-identify.
-void writeIndexedBlock(shm_scope_stream_writer& w, uint64_t engineFrames,
-                       uint32_t n, uint64_t indexBase) {
+// One stereo block whose per-channel samples are generated from their
+// absolute frame index, so windows read back from any cursor position
+// self-identify.
+template <typename GenL, typename GenR>
+void writeGeneratedBlock(shm_scope_stream_writer& w, uint64_t engineFrames,
+                         uint32_t n, uint64_t indexBase, GenL genLeft,
+                         GenR genRight) {
     std::vector<float> left(n), right(n);
     for (uint32_t i = 0; i < n; ++i) {
-        left[i] = static_cast<float>(indexBase + i);
-        right[i] = -static_cast<float>(indexBase + i);
+        const uint64_t idx = indexBase + i;
+        left[i] = genLeft(idx);
+        right[i] = genRight(idx);
     }
     const float* ch[2] = { left.data(), right.data() };
     w.write(ch, n, engineFrames);
+}
+
+void writeIndexedBlock(shm_scope_stream_writer& w, uint64_t engineFrames,
+                       uint32_t n, uint64_t indexBase) {
+    writeGeneratedBlock(
+        w, engineFrames, n, indexBase,
+        [](uint64_t idx) { return static_cast<float>(idx); },
+        [](uint64_t idx) { return -static_cast<float>(idx); });
+}
+
+// Faint per-frame tracer for the triggered-window tests: idx * 2^-16 is
+// exact in float and identifies each frame without disturbing the L+R
+// trigger mix's zero-crossings (max |tracer| in a 1000-frame stream is
+// ~0.015, well under the sine's smallest pre-crossing magnitude ~0.063).
+constexpr float kTracerScale = 1.0f / 65536.0f;
+
+// Left channel: sine with period 100 frames (rising zero-crossing at every
+// multiple of 100). Right channel: index tracer, so triggered windows
+// self-identify their alignment.
+void writeSineIndexedBlock(shm_scope_stream_writer& w, uint64_t engineFrames,
+                           uint32_t n, uint64_t indexBase) {
+    writeGeneratedBlock(
+        w, engineFrames, n, indexBase,
+        [](uint64_t idx) {
+            return static_cast<float>(std::sin((idx % 100) * 2.0 * M_PI / 100.0));
+        },
+        [](uint64_t idx) { return static_cast<float>(idx) * kTracerScale; });
 }
 
 }  // namespace
@@ -202,4 +240,79 @@ TEST_CASE("scope-stream: headless engine publishes an advancing sample clock",
     // visible_frames at the publish instant is close to the published frame.
     const double vis = b.visible_frames(b.dac_ntp);
     CHECK(std::abs(vis - double(b.engine_frames)) < 1.0);
+}
+
+TEST_CASE("scope-stream: copy_triggered_window aligns to a rising zero-crossing",
+          "[scope][stream][trigger]") {
+    auto slot = makeSlot();
+    shm_scope_stream_writer w(slot.get());
+    w.activate(2);
+    shm_scope_stream_reader r(slot.get());
+
+    writeSineIndexedBlock(w, 0, 1000, 0);
+
+    const uint32_t frames = 300, search = 150;
+    std::vector<float> out(frames * SHM_SCOPE_STREAM_CHANNELS);
+    uint32_t ch = 0, trig = 0;
+    const uint32_t real =
+        r.copy_triggered_window(1000, frames, search, out.data(), &ch, &trig);
+
+    REQUIRE(ch == 2);
+    CHECK(real == frames);
+    // Scratch covers frames [550, 1000); the first rising crossing of the
+    // L+R mix in the search region [551, 700] is frame 600, so the window
+    // starts there.
+    CHECK(trig == 50);
+    CHECK(out[1] == 600.0f * kTracerScale);                    // frame 0 tracer
+    CHECK(out[(frames - 1) * 2 + 1] == 899.0f * kTracerScale); // last frame
+}
+
+TEST_CASE("scope-stream: copy_triggered_window without a crossing matches the rolling window",
+          "[scope][stream][trigger]") {
+    auto slot = makeSlot();
+    shm_scope_stream_writer w(slot.get());
+    w.activate(2);
+    shm_scope_stream_reader r(slot.get());
+
+    // All-positive DC left, index tracer right: the L+R mix never goes
+    // negative, so there is no rising zero-crossing anywhere.
+    writeGeneratedBlock(
+        w, 0, 800, 0, [](uint64_t) { return 0.5f; },
+        [](uint64_t idx) { return static_cast<float>(idx); });
+
+    const uint32_t frames = 200, search = 100;
+    std::vector<float> triggered(frames * SHM_SCOPE_STREAM_CHANNELS);
+    std::vector<float> rolling(frames * SHM_SCOPE_STREAM_CHANNELS);
+    uint32_t trig = 999;
+    r.copy_triggered_window(800, frames, search, triggered.data(), nullptr, &trig);
+    r.copy_window(800, frames, rolling.data());
+
+    CHECK(trig == SHM_SCOPE_TRIGGER_NONE);
+    CHECK(std::memcmp(triggered.data(), rolling.data(),
+                      frames * 2 * sizeof(float)) == 0);
+}
+
+TEST_CASE("scope-stream: copy_triggered_window zero-fills like copy_window",
+          "[scope][stream][trigger]") {
+    auto slot = makeSlot();
+    shm_scope_stream_writer w(slot.get());
+    w.activate(2);
+    shm_scope_stream_reader r(slot.get());
+
+    writeSineIndexedBlock(w, 0, 100, 0);   // only 100 real frames
+
+    const uint32_t frames = 300, search = 100;
+    std::vector<float> out(frames * SHM_SCOPE_STREAM_CHANNELS, 42.0f);
+    uint32_t trig = 0;
+    const uint32_t real =
+        r.copy_triggered_window(100, frames, search, out.data(), nullptr, &trig);
+
+    // The whole search region is zero-fill, so no crossing can be found and
+    // exactly the ring's 100 frames land in the emitted window.
+    REQUIRE(real == 100);
+    CHECK(trig == SHM_SCOPE_TRIGGER_NONE);
+    // The 200-frame lead-in must be zeroed, never left holding the caller's
+    // prior buffer contents.
+    CHECK(std::all_of(out.begin(), out.begin() + (frames - real) * 2,
+                      [](float v) { return v == 0.0f; }));
 }

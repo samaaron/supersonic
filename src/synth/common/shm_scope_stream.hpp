@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <vector>
 
 #include "../../memory_profile.h"
 
@@ -39,6 +40,10 @@ inline constexpr uint32_t SHM_SCOPE_STREAM_CHANNELS = 2;  // ScopeOut2 writes st
 // enough. copy_window clamps this to a quarter of small (embedded) rings.
 // js/supersonic.js getScope applies the same formula — keep them in step.
 inline constexpr uint32_t SHM_SCOPE_READ_MARGIN_FRAMES = 2048;
+
+// copy_triggered_window's trigger_offset when no rising crossing was found
+// (distinct from every real offset, including one at the window boundary).
+inline constexpr uint32_t SHM_SCOPE_TRIGGER_NONE = UINT32_MAX;
 
 struct alignas(16) shm_scope_stream {
     // 0 = free, 1 = active. Claim/release is owner-guarded in SC_World.cpp
@@ -232,6 +237,75 @@ public:
         return real;
     }
 
+    // copy_window's sweep-mode sibling: the window is aligned to the first
+    // rising zero-crossing found in the `search` frames that precede the
+    // natural rolling window, so periodic signals render at a stable phase.
+    // The trigger source is the equal-weight mix of the active channels —
+    // the trace a stereo scope draws — so hard-panned material still locks.
+    // No crossing (silence, noise, DC) degrades to exactly the rolling
+    // window. Returns the number of real frames inside the emitted window;
+    // the crossing's offset into the search region is reported via
+    // `trigger_offset` (SHM_SCOPE_TRIGGER_NONE when no crossing was found).
+    //
+    // Display-side helper: allocates scratch for frames + search frames, so
+    // it is not for audio threads. `out` MUST hold
+    // frames * SHM_SCOPE_STREAM_CHANNELS floats, as copy_window.
+    uint32_t copy_triggered_window(uint64_t end_cursor, uint32_t frames,
+                                   uint32_t search, float* out,
+                                   uint32_t* used_channels = nullptr,
+                                   uint32_t* trigger_offset = nullptr) const {
+        // Degenerate requests fall back to the rolling window. The span cap
+        // keeps `frames + search` — and the scratch element count on 32-bit
+        // size_t targets — wrap-free.
+        constexpr uint32_t kMaxSpanFrames = 1u << 29;
+        if (search == 0 || frames == 0 ||
+            frames > kMaxSpanFrames || search > kMaxSpanFrames) {
+            if (trigger_offset) *trigger_offset = SHM_SCOPE_TRIGGER_NONE;
+            return copy_window(end_cursor, frames, out, used_channels);
+        }
+        const uint32_t total = frames + search;
+        std::vector<float> scratch(static_cast<size_t>(total) *
+                                   SHM_SCOPE_STREAM_CHANNELS);
+        uint32_t ch = 0;
+        const uint32_t real = copy_window(end_cursor, total, scratch.data(), &ch);
+        if (used_channels) *used_channels = ch;
+
+        // Crossing detection is scale-invariant, so the plain channel sum
+        // stands in for the mean.
+        const auto mix = [&](uint32_t frame) {
+            const float* s = scratch.data() + static_cast<size_t>(frame) * ch;
+            float sum = 0.0f;
+            for (uint32_t c = 0; c < ch; ++c) sum += s[c];
+            return sum;
+        };
+
+        uint32_t offset = search;  // fallback: the natural rolling window
+        bool found = false;
+        float prev = mix(0);
+        for (uint32_t i = 1; i <= search; i++) {
+            const float cur = mix(i);
+            if (prev < 0.0f && cur >= 0.0f) {
+                offset = i;
+                found = true;
+                break;
+            }
+            prev = cur;
+        }
+        if (trigger_offset)
+            *trigger_offset = found ? offset : SHM_SCOPE_TRIGGER_NONE;
+
+        std::memcpy(out, scratch.data() + static_cast<size_t>(offset) * ch,
+                    static_cast<size_t>(frames) * ch * sizeof(float));
+
+        // Real (non-fill) frames sit at the tail of the scratch window;
+        // report how many of them the emitted [offset, offset + frames)
+        // window actually contains.
+        const uint32_t fillTotal = total - real;
+        const uint32_t end = offset + frames;
+        const uint32_t realInOut = (end > fillTotal) ? (end - fillTotal) : 0;
+        return (realInOut > frames) ? frames : realInOut;
+    }
+
 private:
     shm_scope_stream* _slot = nullptr;
     std::shared_ptr<const void> _keepalive;
@@ -245,6 +319,7 @@ using detail_shm_scope::shm_scope_stream_reader;
 using detail_shm_scope::SHM_SCOPE_STREAM_CHANNELS;
 using detail_shm_scope::SHM_SCOPE_STREAM_HEADER_SIZE;
 using detail_shm_scope::SHM_SCOPE_STREAM_SLOT_SIZE;
+using detail_shm_scope::SHM_SCOPE_TRIGGER_NONE;
 
 // Engine sample position at the start of the block currently being rendered.
 // Advanced by SuperClock::publishSampleClock / advanceEngineFrames; ScopeOut2
