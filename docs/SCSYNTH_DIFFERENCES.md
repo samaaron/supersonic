@@ -224,6 +224,27 @@ SuperSonic supports two communication modes: **postMessage** (default, works eve
 
 ---
 
+## UGen Behaviour Differences
+
+### Signed squared/cubed envelope warps
+
+Upstream scsynth computes the `\sqr` (shape 6) and `\cub` (shape 7) envelope
+warps in root space on the raw levels (`sqrt(level)` / `pow(level, 1/3)`), so
+any segment touching a negative level produces NaN: the envelope sticks, clamps
+to zero, or emits NaN samples. A `pan_slide` from `-1` with
+`pan_slide_shape: 6` never moves (sonic-pi#169).
+
+SuperSonic uses the odd (signed) extensions instead: `copysign(sqrt(|x|), x)`
+with `y * |y|` reconstruction for squared, and `cbrt` for cubed. Non-negative
+envelopes are bit-identical to upstream; negative ranges ramp smoothly with the
+same eased feel mirrored below zero.
+
+Guarded by `#ifdef SUPERSONIC` in `LFUGens.cpp` (EnvGen, `GET_ENV_VAL`) and
+`DemandUGens.cpp` (demand-rate envelopes), with upstream code preserved in the
+`#else` branches. Regression spec: `test/envgen_signed_shapes.spec.mjs`.
+
+---
+
 ## Architectural Differences
 
 ### Threading Model

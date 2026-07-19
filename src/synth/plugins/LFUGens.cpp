@@ -2407,6 +2407,16 @@ enum {
     shape_Sustain = 9999
 };
 
+#ifdef SUPERSONIC
+// Signed forms of the squared/cubed warp roots: upstream takes sqrt/pow
+// of the raw level, so any negative level (e.g. a pan slide from -1)
+// turns the whole segment NaN. Bit-identical for non-negative levels.
+// (sonic-pi#169)
+static inline double sc_signed_sqrt(double x) { return copysign(sqrt(fabs(x)), x); }
+static inline double sc_signed_square(double x) { return x * fabs(x); }
+#endif
+
+
 
 #ifdef NOVA_SIMD
 void EnvGen_next_ak_nova(EnvGen* unit, int inNumSamples);
@@ -2551,6 +2561,18 @@ static bool EnvGen_initSegment(EnvGen* unit, int& counter, double& level, double
             unit->m_grow = exp(curve / counter_fractional);
         }
     } break;
+#ifdef SUPERSONIC
+    case shape_Squared: {
+        unit->m_y1 = sc_signed_sqrt(level);
+        unit->m_y2 = sc_signed_sqrt(endLevel);
+        unit->m_grow = (unit->m_y2 - unit->m_y1) / counter_fractional;
+    } break;
+    case shape_Cubed: {
+        unit->m_y1 = cbrt(level);
+        unit->m_y2 = cbrt(endLevel);
+        unit->m_grow = (unit->m_y2 - unit->m_y1) / counter_fractional;
+    } break;
+#else
     case shape_Squared: {
         unit->m_y1 = sqrt(level);
         unit->m_y2 = sqrt(endLevel);
@@ -2561,6 +2583,7 @@ static bool EnvGen_initSegment(EnvGen* unit, int& counter, double& level, double
         unit->m_y2 = pow(endLevel, 1.0 / 3.0);
         unit->m_grow = (unit->m_y2 - unit->m_y1) / counter_fractional;
     } break;
+#endif
     };
     return true;
 }
@@ -2712,6 +2735,32 @@ static inline void EnvGen_perform(EnvGen* unit, float*& out, double& level, int&
         }
         unit->m_b1 = b1;
     } break;
+#ifdef SUPERSONIC
+    case shape_Squared: {
+        double grow = unit->m_grow;
+        double y1 = unit->m_y1;
+        for (int i = 0; i < nsmps; ++i) {
+            if (!gateCheck(i))
+                break;
+            ZXP(out) = level;
+            y1 += grow;
+            level = sc_signed_square(y1);
+        }
+        unit->m_y1 = y1;
+    } break;
+    case shape_Cubed: {
+        double grow = unit->m_grow;
+        double y1 = unit->m_y1;
+        for (int i = 0; i < nsmps; ++i) {
+            if (!gateCheck(i))
+                break;
+            ZXP(out) = level;
+            y1 += grow;
+            level = y1 * y1 * y1;
+        }
+        unit->m_y1 = y1;
+    } break;
+#else
     case shape_Squared: {
         double grow = unit->m_grow;
         double y1 = unit->m_y1;
@@ -2737,6 +2786,7 @@ static inline void EnvGen_perform(EnvGen* unit, float*& out, double& level, int&
         }
         unit->m_y1 = y1;
     } break;
+#endif
     case shape_Sustain: {
         for (int i = 0; i < nsmps; ++i) {
             if (CheckGateOnSustain) {
@@ -3098,6 +3148,28 @@ void EnvFill(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) {
                 }
             }
         } break;
+#ifdef SUPERSONIC
+        case shape_Squared: {
+            double y1 = sc_signed_sqrt(level);
+            double y2 = sc_signed_sqrt(endLevel);
+            double grow = (y2 - y1) / nsmps;
+            for (int i = 0; i < nsmps; ++i) {
+                data[index++] = level;
+                y1 += grow;
+                level = sc_signed_square(y1);
+            }
+        } break;
+        case shape_Cubed: {
+            double y1 = cbrt(level);
+            double y2 = cbrt(endLevel);
+            double grow = (y2 - y1) / nsmps;
+            for (int i = 0; i < nsmps; ++i) {
+                data[index++] = level;
+                y1 += grow;
+                level = y1 * y1 * y1;
+            }
+        } break;
+#else
         case shape_Squared: {
             double y1 = sqrt(level);
             double y2 = sqrt(endLevel);
@@ -3118,6 +3190,7 @@ void EnvFill(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) {
                 level = y1 * y1 * y1;
             }
         } break;
+#endif
         }
 
         pos += smpdur;
@@ -3145,6 +3218,58 @@ void IEnvGen_Ctor(IEnvGen* unit);
 void IEnvGen_Dtor(IEnvGen* unit);
 }
 
+#ifdef SUPERSONIC
+#define GET_ENV_VAL                                                                                                    \
+    switch (shape) {                                                                                                   \
+    case shape_Step:                                                                                                   \
+        level = unit->m_level = endLevel;                                                                              \
+        break;                                                                                                         \
+    case shape_Hold:                                                                                                   \
+        level = unit->m_level;                                                                                         \
+        unit->m_level = endLevel;                                                                                      \
+        break;                                                                                                         \
+    case shape_Linear:                                                                                                 \
+    default:                                                                                                           \
+        level = unit->m_level = pos * (endLevel - begLevel) + begLevel;                                                \
+        break;                                                                                                         \
+    case shape_Exponential:                                                                                            \
+        level = unit->m_level = begLevel * pow(endLevel / begLevel, pos);                                              \
+        break;                                                                                                         \
+    case shape_Sine:                                                                                                   \
+        level = unit->m_level = begLevel + (endLevel - begLevel) * (-cos(pi * pos) * 0.5 + 0.5);                       \
+        break;                                                                                                         \
+    case shape_Welch: {                                                                                                \
+        if (begLevel < endLevel)                                                                                       \
+            level = unit->m_level = begLevel + (endLevel - begLevel) * sin(pi2 * pos);                                 \
+        else                                                                                                           \
+            level = unit->m_level = endLevel - (endLevel - begLevel) * sin(pi2 - pi2 * pos);                           \
+        break;                                                                                                         \
+    }                                                                                                                  \
+    case shape_Curve:                                                                                                  \
+        if (fabs((float)curve) < 0.0001) {                                                                             \
+            level = unit->m_level = pos * (endLevel - begLevel) + begLevel;                                            \
+        } else {                                                                                                       \
+            double denom = 1. - exp((float)curve);                                                                     \
+            double numer = 1. - exp((float)(pos * curve));                                                             \
+            level = unit->m_level = begLevel + (endLevel - begLevel) * (numer / denom);                                \
+        }                                                                                                              \
+        break;                                                                                                         \
+    case shape_Squared: {                                                                                              \
+        double sqrtBegLevel = sc_signed_sqrt(begLevel);                                                                \
+        double sqrtEndLevel = sc_signed_sqrt(endLevel);                                                                \
+        double sqrtLevel = pos * (sqrtEndLevel - sqrtBegLevel) + sqrtBegLevel;                                         \
+        level = unit->m_level = sc_signed_square(sqrtLevel);                                                           \
+        break;                                                                                                         \
+    }                                                                                                                  \
+    case shape_Cubed: {                                                                                                \
+        double cbrtBegLevel = cbrt(begLevel);                                                                          \
+        double cbrtEndLevel = cbrt(endLevel);                                                                          \
+        double cbrtLevel = pos * (cbrtEndLevel - cbrtBegLevel) + cbrtBegLevel;                                         \
+        level = unit->m_level = cbrtLevel * cbrtLevel * cbrtLevel;                                                     \
+        break;                                                                                                         \
+    }                                                                                                                  \
+    }
+#else
 #define GET_ENV_VAL                                                                                                    \
     switch (shape) {                                                                                                   \
     case shape_Step:                                                                                                   \
@@ -3195,6 +3320,7 @@ void IEnvGen_Dtor(IEnvGen* unit);
         break;                                                                                                         \
     }                                                                                                                  \
     }
+#endif
 
 
 void IEnvGen_Ctor(IEnvGen* unit) {

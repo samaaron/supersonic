@@ -624,6 +624,16 @@ enum {
     shape_Sustain = 9999
 };
 
+#ifdef SUPERSONIC
+// Signed forms of the squared/cubed warp roots: upstream takes sqrt/pow
+// of the raw level, so any negative level (e.g. a pan slide from -1)
+// turns the whole segment NaN. Bit-identical for non-negative levels.
+// (sonic-pi#169)
+static inline double sc_signed_sqrt(double x) { return copysign(sqrt(fabs(x)), x); }
+static inline double sc_signed_square(double x) { return x * fabs(x); }
+#endif
+
+
 
 void DemandEnvGen_next_k(DemandEnvGen* unit, int inNumSamples) {
     float zreset = ZIN0(d_env_reset);
@@ -768,6 +778,18 @@ void DemandEnvGen_next_k(DemandEnvGen* unit, int inNumSamples) {
                         unit->m_grow = exp(curve / ceil(count));
                     }
                 } break;
+#ifdef SUPERSONIC
+                case shape_Squared: {
+                    unit->m_y1 = sc_signed_sqrt(level);
+                    unit->m_y2 = sc_signed_sqrt(endLevel);
+                    unit->m_grow = (unit->m_y2 - unit->m_y1) / count;
+                } break;
+                case shape_Cubed: {
+                    unit->m_y1 = cbrt(level);
+                    unit->m_y2 = cbrt(endLevel);
+                    unit->m_grow = (unit->m_y2 - unit->m_y1) / count;
+                } break;
+#else
                 case shape_Squared: {
                     unit->m_y1 = sqrt(level);
                     unit->m_y2 = sqrt(endLevel);
@@ -778,6 +800,7 @@ void DemandEnvGen_next_k(DemandEnvGen* unit, int inNumSamples) {
                     unit->m_y2 = pow(endLevel, 0.33333333);
                     unit->m_grow = (unit->m_y2 - unit->m_y1) / count;
                 } break;
+#endif
                 }
             }
         }
@@ -828,6 +851,15 @@ void DemandEnvGen_next_k(DemandEnvGen* unit, int inNumSamples) {
                 level = a2 - b1;
                 unit->m_b1 = b1;
             } break;
+#ifdef SUPERSONIC
+            case shape_Squared: {
+                double grow = unit->m_grow;
+                double y1 = unit->m_y1;
+                y1 += grow;
+                level = sc_signed_square(y1);
+                unit->m_y1 = y1;
+            } break;
+#else
             case shape_Squared: {
                 double grow = unit->m_grow;
                 double y1 = unit->m_y1;
@@ -835,6 +867,7 @@ void DemandEnvGen_next_k(DemandEnvGen* unit, int inNumSamples) {
                 level = y1 * y1;
                 unit->m_y1 = y1;
             } break;
+#endif
             case shape_Cubed: {
                 double grow = unit->m_grow;
                 double y1 = unit->m_y1;
@@ -1020,6 +1053,18 @@ void DemandEnvGen_next_a(DemandEnvGen* unit, int inNumSamples) {
                         unit->m_grow = exp(curve / ceil(count));
                     }
                 } break;
+#ifdef SUPERSONIC
+                case shape_Squared: {
+                    unit->m_y1 = sc_signed_sqrt(level);
+                    unit->m_y2 = sc_signed_sqrt(endLevel);
+                    unit->m_grow = (unit->m_y2 - unit->m_y1) / count;
+                } break;
+                case shape_Cubed: {
+                    unit->m_y1 = cbrt(level);
+                    unit->m_y2 = cbrt(endLevel);
+                    unit->m_grow = (unit->m_y2 - unit->m_y1) / count;
+                } break;
+#else
                 case shape_Squared: {
                     unit->m_y1 = sqrt(level);
                     unit->m_y2 = sqrt(endLevel);
@@ -1030,6 +1075,7 @@ void DemandEnvGen_next_a(DemandEnvGen* unit, int inNumSamples) {
                     unit->m_y2 = pow(endLevel, 0.33333333);
                     unit->m_grow = (unit->m_y2 - unit->m_y1) / count;
                 } break;
+#endif
                 }
             }
         }
@@ -1080,6 +1126,15 @@ void DemandEnvGen_next_a(DemandEnvGen* unit, int inNumSamples) {
                 level = a2 - b1;
                 unit->m_b1 = b1;
             } break;
+#ifdef SUPERSONIC
+            case shape_Squared: {
+                double grow = unit->m_grow;
+                double y1 = unit->m_y1;
+                y1 += grow;
+                level = sc_signed_square(y1);
+                unit->m_y1 = y1;
+            } break;
+#else
             case shape_Squared: {
                 double grow = unit->m_grow;
                 double y1 = unit->m_y1;
@@ -1087,6 +1142,7 @@ void DemandEnvGen_next_a(DemandEnvGen* unit, int inNumSamples) {
                 level = y1 * y1;
                 unit->m_y1 = y1;
             } break;
+#endif
             case shape_Cubed: {
                 double grow = unit->m_grow;
                 double y1 = unit->m_y1;

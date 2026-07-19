@@ -1043,6 +1043,8 @@ Current `SUPERSONIC` sites in upstream files:
 - **SC_ReplyImpl.hpp**: `kWeb` protocol enum value
 - **SC_OSC_Commands.h**: `cmd_b_allocPtr` command number
 - **SC_World.cpp**: `supersonic_heap_alloc`/`supersonic_heap_free` for `sc_malloc`/`sc_free` (uses `SUPERSONIC` not `__EMSCRIPTEN__`)
+- **LFUGens.cpp**: signed squared/cubed envelope warps — `sc_signed_sqrt`/`sc_signed_square` helpers, EnvGen segment init/next/fill, duplicated `GET_ENV_VAL` macro (sonic-pi#169)
+- **DemandUGens.cpp**: signed squared/cubed envelope warps — helpers + demand-rate envelope init/next (sonic-pi#169)
 
 ### `#ifndef __EMSCRIPTEN__` — Platform Capability
 
