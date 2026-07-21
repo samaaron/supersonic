@@ -68,12 +68,33 @@ phase_deps() {
         libxinerama-dev libxcursor-dev libxcomposite-dev
 
     # The Rust subsystems (MIDI/gamepad/OSC) are cargo-built staticlibs the
-    # native build links. rustup on an i386 userland resolves the host triple
-    # to i686-unknown-linux-gnu, a tier-1 target.
-    if ! command -v cargo >/dev/null 2>&1 && [ ! -x "${CARGO_HOME:-$HOME/.cargo}/bin/cargo" ]; then
+    # native build links. i686-unknown-linux-gnu is a tier-1 target, but getting
+    # it installed takes saying so: rustup-init infers the host triple from the
+    # KERNEL, which is x86_64 even in a 32-bit userland, so left alone it
+    # installs a 64-bit toolchain whose binaries cannot execute here. That
+    # install "succeeds" (with a quiet "error reading rustc version") and the
+    # failure only surfaces at build time as the shim reporting
+    #   error: command failed: 'cargo': No such file or directory
+    local triple=i686-unknown-linux-gnu
+    setup_paths   # pick up a toolchain from an earlier run of this phase
+
+    if ! cargo --version >/dev/null 2>&1; then
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | sh -s -- -y --default-toolchain stable --profile minimal
+            | sh -s -- -y --profile minimal \
+                --default-host "$triple" --default-toolchain stable
     fi
+    setup_paths
+
+    # State the host and toolchain rather than trusting whatever the installer
+    # settled on: an image carrying a pre-existing ~/.rustup keeps the default
+    # from its own settings.toml and ignores the inferred one entirely.
+    rustup set default-host "$triple"
+    rustup toolchain install "stable-$triple" --profile minimal
+    rustup default "stable-$triple"
+
+    # Fail here, with the toolchain in view, rather than 200 lines into a build.
+    cargo --version
+    rustc --version
 }
 
 phase_configure() {
