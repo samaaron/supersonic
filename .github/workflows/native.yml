@@ -122,6 +122,60 @@ jobs:
           name: ${{ steps.binary.outputs.artifact }}
           path: ${{ steps.binary.outputs.artifact }}
 
+  # ── JUCE native executable, 32-bit x86 ──────────────────────────────────────
+  # i686 is the one desktop target where the engine's lock-free assumptions can
+  # actually break: 8-byte atomics lower to cmpxchg8b and may need libatomic,
+  # where every 64-bit target gets them for free. The bit-packed
+  # atomic<uint64_t> in TimeSource.h / LinkAudioInputRenderer.hpp exists for
+  # exactly this reason; this job is what proves it holds.
+  #
+  # Not folded into the juce matrix above because it can't use a plain runner:
+  # Ubuntu dropped i386 as a full architecture in 19.10, so most of JUCE's -dev
+  # dependencies have no i386 build there. Debian still carries a complete i386
+  # archive, so the build runs in a Debian i386 container on an x86_64 host.
+  # Nothing is emulated — x86_64 runs 32-bit code natively — and the container
+  # can't be a job-level `container:` because the runner injects an x86_64 Node
+  # to execute JS actions, which an i386 rootfs cannot load.
+  juce-x86:
+    runs-on: ubuntu-latest
+    name: native-linux-x86
+    # Slower than the x64 job: no ccache and JUCE compiles twice (binary +
+    # tests). Still well inside this cap.
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # One long-lived container so the apt install is shared while each phase
+      # still gets its own step, making a failure point at the stage that broke.
+      - name: Start 32-bit container
+        run: |
+          docker run -d --name ss32 \
+            --platform linux/386 \
+            -v "${GITHUB_WORKSPACE}:/src" \
+            -w /src \
+            i386/debian:bookworm sleep infinity
+
+      - name: Install dependencies
+        run: docker exec ss32 scripts/ci-linux-x86.sh deps
+
+      - name: Configure
+        run: docker exec ss32 scripts/ci-linux-x86.sh configure
+
+      - name: Build binary + tests
+        run: docker exec ss32 scripts/ci-linux-x86.sh build
+
+      - name: Run tests
+        run: docker exec ss32 scripts/ci-linux-x86.sh test
+
+      - name: Transport harness
+        run: docker exec ss32 scripts/ci-linux-x86.sh transport
+
+      - name: Stop 32-bit container
+        if: ${{ always() }}
+        run: docker rm -f ss32 || true
+
   # ── Freestanding engine (no JUCE, no Emscripten) ────────────────────────────
   # Compiles the shared engine (core + lanes ABI + scsynth + oscpack) against the
   # compile-shim stubs only and drives it purely through ss_init/ss_tick. Checks
@@ -154,6 +208,12 @@ jobs:
           - { os: macos-latest,     name: macos-arm64 }
           - { os: macos-15-intel,   name: macos-x64 }
           - { os: windows-latest,   name: windows-x64 }
+          # 32-bit x86 needs no container, unlike the native-linux-x86 job: the
+          # crate's only dependency is the Rust toolchain, so cross-compiling to
+          # i686 and running the (32-bit) test binaries natively on the x86_64
+          # runner is enough. Worth covering because the transports do pointer-
+          # and usize-width arithmetic when framing messages.
+          - { os: ubuntu-latest,    name: linux-x86, target: i686-unknown-linux-gnu }
           # - { os: windows-arm64,  name: windows-arm64 }
     runs-on: ${{ matrix.os }}
     name: rust-transports-${{ matrix.name }}
@@ -161,9 +221,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+      # gcc-multilib supplies the 32-bit libc and the -m32 linker support cargo
+      # needs to link an i686 target on an x86_64 host.
+      - name: Setup 32-bit target
+        if: matrix.target != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+          rustup target add ${{ matrix.target }}
       - name: Transport load + unit tests (release)
         working-directory: rust
-        run: cargo test --release -p supersonic-osc-net
+        run: cargo test --release -p supersonic-osc-net ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
 
   freestanding:
     runs-on: ubuntu-latest
