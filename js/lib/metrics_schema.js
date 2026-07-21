@@ -154,6 +154,8 @@ export const METRICS_SCHEMA = {
     cpuAvgCenti:  { index: 3, type: 'gauge',   unit: 'centi', description: 'Average DSP load as a share of the audio callback time budget (% * 100)' },
     cpuPeakCenti: { index: 4, type: 'gauge',   unit: 'centi', description: 'Decaying peak DSP load (% * 100). Sustained values near 100% risk audible glitches' },
     cbOverruns:   { index: 5, type: 'counter', unit: 'count', description: 'Audio callbacks that overran their time budget' },
+    nrtMaxPassMs:  { index: 6, type: 'gauge', unit: 'ms', description: 'Longest the control thread has spent handling one batch of commands since boot' },
+    nrtInFlightMs: { index: 7, type: 'gauge', unit: 'ms', description: 'How long the control thread has been stuck in the command it is handling right now. Anything but 0 means later commands, and every reply behind them, are waiting' },
   },
 
   composites: COMPOSITES,

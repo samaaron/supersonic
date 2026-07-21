@@ -118,6 +118,8 @@ inline constexpr NativeStatInfo kNativeStats[] = {
     { 3, "cpuAvgCenti", "centi", "Average DSP load as a share of the audio callback time budget (% * 100)" },
     { 4, "cpuPeakCenti", "centi", "Decaying peak DSP load (% * 100). Sustained values near 100% risk audible glitches" },
     { 5, "cbOverruns", "count", "Audio callbacks that overran their time budget" },
+    { 6, "nrtMaxPassMs", "ms", "Longest the control thread has spent handling one batch of commands since boot" },
+    { 7, "nrtInFlightMs", "ms", "How long the control thread has been stuck in the command it is handling right now. Anything but 0 means later commands, and every reply behind them, are waiting" },
 };
 
 // Rows combining several metrics in one reading ("current | peak", ...).
