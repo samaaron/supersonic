@@ -251,8 +251,12 @@ TEST_CASE("SuperClock: forceBeatAtTime == requestBeatAtTime in session-of-one",
     scB.setBpm(140.0);
     scA.requestBeatAtTime(8.0, 5.0, 4.0);
     scB.forceBeatAtTime(8.0, 5.0, 4.0);
-    CHECK(scA.beatAtTime(7.0, 4.0)  == scB.beatAtTime(7.0, 4.0));
-    CHECK(scA.beatAtTime(10.0, 4.0) == scB.beatAtTime(10.0, 4.0));
+    // Agreement, not bit-identity: the two routes reach the same value by
+    // different arithmetic, and on i686 the x87 FPU holds intermediates at
+    // 80-bit and rounds them per register spill, so they can part company in
+    // the last ULP. Same tolerance as the rest of this file.
+    CHECK(std::abs(scA.beatAtTime(7.0, 4.0)  - scB.beatAtTime(7.0, 4.0))  < 1e-12);
+    CHECK(std::abs(scA.beatAtTime(10.0, 4.0) - scB.beatAtTime(10.0, 4.0)) < 1e-12);
 }
 
 // ── Audio-thread time source ─────────────────────────────────────────────
