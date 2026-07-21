@@ -6,7 +6,9 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -212,6 +214,16 @@ public:
     uint32_t nrtMaxPassMs()  const { return mNrtGateway.maxPassUs()  / 1000; }
     uint32_t nrtInFlightMs() const { return mNrtGateway.inFlightUs() / 1000; }
     void     resetNrtMaxPass()     { mNrtGateway.resetMaxPassUs(); }
+
+    // Run device work off the NRT gateway, in submission order. Enumerating or
+    // reopening devices takes seconds (on Windows listDevices() activates every
+    // device through COM), while the gateway is the sole consumer of control
+    // commands and the sole deliverer of replies — doing it there stalls every
+    // other client, which is what cost sonic-pi#3551 a boot. Named device
+    // switches already run on their own worker; this applies the same
+    // discipline to the paths that didn't. Replies still work from here: the
+    // egress accepts off-thread producers (sendSwitchDone always has).
+    void postDeviceTask(std::function<void()> task);
 
     // Device control surface (called by EngineControl + engine lifecycle).
     // Builds the device/input/info report and pushes it to notify subscribers.
@@ -687,6 +699,16 @@ private:
     std::atomic<bool>          mDebounceSwitchRunning{false};
     std::atomic<bool>          mDebounceSwitchStop{false};
     void executePendingSwitch();
+
+    // Generic device-work queue behind postDeviceTask(). Serialised so two mode
+    // changes can't interleave against the device manager; started on first use
+    // and joined in shutdown() alongside the other device workers.
+    std::thread                        mDeviceTaskThread;
+    std::mutex                         mDeviceTaskMutex;
+    std::condition_variable            mDeviceTaskCv;
+    std::deque<std::function<void()>>  mDeviceTasks;
+    std::atomic<bool>                  mDeviceTaskStop{false};
+    void deviceTaskLoop();
 
     // Device reopen — rejected while one is in flight or within a short cooldown
     // after completion; accepted requests run on mReopenThread.

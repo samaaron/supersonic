@@ -553,18 +553,21 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
                 inputDevName = it->AsStringUnchecked();
             }
 
-            // "__system__" sentinel means "follow system default output"
+            // "__system__" sentinel means "follow system default output".
+            // Off the gateway: the reinit plus its report can take seconds.
             if (devName == "__system__") {
-                auto error = mEngine->setDeviceMode("");
-                char buf[1024];
-                osc::OutboundPacketStream s(buf, sizeof(buf));
-                s << osc::BeginMessage("/supersonic/devices/switch.reply")
-                  << static_cast<osc::int32>(error.empty() ? 1 : 0);
-                if (!error.empty()) s << error.c_str();
-                s << osc::EndMessage;
-                mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
-                          static_cast<uint32_t>(s.Size()));
-                if (error.empty()) mEngine->sendDeviceReport();
+                mEngine->postDeviceTask([this, token] {
+                    auto error = mEngine->setDeviceMode("");
+                    char buf[1024];
+                    osc::OutboundPacketStream s(buf, sizeof(buf));
+                    s << osc::BeginMessage("/supersonic/devices/switch.reply")
+                      << static_cast<osc::int32>(error.empty() ? 1 : 0);
+                    if (!error.empty()) s << error.c_str();
+                    s << osc::EndMessage;
+                    mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
+                              static_cast<uint32_t>(s.Size()));
+                    if (error.empty()) mEngine->sendDeviceReport();
+                });
                 return true;
             }
 
@@ -630,7 +633,8 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
             if (replyPort > 0) {
                 mEgress->subscribeNotifyPort(replyPort);
             }
-            mEngine->sendDeviceReport();
+            // listDevices() is the ~10 s Windows COM probe — never inline here.
+            mEngine->postDeviceTask([this] { mEngine->sendDeviceReport(); });
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/devices/mode") == 0) {
@@ -640,17 +644,20 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
                 mode = it->AsStringUnchecked();
             }
 
-            auto error = mEngine->setDeviceMode(mode);
-            char buf[1024];
-            osc::OutboundPacketStream s(buf, sizeof(buf));
-            s << osc::BeginMessage("/supersonic/devices/mode.reply")
-              << mEngine->deviceMode().c_str()
-              << static_cast<osc::int32>(error.empty() ? 1 : 0);
-            if (!error.empty())
-                s << error.c_str();
-            s << osc::EndMessage;
-            mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
-                      static_cast<uint32_t>(s.Size()));
+            // Off the gateway: setDeviceMode reinitialises the device.
+            mEngine->postDeviceTask([this, token, mode] {
+                auto error = mEngine->setDeviceMode(mode);
+                char buf[1024];
+                osc::OutboundPacketStream s(buf, sizeof(buf));
+                s << osc::BeginMessage("/supersonic/devices/mode.reply")
+                  << mEngine->deviceMode().c_str()
+                  << static_cast<osc::int32>(error.empty() ? 1 : 0);
+                if (!error.empty())
+                    s << error.c_str();
+                s << osc::EndMessage;
+                mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
+                          static_cast<uint32_t>(s.Size()));
+            });
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/drivers/list") == 0) {

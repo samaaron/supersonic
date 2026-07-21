@@ -59,6 +59,25 @@ TEST_CASE("Device report is still delivered when asked for", "[control][3551]") 
     REQUIRE(fix.waitForReply("/supersonic/devices", r, 2000));
 }
 
+// Device commands now run on the device worker rather than the gateway, so the
+// thing to pin is that their replies still arrive — an offloaded command that
+// silently stops answering is a worse bug than the one being fixed.
+TEST_CASE("Offloaded device commands still reply", "[control][3551]") {
+    EngineFixture fix;
+    OscReply r;
+
+    // The report only goes to notify subscribers, so register first — same as
+    // a real client does before asking for device state.
+    fix.send(osc_test::message("/supersonic/notify"));
+    REQUIRE(fix.waitForReply("/supersonic/notify.reply", r));
+
+    fix.send(osc_test::message("/supersonic/devices/mode", "system"));
+    REQUIRE(fix.waitForReply("/supersonic/devices/mode.reply", r, 2000));
+
+    fix.send(osc_test::message("/supersonic/devices/report"));
+    REQUIRE(fix.waitForReply("/supersonic/devices", r, 2000));
+}
+
 // The control thread is the sole non-RT consumer: whatever it does while
 // handling one client's registration is time every other client spends
 // unanswered. Assert on the engine's own measurement rather than a wall-clock

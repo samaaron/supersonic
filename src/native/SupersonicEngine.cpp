@@ -1419,6 +1419,12 @@ void SupersonicEngine::shutdown() {
     mDebounceSwitchStop.store(true);
     if (mDebounceSwitchThread.joinable()) mDebounceSwitchThread.join();
 
+    // Same window as the debounce worker: device tasks touch the device manager
+    // and egress, both torn down below.
+    mDeviceTaskStop.store(true);
+    mDeviceTaskCv.notify_all();
+    if (mDeviceTaskThread.joinable()) mDeviceTaskThread.join();
+
     mHeadlessDriver.signalThreadShouldExit();
     mSampleLoader.signalThreadShouldExit();
 
@@ -1616,6 +1622,36 @@ bool SupersonicEngine::schedFlushSink(void* /*ctx*/, const void* /*callCtx*/,
 }
 
 // --- Device switch / reopen orchestration -------------------------------------
+
+void SupersonicEngine::postDeviceTask(std::function<void()> task) {
+    if (!task) return;
+    {
+        std::lock_guard<std::mutex> lock(mDeviceTaskMutex);
+        if (mDeviceTaskStop.load()) return;   // shutting down: drop rather than queue
+        mDeviceTasks.push_back(std::move(task));
+        if (!mDeviceTaskThread.joinable())
+            mDeviceTaskThread = std::thread(&SupersonicEngine::deviceTaskLoop, this);
+    }
+    mDeviceTaskCv.notify_one();
+}
+
+void SupersonicEngine::deviceTaskLoop() {
+    for (;;) {
+        std::function<void()> task;
+        {
+            std::unique_lock<std::mutex> lock(mDeviceTaskMutex);
+            mDeviceTaskCv.wait(lock, [this] {
+                return mDeviceTaskStop.load() || !mDeviceTasks.empty();
+            });
+            // Drain what is already queued before exiting, so work accepted
+            // just before shutdown still completes (and still replies).
+            if (mDeviceTasks.empty()) return;
+            task = std::move(mDeviceTasks.front());
+            mDeviceTasks.pop_front();
+        }
+        task();
+    }
+}
 
 void SupersonicEngine::scheduleDeviceSwitch(const std::string& devName,
                                             const std::string& inputDevName,
