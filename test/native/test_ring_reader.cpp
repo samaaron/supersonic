@@ -192,3 +192,186 @@ TEST_CASE("RingReader pause from its own thread is a no-op, not a deadlock",
     REQUIRE(selfPaused.load());
     REQUIRE(passes.load(std::memory_order_acquire) >= 2);
 }
+
+// ── Blocking observability (sonic-pi#3551) ───────────────────────────────────
+//
+// One thread drains control commands AND the egress behind them, so a handler
+// that blocks stops the server answering anything while its socket stays up and
+// its audio keeps ticking. That failure produced no log line, no metric and no
+// test signal — the user's only evidence was a 30 s silence.
+//
+// These pin the measurement rather than any particular slow caller: whatever
+// blocks, the gateway must be able to say how long for, and say it WHILE stuck
+// (a high-water mark alone only speaks once the stall is over).
+
+TEST_CASE("RingReader reports how long a blocking handler held the thread",
+          "[RingReader][blocking]") {
+    constexpr uint32_t kSize = 4096;
+    std::vector<uint8_t> buffer(kSize, 0);
+    std::atomic<int32_t> head{0}, tail{0}, sequence{0}, writeLock{0};
+    std::atomic<uint32_t> wake{0};
+    std::atomic<int> gotCount{0};
+
+    RingReader reader("test-ringreader-slow");
+    reader.setWake(&wake);
+    reader.addDrain(
+        buffer.data(), kSize, &head, &tail,
+        [&](uint32_t, const uint8_t*, uint32_t, uint32_t) {
+            std::this_thread::sleep_for(milliseconds(120));
+            gotCount.fetch_add(1, std::memory_order_release);
+        },
+        RingReader::Metrics{});
+    reader.start();
+
+    // Nothing has run yet, so nothing has blocked.
+    REQUIRE(reader.maxPassUs() == 0);
+
+    const std::string payload = "slow";
+    REQUIRE(RingBufferWriter::write(
+        buffer.data(), kSize, &head, &tail, &sequence, &writeLock,
+        payload.data(), static_cast<uint32_t>(payload.size()), 0));
+
+    const auto deadline = steady_clock::now() + seconds(5);
+    while (gotCount.load(std::memory_order_acquire) == 0
+           && steady_clock::now() < deadline) {
+        wake.fetch_add(1, std::memory_order_release);
+        wake.notify_all();
+        std::this_thread::sleep_for(milliseconds(5));
+    }
+    REQUIRE(gotCount.load(std::memory_order_acquire) >= 1);
+
+    // The engine measures itself, so this holds however starved the test
+    // process was — unlike a wall-clock deadline in the test thread.
+    REQUIRE(reader.maxPassUs() >= 100'000);
+
+    reader.resetMaxPassUs();
+    REQUIRE(reader.maxPassUs() == 0);
+}
+
+TEST_CASE("RingReader exposes a stall while it is still stuck",
+          "[RingReader][blocking]") {
+    constexpr uint32_t kSize = 4096;
+    std::vector<uint8_t> buffer(kSize, 0);
+    std::atomic<int32_t> head{0}, tail{0}, sequence{0}, writeLock{0};
+    std::atomic<uint32_t> wake{0};
+    std::atomic<bool> release{false};
+    std::atomic<bool> inHandler{false};
+
+    RingReader reader("test-ringreader-inflight");
+    reader.setWake(&wake);
+    reader.addDrain(
+        buffer.data(), kSize, &head, &tail,
+        [&](uint32_t, const uint8_t*, uint32_t, uint32_t) {
+            inHandler.store(true, std::memory_order_release);
+            while (!release.load(std::memory_order_acquire))
+                std::this_thread::sleep_for(milliseconds(2));
+        },
+        RingReader::Metrics{});
+    reader.start();
+
+    // Idle: not blocked.
+    REQUIRE(reader.inFlightUs() == 0);
+
+    const std::string payload = "wedge";
+    REQUIRE(RingBufferWriter::write(
+        buffer.data(), kSize, &head, &tail, &sequence, &writeLock,
+        payload.data(), static_cast<uint32_t>(payload.size()), 0));
+
+    auto deadline = steady_clock::now() + seconds(5);
+    while (!inHandler.load(std::memory_order_acquire)
+           && steady_clock::now() < deadline) {
+        wake.fetch_add(1, std::memory_order_release);
+        wake.notify_all();
+        std::this_thread::sleep_for(milliseconds(5));
+    }
+    REQUIRE(inHandler.load(std::memory_order_acquire));
+
+    // Wedged right now: this is what a watchdog or the metrics panel reads to
+    // distinguish "server is busy" from "server can never answer you".
+    std::this_thread::sleep_for(milliseconds(60));
+    REQUIRE(reader.inFlightUs() >= 50'000);
+    REQUIRE(reader.maxPassUs() == 0);   // the pass has not ended yet
+
+    release.store(true, std::memory_order_release);
+
+    deadline = steady_clock::now() + seconds(5);
+    while (reader.inFlightUs() != 0 && steady_clock::now() < deadline)
+        std::this_thread::sleep_for(milliseconds(5));
+    REQUIRE(reader.inFlightUs() == 0);       // released
+    REQUIRE(reader.maxPassUs() >= 50'000);   // and recorded on the way out
+}
+
+TEST_CASE("RingReader reports a slow pass to its observer",
+          "[RingReader][blocking]") {
+    constexpr uint32_t kSize = 4096;
+    std::vector<uint8_t> buffer(kSize, 0);
+    std::atomic<int32_t> head{0}, tail{0}, sequence{0}, writeLock{0};
+    std::atomic<uint32_t> wake{0};
+    std::atomic<uint32_t> reportedUs{0};
+    std::atomic<int> reports{0};
+
+    RingReader reader("test-ringreader-report");
+    reader.setWake(&wake);
+    reader.setSlowPassThresholdUs(50'000);
+    reader.onSlowPass([&](uint32_t us) {
+        reportedUs.store(us, std::memory_order_release);
+        reports.fetch_add(1, std::memory_order_release);
+    });
+    reader.addDrain(
+        buffer.data(), kSize, &head, &tail,
+        [&](uint32_t, const uint8_t*, uint32_t, uint32_t) {
+            std::this_thread::sleep_for(milliseconds(80));
+        },
+        RingReader::Metrics{});
+    reader.start();
+
+    const std::string payload = "report";
+    REQUIRE(RingBufferWriter::write(
+        buffer.data(), kSize, &head, &tail, &sequence, &writeLock,
+        payload.data(), static_cast<uint32_t>(payload.size()), 0));
+
+    const auto deadline = steady_clock::now() + seconds(5);
+    while (reports.load(std::memory_order_acquire) == 0
+           && steady_clock::now() < deadline) {
+        wake.fetch_add(1, std::memory_order_release);
+        wake.notify_all();
+        std::this_thread::sleep_for(milliseconds(5));
+    }
+
+    REQUIRE(reports.load(std::memory_order_acquire) >= 1);
+    REQUIRE(reportedUs.load(std::memory_order_acquire) >= 50'000);
+}
+
+TEST_CASE("RingReader stays quiet when passes are quick",
+          "[RingReader][blocking]") {
+    constexpr uint32_t kSize = 4096;
+    std::vector<uint8_t> buffer(kSize, 0);
+    std::atomic<int32_t> head{0}, tail{0}, sequence{0}, writeLock{0};
+    std::atomic<uint32_t> wake{0};
+    std::atomic<int> reports{0};
+    std::atomic<int> gotCount{0};
+
+    RingReader reader("test-ringreader-quiet");
+    reader.setWake(&wake);
+    reader.setSlowPassThresholdUs(250'000);
+    reader.onSlowPass([&](uint32_t) { reports.fetch_add(1, std::memory_order_release); });
+    reader.addDrain(
+        buffer.data(), kSize, &head, &tail,
+        [&](uint32_t, const uint8_t*, uint32_t, uint32_t) {
+            gotCount.fetch_add(1, std::memory_order_release);
+        },
+        RingReader::Metrics{});
+    reader.start();
+
+    for (int i = 0; i < 20; i++) {
+        const std::string payload = "quick";
+        REQUIRE(RingBufferWriter::write(
+            buffer.data(), kSize, &head, &tail, &sequence, &writeLock,
+            payload.data(), static_cast<uint32_t>(payload.size()), 0));
+        wake.fetch_add(1, std::memory_order_release);
+        wake.notify_all();
+        std::this_thread::sleep_for(milliseconds(2));
+    }
+
+    REQUIRE(reports.load(std::memory_order_acquire) == 0);
+}

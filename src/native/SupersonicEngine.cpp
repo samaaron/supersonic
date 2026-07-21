@@ -34,6 +34,10 @@
 #endif
 
 extern "C" {
+    // Publishes NRT control-thread blocking into the native-stats region
+    // (SC_World.cpp). Called from the watchdog poll.
+    void World_PublishNrtBlocking(uint32_t maxPassMs, uint32_t inFlightMs);
+
     // Global used by init_memory() to pass external shared memory to World_New.
     // Declared extern "C" because init_memory() references it from an extern "C" block.
     void* g_external_shared_memory = nullptr;
@@ -1158,9 +1162,23 @@ void SupersonicEngine::init(const Config& cfg) {
         mNrtBuffer, kNrtRingSize, &mNrtHead, &mNrtTail,
         [this](uint32_t token, const uint8_t* d, uint32_t n, uint32_t) {
             DrainCallCtx cc{ token };   // thread the origin to the handler as metadata
+            // Remember the address across the call so a pass that blocks can be
+            // reported by name, not just duration.
+            noteInFlightCommand(d, n);
             mControlIngress.ingest(d, n, &cc);
+            mInFlightCommand[0] = '\0';
         },
         {});
+
+    // Report a control pass that blocked the gateway. Everything queued behind
+    // it — later commands and the egress drains below — waited this long, so a
+    // client's unanswered request is explained here rather than inferred from a
+    // silence in the log.
+    mNrtGateway.onSlowPass([this](uint32_t us) {
+        ss_log("[nrt] control drain blocked %.1fs%s%s\n", us / 1'000'000.0,
+               mInFlightCommand[0] ? " handling " : "",
+               mInFlightCommand[0] ? mInFlightCommand : "");
+    });
 
     // NRT gateway drain #3: the NRT egress lane (NRT-out ring), via the lanes
     // ABI. Off-thread producers (EngineControl replies above, Link/device
@@ -1521,6 +1539,19 @@ void SupersonicEngine::pumpAudioBlock() {
     mAudioCallback.processCount.notify_all();
 }
 
+// Copy the OSC address of the command about to be handled. Bounded copy off the
+// raw packet: an address is NUL-terminated at the head of the message, so no
+// decode is needed on this path.
+void SupersonicEngine::noteInFlightCommand(const uint8_t* data, uint32_t size) {
+    mInFlightCommand[0] = '\0';
+    if (!data || size == 0 || data[0] != '/') return;
+    const uint32_t max = std::min<uint32_t>(size, sizeof(mInFlightCommand) - 1);
+    uint32_t i = 0;
+    for (; i < max && data[i] != '\0'; ++i)
+        mInFlightCommand[i] = static_cast<char>(data[i]);
+    mInFlightCommand[i] = '\0';
+}
+
 void SupersonicEngine::ingest(const uint8_t* data, uint32_t size, uint32_t originToken) {
     // Dumb transport: write the bytes onto the ingress lane (the IN ring) with
     // the opaque origin token in the Message header. The audio thread drains,
@@ -1731,6 +1762,10 @@ void SupersonicEngine::watchdogLoop() {
             std::this_thread::sleep_for(
                 std::chrono::milliseconds(std::min(20, pollMs - slept)));
         if (mWatchdogStop.load()) return;
+
+        // Publish control-thread blocking from here, off the gateway: a gateway
+        // stuck in a handler cannot report its own stall.
+        World_PublishNrtBlocking(nrtMaxPassMs(), nrtInFlightMs());
 
         // Waiting for an audio device (no device open, not a headless / manual-
         // pump build). Keep trying to open one so the engine self-heals the

@@ -483,6 +483,8 @@ struct native_stats {
     uint32_t cpu_load_avg_centi  = 0;  // DSP load, percent * 100 (smoothed average)
     uint32_t cpu_load_peak_centi = 0;  // DSP load, percent * 100 (decaying peak)
     uint32_t callback_overruns   = 0;  // audio callbacks that overran their budget
+    uint32_t nrt_max_pass_ms     = 0;  // longest NRT control-drain pass (high-water)
+    uint32_t nrt_in_flight_ms    = 0;  // NRT control-drain pass blocked right now
 };
 
 // ──── Creator (audio engine side) ───────────────────────────────────────
@@ -639,9 +641,11 @@ public:
                 shm->get_base() + NATIVE_STATS_START + off)
                 ->load(std::memory_order_relaxed);
         };
-        return { field(NATIVE_STAT_SYNTHDEFS),     field(NATIVE_STAT_BUFFERS),
-                 field(NATIVE_STAT_BUFFER_BYTES),  field(NATIVE_STAT_CPU_AVG_CENTI),
-                 field(NATIVE_STAT_CPU_PEAK_CENTI), field(NATIVE_STAT_CB_OVERRUNS) };
+        return { field(NATIVE_STAT_SYNTHDEFS),      field(NATIVE_STAT_BUFFERS),
+                 field(NATIVE_STAT_BUFFER_BYTES),   field(NATIVE_STAT_CPU_AVG_CENTI),
+                 field(NATIVE_STAT_CPU_PEAK_CENTI), field(NATIVE_STAT_CB_OVERRUNS),
+                 field(NATIVE_STAT_NRT_MAX_PASS_MS),
+                 field(NATIVE_STAT_NRT_IN_FLIGHT_MS) };
     }
     // Native segments always carry the stats region; a web-origin arena has no
     // shm client at all. Kept for observer-API symmetry.

@@ -149,7 +149,7 @@ static_assert((SHM_SCOPE_START + SHM_SCOPE_HEADER_SIZE) % 16 == 0,
 // native-only observability that has no WASM counterpart (DSP load, JUCE audio
 // callback overruns), which keeps PerformanceMetrics a clean cross-platform
 // surface rather than a pile of fields that are 0 on half the runtimes.
-constexpr uint32_t NATIVE_STATS_SIZE  = 32;  // u32 x8 (see field offsets below; last two reserved)
+constexpr uint32_t NATIVE_STATS_SIZE  = 32;  // u32 x8 (see field offsets below)
 constexpr uint32_t NATIVE_STATS_START = SHM_SCOPE_START + SHM_SCOPE_TOTAL_SIZE;
 // Field byte offsets within the native-stats region.
 constexpr uint32_t NATIVE_STAT_SYNTHDEFS      = 0;
@@ -158,6 +158,14 @@ constexpr uint32_t NATIVE_STAT_BUFFER_BYTES   = 8;
 constexpr uint32_t NATIVE_STAT_CPU_AVG_CENTI  = 12;  // DSP load, percent * 100 (smoothed average)
 constexpr uint32_t NATIVE_STAT_CPU_PEAK_CENTI = 16;  // DSP load, percent * 100 (decaying peak)
 constexpr uint32_t NATIVE_STAT_CB_OVERRUNS    = 20;  // audio callbacks that overran their time budget
+// NRT control-thread blocking. That thread is the sole non-RT consumer, so a
+// handler which blocks stalls every control command and reply queued behind it
+// while the socket stays up and the audio keeps ticking (sonic-pi#3551).
+// MAX is the high-water mark; IN_FLIGHT is non-zero only while a pass is
+// running long right now — a stall in progress, which a high-water mark cannot
+// show until it ends.
+constexpr uint32_t NATIVE_STAT_NRT_MAX_PASS_MS  = 24;
+constexpr uint32_t NATIVE_STAT_NRT_IN_FLIGHT_MS = 28;
 
 // SuperClock's sample clock — the engine's sample position anchored to
 // wall-clock DAC time. One anchor plus the rate defines the whole line

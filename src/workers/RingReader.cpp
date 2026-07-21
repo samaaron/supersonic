@@ -122,6 +122,32 @@ void RingReader::run() {
             continue;
         }
 
+        // Time the whole pass rather than each drain: what matters is how long
+        // this thread was unavailable to everything queued behind it.
+        const uint64_t startUs = nowUs();
+        mPassStartUs.store(startUs, std::memory_order_relaxed);
+
         for (auto& d : mDrains) drainOne(d);
+
+        const uint64_t elapsed = nowUs() - startUs;
+        mPassStartUs.store(0, std::memory_order_relaxed);
+        const uint32_t us = static_cast<uint32_t>(
+            elapsed > UINT32_MAX ? UINT32_MAX : elapsed);
+        if (us > mMaxPassUs.load(std::memory_order_relaxed))
+            mMaxPassUs.store(us, std::memory_order_relaxed);
+        if (us >= mSlowPassThresholdUs && mOnSlowPass) mOnSlowPass(us);
     }
+}
+
+uint64_t RingReader::nowUs() {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+uint32_t RingReader::inFlightUs() const {
+    const uint64_t start = mPassStartUs.load(std::memory_order_relaxed);
+    if (start == 0) return 0;
+    const uint64_t elapsed = nowUs() - start;
+    return static_cast<uint32_t>(elapsed > UINT32_MAX ? UINT32_MAX : elapsed);
 }

@@ -1337,6 +1337,20 @@ extern "C" void World_UpdateNativeStats(World* inWorld) {
         ->store(static_cast<uint32_t>(bufBytes), std::memory_order_relaxed);
 }
 
+// Publish NRT control-thread blocking into the native-stats region. Written by
+// a thread that is NOT the gateway (the watchdog), so a gateway stuck inside a
+// handler still gets its in-flight duration reported — a blocked thread cannot
+// publish its own stall, which is exactly the state worth seeing.
+extern "C" void World_PublishNrtBlocking(uint32_t maxPassMs, uint32_t inFlightMs) {
+    uint8_t* base = reinterpret_cast<uint8_t*>(get_shared_memory_base());
+    if (!base) return;
+    uint8_t* ns = base + NATIVE_STATS_START;
+    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_NRT_MAX_PASS_MS)
+        ->store(maxPassMs, std::memory_order_relaxed);
+    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_NRT_IN_FLIGHT_MS)
+        ->store(inFlightMs, std::memory_order_relaxed);
+}
+
 // Publish the audio-thread DSP load + overrun count into the same native-stats
 // region. Split from World_UpdateNativeStats because the source (audio callback
 // timing) lives in the platform driver, not the World. Native-only; relaxed

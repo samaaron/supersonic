@@ -205,6 +205,14 @@ public:
     // enqueue/tick, so the slot pool stays single-threaded and lock-free.
     static bool schedFlushSink(void* ctx, const void* callCtx, const uint8_t* data, std::size_t len);
 
+    // NRT control-thread blocking, milliseconds. maxPass is the high-water mark
+    // since boot (or the last reset); inFlight is non-zero only while a pass is
+    // running long right now. Tests assert on these directly rather than on
+    // wall-clock deadlines, which a loaded CI runner cannot honour.
+    uint32_t nrtMaxPassMs()  const { return mNrtGateway.maxPassUs()  / 1000; }
+    uint32_t nrtInFlightMs() const { return mNrtGateway.inFlightUs() / 1000; }
+    void     resetNrtMaxPass()     { mNrtGateway.resetMaxPassUs(); }
+
     // Device control surface (called by EngineControl + engine lifecycle).
     // Builds the device/input/info report and pushes it to notify subscribers.
     void sendDeviceReport();
@@ -602,6 +610,10 @@ private:
     OscEgress         mEgress;
     OscIngress        mIngress;        // ingress dispatcher (audio thread)
     OscIngress        mControlIngress; // control dispatcher (NRT thread): subsystem commands by address
+    // OSC address currently being handled on the NRT gateway, for the slow-pass
+    // report. Written and read on that thread only; empty between commands.
+    char              mInFlightCommand[64] = {0};
+    void              noteInFlightCommand(const uint8_t* data, uint32_t size);
     EngineControl     mEngineControl;
 #ifdef SUPERSONIC_MIDI
     MidiControl       mMidiControl;
