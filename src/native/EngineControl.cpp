@@ -451,7 +451,12 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
 
         if (std::strcmp(addr, "/supersonic/notify") == 0) {
             // Register the caller as a notify target for lifecycle events.
-            const bool firstRegistration = mEgress->subscribeCaller(token);
+            // Registration is device-free by design: enumerating devices here
+            // put a Windows COM probe of every device (pathological with
+            // virtual drivers like Voicemeeter installed) directly in the path
+            // of spider's boot handshake — sonic-pi#3551. Clients that want the
+            // device list ask for it with /supersonic/devices/report.
+            mEgress->subscribeCaller(token);
             char buf[128];
             osc::OutboundPacketStream s(buf, sizeof(buf));
             s << osc::BeginMessage("/supersonic/notify.reply")
@@ -460,28 +465,6 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
               << osc::EndMessage;
             mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
-
-            // Send current device state ONLY for newly registered clients.
-            // Re-registrations from existing clients (e.g. spider's boot
-            // retry loop firing 20 notifies before its first ack arrives)
-            // would otherwise each trigger a fresh listDevices() — and on
-            // Windows that probes every WASAPI device via createDevice +
-            // initialise (full COM activation per device), taking ~10 s
-            // per call and starving the OSC thread for new packets.
-            if (firstRegistration) {
-#ifdef _WIN32
-                // On Windows the first listDevices() activates every WASAPI
-                // device via COM (~10 s total). Running it inline here would
-                // block this OSC drain thread for that whole time, stalling
-                // every packet spider sends right after the boot handshake.
-                // Hand it to a background worker so the drain continues
-                // immediately; the device report reaches subscribers when the
-                // probe finishes (macOS/Linux stay synchronous — cheap there).
-                mEngine->sendDeviceReportAsync();
-#else
-                mEngine->sendDeviceReport();
-#endif
-            }
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/notify/unregister") == 0) {
