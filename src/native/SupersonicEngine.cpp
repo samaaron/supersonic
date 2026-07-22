@@ -3247,16 +3247,28 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     result.deviceName = deviceName;
     bool recovered = false;
 
-    // No-op detection: destroying and recreating an identical aggregate is
-    // fragile — CoreAudio sometimes stops the new instance within a
-    // callback or two. If the caller asked for exactly what we already
-    // have, short-circuit.
-    if (!deviceName.empty() && inputDeviceName.empty() && sampleRate <= 0 && bufferSize <= 0 && !forceCold) {
+    // No-op detection: destroying and recreating an identical device is
+    // fragile — CoreAudio sometimes stops a recreated aggregate within a
+    // callback or two, and on Linux the ALSA close+reopen races PipeWire's
+    // client-side node setup and can SIGSEGV inside libspa-audioconvert
+    // (sonic-pi#3550; the GUI's boot-time saved-prefs restore sends exactly
+    // such a same-device switch). If the caller asked for exactly what we
+    // already have, short-circuit. A requested input counts as satisfied
+    // only when it names the input that is currently open — enabling a
+    // closed input is a real change and must reopen.
+    if (!deviceName.empty() && sampleRate <= 0 && bufferSize <= 0 && !forceCold) {
         std::string activeReal = mRealOutputDeviceName.empty()
             ? (mDeviceManager && mDeviceManager->getCurrentAudioDevice()
                ? mDeviceManager->getCurrentAudioDevice()->getName().toStdString() : "")
             : mRealOutputDeviceName;
-        if (activeReal == deviceName) {
+        bool inputSatisfied = inputDeviceName.empty();
+        if (!inputSatisfied) {
+            auto cur = currentDevice();
+            inputSatisfied = cur.activeInputChannels > 0
+                          && !cur.inputDeviceName.empty()
+                          && cur.inputDeviceName == inputDeviceName;
+        }
+        if (activeReal == deviceName && inputSatisfied) {
             result.success = true;
             result.type = SwapType::Hot;
             result.deviceName = deviceName;
