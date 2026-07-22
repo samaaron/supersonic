@@ -86,6 +86,34 @@ tar -C "$WORK" -cJf "$WORK/supersonic_$UV.orig-link.tar.xz" link
 # ── Rust vendor component ───────────────────────────────────────────────────
 echo "=== orig-rust-vendor tarball ==="
 (cd rust && cargo vendor "$WORK/rust-vendor")
+
+# Newer cargo writes a Cargo.toml.orig for crates whose manifest it rewrites
+# (workspace-dep flattening) and lists it in .cargo-checksum.json. dpkg-source's
+# default tar-ignore drops *.orig as patch backups, so cargo then aborts the
+# offline build on a checksummed-but-missing file. Delete those .orig files and
+# strip their checksum entries so the vendor tree survives the dpkg-source
+# round-trip untouched.
+python3 - "$WORK/rust-vendor" <<'PY'
+import json, os, sys
+root = sys.argv[1]
+for crate in sorted(os.listdir(root)):
+    cksum = os.path.join(root, crate, ".cargo-checksum.json")
+    if not os.path.isfile(cksum):
+        continue
+    with open(cksum) as f:
+        data = json.load(f)
+    files = data.get("files", {})
+    removed = [k for k in files if k.endswith(".orig")]
+    for k in removed:
+        del files[k]
+        p = os.path.join(root, crate, k)
+        if os.path.exists(p):
+            os.remove(p)
+    if removed:
+        with open(cksum, "w") as f:
+            json.dump(data, f, separators=(",", ":"))
+        print(f"  sanitised {crate}: dropped {', '.join(removed)}")
+PY
 tar -C "$WORK" -cJf "$WORK/supersonic_$UV.orig-rust-vendor.tar.xz" rust-vendor
 
 # ── Assemble the source tree ────────────────────────────────────────────────
