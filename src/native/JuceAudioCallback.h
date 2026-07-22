@@ -144,6 +144,11 @@ private:
     // Input bus width the World was built with (immutable). mNumInputChannels
     // tracks the live device and can exceed it; the input-feed loop clamps to this.
     int        mWorldInputBusChannels = 0;
+    // Output bus width the World was built with (immutable). mNumOutputChannels
+    // tracks the live device and can exceed it after a hot swap to a wider
+    // device; the render loop clamps to this so channels the World never
+    // renders emit silence instead of stale bus contents.
+    int        mWorldOutputBusChannels = 0;
     double     mSamplePosition     = 0.0;   // cumulative samples (increments by mBufLen)
     int        mOutputLatencySamples = 0;   // device DSP→DAC latency, captured at start
 
@@ -170,6 +175,12 @@ private:
     // re-promotes the possibly-new audio thread; acted on in the first
     // audioDeviceIOCallbackWithContext, which runs on the audio thread itself.
     std::atomic<bool> mRealtimeElevated{false};
+
+    // One-shot per device start (same reset pattern as mRealtimeElevated):
+    // logs the moment the device's IO thread first reaches our callback.
+    // Boot-diagnostic: a process death between "audio callback attached"
+    // and this line means the driver/HAL never delivered a callback.
+    std::atomic<bool> mFirstCallbackLogged{false};
 
     // Audio thread timing stats (accessed only from audio thread, no atomics needed)
     uint32_t mCallbackCount = 0;

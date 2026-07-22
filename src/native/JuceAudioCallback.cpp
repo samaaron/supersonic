@@ -79,7 +79,8 @@ void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
     mSampleRate        = sampleRate;
     mNumOutputChannels = numOutputChannels;
     mNumInputChannels  = numInputChannels;
-    mWorldInputBusChannels = numInputChannels;  // immutable World input-bus width
+    mWorldInputBusChannels  = numInputChannels;   // immutable World input-bus width
+    mWorldOutputBusChannels = numOutputChannels;  // immutable World output-bus width
 
     // Choose the scsynth block size. bufLen == 0 means "use platform
     // default" (always 128 on web due to AudioWorklet; starting value on
@@ -136,6 +137,7 @@ void JuceAudioCallback::audioDeviceAboutToStart(juce::AudioIODevice* device) {
     // re-arm realtime promotion; the first IO callback below performs it on the
     // audio thread itself (this function runs on the control thread).
     mRealtimeElevated.store(false, std::memory_order_relaxed);
+    mFirstCallbackLogged.store(false, std::memory_order_relaxed);
 
     // Sync our internal channel counts from what the device actually opened.
     // mNumInput/OutputChannels are what we tell scsynth (via process_audio's
@@ -275,6 +277,16 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     int numSamples,
     const juce::AudioIODeviceCallbackContext& context)
 {
+    // One-shot per device start, straight to stderr: proves the device's IO
+    // thread actually reached us. Deliberately the first statement — if the
+    // process dies anywhere in this callback, the log still shows entry.
+    // Warmup-phase only, so the fprintf never lands on a steady-state block.
+    if (!mFirstCallbackLogged.exchange(true, std::memory_order_relaxed)) {
+        fprintf(stderr, "[juce] first audio callback: numSamples=%d out=%d in=%d\n",
+                numSamples, numOutputChannels, numInputChannels);
+        fflush(stderr);
+    }
+
     // Promote the audio thread to realtime once per device start. Done here
     // rather than in audioDeviceAboutToStart (control thread) because this
     // callback runs on the audio thread. A denied request (no rtprio
@@ -309,7 +321,12 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     }
 
     int nIn  = juce::jmin(numInputChannels,  mNumInputChannels);
-    int nOut = juce::jmin(numOutputChannels, mNumOutputChannels);
+    // Clamp to the World's output bus width as well as the live device count:
+    // after a hot swap onto a wider device mNumOutputChannels exceeds what the
+    // World renders, and the copy loops below would read bus rows the engine
+    // never writes (mirrors the mWorldInputBusChannels clamp on the input side).
+    int nOut = juce::jmin(numOutputChannels,
+                          juce::jmin(mNumOutputChannels, mWorldOutputBusChannels));
 
     // hostTimeNs is the framework's "this buffer plays at T" timestamp
     // (CoreAudio supplies it on macOS). When absent — JUCE's Windows backends,

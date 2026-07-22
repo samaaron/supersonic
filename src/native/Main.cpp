@@ -44,28 +44,109 @@ static void signalHandler(int sig) {
     gShutdownRequested.store(true);
 }
 
-static void crashHandler(int sig) {
+#ifndef _WIN32
+// Async-signal-safe stderr writers. fprintf inside a signal handler can
+// take a stdio lock the crashed thread already holds, or allocate — either
+// turns a diagnosable fault into a silent death or a hang. write(2) is on
+// the async-signal-safe list.
+static void crashWrite(const char* s) {
+    size_t n = 0;
+    while (s[n]) ++n;
+    ssize_t r = write(STDERR_FILENO, s, n);
+    (void)r;
+}
+
+static void crashWriteUnsigned(uintptr_t v, int base) {
+    char buf[2 + sizeof(v) * 2 + 1];
+    char* end = buf + sizeof(buf);
+    char* p   = end;
+    *--p = '\0';
+    do {
+        *--p = "0123456789abcdef"[v % static_cast<uintptr_t>(base)];
+        v /= static_cast<uintptr_t>(base);
+    } while (v != 0);
+    if (base == 16) { *--p = 'x'; *--p = '0'; }
+    crashWrite(p);
+}
+
+static void crashHandler(int sig, siginfo_t* info, void*) {
     const char* name = "UNKNOWN";
-    if (sig == SIGSEGV) name = "SIGSEGV";
-#ifndef _WIN32
-    else if (sig == SIGBUS)  name = "SIGBUS";
-#endif
-    else if (sig == SIGABRT) name = "SIGABRT";
-    else if (sig == SIGFPE)  name = "SIGFPE";
+    switch (sig) {
+        case SIGSEGV: name = "SIGSEGV"; break;
+        case SIGBUS:  name = "SIGBUS";  break;
+        case SIGABRT: name = "SIGABRT"; break;
+        case SIGFPE:  name = "SIGFPE";  break;
+        case SIGILL:  name = "SIGILL";  break;
+        case SIGTRAP: name = "SIGTRAP"; break;
+    }
 
-    fprintf(stderr, "\n[supersonic] FATAL: %s (signal %d)\n", name, sig);
+    crashWrite("\n[supersonic] FATAL: ");
+    crashWrite(name);
+    crashWrite(" (signal ");
+    crashWriteUnsigned(static_cast<uintptr_t>(sig), 10);
+    crashWrite(") fault addr=");
+    crashWriteUnsigned(info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0, 16);
+    crashWrite("\n[supersonic] Backtrace:\n");
 
-#ifndef _WIN32
+    // backtrace_symbols_fd writes straight to the fd (no malloc). Not
+    // formally async-signal-safe, but the essential FATAL line is already
+    // out above; from here everything is best-effort bonus detail.
     void* frames[64];
     int n = backtrace(frames, 64);
-    fprintf(stderr, "[supersonic] Backtrace (%d frames):\n", n);
     backtrace_symbols_fd(frames, n, STDERR_FILENO);
-#endif
 
+    crashWrite("[supersonic] Exiting due to crash.\n");
+    _exit(128 + sig);
+}
+
+static void installCrashHandlers() {
+    // Dedicated signal stack: a stack-overflow SIGSEGV is delivered on the
+    // stack that just overflowed, so without an alternate stack the handler
+    // faults before its first instruction and the process dies with no
+    // output at all — exactly the silent-death signature seen in the wild
+    // (boot crash on a virtual audio device with nothing after the last
+    // ordinary log line). SIGSTKSZ stopped being a constant expression in
+    // glibc 2.34, so use a generous fixed block.
+    static char altStack[64 * 1024];
+    stack_t ss = {};
+    ss.ss_sp    = altStack;
+    ss.ss_size  = sizeof(altStack);
+    ss.ss_flags = 0;
+    sigaltstack(&ss, nullptr);
+
+    struct sigaction sa = {};
+    sa.sa_sigaction = crashHandler;
+    // SA_RESETHAND: a second fault inside the handler takes the default
+    // action (die) instead of looping. SIGILL and SIGTRAP are included
+    // because arm64 aborts frequently surface as brk/udf instructions
+    // (os_unfair_lock corruption, __builtin_trap, Rust aborts) — both were
+    // previously unhandled and died silently.
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+    for (int sig : { SIGSEGV, SIGBUS, SIGABRT, SIGFPE, SIGILL, SIGTRAP })
+        sigaction(sig, &sa, nullptr);
+}
+#else
+static void crashHandler(int sig) {
+    const char* name = "UNKNOWN";
+    if      (sig == SIGSEGV) name = "SIGSEGV";
+    else if (sig == SIGABRT) name = "SIGABRT";
+    else if (sig == SIGFPE)  name = "SIGFPE";
+    else if (sig == SIGILL)  name = "SIGILL";
+
+    fprintf(stderr, "\n[supersonic] FATAL: %s (signal %d)\n", name, sig);
     fprintf(stderr, "[supersonic] Exiting due to crash.\n");
     fflush(stderr);
     _exit(128 + sig);
 }
+
+static void installCrashHandlers() {
+    std::signal(SIGSEGV, crashHandler);
+    std::signal(SIGABRT, crashHandler);
+    std::signal(SIGFPE,  crashHandler);
+    std::signal(SIGILL,  crashHandler);
+}
+#endif
 
 // Helper: get next arg value or nullptr
 static const char* nextArg(int i, int argc, char* argv[]) {
@@ -401,12 +482,7 @@ int main(int argc, char* argv[]) {
 
     std::signal(SIGINT,  signalHandler);
     std::signal(SIGTERM, signalHandler);
-    std::signal(SIGSEGV, crashHandler);
-#ifndef _WIN32
-    std::signal(SIGBUS,  crashHandler);
-#endif
-    std::signal(SIGABRT, crashHandler);
-    std::signal(SIGFPE,  crashHandler);
+    installCrashHandlers();
 
     // At most one command transport may replace the UDP command port.
     const int altTransports = (tcpPort > 0 ? 1 : 0) + (udsStreamPath.empty() ? 0 : 1)

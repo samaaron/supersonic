@@ -3006,7 +3006,21 @@ void SupersonicEngine::startAudioSource() {
 
     const AudioSource desired = desiredAudioSource();
     if (desired == AudioSource::RealCallback) {
+        // Bracket the attach with always-on log lines: a silent process
+        // death in this window (seen in the wild on a virtual 8-out device)
+        // is only localisable if the log shows exactly how far we got —
+        // nothing after "attaching" = died inside the driver's start path;
+        // "attached" but no "[juce] first audio callback" = died before the
+        // device's IO thread reached our callback.
+        {
+            auto* dev = mDeviceManager->getCurrentAudioDevice();
+            fprintf(stderr, "[supersonic] attaching audio callback to device '%s'\n",
+                    dev ? dev->getName().toRawUTF8() : "(none)");
+            fflush(stderr);
+        }
         mDeviceManager->addAudioCallback(&mAudioCallback);
+        fprintf(stderr, "[supersonic] audio callback attached — waiting for first tick\n");
+        fflush(stderr);
         // addChangeListener is idempotent (JUCE's ListenerList dedupes), so
         // re-attaching across hot-plug / swap sequences is harmless.
         mDeviceManager->addChangeListener(this);
