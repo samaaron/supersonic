@@ -87,15 +87,36 @@ tar -C "$WORK" -cJf "$WORK/supersonic_$UV.orig-link.tar.xz" link
 echo "=== orig-rust-vendor tarball ==="
 (cd rust && cargo vendor "$WORK/rust-vendor")
 
-# Newer cargo writes a Cargo.toml.orig for crates whose manifest it rewrites
-# (workspace-dep flattening) and lists it in .cargo-checksum.json. dpkg-source's
-# default tar-ignore drops *.orig as patch backups, so cargo then aborts the
-# offline build on a checksummed-but-missing file. Delete those .orig files and
-# strip their checksum entries so the vendor tree survives the dpkg-source
-# round-trip untouched.
+# Sanitise the vendor tree so it survives Debian's source-package machinery and
+# lintian. For each affected crate we delete the offending files AND strip their
+# entries from .cargo-checksum.json, so cargo (which only checks listed files,
+# and only for crates it actually builds) stays consistent. Two classes:
+#
+#   *.orig — newer cargo writes Cargo.toml.orig for crates whose manifest it
+#     rewrites; dpkg-source's default tar-ignore drops *.orig as patch backups,
+#     so cargo would abort the offline build on a checksummed-but-missing file.
+#
+#   Prebuilt Windows binaries — the winapi *-pc-windows-gnu crates ship prebuilt
+#     import libraries (lib/*.a) and libloading ships Windows test DLLs. None are
+#     compiled on a Linux target, but they trip lintian (ar-unreadable .a =
+#     error; *.dll = source-contains-prebuilt-windows-binary warning) and would
+#     be a DFSG smell in the source package. The Windows build uses crates.io
+#     directly, so pruning them from the Linux vendor tarball costs nothing.
 python3 - "$WORK/rust-vendor" <<'PY'
 import json, os, sys
 root = sys.argv[1]
+
+def is_junk(crate, key):
+    if key.endswith(".orig"):
+        return True
+    if key.endswith((".dll", ".dll.a")):
+        return True
+    # Prebuilt import/static libs only inside the Windows target crates, so a
+    # legitimately source-shipped Linux .a (none known) is never touched.
+    if "windows" in crate and key.endswith((".a", ".lib")):
+        return True
+    return False
+
 for crate in sorted(os.listdir(root)):
     cksum = os.path.join(root, crate, ".cargo-checksum.json")
     if not os.path.isfile(cksum):
@@ -103,7 +124,7 @@ for crate in sorted(os.listdir(root)):
     with open(cksum) as f:
         data = json.load(f)
     files = data.get("files", {})
-    removed = [k for k in files if k.endswith(".orig")]
+    removed = [k for k in files if is_junk(crate, k)]
     for k in removed:
         del files[k]
         p = os.path.join(root, crate, k)
@@ -112,7 +133,7 @@ for crate in sorted(os.listdir(root)):
     if removed:
         with open(cksum, "w") as f:
             json.dump(data, f, separators=(",", ":"))
-        print(f"  sanitised {crate}: dropped {', '.join(removed)}")
+        print(f"  sanitised {crate}: dropped {len(removed)} file(s)")
 PY
 tar -C "$WORK" -cJf "$WORK/supersonic_$UV.orig-rust-vendor.tar.xz" rust-vendor
 
