@@ -729,6 +729,19 @@ if(SUPERSONIC_ENABLE_SYNTH)
         juce::juce_audio_formats
         SndFile::sndfile
     )
+
+    # Debian's juce-modules-source unbundles the FLAC/Ogg/Vorbis sources from
+    # juce_audio_formats (they ship the codecs as system libs), so its compiled
+    # object references the system codec symbols and the final link must name
+    # them explicitly. Our own FetchContent JUCE compiles the codecs in, so it
+    # needs none of this — hence gating on SUPERSONIC_SYSTEM_JUCE. Over-linking
+    # a codec the module doesn't reference is harmless under --as-needed.
+    if(SUPERSONIC_SYSTEM_JUCE AND UNIX AND NOT APPLE)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(JUCE_CODECS REQUIRED IMPORTED_TARGET
+            flac ogg vorbis vorbisenc vorbisfile)
+        target_link_libraries(supersonic_engine PUBLIC PkgConfig::JUCE_CODECS)
+    endif()
 endif()
 
 # Ableton Link is gated by SUPERSONIC_ENABLE_LINK, independent of the synth: the
