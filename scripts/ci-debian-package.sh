@@ -93,10 +93,16 @@ phase_autopkgtest() {
 phase_smoke() {
     echo "=== smoke: install + boot in a pristine container ==="
     deb=("$WORK"/build-area/supersonic_*_"$(dpkg --print-architecture)".deb)
-    # Check the man page in the deb itself — the official Debian container
-    # images path-exclude /usr/share/man, so it never hits the filesystem here.
-    dpkg-deb -c "${deb[0]}" | grep -q '\./usr/share/man/man1/supersonic\.1\.gz'
-    dpkg-deb -c "${deb[0]}" | grep -q '\./usr/bin/supersonic'
+    # Inspect the deb's contents (the official Debian container images
+    # path-exclude /usr/share/man, so the man page never hits the filesystem on
+    # install — check the archive itself). Capture the listing once and match
+    # via here-strings: `dpkg-deb -c | grep -q` would SIGPIPE dpkg-deb's tar
+    # when grep short-circuits, and `set -o pipefail` turns that into a failure.
+    contents="$(dpkg-deb -c "${deb[0]}")"
+    grep -q '/usr/bin/supersonic$' <<<"$contents" \
+        || { echo "FAIL: deb has no /usr/bin/supersonic" >&2; exit 1; }
+    grep -q '/usr/share/man/man1/supersonic\.1\.gz$' <<<"$contents" \
+        || { echo "FAIL: deb has no man page" >&2; exit 1; }
     apt-get update
     apt-get install -y "${deb[0]}"
     supersonic -v
