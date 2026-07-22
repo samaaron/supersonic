@@ -1,5 +1,22 @@
 cmake_minimum_required(VERSION 3.24)
-project(SuperSonic VERSION 0.1.0 LANGUAGES C CXX)
+
+# ─── Version ─────────────────────────────────────────────────────────────────
+# Single-sourced from src/supersonic_config.h (updated by scripts/bump-version.sh)
+# so project(), the JUCE app metadata, and the binary's own -v banner agree.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/src/supersonic_config.h" _ss_version_defs
+     REGEX "^#define SUPERSONIC_VERSION_(MAJOR|MINOR|PATCH) ")
+foreach(_ss_line IN LISTS _ss_version_defs)
+    if(_ss_line MATCHES "SUPERSONIC_VERSION_(MAJOR|MINOR|PATCH) +([0-9]+)")
+        set(_ss_ver_${CMAKE_MATCH_1} ${CMAKE_MATCH_2})
+    endif()
+endforeach()
+if(NOT DEFINED _ss_ver_MAJOR OR NOT DEFINED _ss_ver_MINOR OR NOT DEFINED _ss_ver_PATCH)
+    message(FATAL_ERROR "Could not parse SUPERSONIC_VERSION_* from src/supersonic_config.h")
+endif()
+
+project(SuperSonic
+    VERSION ${_ss_ver_MAJOR}.${_ss_ver_MINOR}.${_ss_ver_PATCH}
+    LANGUAGES C CXX)
 if(APPLE)
     enable_language(OBJCXX)
 endif()
@@ -88,8 +105,29 @@ elseif(NOT EMSCRIPTEN)
     add_compile_options("$<$<CONFIG:Release>:-g>")
 endif()
 
-# ─── JUCE via FetchContent ────────────────────────────────────────────────────
+# ─── JUCE via FetchContent (or a system install) ─────────────────────────────
 include(FetchContent)
+
+# FetchContent deps are private build details: exclude them from the install
+# manifest so `cmake --install` ships only SuperSonic's own rules (JUCE would
+# otherwise install its whole module tree, and vorbis bakes ABSOLUTE
+# /usr/local paths that make --prefix installs fail outright). The keyword
+# reached FetchContent_Declare in CMake 3.28; older CMake keeps the historic
+# polluted-install behaviour, which no supported packaging path relies on.
+set(_ss_fc_exclude "")
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+    set(_ss_fc_exclude EXCLUDE_FROM_ALL)
+endif()
+
+# System-dependency switches for distro packaging (Debian et al. forbid network
+# access and embedded library copies at package-build time). Each defaults OFF
+# so developer builds keep the pinned, self-contained FetchContent versions;
+# distro builds flip them on and take whatever the archive ships. See
+# docs/DEBIAN-PACKAGING.md.
+option(SUPERSONIC_SYSTEM_JUCE "Use a system-installed JUCE (find_package) instead of the pinned FetchContent copy" OFF)
+option(SUPERSONIC_SYSTEM_SNDFILE "Link the system libsndfile instead of building the vendored static codec stack" OFF)
+option(SUPERSONIC_SYSTEM_BOOST "Use system Boost headers instead of the vendored bcp subset" OFF)
+option(SUPERSONIC_CARGO_OFFLINE "Build the Rust subsystems with --offline (requires pre-vendored crates)" OFF)
 
 # JUCE is the synth host's audio-device + format layer; it is only consumed when
 # the synth engine is compiled (see the SUPERSONIC_ENABLE_SYNTH link block and the
@@ -97,22 +135,30 @@ include(FetchContent)
 # genuinely JUCE-free — pulling JUCE here unconditionally drags juceaide (and its
 # X11 GUI dependency on headless Linux) into a configure that links none of it.
 if(SUPERSONIC_ENABLE_SYNTH)
-    FetchContent_Declare(
-        JUCE
-        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-        GIT_TAG        8.0.13
-        GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(JUCE)
-
-    # Reset JUCE to pristine on every configure — defensive cleanup in case
-    # a previous build applied a (now-removed) local patch.
-    if(APPLE)
-        execute_process(
-            COMMAND git checkout -- .
-            WORKING_DIRECTORY "${juce_SOURCE_DIR}"
-            ERROR_QUIET
+    if(SUPERSONIC_SYSTEM_JUCE)
+        # Debian: juce-modules-source + juce-tools provide JUCEConfig.cmake,
+        # the module sources, and a prebuilt juceaide.
+        find_package(JUCE CONFIG REQUIRED)
+        message(STATUS "JUCE: system install ${JUCE_VERSION}")
+    else()
+        FetchContent_Declare(
+            JUCE
+            GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+            GIT_TAG        8.0.13
+            GIT_SHALLOW    TRUE
+            ${_ss_fc_exclude}
         )
+        FetchContent_MakeAvailable(JUCE)
+
+        # Reset JUCE to pristine on every configure — defensive cleanup in case
+        # a previous build applied a (now-removed) local patch.
+        if(APPLE)
+            execute_process(
+                COMMAND git checkout -- .
+                WORKING_DIRECTORY "${juce_SOURCE_DIR}"
+                ERROR_QUIET
+            )
+        endif()
     endif()
 endif()
 
@@ -124,7 +170,24 @@ endif()
 # Sample IO belongs to the synth host (SampleLoader links SndFile::sndfile under
 # SUPERSONIC_ENABLE_SYNTH), so gate the fetch on it — the no-synth core does no
 # file IO and must not drag the codec sub-projects into its configure.
-if(SUPERSONIC_ENABLE_SYNTH)
+#
+# SUPERSONIC_SYSTEM_SNDFILE replaces this whole stack with the distro's shared
+# libsndfile (which already carries its codec links), skipping all five fetches.
+if(SUPERSONIC_ENABLE_SYNTH AND SUPERSONIC_SYSTEM_SNDFILE)
+    # Prefer the upstream CMake package; Debian builds libsndfile without one,
+    # so fall back to pkg-config and wrap it in the same imported-target name
+    # the engine links against.
+    find_package(SndFile CONFIG QUIET)
+    if(NOT TARGET SndFile::sndfile)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
+        add_library(SndFile::sndfile INTERFACE IMPORTED)
+        target_link_libraries(SndFile::sndfile INTERFACE PkgConfig::SNDFILE)
+    endif()
+    message(STATUS "libsndfile: system install")
+endif()
+
+if(SUPERSONIC_ENABLE_SYNTH AND NOT SUPERSONIC_SYSTEM_SNDFILE)
 
 # Some codec libs have old cmake_minimum_required — CMake 4.x needs this
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
@@ -144,6 +207,7 @@ FetchContent_Declare(Ogg
     GIT_TAG        v1.3.5
     GIT_SHALLOW    TRUE
     OVERRIDE_FIND_PACKAGE
+    ${_ss_fc_exclude}
 )
 
 # Vorbis (for .ogg sample support)
@@ -152,6 +216,7 @@ FetchContent_Declare(Vorbis
     GIT_TAG        v1.3.7
     GIT_SHALLOW    TRUE
     OVERRIDE_FIND_PACKAGE
+    ${_ss_fc_exclude}
 )
 
 # FLAC (for .flac sample support)
@@ -162,6 +227,7 @@ FetchContent_Declare(FLAC
     GIT_TAG        1.5.0
     GIT_SHALLOW    TRUE
     OVERRIDE_FIND_PACKAGE
+    ${_ss_fc_exclude}
 )
 
 # Opus (for .opus sample support)
@@ -170,6 +236,7 @@ FetchContent_Declare(Opus
     GIT_TAG        v1.5.2
     GIT_SHALLOW    TRUE
     OVERRIDE_FIND_PACKAGE
+    ${_ss_fc_exclude}
 )
 
 # libsndfile — with FLAC, Vorbis, and Opus codec support
@@ -180,6 +247,7 @@ FetchContent_Declare(libsndfile
     GIT_REPOSITORY https://github.com/libsndfile/libsndfile.git
     GIT_TAG        1.2.2
     GIT_SHALLOW    TRUE
+    ${_ss_fc_exclude}
 )
 FetchContent_MakeAvailable(Ogg Vorbis FLAC Opus)
 
@@ -218,7 +286,7 @@ if(TARGET sndfile AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_compile_options(sndfile PRIVATE -Wno-format-truncation)
 endif()
 
-endif()  # SUPERSONIC_ENABLE_SYNTH — libsndfile + audio codecs
+endif()  # SUPERSONIC_ENABLE_SYNTH AND NOT SUPERSONIC_SYSTEM_SNDFILE — vendored codec stack
 
 # ─── Ableton Link ────────────────────────────────────────────────────────────
 # Header-only library — consumes asio in standalone header-only mode via
@@ -401,6 +469,17 @@ set(OSCPACK_SOURCES
 
 # ─── Common include directories ─────────────────────────────────────────────
 # Collected into a variable so both the engine lib and exe can share them.
+
+# Boost usage is header-only (bcp-extracted 1.86 subset in-tree). Distro builds
+# swap in the system headers via SUPERSONIC_SYSTEM_BOOST.
+if(SUPERSONIC_SYSTEM_BOOST)
+    find_package(Boost REQUIRED)
+    set(SUPERSONIC_BOOST_INCLUDE_DIR ${Boost_INCLUDE_DIRS})
+    message(STATUS "Boost: system headers ${Boost_VERSION} (${Boost_INCLUDE_DIRS})")
+else()
+    set(SUPERSONIC_BOOST_INCLUDE_DIR ${SUPERSONIC_SRC}/synth/external_libraries/boost)
+endif()
+
 set(SUPERSONIC_INCLUDE_DIRS
     # NativeShim first — overrides emscripten/ includes
     ${NATIVE_SRC}/NativeShim
@@ -421,7 +500,7 @@ set(SUPERSONIC_INCLUDE_DIRS
     ${SUPERSONIC_SRC}/synth/include/server
     ${SUPERSONIC_SRC}/synth/server
     ${SUPERSONIC_SRC}/synth/common
-    ${SUPERSONIC_SRC}/synth/external_libraries/boost
+    ${SUPERSONIC_BOOST_INCLUDE_DIR}
     ${SUPERSONIC_SRC}/synth/external_libraries/nova-simd
 
     # oscpack vendor
@@ -702,6 +781,15 @@ if(SUPERSONIC_ENABLE_MIDI OR SUPERSONIC_ENABLE_GAMEPAD OR SUPERSONIC_ENABLE_OSC)
         set(SS_RUST_PROFILE release)
         set(SS_RUST_CARGO_FLAGS --release)
     endif()
+    # Cargo.lock is committed; honour it strictly so builds are reproducible and
+    # dependency drift errors out here rather than silently rewriting the
+    # lockfile. --offline additionally forbids all crates.io access — distro
+    # builds set it and point cargo at a pre-vendored crate mirror (see
+    # docs/DEBIAN-PACKAGING.md).
+    list(APPEND SS_RUST_CARGO_FLAGS --locked)
+    if(SUPERSONIC_CARGO_OFFLINE)
+        list(APPEND SS_RUST_CARGO_FLAGS --offline)
+    endif()
 
     # Under TSan the Rust subsystems are instrumented too, std included
     # (-Zbuild-std): the toolchain's precompiled std carries no TSan
@@ -891,7 +979,7 @@ endif()
 if(SUPERSONIC_ENABLE_SYNTH)
     juce_add_console_app(SuperSonic
         PRODUCT_NAME    "supersonic"
-        VERSION         "0.1.0"
+        VERSION         "${PROJECT_VERSION}"
         COMPANY_NAME    "SuperSonic"
     )
 
@@ -908,6 +996,24 @@ if(SUPERSONIC_ENABLE_SYNTH)
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SuperSonic,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SuperSonic,JUCE_VERSION>"
     )
+endif()
+
+# ─── Install ─────────────────────────────────────────────────────────────────
+# `cmake --install` support for distro packaging (Debian's debhelper drives it
+# via dh_auto_install; see packaging/debian/ + docs/DEBIAN-PACKAGING.md). The
+# server installs under its lowercase product name. Default ON only when
+# SuperSonic is the top-level project so add_subdirectory embedders (see
+# test/embed) inherit no rules.
+include(GNUInstallDirs)
+option(SUPERSONIC_INSTALL "Generate install rules for the server binary + man page" ${PROJECT_IS_TOP_LEVEL})
+if(SUPERSONIC_INSTALL AND SUPERSONIC_ENABLE_SYNTH)
+    install(PROGRAMS $<TARGET_FILE:SuperSonic>
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+            RENAME supersonic)
+    if(UNIX)
+        install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/docs/man/supersonic.1
+                DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
+    endif()
 endif()
 
 # ─── BEAM NIF shared library ─────────────────────────────────────────────────
@@ -979,6 +1085,11 @@ if(SUPERSONIC_BUILD_SCHEDULER_HOST)
     else()
         set(HOST_RUST_PROFILE release)
         set(HOST_CARGO_FLAGS --release)
+    endif()
+    # Same lockfile discipline as the engine's Rust build above.
+    list(APPEND HOST_CARGO_FLAGS --locked)
+    if(SUPERSONIC_CARGO_OFFLINE)
+        list(APPEND HOST_CARGO_FLAGS --offline)
     endif()
 
     # Only the OSC (+ optional MIDI) subsystems — never gamepad or Link. Built

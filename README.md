@@ -90,6 +90,7 @@ For the full list of configuration options, see the [API Reference](docs/API.md#
 - [Workers Guide](docs/WORKERS.md) - Send OSC directly from Web Workers and AudioWorklets for the lowest latency.
 - [Metrics](docs/METRICS.md) - Performance monitoring and debugging
 - [Building from Source](docs/BUILDING.md) - WASM, native (JUCE), and NIF (Erlang/Elixir) builds
+- [Debian Packaging](docs/DEBIAN-PACKAGING.md) - CI-proven Debian source package: offline build, system dependencies, lintian/autopkgtest
 
 ## Support
 

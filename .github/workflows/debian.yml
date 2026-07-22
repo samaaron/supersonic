@@ -1,0 +1,129 @@
+# Builds SuperSonic as a real Debian package, the way a Debian maintainer
+# would: assemble a source package (.dsc + orig + component tarballs), build
+# it with dpkg-buildpackage in a container whose NETWORK IS DISCONNECTED
+# (proving the build needs none), run the full native test suite during the
+# build against Debian-archive dependency versions (system JUCE, libsndfile,
+# Boost, Catch2), then lintian (failing on errors AND warnings), autopkgtest
+# (the transport harness against the installed server), and an
+# install-and-boot smoke test in a pristine container.
+#
+# Two targets: sid is where real maintainer uploads land; trixie (current
+# stable) proves the same source package builds for today's users.
+#
+# Same long-lived-container pattern as the juce-x86 job in native.yml: one
+# `docker run -d`, one `docker exec` per phase so failures point at the stage
+# that broke. See scripts/ci-debian-package.sh for the phases and
+# docs/DEBIAN-PACKAGING.md for the whole story.
+name: Debian Package
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  # PRs are path-filtered (each dist leg costs ~45-75 min); pushes to main and
+  # tags always run so coverage stays complete where it counts. Tag pushes are
+  # deliberately unfiltered — path filters behave unpredictably on tag events
+  # and a silently skipped release build would lose the release deb.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'CMakeLists.txt'
+      - 'src/**'
+      - 'rust/**'
+      - 'external/**'
+      - 'test/native/**'
+      - 'test/transport-harness/**'
+      - 'packaging/**'
+      - 'docs/man/**'
+      - 'scripts/ci-debian-package.sh'
+      - 'scripts/make-debian-source.sh'
+      - '.github/workflows/debian.yml'
+  workflow_dispatch:
+
+jobs:
+  deb:
+    strategy:
+      fail-fast: false
+      matrix:
+        dist: [trixie, sid]
+    name: debian-${{ matrix.dist }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    # contents:write is for the release-attach step; the default token is
+    # restricted (native.yml and publish.yml declare theirs the same way).
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Start ${{ matrix.dist }} container
+        run: |
+          docker run -d --name deb \
+            -v "${GITHUB_WORKSPACE}:/src" \
+            -w /src \
+            debian:${{ matrix.dist }} sleep infinity
+
+      - name: Packaging toolchain
+        run: docker exec deb scripts/ci-debian-package.sh deps
+
+      - name: Install Build-Depends
+        run: docker exec deb scripts/ci-debian-package.sh builddeps
+
+      - name: Assemble source package
+        run: docker exec deb scripts/ci-debian-package.sh source
+
+      # From here the container has no network: the package build fetching
+      # anything is a bug, and this is what catches it.
+      - name: Disconnect network
+        run: docker network disconnect bridge deb
+
+      - name: Build package (offline, full test suite)
+        run: docker exec deb scripts/ci-debian-package.sh build
+
+      - name: Reconnect network
+        run: docker network connect bridge deb
+
+      - name: lintian
+        run: docker exec deb scripts/ci-debian-package.sh lintian
+
+      - name: autopkgtest
+        run: docker exec deb scripts/ci-debian-package.sh autopkgtest
+
+      - name: Stop container
+        if: ${{ always() }}
+        run: docker rm -f deb || true
+
+      - name: Install + boot smoke test (pristine container)
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/src" \
+            -w /src \
+            debian:${{ matrix.dist }} \
+            bash scripts/ci-debian-package.sh smoke
+
+      - name: Upload package artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-${{ matrix.dist }}
+          # warn, not error: this step also runs on early-phase failures
+          # (if: always()), where zero artifacts is expected and an error here
+          # would bury the real failure.
+          if-no-files-found: warn
+          path: |
+            build/debian/*.dsc
+            build/debian/*.tar.xz
+            build/debian/build-area/*.deb
+            build/debian/build-area/*.changes
+            build/debian/build-area/*.buildinfo
+
+      # Attach the stable-target deb to tagged releases alongside the raw
+      # binaries native.yml uploads. (sid debs are built against unstable's
+      # moving ABI — useful as CI signal, not as a release artifact.)
+      - name: Attach deb to release
+        if: startsWith(github.ref, 'refs/tags/') && matrix.dist == 'trixie'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/debian/build-area/*.deb

@@ -1,0 +1,112 @@
+.\" Man page for supersonic. Keep the option list in sync with the --help text
+.\" in src/native/Main.cpp — that text is the source of truth.
+.TH SUPERSONIC 1 "July 2026" "supersonic" "User Commands"
+.SH NAME
+supersonic \- low-latency scsynth-compatible audio synthesis server
+.SH SYNOPSIS
+.B supersonic
+.RI [ options ]
+.SH DESCRIPTION
+.B supersonic
+is a port of SuperCollider's scsynth audio engine focused on low latency and
+long-session reliability. It accepts scsynth command-line flags and the
+scsynth OSC command set, so SuperCollider clients (such as Sonic Pi) can
+launch and drive it as a drop-in replacement for
+.BR scsynth (1).
+.PP
+Commands arrive as OSC over UDP by default; alternative command transports
+(TCP, Unix sockets, shared memory) can be selected with the transport options
+below. Ableton Link session sync (including Link Audio streaming), MIDI I/O,
+game controller input, and OSC cue networking are built in.
+.SH OPTIONS
+.TP
+.BI \-u " port"
+UDP port (default: 57110). Also numbers the server's shared-memory segment;
+.B \-u 0
+disables shared memory.
+.TP
+.BI \-S " rate"
+Sample rate (default: 48000).
+.TP
+.BI \-Z " size"
+Hardware buffer size (default: auto).
+.TP
+.BI \-z " size"
+scsynth control block size, 32\-1024 (default: 128).
+.TP
+.BI \-i " num"
+Input channels (default: device max; 0 = disable).
+.TP
+.BI \-o " num"
+Output channels (default: device max).
+.TP
+.BI \-n " num"
+Maximum nodes (default: 1024).
+.TP
+.BI \-b " num"
+Sample buffers (default: 1024).
+.TP
+.BI \-a " num"
+Audio bus channels (default: 1024).
+.TP
+.BI \-c " num"
+Control bus channels (default: 16384).
+.TP
+.BI \-m " size"
+Real-time memory in KB (default: 8192).
+.TP
+.BI \-w " num"
+Maximum wire buffers (default: 64).
+.TP
+.BI \-B " addr"
+Bind address (default: all interfaces).
+.TP
+.BI \-H " words"
+Audio device (fuzzy match on \[dq]Driver : Device\[dq]).
+.TP
+.B \-v
+Print version and exit.
+.TP
+.BI \-\-default\-bpm " n"
+Opening session tempo (default: 120).
+.TP
+.BI \-\-piano\-wavetable " path"
+MdaPiano sample table (raw int16).
+.TP
+.B \-\-list\-devices
+List audio devices and exit.
+.SS Command transports
+Pick at most one; it replaces the UDP command port. The cue server and
+outbound OSC are unaffected, and
+.B \-u
+still numbers the server's shared-memory segment.
+.TP
+.BI \-\-tcp " port"
+TCP, length-prefixed OSC (respects
+.BR \-B ).
+.TP
+.BI \-\-uds " path"
+Unix socket, stream (file mode 0600).
+.TP
+.BI \-\-uds\-dgram " path"
+Unix socket, datagram (file mode 0600).
+.TP
+.B \-\-shm\-commands
+Shared-memory segment's peer command plane for one trusted co-located peer
+(requires \-u > 0).
+.TP
+.BI \-\-max\-connections " n"
+Stream connection cap (default: 4).
+.SS Headless operation
+.TP
+.B \-\-headless
+No audio device; timer-driven render (CI/tests).
+.SH SEE ALSO
+.BR scsynth (1),
+.BR jackd (1)
+.PP
+Project home:
+.UR https://github.com/samaaron/supersonic
+.UE
+.SH AUTHOR
+Sam Aaron

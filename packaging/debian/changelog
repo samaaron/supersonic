@@ -1,0 +1,5 @@
+supersonic (0.71.0-1) unstable; urgency=medium
+
+  * Initial Debian packaging.
+
+ -- Sam Aaron <sam@sonic-pi.net>  Wed, 22 Jul 2026 12:00:00 +0000

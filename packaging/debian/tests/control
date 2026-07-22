@@ -1,0 +1,12 @@
+# Cheap sanity check: the installed binary answers -v without touching audio.
+Test-Command: supersonic -v
+Restrictions: superficial
+
+# End-to-end: boot the installed server headless once per command transport
+# (UDP, TCP, UDS stream, UDS datagram), send /status + a medium OSC load over
+# each, and require replies. Reuses upstream's transport harness; the probe
+# client is built offline from the crates vendored in the source package
+# (rw-build-tree: cargo writes rust/target inside the unpacked source tree).
+Tests: transport-smoke
+Depends: supersonic, cargo, rustc
+Restrictions: allow-stderr, rw-build-tree

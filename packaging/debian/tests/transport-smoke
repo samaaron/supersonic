@@ -1,0 +1,18 @@
+#!/bin/sh
+# Run upstream's transport harness against the installed /usr/bin/supersonic.
+# The harness builds its OSC probe client with cargo; point cargo at the
+# rust-vendor component shipped in the source package so no network is needed.
+set -eu
+
+export CARGO_HOME="${AUTOPKGTEST_TMP:-/tmp}/cargo-home"
+mkdir -p "$CARGO_HOME"
+cat > "$CARGO_HOME/config.toml" <<EOF
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "$(pwd)/rust-vendor"
+EOF
+export CARGO_NET_OFFLINE=true
+
+exec test/transport-harness/run.sh /usr/bin/supersonic

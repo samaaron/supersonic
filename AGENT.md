@@ -58,6 +58,8 @@ scripts/build-native.sh --clean  # Clean rebuild
 
 On Windows use `scripts\build-native.bat` with the same flags.
 
+Debian packaging: CI builds a real Debian source package per push (offline build, system JUCE/libsndfile/Boost/Catch2, full test suite, lintian, autopkgtest) via `.github/workflows/debian.yml` + `scripts/ci-debian-package.sh`. Needs Docker, so it cannot run on this machine — iterate via `workflow_dispatch`. See `docs/DEBIAN-PACKAGING.md`.
+
 ## Testing
 
 Tests use Playwright. The full suite is ~1200 tests across SAB and postMessage modes and takes ~3 minutes.

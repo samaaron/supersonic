@@ -1,0 +1,45 @@
+Source: supersonic
+Section: sound
+Priority: optional
+Maintainer: Sam Aaron <sam@sonic-pi.net>
+Build-Depends: debhelper-compat (= 13),
+ cmake (>= 3.24),
+ pkgconf,
+ cargo,
+ rustc,
+ juce-modules-source (>= 8),
+ juce-tools (>= 8),
+ libsndfile1-dev,
+ libboost-dev,
+ catch2,
+ libasound2-dev,
+ libudev-dev,
+ libjack-jackd2-dev | libjack-dev,
+ libfreetype-dev,
+ libfontconfig1-dev,
+ libx11-dev,
+ libxrandr-dev,
+ libxinerama-dev,
+ libxcursor-dev,
+ libxcomposite-dev,
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+Homepage: https://github.com/samaaron/supersonic
+Vcs-Git: https://github.com/samaaron/supersonic.git
+Vcs-Browser: https://github.com/samaaron/supersonic
+
+Package: supersonic
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Suggests: jackd2 | pipewire-jack
+Description: low-latency scsynth-compatible audio synthesis server
+ SuperSonic is a port of SuperCollider's scsynth audio engine focused on
+ low latency and long-session reliability. The server accepts scsynth
+ command-line flags and the scsynth OSC command set, so SuperCollider
+ clients (such as Sonic Pi) can launch and drive it as a drop-in
+ replacement for scsynth.
+ .
+ Ableton Link session sync (including Link Audio streaming), MIDI I/O,
+ game controller input, and OSC cue networking are built in. Commands
+ arrive as OSC over UDP by default; TCP, Unix-socket, and shared-memory
+ command transports are also available.

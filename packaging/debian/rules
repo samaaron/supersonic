@@ -1,0 +1,43 @@
+#!/usr/bin/make -f
+# Debian rules for supersonic.
+#
+# The build is fully offline: JUCE / libsndfile / Boost / Catch2 come from
+# Debian packages (SUPERSONIC_SYSTEM_* switches), Ableton Link from the
+# orig-link component tarball (patched via debian/patches), and the Rust
+# crates from the orig-rust-vendor component tarball via the cargo source
+# replacement written below.
+
+include /usr/share/dpkg/default.mk
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# Rust: never touch the network; build strictly from the vendored crates.
+export CARGO_HOME = $(CURDIR)/debian/cargo-home
+export CARGO_NET_OFFLINE = true
+
+BUILDDIR = obj-$(DEB_HOST_GNU_TYPE)
+
+%:
+	dh $@ --buildsystem=cmake
+
+override_dh_auto_configure:
+	mkdir -p $(CARGO_HOME)
+	printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "%s"\n' \
+		"$(CURDIR)/rust-vendor" > $(CARGO_HOME)/config.toml
+	# CMAKE_BUILD_TYPE=Release rather than Debian's customary None: this is a
+	# real-time audio server and the engine's DSP inner loops need -O3. The
+	# dpkg-buildflags hardening flags still apply on top.
+	dh_auto_configure -- \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_TESTS=ON \
+		-DSUPERSONIC_SYSTEM_JUCE=ON \
+		-DSUPERSONIC_SYSTEM_SNDFILE=ON \
+		-DSUPERSONIC_SYSTEM_BOOST=ON \
+		-DSUPERSONIC_CARGO_OFFLINE=ON \
+		-DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+		-DFETCHCONTENT_SOURCE_DIR_ABLETONLINK=$(CURDIR)/link
+
+override_dh_auto_test:
+	# Full upstream Catch2 suite, benchmarks excluded (mirrors upstream CI).
+	# Run the binary directly rather than ctest so the tag filter applies.
+	SUPERSONIC_QUIET=1 $(BUILDDIR)/test/native/SuperSonicNativeTests "~[benchmark]"

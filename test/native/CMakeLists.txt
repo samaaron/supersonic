@@ -1,13 +1,25 @@
-include(FetchContent)
+# Prefer a system Catch2 v3 (distro package-builds run offline and Debian ships
+# one); fall back to the pinned FetchContent copy for dev machines without it.
+find_package(Catch2 3 QUIET)
+if(NOT TARGET Catch2::Catch2)
+    include(FetchContent)
 
-FetchContent_Declare(
-    Catch2
-    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG        v3.5.2
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(Catch2)
-list(APPEND CMAKE_MODULE_PATH "${Catch2_SOURCE_DIR}/extras")
+    FetchContent_Declare(
+        Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG        v3.5.2
+        GIT_SHALLOW    TRUE
+        ${_ss_fc_exclude}  # keep Catch2's install() rules out of our manifest
+    )
+    FetchContent_MakeAvailable(Catch2)
+    list(APPEND CMAKE_MODULE_PATH "${Catch2_SOURCE_DIR}/extras")
+else()
+    message(STATUS "Catch2: system install ${Catch2_VERSION}")
+    # Catch2's package config normally appends its own dir to CMAKE_MODULE_PATH
+    # for the include(Catch) below; add it explicitly in case a distro's
+    # packaging of the config omits that.
+    list(APPEND CMAKE_MODULE_PATH "${Catch2_DIR}")
+endif()
 
 add_executable(SuperSonicNativeTests
     test_main.cpp
@@ -146,7 +158,7 @@ target_compile_definitions(SuperSonicNativeTests PRIVATE
     SUPERSONIC_TEST_SYNTHDEFS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../synthdefs"
     SUPERSONIC_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../packages/supersonic-scsynth-samples/samples"
     JUCE_APPLICATION_NAME_STRING="supersonic-tests"
-    JUCE_APPLICATION_VERSION_STRING="0.1.0"
+    JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}"
 )
 
 if(MSVC)

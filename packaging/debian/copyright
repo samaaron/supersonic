@@ -1,0 +1,240 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: supersonic
+Upstream-Contact: Sam Aaron <sam@sonic-pi.net>
+Source: https://github.com/samaaron/supersonic
+Files-Excluded: external_libs/ASIOSDK2.3.4
+Comment: The Steinberg ASIO SDK (Windows-only; dual-licensed proprietary or
+ GPL-3) is excluded from the Debian source tarball because the directory also
+ carries non-free documentation PDFs and trademark-encumbered logo artwork.
+ It is not used on Linux.
+ .
+ The source package is assembled from three upstream tarballs:
+ the main tarball (this repository), the "link" component (pristine Ableton
+ Link 4.0 with its asio-standalone submodule; upstream patches under
+ debian/patches apply to it), and the "rust-vendor" component (the output of
+ `cargo vendor` for the committed rust/Cargo.lock). See debian/README.source.
+
+Files: *
+Copyright: 2025-2026 Sam Aaron <sam@sonic-pi.net>
+License: GPL-3+
+
+Files: js/*
+ rust/*
+ src/nif/supersonic.erl
+ test/freestanding/freestanding_main.cpp
+ esp32s3/main/main.cpp
+Copyright: 2025-2026 Sam Aaron <sam@sonic-pi.net>
+License: Expat or GPL-3+
+Comment: The client libraries are dual-licensed so non-GPL hosts can embed
+ them; the audio engine itself (src/) is GPL-3+ only.
+
+Files: js/workers/scsynth_audio_worklet.js
+Copyright: 2025-2026 Sam Aaron <sam@sonic-pi.net>
+License: GPL-3+
+Comment: The AudioWorklet that executes the GPL engine WASM is not part of
+ the dual-licensed client-library set (see its SPDX header).
+
+Files: src/synth/*
+Copyright: 2002-2023 James McCartney and SuperCollider contributors
+License: GPL-2+
+Comment: SuperSonic's audio engine is a heavily modified fork of
+ SuperCollider's scsynth server. Combined with the GPL-3+ first-party code
+ the effective licence of the built binary is GPL-3+.
+
+Files: src/synth/external_libraries/boost/*
+Copyright: 1998-2024 Boost contributors
+License: BSL-1.0
+Comment: bcp-extracted header subset of Boost 1.86, unused when built with
+ -DSUPERSONIC_SYSTEM_BOOST=ON (as this package does).
+
+Files: src/synth/external_libraries/nova-simd/*
+Copyright: 2008-2012 Tim Blechmann
+License: GPL-2+
+
+Files: src/synth/external_libraries/TLSF-2.4.6/*
+Copyright: 2005-2008 Miguel Masmano Tello
+License: GPL-2 or LGPL-2.1
+Comment: The TLSF real-time allocator is dual-licensed; this package uses it
+ under the GPL-2 option, compatible with the engine's GPL licence.
+
+Files: src/synth/common/fftlib.c
+Copyright: 1995-1996 John Green (Naval Undersea Warfare Center, USA)
+License: public-domain
+ This FFT implementation was written by John Green, an employee of the US
+ federal government (NUWC, New London), and carries no licence statement.
+ Works of US federal government employees produced in the course of their
+ duties are not subject to domestic copyright protection (17 U.S.C. 105).
+ The same file ships in Debian's existing supercollider package.
+
+Files: src/vendor/oscpack/*
+Copyright: 2004-2013 Ross Bencina <rossb@audiomulch.com>
+License: Expat
+Comment: The licence text includes non-binding requests regarding use.
+
+Files: external/midir/*
+Copyright: 2015-2024 Patrick Reisert and RtMidi contributors
+License: Expat
+Comment: Vendored fork of the midir Rust crate (0.11.0) carrying local
+ patches (timestamped send for WebMIDI/CoreMIDI). Consumed as a cargo path
+ dependency; not replaceable by a crates.io copy without losing the patches.
+
+Files: external_libs/erlang_headers/*
+Copyright: 2009-2025 Ericsson AB
+License: Apache-2.0
+Comment: Bundled Erlang/OTP NIF headers, used only when the BEAM NIF is
+ built (-DBUILD_NIF=ON). This package does not build the NIF.
+
+Files: packages/supersonic-scsynth-samples/*
+Copyright: none (dedicated to the public domain by their authors)
+License: CC0-1.0
+Comment: Per-sample provenance (freesound.org links and donations) is
+ recorded in packages/supersonic-scsynth-samples/PROVENANCE.md. Retained in
+ the source package because the test suite exercises sample loading; not
+ shipped in the binary package.
+
+Files: packages/supersonic-scsynth-synthdefs/*
+Copyright: 2013-2026 Sam Aaron and Sonic Pi contributors
+License: Expat
+Comment: Compiled SuperCollider synth definitions (.scsyndef). The preferred
+ form of modification — the sclang synthdef designs they are compiled from —
+ is maintained in the Sonic Pi repository:
+ https://github.com/sonic-pi-net/sonic-pi (etc/synthdefs/designs). Retained
+ in the source package because the test suite loads them; not shipped in the
+ binary package.
+
+Files: link/*
+Copyright: 2016-2024 Ableton AG
+License: GPL-2+
+Comment: Pristine Ableton Link 4.0 ("link" component tarball). Debian ships
+ ableton-link-dev 3.x, which is too old for this package and lacks the four
+ upstream-carried patches applied under debian/patches (loopback-only
+ discovery, peer enumeration, monotonic commit timestamps, a LinkAudio
+ teardown race fix).
+
+Files: link/modules/asio-standalone/*
+Copyright: 2003-2024 Christopher M. Kohlhoff
+License: BSL-1.0
+
+Files: rust-vendor/*
+Copyright: various Rust crate authors; see the LICENSE files inside each
+ crate directory and rust/Cargo.lock for the exact crate set
+License: Expat or Apache-2.0
+Comment: Output of `cargo vendor` for the committed rust/Cargo.lock. The
+ licence allow-list is machine-enforced by upstream's rust/deny.toml (MIT,
+ Apache-2.0 with or without LLVM-exception, BSD-2-Clause, BSD-3-Clause, ISC,
+ Zlib, Unicode-3.0, Unicode-DFS-2016, CC0-1.0, MPL-2.0); every vendored
+ crate is available under at least one of Expat or Apache-2.0 except a small
+ number under the other listed permissive licences — each crate directory
+ carries its own licence text.
+
+Files: debian/*
+Copyright: 2026 Sam Aaron <sam@sonic-pi.net>
+License: GPL-3+
+
+License: GPL-3+
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the Free
+ Software Foundation, either version 3 of the License, or (at your option)
+ any later version.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ more details.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in /usr/share/common-licenses/GPL-3.
+
+License: GPL-2+
+ This program is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the Free
+ Software Foundation; either version 2 of the License, or (at your option)
+ any later version.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ more details.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 2 can be found in /usr/share/common-licenses/GPL-2.
+
+License: GPL-2
+ This program is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License version 2 as published by
+ the Free Software Foundation.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 2 can be found in /usr/share/common-licenses/GPL-2.
+
+License: LGPL-2.1
+ This library is free software; you can redistribute it and/or modify it
+ under the terms of the GNU Lesser General Public License version 2.1 as
+ published by the Free Software Foundation.
+ .
+ On Debian systems, the complete text of the GNU Lesser General Public
+ License version 2.1 can be found in /usr/share/common-licenses/LGPL-2.1.
+
+License: Expat
+ Permission is hereby granted, free of charge, to any person obtaining a
+ copy of this software and associated documentation files (the "Software"),
+ to deal in the Software without restriction, including without limitation
+ the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ and/or sell copies of the Software, and to permit persons to whom the
+ Software is furnished to do so, subject to the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ DEALINGS IN THE SOFTWARE.
+
+License: BSL-1.0
+ Permission is hereby granted, free of charge, to any person or organization
+ obtaining a copy of the software and accompanying documentation covered by
+ this license (the "Software") to use, reproduce, display, distribute,
+ execute, and transmit the Software, and to prepare derivative works of the
+ Software, and to permit third-parties to whom the Software is furnished to
+ do so, all subject to the following:
+ .
+ The copyright notices in the Software and this entire statement, including
+ the above license grant, this restriction and the following disclaimer,
+ must be included in all copies of the Software, in whole or in part, and
+ all derivative works of the Software, unless such copies or derivative
+ works are solely in the form of machine-executable object code generated by
+ a source language processor.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT
+ SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE
+ FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
+ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ DEALINGS IN THE SOFTWARE.
+
+License: Apache-2.0
+ Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ use this file except in compliance with the License. You may obtain a copy
+ of the License at http://www.apache.org/licenses/LICENSE-2.0
+ .
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ License for the specific language governing permissions and limitations
+ under the License.
+ .
+ On Debian systems, the complete text of the Apache License version 2.0 can
+ be found in /usr/share/common-licenses/Apache-2.0.
+
+License: CC0-1.0
+ To the extent possible under law, the author(s) have dedicated all
+ copyright and related and neighboring rights to this software to the public
+ domain worldwide. This software is distributed without any warranty.
+ .
+ On Debian systems, the complete text of the CC0 1.0 Universal dedication
+ can be found in /usr/share/common-licenses/CC0-1.0.
