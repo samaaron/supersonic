@@ -55,6 +55,7 @@ add_executable(SuperSonicNativeTests
     test_control_endpoints.cpp
     test_osc_ingress.cpp
     test_multichannel.cpp
+    test_sound_out_fx.cpp
     test_audio_resume.cpp
     test_fuzzy_match.cpp
     test_scheduling_accuracy.cpp

@@ -1370,6 +1370,20 @@ extern "C" {
         return g_world->mNumOutputs + g_world->mNumInputs;
     }
 
+    // Live World bus widths. A cold swap can rebuild the World at a
+    // different width than boot, so callers that cache channel counts
+    // (JuceAudioCallback's output/input clamps) must re-sync from these
+    // after a rebuild rather than trusting boot-time values.
+    EMSCRIPTEN_KEEPALIVE
+    int get_audio_num_output_buses() {
+        return g_world ? static_cast<int>(g_world->mNumOutputs) : 0;
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    int get_audio_num_input_buses() {
+        return g_world ? static_cast<int>(g_world->mNumInputs) : 0;
+    }
+
     // Mark an audio bus "touched" so In.ar reads it. Callers from
     // INSIDE process_audio (after the per-block mBufCounter++) write
     // the current counter; pre-process_audio callers (e.g. Link Audio

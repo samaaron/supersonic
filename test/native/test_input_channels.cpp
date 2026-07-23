@@ -210,3 +210,36 @@ TEST_CASE("InputChannels: no-op does not fire swap events", "[InputChannels]") {
     REQUIRE(result.success);
     REQUIRE_FALSE(eventFired);
 }
+
+// ── Callback's cached World widths track cold-swap rebuilds ────────────────
+// The IO callback clamps its render/input copies to the World bus widths it
+// cached — if those don't follow a cold-swap rebuild, writes to buses beyond
+// the boot-time width are silently dropped at the hardware boundary (e.g.
+// boot on a 2-out device, swap to a 4-out device: Out.ar(2, sig) renders in
+// the World but never reaches channel 3) and re-enabled inputs feed buses
+// the World doesn't have. resume() re-syncs the widths from the live World;
+// the input path is the one a headless fixture can rebuild at a new width.
+
+TEST_CASE("InputChannels: callback World widths track cold-swap rebuilds",
+          "[InputChannels]") {
+    EngineFixture fix;
+    auto& cb = fix.engine().audioCallback();
+
+    // Boot: fixture world is 2-in / 2-out
+    CHECK(cb.worldInputBusChannels() == 2);
+    CHECK(cb.worldOutputBusChannels() == 2);
+
+    // Narrow: 2 -> 0 inputs
+    auto r0 = fix.engine().enableInputChannels(0);
+    REQUIRE(r0.success);
+    REQUIRE(r0.type == SwapType::Cold);
+    CHECK(cb.worldInputBusChannels() == 0);
+    CHECK(cb.worldOutputBusChannels() == 2);
+
+    // Widen past the boot width: 0 -> 4 inputs
+    auto r4 = fix.engine().enableInputChannels(4);
+    REQUIRE(r4.success);
+    REQUIRE(r4.type == SwapType::Cold);
+    CHECK(cb.worldInputBusChannels() == 4);
+    CHECK(cb.worldOutputBusChannels() == 2);
+}

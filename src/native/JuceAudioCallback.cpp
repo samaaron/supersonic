@@ -79,8 +79,8 @@ void JuceAudioCallback::initialiseWorld(uint8_t* ringBufferStorage,
     mSampleRate        = sampleRate;
     mNumOutputChannels = numOutputChannels;
     mNumInputChannels  = numInputChannels;
-    mWorldInputBusChannels  = numInputChannels;   // immutable World input-bus width
-    mWorldOutputBusChannels = numOutputChannels;  // immutable World output-bus width
+    mWorldInputBusChannels  = numInputChannels;   // re-synced in resume() after rebuilds
+    mWorldOutputBusChannels = numOutputChannels;  // re-synced in resume() after rebuilds
 
     // Choose the scsynth block size. bufLen == 0 means "use platform
     // default" (always 128 on web due to AudioWorklet; starting value on
@@ -262,6 +262,20 @@ void JuceAudioCallback::resume() {
     mOverrunCount   = 0;
     mTotalUs        = 0.0;
     mMaxUs          = 0.0;
+
+    // Re-sync the cached World bus widths: a cold swap rebuilds the World
+    // at the new device's channel counts, and the IO-callback clamps must
+    // follow or writes to buses beyond the boot-time width never reach the
+    // hardware (and re-enabled inputs never reach the World). Safe here:
+    // resume() runs on the control thread while the callback is still
+    // gated on mPaused, and the release store below publishes the update.
+    // get_audio_bus_count() > 0 doubles as a World-alive check — a failed
+    // rebuild leaves no World, in which case keep the previous widths.
+    if (get_audio_bus_count() > 0) {
+        mWorldOutputBusChannels = get_audio_num_output_buses();
+        mWorldInputBusChannels  = get_audio_num_input_buses();
+    }
+
     mPaused.store(false, std::memory_order_release);
 }
 

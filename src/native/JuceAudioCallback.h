@@ -24,6 +24,8 @@ extern "C" {
     uintptr_t get_audio_bus_pool();
     int get_audio_bus_count();
     int get_audio_first_private_bus_idx();
+    int get_audio_num_output_buses();
+    int get_audio_num_input_buses();
     void touch_audio_bus(uint32_t busIdx);
     void touch_audio_bus_for_next_block(uint32_t busIdx);
 }
@@ -98,6 +100,12 @@ public:
     void resume();
     bool isPaused() const;
 
+    // --- World bus widths (for testing) ---
+    // The cached widths the IO-callback clamps render/input copies against.
+    // Tests assert these track the live World across cold-swap rebuilds.
+    int worldOutputBusChannels() const { return mWorldOutputBusChannels; }
+    int worldInputBusChannels() const  { return mWorldInputBusChannels; }
+
     // --- Gap detector state (for testing) ---
     // Returns true if the inter-callback gap detector has a baseline timestamp,
     // meaning the next callback will measure the gap since that timestamp.
@@ -141,13 +149,19 @@ private:
     int        mSampleRate         = 48000;
     int        mNumOutputChannels  = 2;
     int        mNumInputChannels   = 2;
-    // Input bus width the World was built with (immutable). mNumInputChannels
-    // tracks the live device and can exceed it; the input-feed loop clamps to this.
+    // Input bus width of the current World. mNumInputChannels tracks the
+    // live device and can exceed it; the input-feed loop clamps to this.
+    // Set at initialiseWorld and re-synced from the live World in resume(),
+    // because a cold swap rebuilds the World at the new device's width.
     int        mWorldInputBusChannels = 0;
-    // Output bus width the World was built with (immutable). mNumOutputChannels
-    // tracks the live device and can exceed it after a hot swap to a wider
-    // device; the render loop clamps to this so channels the World never
-    // renders emit silence instead of stale bus contents.
+    // Output bus width of the current World. mNumOutputChannels tracks the
+    // live device and can exceed it after a hot swap to a wider device; the
+    // render loop clamps to this so channels the World never renders emit
+    // silence instead of stale bus contents. Set at initialiseWorld and
+    // re-synced from the live World in resume() — without the re-sync, a
+    // boot on a narrow device pins the clamp at the boot width and Out.ar
+    // writes to higher buses never reach the hardware after a cold swap
+    // onto a wider device.
     int        mWorldOutputBusChannels = 0;
     double     mSamplePosition     = 0.0;   // cumulative samples (increments by mBufLen)
     int        mOutputLatencySamples = 0;   // device DSP→DAC latency, captured at start
