@@ -710,6 +710,25 @@ if(SUPERSONIC_ENABLE_SYNTH)
         target_compile_definitions(supersonic_engine PUBLIC JUCE_JACK=1)
     endif()
 
+    # Native PipeWire backend on Linux. Like JACK above, libpipewire-0.3 is
+    # dlopen'd at runtime so there is no hard link dependency — only the
+    # headers are needed, and only at build time. Without the headers the
+    # backend is not compiled and Linux behaves exactly as before.
+    if(UNIX AND NOT APPLE)
+        find_package(PkgConfig QUIET)
+        if(PKG_CONFIG_FOUND)
+            pkg_check_modules(PIPEWIRE libpipewire-0.3)
+        endif()
+        if(PIPEWIRE_FOUND)
+            target_sources(supersonic_engine PRIVATE ${NATIVE_SRC}/PipeWireAudio.cpp)
+            target_compile_definitions(supersonic_engine PUBLIC SUPERSONIC_PIPEWIRE=1)
+            target_include_directories(supersonic_engine PRIVATE ${PIPEWIRE_INCLUDE_DIRS})
+            message(STATUS "PipeWire backend: enabled (libpipewire-0.3 ${PIPEWIRE_VERSION})")
+        else()
+            message(STATUS "PipeWire backend: disabled (libpipewire-0.3 headers not found)")
+        endif()
+    endif()
+
     # Enable JUCE's ASIO backend on Windows. The Steinberg ASIO SDK lives
     # under external_libs/ASIOSDK2.3.4 (dual-licensed Steinberg-proprietary
     # OR GPLv3 since 2.3.4 — we take it under GPLv3). Only headers from

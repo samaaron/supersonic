@@ -89,6 +89,30 @@ TEST_CASE("DeviceManagement: /d_free removes from cache", "[DeviceManagement]") 
     REQUIRE(fix.engine().stateCache().synthDefs().count("sonic-pi-beep") == 0);
 }
 
+// ── Per-driver device table broadcast ───────────────────────────────────────
+
+TEST_CASE("DeviceManagement: device report carries a well-formed per-driver table",
+          "[DeviceManagement]") {
+    EngineFixture fix;
+    fix.clearReplies();
+    // Subscribing a reply port makes the engine broadcast the report set.
+    fix.send(osc_test::message("/supersonic/devices/report",
+                               static_cast<int32_t>(1)));
+
+    // The grouped table is broadcast alongside the flat report. Headless:
+    // no device manager, so both driver fields are empty and there are no
+    // driver groups — but the header must still parse counts-first.
+    OscReply table;
+    REQUIRE(fix.waitForReply("/supersonic/device-table", table));
+    CHECK(table.parsed().argString(0) == "");   // currentDriver
+    CHECK(table.parsed().argString(1) == "");   // intendedDriver
+    CHECK(table.parsed().argInt(2) == 0);       // numDrivers
+
+    // The legacy flat report still goes out unchanged.
+    OscReply flat;
+    CHECK(fix.waitForReply("/supersonic/devices", flat));
+}
+
 TEST_CASE("DeviceManagement: /d_freeAll clears cache", "[DeviceManagement]") {
     EngineFixture fix;
     REQUIRE(fix.loadSynthDef("sonic-pi-beep"));

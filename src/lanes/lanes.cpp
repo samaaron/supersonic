@@ -33,8 +33,12 @@
 // NRT-out lane (the engine's OscEgress delegates to ss_egress_nrt_write).
 static std::atomic<int32_t> g_nrt_egress_lock{0};
 
-// Largest NRT egress frame the producer accepts (replies/notifies are small).
-static constexpr uint32_t kNrtEgressMax = 4096;
+// Largest NRT egress frame the producer accepts. Sized for the biggest
+// producer — the device reports, which reach several KB on device-heavy
+// Windows machines — but never more than half the ring so a frame can
+// always drain (small-profile builds have a 4 KB NRT-out ring).
+static constexpr uint32_t kNrtEgressMax =
+    NRT_OUT_BUFFER_SIZE / 2 < 8192 ? NRT_OUT_BUFFER_SIZE / 2 : 8192;
 
 // Per-lane consumer state (single consumer per lane, by contract). Process
 // lifetime; init_memory() resets it alongside the ring sequence counters via

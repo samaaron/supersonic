@@ -6,6 +6,7 @@
 #include "scheduler/MidiClockOut.h"
 #include "AggregateDeviceHelper.h"
 #include "DevicePolicy.h"
+#include "PipeWireAudio.h"
 #include "src/audio_processor.h"
 #include "src/lanes/lanes.h"
 #include "audio_config.h"
@@ -224,6 +225,10 @@ int SupersonicEngine::probeDeviceChannelCount(const std::string& name,
 std::vector<double> SupersonicEngine::probeDeviceSampleRates(
         const std::string& name, bool isInput) {
     std::vector<double> result;
+    // Serialise mDeviceManager access against swaps/recovery — the
+    // scanForDevices() below mutates each type's cached device lists, which
+    // listDevices() readers iterate. Same gate discipline as listDevices().
+    std::lock_guard<std::recursive_mutex> gate(mSwapMutex);
     if (name.empty() || !mDeviceManager) return result;
     auto& types = mDeviceManager->getAvailableDeviceTypes();
     for (auto* type : types) {
@@ -312,6 +317,34 @@ static void ssLifecycleLog(const char* fmt, ...) {
     va_end(args);
     fflush(stderr);
 }
+
+#if defined(__linux__) && defined(SUPERSONIC_PIPEWIRE)
+// Touch the type list before adding ours: JUCE only creates its built-in
+// types (ALSA/JACK) when the list is empty, so appending first would leave
+// PipeWire as the sole driver.
+static void registerPipeWireDriver(juce::AudioDeviceManager& dm) {
+    dm.getAvailableDeviceTypes();
+    if (auto pwType = createPipeWireAudioIODeviceType())
+        dm.addAudioDeviceType(std::move(pwType));
+}
+
+// Prefer the native PipeWire driver whenever the daemon exposes devices: it
+// shows friendly device names, follows the system default sink/source, and
+// needs neither pipewire-alsa nor pipewire-jack compat layers installed.
+// ALSA and JACK remain selectable via /supersonic/drivers/switch. The scan
+// also matters on its own: JUCE settles default-device init on the first
+// type that reports devices, and a never-scanned type reports none.
+static void preferPipeWireDriverIfAvailable(juce::AudioDeviceManager& dm) {
+    for (auto* t : dm.getAvailableDeviceTypes()) {
+        if (t->getTypeName() != "PipeWire")
+            continue;
+        t->scanForDevices();
+        if (t->getDeviceNames(false).size() > 0)
+            dm.setCurrentAudioDeviceType("PipeWire", true);
+        break;
+    }
+}
+#endif
 
 void SupersonicEngine::setEngineState(EngineState state, const std::string& reason) {
     EngineState prev = mEngineState.exchange(state);
@@ -446,6 +479,9 @@ void SupersonicEngine::init(const Config& cfg) {
 
 #ifdef __linux__
         silenceJackLogsIfPossible();
+#ifdef SUPERSONIC_PIPEWIRE
+        registerPipeWireDriver(*mDeviceManager);
+#endif
 #endif
 
         // -- Select audio driver --------------------------------------------------
@@ -457,6 +493,10 @@ void SupersonicEngine::init(const Config& cfg) {
             fprintf(stderr, "\n");
             fflush(stderr);
         }
+
+#if defined(__linux__) && defined(SUPERSONIC_PIPEWIRE)
+        preferPipeWireDriverIfAvailable(*mDeviceManager);
+#endif
 
 #ifdef _WIN32
         // Default to DirectSound on Windows.  WASAPI shared mode batches
@@ -2098,14 +2138,16 @@ void SupersonicEngine::sendDeviceReport() {
     auto current = currentDevice();
     auto mode    = deviceMode();
 
-    // Detect whether PipeWire is managing audio on Linux. The reliable
-    // signal is presence of the "PipeWire Sound Server" ALSA-typed
-    // virtual device — that's what PipeWire exposes when its ALSA
-    // compat layer is active. Passed into isPlatformClutter() so direct-
-    // hardware PCMs (which PipeWire holds exclusive) can be hidden.
+    // Detect whether PipeWire is managing audio on Linux: either the native
+    // "PipeWire" driver enumerated devices (daemon reachable, no compat
+    // layers needed), or the "PipeWire Sound Server" ALSA-typed virtual
+    // device is present (what PipeWire exposes when its ALSA compat layer
+    // is active). Passed into isPlatformClutter() so direct-hardware PCMs
+    // (which PipeWire holds exclusive) can be hidden.
     bool pipewireActive = false;
     for (auto& dev : allDevices) {
-        if (dev.typeName == "ALSA" && dev.name == "PipeWire Sound Server") {
+        if (dev.typeName == "PipeWire"
+            || (dev.typeName == "ALSA" && dev.name == "PipeWire Sound Server")) {
             pipewireActive = true;
             break;
         }
@@ -2128,35 +2170,11 @@ void SupersonicEngine::sendDeviceReport() {
             inputDevices.push_back(dev);
     }
 
-    // Dedupe by device name. JUCE on Windows enumerates the same physical
-    // device under each driver type (Windows Audio shared / exclusive /
-    // low-latency / DirectSound), so a single pair of speakers shows up
-    // four times. Keep the entry whose typeName matches the active
-    // driver, falling back to the first occurrence so devices not present
-    // in the active driver still appear. Driver selection is exposed
-    // separately via /supersonic/drivers.
-    auto dedupeByName = [&](std::vector<decltype(allDevices)::value_type>& devs) {
-        std::vector<decltype(allDevices)::value_type> out;
-        out.reserve(devs.size());
-        std::set<std::string> seen;
-        // Pass 1: entries matching the active driver win.
-        for (auto& dev : devs) {
-            if (dev.typeName == current.typeName && seen.insert(dev.name).second)
-                out.push_back(dev);
-        }
-        // Pass 2: anything not yet represented.
-        for (auto& dev : devs) {
-            if (seen.insert(dev.name).second) out.push_back(dev);
-        }
-        devs.swap(out);
-    };
-    dedupeByName(outputDevices);
-    dedupeByName(inputDevices);
-
     // Hide inputs that have already failed when paired with the current
     // output (remembered by switchDevice's input-fallback branch). Per-
     // output scoping: the same input may pair fine with a different
-    // output. "Don't show options we can't honour."
+    // output. "Don't show options we can't honour." Runs before the
+    // grouped snapshot below so the per-driver table hides them too.
     if (!current.name.empty()) {
         inputDevices.erase(
             std::remove_if(inputDevices.begin(), inputDevices.end(),
@@ -2185,6 +2203,51 @@ void SupersonicEngine::sendDeviceReport() {
         }
     }
 
+    // Per-driver device table: the same filtered devices, grouped by driver
+    // type and NOT deduped — one group per driver, so a client can render
+    // any driver's device list directly instead of inferring it from the
+    // flat list below, whose dedupe keeps only the active driver's entry
+    // for a shared name (Windows: the WASAPI variants and DirectSound
+    // expose identical endpoint names). Group order follows enumeration
+    // order. Snapshot taken before dedupeByName mutates the vectors.
+    struct DriverGroup { std::string driver; std::vector<std::string> outputs, inputs; };
+    std::vector<DriverGroup> deviceTable;
+    {
+        auto groupFor = [&](const std::string& t) -> DriverGroup& {
+            for (auto& g : deviceTable)
+                if (g.driver == t) return g;
+            deviceTable.push_back({t, {}, {}});
+            return deviceTable.back();
+        };
+        for (auto& dev : outputDevices) groupFor(dev.typeName).outputs.push_back(dev.name);
+        for (auto& dev : inputDevices)  groupFor(dev.typeName).inputs.push_back(dev.name);
+    }
+
+    // Dedupe by device name. JUCE on Windows enumerates the same physical
+    // device under each driver type (Windows Audio shared / exclusive /
+    // low-latency / DirectSound), so a single pair of speakers shows up
+    // four times. Keep the entry whose typeName matches the active
+    // driver, falling back to the first occurrence so devices not present
+    // in the active driver still appear. Driver selection is exposed
+    // separately via /supersonic/drivers.
+    auto dedupeByName = [&](std::vector<decltype(allDevices)::value_type>& devs) {
+        std::vector<decltype(allDevices)::value_type> out;
+        out.reserve(devs.size());
+        std::set<std::string> seen;
+        // Pass 1: entries matching the active driver win.
+        for (auto& dev : devs) {
+            if (dev.typeName == current.typeName && seen.insert(dev.name).second)
+                out.push_back(dev);
+        }
+        // Pass 2: anything not yet represented.
+        for (auto& dev : devs) {
+            if (seen.insert(dev.name).second) out.push_back(dev);
+        }
+        devs.swap(out);
+    };
+    dedupeByName(outputDevices);
+    dedupeByName(inputDevices);
+
     // Guard against reporting an inconsistent snapshot: JUCE's device
     // enumeration can briefly return an empty list around a device-list-
     // changed event (especially when an aggregate is being torn down /
@@ -2201,6 +2264,35 @@ void SupersonicEngine::sendDeviceReport() {
                 "(transient enumeration, probably mid-swap)\n");
         fflush(stderr);
         return;
+    }
+
+    // Build per-driver device table message
+    // Format: currentDriver(str), intendedDriver(str), numDrivers(int32),
+    //         then per driver: name(str), numOutputs(int32), output names,
+    //         numInputs(int32), input names. Counts-first throughout so
+    //         parsers never have to type-sniff. Overflow degrades to
+    //         skipping just this message — clients fall back to the flat
+    //         report, and oscpack's throw must never reach
+    //         mBootDeviceReportThread.
+    char tableBuf[8192];
+    osc::OutboundPacketStream tableMsg(tableBuf, sizeof(tableBuf));
+    bool tableOk = true;
+    try {
+        tableMsg << osc::BeginMessage("/supersonic/device-table")
+                 << currentDriver().c_str()
+                 << mIntendedDriver.c_str()
+                 << static_cast<osc::int32>(deviceTable.size());
+        for (auto& g : deviceTable) {
+            tableMsg << g.driver.c_str()
+                     << static_cast<osc::int32>(g.outputs.size());
+            for (auto& n : g.outputs) tableMsg << n.c_str();
+            tableMsg << static_cast<osc::int32>(g.inputs.size());
+            for (auto& n : g.inputs) tableMsg << n.c_str();
+        }
+        tableMsg << osc::EndMessage;
+    } catch (osc::OutOfBufferMemoryException&) {
+        ss_log("device-table dropped: exceeds %d bytes", (int) sizeof(tableBuf));
+        tableOk = false;
     }
 
     // Build output device list message
@@ -2452,7 +2544,13 @@ void SupersonicEngine::sendDeviceReport() {
     infoMsg << mIntendedDriver.c_str();
     infoMsg << osc::EndMessage;
 
-    // Fan out to all registered notify subscribers via the transport.
+    // Fan out to all registered notify subscribers via the transport. The
+    // table goes first so a client already holds the grouped lists when the
+    // flat messages trigger its UI rebuild (relay order is not guaranteed;
+    // clients must still tolerate either order).
+    if (tableOk)
+        mEgress.broadcastToTargets(reinterpret_cast<const uint8_t*>(tableMsg.Data()),
+                                   static_cast<uint32_t>(tableMsg.Size()));
     mEgress.broadcastToTargets(reinterpret_cast<const uint8_t*>(devMsg.Data()),
                                static_cast<uint32_t>(devMsg.Size()));
     mEgress.broadcastToTargets(reinterpret_cast<const uint8_t*>(inDevMsg.Data()),
@@ -4253,6 +4351,13 @@ juce::String SupersonicEngine::recreateDeviceManager() {
 #else
     teardownDeviceManager();
     mDeviceManager = std::make_unique<juce::AudioDeviceManager>();
+#if defined(__linux__) && defined(SUPERSONIC_PIPEWIRE)
+    // Same registration and preference as at boot; the scan must land before
+    // the default-device init below so the fresh manager can see PipeWire's
+    // devices at all.
+    registerPipeWireDriver(*mDeviceManager);
+    preferPipeWireDriverIfAvailable(*mDeviceManager);
+#endif
 #endif
 
     // Open the device via the shared system-default reinit: it preserves the
