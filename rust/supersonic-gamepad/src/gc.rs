@@ -37,6 +37,21 @@ use objc2_game_controller::{
 use crate::io::{assign_handle, Out, Registry};
 use crate::state::PadState;
 
+// Minimal libdispatch surface for hopping one call onto the main queue (no
+// dispatch crate dependency for a single call site).
+extern "C" {
+    static _dispatch_main_q: std::ffi::c_void;
+    fn dispatch_async_f(
+        queue: *const std::ffi::c_void,
+        context: *mut std::ffi::c_void,
+        work: extern "C" fn(*mut std::ffi::c_void),
+    );
+}
+
+extern "C" fn enable_background_events(_ctx: *mut std::ffi::c_void) {
+    unsafe { GCController::setShouldMonitorBackgroundEvents(true) };
+}
+
 /// Input reads happen every poll tick; hotplug reconciliation (an ObjC
 /// round-trip + allocations) only needs ~100ms-class latency, so it runs
 /// every Nth tick (N × the ~4ms poll pace).
@@ -69,9 +84,19 @@ pub struct GamepadIo {
 
 impl GamepadIo {
     pub fn new(registry: Arc<Mutex<Registry>>) -> Result<Self, ()> {
-        // The engine process is never the focused app, so without this the
-        // framework reports controllers but withholds their input.
-        unsafe { GCController::setShouldMonitorBackgroundEvents(true) };
+        // The engine process is never the focused app, so without
+        // setShouldMonitorBackgroundEvents the framework reports controllers
+        // but withholds their input. The call must run on the main queue: on
+        // macOS 14 (Sonoma) it takes GameController's legacy HID-monitor path,
+        // which dispatch_assert_queue()s the main queue and SIGTRAPs the
+        // process when called from this poll thread (github issue: SuperSonic
+        // crashed at boot on Sonoma). The main CFRunLoop drains the main
+        // queue in hosts that pump it (the standalone does); in hosts that
+        // don't, the block never runs and pads stay silent — the same
+        // degraded-but-alive behaviour documented above for a missing pump.
+        unsafe {
+            dispatch_async_f(&_dispatch_main_q, std::ptr::null_mut(), enable_background_events);
+        }
         Ok(GamepadIo { registry, pads: Vec::new(), tick: 0 })
     }
 
