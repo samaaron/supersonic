@@ -772,7 +772,13 @@ private:
             return;
         }
         const uint32_t maxFrames = sb->datas[0].maxsize / sizeof(float);
+#if PW_CHECK_VERSION(0, 3, 49)
+        // pw_buffer::requested arrived in 0.3.49; older headers (Ubuntu 22.04
+        // ships 0.3.48) fill the whole buffer, as pre-0.3.49 apps always did.
         uint32_t n = b->requested > 0 ? std::min((uint32_t) b->requested, maxFrames) : maxFrames;
+#else
+        uint32_t n = maxFrames;
+#endif
         n = std::min(n, kMaxQuantum);
         if (n == 0) {
             A.stream_queue_buffer(mOutStream, b);
