@@ -3,7 +3,7 @@
 SuperSonic carries everything needed to build it as a proper Debian package,
 and CI proves it works on every push: `.github/workflows/debian.yml` builds a
 real source package, compiles it in a **network-disconnected** container on
-both **trixie** (stable) and **sid** (unstable), runs the full native test
+**trixie** (stable), runs the full native test
 suite against Debian-archive dependency versions during the build, then runs
 `lintian --fail-on error,warning`, `autopkgtest`, and an install-and-boot
 smoke test in a pristine container.

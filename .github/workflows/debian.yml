@@ -7,8 +7,10 @@
 # (the transport harness against the installed server), and an
 # install-and-boot smoke test in a pristine container.
 #
-# Two targets: sid is where real maintainer uploads land; trixie (current
-# stable) proves the same source package builds for today's users.
+# Builds trixie (current stable) only: what today's users install on. sid
+# (where maintainer uploads land) is rolling and regularly breaks itself
+# mid-transition, so it doesn't gate pushes — build it on demand when
+# preparing a Debian upload.
 #
 # Same long-lived-container pattern as the juce-x86 job in native.yml: one
 # `docker run -d`, one `docker exec` per phase so failures point at the stage
@@ -45,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dist: [trixie, sid]
+        dist: [trixie]
     name: debian-${{ matrix.dist }}
     runs-on: ubuntu-latest
     timeout-minutes: 75
@@ -120,8 +122,8 @@ jobs:
             build/debian/build-area/*.buildinfo
 
       # Attach the stable-target deb to tagged releases alongside the raw
-      # binaries native.yml uploads. (sid debs are built against unstable's
-      # moving ABI — useful as CI signal, not as a release artifact.)
+      # binaries native.yml uploads. The dist guard keeps this trixie-only
+      # if sid is ever added back to the matrix.
       - name: Attach deb to release
         if: startsWith(github.ref, 'refs/tags/') && matrix.dist == 'trixie'
         uses: softprops/action-gh-release@v2
