@@ -6,6 +6,7 @@
 #include "scheduler/MidiClockOut.h"
 #include "AggregateDeviceHelper.h"
 #include "DevicePolicy.h"
+#include "AsioDriverCheck.h"
 #include "PipeWireAudio.h"
 #include "src/audio_processor.h"
 #include "src/lanes/lanes.h"
@@ -2822,11 +2823,20 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
             return skipAllProbing || name == activeDeviceName;
         };
 
+        // ASIO names come from the registry, so an installed-but-unloadable
+        // driver is listed exactly like a working one. Drop the ones the
+        // Windows loader rejects outright — probing them yields no channels,
+        // and the 0 -> 2/1 fallback below would dress them up as usable.
+        const std::set<std::string> unloadable =
+            typeNameStr == "ASIO" ? sonicpi::device::unloadableAsioDrivers()
+                                  : std::set<std::string>{};
+
         // Enumerate output devices
         auto outputNames = type->getDeviceNames(false);
         for (auto& devName : outputNames) {
             DeviceInfo info;
             info.name = devName.toStdString();
+            if (unloadable.count(info.name)) continue;
             info.typeName = typeNameStr;
 #ifdef __APPLE__
             info.transportType = lookupTransport(info.name);
@@ -2864,6 +2874,7 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
         auto inputNames = type->getDeviceNames(true);
         for (auto& devName : inputNames) {
             std::string nameStr = devName.toStdString();
+            if (unloadable.count(nameStr)) continue;
 
             DeviceInfo* existing = nullptr;
             for (auto& e : result) {
@@ -4566,8 +4577,25 @@ std::vector<std::string> SupersonicEngine::listDrivers() const {
         // hardware on their side so they pass; JACK / ASIO only show
         // when a server or driver is actually reachable.
         type->scanForDevices();
-        if (type->getDeviceNames(false).isEmpty()) continue;
-        result.push_back(type->getTypeName().toStdString());
+        auto names = type->getDeviceNames(false);
+        if (names.isEmpty()) continue;
+
+        // Same rule as listDevices: an ASIO driver the loader rejects can
+        // never be opened, so it doesn't count towards the type being
+        // reachable. When every installed ASIO driver is unloadable (e.g.
+        // x64-only drivers on an ARM64 host) the whole type is hidden
+        // rather than offering a driver with nothing selectable under it.
+        const std::string typeName = type->getTypeName().toStdString();
+        if (typeName == "ASIO") {
+            const auto unloadable = sonicpi::device::unloadableAsioDrivers();
+            bool anyUsable = false;
+            for (const auto& n : names) {
+                if (!unloadable.count(n.toStdString())) { anyUsable = true; break; }
+            }
+            if (!anyUsable) continue;
+        }
+
+        result.push_back(typeName);
     }
 
     {
