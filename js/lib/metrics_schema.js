@@ -26,11 +26,11 @@
 const COMPOSITES = {
   schedulerQueueCurrentPeak: { description: 'Current | peak scheduler queue depth' },
   schedulerLateWorstLast:    { description: 'Worst | most recent late bundle execution (ms)' },
-  debugCountBytes:           { description: 'Debug messages from scsynth (count and bytes)' },
-  oscSentCountBytes:         { description: 'Messages | bytes sent from host to scsynth' },
-  oscRecvCountBytes:         { description: 'Messages | bytes received back from scsynth' },
-  inRingUsedPeak:            { description: 'Used / peak bytes in the IN ring buffer (host to scsynth)' },
-  outRingUsedPeak:           { description: 'Used / peak bytes in the OUT ring buffer (scsynth replies to host)' },
+  debugCountBytes:           { description: 'Debug messages from SuperSonic (count and bytes)' },
+  oscSentCountBytes:         { description: 'Messages | bytes sent from host to SuperSonic' },
+  oscRecvCountBytes:         { description: 'Messages | bytes received back from SuperSonic' },
+  inRingUsedPeak:            { description: 'Used / peak bytes in the IN ring buffer (host to SuperSonic)' },
+  outRingUsedPeak:           { description: 'Used / peak bytes in the OUT ring buffer (SuperSonic replies to host)' },
   nrtRingUsedPeak:           { description: 'Used / peak bytes in the NRT-out ring buffer (replies, notifications, debug)' },
   linkAudioChannelsRate:     { description: 'Received Link Audio channels and their sample rate' },
   linkAudioPublishSinks:     { description: 'Link Audio publishing state (1 = on) | active output sinks' },
@@ -42,27 +42,27 @@ export const METRICS_SCHEMA = {
   metrics: {
     // scsynth metrics [0-8]
     scsynthProcessCount:          { offset: 0,  type: 'counter',  unit: 'count', description: 'Audio process() calls' },
-    scsynthMessagesProcessed:     { offset: 1,  type: 'counter',  unit: 'count', description: 'OSC messages processed by scsynth' },
+    scsynthMessagesProcessed:     { offset: 1,  type: 'counter',  unit: 'count', description: 'Messages drained from the IN ring and dispatched' },
     scsynthMessagesDropped:       { offset: 2,  type: 'counter',  unit: 'count', description: 'Messages dropped (ring buffer full)' },
     scsynthSchedulerDepth:        { offset: 3,  type: 'gauge',    unit: 'count', description: 'Current scheduler queue depth' },
     scsynthSchedulerPeakDepth:    { offset: 4,  type: 'gauge',    unit: 'count', description: 'Peak scheduler queue depth (high water mark)' },
     scsynthSchedulerDropped:      { offset: 5,  type: 'counter',  unit: 'count', description: 'Events dropped because the scheduler queue overflowed' },
-    scsynthSequenceGaps:          { offset: 6,  type: 'counter',  unit: 'count', description: 'Messages lost in transit from host to scsynth' },
+    scsynthSequenceGaps:          { offset: 6,  type: 'counter',  unit: 'count', description: 'Messages lost in transit from host to SuperSonic' },
     scsynthWasmErrors:            { offset: 7,  type: 'counter',  unit: 'count', description: 'WASM execution errors in audio worklet' },
     scsynthSchedulerLates:        { offset: 8,  type: 'counter',  unit: 'count', description: 'Bundles executed after their scheduled time' },
 
     // OSC Out metrics [9-10]
-    oscOutMessagesSent:           { offset: 9,  type: 'counter',  unit: 'count', description: 'OSC messages sent from host to scsynth' },
-    oscOutBytesSent:              { offset: 10, type: 'counter',  unit: 'bytes', description: 'Total bytes sent from host to scsynth' },
+    oscOutMessagesSent:           { offset: 9,  type: 'counter',  unit: 'count', description: 'OSC messages sent from host to SuperSonic' },
+    oscOutBytesSent:              { offset: 10, type: 'counter',  unit: 'bytes', description: 'Total bytes sent from host to SuperSonic' },
 
     // OSC In metrics [11-14]
-    oscInMessagesReceived:        { offset: 11, type: 'counter',  unit: 'count', description: 'OSC replies received from scsynth' },
-    oscInBytesReceived:           { offset: 12, type: 'counter',  unit: 'bytes', description: 'Total bytes received from scsynth' },
-    oscInMessagesDropped:         { offset: 13, type: 'counter',  unit: 'count', description: 'Replies lost in transit from scsynth to host' },
+    oscInMessagesReceived:        { offset: 11, type: 'counter',  unit: 'count', description: 'OSC replies received from SuperSonic' },
+    oscInBytesReceived:           { offset: 12, type: 'counter',  unit: 'bytes', description: 'Total bytes received from SuperSonic' },
+    oscInMessagesDropped:         { offset: 13, type: 'counter',  unit: 'count', description: 'Replies lost in transit from SuperSonic to host' },
     oscInCorrupted:               { offset: 14, type: 'counter',  unit: 'count', description: 'Corrupted messages detected in the ring buffer' },
 
     // Debug metrics [15-16]
-    debugMessagesReceived:        { offset: 15, type: 'counter',  unit: 'count', description: 'Debug messages from scsynth' },
+    debugMessagesReceived:        { offset: 15, type: 'counter',  unit: 'count', description: 'Debug messages from SuperSonic' },
     debugBytesReceived:           { offset: 16, type: 'counter',  unit: 'bytes', description: 'Debug bytes received' },
 
     // Ring buffer usage [17-22]
@@ -74,9 +74,9 @@ export const METRICS_SCHEMA = {
     nrtOutBufferPeakBytes:         { offset: 22, type: 'gauge',    unit: 'bytes', description: 'Peak bytes used in NRT-out ring buffer' },
 
     // scsynth late timing diagnostics [23-25]
-    scsynthSchedulerMaxLateMs:    { offset: 23, type: 'gauge',    unit: 'ms',    description: 'Maximum lateness observed in scsynth scheduler (ms)' },
-    scsynthSchedulerLastLateMs:   { offset: 24, type: 'gauge',    unit: 'ms',    description: 'Most recent late magnitude in scsynth scheduler (ms)' },
-    scsynthSchedulerLastLateTick: { offset: 25, type: 'gauge',    unit: 'count', description: 'Process count when last scsynth late occurred' },
+    scsynthSchedulerMaxLateMs:    { offset: 23, type: 'gauge',    unit: 'ms',    description: 'Maximum lateness observed in the scheduler (ms)' },
+    scsynthSchedulerLastLateMs:   { offset: 24, type: 'gauge',    unit: 'ms',    description: 'Most recent late magnitude in the scheduler (ms)' },
+    scsynthSchedulerLastLateTick: { offset: 25, type: 'gauge',    unit: 'count', description: 'Process count when the last scheduler late occurred' },
 
     // Ring buffer direct write failures [26]
     ringBufferDirectWriteFails:   { offset: 26, type: 'counter',  unit: 'count', description: 'SAB mode only: direct IN-ring writes that lost the lock race or hit a full ring and were dropped (no fallback)' },
