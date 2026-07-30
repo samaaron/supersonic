@@ -135,6 +135,17 @@ void RingReader::run() {
             elapsed > UINT32_MAX ? UINT32_MAX : elapsed);
         if (us > mMaxPassUs.load(std::memory_order_relaxed))
             mMaxPassUs.store(us, std::memory_order_relaxed);
+        // Rolling-window worst: bucket by the pass END time. Reset a slot the
+        // first time its epoch comes round again (the wrap means its old value
+        // is a full window old).
+        const uint64_t epoch = (startUs + elapsed) / kRecentBucketUs;
+        const uint32_t slot  = static_cast<uint32_t>(epoch % kRecentBuckets);
+        if (mRecentEpoch[slot].load(std::memory_order_relaxed) != epoch) {
+            mRecentMaxUs[slot].store(0, std::memory_order_relaxed);
+            mRecentEpoch[slot].store(epoch, std::memory_order_relaxed);
+        }
+        if (us > mRecentMaxUs[slot].load(std::memory_order_relaxed))
+            mRecentMaxUs[slot].store(us, std::memory_order_relaxed);
         if (us >= mSlowPassThresholdUs && mOnSlowPass) mOnSlowPass(us);
     }
 }
@@ -143,6 +154,28 @@ uint64_t RingReader::nowUs() {
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+uint32_t RingReader::recentMaxPassUs() const {
+    const uint64_t nowEpoch = nowUs() / kRecentBucketUs;
+    uint32_t worst = 0;
+    for (uint32_t i = 0; i < kRecentBuckets; ++i) {
+        // A slot is live only while its epoch is within the last kRecentBuckets
+        // ticks; older slots are leftovers from a previous window lap.
+        if (mRecentEpoch[i].load(std::memory_order_relaxed) + kRecentBuckets <= nowEpoch)
+            continue;
+        const uint32_t us = mRecentMaxUs[i].load(std::memory_order_relaxed);
+        if (us > worst) worst = us;
+    }
+    return worst;
+}
+
+void RingReader::resetMaxPassUs() {
+    mMaxPassUs.store(0, std::memory_order_relaxed);
+    for (uint32_t i = 0; i < kRecentBuckets; ++i) {
+        mRecentEpoch[i].store(0, std::memory_order_relaxed);
+        mRecentMaxUs[i].store(0, std::memory_order_relaxed);
+    }
 }
 
 uint32_t RingReader::inFlightUs() const {

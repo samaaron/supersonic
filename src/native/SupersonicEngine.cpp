@@ -38,7 +38,8 @@
 extern "C" {
     // Publishes NRT control-thread blocking into the native-stats region
     // (SC_World.cpp). Called from the watchdog poll.
-    void World_PublishNrtBlocking(uint32_t maxPassMs, uint32_t inFlightMs);
+    void World_PublishNrtBlocking(uint32_t maxPassUs, uint32_t recentWorstUs,
+                                  uint32_t inFlightUs);
 
     // Global used by init_memory() to pass external shared memory to World_New.
     // Declared extern "C" because init_memory() references it from an extern "C" block.
@@ -1842,7 +1843,11 @@ void SupersonicEngine::watchdogLoop() {
 
         // Publish control-thread blocking from here, off the gateway: a gateway
         // stuck in a handler cannot report its own stall.
-        World_PublishNrtBlocking(nrtMaxPassMs(), nrtInFlightMs());
+        // µs, not ms: healthy gateway passes are tens of µs, so integer ms
+        // rounds every reading a user ever sees to 0.
+        World_PublishNrtBlocking(mNrtGateway.maxPassUs(),
+                                 mNrtGateway.recentMaxPassUs(),
+                                 mNrtGateway.inFlightUs());
 
         // Waiting for an audio device (no device open, not a headless / manual-
         // pump build). Keep trying to open one so the engine self-heals the

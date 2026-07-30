@@ -36,6 +36,7 @@ const COMPOSITES = {
   linkAudioPublishSinks:     { description: 'Link Audio publishing state (1 = on) | active output sinks' },
   engineVersion:             { description: 'SuperSonic engine version' },
   busChannelsOutIn:          { description: 'Output | input audio bus channels' },
+  nrtWorstRecentBoot:        { description: 'Worst control pass in the last minute | since boot (ms)' },
 };
 
 export const METRICS_SCHEMA = {
@@ -151,11 +152,12 @@ export const METRICS_SCHEMA = {
     synthDefs:    { index: 0, type: 'gauge',   unit: 'count', description: 'Synth definitions currently loaded in the engine' },
     buffers:      { index: 1, type: 'gauge',   unit: 'count', description: 'Allocated sample buffers' },
     bufferBytes:  { index: 2, type: 'gauge',   unit: 'bytes', description: 'Total memory held by sample buffers' },
-    cpuAvgCenti:  { index: 3, type: 'gauge',   unit: 'centi', description: 'Average DSP load as a share of the audio callback time budget (% * 100)' },
-    cpuPeakCenti: { index: 4, type: 'gauge',   unit: 'centi', description: 'Decaying peak DSP load (% * 100). Sustained values near 100% risk audible glitches' },
+    cpuAvgCenti:  { index: 3, type: 'gauge',   unit: 'centi', description: 'Average DSP load: how much of each audio callback\'s time budget the render consumed, smoothed over the last ~10 callbacks. 100% means rendering ate the whole real-time deadline' },
+    cpuPeakCenti: { index: 4, type: 'gauge',   unit: 'centi', description: 'Peak DSP load: spikes show immediately, then decay ~5% per callback so they fade instead of pinning forever. Sustained values near 100% risk audible glitches' },
     cbOverruns:   { index: 5, type: 'counter', unit: 'count', description: 'Audio callbacks that overran their time budget' },
-    nrtMaxPassMs:  { index: 6, type: 'gauge', unit: 'ms', description: 'Longest the control thread has spent handling one batch of commands since boot' },
-    nrtInFlightMs: { index: 7, type: 'gauge', unit: 'ms', description: 'How long the control thread has been stuck in the command it is handling right now. Anything but 0 means later commands, and every reply behind them, are waiting' },
+    nrtMaxPassUs:  { index: 6, type: 'gauge', unit: 'us', description: 'Longest the control thread has spent handling one batch of commands since boot' },
+    nrtInFlightUs: { index: 7, type: 'gauge', unit: 'us', description: 'How long the control thread has been stuck in the command it is handling right now. Anything but 0 means later commands, and every reply behind them, are waiting' },
+    nrtRecentWorstUs: { index: 8, type: 'gauge', unit: 'us', description: 'Longest the control thread has spent handling one batch of commands in the last minute (unlike the since-boot worst, this decays back to quiet)' },
   },
 
   composites: COMPOSITES,

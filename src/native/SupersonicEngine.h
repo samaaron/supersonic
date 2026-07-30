@@ -208,11 +208,14 @@ public:
     static bool schedFlushSink(void* ctx, const void* callCtx, const uint8_t* data, std::size_t len);
 
     // NRT control-thread blocking, milliseconds. maxPass is the high-water mark
-    // since boot (or the last reset); inFlight is non-zero only while a pass is
-    // running long right now. Tests assert on these directly rather than on
-    // wall-clock deadlines, which a loaded CI runner cannot honour.
-    uint32_t nrtMaxPassMs()  const { return mNrtGateway.maxPassUs()  / 1000; }
-    uint32_t nrtInFlightMs() const { return mNrtGateway.inFlightUs() / 1000; }
+    // since boot (or the last reset); recentWorst is the worst pass in the
+    // trailing ~60 s window (decays back to quiet); inFlight is non-zero only
+    // while a pass is running long right now. Tests assert on these directly
+    // rather than on wall-clock deadlines, which a loaded CI runner cannot
+    // honour.
+    uint32_t nrtMaxPassMs()      const { return mNrtGateway.maxPassUs()       / 1000; }
+    uint32_t nrtRecentWorstMs()  const { return mNrtGateway.recentMaxPassUs() / 1000; }
+    uint32_t nrtInFlightMs()     const { return mNrtGateway.inFlightUs()      / 1000; }
     void     resetNrtMaxPass()     { mNrtGateway.resetMaxPassUs(); }
 
     // Run device work off the NRT gateway, in submission order. Enumerating or

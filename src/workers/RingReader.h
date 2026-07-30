@@ -90,7 +90,13 @@ public:
 
     // Longest drain pass observed, microseconds (high-water mark).
     uint32_t maxPassUs() const { return mMaxPassUs.load(std::memory_order_relaxed); }
-    void resetMaxPassUs() { mMaxPassUs.store(0, std::memory_order_relaxed); }
+    void resetMaxPassUs();
+
+    // Longest drain pass completed within the trailing window (~60 s),
+    // microseconds. A since-boot high-water mark can only ever grow, so it
+    // says nothing about whether the stall was five seconds or five hours
+    // ago — this decays back to quiet once the window slides past.
+    uint32_t recentMaxPassUs() const;
 
     // Microseconds the current pass has been running; 0 between passes. A
     // high-water mark only records a stall once it ENDS — this shows one that
@@ -133,6 +139,14 @@ private:
     // between passes, so a reader can tell "blocked now" from "was slow once".
     std::atomic<uint64_t>  mPassStartUs{0};
     std::atomic<uint32_t>  mMaxPassUs{0};
+    // Rolling-window worst: per-bucket max, keyed by the bucket's absolute
+    // epoch (nowUs / kRecentBucketUs) so a reader can drop buckets that have
+    // slid out of the window without any timer. Written only by the reader
+    // thread; relaxed loads elsewhere (display-only).
+    static constexpr uint32_t kRecentBuckets  = 12;
+    static constexpr uint64_t kRecentBucketUs = 5'000'000;   // 12 x 5 s = 60 s window
+    std::atomic<uint64_t>  mRecentEpoch[kRecentBuckets] {};
+    std::atomic<uint32_t>  mRecentMaxUs[kRecentBuckets] {};
     uint32_t               mSlowPassThresholdUs = 250'000;   // 250 ms
     std::function<void(uint32_t)> mOnSlowPass;
 

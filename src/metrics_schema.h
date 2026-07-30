@@ -115,11 +115,12 @@ inline constexpr NativeStatInfo kNativeStats[] = {
     { 0, "synthDefs", "count", "Synth definitions currently loaded in the engine" },
     { 1, "buffers", "count", "Allocated sample buffers" },
     { 2, "bufferBytes", "bytes", "Total memory held by sample buffers" },
-    { 3, "cpuAvgCenti", "centi", "Average DSP load as a share of the audio callback time budget (% * 100)" },
-    { 4, "cpuPeakCenti", "centi", "Decaying peak DSP load (% * 100). Sustained values near 100% risk audible glitches" },
+    { 3, "cpuAvgCenti", "centi", "Average DSP load: how much of each audio callback's time budget the render consumed, smoothed over the last ~10 callbacks. 100% means rendering ate the whole real-time deadline" },
+    { 4, "cpuPeakCenti", "centi", "Peak DSP load: spikes show immediately, then decay ~5% per callback so they fade instead of pinning forever. Sustained values near 100% risk audible glitches" },
     { 5, "cbOverruns", "count", "Audio callbacks that overran their time budget" },
-    { 6, "nrtMaxPassMs", "ms", "Longest the control thread has spent handling one batch of commands since boot" },
-    { 7, "nrtInFlightMs", "ms", "How long the control thread has been stuck in the command it is handling right now. Anything but 0 means later commands, and every reply behind them, are waiting" },
+    { 6, "nrtMaxPassUs", "us", "Longest the control thread has spent handling one batch of commands since boot" },
+    { 7, "nrtInFlightUs", "us", "How long the control thread has been stuck in the command it is handling right now. Anything but 0 means later commands, and every reply behind them, are waiting" },
+    { 8, "nrtRecentWorstUs", "us", "Longest the control thread has spent handling one batch of commands in the last minute (unlike the since-boot worst, this decays back to quiet)" },
 };
 
 // Rows combining several metrics in one reading ("current | peak", ...).
@@ -142,6 +143,7 @@ inline constexpr CompositeInfo kComposites[] = {
     { "linkAudioPublishSinks", "Link Audio publishing state (1 = on) | active output sinks" },
     { "engineVersion", "SuperSonic engine version" },
     { "busChannelsOutIn", "Output | input audio bus channels" },
+    { "nrtWorstRecentBoot", "Worst control pass in the last minute | since boot (ms)" },
 };
 
 inline const char* descriptionForComposite(const char* key)

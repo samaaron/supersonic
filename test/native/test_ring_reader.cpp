@@ -248,6 +248,52 @@ TEST_CASE("RingReader reports how long a blocking handler held the thread",
     REQUIRE(reader.maxPassUs() == 0);
 }
 
+TEST_CASE("RingReader tracks the worst pass in the recent window",
+          "[RingReader][blocking]") {
+    constexpr uint32_t kSize = 4096;
+    std::vector<uint8_t> buffer(kSize, 0);
+    std::atomic<int32_t> head{0}, tail{0}, sequence{0}, writeLock{0};
+    std::atomic<uint32_t> wake{0};
+    std::atomic<int> gotCount{0};
+
+    RingReader reader("test-ringreader-recent");
+    reader.setWake(&wake);
+    reader.addDrain(
+        buffer.data(), kSize, &head, &tail,
+        [&](uint32_t, const uint8_t*, uint32_t, uint32_t) {
+            std::this_thread::sleep_for(milliseconds(120));
+            gotCount.fetch_add(1, std::memory_order_release);
+        },
+        RingReader::Metrics{});
+    reader.start();
+
+    REQUIRE(reader.recentMaxPassUs() == 0);
+
+    const std::string payload = "recent";
+    REQUIRE(RingBufferWriter::write(
+        buffer.data(), kSize, &head, &tail, &sequence, &writeLock,
+        payload.data(), static_cast<uint32_t>(payload.size()), 0));
+
+    const auto deadline = steady_clock::now() + seconds(5);
+    while (gotCount.load(std::memory_order_acquire) == 0
+           && steady_clock::now() < deadline) {
+        wake.fetch_add(1, std::memory_order_release);
+        wake.notify_all();
+        std::this_thread::sleep_for(milliseconds(5));
+    }
+    REQUIRE(gotCount.load(std::memory_order_acquire) >= 1);
+
+    // The slow pass just ended, so it is inside the rolling window and the
+    // two measures agree; only the windowed copy will decay back to quiet
+    // once ~60 s slide past (not wall-clock testable here).
+    REQUIRE(reader.recentMaxPassUs() >= 100'000);
+    REQUIRE(reader.recentMaxPassUs() <= reader.maxPassUs());
+
+    // Reset clears the window along with the high-water mark.
+    reader.resetMaxPassUs();
+    REQUIRE(reader.recentMaxPassUs() == 0);
+}
+
 TEST_CASE("RingReader exposes a stall while it is still stuck",
           "[RingReader][blocking]") {
     constexpr uint32_t kSize = 4096;
