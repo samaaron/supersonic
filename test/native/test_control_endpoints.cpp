@@ -160,6 +160,65 @@ TEST_CASE("clock: combined beat_phase RPCs", "[control][clock]") {
     CHECK(r2.parsed().argDouble(0) == Catch::Approx(beat).margin(0.01));
 }
 
+// rpc/time_at_beat is the only /clock verb that takes a BEAT as input, and a
+// beat has to arrive exactly. OSC 1.0 guarantees only float32, whose ulp is
+// 2**-8 beats once the session beat count passes 32768 — at 60bpm that is 3.9ms
+// of wall time, so a float32 beat puts ~2ms of error into every beat->time
+// conversion (i.e. every Spider sleep in clock bpm mode). Beats therefore
+// arrive as int64 microbeats, which is Link's own representation
+// (ableton/link/Beats.hpp) and matches how the sibling verbs carry time.
+//
+// Asserted as a difference between two nearby beats, so the check needs no
+// knowledge of the session's beat origin: 0.001 beat at 60bpm is 1000us.
+TEST_CASE("clock: rpc/time_at_beat carries a beat exactly as microbeats",
+          "[control][clock]") {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.defaultBpm = 60.0;
+    EngineFixture fx(cfg);
+
+    // A beat magnitude where float32 is coarse: 40000 is in [2**15, 2**16).
+    const int64_t beatA_ub = 40'000'000'000LL;   // 40000.000 beats
+    const int64_t beatB_ub = 40'000'001'000LL;   // 40000.001 beats
+
+    auto timeAtMicrobeats = [&](int64_t ub, const char* what) {
+        fx.clearReplies();
+        osc_test::Builder b;
+        b.begin("/clock/rpc/time_at_beat")
+            << static_cast<osc::int64>(ub) << 4.0f;
+        fx.send(b.end());
+        OscReply r;
+        INFO(what);
+        REQUIRE(fx.waitForReply("/clock/rpc/time_at_beat.reply", r));
+        return r.parsed().argInt64(0);
+    };
+
+    const int64_t tA = timeAtMicrobeats(beatA_ub, "beat A");
+    const int64_t tB = timeAtMicrobeats(beatB_ub, "beat B");
+
+    CHECK(tA > 1'000'000'000'000'000LL);   // NTP-1900 micros domain
+    // 0.001 beat at 60bpm == 1000us. A float32 beat would snap both requests
+    // onto the 2**-8 grid and answer 0us or 3906us apart.
+    CHECK(static_cast<double>(tB - tA) == Catch::Approx(1000.0).margin(20.0));
+}
+
+// The float32 form stays accepted: a Spider built before the microbeat change
+// (or any third-party client using only the OSC 1.0 core types) must keep
+// working rather than have its request silently dropped — an ignored request
+// means no reply at all, so the client blocks until its RPC times out.
+TEST_CASE("clock: rpc/time_at_beat still accepts a float32 beat",
+          "[control][clock]") {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.defaultBpm = 60.0;
+    EngineFixture fx(cfg);
+
+    osc_test::Builder b;
+    b.begin("/clock/rpc/time_at_beat") << 8.0f << 4.0f;
+    fx.send(b.end());
+    OscReply r;
+    REQUIRE(fx.waitForReply("/clock/rpc/time_at_beat.reply", r));
+    CHECK(r.parsed().argInt64(0) > 1'000'000'000'000'000LL);
+}
+
 // A /clock verb nothing owns must refuse explicitly (echoing the offending
 // address) instead of vanishing, so clients can tell "unsupported" from
 // "lost datagram".

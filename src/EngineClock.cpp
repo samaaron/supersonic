@@ -203,8 +203,18 @@ bool handleClockCoreOsc(SuperClock& clock, const uint8_t* data, uint32_t size,
         }
         if (std::strcmp(verb, "rpc/time_at_beat") == 0) {
             auto it = msg.ArgumentsBegin();
-            if (it == msg.ArgumentsEnd() || !it->IsFloat()) return true;
-            const float b = it->AsFloatUnchecked(); ++it;
+            if (it == msg.ArgumentsEnd()) return true;
+            // int64 microbeats carries a beat exactly; float32 loses ~2ms once
+            // the beat count passes 32768. float32 kept for older clients.
+            double b;
+            if (it->IsInt64())
+                b = static_cast<double>(it->AsInt64Unchecked())
+                    / supersonic::kMicrobeatsPerBeat;
+            else if (it->IsFloat())
+                b = it->AsFloatUnchecked();
+            else
+                return true;
+            ++it;
             if (it == msg.ArgumentsEnd() || !it->IsFloat()) return true;
             const float q = it->AsFloatUnchecked();
             char ra[96], buf[128];

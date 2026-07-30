@@ -18,6 +18,10 @@ namespace supersonic {
 // Seconds between the NTP epoch (1900) and the Unix epoch (1970).
 inline constexpr double kNtpEpochOffset = 2208988800.0;
 
+// Link's own beat unit (ableton/link/Beats.hpp): beats travel as int64
+// microbeats, as times travel as int64 micros.
+inline constexpr double kMicrobeatsPerBeat = 1.0e6;
+
 // Gain of the slow drift-correction IIRs (audio-thread NTP in TimeSource,
 // Link-domain host anchor in SuperClock::linkAudioHostMicros): converge toward
 // the reference at ~1% per audio callback — fast enough to track real drift,
