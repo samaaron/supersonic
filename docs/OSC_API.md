@@ -328,6 +328,31 @@ session surface: visibility, peers, notify), `link_audio` (the
 follower timelines). The clock core (tempo / transport / rpc /
 timelines / start_stop_sync / time) is answered on every build.
 
+### `→ /clock/[tl/]rpc/beat_at_time h:ntpMicros f:quantum`
+
+**Reply:** `← …rpc/beat_at_time.reply d:beat`
+
+The timeline's beat at an NTP time.
+
+### `→ /clock/[tl/]rpc/phase_at_time h:ntpMicros f:quantum`
+
+**Reply:** `← …rpc/phase_at_time.reply d:phase`
+
+The timeline's phase within `quantum` at an NTP time — the beat above
+wrapped into `[0, quantum)`.
+
+### `→ /clock/[tl/]rpc/time_at_beat h:microbeats f:quantum`
+
+**Reply:** `← …rpc/time_at_beat.reply h:ntpMicros`
+
+The NTP time of a beat: the inverse of `rpc/beat_at_time`.
+
+The beat arrives as int64 **microbeats** (1 beat = 1e6), Link's own beat
+unit. `f:beat` is also accepted for older clients, but is lossy: float32
+resolves a beat to 2**-8 once the count passes 32768, which is 3.9ms at
+60 BPM. Replies carry beats as `d`, so a client that reads a beat here
+and sends it back must scale it to microbeats to keep it.
+
 ### `→ /clock/[tl/]rpc/beat_phase_at_time h:ntpMicros f:quantum`
 
 **Reply:** `← …rpc/beat_phase_at_time.reply d:beat d:phase`
