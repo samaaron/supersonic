@@ -105,6 +105,37 @@ elseif(NOT EMSCRIPTEN)
     add_compile_options("$<$<CONFIG:Release>:-g>")
 endif()
 
+# ─── IEEE single precision on 32-bit x86 ─────────────────────────────────────
+# 32-bit x86 defaults to -mfpmath=387, so float expressions evaluate in 80-bit
+# x87 registers (FLT_EVAL_METHOD 2) and round to 32 bits only when the compiler
+# happens to spill. Whether a value spills depends on register pressure, which
+# depends on inlining and loop shape — so the same arithmetic gives different
+# answers at different block sizes.
+#
+# That breaks the audio path, not just the tests: SPLimiterCore's ceiling proof
+# and its block-size independence both assume IEEE single precision, which is
+# what SSE and NEON give on every other target. An x87 build is the odd one out.
+#
+# -fexcess-precision=standard rounds after each operation, restoring those
+# semantics without raising the CPU baseline. That baseline matters here:
+# debian/control is Architecture: any, and Debian's i386 port targets i686,
+# which does not guarantee SSE2 — so -msse2 -mfpmath=sse (simpler and faster,
+# but SSE2-only hardware from 2001 onward) is deliberately not used.
+# -ffloat-store is the fallback for a compiler without the flag.
+if(NOT MSVC AND NOT EMSCRIPTEN
+   AND CMAKE_SIZEOF_VOID_P EQUAL 4
+   AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i[3-6]86|x86)$")
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-fexcess-precision=standard" SS_HAS_EXCESS_PRECISION)
+    if(SS_HAS_EXCESS_PRECISION)
+        add_compile_options(-fexcess-precision=standard)
+        message(STATUS "SuperSonic: 32-bit x86 — IEEE float via -fexcess-precision=standard")
+    else()
+        add_compile_options(-ffloat-store)
+        message(STATUS "SuperSonic: 32-bit x86 — IEEE float via -ffloat-store (fallback)")
+    endif()
+endif()
+
 # ─── JUCE via FetchContent (or a system install) ─────────────────────────────
 include(FetchContent)
 

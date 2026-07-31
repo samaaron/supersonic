@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 using sonicpi::dsp::SPLimiterCore;
@@ -94,6 +95,16 @@ std::vector<float> run(SPLimiterCore& core, const std::vector<float>& in, float 
         pos += static_cast<std::size_t>(n);
     }
     return out;
+}
+
+// The correctly-rounded float product of two floats. Two 24-bit mantissas
+// multiply exactly inside a double's 53, so rounding that once to float is
+// by definition what float arithmetic owes — computing it this way keeps an
+// exact comparison from depending on whether the compiler happened to keep
+// an intermediate in a wider register (32-bit x86 evaluates float
+// expressions in 80-bit x87 registers unless told otherwise).
+float exactProduct(float a, float b) {
+    return static_cast<float>(static_cast<double>(a) * static_cast<double>(b));
 }
 
 // The assertion that matters. Returns the worst offending sample index,
@@ -531,8 +542,8 @@ TEST_CASE("SPLimiter2 applies one identical gain to both channels", "[splimiter]
         for (int i = d; i < n; ++i) {
             const auto u = static_cast<std::size_t>(i);
             const auto v = static_cast<std::size_t>(i - d);
-            REQUIRE(ol[u] == gain[u] * l[v]);
-            REQUIRE(orr[u] == gain[u] * r[v]);
+            REQUIRE(ol[u] == exactProduct(gain[u], l[v]));
+            REQUIRE(orr[u] == exactProduct(gain[u], r[v]));
         }
     }
 }
@@ -607,6 +618,620 @@ TEST_CASE("SPLimiter2 is transparent below the ceiling", "[splimiter]") {
         REQUIRE(gain[u] == 1.0f);
         REQUIRE(ol[u] == l[v]);
         REQUIRE(orr[u] == r[v]);
+    }
+}
+
+// =============================================================================
+// Never louder than it was given
+//
+// A limiter that can boost is a fader with a bug in it. The gain path is
+// built from r = min(1, L/|x|), a sliding minimum, an envelope that only
+// sits below its input, and a normalised kernel over values that are all
+// <= 1, so unity is a hard upper bound at every stage.
+// =============================================================================
+
+TEST_CASE("SPLimiter never boosts", "[splimiter]") {
+    const int d = 72;
+    const int n = 24000;
+
+    // Quiet, loud, and straddling the ceiling: a boost bug could hide in
+    // any one of them.
+    for (float drive : {0.01f, 0.5f, 0.99f, 1.01f, 8.0f}) {
+        std::vector<float> sig(n);
+        Rng rng(606);
+        for (int i = 0; i < n; ++i) sig[i] = rng.next() * drive;
+
+        Fixture fx(d);
+        std::vector<float> out(n, 0.0f), gain(n, 0.0f);
+        for (int pos = 0; pos < n; pos += 64) {
+            const int c = std::min(64, n - pos);
+            fx.core().process(sig.data() + pos, out.data() + pos, c, 0.99f, 0.05f,
+                              gain.data() + pos);
+        }
+
+        INFO("drive " << drive);
+        for (int i = d; i < n; ++i) {
+            const auto u = static_cast<std::size_t>(i);
+            const auto v = static_cast<std::size_t>(i - d);
+            REQUIRE(gain[u] <= 1.0f);
+            REQUIRE(gain[u] >= 0.0f);
+            // The sample it carries can only have got quieter.
+            REQUIRE(std::fabs(out[u]) <= std::fabs(sig[v]));
+        }
+    }
+}
+
+// =============================================================================
+// Gain continuity
+//
+// A step in the gain is a click, and on a master bus a click is audible
+// over everything. The smoother is three cascaded boxes of length B, and
+// each box is a running mean, so one sample can move its output by at
+// most (range of its input)/B. The input to the first box is in [0, 1],
+// so 1/B bounds the whole cascade. Asserting against the derived bound
+// rather than a measured constant keeps this meaningful if the kernel is
+// ever retuned.
+// =============================================================================
+
+TEST_CASE("SPLimiter gain moves too smoothly to click", "[splimiter]") {
+    const int n = 24000;
+
+    // Sparse full-scale impulses on silence: the largest gain excursion
+    // the smoother can be asked for, since the gain must go from unity to
+    // deep reduction and back with nothing in between.
+    std::vector<float> sig(n, 0.0f);
+    for (int i = 100; i < n; i += 977) sig[static_cast<std::size_t>(i)] = 50.0f;
+
+    double previous = 1.0;
+    for (int d : {SPLimiterCore::kMinLookahead, 8, 16, 32, 72, 144, 480}) {
+        Fixture fx(d);
+        std::vector<float> out(n, 0.0f), gain(n, 0.0f);
+        for (int pos = 0; pos < n; pos += 64) {
+            const int c = std::min(64, n - pos);
+            fx.core().process(sig.data() + pos, out.data() + pos, c, 0.99f, 0.05f,
+                              gain.data() + pos);
+        }
+
+        double worst = 0.0;
+        for (std::size_t i = 1; i < gain.size(); ++i) {
+            worst = std::max(worst, std::fabs(static_cast<double>(gain[i]) - gain[i - 1]));
+        }
+        const double bound = 1.0 / SPLimiterCore::boxLength(d);
+
+        INFO("lookahead " << d << ", worst step " << worst << ", bound " << bound);
+        REQUIRE(worst <= bound);
+
+        // And a longer look-ahead is always the smoother one, which is
+        // what makes the parameter mean something.
+        REQUIRE(worst < previous);
+        previous = worst;
+    }
+}
+
+// =============================================================================
+// Non-finite input
+//
+// A runaway synth reaches the master bus as finite-but-enormous, or as
+// Inf/NaN if sanitize upstream ever lets one through. Garbage in may be
+// garbage out for the samples themselves, but it must not poison the
+// limiter: the gain state has to survive so the *next* sound is limited
+// correctly. A master limiter that latches on one bad sample takes the
+// whole session down with it.
+// =============================================================================
+
+TEST_CASE("SPLimiter contains non-finite input and recovers", "[splimiter]") {
+    const int d = 72;
+    const int n = 24000;
+    const int burstFrom = 1000;
+    const int burstLen = 10;
+    const float level = 0.99f;
+
+    struct Case { const char* name; float value; };
+    const Case cases[] = {
+        {"+Inf", std::numeric_limits<float>::infinity()},
+        {"-Inf", -std::numeric_limits<float>::infinity()},
+        {"NaN", std::numeric_limits<float>::quiet_NaN()},
+        {"1e30", 1e30f},
+        {"denormal", 1e-40f},
+    };
+
+    for (const auto& c : cases) {
+        Fixture fx(d);
+        // Ordinary quiet programme either side of the burst, so the tail
+        // shows whether the limiter came back.
+        std::vector<float> sig(n, 0.0f);
+        for (int i = 0; i < n; ++i) {
+            sig[static_cast<std::size_t>(i)] =
+                0.3f * static_cast<float>(std::sin(2.0 * kPi * 220.0 * i / kSR));
+        }
+        for (int i = burstFrom; i < burstFrom + burstLen; ++i) {
+            sig[static_cast<std::size_t>(i)] = c.value;
+        }
+
+        std::vector<float> out(n, 0.0f);
+        for (int pos = 0; pos < n; pos += 64) {
+            const int cc = std::min(64, n - pos);
+            fx.core().process(sig.data() + pos, out.data() + pos, cc, level, 0.05f);
+        }
+
+        INFO(c.name);
+
+        // Contamination is confined to the samples that actually carried
+        // it through the delay line — it does not spread.
+        int nonFinite = 0;
+        for (int i = 0; i < n; ++i) {
+            if (!std::isfinite(out[static_cast<std::size_t>(i)])) ++nonFinite;
+        }
+        REQUIRE(nonFinite <= burstLen);
+
+        // Well past the burst, the limiter is doing its job again: finite,
+        // under the ceiling, and still passing audio rather than sitting
+        // at zero gain forever.
+        double tailPeak = 0.0;
+        for (int i = n / 2; i < n; ++i) {
+            const float v = out[static_cast<std::size_t>(i)];
+            REQUIRE(std::isfinite(v));
+            tailPeak = std::max(tailPeak, static_cast<double>(std::fabs(v)));
+        }
+        REQUIRE(tailPeak <= level * (1.0 + kTol));
+        REQUIRE(tailPeak > 0.1);
+        REQUIRE(std::isfinite(fx.core().currentGain()));
+        REQUIRE(fx.core().currentGain() > 0.5f);
+        REQUIRE(fx.guardsIntact());
+    }
+}
+
+// =============================================================================
+// Sample rate
+//
+// Sonic Pi runs at whatever the device gives it. The look-ahead is
+// specified in seconds and converted per rate, so the guarantee has to
+// survive that conversion rather than holding only at 48k.
+// =============================================================================
+
+TEST_CASE("SPLimiter holds the ceiling at every sample rate", "[splimiter]") {
+    const float level = 0.99f;
+    for (double sr : {44100.0, 48000.0, 88200.0, 96000.0, 192000.0}) {
+        const int d = SPLimiterCore::lookaheadSamples(0.0015f, sr);
+        Fixture fx(d, 1, sr);
+        REQUIRE(fx.core().latencySamples() == d);
+
+        const int n = static_cast<int>(sr);
+        std::vector<float> sig(n);
+        Rng rng(19);
+        for (int i = 0; i < n; ++i) sig[i] = rng.next() * 6.0f;
+
+        const auto out = run(fx.core(), sig, level, 0.05f, 64);
+        INFO("sample rate " << sr << ", lookahead " << d);
+        REQUIRE(firstOvershoot(out, level) == -1);
+        REQUIRE(fx.guardsIntact());
+    }
+}
+
+// =============================================================================
+// Mono and stereo agree
+//
+// SPLimiter2 fed the same signal on both channels must be the mono
+// SPLimiter, exactly. If the two paths ever drift apart, a mix that
+// happens to be mono changes when it is routed through the stereo UGen.
+// =============================================================================
+
+TEST_CASE("SPLimiter2 on identical channels matches the mono path", "[splimiter]") {
+    const int d = 72;
+    const int n = 24000;
+    std::vector<float> sig(n);
+    Rng rng(5150);
+    for (int i = 0; i < n; ++i) sig[i] = rng.next() * 5.0f;
+
+    Fixture mono(d, 1);
+    const auto om = run(mono.core(), sig, 0.99f, 0.05f, 64);
+
+    Fixture stereo(d, 2);
+    std::vector<float> ol(n, 0.0f), orr(n, 0.0f);
+    for (int pos = 0; pos < n; pos += 64) {
+        const int c = std::min(64, n - pos);
+        stereo.core().process(sig.data() + pos, sig.data() + pos, ol.data() + pos,
+                              orr.data() + pos, c, 0.99f, 0.05f);
+    }
+
+    // Bit-exact, not close: the detector sees max(|l|,|r|) = |x| and the
+    // arithmetic is otherwise identical, so there is nothing to round
+    // differently.
+    REQUIRE(ol == om);
+    REQUIRE(orr == om);
+}
+
+// =============================================================================
+// Distortion
+//
+// Multiplying by a gain that moves within a cycle *is* harmonic
+// distortion, and it is the measurement that separates a transparent
+// limiter from an audibly grubby one. The sliding minimum runs over
+// D+1 samples, and |x| of a sine repeats every half period, so once
+// D >= sr/(2f) the window always spans a whole half period, the minimum
+// is constant, and the gain stops rippling: distortion goes to zero, not
+// merely low. Below that corner the ripple is bounded and falls fast
+// with frequency.
+// =============================================================================
+
+namespace {
+
+// Magnitude of one bin, over an exact integer number of periods so no
+// leakage lands in the harmonic bins.
+double binMag(const std::vector<float>& x, int from, int len, double freq, double sr) {
+    double re = 0.0, im = 0.0;
+    for (int i = 0; i < len; ++i) {
+        const double ph = 2.0 * kPi * freq * i / sr;
+        re += x[static_cast<std::size_t>(from + i)] * std::cos(ph);
+        im -= x[static_cast<std::size_t>(from + i)] * std::sin(ph);
+    }
+    return 2.0 * std::sqrt(re * re + im * im) / len;
+}
+
+// Total harmonic distortion of the steady-state output for a sine of
+// `freq` driven `drive` times over the ceiling.
+double measureThd(int d, double freq, float drive, float level) {
+    const int period = static_cast<int>(kSR / freq);
+    const int cycles = std::max(8, static_cast<int>(kSR / period));
+    const int len = period * cycles;
+    const int settle = static_cast<int>(kSR);  // a second is far past the release
+    const int n = len + 2 * settle;
+
+    std::vector<float> sig(n);
+    for (int i = 0; i < n; ++i) {
+        sig[static_cast<std::size_t>(i)] =
+            drive * static_cast<float>(std::sin(2.0 * kPi * freq * i / kSR));
+    }
+
+    Fixture fx(d);
+    const auto out = run(fx.core(), sig, level, 0.05f, 64);
+
+    const double fund = binMag(out, settle, len, freq, kSR);
+    double harmonics = 0.0;
+    for (int h = 2; h <= 20; ++h) {
+        const double hf = freq * h;
+        if (hf >= kSR / 2.0) break;
+        const double m = binMag(out, settle, len, hf, kSR);
+        harmonics += m * m;
+    }
+    return std::sqrt(harmonics) / fund;
+}
+
+}  // namespace
+
+TEST_CASE("SPLimiter is distortion-free above the look-ahead corner", "[splimiter]") {
+    const int d = 72;
+    const float level = 0.99f;
+    // Frequencies chosen to divide 48 kHz exactly, so every harmonic bin
+    // is an exact integer number of periods.
+    const double corner = kSR / (2.0 * d);  // 333 Hz at d = 72
+
+    for (double f : {500.0, 1000.0, 4000.0}) {
+        REQUIRE(f > corner);
+        const double thd = measureThd(d, f, 2.0f, level);
+        INFO("freq " << f << " THD " << (thd * 100.0) << " %");
+        // Numerically zero: the gain is genuinely constant here, so this
+        // is float noise and nothing else.
+        REQUIRE(thd < 1e-6);
+    }
+}
+
+TEST_CASE("SPLimiter keeps low-frequency distortion bounded", "[splimiter]") {
+    const int d = 72;
+    const float level = 0.99f;
+
+    // Below the corner the gain does ripple. These bounds sit just above
+    // what the current design measures, so a change that made the limiter
+    // grubbier would fail rather than pass quietly.
+    struct Bound { double freq; double maxThdPercent; };
+    const Bound bounds[] = {
+        {25.0, 1.0},   // measures 0.74 %
+        {30.0, 0.8},   // measures 0.60 %
+        {50.0, 0.4},   // measures 0.29 %
+        {100.0, 0.1},  // measures 0.066 %
+        {200.0, 0.01}, // measures 0.0021 %
+    };
+
+    double previous = 100.0;
+    for (const auto& b : bounds) {
+        const double thd = measureThd(d, b.freq, 2.0f, level) * 100.0;
+        INFO("freq " << b.freq << " THD " << thd << " % (bound " << b.maxThdPercent << " %)");
+        REQUIRE(thd < b.maxThdPercent);
+        // Monotonic: distortion falls as the window covers more of the
+        // half period.
+        REQUIRE(thd < previous);
+        previous = thd;
+    }
+}
+
+TEST_CASE("SPLimiter distortion falls as look-ahead grows", "[splimiter]") {
+    const float level = 0.99f;
+    const double f = 50.0;
+
+    // 50 Hz has a half period of 480 samples, so the corner is crossed at
+    // exactly that look-ahead and distortion should vanish there.
+    double previous = 100.0;
+    for (int d : {16, 32, 72, 144}) {
+        const double thd = measureThd(d, f, 2.0f, level);
+        INFO("lookahead " << d << " THD " << (thd * 100.0) << " %");
+        REQUIRE(thd < previous);
+        previous = thd;
+    }
+    REQUIRE(measureThd(480, f, 2.0f, level) < 1e-6);
+}
+
+// =============================================================================
+// Inter-sample peaks
+//
+// The ceiling guarantee is on sample values. A D/A converter, a sample
+// rate converter and every lossy encoder reconstruct the waveform
+// *between* the samples, and that reconstruction can be higher than any
+// sample in it. This is what "true peak" means in BS.1770, and it is the
+// one place where a correct sample-peak limiter still hands a clipped
+// signal to the outside world.
+//
+// The interpolator below is checked against signals whose true peak is
+// known analytically before it is used to judge the limiter, because a
+// measurement instrument asserted against nothing is worth nothing.
+// =============================================================================
+
+namespace {
+
+// Windowed-sinc fractional interpolator. The window is centred on the
+// interpolation point rather than on the tap index, and each phase is
+// normalised to unit DC gain; getting either wrong shows up immediately
+// in the self-check below.
+class Oversampler {
+public:
+    Oversampler(int factor, int halfTaps) : mOs(factor), mHalf(halfTaps) {
+        mTaps.resize(static_cast<std::size_t>(mOs) * 2 * mHalf);
+        for (int p = 0; p < mOs; ++p) {
+            const double frac = static_cast<double>(p) / mOs;
+            double sum = 0.0;
+            for (int k = -mHalf; k < mHalf; ++k) {
+                const double t = k - frac;
+                const double s =
+                    (std::fabs(t) < 1e-12) ? 1.0 : std::sin(kPi * t) / (kPi * t);
+                const double u = (t + mHalf) / (2.0 * mHalf);
+                const double w = (u < 0.0 || u > 1.0)
+                                     ? 0.0
+                                     : 0.35875 - 0.48829 * std::cos(2 * kPi * u) +
+                                           0.14128 * std::cos(4 * kPi * u) -
+                                           0.01168 * std::cos(6 * kPi * u);
+                mTaps[idx(p, k)] = s * w;
+                sum += s * w;
+            }
+            for (int k = -mHalf; k < mHalf; ++k) mTaps[idx(p, k)] /= sum;
+        }
+    }
+
+    double peak(const std::vector<float>& x) const {
+        double pk = 0.0;
+        const int n = static_cast<int>(x.size());
+        for (int i = mHalf; i < n - mHalf; ++i) {
+            for (int p = 0; p < mOs; ++p) {
+                double acc = 0.0;
+                for (int k = -mHalf; k < mHalf; ++k) {
+                    acc += x[static_cast<std::size_t>(i + k)] * mTaps[idx(p, k)];
+                }
+                pk = std::max(pk, std::fabs(acc));
+            }
+        }
+        return pk;
+    }
+
+private:
+    std::size_t idx(int p, int k) const {
+        return static_cast<std::size_t>(p) * 2 * mHalf + static_cast<std::size_t>(k + mHalf);
+    }
+
+    int mOs;
+    int mHalf;
+    std::vector<double> mTaps;
+};
+
+const Oversampler& oversampler() {
+    static const Oversampler os(8, 32);  // BS.1770 asks for >= 4x
+    return os;
+}
+
+}  // namespace
+
+TEST_CASE("inter-sample peak meter reads known signals correctly", "[splimiter]") {
+    const int n = 8192;
+    const auto& os = oversampler();
+
+    // DC: nothing happens between the samples.
+    {
+        std::vector<float> x(n, 0.7f);
+        REQUIRE(std::fabs(os.peak(x) - 0.7) < 1e-4);
+    }
+    // A sine well below Nyquist peaks at its amplitude wherever it is sampled.
+    {
+        std::vector<float> x(n);
+        for (int i = 0; i < n; ++i) {
+            x[static_cast<std::size_t>(i)] =
+                0.8f * static_cast<float>(std::sin(2.0 * kPi * 1000.0 * i / kSR));
+        }
+        REQUIRE(std::fabs(os.peak(x) - 0.8) < 1e-4);
+    }
+    // The canonical +3 dB case: a quarter-rate sine sampled at 45 degrees,
+    // so every sample sits at 0.8/sqrt(2) and the true peak is still 0.8.
+    {
+        std::vector<float> x(n);
+        for (int i = 0; i < n; ++i) {
+            x[static_cast<std::size_t>(i)] = 0.8f * static_cast<float>(std::sin(
+                2.0 * kPi * (kSR / 4.0) * i / kSR + kPi / 4.0));
+        }
+        double samplePeak = 0.0;
+        for (float v : x) samplePeak = std::max(samplePeak, static_cast<double>(std::fabs(v)));
+        REQUIRE(std::fabs(samplePeak - 0.8 / std::sqrt(2.0)) < 1e-4);
+        REQUIRE(std::fabs(os.peak(x) - 0.8) < 1e-4);
+    }
+    // Alternating samples are a Nyquist-rate cosine: reconstruction peaks
+    // at the sample value, not above it.
+    {
+        std::vector<float> x(n);
+        for (int i = 0; i < n; ++i) x[static_cast<std::size_t>(i)] = (i & 1) ? 0.99f : -0.99f;
+        REQUIRE(std::fabs(os.peak(x) - 0.99) < 1e-4);
+    }
+}
+
+TEST_CASE("SPLimiter keeps inter-sample peaks tight on band-limited audio", "[splimiter]") {
+    const int d = 72;
+    const int n = 16384;
+    const float level = 0.99f;
+    const auto& os = oversampler();
+
+    // Programme material is band-limited well below Nyquist, which is the
+    // case that has to stay clean: a converter fed this must not clip.
+    struct Case { const char* name; std::vector<float> sig; };
+    std::vector<Case> cases;
+    {
+        std::vector<float> s(n);
+        double phase = 0.0;
+        for (int i = 0; i < n; ++i) {
+            const double f = 20.0 + 8000.0 * (static_cast<double>(i) / n);
+            phase += 2.0 * kPi * f / kSR;
+            s[static_cast<std::size_t>(i)] = 3.0f * static_cast<float>(std::sin(phase));
+        }
+        cases.push_back({"20 Hz to 8 kHz sweep at +9.5 dB", std::move(s)});
+    }
+    {
+        std::vector<float> s(n);
+        for (int i = 0; i < n; ++i) {
+            const double t = static_cast<double>(i) / kSR;
+            s[static_cast<std::size_t>(i)] =
+                static_cast<float>(2.5 * std::sin(2.0 * kPi * 110.0 * t) +
+                                   1.5 * std::sin(2.0 * kPi * 440.0 * t) +
+                                   0.8 * std::sin(2.0 * kPi * 1320.0 * t));
+        }
+        cases.push_back({"harmonic stack at +12 dB", std::move(s)});
+    }
+
+    for (const auto& c : cases) {
+        Fixture fx(d);
+        const auto out = run(fx.core(), c.sig, level, 0.05f, 64);
+        REQUIRE(firstOvershoot(out, level) == -1);
+
+        const double tp = os.peak(out);
+        const double overDb = 20.0 * std::log10(tp / level);
+        INFO(c.name << ": true peak " << tp << " (" << overDb << " dB over the ceiling)");
+        // Measures under 0.03 dB for both. Half a dB is still far below
+        // anything audible and leaves room for the meter's own error.
+        REQUIRE(overDb < 0.5);
+    }
+}
+
+// Full-band content is a different matter, and this test exists to record
+// that honestly rather than to claim a guarantee the design does not make.
+// White noise has independent consecutive samples, so its reconstruction
+// swings hard between them: the *input* here already has inter-sample
+// peaks ~6 dB above its sample peak. A sample-peak limiter preserves that
+// ratio, so the output does too. Closing this needs an oversampled
+// detector, which costs latency and CPU; the sample-peak ceiling is exact
+// either way.
+TEST_CASE("SPLimiter inter-sample behaviour on full-band content is bounded",
+          "[splimiter]") {
+    const int d = 72;
+    const int n = 16384;
+    const float level = 0.99f;
+    const auto& os = oversampler();
+
+    std::vector<float> sig(n);
+    Rng rng(12345);
+    for (int i = 0; i < n; ++i) sig[i] = rng.next() * 4.0f;
+
+    Fixture fx(d);
+    const auto out = run(fx.core(), sig, level, 0.05f, 64);
+
+    // The guarantee the design actually makes still holds exactly.
+    REQUIRE(firstOvershoot(out, level) == -1);
+
+    const double inTp = os.peak(sig);
+    double inSample = 0.0;
+    for (float v : sig) inSample = std::max(inSample, static_cast<double>(std::fabs(v)));
+    const double outTp = os.peak(out);
+
+    // The input's own inter-sample excess, which the limiter inherits
+    // rather than causes.
+    const double inExcessDb = 20.0 * std::log10(inTp / inSample);
+    const double outExcessDb = 20.0 * std::log10(outTp / level);
+    INFO("input excess " << inExcessDb << " dB, output excess " << outExcessDb << " dB");
+    REQUIRE(inExcessDb > 3.0);
+    // Measures ~5.7 dB. The bound catches a regression that made the
+    // limiter itself a source of inter-sample peaks.
+    REQUIRE(outExcessDb < 7.0);
+}
+
+// =============================================================================
+// A moving ceiling
+//
+// The proof is for a constant L. Audio already inside the delay line was
+// cleared against the ceiling in force when it entered, so lowering the
+// ceiling cannot retroactively apply to it: for up to D samples the
+// output can exceed the new ceiling, by at most the ratio of old to new.
+// That is a real property of the design, so it is pinned here rather than
+// left to be discovered on a master bus.
+// =============================================================================
+
+TEST_CASE("SPLimiter applies a lowered ceiling within the look-ahead", "[splimiter]") {
+    const int d = 72;
+    const int n = 24000;
+    const float high = 0.9f;
+    const float low = 0.1f;
+
+    std::vector<float> sig(n);
+    Rng rng(31);
+    for (int i = 0; i < n; ++i) sig[i] = rng.next() * 4.0f;
+
+    const int stepAt = 8000;
+    Fixture fx(d);
+    std::vector<float> out(n, 0.0f);
+    for (int pos = 0; pos < n; pos += 64) {
+        const int c = std::min(64, n - pos);
+        const float level = pos < stepAt ? high : low;
+        fx.core().process(sig.data() + pos, out.data() + pos, c, level, 0.05f);
+    }
+
+    // Before the step the old ceiling holds exactly.
+    for (int i = 0; i < stepAt; ++i) {
+        REQUIRE(std::fabs(out[static_cast<std::size_t>(i)]) <= high * (1.0f + kTol));
+    }
+
+    // Across the step the excess is bounded by the ratio of the ceilings,
+    // never worse.
+    int lastOver = -1;
+    double worst = 0.0;
+    for (int i = stepAt; i < n; ++i) {
+        const double v = std::fabs(out[static_cast<std::size_t>(i)]);
+        worst = std::max(worst, v);
+        if (v > low * (1.0 + kTol)) lastOver = i;
+    }
+    INFO("worst " << worst << ", settles by sample " << lastOver << " of " << stepAt);
+    REQUIRE(worst <= static_cast<double>(high) * (1.0 + kTol));
+
+    // And it is over within the look-ahead, not lingering.
+    REQUIRE(lastOver >= 0);
+    REQUIRE(lastOver - stepAt < d);
+
+    // Long after the step the new ceiling is exact.
+    for (int i = stepAt + d; i < n; ++i) {
+        REQUIRE(std::fabs(out[static_cast<std::size_t>(i)]) <= low * (1.0f + kTol));
+    }
+
+    // Raising the ceiling is safe at any moment, since the old gain was
+    // only ever more conservative.
+    Fixture up(d);
+    std::vector<float> upOut(n, 0.0f);
+    for (int pos = 0; pos < n; pos += 64) {
+        const int c = std::min(64, n - pos);
+        const float level = pos < stepAt ? low : high;
+        up.core().process(sig.data() + pos, upOut.data() + pos, c, level, 0.05f);
+    }
+    for (int i = 0; i < n; ++i) {
+        const float level = (i < stepAt) ? low : high;
+        REQUIRE(std::fabs(upOut[static_cast<std::size_t>(i)]) <= level * (1.0f + kTol));
     }
 }
 
