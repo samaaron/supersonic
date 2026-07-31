@@ -205,9 +205,49 @@ std::string SupersonicEngine::refuseWirelessMicAddition(
 }
 
 int SupersonicEngine::probeDeviceChannelCount(const std::string& name,
-                                              bool isInput) {
+                                              bool isInput,
+                                              const std::string& typeName) {
     if (name.empty() || name == "__none__") return -1;
     if (!mDeviceManager) return -1;
+
+    // The currently open device answers from its live handle: authoritative
+    // and free. Its cache entry is never probed (listDevices must not
+    // createDevice on a device that is already open), and creating a second
+    // instance below can fail or disturb the live one on some drivers.
+    if (auto* cur = mDeviceManager->getCurrentAudioDevice()) {
+        if (deviceNameMatches(cur->getName().toStdString(), name)
+            && (typeName.empty()
+                || cur->getTypeName().toStdString() == typeName)) {
+            const int n = isInput ? cur->getInputChannelNames().size()
+                                  : cur->getOutputChannelNames().size();
+            if (n > 0) return n;
+        }
+    }
+
+    // The enumerated device list already carries both channel counts and is
+    // cached, so when the caller knows which driver it means, the answer is
+    // already in hand. Falling through to createDevice() below instead costs
+    // a full driver init to re-read a cached number, around 0.7 s on ASIO,
+    // and worse for a driver whose hardware is registered but not plugged
+    // in.
+    //
+    // Only consulted when typeName is known: the same device name appears
+    // under several driver types with different channel counts (a MOTU is
+    // 2-in under ASIO and 24-in under WASAPI), so an untyped lookup could
+    // return a count belonging to a driver the swap does not target. And
+    // only trusted when the count was genuinely probed: entries that skipped
+    // probing carry placeholder counts, good enough for a device list but
+    // not for the swap decisions this feeds.
+    if (!typeName.empty()) {
+        for (const auto& dev : listDevices(false)) {
+            if (dev.typeName != typeName) continue;
+            if (!deviceNameMatches(dev.name, name)) continue;
+            if (!(isInput ? dev.inChannelsProbed : dev.outChannelsProbed)) continue;
+            const int n = isInput ? dev.maxInputChannels : dev.maxOutputChannels;
+            if (n > 0) return n;
+        }
+    }
+
     auto& types = mDeviceManager->getAvailableDeviceTypes();
     for (auto* type : types) {
         for (auto& n : type->getDeviceNames(isInput)) {
@@ -2821,6 +2861,11 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
                 info.availableBufferSizes.push_back(b);
             info.maxOutputChannels = dev->getOutputChannelNames().size();
             info.maxInputChannels  = dev->getInputChannelNames().size();
+            // Only the side the device was created on is authoritative: a
+            // wrapper created output-only reports no input channels even on
+            // a full-duplex device (the input merge below probes that side).
+            info.outChannelsProbed = info.maxOutputChannels > 0;
+            info.inChannelsProbed  = info.maxInputChannels > 0;
         };
 
         std::string typeNameStr = type->getTypeName().toStdString();
@@ -2863,6 +2908,7 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
             if (info.maxOutputChannels == 0) {
                 AudioObjectID devID = lookupID(info.name);
                 info.maxOutputChannels = scopeChannelCount(devID, false);
+                info.outChannelsProbed = info.maxOutputChannels > 0;
             }
 #else
             if (info.maxOutputChannels == 0) info.maxOutputChannels = 2;
@@ -2898,6 +2944,8 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
                     if (tempDev) {
                         existing->maxInputChannels =
                             tempDev->getInputChannelNames().size();
+                        existing->inChannelsProbed =
+                            existing->maxInputChannels > 0;
                     }
                 }
 #ifdef __APPLE__
@@ -2907,6 +2955,7 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
                 if (existing->maxInputChannels == 0) {
                     AudioObjectID devID = lookupID(existing->name);
                     existing->maxInputChannels = scopeChannelCount(devID, true);
+                    existing->inChannelsProbed = existing->maxInputChannels > 0;
                 }
 #else
                 if (existing->maxInputChannels == 0)
@@ -2933,6 +2982,7 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
             if (info.maxInputChannels == 0) {
                 AudioObjectID devID = lookupID(info.name);
                 info.maxInputChannels = scopeChannelCount(devID, true);
+                info.inChannelsProbed = info.maxInputChannels > 0;
             }
 #else
             if (info.maxInputChannels == 0) info.maxInputChannels = 1;
@@ -3434,6 +3484,19 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     bool        crossDriver       = false;
     std::string crossDriverTarget;
     std::string crossDriverDevice;
+
+    // The driver type the channel probes below should ask about: the target
+    // type on a cross-driver swap, otherwise the current one. Knowing it
+    // lets probeDeviceChannelCount answer from the cached device list
+    // rather than opening the device.
+    auto targetDeviceTypeName = [&]() -> std::string {
+        if (crossDriver) return crossDriverTarget;
+        if (!mDeviceManager) return {};
+        if (auto* dev = mDeviceManager->getCurrentAudioDevice())
+            return dev->getTypeName().toStdString();
+        return mDeviceManager->getCurrentAudioDeviceType().toStdString();
+    };
+
     if (mDeviceManager) {
         std::string juceCurrentType;
         if (auto* dev = mDeviceManager->getCurrentAudioDevice())
@@ -3594,7 +3657,8 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         // a transient AudioIODevice and reads getInputChannelNames()
         // — true count, no live-device disturbance. Probe failure
         // (-1) means "unknown"; `requested` is used as-is.
-        int probed = probeDeviceChannelCount(inputDeviceName, true);
+        int probed = probeDeviceChannelCount(inputDeviceName, true,
+                                             targetDeviceTypeName());
         int reEnableCount = (probed > 0 && probed < requested) ? probed : requested;
         if (reEnableCount != requested) {
             fprintf(stderr, "[device-setup] auto-enabling %d input channels for '%s' "
@@ -3626,8 +3690,9 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
     // current config.
     bool forceColdForChannels = false;
     if (mDeviceManager && !forceCold) {
-        int probedOut = probeDeviceChannelCount(deviceName,      false);
-        int probedIn  = probeDeviceChannelCount(inputDeviceName, true);
+        const std::string probeType = targetDeviceTypeName();
+        int probedOut = probeDeviceChannelCount(deviceName,      false, probeType);
+        int probedIn  = probeDeviceChannelCount(inputDeviceName, true,  probeType);
         if (probedOut > 0 && probedOut != mCurrentConfig.numOutputChannels)
             forceColdForChannels = true;
         if (probedIn  > 0 && probedIn  != mCurrentConfig.numInputChannels)
@@ -3708,6 +3773,19 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         // here in IASIO::init().
         if (crossDriver) {
             mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+
+            // A cross-driver change costs ~1.5 s, and essentially all of it
+            // is JUCE: setCurrentAudioDeviceType closes the open device and
+            // then does a hardcoded Thread::sleep(1500): "allow a moment for
+            // OS devices to sort themselves out, to help avoid things like
+            // DirectSound/ASIO clashes" (juce_AudioDeviceManager.cpp).
+            //
+            // Closing the device first would make JUCE take neither branch,
+            // but leaves the manager in a state its destructor cannot
+            // handle: the process faults on teardown (0xC000041D). The safe
+            // lever is shortening the sleep in the vendored JUCE via a
+            // FetchContent patch, which changes the duration without
+            // reordering the device lifecycle.
             mDeviceManager->setCurrentAudioDeviceType(
                 juce::String(crossDriverTarget), false);
         }

@@ -30,6 +30,13 @@ struct DeviceInfo {
     std::vector<int>    availableBufferSizes;
     int  maxOutputChannels = 0;
     int  maxInputChannels  = 0;
+    // Whether each channel count came from an actual device probe (or an
+    // authoritative CoreAudio query) rather than the 2-out/1-in placeholder
+    // used when probing is skipped (device currently open, aggregate live).
+    // Placeholder counts are fine for populating a device list but must not
+    // feed decisions like hot-vs-cold swap or input re-enable width.
+    bool outChannelsProbed = false;
+    bool inChannelsProbed  = false;
     uint32_t transportType = 0;              // CoreAudio transport type (macOS only)
 
     // Bluetooth and AirPlay use wireless codecs that are unsuitable for

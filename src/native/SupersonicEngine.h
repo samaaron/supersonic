@@ -572,7 +572,10 @@ private:
     // number of channels it advertises, or -1 if the name doesn't
     // match / device can't be opened. Handles the "__none__" sentinel
     // by returning -1 without probing.
-    int probeDeviceChannelCount(const std::string& name, bool isInput);
+    // typeName narrows the lookup to one driver type, which lets the answer
+    // come from the cached device list instead of opening the device.
+    int probeDeviceChannelCount(const std::string& name, bool isInput,
+                                const std::string& typeName = "");
 
     // Returns the sample rates advertised by a named device, or an
     // empty vector if the name doesn't match or the device can't be
