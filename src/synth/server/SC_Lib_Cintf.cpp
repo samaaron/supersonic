@@ -91,6 +91,9 @@ void DemoUGens_Load(InterfaceTable* table);
 // to match the PluginLoad() macro. Empty body on no-Link builds — the
 // PluginLoad function still exists, just registers nothing.
 void LinkUGen_Load(InterfaceTable* table);
+// SPLimiter: look-ahead limiter for the master bus. C++ linkage to
+// match the PluginLoad() macro.
+void SPLimiterUGen_Load(InterfaceTable* table);
 
 extern void DiskIO_Unload(void);
 extern void UIUGens_Unload(void);
@@ -143,5 +146,6 @@ void initialize_library(const char* uGensPluginPath) {
     // demo plugins (for testing plugin/unit commands)
     DemoUGens_Load(&gInterfaceTable);
     LinkUGen_Load(&gInterfaceTable);
+    SPLimiterUGen_Load(&gInterfaceTable);
 #endif // STATIC_PLUGINS
 }

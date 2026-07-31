@@ -75,6 +75,7 @@ add_executable(SuperSonicNativeTests
     test_device_selection.cpp
     test_aggregate_buffer_clamp.cpp
     test_device_policy.cpp
+    test_splimiter.cpp
     test_audio_recovery.cpp
     test_recover_audio.cpp
     test_scope_race.cpp
@@ -146,6 +147,10 @@ target_link_libraries(SuperSonicNativeTests PRIVATE
 
 target_include_directories(SuperSonicNativeTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    # SPLimiterCore.h is a plain header with no SC dependencies, so
+    # test_splimiter.cpp includes it directly rather than going through
+    # the UGen.
+    ${CMAKE_SOURCE_DIR}/src/synth/plugins
 )
 
 # Golden ring-wire corpus shared with the JS conformance test

@@ -447,6 +447,7 @@ set(SCSYNTH_PLUGIN_SOURCES
     ${SUPERSONIC_SRC}/synth/plugins/MulAddUGens.cpp
     ${SUPERSONIC_SRC}/synth/plugins/NoiseUGens.cpp
     ${SUPERSONIC_SRC}/synth/plugins/OscUGens.cpp
+    ${SUPERSONIC_SRC}/synth/plugins/SPLimiterUGen.cpp
     ${SUPERSONIC_SRC}/synth/plugins/PV_ThirdParty.cpp
     ${SUPERSONIC_SRC}/synth/plugins/PV_UGens.cpp
     ${SUPERSONIC_SRC}/synth/plugins/PanUGens.cpp
