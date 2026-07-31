@@ -120,6 +120,37 @@ int firstOvershoot(const std::vector<float>& out, float level) {
 }  // namespace
 
 // =============================================================================
+// The arithmetic the rest of this file assumes
+//
+// Every exactness claim below — block-size independence, bit-identical
+// mono and stereo paths, a reported gain that is exactly the applied one
+// — assumes a float expression evaluates as a float. 32-bit x86 defaults
+// to 80-bit x87 registers and rounds only when the compiler spills, so
+// the same arithmetic gives different answers at different block sizes.
+// CMakeLists.txt detects that target and asks for IEEE semantics back.
+//
+// This runs first so that a build where that did not take fails here,
+// naming the cause, instead of surfacing as a scatter of DSP failures
+// with values that print identically on both sides of the ==.
+// =============================================================================
+
+TEST_CASE("float expressions evaluate as float", "[splimiter]") {
+    // volatile on both sides: the store forces a round to 32 bits, and the
+    // reloads stop the compiler folding the whole thing at compile time.
+    volatile float a = 1.0f;
+    volatile float b = 3.0f;
+    volatile float quotient = a / b;
+    INFO("float arithmetic is carrying excess precision — see the "
+         "FLT_EVAL_METHOD block in CMakeLists.txt");
+    REQUIRE(quotient == a / b);
+
+    volatile float x = 0.1f;
+    volatile float y = 0.7f;
+    volatile float product = x * y;
+    REQUIRE(product == x * y);
+}
+
+// =============================================================================
 // The K <= D+1 invariant the ceiling proof rests on
 // =============================================================================
 
