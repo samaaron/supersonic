@@ -121,15 +121,27 @@ use supersonic_osc::ffi::no_unwind;
 /// sole caller of send/broadcast) indefinitely on a full kernel send buffer.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// A connection's write half: framed sends + a shutdown to unblock its reader.
+/// How many times one frame may be re-offered to a socket that refused it
+/// without taking any bytes. Bounded so a client whose refusal never clears
+/// still ends up evicted instead of parking the gateway thread.
+const WRITE_RETRIES: usize = 3;
+
+/// Pause between those retries — long enough for a momentary kernel buffer
+/// shortage to clear, short enough that the whole bounded sequence stays far
+/// inside WRITE_TIMEOUT.
+const WRITE_RETRY_PAUSE: Duration = Duration::from_millis(1);
+
+/// A connection's write half: raw writes + a shutdown to unblock its reader.
+/// Byte-level rather than write-all so the retry policy can tell "nothing went
+/// out" from "half a frame went out", which decides whether framing survived.
 trait ConnWriter: Send {
-    fn write_all_bytes(&mut self, data: &[u8]) -> std::io::Result<()>;
+    fn write_some(&mut self, data: &[u8]) -> std::io::Result<usize>;
     fn set_write_timeout(&self, d: Duration);
     fn shutdown_both(&self);
 }
 impl ConnWriter for TcpStream {
-    fn write_all_bytes(&mut self, data: &[u8]) -> std::io::Result<()> {
-        self.write_all(data)
+    fn write_some(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.write(data)
     }
     fn set_write_timeout(&self, d: Duration) {
         let _ = TcpStream::set_write_timeout(self, Some(d));
@@ -140,8 +152,8 @@ impl ConnWriter for TcpStream {
 }
 #[cfg(unix)]
 impl ConnWriter for UnixStream {
-    fn write_all_bytes(&mut self, data: &[u8]) -> std::io::Result<()> {
-        self.write_all(data)
+    fn write_some(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.write(data)
     }
     fn set_write_timeout(&self, d: Duration) {
         let _ = UnixStream::set_write_timeout(self, Some(d));
@@ -149,6 +161,42 @@ impl ConnWriter for UnixStream {
     fn shutdown_both(&self) {
         let _ = self.shutdown(Shutdown::Both);
     }
+}
+
+/// Is this write error worth re-offering the frame for?
+///
+/// `Interrupted` is EINTR — no bytes were taken and no state was lost.
+/// `Other` is where a transient kernel refusal such as ENOBUFS lands, since
+/// std has no ErrorKind for it. Everything else is either terminal (the peer
+/// is gone) or WouldBlock/TimedOut, which on a blocking socket means
+/// SO_SNDTIMEO expired: a client that stopped reading, and must be dropped
+/// rather than retried.
+fn write_retryable(e: &std::io::Error) -> bool {
+    matches!(e.kind(), ErrorKind::Interrupted | ErrorKind::Other)
+}
+
+/// Push one whole frame at a connection, resuming after a retryable refusal.
+/// An error means the connection is finished: either the peer is gone, or a
+/// refusal outlasted the retry budget with part of a frame already on the
+/// wire, which leaves the stream desynced.
+fn write_frame(w: &mut dyn ConnWriter, frame: &[u8]) -> std::io::Result<()> {
+    let (mut sent, mut retries) = (0usize, 0usize);
+    while sent < frame.len() {
+        match w.write_some(&frame[sent..]) {
+            Ok(0) => return Err(std::io::Error::from(ErrorKind::WriteZero)),
+            Ok(n) => sent += n,
+            Err(e) if write_retryable(&e) && retries < WRITE_RETRIES => {
+                retries += 1;
+                // EINTR costs nothing to re-issue; a kernel refusal needs a
+                // moment before it can clear.
+                if e.kind() != ErrorKind::Interrupted {
+                    std::thread::sleep(WRITE_RETRY_PAUSE);
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
 }
 
 /// A connection's read half, abstracted over TCP/UDS.
@@ -216,17 +264,17 @@ impl StreamServerImpl for SocketServer {
         // registry lock — a slow client must not stall unrelated sends.
         let writer = self.shared.conns.lock().unwrap().get(&conn_id).cloned();
         let Some(writer) = writer else { return false };
-        let err = match writer.lock().unwrap().write_all_bytes(&frame_packet(data)) {
+        let err = match write_frame(&mut **writer.lock().unwrap(), &frame_packet(data)) {
             Ok(()) => return true,
             Err(e) => e,
         };
-        // Write failed or hit WRITE_TIMEOUT (stuck client): a partial frame may
-        // have gone out, desyncing this connection's framing, so evict it and
-        // shut it down. The reader wakes on the shutdown and fires on_closed,
-        // pruning the client from every audience. The logged error kind
-        // separates the two cases: a blocking socket only reports
-        // WouldBlock/TimedOut once SO_SNDTIMEO expires, so those mean a client
-        // that went WRITE_TIMEOUT without reading; anything else failed outright.
+        // The frame did not make it and retrying is pointless: the peer is gone,
+        // or a refusal outlasted the budget mid-frame and this connection's
+        // framing is now suspect. Evict and shut it down; the reader wakes on
+        // the shutdown and fires on_closed, pruning the client from every
+        // audience. The logged error kind says which: WouldBlock/TimedOut is a
+        // client that went WRITE_TIMEOUT without reading, anything else failed
+        // outright.
         eprintln!("[osc] stream conn {conn_id} dropped — reply write failed: {err}");
         if let Some(w) = self.shared.conns.lock().unwrap().remove(&conn_id) {
             w.lock().unwrap().shutdown_both();
@@ -782,8 +830,8 @@ mod tests {
     }
     struct NullWriter;
     impl ConnWriter for NullWriter {
-        fn write_all_bytes(&mut self, _: &[u8]) -> std::io::Result<()> {
-            Ok(())
+        fn write_some(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            Ok(data.len())
         }
         fn set_write_timeout(&self, _: Duration) {}
         fn shutdown_both(&self) {}
@@ -802,6 +850,167 @@ mod tests {
             next_id: AtomicU32::new(1),
             readers: Mutex::new(Vec::new()),
         })
+    }
+
+    // A ConnWriter replaying scripted write outcomes, recording everything the
+    // wire actually accepted so a test can prove a frame arrived intact.
+    struct ScriptedWriter {
+        steps: VecDeque<std::io::Result<usize>>, // Ok(n) = accept n bytes
+        wrote: Arc<Mutex<Vec<u8>>>,
+        shutdowns: Arc<AtomicU32>,
+    }
+    impl ConnWriter for ScriptedWriter {
+        fn write_some(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            match self.steps.pop_front() {
+                Some(Ok(n)) => {
+                    let n = n.min(data.len());
+                    self.wrote.lock().unwrap().extend_from_slice(&data[..n]);
+                    Ok(n)
+                }
+                Some(Err(e)) => Err(e),
+                None => {
+                    self.wrote.lock().unwrap().extend_from_slice(data);
+                    Ok(data.len())
+                }
+            }
+        }
+        fn set_write_timeout(&self, _: Duration) {}
+        fn shutdown_both(&self) {
+            self.shutdowns.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    struct SendProbe {
+        server: SocketServer,
+        wrote: Arc<Mutex<Vec<u8>>>,
+        shutdowns: Arc<AtomicU32>,
+    }
+    impl SendProbe {
+        // A server holding exactly one connection (id 1) whose writer replays
+        // `steps`, so send()'s eviction policy can be exercised without a
+        // socket that would have to be coaxed into failing.
+        fn new(steps: Vec<std::io::Result<usize>>) -> Self {
+            let wrote = Arc::new(Mutex::new(Vec::new()));
+            let shutdowns = Arc::new(AtomicU32::new(0));
+            let w = ScriptedWriter {
+                steps: VecDeque::from(steps),
+                wrote: wrote.clone(),
+                shutdowns: shutdowns.clone(),
+            };
+            let shared = empty_shared();
+            shared.conns.lock().unwrap()
+                .insert(1, Arc::new(Mutex::new(Box::new(w) as Box<dyn ConnWriter>)));
+            let server = SocketServer {
+                shared,
+                accept_join: None,
+                port: 0,
+                path: None,
+            };
+            SendProbe { server, wrote, shutdowns }
+        }
+        fn send(&self, osc: &[u8]) -> bool {
+            self.server.send(1, osc)
+        }
+        fn still_registered(&self) -> bool {
+            self.server.shared.conns.lock().unwrap().contains_key(&1)
+        }
+    }
+
+    fn os_err(kind: ErrorKind) -> std::io::Result<usize> {
+        Err(std::io::Error::from(kind))
+    }
+
+    // A transient kernel refusal (ENOBUFS and friends land in Other/Uncategorized)
+    // is not a dead client: nothing of the frame went out, so the stream is still
+    // correctly framed and the send can simply be retried.
+    #[test]
+    fn transient_write_error_keeps_the_connection() {
+        let msg = encode("/status.reply", &[OscArg::Int(1)]);
+        let p = SendProbe::new(vec![
+            Err(std::io::Error::new(ErrorKind::Other, "ENOBUFS")),
+            Ok(usize::MAX), // then the whole frame goes out
+        ]);
+
+        assert!(p.send(&msg), "a retryable write must still report success");
+        assert!(p.still_registered(), "a healthy client must survive a transient");
+        assert_eq!(*p.wrote.lock().unwrap(), frame_packet(&msg),
+                   "the frame must land exactly once, intact");
+        assert_eq!(p.shutdowns.load(Ordering::Relaxed), 0);
+    }
+
+    // A transient part-way through a frame resumes at the right offset — the
+    // bytes already accepted must not be resent, or the peer desyncs.
+    #[test]
+    fn transient_mid_frame_resumes_without_duplicating() {
+        let msg = encode("/status.reply", &[OscArg::Int(1)]);
+        let p = SendProbe::new(vec![
+            Ok(6), // partial
+            Err(std::io::Error::new(ErrorKind::Other, "ENOBUFS")),
+            Ok(usize::MAX), // remainder
+        ]);
+
+        assert!(p.send(&msg));
+        assert!(p.still_registered());
+        assert_eq!(*p.wrote.lock().unwrap(), frame_packet(&msg),
+                   "resume must continue from the offset, not restart the frame");
+    }
+
+    // EINTR mid-write is the write-side twin of the reader fix: a signal must
+    // not cost a frame or a connection.
+    #[test]
+    fn interrupted_write_is_retried() {
+        let msg = encode("/status.reply", &[OscArg::Int(1)]);
+        let p = SendProbe::new(vec![
+            Ok(4),
+            os_err(ErrorKind::Interrupted),
+            Ok(usize::MAX),
+        ]);
+
+        assert!(p.send(&msg));
+        assert!(p.still_registered());
+        assert_eq!(*p.wrote.lock().unwrap(), frame_packet(&msg));
+    }
+
+    // WouldBlock/TimedOut from a blocking socket means SO_SNDTIMEO expired —
+    // a client that stopped reading for WRITE_TIMEOUT. That one must go, or it
+    // wedges the gateway thread on every subsequent send.
+    #[test]
+    fn stuck_client_is_evicted() {
+        let msg = encode("/status.reply", &[OscArg::Int(1)]);
+        for kind in [ErrorKind::WouldBlock, ErrorKind::TimedOut] {
+            let p = SendProbe::new(vec![os_err(kind)]);
+            assert!(!p.send(&msg), "{kind:?}: send must report failure");
+            assert!(!p.still_registered(), "{kind:?}: stuck client must be evicted");
+            assert_eq!(p.shutdowns.load(Ordering::Relaxed), 1,
+                       "{kind:?}: eviction must shut the socket down");
+        }
+    }
+
+    // A dead peer, and a socket accepting nothing, are both terminal.
+    #[test]
+    fn broken_connection_is_evicted() {
+        let msg = encode("/status.reply", &[OscArg::Int(1)]);
+        for steps in [vec![os_err(ErrorKind::BrokenPipe)],
+                      vec![os_err(ErrorKind::ConnectionReset)],
+                      vec![Ok(0)]] {
+            let p = SendProbe::new(steps);
+            assert!(!p.send(&msg));
+            assert!(!p.still_registered(), "a broken connection must be evicted");
+        }
+    }
+
+    // A transient that never clears still ends the connection rather than
+    // parking the gateway thread on one client indefinitely.
+    #[test]
+    fn endless_transient_gives_up() {
+        let msg = encode("/status.reply", &[OscArg::Int(1)]);
+        let steps = (0..WRITE_RETRIES + 1)
+            .map(|_| Err(std::io::Error::new(ErrorKind::Other, "ENOBUFS")))
+            .collect();
+        let p = SendProbe::new(steps);
+
+        assert!(!p.send(&msg));
+        assert!(!p.still_registered(), "a transient that never clears is terminal");
     }
 
     // EINTR is not a dead connection: std never retries an interrupted read

@@ -9,10 +9,20 @@
 #include "EngineFixture.h"
 #include "JuceAudioCallback.h"
 #include "SampleLoader.h"
+#include <catch2/catch_test_macros.hpp>
 #include <fstream>
 #include <chrono>
 #include <thread>
 #include <filesystem>
+
+// Render collected replies one per line. Caller holds mReplyMutex.
+static std::string dumpReplies(const std::vector<OscReply>& replies) {
+    if (replies.empty()) return "(none)";
+    std::string out;
+    for (auto& r : replies)
+        out += "\n  | " + r.address + " (" + std::to_string(r.raw.size()) + " bytes)";
+    return out;
+}
 
 SupersonicEngine::Config EngineFixture::defaultConfig() {
     SupersonicEngine::Config cfg;
@@ -123,7 +133,14 @@ bool EngineFixture::waitForReply(const std::string& addr, OscReply& out,
         while (true) {
             pumpBlock();
             if (take()) return true;
-            if (std::chrono::steady_clock::now() >= deadline) return false;
+            if (std::chrono::steady_clock::now() >= deadline) {
+                // The caller's assertion expands to a bare "false"; say what we
+                // waited for and what did arrive, so a timeout separates "wrong
+                // reply" from "no reply at all" without a rerun.
+                UNSCOPED_INFO("waitForReply(\"" << addr << "\") timed out after "
+                              << timeoutMs << "ms; replies held:" << repliesDump());
+                return false;
+            }
             // Let the gateway thread (woken by the pump's processCount tick)
             // deliver before the next scan.
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
@@ -140,8 +157,13 @@ bool EngineFixture::waitForReply(const std::string& addr, OscReply& out,
             }
         }
 
-        if (std::chrono::steady_clock::now() >= deadline)
+        if (std::chrono::steady_clock::now() >= deadline) {
+            // mReplyMutex is held here, so dump directly rather than via
+            // repliesDump() (which takes the same non-recursive lock).
+            UNSCOPED_INFO("waitForReply(\"" << addr << "\") timed out after "
+                          << timeoutMs << "ms; replies held:" << dumpReplies(mReplies));
             return false;
+        }
 
         mReplyCv.wait_until(lk, deadline);
     }
@@ -185,6 +207,19 @@ std::vector<std::string> EngineFixture::debugMessages() const {
 void EngineFixture::clearDebugMessages() {
     std::lock_guard<std::mutex> lk(mDebugMutex);
     mDebugMessages.clear();
+}
+
+std::string EngineFixture::debugMessagesDump() const {
+    std::lock_guard<std::mutex> lk(mDebugMutex);
+    if (mDebugMessages.empty()) return "(none)";
+    std::string out;
+    for (auto& m : mDebugMessages) out += "\n  | " + m;
+    return out;
+}
+
+std::string EngineFixture::repliesDump() const {
+    std::lock_guard<std::mutex> lk(mReplyMutex);
+    return dumpReplies(mReplies);
 }
 
 // ── HeadlessDriver control ───────────────────────────────────────────────────

@@ -81,6 +81,12 @@ public:
     std::vector<std::string> debugMessages() const;
     void clearDebugMessages();
 
+    // One-per-line renderings for Catch2 INFO/CAPTURE: an assertion on a
+    // count or on emptiness expands to a bare number, so the contents — the
+    // thing that actually identifies the fault — have to be logged alongside.
+    std::string debugMessagesDump() const;
+    std::string repliesDump() const;
+
 
     // ── Synthdef helpers ───────────────────────────────────────────────
     // Load a .scsyndef file by name (e.g. "sonic-pi-beep")

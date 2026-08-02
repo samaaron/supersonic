@@ -191,7 +191,9 @@ TEST_CASE("AudioResume: LATE count does not spike after short pause",
     }
 
     // A small number of LATE messages right after resume is acceptable,
-    // but a burst of many indicates a scheduling catch-up problem
+    // but a burst of many indicates a scheduling catch-up problem. Log the
+    // lines too: how late, and how they cluster, is the diagnosis.
+    INFO("debug lines around the pause/resume:" << fix.debugMessagesDump());
     CHECK(lateCount <= 2);
 }
 

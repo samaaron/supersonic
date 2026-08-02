@@ -149,6 +149,10 @@ TEST_CASE("debugMessages() is initially empty on fresh engine", "[callback]") {
     EngineFixture fx;
 
     auto msgs = fx.debugMessages();
+    // The out rings live in the process-global engine arena, so a line from an
+    // earlier test's engine can still be in flight when this fixture drains.
+    // Name what arrived — "false" on its own says nothing about who wrote it.
+    INFO("debug lines on a fresh engine:" << fx.debugMessagesDump());
     CHECK(msgs.empty());
 }
 
@@ -199,10 +203,12 @@ TEST_CASE("clearReplies() actually clears collected replies", "[callback]") {
     fx.waitForReply("/synced", barrier);
 
     // /status.reply should still be in the reply buffer (not consumed)
+    INFO("replies held after the barrier:" << fx.repliesDump());
     CHECK(!fx.allReplies().empty());
 
     // Clear and verify
     fx.clearReplies();
+    INFO("replies surviving clearReplies():" << fx.repliesDump());
     CHECK(fx.allReplies().empty());
 
     // Engine should still work after clearing
