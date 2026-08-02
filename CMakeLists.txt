@@ -1065,11 +1065,16 @@ if(SUPERSONIC_ENABLE_SYNTH)
     # so the override never moves build outputs.
     set(SUPERSONIC_PRODUCT_NAME "supersonic" CACHE STRING
         "Product name published in OS-facing binary metadata")
+    # CompanyName in the Windows version resource is the "Publisher" line
+    # of firewall consent prompts - embedders override it alongside the
+    # product name (Sonic Pi passes "Sonic Pi").
+    set(SUPERSONIC_COMPANY_NAME "SuperSonic" CACHE STRING
+        "Company name published in OS-facing binary metadata")
 
     juce_add_console_app(SuperSonic
         PRODUCT_NAME    "${SUPERSONIC_PRODUCT_NAME}"
         VERSION         "${PROJECT_VERSION}"
-        COMPANY_NAME    "SuperSonic"
+        COMPANY_NAME    "${SUPERSONIC_COMPANY_NAME}"
     )
     set_target_properties(SuperSonic PROPERTIES OUTPUT_NAME "SuperSonic")
 
