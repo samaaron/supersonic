@@ -216,13 +216,18 @@ impl StreamServerImpl for SocketServer {
         // registry lock — a slow client must not stall unrelated sends.
         let writer = self.shared.conns.lock().unwrap().get(&conn_id).cloned();
         let Some(writer) = writer else { return false };
-        if writer.lock().unwrap().write_all_bytes(&frame_packet(data)).is_ok() {
-            return true;
-        }
+        let err = match writer.lock().unwrap().write_all_bytes(&frame_packet(data)) {
+            Ok(()) => return true,
+            Err(e) => e,
+        };
         // Write failed or hit WRITE_TIMEOUT (stuck client): a partial frame may
         // have gone out, desyncing this connection's framing, so evict it and
         // shut it down. The reader wakes on the shutdown and fires on_closed,
-        // pruning the client from every audience.
+        // pruning the client from every audience. The logged error kind
+        // separates the two cases: a blocking socket only reports
+        // WouldBlock/TimedOut once SO_SNDTIMEO expires, so those mean a client
+        // that went WRITE_TIMEOUT without reading; anything else failed outright.
+        eprintln!("[osc] stream conn {conn_id} dropped — reply write failed: {err}");
         if let Some(w) = self.shared.conns.lock().unwrap().remove(&conn_id) {
             w.lock().unwrap().shutdown_both();
         }
@@ -257,18 +262,25 @@ fn run_reader<C: ConnReader>(mut conn: C, id: u32, shared: Arc<Shared>, host: Ho
     conn.set_timeout(Duration::from_millis(100));
     let mut acc: Vec<u8> = Vec::new();
     let mut tmp = [0u8; 8192];
+    // Why this connection ended, when it wasn't the peer's own doing. A clean
+    // EOF is the client's decision and stays quiet; anything else is the
+    // server hanging up on a live client, so say so.
+    let mut why: Option<String> = None;
     while !shared.stop.load(Ordering::Relaxed) {
         match conn.read(&mut tmp) {
             Ok(0) => break, // EOF — peer gone
             Ok(n) => {
                 acc.extend_from_slice(&tmp[..n]);
                 if !drain_frames(&mut acc, &host, id) {
-                    break; // protocol violation — drop the connection
+                    why = Some("protocol violation (bad frame length)".into());
+                    break;
                 }
             }
-            Err(e) if e.kind() == ErrorKind::WouldBlock
-                   || e.kind() == ErrorKind::TimedOut => {}
-            Err(_) => break,
+            Err(e) if crate::recv_retryable(&e) => {}
+            Err(e) => {
+                why = Some(format!("read failed: {e}"));
+                break;
+            }
         }
     }
     // Leave the registry, then tell the host — subscription lifetime ==
@@ -277,6 +289,9 @@ fn run_reader<C: ConnReader>(mut conn: C, id: u32, shared: Arc<Shared>, host: Ho
         w.lock().unwrap().shutdown_both();
     }
     if !shared.stop.load(Ordering::Relaxed) {
+        if let Some(why) = why {
+            eprintln!("[osc] stream conn {id} dropped — {why}");
+        }
         host.closed(id);
     }
 }
@@ -508,6 +523,7 @@ pub unsafe extern "C" fn ss_osc_stream_stop(handle: *mut SsOscStream) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::sync::Mutex;
@@ -746,6 +762,70 @@ mod tests {
         assert_eq!(seen.len(), 3, "each connection gets a fresh id: {seen:?}");
 
         unsafe { ss_osc_stream_stop(h) };
+    }
+
+    // A ConnReader replaying a scripted sequence of reads, so the reader loop
+    // can be driven through error kinds a real socket won't produce on demand.
+    // An exhausted script reads as EOF, which ends run_reader.
+    struct ScriptedReader(VecDeque<std::io::Result<Vec<u8>>>);
+    impl Read for ScriptedReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            match self.0.pop_front() {
+                Some(Ok(bytes)) => {
+                    buf[..bytes.len()].copy_from_slice(&bytes);
+                    Ok(bytes.len())
+                }
+                Some(Err(e)) => Err(e),
+                None => Ok(0), // EOF
+            }
+        }
+    }
+    struct NullWriter;
+    impl ConnWriter for NullWriter {
+        fn write_all_bytes(&mut self, _: &[u8]) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn set_write_timeout(&self, _: Duration) {}
+        fn shutdown_both(&self) {}
+    }
+    impl ConnReader for ScriptedReader {
+        fn set_timeout(&self, _: Duration) {}
+        fn clone_writer(&self) -> std::io::Result<Box<dyn ConnWriter>> {
+            Ok(Box::new(NullWriter))
+        }
+    }
+
+    fn empty_shared() -> Arc<Shared> {
+        Arc::new(Shared {
+            stop: AtomicBool::new(false),
+            conns: Mutex::new(HashMap::new()),
+            next_id: AtomicU32::new(1),
+            readers: Mutex::new(Vec::new()),
+        })
+    }
+
+    // EINTR is not a dead connection: std never retries an interrupted read
+    // itself, so a signal landing on a reader thread must not cost the client
+    // its connection.
+    #[test]
+    fn reader_survives_interrupted_read() {
+        let cap = Cap::new();
+        let host = Host {
+            ctx: &*cap as *const Cap as *mut c_void,
+            on_packet,
+            on_closed,
+        };
+        let conn = ScriptedReader(VecDeque::from(vec![
+            Err(std::io::Error::from(ErrorKind::Interrupted)),
+            Ok(frame(&encode("/after-eintr", &[]))),
+        ]));
+
+        run_reader(conn, 7, empty_shared(), host); // returns at the script's EOF
+
+        let packets = cap.packets.lock().unwrap();
+        assert_eq!(packets.len(), 1,
+                   "an interrupted read must not drop the connection");
+        assert_eq!(decode(&packets[0].1).unwrap().addr, "/after-eintr");
     }
 
     #[test]

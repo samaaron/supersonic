@@ -25,3 +25,16 @@ pub mod uds;
 // by the transport harness to drive --shm-commands end-to-end. Not a C ABI.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod shm;
+
+/// Does this receive error leave the socket usable, so the loop should poll
+/// again rather than tear the connection down?
+///
+/// `WouldBlock`/`TimedOut` are the read-timeout tick every receive loop polls
+/// on. `Interrupted` is EINTR: std does not retry `read`/`recv_from` for us
+/// (unlike `write_all`/`read_exact`, which do), so it surfaces here on any
+/// signal delivered to that thread — a live client, not a dead one.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn recv_retryable(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted)
+}

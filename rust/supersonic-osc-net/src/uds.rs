@@ -14,7 +14,6 @@
 #[cfg(unix)]
 mod imp {
     use std::ffi::c_void;
-    use std::io::ErrorKind;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixDatagram;
     use std::path::{Path, PathBuf};
@@ -85,8 +84,7 @@ mod imp {
                     let end = peer.iter().position(|&b| b == 0).unwrap_or(peer.len());
                     no_unwind((), || host.emit(&peer[..end], &buf[..n]));
                 }
-                Err(e) if e.kind() == ErrorKind::WouldBlock
-                       || e.kind() == ErrorKind::TimedOut => {}
+                Err(e) if crate::recv_retryable(&e) => {}
                 Err(_) => break, // socket closed / fatal
             }
         }

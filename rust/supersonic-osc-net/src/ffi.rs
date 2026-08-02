@@ -18,7 +18,6 @@
 //! touches the audio thread.
 
 use std::ffi::c_void;
-use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6, ToSocketAddrs, UdpSocket};
 use std::slice;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -145,7 +144,7 @@ fn run_cue_server(socket: UdpSocket, stop: Arc<AtomicBool>, cues_on: Arc<AtomicB
                     }
                 }
             }
-            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {}
+            Err(e) if crate::recv_retryable(&e) => {}
             Err(_) => break, // socket closed / fatal
         }
     }
@@ -248,7 +247,7 @@ fn run_raw_server(socket: UdpSocket, stop: Arc<AtomicBool>, host: Host) {
     while !stop.load(Ordering::Relaxed) {
         match socket.recv_from(&mut buf) {
             Ok((n, _src)) => no_unwind((), || host.emit(&buf[..n])),
-            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {}
+            Err(e) if crate::recv_retryable(&e) => {}
             Err(_) => break,
         }
     }
@@ -322,7 +321,7 @@ fn run_raw_server_src(socket: UdpSocket, stop: Arc<AtomicBool>, host: HostSrc) {
             Ok((n, src)) => no_unwind((), || {
                 host.emit(&src.ip().to_string(), src.port() as i32, &buf[..n])
             }),
-            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {}
+            Err(e) if crate::recv_retryable(&e) => {}
             Err(_) => break,
         }
     }
