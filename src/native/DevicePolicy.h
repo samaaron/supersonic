@@ -164,6 +164,41 @@ std::string selectBootOutputDevice(const std::string& defaultName,
                                    const std::vector<std::string>& visibleDevices,
                                    const std::vector<bool>& visibleIsWireless);
 
+// Decide which input device the boot open pairs with the opened output.
+// The daemon passes the user's saved input via -H (see parseHardwareFlag);
+// before that existed boot always paired the system default input, and the
+// saved input arrived one cold swap (a full second studio boot) later.
+//   - requestedInput empty / "__none__"         → systemDefaultInput
+//   - requestedInput visible (exact or JUCE
+//     "<name> (N)" form, resolveJuceDeviceName)  → the resolved name
+//   - requestedInput not visible (unplugged)     → systemDefaultInput; the
+//     GUI's restore reconciler surfaces/clears the stale pref
+//   - resolved entry marked unsuitable in visibleIsSuitable (parallel to
+//     visibleInputs; empty or mismatched length = all suitable) →
+//     systemDefaultInput. Callers pass the same vetting switchDevice
+//     applies (no wireless aggregate sub-devices).
+std::string chooseBootInputDevice(const std::string& requestedInput,
+                                  const std::string& systemDefaultInput,
+                                  const std::vector<std::string>& visibleInputs,
+                                  const std::vector<bool>& visibleIsSuitable = {});
+
+// -H flag semantics, scsynth-compatible (upstream scsynth_main.cpp): one
+// name serves BOTH directions; two names are "<input> <output>". Sonic Pi's
+// daemon sends all three shapes (-H <in> <out>, -H <in>, -H <out>).
+// `secondToken` is the next argv token or nullptr; it counts as a device
+// name only when non-empty and not flag-shaped (leading '-') — a real
+// device name starting with '-' therefore can't be passed second, the same
+// ambiguity upstream has. Sentinels stay direction-scoped: "__system__"
+// (follow default output) is never mirrored to input, "__none__" (disable
+// input) never hijacks output.
+struct HardwareFlagRequest {
+    std::string outputDevice;      // empty = default output
+    std::string inputDevice;       // empty = default input
+    bool secondTokenUsed = false;  // caller advances argv one extra slot
+};
+HardwareFlagRequest parseHardwareFlag(const std::string& first,
+                                      const char* secondToken);
+
 // Validate device names against a visible-device list before any
 // destructive swap work happens. Returns empty string on success or
 // an error string naming the bad argument. Names are accepted if:

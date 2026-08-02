@@ -1080,3 +1080,175 @@ TEST_CASE("TableAnnotation: patchbay name in a foreign driver is not special",
     auto a = annotate("ALSA", { "Patchbay (16 ch)" });
     REQUIRE(a.flags[0] == "");
 }
+
+// =============================================================================
+// chooseBootInputDevice
+// =============================================================================
+// The daemon hands the user's saved input via -H (see parseHardwareFlag);
+// boot's aggregate promotion pairs the opened output with this choice.
+// Before it existed, boot always paired the system default input and the
+// user's saved input arrived one cold swap later (a whole second studio
+// boot).
+
+static std::string chooseInput(const std::string& requested,
+                               const std::string& fallback,
+                               const std::vector<std::string>& visible) {
+    return sonicpi::device::chooseBootInputDevice(requested, fallback, visible);
+}
+
+TEST_CASE("BootInput: no request = system default", "[BootInput]") {
+    REQUIRE(chooseInput("", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "Loopback Audio" })
+            == "MacBook Pro Microphone");
+}
+
+TEST_CASE("BootInput: __none__ sentinel = system default", "[BootInput]") {
+    // Input disablement travels as -i 0; the pairing choice just falls back.
+    REQUIRE(chooseInput("__none__", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "Loopback Audio" })
+            == "MacBook Pro Microphone");
+}
+
+TEST_CASE("BootInput: requested input visible = requested wins", "[BootInput]") {
+    REQUIRE(chooseInput("Loopback Audio", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "Loopback Audio" })
+            == "Loopback Audio");
+}
+
+TEST_CASE("BootInput: JUCE-suffixed form of the requested name matches",
+          "[BootInput]") {
+    REQUIRE(chooseInput("USB Audio", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "USB Audio (2)" })
+            == "USB Audio (2)");
+}
+
+TEST_CASE("BootInput: requested input unplugged = system default", "[BootInput]") {
+    // The stale pref is the GUI's to notice and clear; boot must still
+    // come up with a working input rather than none.
+    REQUIRE(chooseInput("MOTU M4", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "Loopback Audio" })
+            == "MacBook Pro Microphone");
+}
+
+TEST_CASE("BootInput: suffix match must not fuzzy-match a longer name",
+          "[BootInput]") {
+    // "USB Audio Pro" is not the "<USB Audio> (N)" form — same rule as
+    // resolveJuceDeviceName.
+    REQUIRE(chooseInput("USB Audio", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "USB Audio Pro" })
+            == "MacBook Pro Microphone");
+}
+
+// Suitability mask (parallel to visibleInputs, selectBootOutputDevice-style):
+// switchDevice never aggregates a wireless input (HFP 16 kHz mono; CoreAudio
+// IOProc freeze), so boot pairing must apply the same vetting — a saved
+// Bluetooth input pref falls back to the system default instead of
+// deterministically rebuilding the bad aggregate on every boot.
+
+static std::string chooseInput(const std::string& requested,
+                               const std::string& fallback,
+                               const std::vector<std::string>& visible,
+                               const std::vector<bool>& suitable) {
+    return sonicpi::device::chooseBootInputDevice(requested, fallback,
+                                                  visible, suitable);
+}
+
+TEST_CASE("BootInput: unsuitable (wireless) requested input is not paired",
+          "[BootInput]") {
+    REQUIRE(chooseInput("AirPods Pro", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "AirPods Pro" },
+                        { true, false })
+            == "MacBook Pro Microphone");
+}
+
+TEST_CASE("BootInput: suitable requested input still wins under a mask",
+          "[BootInput]") {
+    REQUIRE(chooseInput("MOTU M4", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "MOTU M4" },
+                        { true, true })
+            == "MOTU M4");
+}
+
+TEST_CASE("BootInput: suffixed resolved form is judged by its own mask slot",
+          "[BootInput]") {
+    // "USB Audio" resolves to "USB Audio (2)"; that entry is the unsuitable
+    // one, so the pref is dropped.
+    REQUIRE(chooseInput("USB Audio", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "USB Audio (2)" },
+                        { true, false })
+            == "MacBook Pro Microphone");
+}
+
+TEST_CASE("BootInput: mismatched mask length = treated as all-suitable",
+          "[BootInput]") {
+    // Defensive: a caller bug in building the mask must not veto a good
+    // pairing.
+    REQUIRE(chooseInput("MOTU M4", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "MOTU M4" },
+                        { true })
+            == "MOTU M4");
+}
+
+// =============================================================================
+// parseHardwareFlag
+// =============================================================================
+// scsynth's -H takes one or two device names; upstream (scsynth_main.cpp)
+// reads two-name as "<input> <output>" and mirrors a single name into BOTH
+// directions. Sonic Pi's daemon relies on all three shapes: -H <in> <out>,
+// -H <in> (input-only pref), -H <out> (output-only pref). The second argv
+// token only counts as a name when it's non-empty and not flag-shaped.
+
+using sonicpi::device::parseHardwareFlag;
+
+TEST_CASE("HFlag: single name serves both directions", "[HFlag]") {
+    // daemon.rb sends `-H <input>` when only an input pref is saved —
+    // upstream semantics apply it to input AND output.
+    auto r = parseHardwareFlag("MOTU M4", nullptr);
+    REQUIRE(r.outputDevice == "MOTU M4");
+    REQUIRE(r.inputDevice  == "MOTU M4");
+    REQUIRE(!r.secondTokenUsed);
+}
+
+TEST_CASE("HFlag: single name followed by a flag token", "[HFlag]") {
+    auto r = parseHardwareFlag("MOTU M4", "-u");
+    REQUIRE(r.outputDevice == "MOTU M4");
+    REQUIRE(r.inputDevice  == "MOTU M4");
+    REQUIRE(!r.secondTokenUsed);
+}
+
+TEST_CASE("HFlag: two names are input then output", "[HFlag]") {
+    auto r = parseHardwareFlag("MOTU M4", "MacBook Pro Speakers");
+    REQUIRE(r.inputDevice  == "MOTU M4");
+    REQUIRE(r.outputDevice == "MacBook Pro Speakers");
+    REQUIRE(r.secondTokenUsed);
+}
+
+TEST_CASE("HFlag: empty second token is not a device name", "[HFlag]") {
+    // A quoted empty shell var (`-H "Speakers" ""`) must not become the
+    // output device — ""[0] is '\0', not '-'.
+    auto r = parseHardwareFlag("MacBook Pro Speakers", "");
+    REQUIRE(r.outputDevice == "MacBook Pro Speakers");
+    REQUIRE(r.inputDevice  == "MacBook Pro Speakers");
+    REQUIRE(!r.secondTokenUsed);
+}
+
+TEST_CASE("HFlag: __system__ output sentinel is not mirrored to input",
+          "[HFlag]") {
+    // "Follow the system default output" says nothing about input.
+    auto r = parseHardwareFlag("__system__", nullptr);
+    REQUIRE(r.outputDevice == "__system__");
+    REQUIRE(r.inputDevice.empty());
+}
+
+TEST_CASE("HFlag: __none__ disables input without hijacking output", "[HFlag]") {
+    auto r = parseHardwareFlag("__none__", nullptr);
+    REQUIRE(r.inputDevice == "__none__");
+    REQUIRE(r.outputDevice.empty());
+}
+
+TEST_CASE("HFlag: two-name form passes sentinels through", "[HFlag]") {
+    auto r = parseHardwareFlag("__none__", "MacBook Pro Speakers");
+    REQUIRE(r.inputDevice  == "__none__");
+    REQUIRE(r.outputDevice == "MacBook Pro Speakers");
+    REQUIRE(r.secondTokenUsed);
+}

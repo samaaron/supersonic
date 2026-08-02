@@ -63,16 +63,63 @@ bool shouldFollowDefaultOutputChange(const std::string& newDefault,
     return true;
 }
 
+namespace {
+// Index of the entry `name` genuinely resolves to, or -1. resolveJuceDeviceName
+// returns the exact name, the "<name> (N)" form if that's what's present, or
+// `name` unchanged when nothing matches — so a genuine match is exactly "the
+// resolved name is actually in the list". Shared core of deviceNameVisible
+// and chooseBootInputDevice.
+int resolvedVisibleIndex(const std::string& name,
+                         const std::vector<std::string>& visibleNames) {
+    if (name.empty()) return -1;
+    const std::string resolved = resolveJuceDeviceName(name, visibleNames);
+    for (size_t i = 0; i < visibleNames.size(); ++i)
+        if (visibleNames[i] == resolved) return static_cast<int>(i);
+    return -1;
+}
+} // namespace
+
 bool deviceNameVisible(const std::string& name,
                        const std::vector<std::string>& visibleNames) {
-    if (name.empty()) return false;
-    // resolveJuceDeviceName returns the exact name, the "<name> (N)" form if
-    // that's what's present, or `name` unchanged when nothing matches. So a
-    // genuine match is exactly "the resolved name is actually in the list".
-    const std::string resolved = resolveJuceDeviceName(name, visibleNames);
-    for (const auto& n : visibleNames)
-        if (n == resolved) return true;
-    return false;
+    return resolvedVisibleIndex(name, visibleNames) >= 0;
+}
+
+std::string chooseBootInputDevice(const std::string& requestedInput,
+                                  const std::string& systemDefaultInput,
+                                  const std::vector<std::string>& visibleInputs,
+                                  const std::vector<bool>& visibleIsSuitable) {
+    if (requestedInput.empty() || requestedInput == "__none__")
+        return systemDefaultInput;
+    const int idx = resolvedVisibleIndex(requestedInput, visibleInputs);
+    // A mask of the wrong length is a caller bug; treat as all-suitable
+    // rather than vetoing a good pairing.
+    const bool useMask = visibleIsSuitable.size() == visibleInputs.size();
+    if (idx >= 0 && (!useMask || visibleIsSuitable[idx]))
+        return visibleInputs[idx];
+    // Requested input isn't attached (or is unsuitable to pair): boot with
+    // a working input anyway and let the GUI's restore reconciler notice
+    // and clear the stale pref.
+    return systemDefaultInput;
+}
+
+HardwareFlagRequest parseHardwareFlag(const std::string& first,
+                                      const char* secondToken) {
+    HardwareFlagRequest r;
+    const bool secondIsName =
+        secondToken && secondToken[0] != '\0' && secondToken[0] != '-';
+    if (secondIsName) {
+        r.inputDevice     = first;
+        r.outputDevice    = secondToken;
+        r.secondTokenUsed = true;
+        return r;
+    }
+    // Direction-scoped sentinels don't cross over.
+    if (first == "__none__")   { r.inputDevice  = first; return r; }
+    if (first == "__system__") { r.outputDevice = first; return r; }
+    // Upstream parity: a single real name serves both directions.
+    r.outputDevice = first;
+    r.inputDevice  = first;
+    return r;
 }
 
 std::vector<int> usableAggregateRates(const std::vector<int>& outputRates,
