@@ -1014,7 +1014,9 @@ void SupersonicEngine::init(const Config& cfg) {
                 // the auto-max sentinel requests kRequestMaxChannels.
                 int wantIn = reqIn;
                 const int probedIn = probeDeviceChannelCount(
-                    chosen, true, targetDeviceTypeName());
+                    chosen, true,
+                    mDeviceManager->getCurrentAudioDevice()
+                        ->getTypeName().toStdString());
                 if (probedIn > 0 && probedIn < wantIn) wantIn = probedIn;
                 juce::BigInteger inputBits;
                 inputBits.setRange(0, wantIn, true);
