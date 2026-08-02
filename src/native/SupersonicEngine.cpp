@@ -491,6 +491,14 @@ void SupersonicEngine::init(const Config& cfg) {
     // "explicitly follow macOS default"; leave the preferred empty.
     if (!cfg.hardwareDevice.empty() && cfg.hardwareDevice != "__system__")
         mPreferredOutputDevice = cfg.hardwareDevice;
+    // Same for the requested input (-H's input name): remembered as the
+    // preferred input so boot pairing and hotplug re-attach both honour it.
+    // Only when inputs are enabled — with -i 0 (or the macOS mic-permission
+    // guard's zeroing), a seeded preference would let decideHotplugAction
+    // re-open the very input stream the disable exists to avoid.
+    if (cfg.numInputChannels != 0
+        && !cfg.inputDevice.empty() && cfg.inputDevice != "__none__")
+        mPreferredInputDevice = cfg.inputDevice;
 
     // Map -1 (auto/max) to a large request count. JUCE/CoreAudio will clamp
     // the bitmask to the actual device channel count, so asking for more
@@ -631,12 +639,50 @@ void SupersonicEngine::init(const Config& cfg) {
                     setup.inputDeviceName  = juce::String();
                     setup.useDefaultOutputChannels = true;
                     setup.useDefaultInputChannels  = false;
+                    // Requested input is this same device (full-duplex, e.g.
+                    // a virtual loopback): open both directions in one go —
+                    // no aggregate needed, and no transient default-input
+                    // state for the GUI to "correct" with a cold swap.
+                    // Strict exact-or-"(N)" resolution against the full
+                    // enumeration: with "USB Audio Device" and "USB Audio
+                    // Device (2)" both attached, the exact entry wins, so
+                    // opening box 2 never swallows box 1's input role.
+                    if (cfg.numInputChannels != 0
+                        && !mPreferredInputDevice.empty()) {
+                        std::vector<std::string> devNames;
+                        for (auto& cand : entries)
+                            devNames.push_back(cand.devName);
+                        if (sonicpi::device::resolveJuceDeviceName(
+                                mPreferredInputDevice, devNames) == e.devName) {
+                            setup.inputDeviceName = juce::String(e.devName);
+                            setup.useDefaultInputChannels = true;
+                        }
+                    }
                     if (cfg.sampleRate > 0) setup.sampleRate = cfg.sampleRate;
                     if (cfg.bufferSize > 0) setup.bufferSize = cfg.bufferSize;
 
                     initError = mDeviceManager->initialise(
                         reqIn, reqOut,
                         nullptr, false, juce::String(), &setup);
+
+                    // A failed full-duplex attempt may be the input half
+                    // alone (mic-privacy denial, exclusive-mode contention,
+                    // input-side rate limits). Retry output-only — same
+                    // rescue as switchDevice's input-fallback — so a bad
+                    // input never costs the user their chosen output;
+                    // aggregate promotion below pairs an input normally.
+                    if (initError.isNotEmpty()
+                        && setup.inputDeviceName.isNotEmpty()) {
+                        fprintf(stderr, "[device-setup] -H full-duplex open of "
+                                "'%s' failed (%s) — retrying output-only\n",
+                                e.devName.c_str(), initError.toRawUTF8());
+                        fflush(stderr);
+                        setup.inputDeviceName = juce::String();
+                        setup.useDefaultInputChannels = false;
+                        initError = mDeviceManager->initialise(
+                            reqIn, reqOut,
+                            nullptr, false, juce::String(), &setup);
+                    }
 
                     if (initError.isNotEmpty()) {
                         fprintf(stderr, "[device-setup] -H '%s' matched '%s' but failed: %s\n",
@@ -784,6 +830,11 @@ void SupersonicEngine::init(const Config& cfg) {
         // stalling boot until an external swap arrives.
         if (initError.isEmpty() && cfg.numInputChannels != 0) {
             auto* dev = mDeviceManager->getCurrentAudioDevice();
+            // A full-duplex -H open already carries its input: nothing to
+            // promote — and the same-name fallback below would clobber the
+            // opened device with a default-device re-open.
+            if (dev && dev->getActiveInputChannels().countNumberOfSetBits() > 0)
+                dev = nullptr;
             if (dev) {
                 std::string outName = dev->getName().toStdString();
                 std::string inName;
@@ -813,13 +864,42 @@ void SupersonicEngine::init(const Config& cfg) {
                         inName = buf;
                     }
                 }
+                // One cached-list snapshot serves the pairing choice and the
+                // suitability check below — a rescan here can disrupt the
+                // just-opened device (see listDevices).
+                const auto bootDevices = listDevices(false);
+                // Pair with the requested input (-H's input name) when it's
+                // attached; the system default is the fallback, not the policy.
+                if (!mPreferredInputDevice.empty()) {
+                    std::vector<std::string> inputNames;
+                    std::vector<bool> inputSuitable;
+                    for (auto& d : bootDevices) {
+                        if (d.maxInputChannels <= 0) continue;
+                        inputNames.push_back(d.name);
+                        // Same vetting as switchDevice: never pair a wireless
+                        // input into an aggregate (HFP 16 kHz mono; IOProc
+                        // freeze). The opened output itself is exempt —
+                        // same-device full duplex needs no aggregate.
+                        inputSuitable.push_back(d.isSuitableForAggregate()
+                                                || d.name == outName);
+                    }
+                    std::string chosen = sonicpi::device::chooseBootInputDevice(
+                        mPreferredInputDevice, inName, inputNames, inputSuitable);
+                    if (chosen != inName) {
+                        fprintf(stderr, "[device-setup] boot: pairing requested "
+                                "input '%s' (system default '%s')\n",
+                                chosen.c_str(), inName.c_str());
+                        fflush(stderr);
+                    }
+                    inName = chosen;
+                }
                 // Skip aggregate for wireless (Bluetooth/AirPlay) or virtual
                 // (Loopback/Blackhole) outputs — same rule as switchDevice.
                 // Boot with output-only instead so we don't crash JUCE's
                 // Combiner fallback when sample-rate negotiation fails.
                 bool outputSuitable = true;
                 if (!inName.empty() && inName != outName) {
-                    for (auto& d : listDevices()) {
+                    for (auto& d : bootDevices) {
                         if (d.name == outName && !d.isSuitableForAggregate()) {
                             outputSuitable = false;
                             fprintf(stderr, "[device-setup] boot: skipping aggregate — "
@@ -892,10 +972,65 @@ void SupersonicEngine::init(const Config& cfg) {
                             mSuppressRunLoop.store(true);
                         }
                     }
-                } else if (inName == outName) {
+                } else if (inName == outName && !openedByHardwareFlag) {
+                    // Default-device boot where the preferred input IS the
+                    // opened output: reopen full duplex. Never on the -H
+                    // path — its full-duplex open already ran (and possibly
+                    // fell back to output-only); reopening defaults here
+                    // would discard the user's chosen output.
                     mLastSelfTriggeredChange = std::chrono::steady_clock::now();
                     initError = mDeviceManager->initialiseWithDefaultDevices(
                         reqIn, reqOut);
+                }
+            }
+        }
+#else
+        // Pair the requested input (-H's input name) on non-mac drivers,
+        // which open input and output as separate devices — no aggregate
+        // involved; switchDevice already supports this cross-platform.
+        // Without it the GUI reconciler sees intent != actual on every
+        // boot and "corrects" with the redundant cold swap this feature
+        // exists to remove.
+        if (initError.isEmpty() && cfg.numInputChannels != 0
+            && !mPreferredInputDevice.empty()
+            && mDeviceManager->getCurrentAudioDevice()) {
+            juce::AudioDeviceManager::AudioDeviceSetup setup;
+            mDeviceManager->getAudioDeviceSetup(setup);
+            const std::string currentIn = setup.inputDeviceName.toStdString();
+            std::vector<std::string> inputNames;
+            for (auto& d : listDevices(false))
+                if (d.maxInputChannels > 0) inputNames.push_back(d.name);
+            const std::string chosen = sonicpi::device::chooseBootInputDevice(
+                mPreferredInputDevice, currentIn, inputNames);
+            if (!chosen.empty() && chosen != currentIn) {
+                fprintf(stderr, "[device-setup] boot: pairing requested input "
+                        "'%s' (default was '%s')\n",
+                        chosen.c_str(), currentIn.c_str());
+                fflush(stderr);
+                setup.inputDeviceName = juce::String(chosen);
+                setup.useDefaultInputChannels = false;
+                // Clamp the bitmask to the device's real capacity — WASAPI
+                // rejects a setup asking for more inputs than exist, and
+                // the auto-max sentinel requests kRequestMaxChannels.
+                int wantIn = reqIn;
+                const int probedIn = probeDeviceChannelCount(
+                    chosen, true, targetDeviceTypeName());
+                if (probedIn > 0 && probedIn < wantIn) wantIn = probedIn;
+                juce::BigInteger inputBits;
+                inputBits.setRange(0, wantIn, true);
+                setup.inputChannels = inputBits;
+                mLastSelfTriggeredChange = std::chrono::steady_clock::now();
+                const juce::String pairErr =
+                    mDeviceManager->setAudioDeviceSetup(setup, true);
+                if (pairErr.isNotEmpty()) {
+                    // Keep the working default input rather than unwinding
+                    // an otherwise-good boot.
+                    fprintf(stderr, "[device-setup] boot input pairing failed: "
+                            "%s — keeping '%s'\n",
+                            pairErr.toRawUTF8(), currentIn.c_str());
+                    fflush(stderr);
+                } else {
+                    mLastInputDeviceName = chosen;
                 }
             }
         }

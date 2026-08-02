@@ -11,6 +11,7 @@
  */
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_core/juce_core.h>
+#include "DevicePolicy.h"
 #include "SupersonicEngine.h"
 #include "ShmTransport.h"
 #include "StreamOscTransport.h"
@@ -451,7 +452,16 @@ int main(int argc, char* argv[]) {
             case 'n': cfg.maxNodes             = std::atoi(val); ++i; break;
             case 'w': cfg.maxWireBufs          = std::atoi(val); ++i; break;
             case 'z': cfg.blockSize            = std::atoi(val); ++i; break;
-            case 'H': cfg.hardwareDevice = val; ++i; break;
+            case 'H': {
+                // scsynth's -H: "<in> <out>", or a single name for both
+                // directions. Token/sentinel rules live in parseHardwareFlag.
+                auto req = sonicpi::device::parseHardwareFlag(
+                    val, nextArg(i + 1, argc, argv));
+                cfg.hardwareDevice = req.outputDevice;
+                cfg.inputDevice    = req.inputDevice;
+                i += req.secondTokenUsed ? 2 : 1;
+                break;
+            }
 
             // Accepted for scsynth compatibility (ignored):
             case 'U': case 'D': case 'R': case 'l':

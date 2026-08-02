@@ -136,6 +136,9 @@ public:
                                                    // names the segment).
         std::string bindAddress       = "127.0.0.1"; // localhost only; use -B to override
         std::string hardwareDevice;                // -H flag: fuzzy match on "Driver : Device"
+        std::string inputDevice;                   // -H input name (first of two, or the
+                                                   // single shared name); empty = pair with
+                                                   // the system default input
         std::string appName           = "SuperSonic"; // --app-name: name published to OS
                                                    // registries (PipeWire nodes, ALSA seq
                                                    // MIDI clients, macOS aggregate devices,
