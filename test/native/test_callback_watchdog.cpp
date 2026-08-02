@@ -53,10 +53,18 @@ TEST_CASE("Watchdog: restarts a stalled audio source and the engine answers agai
     // Headless — exactly the wedge state (source believed live, no ticks).
     fix.stopHeadlessDriver();
 
-    // Deaf: the command lands in the IN ring with nothing draining it.
+    // Deaf: the command lands in the IN ring with nothing draining it. The
+    // deafness is asserted against the watchdog's own state, not a wall clock —
+    // the stall window starts when the driver stops ticking, which is before
+    // this wait begins, so any fixed window here is racing the recovery it is
+    // meant to precede. A reply is only wrong if it arrived without one.
     OscReply r;
     fix.send(osc_test::message("/status"));
-    REQUIRE_FALSE(fix.waitForReply("/status.reply", r, 200));
+    const bool answeredEarly = fix.waitForReply("/status.reply", r, 200);
+    if (answeredEarly) {
+        INFO("a stalled source answered /status");
+        REQUIRE(fix.engine().watchdogRecoveryCount() >= 1);
+    }
 
     // The watchdog must notice the frozen processCount and restart the source…
     REQUIRE(fix.pollUntil([&] {
@@ -64,7 +72,8 @@ TEST_CASE("Watchdog: restarts a stalled audio source and the engine answers agai
     }, 5000));
 
     // …after which the queued command drains and the engine answers.
-    REQUIRE(fix.waitForReply("/status.reply", r, 2000));
+    if (!answeredEarly)
+        REQUIRE(fix.waitForReply("/status.reply", r, 2000));
     REQUIRE(fix.engine().audioSource()
             == SupersonicEngine::AudioSource::Headless);
 }
