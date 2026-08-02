@@ -70,6 +70,7 @@ add_executable(SuperSonicNativeTests
     test_driver_switch.cpp
     test_rapid_switching.cpp
     test_callback_watchdog.cpp
+    test_hardening_policy.cpp
     test_control_plane_liveness.cpp
     test_time_source.cpp
     test_device_selection.cpp

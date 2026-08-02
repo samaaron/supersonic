@@ -34,11 +34,13 @@
 #include <vector>
 
 #include <pipewire/pipewire.h>
+#include <pipewire/extensions/metadata.h>
 #include <spa/param/audio/format-utils.h>
 #include <spa/param/audio/type-info.h>
 #include <spa/utils/result.h>
 
 extern "C" int ss_log(const char* fmt, ...);
+extern "C" const char* ss_app_name();
 
 #ifndef PW_KEY_TARGET_OBJECT
 #define PW_KEY_TARGET_OBJECT "target.object"
@@ -46,10 +48,29 @@ extern "C" int ss_log(const char* fmt, ...);
 #ifndef PW_KEY_OBJECT_SERIAL
 #define PW_KEY_OBJECT_SERIAL "object.serial"
 #endif
+#ifndef PW_KEY_NODE_MAX_LATENCY
+#define PW_KEY_NODE_MAX_LATENCY "node.max-latency"
+#endif
+
+#include "HardeningPolicy.h"
 
 namespace {
 
 constexpr const char* kDefaultDeviceName = "System Default";
+
+// The patchbay device: one pw_filter node with explicit graph ports, the
+// same shape a JACK client has. Port count is fixed and independent of any
+// sink's channel layout, and the session manager's stream remix policy
+// does not apply — ports are patched (qpwgraph, pw-link, a DAW) rather
+// than routed. The first pair each way is auto-linked to the default
+// sink/source so the device makes sound before any patching.
+constexpr const char* kPatchbayDeviceName = "Patchbay (16 ch)";
+constexpr int kPatchbayChans = 16;
+
+// PipeWire quantum ceiling (default max in the daemon's config); sizes
+// scratch planes and caps the per-cycle frame count so process callbacks
+// never allocate and never outgrow them.
+constexpr uint32_t kMaxQuantum = 8192;
 
 //==============================================================================
 // dlopen shim. Only functions that are real library symbols go through this
@@ -93,6 +114,17 @@ struct PwApi {
     pw_buffer* (*stream_dequeue_buffer)(pw_stream*) = nullptr;
     int (*stream_queue_buffer)(pw_stream*, pw_buffer*) = nullptr;
 
+    pw_filter* (*filter_new)(pw_core*, const char*, pw_properties*) = nullptr;
+    void (*filter_destroy)(pw_filter*) = nullptr;
+    void (*filter_add_listener)(pw_filter*, spa_hook*, const pw_filter_events*, void*) = nullptr;
+    int (*filter_connect)(pw_filter*, pw_filter_flags, const spa_pod**, uint32_t) = nullptr;
+    int (*filter_disconnect)(pw_filter*) = nullptr;
+    pw_filter_state (*filter_get_state)(pw_filter*, const char**) = nullptr;
+    uint32_t (*filter_get_node_id)(pw_filter*) = nullptr;
+    void* (*filter_add_port)(pw_filter*, pw_direction, pw_filter_port_flags, size_t,
+                             pw_properties*, const spa_pod**, uint32_t) = nullptr;
+    void* (*filter_get_dsp_buffer)(void*, uint32_t) = nullptr;
+
     bool load() {
         handle = dlopen("libpipewire-0.3.so.0", RTLD_NOW | RTLD_LOCAL);
         if (handle == nullptr)
@@ -132,6 +164,15 @@ struct PwApi {
         grab(stream_get_state,      "pw_stream_get_state");
         grab(stream_dequeue_buffer, "pw_stream_dequeue_buffer");
         grab(stream_queue_buffer,   "pw_stream_queue_buffer");
+        grab(filter_new,            "pw_filter_new");
+        grab(filter_destroy,        "pw_filter_destroy");
+        grab(filter_add_listener,   "pw_filter_add_listener");
+        grab(filter_connect,        "pw_filter_connect");
+        grab(filter_disconnect,     "pw_filter_disconnect");
+        grab(filter_get_state,      "pw_filter_get_state");
+        grab(filter_get_node_id,    "pw_filter_get_node_id");
+        grab(filter_add_port,       "pw_filter_add_port");
+        grab(filter_get_dsp_buffer, "pw_filter_get_dsp_buffer");
 
         if (!ok) { dlclose(handle); handle = nullptr; }
         return ok;
@@ -306,6 +347,52 @@ public:
         mSinks.erase(owner);
     }
 
+    // Where the patchbay's auto-links should land: the default sink/source
+    // per the "default" metadata, falling back to the first endpoint when
+    // the metadata is absent. portIds are the linkable ports (sinks consume
+    // on inputs, sources produce on non-monitor outputs) in index order.
+    // Caller must hold the thread-loop lock.
+    struct LinkTarget {
+        uint32_t nodeId = PW_ID_ANY;
+        std::vector<uint32_t> portIds;
+    };
+
+    LinkTarget defaultTarget(bool sink) const {
+        LinkTarget t;
+        const std::string& want = sink ? mDefaultSinkName : mDefaultSourceName;
+        const PwNodeInfo* found = nullptr;
+        for (const auto& n : mNodes) {
+            if (n.isSink != sink)
+                continue;
+            if (found == nullptr)
+                found = &n;                       // fallback: first endpoint
+            if (!want.empty() && n.nodeName == want) { found = &n; break; }
+        }
+        if (found == nullptr)
+            return t;
+        t.nodeId = found->id;
+        struct Slot { int index; uint32_t globalId; };
+        std::vector<Slot> slots;
+        for (const auto& p : mPorts)
+            if (p.nodeId == found->id && !p.monitor && p.isInput == sink)
+                slots.push_back({ p.portIndex, p.globalId });
+        std::sort(slots.begin(), slots.end(),
+                  [](const Slot& a, const Slot& b) { return a.index < b.index; });
+        for (const auto& s : slots)
+            t.portIds.push_back(s.globalId);
+        return t;
+    }
+
+    // Registry global id of one of our own filter ports, found by node id,
+    // direction and per-direction index. Caller must hold the loop lock.
+    uint32_t portGlobalId(uint32_t nodeId, bool isInput, int index) const {
+        for (const auto& p : mPorts)
+            if (p.nodeId == nodeId && p.isInput == isInput && !p.monitor
+                && p.portIndex == index)
+                return p.globalId;
+        return PW_ID_ANY;
+    }
+
 private:
     PipeWireSystem() { api.load(); }
 
@@ -366,20 +453,96 @@ private:
             if (const char* ch = dictGet(props, PW_KEY_AUDIO_CHANNEL))
                 p.channel = ch;
 
-            // Only ports of tracked device nodes matter — this also keeps our
-            // own stream nodes from triggering device-change notifications.
+            // Every port is recorded (the patchbay links by port global id,
+            // including its own filter ports), but only ports of tracked
+            // device nodes notify — our own stream/filter nodes appearing
+            // must not read as a device change.
+            const uint32_t nodeId = p.nodeId;
+            self->mPorts.push_back(std::move(p));
             for (const auto& n : self->mNodes) {
-                if (n.id == p.nodeId) {
-                    self->mPorts.push_back(std::move(p));
+                if (n.id == nodeId) {
                     self->notifyChanged();
                     return;
                 }
             }
+            return;
         }
+
+        if (type != nullptr && strcmp(type, PW_TYPE_INTERFACE_Metadata) == 0) {
+            // The "default" metadata carries the session manager's default
+            // sink/source choices; the patchbay follows them for its
+            // auto-links the way WirePlumber re-routes streams.
+            const char* name = dictGet(props, PW_KEY_METADATA_NAME);
+            if (name == nullptr || strcmp(name, "default") != 0 || self->mMetadata != nullptr)
+                return;
+            self->mMetadata = (pw_metadata*) pw_registry_bind(
+                self->mRegistry, id, type, PW_VERSION_METADATA, 0);
+            if (self->mMetadata == nullptr)
+                return;
+            self->mMetadataId = id;
+            static const pw_metadata_events metadataEvents = [] {
+                pw_metadata_events e{};
+                e.version = PW_VERSION_METADATA_EVENTS;
+                e.property = [](void* data, uint32_t /*subject*/, const char* key,
+                                const char* /*type*/, const char* value) -> int {
+                    auto* s = static_cast<PipeWireSystem*>(data);
+                    if (key == nullptr)
+                        return 0;
+                    // The *configured* defaults are what the user last chose
+                    // and can outlive the hardware (stale session-manager
+                    // state after a sound-card swap); tracked separately for
+                    // the ghost diagnostic, they never drive routing.
+                    const bool cfgSink = strcmp(key, "default.configured.audio.sink") == 0;
+                    const bool cfgSource = strcmp(key, "default.configured.audio.source") == 0;
+                    if (cfgSink || cfgSource) {
+                        (cfgSink ? s->mConfiguredSinkName : s->mConfiguredSourceName) =
+                            parseNameFromJson(value);
+                        s->warnIfConfiguredDefaultMissing();
+                        return 0;
+                    }
+                    const bool sink = strcmp(key, "default.audio.sink") == 0;
+                    const bool source = strcmp(key, "default.audio.source") == 0;
+                    if (!sink && !source)
+                        return 0;
+                    std::string& slot = sink ? s->mDefaultSinkName : s->mDefaultSourceName;
+                    std::string parsed = parseNameFromJson(value);
+                    if (slot != parsed) {
+                        slot = std::move(parsed);
+                        s->notifyChanged();
+                    }
+                    return 0;
+                };
+                return e;
+            }();
+            pw_metadata_add_listener(self->mMetadata, &self->mMetadataHook,
+                                     &metadataEvents, self);
+        }
+    }
+
+    // Values look like {"name":"alsa_output.pci-....analog-stereo"}.
+    static std::string parseNameFromJson(const char* value) {
+        if (value == nullptr)
+            return {};
+        const char* key = strstr(value, "\"name\"");
+        if (key == nullptr)
+            return {};
+        const char* open = strchr(key + 6, '"');
+        if (open == nullptr)
+            return {};
+        const char* close = strchr(open + 1, '"');
+        if (close == nullptr)
+            return {};
+        return std::string(open + 1, (size_t) (close - open - 1));
     }
 
     static void onGlobalRemove(void* data, uint32_t id) {
         auto* self = static_cast<PipeWireSystem*>(data);
+        if (self->mMetadata != nullptr && id == self->mMetadataId) {
+            spa_hook_remove(&self->mMetadataHook);
+            self->api.proxy_destroy((pw_proxy*) self->mMetadata);
+            self->mMetadata = nullptr;
+            self->mMetadataId = PW_ID_ANY;
+        }
         bool changed = false;
         for (auto it = self->mNodes.begin(); it != self->mNodes.end();) {
             if (it->id == id) { it = self->mNodes.erase(it); changed = true; }
@@ -394,9 +557,33 @@ private:
     }
 
     void notifyChanged() {
+        warnIfConfiguredDefaultMissing();
         std::lock_guard<std::mutex> g(mSinkMutex);
         for (auto& [owner, fn] : mSinks)
             fn();
+    }
+
+    // Surfaces the ghost-default condition (#3553): the session manager's
+    // configured default names hardware that is no longer in the graph,
+    // which silently changes how streams negotiate. Edge-triggered so a
+    // persistent ghost logs once, and re-arms if it is fixed and recurs.
+    // Caller must hold the thread-loop lock.
+    void warnIfConfiguredDefaultMissing() {
+        auto check = [&](const std::string& want, bool sink, bool& warned) {
+            std::vector<std::string> present;
+            for (const auto& n : mNodes)
+                if (n.isSink == sink)
+                    present.push_back(n.nodeName);
+            const bool missing = hardening::defaultNodeMissing(want, present);
+            if (missing && !warned)
+                ss_log("PipeWire: configured default %s '%s' is not present in the "
+                       "graph — audio may route to a fallback device (stale "
+                       "session-manager state from a removed sound card?)",
+                       sink ? "output" : "input", want.c_str());
+            warned = missing;
+        };
+        check(mConfiguredSinkName, true, mWarnedGhostSink);
+        check(mConfiguredSourceName, false, mWarnedGhostSource);
     }
 
     std::mutex mConnectMutex;
@@ -411,6 +598,12 @@ private:
     // Guarded by the thread-loop lock (mutated only in registry events).
     std::vector<PwNodeInfo> mNodes;
     std::vector<PwPort> mPorts;
+    pw_metadata* mMetadata = nullptr;
+    uint32_t mMetadataId = PW_ID_ANY;
+    spa_hook mMetadataHook{};
+    std::string mDefaultSinkName, mDefaultSourceName;
+    std::string mConfiguredSinkName, mConfiguredSourceName;
+    bool mWarnedGhostSink = false, mWarnedGhostSource = false;
 
     std::mutex mSinkMutex;
     std::map<void*, std::function<void()>> mSinks;
@@ -632,11 +825,6 @@ public:
     juce::String outputName, inputName;
 
 private:
-    // PipeWire quantum ceiling (default max in the daemon's config); sizes
-    // the capture scratch planes and caps the per-cycle frame count so
-    // process() never allocates and never outgrows them.
-    static constexpr uint32_t kMaxQuantum = 8192;
-
     juce::StringArray channelNames(const PwNodeInfo& info, const char* prefix) const {
         juce::StringArray names;
         int i = 1;
@@ -664,12 +852,15 @@ private:
         auto& sys = PipeWireSystem::instance();
         auto& A = sys.api;
 
+        // pw_properties copies its values, so the temporaries are safe.
+        const juce::String appName(ss_app_name());
+        const juce::String inputNodeName = appName + " Input";
         pw_properties* props = A.properties_new(
             PW_KEY_MEDIA_TYPE, "Audio",
             PW_KEY_MEDIA_CATEGORY, playback ? "Playback" : "Capture",
             PW_KEY_MEDIA_ROLE, "Production",
-            PW_KEY_APP_NAME, "SuperSonic",
-            PW_KEY_NODE_NAME, playback ? "SuperSonic" : "SuperSonic Input",
+            PW_KEY_APP_NAME, appName.toRawUTF8(),
+            PW_KEY_NODE_NAME, playback ? appName.toRawUTF8() : inputNodeName.toRawUTF8(),
             // Keep the graph driving us while idle: the engine's clock,
             // worker wakeups and the recovery watchdog are all fed off the
             // process callback, so a suspended stream reads as a dead device.
@@ -678,12 +869,19 @@ private:
         char tmp[64];
         snprintf(tmp, sizeof(tmp), "%d/%d", mBufFrames, mRate);
         A.properties_set(props, PW_KEY_NODE_LATENCY, tmp);
+        // Cap the quantum the graph may schedule us at: without a ceiling
+        // the session manager can run the stream at its global maximum
+        // (8192 frames = 170ms at 48k — sonic-pi #3553), far beyond
+        // anything the engine asked for.
+        snprintf(tmp, sizeof(tmp), "%d/%d", std::max(mBufFrames * 2, 2048), mRate);
+        A.properties_set(props, PW_KEY_NODE_MAX_LATENCY, tmp);
         snprintf(tmp, sizeof(tmp), "1/%d", mRate);
         A.properties_set(props, PW_KEY_NODE_RATE, tmp);
         if (!node.serial.empty())
             A.properties_set(props, PW_KEY_TARGET_OBJECT, node.serial.c_str());
 
-        pw_stream* s = A.stream_new(sys.core(), playback ? "SuperSonic Out" : "SuperSonic In", props);
+        const juce::String streamName = appName + (playback ? " Out" : " In");
+        pw_stream* s = A.stream_new(sys.core(), streamName.toRawUTF8(), props);
         if (s == nullptr) {
             err = "pw_stream_new failed";
             return nullptr;
@@ -872,6 +1070,392 @@ private:
 };
 
 //==============================================================================
+// The patchbay device: a single pw_filter node carrying out_1..out_16 and
+// in_1..in_16 as explicit graph ports. Filters bypass the stream adapter
+// entirely, so there is no resampling (the node runs at the graph rate,
+// reported back from open()) and no session-manager channel remixing —
+// which is the point. Auto-links tie the first pair each way to the
+// default sink/source, following the "default" metadata the way
+// WirePlumber re-routes streams; everything else is left to the user's
+// patchbay. Capture and playback share one process callback, so input is
+// sample-synchronous with output and needs no ring.
+class PatchbayAudioIODevice final : public juce::AudioIODevice {
+public:
+    PatchbayAudioIODevice()
+        : juce::AudioIODevice(kPatchbayDeviceName, "PipeWire") {}
+
+    ~PatchbayAudioIODevice() override { close(); }
+
+    juce::StringArray getOutputChannelNames() override { return portNames("out_"); }
+    juce::StringArray getInputChannelNames() override  { return portNames("in_"); }
+
+    // The graph decides the real rate; open() reports it back, and the
+    // engine adopts actual-over-requested the same way it does for a
+    // device whose hardware rate differs from the request.
+    juce::Array<double> getAvailableSampleRates() override {
+        return { 44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0 };
+    }
+
+    juce::Array<int> getAvailableBufferSizes() override {
+        return { 32, 64, 128, 256, 512, 1024, 2048, 4096 };
+    }
+
+    int getDefaultBufferSize() override { return 256; }
+
+    juce::String open(const juce::BigInteger& inputChannels,
+                      const juce::BigInteger& outputChannels,
+                      double sampleRate, int bufferSizeSamples) override {
+        close();
+        auto& sys = PipeWireSystem::instance();
+        auto& A = sys.api;
+        if (!sys.ensureConnected()) {
+            mLastError = "PipeWire daemon is not reachable";
+            return mLastError;
+        }
+
+        mClosing.store(false, std::memory_order_relaxed);
+        mRate = sampleRate > 0 ? (int) sampleRate : 48000;
+        mBufFrames = bufferSizeSamples > 0 ? bufferSizeSamples : getDefaultBufferSize();
+        mNumOut = outputChannels.isZero() ? 0
+                    : juce::jlimit(1, kPatchbayChans, outputChannels.getHighestBit() + 1);
+        mNumIn = inputChannels.isZero() ? 0
+                    : juce::jlimit(1, kPatchbayChans, inputChannels.getHighestBit() + 1);
+        if (mNumOut == 0 && mNumIn == 0) {
+            mLastError = "no channels requested";
+            return mLastError;
+        }
+
+        mOutPorts.assign((size_t) mNumOut, nullptr);
+        mInPorts.assign((size_t) mNumIn, nullptr);
+        mOutPtrs.assign((size_t) std::max(mNumOut, 1), nullptr);
+        mInPtrs.assign((size_t) std::max(mNumIn, 1), nullptr);
+        mZeroPlane.assign(kMaxQuantum, 0.0f);
+        mTrashPlane.assign(kMaxQuantum, 0.0f);
+        mObservedRate.store(0, std::memory_order_relaxed);
+        mNodeId = PW_ID_ANY;
+
+        juce::String err;
+        sys.lock();
+        pw_properties* props = A.properties_new(
+            PW_KEY_MEDIA_TYPE, "Audio",
+            PW_KEY_MEDIA_CATEGORY, "Duplex",
+            PW_KEY_MEDIA_ROLE, "DSP",
+            PW_KEY_APP_NAME, ss_app_name(),
+            PW_KEY_NODE_NAME, ss_app_name(),
+            PW_KEY_NODE_ALWAYS_PROCESS, "true",
+            nullptr);
+        char tmp[64];
+        snprintf(tmp, sizeof(tmp), "%d/%d", mBufFrames, mRate);
+        A.properties_set(props, PW_KEY_NODE_LATENCY, tmp);
+        // Same quantum ceiling as the stream devices (see makeStream).
+        snprintf(tmp, sizeof(tmp), "%d/%d", std::max(mBufFrames * 2, 2048), mRate);
+        A.properties_set(props, PW_KEY_NODE_MAX_LATENCY, tmp);
+
+        mFilter = A.filter_new(sys.core(), ss_app_name(), props);
+        if (mFilter == nullptr) {
+            err = "pw_filter_new failed";
+        } else {
+            static const pw_filter_events filterEvents = [] {
+                pw_filter_events e{};
+                e.version = PW_VERSION_FILTER_EVENTS;
+                e.state_changed = [](void* /*data*/, pw_filter_state /*old*/,
+                                     pw_filter_state state, const char* error) {
+                    if (state == PW_FILTER_STATE_ERROR)
+                        ss_log("PipeWire filter error: %s", error != nullptr ? error : "unknown");
+                    auto& s = PipeWireSystem::instance();
+                    s.api.thread_loop_signal(s.loop(), false);
+                };
+                e.process = [](void* data, spa_io_position* position) {
+                    static_cast<PatchbayAudioIODevice*>(data)->process(position);
+                };
+                return e;
+            }();
+            A.filter_add_listener(mFilter, &mFilterHook, &filterEvents, this);
+
+            for (int i = 0; i < mNumOut + mNumIn && err.isEmpty(); ++i) {
+                const bool playback = i < mNumOut;
+                const int idx = playback ? i : i - mNumOut;
+                snprintf(tmp, sizeof(tmp), "%s%d", playback ? "out_" : "in_", idx + 1);
+                void* port = A.filter_add_port(
+                    mFilter,
+                    playback ? PW_DIRECTION_OUTPUT : PW_DIRECTION_INPUT,
+                    PW_FILTER_PORT_FLAG_MAP_BUFFERS,
+                    sizeof(PortData),
+                    A.properties_new(PW_KEY_FORMAT_DSP, "32 bit float mono audio",
+                                     PW_KEY_PORT_NAME, tmp,
+                                     nullptr),
+                    nullptr, 0);
+                if (port == nullptr) {
+                    err = "pw_filter_add_port failed";
+                    break;
+                }
+                static_cast<PortData*>(port)->index = idx;
+                (playback ? mOutPorts : mInPorts)[(size_t) idx] = port;
+            }
+
+            if (err.isEmpty()) {
+                const int res = A.filter_connect(mFilter, PW_FILTER_FLAG_RT_PROCESS, nullptr, 0);
+                if (res < 0)
+                    err = "pw_filter_connect failed: " + juce::String(spa_strerror(res));
+            }
+        }
+        sys.unlock();
+
+        if (err.isEmpty())
+            err = waitForFilter();
+
+        if (err.isEmpty()) {
+            // Registry must have seen our ports before links can name them.
+            sys.roundtrip(2);
+            sys.lock();
+            refreshLinks();
+            sys.unlock();
+            sys.addChangeSink(this, [this] {
+                if (!mClosing.load(std::memory_order_relaxed))
+                    refreshLinks();
+            });
+        }
+
+        if (err.isNotEmpty()) {
+            close();
+            mLastError = err;
+            return err;
+        }
+
+        if (const int seen = mObservedRate.load(std::memory_order_relaxed))
+            mRate = seen;
+
+        mActiveOut.clear();
+        mActiveOut.setRange(0, mNumOut, true);
+        mActiveIn.clear();
+        mActiveIn.setRange(0, mNumIn, true);
+        mIsOpen = true;
+        mLastError.clear();
+        return {};
+    }
+
+    void close() override {
+        stop();
+        mClosing.store(true, std::memory_order_relaxed);
+        auto& sys = PipeWireSystem::instance();
+        sys.removeChangeSink(this);
+        if (sys.connected() && mFilter != nullptr) {
+            sys.lock();
+            dropLinks(mOutLinks);
+            dropLinks(mInLinks);
+            sys.api.filter_disconnect(mFilter);
+            sys.api.filter_destroy(mFilter);   // also removes ports + listeners
+            sys.unlock();
+        }
+        mFilter = nullptr;
+        mFilterHook = spa_hook{};
+        mNodeId = PW_ID_ANY;
+        mIsOpen = false;
+    }
+
+    void start(juce::AudioIODeviceCallback* newCallback) override {
+        if (mIsOpen && newCallback != mCallback) {
+            if (newCallback != nullptr)
+                newCallback->audioDeviceAboutToStart(this);
+            juce::AudioIODeviceCallback* old = mCallback;
+            {
+                const juce::ScopedLock sl(mCallbackLock);
+                mCallback = newCallback;
+            }
+            if (old != nullptr)
+                old->audioDeviceStopped();
+        }
+    }
+
+    void stop() override { start(nullptr); }
+
+    bool isOpen() override    { return mIsOpen; }
+    bool isPlaying() override { return mCallback != nullptr; }
+    juce::String getLastError() override { return mLastError; }
+
+    int getCurrentBufferSizeSamples() override { return mBufFrames; }
+    double getCurrentSampleRate() override     { return mRate; }
+    int getCurrentBitDepth() override          { return 32; }
+
+    juce::BigInteger getActiveOutputChannels() const override { return mActiveOut; }
+    juce::BigInteger getActiveInputChannels() const override  { return mActiveIn; }
+
+    int getOutputLatencyInSamples() override { return mBufFrames; }
+    int getInputLatencyInSamples() override  { return mBufFrames; }
+
+private:
+    struct PortData { int index; };
+
+    struct AutoLinks {
+        uint32_t targetNode = PW_ID_ANY;
+        std::vector<pw_proxy*> proxies;
+    };
+
+    juce::StringArray portNames(const char* prefix) const {
+        juce::StringArray names;
+        for (int i = 1; i <= kPatchbayChans; ++i)
+            names.add(juce::String(prefix) + juce::String(i));
+        return names;
+    }
+
+    juce::String waitForFilter() {
+        auto& sys = PipeWireSystem::instance();
+        auto& A = sys.api;
+        juce::String err;
+        sys.lock();
+        for (int elapsed = 0; elapsed < 5; ++elapsed) {
+            const char* filterError = nullptr;
+            const pw_filter_state st = A.filter_get_state(mFilter, &filterError);
+            if (st == PW_FILTER_STATE_ERROR) {
+                err = "PipeWire filter failed: "
+                      + juce::String(filterError != nullptr ? filterError : "unknown");
+                break;
+            }
+            if (st == PW_FILTER_STATE_PAUSED || st == PW_FILTER_STATE_STREAMING) {
+                mNodeId = A.filter_get_node_id(mFilter);
+                if (mNodeId != PW_ID_ANY)
+                    break;
+            }
+            A.thread_loop_timed_wait(sys.loop(), 1);
+        }
+        if (err.isEmpty() && mNodeId == PW_ID_ANY)
+            err = "PipeWire filter did not start";
+
+        // ALWAYS_PROCESS keeps the graph driving us, so the true graph rate
+        // arrives with the first process callback; fall back to the
+        // requested rate if the graph stays quiet.
+        for (int elapsed = 0;
+             err.isEmpty() && elapsed < 2
+                 && mObservedRate.load(std::memory_order_relaxed) == 0;
+             ++elapsed)
+            A.thread_loop_timed_wait(sys.loop(), 1);
+        sys.unlock();
+        return err;
+    }
+
+    // Auto-link maintenance. Caller must hold the thread-loop lock (the
+    // change-sink path arrives with it held; open() takes it explicitly —
+    // pw_thread_loop locks are recursive).
+    void refreshLinks() {
+        if (mNodeId == PW_ID_ANY)
+            return;
+        relinkSide(mOutLinks, true);
+        relinkSide(mInLinks, false);
+    }
+
+    void relinkSide(AutoLinks& links, bool playback) {
+        auto& sys = PipeWireSystem::instance();
+        const auto target = sys.defaultTarget(playback);
+        const int want = std::min({ 2, playback ? mNumOut : mNumIn,
+                                    (int) target.portIds.size() });
+        // Same target with links in place: leave the graph alone (including
+        // any edits the user made to our links).
+        if (target.nodeId == links.targetNode && (int) links.proxies.size() >= want)
+            return;
+        dropLinks(links);
+        links.targetNode = target.nodeId;
+        if (target.nodeId == PW_ID_ANY)
+            return;
+        for (int i = 0; i < want; ++i) {
+            const uint32_t ours = sys.portGlobalId(mNodeId, !playback, i);
+            if (ours == PW_ID_ANY)
+                continue;
+            pw_proxy* link = playback
+                ? makeLink(mNodeId, ours, target.nodeId, target.portIds[(size_t) i])
+                : makeLink(target.nodeId, target.portIds[(size_t) i], mNodeId, ours);
+            if (link != nullptr)
+                links.proxies.push_back(link);
+        }
+        ss_log("PipeWire patchbay: auto-linked %d %s port(s) to node %u",
+               (int) links.proxies.size(), playback ? "out" : "in", target.nodeId);
+    }
+
+    void dropLinks(AutoLinks& links) {
+        auto& A = PipeWireSystem::instance().api;
+        for (pw_proxy* p : links.proxies)
+            A.proxy_destroy(p);
+        links.proxies.clear();
+        links.targetNode = PW_ID_ANY;
+    }
+
+    pw_proxy* makeLink(uint32_t outNode, uint32_t outPort, uint32_t inNode, uint32_t inPort) {
+        auto& sys = PipeWireSystem::instance();
+        auto& A = sys.api;
+        pw_properties* p = A.properties_new(nullptr, nullptr);
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%u", outNode);
+        A.properties_set(p, PW_KEY_LINK_OUTPUT_NODE, buf);
+        snprintf(buf, sizeof(buf), "%u", outPort);
+        A.properties_set(p, PW_KEY_LINK_OUTPUT_PORT, buf);
+        snprintf(buf, sizeof(buf), "%u", inNode);
+        A.properties_set(p, PW_KEY_LINK_INPUT_NODE, buf);
+        snprintf(buf, sizeof(buf), "%u", inPort);
+        A.properties_set(p, PW_KEY_LINK_INPUT_PORT, buf);
+        auto* proxy = (pw_proxy*) pw_core_create_object(
+            sys.core(), "link-factory", PW_TYPE_INTERFACE_Link, PW_VERSION_LINK,
+            &p->dict, 0);
+        A.properties_free(p);
+        return proxy;
+    }
+
+    void process(spa_io_position* position) {
+        auto& A = PipeWireSystem::instance().api;
+        uint32_t n = position != nullptr ? (uint32_t) position->clock.duration
+                                         : (uint32_t) mBufFrames;
+        if (n == 0)
+            return;
+        n = std::min(n, kMaxQuantum);
+        if (position != nullptr && position->clock.rate.denom != 0)
+            mObservedRate.store((int) position->clock.rate.denom, std::memory_order_relaxed);
+
+        // Unpatched ports hand back null DSP buffers: silent plane for
+        // inputs, shared discard plane for outputs.
+        for (int i = 0; i < mNumIn; ++i) {
+            auto* b = (const float*) A.filter_get_dsp_buffer(mInPorts[(size_t) i], n);
+            mInPtrs[(size_t) i] = b != nullptr ? b : mZeroPlane.data();
+        }
+        for (int i = 0; i < mNumOut; ++i) {
+            auto* b = (float*) A.filter_get_dsp_buffer(mOutPorts[(size_t) i], n);
+            mOutPtrs[(size_t) i] = b != nullptr ? b : mTrashPlane.data();
+        }
+
+        const juce::ScopedLock sl(mCallbackLock);
+        if (mCallback != nullptr)
+            mCallback->audioDeviceIOCallbackWithContext(
+                mInPtrs.data(), mNumIn > 0 ? mNumIn : 0,
+                mOutPtrs.data(), mNumOut, (int) n, {});
+        else
+            for (int i = 0; i < mNumOut; ++i)
+                if (mOutPtrs[(size_t) i] != mTrashPlane.data())
+                    memset(mOutPtrs[(size_t) i], 0, n * sizeof(float));
+    }
+
+    pw_filter* mFilter = nullptr;
+    spa_hook mFilterHook{};
+    uint32_t mNodeId = PW_ID_ANY;
+
+    int mRate = 48000;
+    int mBufFrames = 256;
+    int mNumOut = 0, mNumIn = 0;
+    bool mIsOpen = false;
+    std::atomic<bool> mClosing { false };
+    std::atomic<int> mObservedRate { 0 };
+    juce::String mLastError;
+    juce::BigInteger mActiveOut, mActiveIn;
+
+    juce::AudioIODeviceCallback* mCallback = nullptr;
+    juce::CriticalSection mCallbackLock;
+
+    std::vector<void*> mOutPorts, mInPorts;
+    std::vector<const float*> mInPtrs;
+    std::vector<float*> mOutPtrs;
+    std::vector<float> mZeroPlane, mTrashPlane;
+    AutoLinks mOutLinks, mInLinks;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PatchbayAudioIODevice)
+};
+
+//==============================================================================
 class PipeWireAudioIODeviceType final : public juce::AudioIODeviceType,
                                         private juce::AsyncUpdater {
 public:
@@ -930,6 +1514,16 @@ public:
             if (n.isSink) add(mOutputs, outputNames, std::move(n));
             else          add(mInputs, inputNames, std::move(n));
         }
+
+        // The patchbay is a graph citizen rather than a sink wrapper, so it
+        // is offered whenever the daemon is reachable — even with no sinks
+        // (its ports can still be patched to other apps).
+        PwNodeInfo patchbay;
+        patchbay.description = kPatchbayDeviceName;
+        mOutputs.push_back(patchbay);
+        outputNames.add(kPatchbayDeviceName);
+        mInputs.push_back(patchbay);
+        inputNames.add(kPatchbayDeviceName);
     }
 
     juce::StringArray getDeviceNames(bool wantInputNames) const override {
@@ -946,6 +1540,8 @@ public:
 
     int getIndexOfDevice(juce::AudioIODevice* device, bool asInput) const override {
         jassert(hasScanned);
+        if (dynamic_cast<PatchbayAudioIODevice*>(device) != nullptr)
+            return (asInput ? inputNames : outputNames).indexOf(kPatchbayDeviceName);
         if (auto* d = dynamic_cast<PipeWireAudioIODevice*>(device))
             return asInput ? inputNames.indexOf(d->inputName)
                            : outputNames.indexOf(d->outputName);
@@ -955,6 +1551,11 @@ public:
     juce::AudioIODevice* createDevice(const juce::String& outputDeviceName,
                                       const juce::String& inputDeviceName) override {
         jassert(hasScanned);
+        // The patchbay's ports live on one filter node, so selecting it on
+        // either side selects it for both — a stream device can't share the
+        // node, and mixed pairings would reintroduce the capture ring.
+        if (outputDeviceName == kPatchbayDeviceName || inputDeviceName == kPatchbayDeviceName)
+            return new PatchbayAudioIODevice();
         const int outIdx = outputNames.indexOf(outputDeviceName);
         const int inIdx = inputNames.indexOf(inputDeviceName);
         if (outIdx < 0 && inIdx < 0)
@@ -987,5 +1588,8 @@ std::unique_ptr<juce::AudioIODeviceType> createPipeWireAudioIODeviceType() {
         return nullptr;
     return std::make_unique<PipeWireAudioIODeviceType>();
 }
+
+const char* pipeWirePatchbayDeviceName() { return kPatchbayDeviceName; }
+const char* pipeWireDefaultDeviceName()  { return kDefaultDeviceName; }
 
 #endif // __linux__ && SUPERSONIC_PIPEWIRE

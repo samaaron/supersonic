@@ -30,6 +30,53 @@
 #include <atomic>
 #include <cstdint>
 
+namespace supersonic {
+
+// Rate-gates the wall-clock drift diagnostic. Steady-state jitter on VMs
+// and Windows shared-mode WASAPI hovers right at the threshold, so a
+// per-second limit still logs forever (thousands of lines per session);
+// ASIO-grade callbacks stay below it and log nothing. A genuine step is
+// reported immediately; a persisting condition summarises at most once
+// per minute, the line carrying the window's peak and hit count so one
+// line tells the minute's story. Audio-thread only — plain fields.
+struct DriftLogGate {
+    static constexpr double kThresholdSec   = 0.005;
+    static constexpr double kMinIntervalSec = 60.0;
+
+    struct Line {
+        double   driftSec = 0.0;   // this callback's signed drift
+        double   peakSec = 0.0;    // window peak magnitude
+        uint32_t hits = 0;         // over-threshold callbacks this window
+        uint32_t total = 0;        // over-threshold callbacks since boot
+    };
+
+    // Returns true when a line should be emitted, filling `out`.
+    bool offer(double driftSec, double wallNow, Line& out) {
+        const double mag = driftSec < 0.0 ? -driftSec : driftSec;
+        if (mag <= kThresholdSec)
+            return false;
+        ++mTotal;
+        ++mWindowHits;
+        if (mag > mWindowPeakSec)
+            mWindowPeakSec = mag;
+        if (wallNow - mLastLogNTP < kMinIntervalSec)
+            return false;
+        out = { driftSec, mWindowPeakSec, mWindowHits, mTotal };
+        mLastLogNTP = wallNow;
+        mWindowHits = 0;
+        mWindowPeakSec = 0.0;
+        return true;
+    }
+
+private:
+    double   mLastLogNTP{0.0};
+    double   mWindowPeakSec{0.0};
+    uint32_t mWindowHits{0};
+    uint32_t mTotal{0};
+};
+
+} // namespace supersonic
+
 #if SUPERSONIC_WORKLET_CLOCK
 
 // ─── Worklet time-source (self-driven; WASM / ESP32) ─────────────────────────
@@ -130,8 +177,7 @@ private:
     // returns a pure sample-derived NTP (deterministic; see setFreewheelClock).
     std::atomic<bool>     mFreewheelClock{false};
     // Drift-step logging state (audio-thread only).
-    double   mLastDriftLogNTP{0.0};
-    uint32_t mDriftOverCount{0};
+    supersonic::DriftLogGate mDriftLogGate;
 };
 
 #endif  // SUPERSONIC_WORKLET_CLOCK

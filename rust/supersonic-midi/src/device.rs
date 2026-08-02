@@ -177,10 +177,15 @@ fn port_names_out(mo: &MidiOutput) -> Vec<String> {
 /// skips a second SuperSonic instance's internal ports.
 const OWN_IN_PORT: &str = "supersonic-midi-in";
 const OWN_OUT_PORT: &str = "supersonic-midi-out";
+use crate::watcher::HOTSWAP_CLIENT_NAME;
 
 /// True when an enumerated raw port name is one of our own ports.
 fn is_own_port(raw: &str) -> bool {
     raw.contains(OWN_IN_PORT) || raw.contains(OWN_OUT_PORT)
+        // The hot-swap watcher's ALSA announce port is a distinct client, so
+        // the I/O port names above don't cover it (its NO_EXPORT capability
+        // doesn't help either — midir's filter only checks for WRITE|SUBS).
+        || raw.contains(HOTSWAP_CLIENT_NAME)
 }
 
 /// Linux/ALSA storage: all inputs share one sequencer client, all outputs share

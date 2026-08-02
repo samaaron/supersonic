@@ -327,4 +327,85 @@ std::string validateSwapDeviceNames(
     return {};
 }
 
+ExclusivePair resolveExclusiveDuplexPair(const std::string& requestedOutput,
+                                         const std::string& requestedInput,
+                                         const std::string& currentOutput,
+                                         const std::string& currentInput,
+                                         const std::string& exclusiveName,
+                                         const std::string& fallbackOutput) {
+    ExclusivePair p{ requestedOutput, requestedInput };
+    if (exclusiveName.empty())
+        return p;
+
+    const std::string& x = exclusiveName;
+    const std::string& effOut = requestedOutput.empty() ? currentOutput : requestedOutput;
+    const std::string& effIn  = requestedInput.empty()  ? currentInput  : requestedInput;
+    const bool outIsX = effOut == x;
+    const bool inIsX  = effIn == x;
+    if (!outIsX && !inIsX)
+        return p;
+
+    if (outIsX && inIsX) {
+        // Fully on the exclusive device. Concrete on both sides so the
+        // device layer never re-derives an empty "keep" field.
+        p.output = x;
+        p.input = x;
+        return p;
+    }
+
+    // One side on the exclusive device with the other side absent or
+    // disabled is a legal state (patchbay output with inputs off), not a
+    // mixed pair — nothing to resolve.
+    if (outIsX && (effIn.empty() || effIn == "__none__"))
+        return p;
+    if (inIsX && effOut.empty())
+        return p;
+
+    // Mixed pair. The user's intent is the side the request changes; a
+    // side merely re-sent or inherited is ambient state.
+    const bool introducedOut = requestedOutput == x && currentOutput != x;
+    const bool introducedIn  = requestedInput == x && currentInput != x;
+    if (introducedOut || introducedIn) {
+        p.output = x;
+        p.input = x;
+        return p;
+    }
+
+    // The exclusive device is carried-over state only; the other side's
+    // explicit change wins and the exclusive side yields.
+    if (inIsX)
+        p.input = "__none__";
+    else
+        p.output = fallbackOutput;
+    return p;
+}
+
+DriverTableAnnotation annotateDriverOutputs(const std::string& driver,
+                                            const std::vector<std::string>& outputs,
+                                            const std::string& nativeDriver,
+                                            const std::string& defaultFollowName,
+                                            const std::string& exclusiveName) {
+    DriverTableAnnotation a;
+    a.flags.assign(outputs.size(), "");
+
+    bool hasNativeDefault = false;
+    if (driver == nativeDriver) {
+        for (size_t i = 0; i < outputs.size(); ++i) {
+            if (!defaultFollowName.empty() && outputs[i] == defaultFollowName) {
+                a.flags[i] = "follows-default";
+                hasNativeDefault = true;
+            } else if (!exclusiveName.empty() && outputs[i] == exclusiveName) {
+                a.flags[i] = "exclusive-duplex";
+            }
+        }
+    }
+
+    if (!hasNativeDefault && driver != "ASIO") {
+        a.insertSyntheticDefault = true;
+        a.syntheticName = defaultFollowName;
+        a.syntheticFlags = "follows-default,synthetic";
+    }
+    return a;
+}
+
 } // namespace sonicpi::device

@@ -231,7 +231,21 @@ pub extern "C" fn ss_midi_create(
     emit: EmitFn,
     clock: ClockFn,
     transport: TransportFn,
+    app_name: *const std::ffi::c_char,
 ) -> *mut SsMidi {
+    // The OS MIDI registry client name other apps see; NULL/"" falls back.
+    let client_name = if app_name.is_null() {
+        String::new()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(app_name) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    let client_name = if client_name.is_empty() {
+        "SuperSonic".to_string()
+    } else {
+        client_name
+    };
     no_unwind(std::ptr::null_mut(), || {
         let host = Host {
             ctx,
@@ -248,7 +262,7 @@ pub extern "C" fn ss_midi_create(
         let on_input: InputCallback = Arc::new(move |norm: &str, raw: &str, ts: u64, bytes: &[u8]| {
             no_unwind((), || handle_input(&host, &in_state, norm, raw, ts, bytes));
         });
-        let io = Arc::new(Mutex::new(MidiIo::new("SuperSonic", on_input)));
+        let io = Arc::new(Mutex::new(MidiIo::new(client_name, on_input)));
 
         // Native hot-swap: the OS device-change notification (WinRT DeviceWatcher /
         // CoreMIDI notify / ALSA announce) re-enumerates and diff-broadcasts

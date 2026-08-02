@@ -65,7 +65,15 @@ namespace {
 // Arena base for engine-region access in this file. Valid after init_memory()
 // (i.e. once the World has booted), which all callers below satisfy.
 inline uint8_t* sp_arena() { return static_cast<uint8_t*>(get_shared_memory_base()); }
+
+// Name published to OS registries (PipeWire nodes, ALSA seq MIDI clients,
+// macOS aggregate devices, Link peers). Written once in init() from
+// cfg.appName before any device manager or MIDI subsystem exists, read-only
+// after; consumers declare `extern "C" const char* ss_app_name()`.
+std::string sPublishedAppName = "SuperSonic";
 }
+
+extern "C" const char* ss_app_name() { return sPublishedAppName.c_str(); }
 
 namespace {
 // JUCE appends " (N)" suffixes to disambiguate duplicate CoreAudio device
@@ -451,6 +459,9 @@ void SupersonicEngine::loadPianoWavetable(const std::string& path) {
 void SupersonicEngine::init(const Config& cfg) {
     if (mRunning.load()) return;
     setEngineState(EngineState::Booting, "init");
+
+    if (!cfg.appName.empty())
+        sPublishedAppName = cfg.appName;
 
     mHeadless = cfg.headless;
     mSuperClock.setFreewheelClock(cfg.freewheelClock);
@@ -2256,17 +2267,53 @@ void SupersonicEngine::sendDeviceReport() {
     // for a shared name (Windows: the WASAPI variants and DirectSound
     // expose identical endpoint names). Group order follows enumeration
     // order. Snapshot taken before dedupeByName mutates the vectors.
-    struct DriverGroup { std::string driver; std::vector<std::string> outputs, inputs; };
+    struct DriverGroup {
+        std::string driver;
+        std::vector<std::string> outputs, inputs;
+        std::vector<std::string> outputFlags, inputFlags;   // parallel, "" = none
+    };
     std::vector<DriverGroup> deviceTable;
     {
         auto groupFor = [&](const std::string& t) -> DriverGroup& {
             for (auto& g : deviceTable)
                 if (g.driver == t) return g;
-            deviceTable.push_back({t, {}, {}});
+            deviceTable.push_back({t, {}, {}, {}, {}});
             return deviceTable.back();
         };
         for (auto& dev : outputDevices) groupFor(dev.typeName).outputs.push_back(dev.name);
         for (auto& dev : inputDevices)  groupFor(dev.typeName).inputs.push_back(dev.name);
+
+        // Capability flags make the table the single source of truth for
+        // client dropdowns: the GUI renders rows and their semantics from
+        // here instead of synthesizing an "OS Default" entry client-side.
+        // Drivers without a native default-follow device get a synthetic
+        // flagged row; picking it is translated to system mode by
+        // EngineControl (see isSyntheticDefaultPick).
+#if defined(__linux__) && defined(SUPERSONIC_PIPEWIRE)
+        const std::string nativeFollowDriver = "PipeWire";
+        const std::string followName = pipeWireDefaultDeviceName();
+        const std::string exclusiveName = pipeWirePatchbayDeviceName();
+#else
+        const std::string nativeFollowDriver;
+        const std::string followName = sonicpi::device::kSystemDefaultTableName;
+        const std::string exclusiveName;
+#endif
+        for (auto& g : deviceTable) {
+            auto out = sonicpi::device::annotateDriverOutputs(
+                g.driver, g.outputs, nativeFollowDriver, followName, exclusiveName);
+            g.outputFlags = std::move(out.flags);
+            if (out.insertSyntheticDefault) {
+                g.outputs.insert(g.outputs.begin(), out.syntheticName);
+                g.outputFlags.insert(g.outputFlags.begin(), out.syntheticFlags);
+            }
+            // Inputs carry the same per-device capabilities but never a
+            // synthetic default row — "no input" is already an explicit
+            // GUI choice, and input-follow semantics ride on the native
+            // driver's own entry.
+            auto in = sonicpi::device::annotateDriverOutputs(
+                g.driver, g.inputs, nativeFollowDriver, followName, exclusiveName);
+            g.inputFlags = std::move(in.flags);
+        }
     }
 
     // Dedupe by device name. JUCE on Windows enumerates the same physical
@@ -2314,12 +2361,15 @@ void SupersonicEngine::sendDeviceReport() {
 
     // Build per-driver device table message
     // Format: currentDriver(str), intendedDriver(str), numDrivers(int32),
-    //         then per driver: name(str), numOutputs(int32), output names,
-    //         numInputs(int32), input names. Counts-first throughout so
-    //         parsers never have to type-sniff. Overflow degrades to
-    //         skipping just this message — clients fall back to the flat
-    //         report, and oscpack's throw must never reach
-    //         mBootDeviceReportThread.
+    //         then per driver: name(str),
+    //         numOutputs(int32), then per output: name(str), flags(str),
+    //         numInputs(int32),  then per input:  name(str), flags(str).
+    //         Flags are comma-separated capability tokens
+    //         ("follows-default", "exclusive-duplex", "synthetic"), "" =
+    //         plain device. Counts-first throughout so parsers never have
+    //         to type-sniff. Overflow degrades to skipping just this
+    //         message — clients fall back to the flat report, and
+    //         oscpack's throw must never reach mBootDeviceReportThread.
     char tableBuf[8192];
     osc::OutboundPacketStream tableMsg(tableBuf, sizeof(tableBuf));
     bool tableOk = true;
@@ -2331,9 +2381,15 @@ void SupersonicEngine::sendDeviceReport() {
         for (auto& g : deviceTable) {
             tableMsg << g.driver.c_str()
                      << static_cast<osc::int32>(g.outputs.size());
-            for (auto& n : g.outputs) tableMsg << n.c_str();
+            for (size_t i = 0; i < g.outputs.size(); ++i) {
+                tableMsg << g.outputs[i].c_str();
+                tableMsg << (i < g.outputFlags.size() ? g.outputFlags[i].c_str() : "");
+            }
             tableMsg << static_cast<osc::int32>(g.inputs.size());
-            for (auto& n : g.inputs) tableMsg << n.c_str();
+            for (size_t i = 0; i < g.inputs.size(); ++i) {
+                tableMsg << g.inputs[i].c_str();
+                tableMsg << (i < g.inputFlags.size() ? g.inputFlags[i].c_str() : "");
+            }
         }
         tableMsg << osc::EndMessage;
     } catch (osc::OutOfBufferMemoryException&) {
@@ -3011,6 +3067,18 @@ std::vector<DeviceInfo> SupersonicEngine::listDevices(bool rescan) const {
     return result;
 }
 
+bool SupersonicEngine::isSyntheticDefaultPick(const std::string& name) const {
+    if (name != sonicpi::device::kSystemDefaultTableName)
+        return false;
+    // A driver with a real device of this name (PipeWire) makes it a
+    // literal pick; everywhere else the row exists only in the table.
+    const std::string driver = currentDriver();
+    for (const auto& dev : listDevices(false))
+        if (dev.typeName == driver && dev.name == name)
+            return false;
+    return true;
+}
+
 CurrentDeviceInfo SupersonicEngine::currentDevice() const {
     // Serialise mDeviceManager access against device mutations / recovery's
     // recreate (see mSwapMutex). Recursive: mutation paths call this under gate.
@@ -3406,6 +3474,32 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
         deviceName      = sonicpi::device::resolveJuceDeviceName(deviceName, visibleNames);
         inputDeviceName = sonicpi::device::resolveJuceDeviceName(inputDeviceName, visibleNames);
     }
+
+#if defined(__linux__) && defined(SUPERSONIC_PIPEWIRE)
+    // The patchbay's two sides live on one filter node, so a mixed
+    // patchbay/stream pair can never open as requested — JUCE would hand
+    // both sides to whichever device the type resolves, silently
+    // overriding the side the user just changed. Resolve to the pair that
+    // will really open before any destructive swap work (see
+    // DevicePolicy::resolveExclusiveDuplexPair for the rules). Gated on a
+    // named request: rate/buffer-only swaps carry no pairing intent, and
+    // currentDevice() takes the swap gate — a concurrent rate-only swap
+    // must reach the reject-if-busy check without blocking on it.
+    if (!deviceName.empty() || !inputDeviceName.empty()) {
+        auto cur = currentDevice();
+        const auto resolved = sonicpi::device::resolveExclusiveDuplexPair(
+            deviceName, inputDeviceName, cur.name, cur.inputDeviceName,
+            pipeWirePatchbayDeviceName(), pipeWireDefaultDeviceName());
+        if (resolved.output != deviceName || resolved.input != inputDeviceName) {
+            fprintf(stderr,
+                    "[device-setup] exclusive-pair resolve: out '%s' -> '%s', in '%s' -> '%s'\n",
+                    deviceName.c_str(), resolved.output.c_str(),
+                    inputDeviceName.c_str(), resolved.input.c_str());
+            deviceName = resolved.output;
+            inputDeviceName = resolved.input;
+        }
+    }
+#endif
 
     SwapResult result;
     result.deviceName = deviceName;
@@ -4299,6 +4393,16 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             juce::AudioDeviceManager::AudioDeviceSetup finalSetup;
             mDeviceManager->getAudioDeviceSetup(finalSetup);
             result.inputDeviceName = finalSetup.inputDeviceName.toStdString();
+
+            // Report the device that actually opened, not the request:
+            // JUCE keeps the requested name in its setup even when the
+            // device type resolved it elsewhere, and subscribers (the GUI)
+            // must never be told a fiction. On macOS the aggregate wraps
+            // the real device — report the real one, matching the device
+            // lists the GUI displays.
+            result.deviceName = mRealOutputDeviceName.empty()
+                ? finalDev->getName().toStdString()
+                : mRealOutputDeviceName;
 
             fprintf(stderr, "[device-setup] switched to %s: %s %.0fHz buf=%d %dch\n",
                     finalDev->getTypeName().toRawUTF8(),

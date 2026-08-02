@@ -18,4 +18,11 @@
 
 std::unique_ptr<juce::AudioIODeviceType> createPipeWireAudioIODeviceType();
 
+// Names the engine's device-switch policy needs: the patchbay is an
+// exclusive duplex device (both sides on one filter node — see
+// DevicePolicy's resolveExclusiveDuplexPair), and "System Default" is the
+// driver's fallback output when a carried-over patchbay side must yield.
+const char* pipeWirePatchbayDeviceName();
+const char* pipeWireDefaultDeviceName();
+
 #endif

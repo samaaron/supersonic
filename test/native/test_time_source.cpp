@@ -134,3 +134,60 @@ TEST_CASE("TimeSource: freewheel ignores the wall clock entirely",
         REQUIRE(ntp == Approx(anchor + rig.samples / kRate).margin(1e-9));
     }
 }
+
+// ── Drift-log rate gate ──────────────────────────────────────────────────────
+// Steady-state jitter on VMs and Windows shared-mode WASAPI hovers right at
+// the drift threshold, so a once-per-second rate limit still logs forever
+// (thousands of lines per session — sonic-pi #3553 logs, and any Windows
+// session outside ASIO). The gate reports a genuine step immediately, then
+// summarises a persisting condition at most once a minute, carrying the
+// window's peak and hit count so one line tells the minute's story.
+
+TEST_CASE("DriftLogGate: quiet clock never logs", "[DriftLog]") {
+    supersonic::DriftLogGate gate;
+    supersonic::DriftLogGate::Line line;
+    for (int i = 0; i < 1000; ++i)
+        REQUIRE_FALSE(gate.offer(0.004, 1000.0 + i * 0.02, line));
+}
+
+TEST_CASE("DriftLogGate: first excursion logs immediately", "[DriftLog]") {
+    supersonic::DriftLogGate gate;
+    supersonic::DriftLogGate::Line line;
+    REQUIRE(gate.offer(0.0062, 5000.0, line));
+    REQUIRE(line.hits == 1);
+    REQUIRE(line.total == 1);
+    REQUIRE(line.peakSec == 0.0062);
+}
+
+TEST_CASE("DriftLogGate: sustained jitter summarises once a minute",
+          "[DriftLog]") {
+    supersonic::DriftLogGate gate;
+    supersonic::DriftLogGate::Line line;
+    int lines = 0;
+    // Two full minutes of 50Hz callbacks all hovering over threshold
+    // (6001 ticks spans t=1000..1120 inclusive, crossing both minute marks).
+    for (int i = 0; i < 6001; ++i) {
+        const double now = 1000.0 + i * 0.02;
+        const double drift = (i % 2 == 0) ? 0.006 : -0.008;
+        if (gate.offer(drift, now, line))
+            ++lines;
+    }
+    REQUIRE(lines == 3);              // immediate + one per following minute
+    REQUIRE(line.peakSec == 0.008);   // window peak uses magnitude
+    REQUIRE(line.hits > 2000);        // the whole window, not one callback
+    REQUIRE(line.total == 6001);
+}
+
+TEST_CASE("DriftLogGate: a step long after the last report logs immediately",
+          "[DriftLog]") {
+    supersonic::DriftLogGate gate;
+    supersonic::DriftLogGate::Line line;
+    REQUIRE(gate.offer(0.010, 1000.0, line));
+    // Quiet hour.
+    for (int i = 0; i < 100; ++i)
+        REQUIRE_FALSE(gate.offer(0.001, 1100.0 + i, line));
+    // Fresh step: reported at once, window state freshly its own.
+    REQUIRE(gate.offer(-0.020, 4600.0, line));
+    REQUIRE(line.hits == 1);
+    REQUIRE(line.peakSec == 0.020);
+}

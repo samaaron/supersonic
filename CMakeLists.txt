@@ -1058,11 +1058,47 @@ endif()
 # in the no-synth core, which links no JUCE). The no-synth runtime entry point is
 # supersonic_nosynth_smoke above; the synth host's is this binary.
 if(SUPERSONIC_ENABLE_SYNTH)
+    # Name published in OS-facing binary metadata: the Windows version
+    # resource (what firewall consent prompts display) and the macOS
+    # embedded Info.plist below. Embedders override it (Sonic Pi passes
+    # "Sonic Pi - SuperSonic"); the artefact filename is pinned separately
+    # so the override never moves build outputs.
+    set(SUPERSONIC_PRODUCT_NAME "supersonic" CACHE STRING
+        "Product name published in OS-facing binary metadata")
+
     juce_add_console_app(SuperSonic
-        PRODUCT_NAME    "supersonic"
+        PRODUCT_NAME    "${SUPERSONIC_PRODUCT_NAME}"
         VERSION         "${PROJECT_VERSION}"
         COMPANY_NAME    "SuperSonic"
     )
+    set_target_properties(SuperSonic PROPERTIES OUTPUT_NAME "SuperSonic")
+
+    if(APPLE)
+        # Plain (non-bundled) binaries surface identity to macOS dialogs —
+        # firewall consent, privacy prompts — via an embedded __info_plist
+        # section; without it those dialogs show the raw executable path.
+        set(SUPERSONIC_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/SuperSonicInfo.plist")
+        file(WRITE "${SUPERSONIC_INFO_PLIST}"
+"<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+<plist version=\"1.0\">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.sonicpi.supersonic</string>
+    <key>CFBundleName</key>
+    <string>${SUPERSONIC_PRODUCT_NAME}</string>
+    <key>CFBundleDisplayName</key>
+    <string>${SUPERSONIC_PRODUCT_NAME}</string>
+    <key>CFBundleVersion</key>
+    <string>${PROJECT_VERSION}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${PROJECT_VERSION}</string>
+</dict>
+</plist>
+")
+        target_link_options(SuperSonic PRIVATE
+            "LINKER:-sectcreate,__TEXT,__info_plist,${SUPERSONIC_INFO_PLIST}")
+    endif()
 
     target_sources(SuperSonic PRIVATE
         ${NATIVE_SRC}/Main.cpp

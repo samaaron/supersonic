@@ -136,6 +136,11 @@ public:
                                                    // names the segment).
         std::string bindAddress       = "127.0.0.1"; // localhost only; use -B to override
         std::string hardwareDevice;                // -H flag: fuzzy match on "Driver : Device"
+        std::string appName           = "SuperSonic"; // --app-name: name published to OS
+                                                   // registries (PipeWire nodes, ALSA seq
+                                                   // MIDI clients, macOS aggregate devices,
+                                                   // Link peers). Embedders pass their
+                                                   // user-facing name, e.g. "Sonic Pi".
         std::string pianoWavetablePath;            // --piano-wavetable: raw int16 sample
                                                    // table for the MdaPiano UGen, loaded on
                                                    // the boot thread and injected. Empty =>
@@ -282,6 +287,11 @@ public:
     // just-opened device on macOS). Pass false to reuse JUCE's cached list.
     std::vector<DeviceInfo>  listDevices(bool rescan = true) const;
     CurrentDeviceInfo        currentDevice() const;     // resolves aggregate to real names
+    // True when `name` is the device table's synthetic default-follow row
+    // ("System Default" under a driver that has no real device of that
+    // name) — callers translate the pick into a system-mode request, the
+    // same path as the "__system__" sentinel.
+    bool                     isSyntheticDefaultPick(const std::string& name) const;
     std::string              realOutputDeviceName() const { return mRealOutputDeviceName; }
     std::string              realInputDeviceName() const  { return mRealInputDeviceName; }
     // origin: pass SwapOrigin::Internal for engine-originated swaps

@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
     }
 
 #ifdef SUPERSONIC_WITH_MIDI
-    SsMidi* midi = ss_midi_create(nullptr, midi_emit_noop, midi_clock_noop, midi_transport_noop);
+    SsMidi* midi = ss_midi_create(nullptr, midi_emit_noop, midi_clock_noop, midi_transport_noop, nullptr);
 #endif
 
     ss_host::SendOsc sendOsc =

@@ -28,10 +28,11 @@
 #include <string>
 #include <vector>
 
+extern "C" const char* ss_app_name();
+
 namespace AggregateDeviceHelper {
 
 static const char* kAggregateUIDBase  = "com.sonicpi.supersonic.aggregate";
-static const char* kAggregateNameBase = "SuperSonic";
 
 static AudioObjectID sAggregateID = kAudioObjectUnknown;
 static AudioObjectID sPrevAggregateID = kAudioObjectUnknown;
@@ -329,7 +330,7 @@ std::string createOrUpdate(const std::string& outputDeviceName,
     int n = sAggregateCounter.fetch_add(1) + 1;
     char uidBuf[128], nameBuf[64];
     snprintf(uidBuf, sizeof(uidBuf), "%s.%d", kAggregateUIDBase, n);
-    snprintf(nameBuf, sizeof(nameBuf), "%s#%d", kAggregateNameBase, n);
+    snprintf(nameBuf, sizeof(nameBuf), "%s#%d", ss_app_name(), n);
 
     CFStringRef uidRef  = CFStringCreateWithCString(nullptr, uidBuf, kCFStringEncodingUTF8);
     CFStringRef nameRef = CFStringCreateWithCString(nullptr, nameBuf, kCFStringEncodingUTF8);

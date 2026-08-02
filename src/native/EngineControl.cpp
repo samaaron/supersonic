@@ -553,9 +553,11 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
                 inputDevName = it->AsStringUnchecked();
             }
 
-            // "__system__" sentinel means "follow system default output".
+            // "__system__" sentinel means "follow system default output" —
+            // as does picking the device table's synthetic default-follow
+            // row by name (the GUI sends table names verbatim).
             // Off the gateway: the reinit plus its report can take seconds.
-            if (devName == "__system__") {
+            if (devName == "__system__" || mEngine->isSyntheticDefaultPick(devName)) {
                 mEngine->postDeviceTask([this, token] {
                     auto error = mEngine->setDeviceMode("");
                     char buf[1024];

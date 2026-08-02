@@ -55,11 +55,15 @@ typedef void (*ss_midi_transport_fn)(void* ctx,
                                      const uint8_t* raw, uint32_t raw_len,
                                      int32_t kind, double beat);
 
-/* Create the subsystem. `ctx` and the callbacks must outlive it. */
+/* Create the subsystem. `ctx` and the callbacks must outlive it. `app_name`
+ * is the client name published to the OS MIDI registry (what other MIDI apps
+ * see, e.g. in ALSA/CoreMIDI port lists); NULL or "" falls back to
+ * "SuperSonic". Copied — need not outlive the call. */
 SsMidi* ss_midi_create(void* ctx,
                        ss_midi_emit_fn emit,
                        ss_midi_clock_fn clock,
-                       ss_midi_transport_fn transport);
+                       ss_midi_transport_fn transport,
+                       const char* app_name);
 
 /* Stop the clock thread, close all ports, free the instance. */
 void ss_midi_destroy(SsMidi* handle);

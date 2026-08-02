@@ -939,3 +939,144 @@ TEST_CASE("SwapScope: input name participates in the resolution",
     REQUIRE(d.scopedDriver == "ASIO");
     REQUIRE_FALSE(d.abandonIntent);
 }
+
+// ── Exclusive duplex pair resolution ─────────────────────────────────────────
+// The PipeWire patchbay's input and output sides live on one filter node,
+// so it cannot be half-paired with a stream device. A request that would
+// produce a mixed pair must resolve to an explicit, truthful pair — never
+// silently override the side the user just changed (sonic-pi #3553
+// follow-up: switching output to System Default while the patchbay held
+// the input hijacked the output back to the patchbay, then a reconcile
+// pass amputated the input).
+
+namespace {
+sonicpi::device::ExclusivePair xpair(const std::string& reqOut, const std::string& reqIn,
+                                     const std::string& curOut, const std::string& curIn) {
+    return sonicpi::device::resolveExclusiveDuplexPair(
+        reqOut, reqIn, curOut, curIn, "Patchbay (16 ch)", "System Default");
+}
+} // namespace
+
+TEST_CASE("ExclusivePair: picking the exclusive device claims both sides",
+          "[ExclusivePair]") {
+    // Output dropdown pick...
+    auto p = xpair("Patchbay (16 ch)", "", "System Default", "System Default");
+    REQUIRE(p.output == "Patchbay (16 ch)");
+    REQUIRE(p.input == "Patchbay (16 ch)");
+    // ...and input dropdown pick (GUI re-sends the unchanged output).
+    p = xpair("System Default", "Patchbay (16 ch)", "System Default", "System Default");
+    REQUIRE(p.output == "Patchbay (16 ch)");
+    REQUIRE(p.input == "Patchbay (16 ch)");
+}
+
+TEST_CASE("ExclusivePair: changing output away drops the carried input, "
+          "never the output choice", "[ExclusivePair]") {
+    // The #3553 follow-up scenario: on patchbay both sides, user picks
+    // System Default output; input request is empty (= keep current).
+    auto p = xpair("System Default", "", "Patchbay (16 ch)", "Patchbay (16 ch)");
+    REQUIRE(p.output == "System Default");
+    REQUIRE(p.input == "__none__");
+}
+
+TEST_CASE("ExclusivePair: changing input away frees the carried output to "
+          "the fallback", "[ExclusivePair]") {
+    // On patchbay both sides, user picks a stream input; the GUI re-sends
+    // the (unchanged) patchbay output alongside it. The changed side wins.
+    auto p = xpair("Patchbay (16 ch)", "Built-in Audio Analog Stereo",
+                   "Patchbay (16 ch)", "Patchbay (16 ch)");
+    REQUIRE(p.output == "System Default");
+    REQUIRE(p.input == "Built-in Audio Analog Stereo");
+}
+
+TEST_CASE("ExclusivePair: pairs not involving the exclusive device pass "
+          "through untouched", "[ExclusivePair]") {
+    auto p = xpair("System Default", "", "Built-in Audio Analog Stereo", "");
+    REQUIRE(p.output == "System Default");
+    REQUIRE(p.input == "");
+    p = xpair("", "Built-in Audio Analog Stereo", "System Default", "System Default");
+    REQUIRE(p.output == "");
+    REQUIRE(p.input == "Built-in Audio Analog Stereo");
+}
+
+TEST_CASE("ExclusivePair: staying on the exclusive device passes through",
+          "[ExclusivePair]") {
+    // Re-selecting or rate/buffer-only changes while on the patchbay.
+    auto p = xpair("Patchbay (16 ch)", "Patchbay (16 ch)",
+                   "Patchbay (16 ch)", "Patchbay (16 ch)");
+    REQUIRE(p.output == "Patchbay (16 ch)");
+    REQUIRE(p.input == "Patchbay (16 ch)");
+    p = xpair("Patchbay (16 ch)", "", "Patchbay (16 ch)", "Patchbay (16 ch)");
+    REQUIRE(p.output == "Patchbay (16 ch)");
+    REQUIRE(p.input == "Patchbay (16 ch)");
+}
+
+TEST_CASE("ExclusivePair: empty exclusive name disables the policy",
+          "[ExclusivePair]") {
+    auto p = sonicpi::device::resolveExclusiveDuplexPair(
+        "System Default", "", "Patchbay (16 ch)", "Patchbay (16 ch)", "", "System Default");
+    REQUIRE(p.output == "System Default");
+    REQUIRE(p.input == "");
+}
+
+TEST_CASE("ExclusivePair: exclusive output with inputs disabled is legal, "
+          "not a conflict", "[ExclusivePair]") {
+    // Re-picking the patchbay output while inputs are off must not force
+    // the output anywhere; inputs stay as requested.
+    auto p = xpair("Patchbay (16 ch)", "", "Patchbay (16 ch)", "");
+    REQUIRE(p.output == "Patchbay (16 ch)");
+    REQUIRE(p.input == "");
+    p = xpair("Patchbay (16 ch)", "__none__", "System Default", "System Default");
+    REQUIRE(p.output == "Patchbay (16 ch)");
+    REQUIRE(p.input == "__none__");
+}
+
+// ── Device-table capability annotation ───────────────────────────────────────
+// The device table is the single source of truth for the GUI's dropdowns:
+// every row the user can pick exists in the table, and semantics ride on
+// per-device capability flags instead of client-side synthesis or name
+// sentinels. Drivers with a native default-follow device (PipeWire's
+// "System Default") get it flagged; drivers without one get a synthetic
+// flagged row contributed by the engine, so the GUI never invents rows.
+
+namespace {
+sonicpi::device::DriverTableAnnotation annotate(const std::string& driver,
+                                                const std::vector<std::string>& outputs) {
+    return sonicpi::device::annotateDriverOutputs(
+        driver, outputs, "PipeWire", "System Default", "Patchbay (16 ch)");
+}
+} // namespace
+
+TEST_CASE("TableAnnotation: native driver flags its own default and patchbay",
+          "[DeviceTable]") {
+    auto a = annotate("PipeWire", { "System Default", "Built-in Audio", "Patchbay (16 ch)" });
+    REQUIRE_FALSE(a.insertSyntheticDefault);
+    REQUIRE(a.flags.size() == 3);
+    REQUIRE(a.flags[0] == "follows-default");
+    REQUIRE(a.flags[1] == "");
+    REQUIRE(a.flags[2] == "exclusive-duplex");
+}
+
+TEST_CASE("TableAnnotation: driver without native default gets a synthetic row",
+          "[DeviceTable]") {
+    auto a = annotate("ALSA", { "PipeWire Sound Server", "HDA Intel" });
+    REQUIRE(a.insertSyntheticDefault);
+    REQUIRE(a.syntheticName == "System Default");
+    REQUIRE(a.syntheticFlags == "follows-default,synthetic");
+    REQUIRE(a.flags.size() == 2);
+    REQUIRE(a.flags[0] == "");
+}
+
+TEST_CASE("TableAnnotation: ASIO never gets a synthetic default",
+          "[DeviceTable]") {
+    // ASIO has no OS-default concept — each driver IS its device.
+    auto a = annotate("ASIO", { "MOTU Pro Audio" });
+    REQUIRE_FALSE(a.insertSyntheticDefault);
+}
+
+TEST_CASE("TableAnnotation: patchbay name in a foreign driver is not special",
+          "[DeviceTable]") {
+    // Only the native driver's device carries the capability; an ALSA
+    // device that happens to share the name must not inherit it.
+    auto a = annotate("ALSA", { "Patchbay (16 ch)" });
+    REQUIRE(a.flags[0] == "");
+}

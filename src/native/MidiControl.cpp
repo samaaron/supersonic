@@ -10,6 +10,8 @@
 #include "src/SuperClock.h"
 #include "src/timeline_osc.h"
 #include "ss_midi.h"
+
+extern "C" const char* ss_app_name();
 #include "scheduler/MidiClockOut.h"
 #include "osc/OscReceivedElements.h"
 #include "osc/OscOutboundPacketStream.h"
@@ -29,7 +31,7 @@ void MidiControl::init(OscEgress* egress, SuperClock* clock) {
         });
     if (!mMidi) {
         mMidi = ss_midi_create(this, &MidiControl::emitCb, &MidiControl::clockCb,
-                               &MidiControl::transportCb);
+                               &MidiControl::transportCb, ss_app_name());
     }
 }
 

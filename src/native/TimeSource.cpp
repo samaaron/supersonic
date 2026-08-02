@@ -112,18 +112,16 @@ double TimeSource::updateAudioThreadNTP(double samplePosition,
     const double drift = wallNow - (baseNTP + sampleOffsetSec);
 
     // Surface timebase disturbances (wall-clock step/slew, callback stall):
-    // steady-state drift is µs-level, so anything past 5ms is an event worth
-    // logging. A genuine step stays over threshold while the IIR converges
-    // (~1%/callback), so rate-limit to one line/second — the decaying values
-    // trace the re-convergence. ss_log is a lock-free egress-ring write.
-    const double absDrift = drift < 0.0 ? -drift : drift;
-    if (absDrift > 0.005) {
-        ++mDriftOverCount;
-        if (wallNow - mLastDriftLogNTP >= 1.0) {
-            mLastDriftLogNTP = wallNow;
-            ss_log("DRIFT: wall clock %+.1fms from audio timebase, re-converging (count=%u)",
-                   drift * 1000.0, mDriftOverCount);
-        }
+    // a genuine step is reported immediately; jitter that *hovers* at the
+    // threshold (VMs, Windows shared-mode) summarises at most once per
+    // minute instead of becoming per-second wallpaper — see DriftLogGate.
+    // ss_log is a lock-free egress-ring write.
+    supersonic::DriftLogGate::Line line;
+    if (mDriftLogGate.offer(drift, wallNow, line)) {
+        ss_log("DRIFT: wall clock %+.1fms from audio timebase, re-converging "
+               "(peak %.1fms, %u hits since last report, %u total)",
+               line.driftSec * 1000.0, line.peakSec * 1000.0,
+               line.hits, line.total);
     }
 
     const double newBaseNTP = baseNTP + drift * supersonic::kDriftIirGain;

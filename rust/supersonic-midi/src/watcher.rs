@@ -29,6 +29,12 @@ use std::time::Duration;
 /// watcher's own thread; the implementation must be thread-safe.
 pub type OnChange = Arc<dyn Fn() + Send + Sync + 'static>;
 
+/// Client name the watcher registers with the OS MIDI service. On Linux this
+/// names a real ALSA sequencer client whose announce port is visible to every
+/// enumerator, so the registry filters it out of port lists by this name (see
+/// `device::is_own_port`).
+pub(crate) const HOTSWAP_CLIENT_NAME: &str = "supersonic-midi-hotswap";
+
 /// Quiet period that ends a burst of device events before the first refresh.
 const DEBOUNCE: Duration = Duration::from_millis(200);
 /// Delay before the follow-up "settle" refresh that catches a port which wasn't
@@ -280,7 +286,7 @@ mod imp {
         // change (object added/removed, property changed) coalesces into a single
         // re-enumerate downstream.
         let _client = match Client::new_with_notifications(
-            "supersonic-midi-hotswap",
+            crate::watcher::HOTSWAP_CLIENT_NAME,
             move |_n: &Notification| {
                 let _ = poke.send(());
             },
@@ -357,13 +363,18 @@ mod imp {
             Ok(s) => s,
             Err(_) => return,
         };
-        let _ = seq.set_client_name(&std::ffi::CString::new("supersonic-midi-hotswap").unwrap());
+        let _ = seq.set_client_name(
+            &std::ffi::CString::new(crate::watcher::HOTSWAP_CLIENT_NAME).unwrap());
 
         // A local port to receive announcements on.
         let port = {
             use alsa::seq::PortInfo;
             let mut info = PortInfo::empty().unwrap();
-            info.set_capability(PortCap::WRITE | PortCap::SUBS_WRITE);
+            // NO_EXPORT: this port only receives kernel announcements —
+            // third parties may not route through it, and well-behaved
+            // enumerators hide it. (Our own listings filter it by client
+            // name; midir's capability check doesn't exclude NO_EXPORT.)
+            info.set_capability(PortCap::WRITE | PortCap::SUBS_WRITE | PortCap::NO_EXPORT);
             info.set_type(PortType::MIDI_GENERIC | PortType::APPLICATION);
             info.set_name(&std::ffi::CString::new("hotswap").unwrap());
             if seq.create_port(&info).is_err() {

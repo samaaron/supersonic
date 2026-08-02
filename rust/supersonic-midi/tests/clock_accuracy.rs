@@ -56,7 +56,7 @@ fn new_ctx() -> *mut Ctx {
 }
 
 fn create(ctx: *mut Ctx) -> *mut SsMidi {
-    ss_midi_create(ctx as *mut c_void, emit_cb, clock_cb, transport_cb)
+    ss_midi_create(ctx as *mut c_void, emit_cb, clock_cb, transport_cb, std::ptr::null())
 }
 
 fn send(h: *mut SsMidi, addr: &str, args: &[OscArg]) {

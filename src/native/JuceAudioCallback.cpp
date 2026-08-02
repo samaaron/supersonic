@@ -2,6 +2,7 @@
  * JuceAudioCallback.cpp
  */
 #include "JuceAudioCallback.h"
+#include "HardeningPolicy.h"
 #include "RealtimeThread.h"
 #include "WallClock.h"
 #include "SampleLoader.h"
@@ -386,12 +387,14 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
             fflush(stderr);
             mSuperClock->resetAudioThreadTime(mSamplePosition, mSampleRate);
             if (onWake) onWake();
-        } else if (gapUs > 150'000.0) {
+        } else if (gapUs > hardening::stallThresholdUs(numSamples, mSampleRate)) {
             // Sub-wake stall: long enough to snap the timeline and push
             // scheduled client threads past their sched-ahead window (Spider
             // raises TimingError on the affected live loops), too short for
             // the wake path above. Log its size — without this, such a stall
-            // surfaces only as unexplained LATEs downstream.
+            // surfaces only as unexplained LATEs downstream. The threshold
+            // scales with the callback period so a graph running us at a
+            // huge quantum isn't misread as one stall per cycle.
             fprintf(stderr, "  [gap] audio callback stalled %.0fms\n", gapUs / 1000.0);
             fflush(stderr);
         }

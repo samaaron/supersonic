@@ -276,4 +276,56 @@ SwapScopeDecision resolveSwapScope(
 int chooseBlockSize(int hwBufSize, int defaultBlockSize,
                     int minBlockSize, int maxBlockSize);
 
+// An "exclusive duplex" device carries both its input and output sides on
+// a single node (the PipeWire patchbay), so it can never be half of a
+// mixed pair with another device. Resolve a switch request into the pair
+// that will actually open, honouring the side the user changed:
+//   - a request that *introduces* the exclusive device on either side
+//     claims both sides (selecting it anywhere selects it everywhere);
+//   - a request that moves one side away from it is never hijacked — the
+//     carried-over exclusive side yields instead: an input falls to
+//     "__none__" (inputs disabled), an output falls to fallbackOutput;
+//   - pairs not involving the exclusive device pass through, empty
+//     request fields (= "keep current") included.
+// "Introduces" is judged against the current pair because the GUI re-sends
+// the unchanged side's name alongside the one the user picked. Empty
+// exclusiveName disables the policy.
+struct ExclusivePair {
+    std::string output;
+    std::string input;
+};
+ExclusivePair resolveExclusiveDuplexPair(const std::string& requestedOutput,
+                                         const std::string& requestedInput,
+                                         const std::string& currentOutput,
+                                         const std::string& currentInput,
+                                         const std::string& exclusiveName,
+                                         const std::string& fallbackOutput);
+
+// Display/table name for the default-follow entry — both the PipeWire
+// driver's native device and every synthetic row use it, so a pick of
+// this name is a real device under drivers that have one and a system-
+// mode request everywhere else (see isSyntheticDefaultPick).
+inline constexpr const char* kSystemDefaultTableName = "System Default";
+
+// Capability annotation for one driver's device-table group. The table is
+// the single source of truth for client dropdowns: semantics ride on
+// per-device flags ("follows-default", "exclusive-duplex", "synthetic"),
+// never on client-side row synthesis or name sentinels. A driver whose
+// own device list carries a native default-follow device (nativeDriver's
+// defaultFollowName) gets it flagged; any other driver gets a synthetic
+// flagged default row (ASIO excepted — it has no OS-default concept, each
+// ASIO driver is its single device). Flags are per-output, parallel to
+// the outputs vector; comma-separated tokens.
+struct DriverTableAnnotation {
+    std::vector<std::string> flags;      // one entry per output, "" = none
+    bool insertSyntheticDefault = false; // prepend syntheticName to the group
+    std::string syntheticName;
+    std::string syntheticFlags;
+};
+DriverTableAnnotation annotateDriverOutputs(const std::string& driver,
+                                            const std::vector<std::string>& outputs,
+                                            const std::string& nativeDriver,
+                                            const std::string& defaultFollowName,
+                                            const std::string& exclusiveName);
+
 } // namespace sonicpi::device

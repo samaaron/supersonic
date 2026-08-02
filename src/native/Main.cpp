@@ -288,6 +288,8 @@ int main(int argc, char* argv[]) {
                 "  -v           Print version and exit\n"
                 "  --default-bpm <n>  Opening session tempo (default 120)\n"
                 "  --piano-wavetable <path>  MdaPiano sample table (raw int16)\n"
+                "  --app-name <name>  Name published to OS audio/MIDI registries\n"
+                "                     (PipeWire, ALSA seq, Link; default: SuperSonic)\n"
                 "  --list-devices     List audio devices and exit\n"
                 "\n"
                 "Command transports (pick at most one; it replaces the UDP command\n"
@@ -384,6 +386,15 @@ int main(int argc, char* argv[]) {
         // thread; if absent, :piano plays silence.
         if (std::strcmp(arg, "--piano-wavetable") == 0) {
             if (val) { cfg.pianoWavetablePath = val; ++i; }
+            continue;
+        }
+
+        // Name published to OS audio/MIDI registries (PipeWire nodes, ALSA
+        // seq MIDI clients, macOS aggregate devices, Link peers). Embedders
+        // pass their user-facing name so patchbays and MIDI port lists say
+        // e.g. "Sonic Pi" rather than the engine's own name.
+        if (std::strcmp(arg, "--app-name") == 0) {
+            if (val && *val) { cfg.appName = val; ++i; }
             continue;
         }
 

@@ -17,6 +17,8 @@
 #include "native/WallClock.h"
 #include "shared_memory.h"
 
+extern "C" const char* ss_app_name();
+
 // LinkAudio.hpp must be used INSTEAD of Link.hpp ("LinkAudio and Link should not
 // be used simultaneously" per Ableton's docs).
 #include <ableton/LinkAudio.hpp>
@@ -89,8 +91,9 @@ struct LinkSession::Impl {
     ableton::link::platform::ThreadPriority threadPriority{};
 
     // Backing storage for the peer name we advertise. Link::setName takes by
-    // value; we keep the C-string stable for peerName().
-    std::string peerNameCache{"SuperSonic"};
+    // value; we keep the C-string stable for peerName(). Defaults to the
+    // published app name (--app-name); /clock/peer_name/set overrides.
+    std::string peerNameCache{ss_app_name()};
 
     // Last non-Off visibility, restored by setLinkEnabled(false→true). Defaults
     // to LoopbackOnly: bare enable on a fresh SuperClock stays loopback-only
