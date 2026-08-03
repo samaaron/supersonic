@@ -7,6 +7,7 @@
 
 #include "src/IngressCallCtx.h"
 #include "OscEgress.h"
+#include "SubscribeAck.h"
 #include "src/SuperClock.h"
 #include "src/timeline_osc.h"
 #include "ss_midi.h"
@@ -54,6 +55,8 @@ bool MidiControl::handleMidiCommand(const DrainCallCtx& meta, const uint8_t* dat
     if (std::strcmp(addr, "/midi/notify/subscribe") == 0) {
         if (mEgress && mEgress->subscribeCallerToMidiNotify(token) && mMidi)
             ss_midi_emit_ports(mMidi);   // ports snapshot to the new subscriber
+        ackSubscribeIfTokened(mEgress, token, data, size,
+                              "/midi/notify/subscribe.reply");
         return true;
     }
     if (std::strcmp(addr, "/midi/notify/unsubscribe") == 0) {

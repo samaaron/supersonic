@@ -7,6 +7,7 @@
 
 #include "EngineClock.h"
 #include "OscEgress.h"
+#include "SubscribeAck.h"
 #include "SupersonicEngine.h"
 #include "src/SuperClock.h"
 #include "osc/OscOutboundPacketStream.h"
@@ -365,6 +366,8 @@ bool EngineControl::handleLinkCommand(const DrainCallCtx& meta, const uint8_t* d
             // same tempo as our local default leaves the subscriber stuck on its
             // own default until something moves.
             if (!mEgress->subscribeCallerToLinkNotify(token)) return true;  // no addressable caller
+            ackSubscribeIfTokened(mEgress, token, data, size,
+                                  "/clock/notify/subscribe.reply");
             const double initTempo = mSuperClock->getBpm();
             const int32_t initPeers = static_cast<int32_t>(mSuperClock->numPeers());
             {

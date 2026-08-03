@@ -7,6 +7,7 @@
 
 #include "src/IngressCallCtx.h"
 #include "OscEgress.h"
+#include "SubscribeAck.h"
 #include "ss_osc.h"
 #include "supersonic_config.h"   // ss_log
 #include "osc/OscReceivedElements.h"
@@ -68,6 +69,8 @@ bool OscControl::handleOscCommand(const DrainCallCtx& meta, const uint8_t* data,
 
     if (std::strcmp(addr, "/osc/notify/subscribe") == 0) {
         if (mEgress) mEgress->subscribeCallerToOscNotify(token);
+        ackSubscribeIfTokened(mEgress, token, data, size,
+                              "/osc/notify/subscribe.reply");
         return true;
     }
     if (std::strcmp(addr, "/osc/notify/unsubscribe") == 0) {

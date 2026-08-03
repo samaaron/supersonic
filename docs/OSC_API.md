@@ -75,6 +75,18 @@ without a token receive the byte-identical legacy reply format. A
 client that sends tokens must match on them and treat a mismatch as a
 stale reply to be discarded.
 
+### Subscribe acks (`<subsystem>/notify/subscribe`)
+
+The four subsystem subscribe verbs (`/midi`, `/gamepad`, `/osc`,
+`/clock` + `/notify/subscribe`) accept the same trailing int32
+correlation token. A tokened subscribe is acked with
+`<verb>.reply i:token` sent to the subscriber; a token-less subscribe
+keeps its historical no-reply behaviour. Because a subscribe datagram
+lost in transit costs the client every event the subsystem would ever
+push, clients that depend on the stream should send tokened
+subscribes and resend until the token comes back — subscribing is
+idempotent, so resends are harmless.
+
 ---
 
 ## Notify registration
@@ -403,7 +415,7 @@ builds (gated by `SUPERSONIC_ENABLE_MIDI`).
 | `/midi/in/enable s:port i:0\|1` | Open/close an input (`"*"` = all). Pushes `/midi/ports`. |
 | `/midi/out/enable s:port i:0\|1` | Open/close an output (`"*"` = all). Pushes `/midi/ports`. |
 | `/midi/refresh` | Re-enumerate devices; pushes `/midi/ports`. |
-| `/midi/notify/subscribe` | Subscribe to `/midi/in/*` events + `/midi/ports` pushes; replies with a `/midi/ports.reply` snapshot. |
+| `/midi/notify/subscribe` | Subscribe to `/midi/in/*` events + `/midi/ports` pushes; replies with a `/midi/ports.reply` snapshot. Tokened requests are acked (see "Subscribe acks"). |
 | `/midi/notify/unsubscribe` | Stop notifications. |
 
 ### Output (engine → device)
@@ -495,7 +507,7 @@ connect.
 | `/gamepad/devices/list` | Reply `← /gamepad/devices.reply i:n [s:name i:enabled]*` |
 | `/gamepad/enable s:pad i:0\|1` | Mute/unmute a pad's `/gamepad/in/*` events (`"*"` = all + the default for pads that connect later). Pushes `/gamepad/devices`. |
 | `/gamepad/refresh` | Re-broadcast the device snapshot (`/gamepad/devices`). |
-| `/gamepad/notify/subscribe` | Subscribe to `/gamepad/in/*` events + `/gamepad/devices` pushes; replies with a `/gamepad/devices.reply` snapshot. |
+| `/gamepad/notify/subscribe` | Subscribe to `/gamepad/in/*` events + `/gamepad/devices` pushes; replies with a `/gamepad/devices.reply` snapshot. Tokened requests are acked (see "Subscribe acks"). |
 | `/gamepad/notify/unsubscribe` | Stop notifications. |
 
 ### Input events

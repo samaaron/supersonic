@@ -7,6 +7,7 @@
 
 #include "src/IngressCallCtx.h"
 #include "OscEgress.h"
+#include "SubscribeAck.h"
 #include "ss_gamepad.h"
 #include "osc/OscReceivedElements.h"
 
@@ -40,6 +41,8 @@ bool GamepadControl::handleGamepadCommand(const DrainCallCtx& meta, const uint8_
     if (std::strcmp(addr, "/gamepad/notify/subscribe") == 0) {
         if (mEgress && mEgress->subscribeCallerToGamepadNotify(token) && mGamepad)
             ss_gamepad_emit_devices(mGamepad);  // devices snapshot to the new subscriber
+        ackSubscribeIfTokened(mEgress, token, data, size,
+                              "/gamepad/notify/subscribe.reply");
         return true;
     }
     if (std::strcmp(addr, "/gamepad/notify/unsubscribe") == 0) {
