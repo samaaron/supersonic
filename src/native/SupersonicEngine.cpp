@@ -2546,8 +2546,13 @@ void SupersonicEngine::sendDeviceReport() {
     // maxInputChannels with the real underlying sub-device counts.
     int outCh = current.maxOutputChannels > 0 ? current.maxOutputChannels
                                               : current.activeOutputChannels;
-    int inCh  = current.maxInputChannels  > 0 ? current.maxInputChannels
-                                              : current.activeInputChannels;
+    // Only report an input count when input channels are actually open —
+    // maxInputChannels is the device's capability and is non-zero even
+    // when inputs are disabled (the patchbay always exposes 16 port
+    // names), which would show "in 16" on a device with no input active.
+    int inCh  = current.activeInputChannels == 0 ? 0
+              : current.maxInputChannels  > 0    ? current.maxInputChannels
+                                                 : current.activeInputChannels;
 
     char info[1024];
     if (!current.inputDeviceName.empty() && inCh > 0) {
@@ -3204,6 +3209,13 @@ CurrentDeviceInfo SupersonicEngine::currentDevice() const {
     // output device when on ASIO and the input is active.
     if (info.typeName == "ASIO")
         info.inputDeviceName = (info.activeInputChannels > 0) ? info.name : "";
+
+    // With zero active input channels there is no usable input, whatever
+    // name the setup echoes back (JUCE fills in the driver's default-input
+    // name even when the device was opened output-only). Report none so
+    // the GUI's input dropdown matches reality.
+    if (info.activeInputChannels == 0)
+        info.inputDeviceName.clear();
 
     // If running on an aggregate device, report the real underlying names
     // so the GUI sees the actual hardware, not "SuperSonic".
@@ -3931,7 +3943,11 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
             // Re-assert the user's explicit output choice on input-only switches
             setup.outputDeviceName = juce::String(mDeviceMode);
         }
-        if (mCurrentConfig.numInputChannels > 0) {
+        // "__none__" can arrive here with numInputChannels still > 0 (the
+        // exclusive-pair resolver yields a carried-over patchbay input when
+        // the output moves away) — it is a disable request, never a device
+        // name, so it must take the disable branch below.
+        if (mCurrentConfig.numInputChannels > 0 && inputDeviceName != "__none__") {
             if (!inputDeviceName.empty()) {
                 // Explicit input device requested — save for future re-enable
                 setup.useDefaultInputChannels = false;
