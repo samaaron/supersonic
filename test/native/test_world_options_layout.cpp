@@ -12,6 +12,7 @@
 #include "OscBuilder.h"
 #include "src/shared_memory.h"
 #include "src/audio_processor.h"
+#include "src/audio_config.h"
 #include <cstring>
 
 // ── Layout validation ───────────────────────────────────────────────────────
@@ -95,6 +96,50 @@ TEST_CASE("ColdSwap: worldOptions preserved after rate change", "[ColdSwap][Layo
             REQUIRE(afterOpts[i] == originalOpts[i]);
         }
     }
+}
+
+// ── Block size follows the driver buffer (chooseBlockSize wiring) ───────────
+//
+// scsynth's block should match the hardware callback buffer when that
+// buffer is SMALLER than the default block — one block per callback, no
+// prefetch / accumulator decoupling, for low-latency driver buffers. The
+// block is never raised above kDefaultBlockSize: matching a large buffer
+// (Sonic Pi ships -Z 1024) would coarsen the control rate; the decoupling
+// machinery spans the difference instead. In headless mode the manual
+// pump buffer (cfg.bufferSize) IS the "hardware" callback size.
+
+TEST_CASE("BlockSize: world block matches a smaller driver buffer",
+          "[Layout][ChooseBlockSize]") {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.bufferSize = 32;
+    cfg.blockSize  = 0;   // no explicit -z: policy decides
+    EngineFixture fix(cfg);
+    uint32_t* opts = reinterpret_cast<uint32_t*>(
+        ring_buffer_storage + WORLD_OPTIONS_START);
+    REQUIRE(opts[sonicpi::WorldOpts::kBufLength] == 32);
+}
+
+TEST_CASE("BlockSize: larger driver buffer keeps the default block",
+          "[Layout][ChooseBlockSize]") {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.bufferSize = 512;
+    cfg.blockSize  = 0;
+    EngineFixture fix(cfg);
+    uint32_t* opts = reinterpret_cast<uint32_t*>(
+        ring_buffer_storage + WORLD_OPTIONS_START);
+    REQUIRE(opts[sonicpi::WorldOpts::kBufLength]
+            == static_cast<uint32_t>(sonicpi::kDefaultBlockSize));
+}
+
+TEST_CASE("BlockSize: explicit -z overrides the driver buffer",
+          "[Layout][ChooseBlockSize]") {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.bufferSize = 512;
+    cfg.blockSize  = 64;
+    EngineFixture fix(cfg);
+    uint32_t* opts = reinterpret_cast<uint32_t*>(
+        ring_buffer_storage + WORLD_OPTIONS_START);
+    REQUIRE(opts[sonicpi::WorldOpts::kBufLength] == 64);
 }
 
 // ── Cold swap reports correct sample rate ───────────────────────────────────

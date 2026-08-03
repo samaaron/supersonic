@@ -79,8 +79,13 @@ TEST_CASE("InputFallback: result flags input as unavailable with reason",
     CHECK(result.inputUnavailableReason == "Couldn't open the input device!");
 }
 
-TEST_CASE("InputFallback: failure unrelated to input is not retried",
-          "[InputFallback]") {
+TEST_CASE("InputFallback: persistent failure fails the swap after an "
+          "attributing retry", "[InputFallback]") {
+    // The fault is attributed by RETRYING output-only, not by matching
+    // device names inside JUCE's error text (the old contract — it broke
+    // silently whenever the wording changed). A failure that persists
+    // without the input is not the input's fault: the swap fails and no
+    // input-unavailable flag is raised.
     EngineFixture fix;
     int totalAttempts = 0;
     fix.engine().testSwapFailure = [&](bool) -> std::string {
@@ -91,9 +96,8 @@ TEST_CASE("InputFallback: failure unrelated to input is not retried",
     auto result = fix.engine().switchDevice(
         "OutputDevice", 44100, 0, /*forceCold=*/false, "InputDevice");
 
-    // Non-input failure → swap fails, rollback (no retry).
     REQUIRE_FALSE(result.success);
-    REQUIRE(totalAttempts == 1);
+    REQUIRE(totalAttempts == 2);   // original + attributing retry
     CHECK_FALSE(result.inputUnavailable);
 }
 

@@ -89,6 +89,7 @@ add_executable(SuperSonicNativeTests
     test_bundle_sequential.cpp
     test_input_fallback.cpp
     test_no_audio_device.cpp
+    test_swap_characterization.cpp
     test_rt_alloc.cpp
     test_graphdef_leak.cpp
     test_superclock.cpp

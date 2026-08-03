@@ -3,22 +3,236 @@
  */
 #include "DevicePolicy.h"
 
+#include <algorithm>
+#include <set>
+
 namespace sonicpi::device {
 
 namespace {
-// JUCE appends " (N)" suffixes when CoreAudio reports duplicate device
-// names. Returns true if full == base, or full is base followed by a
-// space. Duplicated here (identical copy lives in SupersonicEngine.cpp)
-// to keep this TU standalone — the function is 6 lines and hasn't
-// changed in years.
-bool deviceNameMatches(const std::string& full, const std::string& base) {
-    if (full == base) return true;
-    return full.size() > base.size()
-        && full.compare(0, base.size(), base) == 0
-        && full[base.size()] == ' ';
+// full == base + " (digits)" — JUCE's duplicate-name suffix, exactly.
+bool hasJuceDupSuffix(const std::string& full, const std::string& base) {
+    if (full.size() < base.size() + 4) return false;   // need " (1)"
+    if (full.compare(0, base.size(), base) != 0) return false;
+    size_t i = base.size();
+    if (full[i] != ' ' || full[i + 1] != '(') return false;
+    if (full.back() != ')') return false;
+    bool digits = false;
+    for (size_t k = i + 2; k + 1 < full.size(); ++k) {
+        if (full[k] < '0' || full[k] > '9') return false;
+        digits = true;
+    }
+    return digits;
 }
 } // anonymous namespace
 
+bool sameDeviceName(const std::string& a, const std::string& b) {
+    return a == b || hasJuceDupSuffix(a, b) || hasJuceDupSuffix(b, a);
+}
+
+SwapPlan planSwap(const SwapPlanRequest& req, const SwapSnapshot& snap) {
+    SwapPlan plan;
+    plan.inputName  = req.inputName;
+    plan.sampleRate = req.sampleRate;
+    bool forceCold  = req.forceCold;
+
+    if (snap.hasDeviceManager) {
+        auto scopeDecision = resolveSwapScope(
+            req.userInitiated, snap.intendedDriver, snap.juceCurrentType,
+            req.outputName, req.inputName, snap.deviceTable);
+        plan.abandonDriverIntent = scopeDecision.abandonIntent;
+
+        if (auto err = resolveSwapTarget(req.outputName,
+                                         scopeDecision.scopedDriver,
+                                         snap.juceCurrentType,
+                                         snap.deviceTable, plan.scope);
+            !err.empty()) {
+            plan.error = err;
+            return plan;
+        }
+        if (auto err = resolveSwapTarget(req.inputName,
+                                         scopeDecision.scopedDriver,
+                                         snap.juceCurrentType,
+                                         snap.deviceTable, plan.scope);
+            !err.empty()) {
+            plan.error = err;
+            return plan;
+        }
+
+        // ASIO is full-duplex single-device by spec — one open call
+        // delivers both directions. On a cross-driver switch to ASIO with
+        // an explicit output but no input, mirror the output into the
+        // input.
+        if (plan.scope.crossDriver && plan.scope.targetDriver == "ASIO"
+            && !req.outputName.empty()
+            && (plan.inputName.empty() || plan.inputName == "__none__"))
+            plan.inputName = plan.scope.targetDevice;
+    }
+
+    auto isWireless = [&](const std::string& n) {
+        if (n.empty()) return false;
+        for (auto& w : snap.wirelessDeviceNames)
+            if (sameDeviceName(w, n)) return true;
+        return false;
+    };
+
+    // Rate precedence rung 2: leaving wireless restores the remembered
+    // pre-wireless rate (the wireless receiver's negotiated rate must not
+    // carry onto hardware).
+    if (plan.sampleRate <= 0 && snap.preWirelessRate > 0
+        && snap.hasDeviceManager) {
+        const std::string targetName =
+            req.outputName.empty() ? snap.deviceMode : req.outputName;
+        const double resolved = resolveWirelessExitRate(
+            plan.sampleRate, snap.preWirelessRate, snap.currentRate,
+            isWireless(snap.currentOutputName), isWireless(targetName));
+        if (resolved != plan.sampleRate) {
+            plan.sampleRate = resolved;
+            plan.restoredPreWirelessRate = true;
+        }
+    }
+
+    // Rung 3: target device doesn't support the current rate → nearest.
+    // Output side answers first; the input side is only consulted when
+    // the output side kept the rate (or knew nothing).
+    if (plan.sampleRate <= 0) {
+        double r = resolveTargetRate(snap.outputDeviceRates, snap.currentRate);
+        if (r == 0)
+            r = resolveTargetRate(snap.inputDeviceRates, snap.currentRate);
+        if (r != 0) {
+            plan.sampleRate = r;
+            plan.rateAdjustedToNearest = true;
+        }
+    }
+
+    // Input auto-enable: a device was named against a zero-input world.
+    // Must precede the cold verdict so the forced cold takes effect.
+    if (!plan.inputName.empty() && plan.inputName != "__none__"
+        && snap.currentInputChannels == 0) {
+        plan.enableInputRequested =
+            resolveInputWidth(-1, snap.bootInputChannels, -1);
+        plan.enableInputProbed = snap.probedInputChannels;
+        plan.enableInputWidth =
+            resolveInputWidth(-1, snap.bootInputChannels,
+                              snap.probedInputChannels);
+        forceCold = true;
+    }
+
+    // Rung 4: per-device rate memory, only when nothing above decided.
+    if (plan.sampleRate <= 0 && !req.outputName.empty()
+        && snap.rememberedRate > 0) {
+        plan.sampleRate = static_cast<double>(snap.rememberedRate);
+        plan.rateFromMemory = true;
+    }
+
+    // A hot swap keeps the existing World; its bus counts are only
+    // re-read on rebuild, so a channel-count change at the target forces
+    // cold (writes to higher buses would land on private buses instead of
+    // hardware).
+    if (snap.hasDeviceManager && !forceCold) {
+        if (snap.probedTargetOut > 0
+            && snap.probedTargetOut != snap.currentOutputChannels)
+            plan.coldForChannels = true;
+        if (snap.probedTargetIn > 0
+            && snap.probedTargetIn != snap.currentInputChannels)
+            plan.coldForChannels = true;
+    }
+
+    plan.isCold = forceCold || plan.coldForChannels || plan.scope.crossDriver
+               || (plan.sampleRate > 0 && plan.sampleRate != snap.currentRate);
+    return plan;
+}
+
+double resolveTargetRate(const std::vector<double>& deviceRates,
+                         double currentRate) {
+    if (deviceRates.empty() || currentRate <= 0) return 0;
+    for (double r : deviceRates)
+        if (static_cast<int>(r) == static_cast<int>(currentRate))
+            return 0;
+    double nearest = deviceRates[0];
+    for (double r : deviceRates)
+        if (std::abs(r - currentRate) < std::abs(nearest - currentRate))
+            nearest = r;
+    return nearest;
+}
+
+DeviceListSelection selectReportedDevices(
+        const std::vector<DeviceInfo>& all,
+        const std::string& currentOutputName,
+        const std::string& currentInputName,
+        const std::string& activeDriver,
+        const std::vector<std::string>& knownBadInputsForCurrent) {
+    DeviceListSelection sel;
+
+    for (auto& d : all) {
+        if (d.typeName == "PipeWire"
+            || (d.typeName == "ALSA" && d.name == "PipeWire Sound Server")) {
+            sel.pipewireActive = true;
+            break;
+        }
+    }
+
+    std::vector<DeviceInfo> outputs, inputs;
+    for (auto& d : all) {
+        if (d.isPlatformClutter(sel.pipewireActive)) continue;
+        if (d.maxOutputChannels > 0 && !d.isWirelessTransport())
+            outputs.push_back(d);
+        if (d.maxInputChannels > 0 && d.isSuitableForInput())
+            inputs.push_back(d);
+    }
+
+    if (!currentOutputName.empty()) {
+        inputs.erase(
+            std::remove_if(inputs.begin(), inputs.end(),
+                [&](const DeviceInfo& d) {
+                    for (auto& bad : knownBadInputsForCurrent)
+                        if (d.name == bad) return true;
+                    return false;
+                }),
+            inputs.end());
+
+        for (auto& d : all) {
+            if (sameDeviceName(d.name, currentOutputName)
+                && !d.isSuitableForAggregate()) {
+                inputs.clear();
+                break;
+            }
+        }
+    }
+
+    sel.outputsByDriver = outputs;
+    sel.inputsByDriver  = inputs;
+
+    auto dedupeByName = [&](std::vector<DeviceInfo>& devs) {
+        std::vector<DeviceInfo> out;
+        out.reserve(devs.size());
+        std::set<std::string> seen;
+        for (auto& d : devs)
+            if (d.typeName == activeDriver && seen.insert(d.name).second)
+                out.push_back(d);
+        for (auto& d : devs)
+            if (seen.insert(d.name).second) out.push_back(d);
+        devs.swap(out);
+    };
+    dedupeByName(outputs);
+    dedupeByName(inputs);
+    sel.outputs = std::move(outputs);
+    sel.inputs  = std::move(inputs);
+
+    sel.suppressReport = sel.inputs.empty() && !currentInputName.empty();
+    return sel;
+}
+
+
+int resolveInputWidth(int requested, int bootInputChannels, int probedMax) {
+    int width = requested;
+    if (requested < 0) {
+        if (bootInputChannels > 0)      width = bootInputChannels;
+        else if (bootInputChannels < 0) width = kRequestMaxChannels;
+        else                            width = 2;
+    }
+    if (probedMax > 0 && width > probedMax) width = probedMax;
+    return width;
+}
 
 int clampBufferForDriftComp(int bufferSize,
                             bool aggregateWithDriftCompActive) {
@@ -55,11 +269,17 @@ double resolveAggregateRate(double desired, double actualIn, double actualOut) {
 
 bool shouldFollowDefaultOutputChange(const std::string& newDefault,
                                      const std::string& currentOutput,
-                                     bool newDefaultIsVirtual) {
-    if (newDefault.empty())                           return false;
-    if (newDefault.compare(0, 10, "SuperSonic") == 0) return false;
-    if (newDefault == currentOutput)                  return false;
-    if (newDefaultIsVirtual)                          return false;
+                                     bool newDefaultIsVirtual,
+                                     const std::string& selfAggregatePrefix) {
+    if (newDefault.empty())          return false;
+    if (!selfAggregatePrefix.empty()
+        && newDefault.compare(0, selfAggregatePrefix.size(),
+                              selfAggregatePrefix) == 0
+        && newDefault.size() > selfAggregatePrefix.size()
+        && newDefault[selfAggregatePrefix.size()] == '#')
+        return false;
+    if (newDefault == currentOutput) return false;
+    if (newDefaultIsVirtual)         return false;
     return true;
 }
 
@@ -141,19 +361,8 @@ std::string resolveJuceDeviceName(const std::string& rawName,
         if (v == rawName) return v;
 
     // Looking for "<rawName> (<digits>)" — JUCE's disambiguation pattern.
-    for (auto& v : visibleDevices) {
-        if (v.size() < rawName.size() + 4) continue;           // need " (1)"
-        if (v.compare(0, rawName.size(), rawName) != 0) continue;
-        size_t i = rawName.size();
-        if (v[i] != ' ' || v[i + 1] != '(') continue;
-        if (v.back() != ')') continue;
-        bool hasDigits = false;
-        for (size_t k = i + 2; k + 1 < v.size(); ++k) {
-            if (v[k] < '0' || v[k] > '9') { hasDigits = false; break; }
-            hasDigits = true;
-        }
-        if (hasDigits) return v;
-    }
+    for (auto& v : visibleDevices)
+        if (hasJuceDupSuffix(v, rawName)) return v;
 
     return rawName;
 }
@@ -178,6 +387,27 @@ std::string selectBootOutputDevice(const std::string& defaultName,
     return {};
 }
 
+std::string resolveSwapTarget(
+        const std::string& name,
+        const std::string& scopedDriver,
+        const std::string& juceCurrentType,
+        const std::vector<std::pair<std::string, std::string>>& deviceTable,
+        SwapScope& scope) {
+    if (name.empty() || name == "__system__" || name == "__none__")
+        return {};
+    auto plan = planDeviceSwitch(scopedDriver, name, deviceTable);
+    if (!plan.deviceFound) {
+        return "device '" + name + "' not available on driver '"
+             + (scopedDriver.empty() ? "(none)" : scopedDriver) + "'";
+    }
+    if (plan.targetDriver != juceCurrentType && !scope.crossDriver) {
+        scope.crossDriver  = true;
+        scope.targetDriver = plan.targetDriver;
+        scope.targetDevice = plan.targetDevice;
+    }
+    return {};
+}
+
 int chooseBlockSize(int hwBufSize, int defaultBlockSize,
                     int minBlockSize, int maxBlockSize) {
     if (hwBufSize >= minBlockSize && hwBufSize <= maxBlockSize)
@@ -196,13 +426,13 @@ HotplugDecision decideHotplugAction(
     auto visible = [&](const std::string& name) {
         if (name.empty()) return false;
         for (auto& v : visibleDevices)
-            if (deviceNameMatches(v, name)) return true;
+            if (sameDeviceName(v, name)) return true;
         return false;
     };
 
     // Preferred output just appeared (or returned) and we're not on it.
     if (!preferredOutput.empty()
-        && !deviceNameMatches(currentOutput, preferredOutput)
+        && !sameDeviceName(currentOutput, preferredOutput)
         && visible(preferredOutput)) {
         d.switchOutput = true;
         d.outputName   = preferredOutput;
@@ -226,20 +456,8 @@ namespace {
 // Matches resolveJuceDeviceName's stricter "<base> (<digits>)" form.
 bool deviceNameAcceptable(const std::string& name,
                           const std::vector<std::string>& visible) {
-    for (auto& v : visible) {
-        if (v == name) return true;
-        if (v.size() < name.size() + 4) continue;          // need " (1)"
-        if (v.compare(0, name.size(), name) != 0) continue;
-        size_t i = name.size();
-        if (v[i] != ' ' || v[i + 1] != '(') continue;
-        if (v.back() != ')') continue;
-        bool digits = false;
-        for (size_t k = i + 2; k + 1 < v.size(); ++k) {
-            if (v[k] < '0' || v[k] > '9') { digits = false; break; }
-            digits = true;
-        }
-        if (digits) return true;
-    }
+    for (auto& v : visible)
+        if (v == name || hasJuceDupSuffix(v, name)) return true;
     return false;
 }
 } // anonymous namespace

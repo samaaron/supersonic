@@ -719,8 +719,10 @@ TEST_CASE("AggregateRate: nothing readable → fall back to desired",
 // These cases lock in what we will and won't chase.
 // =============================================================================
 
-static bool follow(const std::string& nd, const std::string& cur, bool virt) {
-    return sonicpi::device::shouldFollowDefaultOutputChange(nd, cur, virt);
+static bool follow(const std::string& nd, const std::string& cur, bool virt,
+                   const std::string& selfPrefix = "SuperSonic") {
+    return sonicpi::device::shouldFollowDefaultOutputChange(nd, cur, virt,
+                                                            selfPrefix);
 }
 
 TEST_CASE("FollowDefault: real hardware device, not current → follow",
@@ -749,6 +751,90 @@ TEST_CASE("FollowDefault: our own SuperSonic aggregate elevated to default → i
 TEST_CASE("FollowDefault: empty new-default name → ignore",
           "[FollowDefault]") {
     REQUIRE_FALSE(follow("", "MacBook Pro Speakers", false));
+}
+
+TEST_CASE("FollowDefault: self-aggregate detection follows the app name",
+          "[FollowDefault]") {
+    // The aggregate is named "<appName>#N" (AggregateDeviceHelper). An
+    // embedder that renames the app must still have its own aggregate
+    // ignored — the literal "SuperSonic" must not be baked in.
+    REQUIRE_FALSE(follow("MyLoopApp#3", "MacBook Pro Speakers", false,
+                         "MyLoopApp"));
+    REQUIRE_FALSE(follow("SuperSonic#7", "MacBook Pro Speakers", false,
+                         "SuperSonic"));
+}
+
+TEST_CASE("FollowDefault: real device sharing the app-name prefix is followed",
+          "[FollowDefault]") {
+    // Only "<prefix>#N" is ours. A hardware device that merely starts with
+    // the app name (or the app name itself, however unlikely) is a real
+    // target, not our aggregate.
+    REQUIRE(follow("SuperSonic Audio Interface", "MacBook Pro Speakers", false,
+                   "SuperSonic"));
+}
+
+TEST_CASE("FollowDefault: empty self-prefix never matches",
+          "[FollowDefault]") {
+    REQUIRE(follow("#1 DAC", "MacBook Pro Speakers", false, ""));
+}
+
+// =============================================================================
+// resolveInputWidth
+//
+// One answer to "how many input channels do we actually request". Both
+// switchDevice's auto-enable block and enableInputChannels resolve the -1
+// sentinel against the boot -i flag, and the result must be clamped to the
+// device's probed capacity: WASAPI rejects setAudioDeviceSetup outright
+// when asked for more inputs than exist (CoreAudio silently clamps, which
+// is how the unclamped kRequestMaxChannels path shipped). Previously
+// enableInputChannels resolved WITHOUT clamping — the Windows boot path
+// (enableInputChannels(-1) from Main) sent 64 input bits into WASAPI.
+// =============================================================================
+
+static int width(int requested, int boot, int probed) {
+    return sonicpi::device::resolveInputWidth(requested, boot, probed);
+}
+
+TEST_CASE("InputWidth: auto sentinel + boot auto-max clamps to probed count",
+          "[InputWidth]") {
+    // THE Windows boot bug: -i -1 → kRequestMaxChannels must not survive
+    // a successful probe.
+    REQUIRE(width(-1, -1, 2) == 2);
+    REQUIRE(width(-1, -1, 8) == 8);
+}
+
+TEST_CASE("InputWidth: auto sentinel + boot auto-max + probe failed → request max",
+          "[InputWidth]") {
+    // Unknown capacity: keep the over-request (CoreAudio clamps; nothing
+    // better is knowable).
+    REQUIRE(width(-1, -1, -1) == sonicpi::device::kRequestMaxChannels);
+    REQUIRE(width(-1, -1, 0) == sonicpi::device::kRequestMaxChannels);
+}
+
+TEST_CASE("InputWidth: auto sentinel honours an explicit boot count",
+          "[InputWidth]") {
+    REQUIRE(width(-1, 4, -1) == 4);
+    // ...still clamped when the device has fewer.
+    REQUIRE(width(-1, 4, 2) == 2);
+}
+
+TEST_CASE("InputWidth: auto sentinel + boot disabled inputs → stereo default",
+          "[InputWidth]") {
+    REQUIRE(width(-1, 0, -1) == 2);
+    REQUIRE(width(-1, 0, 1) == 1);
+}
+
+TEST_CASE("InputWidth: explicit request clamps to probed capacity",
+          "[InputWidth]") {
+    REQUIRE(width(4, -1, 2) == 2);
+    REQUIRE(width(4, -1, 8) == 4);
+    REQUIRE(width(4, -1, -1) == 4);
+}
+
+TEST_CASE("InputWidth: explicit zero (disable) is never touched",
+          "[InputWidth]") {
+    REQUIRE(width(0, -1, 2) == 0);
+    REQUIRE(width(0, 0, -1) == 0);
 }
 
 // =============================================================================
@@ -1251,4 +1337,467 @@ TEST_CASE("HFlag: two-name form passes sentinels through", "[HFlag]") {
     REQUIRE(r.inputDevice  == "__none__");
     REQUIRE(r.outputDevice == "MacBook Pro Speakers");
     REQUIRE(r.secondTokenUsed);
+}
+
+// =============================================================================
+// resolveSwapTarget / SwapScope
+//
+// Promoted from switchDevice's `considerName` lambda — the cross-driver
+// resolution algorithm that was function-local state until it caused a
+// cross-platform build break (init needed the same answer and couldn't
+// reach it). Resolves one requested name against the scoped driver and
+// latches cross-driver state first-wins into a SwapScope.
+// =============================================================================
+
+using sonicpi::device::SwapScope;
+using sonicpi::device::resolveSwapTarget;
+
+static const std::vector<std::pair<std::string, std::string>> kTwoDriverTable = {
+    {"CoreAudio", "MacBook Pro Speakers"},
+    {"CoreAudio", "External Headphones"},
+    {"ASIO",      "MOTU Pro Audio"},
+};
+
+TEST_CASE("SwapTarget: sentinels and empty resolve to no-op", "[SwapTarget]") {
+    SwapScope scope;
+    REQUIRE(resolveSwapTarget("", "CoreAudio", "CoreAudio",
+                              kTwoDriverTable, scope).empty());
+    REQUIRE(resolveSwapTarget("__system__", "CoreAudio", "CoreAudio",
+                              kTwoDriverTable, scope).empty());
+    REQUIRE(resolveSwapTarget("__none__", "CoreAudio", "CoreAudio",
+                              kTwoDriverTable, scope).empty());
+    REQUIRE(!scope.crossDriver);
+}
+
+TEST_CASE("SwapTarget: in-driver device resolves without cross-driver",
+          "[SwapTarget]") {
+    SwapScope scope;
+    auto err = resolveSwapTarget("External Headphones", "CoreAudio",
+                                 "CoreAudio", kTwoDriverTable, scope);
+    REQUIRE(err.empty());
+    REQUIRE(!scope.crossDriver);
+}
+
+TEST_CASE("SwapTarget: unknown name reports the scoped driver in the error",
+          "[SwapTarget]") {
+    // Exact wording is a contract — the GUI surfaces it verbatim.
+    SwapScope scope;
+    auto err = resolveSwapTarget("Ghost Device", "CoreAudio", "CoreAudio",
+                                 kTwoDriverTable, scope);
+    REQUIRE(err == "device 'Ghost Device' not available on driver 'CoreAudio'");
+    SwapScope scope2;
+    auto err2 = resolveSwapTarget("Ghost Device", "", "", kTwoDriverTable,
+                                  scope2);
+    REQUIRE(err2 == "device 'Ghost Device' not available on driver '(none)'");
+}
+
+TEST_CASE("SwapTarget: pending-intent scope resolves under the intended driver "
+          "and latches cross-driver against JUCE's actual type",
+          "[SwapTarget]") {
+    // Two-step driver→device flow: switchDriver recorded intent 'ASIO',
+    // JUCE still has CoreAudio open. The device lookup scopes to the
+    // intent; the type-switch decision compares against JUCE's reality.
+    SwapScope scope;
+    auto err = resolveSwapTarget("MOTU Pro Audio", "ASIO", "CoreAudio",
+                                 kTwoDriverTable, scope);
+    REQUIRE(err.empty());
+    REQUIRE(scope.crossDriver);
+    REQUIRE(scope.targetDriver == "ASIO");
+    REQUIRE(scope.targetDevice == "MOTU Pro Audio");
+}
+
+TEST_CASE("SwapTarget: cross-driver latch is first-wins", "[SwapTarget]") {
+    // Output already latched the cross; a second name (the input) must not
+    // overwrite the target driver/device.
+    SwapScope scope;
+    REQUIRE(resolveSwapTarget("MOTU Pro Audio", "ASIO", "CoreAudio",
+                              kTwoDriverTable, scope).empty());
+    const std::string firstDriver = scope.targetDriver;
+    const std::string firstDevice = scope.targetDevice;
+    // Cold-init global scope ("") lets a CoreAudio name resolve too.
+    REQUIRE(resolveSwapTarget("External Headphones", "", "CoreAudio",
+                              kTwoDriverTable, scope).empty());
+    REQUIRE(scope.crossDriver);
+    REQUIRE(scope.targetDriver == firstDriver);
+    REQUIRE(scope.targetDevice == firstDevice);
+}
+
+// =============================================================================
+// sameDeviceName
+//
+// THE device-name identity predicate. JUCE appends " (N)" when CoreAudio
+// reports duplicate device names; "same device" must mean equal modulo
+// that suffix — in either direction, digits only. This replaces the loose
+// prefix-space rule that lived (twice) beside the strict one: the loose
+// rule matched "USB Audio Pro" against "USB Audio", so the hotplug
+// auto-switch could treat a DIFFERENT physical device as the preferred
+// one. One rule, one implementation, everywhere.
+// =============================================================================
+
+using sonicpi::device::sameDeviceName;
+
+TEST_CASE("SameDevice: exact names match", "[SameDevice]") {
+    REQUIRE(sameDeviceName("MacBook Pro Speakers", "MacBook Pro Speakers"));
+    REQUIRE_FALSE(sameDeviceName("MacBook Pro Speakers", "MacBook Air Speakers"));
+}
+
+TEST_CASE("SameDevice: JUCE duplicate suffix matches in either direction",
+          "[SameDevice]") {
+    REQUIRE(sameDeviceName("USB Audio (2)", "USB Audio"));
+    REQUIRE(sameDeviceName("USB Audio", "USB Audio (2)"));
+    REQUIRE(sameDeviceName("USB Audio (17)", "USB Audio"));
+}
+
+TEST_CASE("SameDevice: a longer real name is NOT the same device",
+          "[SameDevice]") {
+    // The loose rule's false positive: a different product sharing a
+    // prefix. Must not match.
+    REQUIRE_FALSE(sameDeviceName("USB Audio Pro", "USB Audio"));
+    REQUIRE_FALSE(sameDeviceName("USB Audio", "USB Audio Pro"));
+}
+
+TEST_CASE("SameDevice: suffix must be digits in parens", "[SameDevice]") {
+    REQUIRE_FALSE(sameDeviceName("USB Audio (two)", "USB Audio"));
+    REQUIRE_FALSE(sameDeviceName("USB Audio ()", "USB Audio"));
+    REQUIRE_FALSE(sameDeviceName("USB Audio (2", "USB Audio"));
+}
+
+TEST_CASE("SameDevice: empty never matches non-empty", "[SameDevice]") {
+    REQUIRE_FALSE(sameDeviceName("", "USB Audio"));
+    REQUIRE_FALSE(sameDeviceName("USB Audio", ""));
+    REQUIRE(sameDeviceName("", ""));
+}
+
+// =============================================================================
+// DeviceInfo aggregate suitability
+//
+// One predicate answers "can this device be half of an aggregate":
+// wireless (Bluetooth/AirPlay) is out — HAL can't open it and HFP mode
+// wrecks rates. Virtual (Loopback/BlackHole/NDI) is deliberately IN:
+// aggregates work when the hardware sub-device is the clock master
+// (AggregateDeviceHelper's master selection; the virtual-output + mic
+// recipe is field-verified). A stale comment in switchDevice used to
+// claim the opposite — these pin the truth.
+// =============================================================================
+
+#include "DeviceInfo.h"
+
+static DeviceInfo withTransport(uint32_t fourCC) {
+    DeviceInfo d;
+    d.name = "X";
+    d.transportType = fourCC;
+    return d;
+}
+
+TEST_CASE("Aggregate suitability: wireless transports are unsuitable",
+          "[DeviceInfo]") {
+    REQUIRE_FALSE(withTransport(CoreAudioTransport::kBluetooth)
+                      .isSuitableForAggregate());
+    REQUIRE_FALSE(withTransport(CoreAudioTransport::kAirPlay)
+                      .isSuitableForAggregate());
+}
+
+TEST_CASE("Aggregate suitability: virtual transports ARE suitable",
+          "[DeviceInfo]") {
+    REQUIRE(withTransport(CoreAudioTransport::kVirtual)
+                .isSuitableForAggregate());
+}
+
+TEST_CASE("Aggregate suitability: plain hardware is suitable",
+          "[DeviceInfo]") {
+    REQUIRE(withTransport(0x626C746E /* bltn built-in */)
+                .isSuitableForAggregate());
+    REQUIRE(withTransport(0x75736220 /* usb  */)
+                .isSuitableForAggregate());
+}
+
+// =============================================================================
+// selectReportedDevices
+//
+// The list-shaping half of sendDeviceReport, extracted pure: which devices
+// the GUI is offered. Filter order is contractual and pinned here:
+// clutter/wireless split → known-bad-input removal → unpairable-current-
+// output clears inputs → (grouped lists snapshot) → dedupe by name with
+// active-driver preference → transient-enumeration suppression.
+// =============================================================================
+
+using sonicpi::device::selectReportedDevices;
+
+namespace {
+DeviceInfo dev(const std::string& name, const std::string& driver,
+               int outs, int ins, uint32_t transport = 0) {
+    DeviceInfo d;
+    d.name = name;
+    d.typeName = driver;
+    d.maxOutputChannels = outs;
+    d.maxInputChannels = ins;
+    d.transportType = transport;
+    return d;
+}
+} // namespace
+
+TEST_CASE("ReportSelect: wireless devices are hidden from both lists",
+          "[ReportSelect]") {
+    auto sel = selectReportedDevices(
+        { dev("Speakers", "CoreAudio", 2, 0),
+          dev("AirPods", "CoreAudio", 2, 1, CoreAudioTransport::kBluetooth) },
+        "Speakers", "", "CoreAudio", {});
+    REQUIRE(sel.outputs.size() == 1);
+    REQUIRE(sel.outputs[0].name == "Speakers");
+    REQUIRE(sel.inputs.empty());
+}
+
+TEST_CASE("ReportSelect: known-bad inputs for the current output are hidden",
+          "[ReportSelect]") {
+    auto sel = selectReportedDevices(
+        { dev("Speakers", "CoreAudio", 2, 0),
+          dev("Bad Mic", "CoreAudio", 0, 1),
+          dev("Good Mic", "CoreAudio", 0, 1) },
+        "Speakers", "Good Mic", "CoreAudio", { "Bad Mic" });
+    REQUIRE(sel.inputs.size() == 1);
+    REQUIRE(sel.inputs[0].name == "Good Mic");
+}
+
+TEST_CASE("ReportSelect: unpairable current output clears the input list",
+          "[ReportSelect]") {
+    // Wireless current output: no separate mic can join it. The GUI's
+    // "-- None --" row is client-side; an empty input list here is the
+    // deliberate signal.
+    auto sel = selectReportedDevices(
+        { dev("AirPods", "CoreAudio", 2, 0, CoreAudioTransport::kAirPlay),
+          dev("Mic", "CoreAudio", 0, 1) },
+        "AirPods", "", "CoreAudio", {});
+    REQUIRE(sel.inputs.empty());
+    // Virtual current output pairs fine — inputs stay.
+    auto sel2 = selectReportedDevices(
+        { dev("BlackHole", "CoreAudio", 2, 0, CoreAudioTransport::kVirtual),
+          dev("Mic", "CoreAudio", 0, 1) },
+        "BlackHole", "", "CoreAudio", {});
+    REQUIRE(sel2.inputs.size() == 1);
+}
+
+TEST_CASE("ReportSelect: dedupe keeps the active driver's entry first",
+          "[ReportSelect]") {
+    auto sel = selectReportedDevices(
+        { dev("Speakers", "Windows Audio", 2, 0),
+          dev("Speakers", "DirectSound", 2, 0),
+          dev("Only WASAPI", "Windows Audio", 2, 0) },
+        "Speakers", "", "DirectSound", {});
+    REQUIRE(sel.outputs.size() == 2);
+    REQUIRE(sel.outputs[0].typeName == "DirectSound");  // active driver wins
+    REQUIRE(sel.outputs[1].name == "Only WASAPI");      // fallback still listed
+    // The grouped (per-driver) lists are NOT deduped.
+    REQUIRE(sel.outputsByDriver.size() == 3);
+}
+
+TEST_CASE("ReportSelect: transient empty input list suppresses the report",
+          "[ReportSelect]") {
+    // A current input with no visible inputs = JUCE mid-churn snapshot;
+    // reporting it would make the GUI silently deselect the user's mic.
+    auto sel = selectReportedDevices(
+        { dev("Speakers", "CoreAudio", 2, 0) },
+        "Speakers", "Real Mic", "CoreAudio", {});
+    REQUIRE(sel.suppressReport);
+    auto sel2 = selectReportedDevices(
+        { dev("Speakers", "CoreAudio", 2, 0) },
+        "Speakers", "", "CoreAudio", {});
+    REQUIRE_FALSE(sel2.suppressReport);
+}
+
+TEST_CASE("ReportSelect: PipeWire detected via native driver or ALSA compat",
+          "[ReportSelect]") {
+    auto viaNative = selectReportedDevices(
+        { dev("Card", "PipeWire", 2, 0) }, "", "", "PipeWire", {});
+    REQUIRE(viaNative.pipewireActive);
+    auto viaCompat = selectReportedDevices(
+        { dev("PipeWire Sound Server", "ALSA", 2, 0) }, "", "", "ALSA", {});
+    REQUIRE(viaCompat.pipewireActive);
+    auto without = selectReportedDevices(
+        { dev("hw:0", "ALSA", 2, 0) }, "", "", "ALSA", {});
+    REQUIRE_FALSE(without.pipewireActive);
+}
+
+// =============================================================================
+// resolveTargetRate
+//
+// The pure core of "which rate does a swap land on": keep the current
+// session rate when the target device supports it (no cold swap for
+// nothing), else the device's nearest supported rate. 0 = keep — the
+// caller only cold-swaps on a returned change. One of four historical
+// rate policies; the P2 planner routes the others through here or names
+// their divergence explicitly.
+// =============================================================================
+
+using sonicpi::device::resolveTargetRate;
+
+TEST_CASE("TargetRate: supported current rate is kept (returns 0)",
+          "[TargetRate]") {
+    REQUIRE(resolveTargetRate({44100, 48000}, 48000) == 0);
+}
+
+TEST_CASE("TargetRate: unsupported current rate resolves to nearest",
+          "[TargetRate]") {
+    REQUIRE(resolveTargetRate({44100, 96000}, 48000) == 44100);
+    REQUIRE(resolveTargetRate({44100, 48000}, 96000) == 48000);
+}
+
+TEST_CASE("TargetRate: no rates known = keep (returns 0)", "[TargetRate]") {
+    REQUIRE(resolveTargetRate({}, 48000) == 0);
+}
+
+TEST_CASE("TargetRate: integer comparison tolerates 44100.0001-style reports",
+          "[TargetRate]") {
+    REQUIRE(resolveTargetRate({44100.0001}, 44100) == 0);
+}
+
+// =============================================================================
+// planSwap
+//
+// The whole decision half of switchDevice, pure: scope resolution, ASIO
+// mirroring, the rate precedence ladder (explicit > wireless-exit >
+// probe-nearest > per-device memory), input auto-enable with WASAPI
+// clamp, channel-count cold forcing, and the final hot/cold verdict.
+// The executor (applySwapPlan side of switchDevice) mutates nothing the
+// planner didn't decide.
+// =============================================================================
+
+using sonicpi::device::planSwap;
+using sonicpi::device::SwapPlanRequest;
+using sonicpi::device::SwapSnapshot;
+
+namespace {
+SwapSnapshot snapTwoDevices() {
+    SwapSnapshot s;
+    s.hasDeviceManager = true;
+    s.juceCurrentType = "CoreAudio";
+    s.deviceTable = { {"CoreAudio", "Speakers"},
+                      {"CoreAudio", "Interface"},
+                      {"ASIO", "MOTU"} };
+    s.currentOutputName = "Speakers";
+    s.currentRate = 48000;
+    s.currentOutputChannels = 2;
+    s.bootInputChannels = -1;   // boot asked for auto-max
+    return s;
+}
+} // namespace
+
+TEST_CASE("PlanSwap: unknown device errors without any plan", "[PlanSwap]") {
+    SwapPlanRequest req;
+    req.outputName = "Ghost";
+    auto plan = planSwap(req, snapTwoDevices());
+    REQUIRE(!plan.error.empty());
+}
+
+TEST_CASE("PlanSwap: same-driver, same-rate named swap is hot", "[PlanSwap]") {
+    SwapPlanRequest req;
+    req.outputName = "Interface";
+    auto plan = planSwap(req, snapTwoDevices());
+    REQUIRE(plan.error.empty());
+    REQUIRE(!plan.isCold);
+    REQUIRE(!plan.scope.crossDriver);
+}
+
+TEST_CASE("PlanSwap: explicit rate change is cold at that rate", "[PlanSwap]") {
+    SwapPlanRequest req;
+    req.sampleRate = 44100;
+    auto plan = planSwap(req, snapTwoDevices());
+    REQUIRE(plan.isCold);
+    REQUIRE(plan.sampleRate == 44100);
+}
+
+TEST_CASE("PlanSwap: cross-driver pick forces cold and mirrors ASIO input",
+          "[PlanSwap]") {
+    SwapPlanRequest req;
+    req.outputName = "MOTU";
+    auto snap = snapTwoDevices();
+    snap.intendedDriver = "ASIO";   // two-step driver→device flow pending
+    auto plan = planSwap(req, snap);
+    REQUIRE(plan.error.empty());
+    REQUIRE(plan.scope.crossDriver);
+    REQUIRE(plan.scope.targetDriver == "ASIO");
+    REQUIRE(plan.isCold);
+    REQUIRE(plan.inputName == "MOTU");   // full-duplex mirror
+}
+
+TEST_CASE("PlanSwap: wireless exit restores the pre-wireless rate",
+          "[PlanSwap]") {
+    auto snap = snapTwoDevices();
+    snap.currentOutputName = "AirPods";
+    snap.wirelessDeviceNames = { "AirPods" };
+    snap.currentRate = 44100;       // what AirPlay negotiated
+    snap.preWirelessRate = 48000;
+    SwapPlanRequest req;
+    req.outputName = "Speakers";
+    auto plan = planSwap(req, snap);
+    REQUIRE(plan.sampleRate == 48000);
+    REQUIRE(plan.restoredPreWirelessRate);
+    REQUIRE(plan.isCold);
+}
+
+TEST_CASE("PlanSwap: unsupported current rate resolves to target's nearest",
+          "[PlanSwap]") {
+    auto snap = snapTwoDevices();
+    snap.outputDeviceRates = { 44100, 96000 };  // target doesn't do 48k
+    SwapPlanRequest req;
+    req.outputName = "Interface";
+    auto plan = planSwap(req, snap);
+    REQUIRE(plan.sampleRate == 44100);
+    REQUIRE(plan.isCold);
+}
+
+TEST_CASE("PlanSwap: remembered per-device rate is restored when nothing "
+          "else decided a rate", "[PlanSwap]") {
+    auto snap = snapTwoDevices();
+    snap.rememberedRate = 96000;
+    SwapPlanRequest req;
+    req.outputName = "Interface";
+    auto plan = planSwap(req, snap);
+    REQUIRE(plan.sampleRate == 96000);
+    REQUIRE(plan.rateFromMemory);
+}
+
+TEST_CASE("PlanSwap: naming an input with zero live inputs auto-enables, "
+          "clamped to the probed width", "[PlanSwap]") {
+    auto snap = snapTwoDevices();
+    snap.currentInputChannels = 0;
+    snap.probedInputChannels = 2;   // device has 2; boot asked auto-max (64)
+    SwapPlanRequest req;
+    req.outputName = "Interface";
+    req.inputName  = "Interface";
+    auto plan = planSwap(req, snap);
+    REQUIRE(plan.enableInputWidth == 2);
+    REQUIRE(plan.isCold);           // world must rebuild with input buses
+}
+
+TEST_CASE("PlanSwap: __none__ input never auto-enables", "[PlanSwap]") {
+    auto snap = snapTwoDevices();
+    snap.currentInputChannels = 0;
+    SwapPlanRequest req;
+    req.outputName = "Interface";
+    req.inputName  = "__none__";
+    auto plan = planSwap(req, snap);
+    REQUIRE(plan.enableInputWidth == -1);
+}
+
+TEST_CASE("PlanSwap: channel-count change at the target forces cold",
+          "[PlanSwap]") {
+    auto snap = snapTwoDevices();
+    snap.probedTargetOut = 8;       // current world is 2-out
+    SwapPlanRequest req;
+    req.outputName = "Interface";
+    auto plan = planSwap(req, snap);
+    REQUIRE(plan.isCold);
+    REQUIRE(plan.coldForChannels);
+}
+
+TEST_CASE("PlanSwap: user pick under the still-active driver abandons the "
+          "pending driver intent", "[PlanSwap]") {
+    auto snap = snapTwoDevices();
+    snap.intendedDriver = "ASIO";
+    SwapPlanRequest req;
+    req.outputName = "Interface";   // resolves under CoreAudio
+    req.userInitiated = true;
+    auto plan = planSwap(req, snap);
+    REQUIRE(plan.abandonDriverIntent);
+    REQUIRE(!plan.scope.crossDriver);
 }

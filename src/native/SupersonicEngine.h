@@ -44,6 +44,7 @@
 #include "SampleLoader.h"
 #include "SuperClock.h"
 #include "DeviceInfo.h"
+#include "DevicePolicy.h"
 #include "AudioRecovery.h"
 #include "StateCache.h"
 #include "OscBuilder.h"
@@ -58,27 +59,27 @@ public:
     // channels active (let JUCE/CoreAudio clamp to the hardware max)".
     // 0 still means "disabled" for inputs; positive N means "exactly N".
     static constexpr int kAutoChannelCount   = -1;
-    // Upper bound on channels we'll ever request. JUCE's BigInteger bitmask
-    // gets clamped to the device's real channel count by CoreAudio, so
-    // over-requesting is safe — we just set this many bits and JUCE drops
-    // the excess. 64 covers commodity audio interfaces (MOTU, RME, etc.).
-    static constexpr int kRequestMaxChannels = 64;
-    // Minimum buffer size on an aggregate device. Aggregates combine two
-    // independent clocks (e.g. MBP Speakers + motu-xaero over USB) and run
-    // kernel-level sample-rate conversion in the IOProc for drift
-    // correction. Anything below ~256 samples starves the SRC and the
-    // audio warbles ("drift storm"). Enforced at aggregate creation
-    // paths regardless of -z / -Z / TOML.
-    static constexpr int kMinAggregateBufferSize = 256;
+    // Upper bound on channels we'll ever request when the true capacity is
+    // unknown. CoreAudio clamps an over-request to the device's real
+    // count, but WASAPI rejects it outright — clamp against a probed
+    // count wherever one is obtainable (see resolveInputWidth).
+    static constexpr int kRequestMaxChannels =
+        sonicpi::device::kRequestMaxChannels;
+    // Minimum buffer size on an aggregate device (single source of truth
+    // in DevicePolicy — see the longer story there: drift-comp SRC
+    // starvation, "drift storm").
+    static constexpr int kMinAggregateBufferSize =
+        sonicpi::device::kMinAggregateBufferSize;
 
     struct Config {
         int    sampleRate               = 48000;
         int    bufferSize               = 0;   // 0 = auto (smallest buffer >= 128)
         int    blockSize                = 0;   // scsynth control block size (SC's -z);
-                                               // 0 = platform default (kDefaultBlockSize,
-                                               // 128). Decoupled from the HW buffer above;
-                                               // clamped to [32, kMaxBlockSize]. WASM ignores
-                                               // it (must equal the 128-sample render quantum).
+                                               // 0 = match the opened device's buffer when
+                                               // smaller than kDefaultBlockSize, else the
+                                               // default (see chooseBlockSize). Clamped to
+                                               // [32, kMaxBlockSize]. WASM ignores it (must
+                                               // equal the 128-sample render quantum).
         int    udpPort                  = 57110;
         int    maxNodes                 = 1024;
         int    numBuffers               = 1024;
@@ -148,6 +149,17 @@ public:
                                                    // table for the MdaPiano UGen, loaded on
                                                    // the boot thread and injected. Empty =>
                                                    // :piano stays silent (no asset shipped).
+
+        // Test seam: build the JUCE device manager. When set, the engine
+        // calls this instead of constructing a plain AudioDeviceManager —
+        // both at boot and in recovery's recreateDeviceManager — and skips
+        // every platform-specific piece of device bring-up (CoreAudio
+        // runloop/aggregate cleanup, PipeWire registration, DirectSound
+        // preference, the HAL default-output listener): the factory's
+        // manager owns its own device types (typically fakes — see
+        // test/native/FakeAudioDevice.h). Production leaves it unset.
+        std::function<std::unique_ptr<juce::AudioDeviceManager>()>
+            deviceManagerFactory;
     };
 
     SupersonicEngine();
@@ -249,7 +261,7 @@ public:
                               const std::string& inputDevName,
                               double sampleRate, int bufferSize);
     // Accept-or-reject an audio-recovery attempt (in-flight + cooldown gated).
-    // On accept, launches recoverAudio() on mReopenThread and returns true; on
+    // On accept, posts recoverAudio() to the device task lane and returns true; on
     // reject fills `reason`. Called by the watchdog on a real-device stall and by
     // the external /reopen OSC command.
     bool requestAudioRecovery(std::string& reason);
@@ -408,6 +420,14 @@ public:
     // the wrong rate rather than stalled). See Config::watchdogRateWindowMs.
     uint32_t rateSkewRecoveryCount() const { return mRateSkewRecoveries.load(); }
 
+    // The one authoritative answer to "is a device mutation in flight".
+    // Set via PhaseGuard by switchDevice (Swapping) and recoverAudio
+    // (Recovering). Replaces probing the swap gate with try_lock/unlock
+    // (a TOCTOU, and a false positive whenever a mere reader held the
+    // gate).
+    enum class DevicePhase : uint8_t { Idle, Swapping, Recovering };
+    DevicePhase devicePhase() const { return mDevicePhase.load(); }
+
     // Bounded acquisition of the swap gate: up to `attempts` try_locks,
     // `sleepMs` apart, mirroring executePendingSwitch's retry discipline.
     // Used by setDeviceMode's system-default reinit so it cannot interleave
@@ -417,8 +437,28 @@ public:
     bool tryAcquireSwapGate(std::unique_lock<std::recursive_mutex>& lk,
                             int attempts, int sleepMs);
 
-    // Test-only: hold the swap gate to simulate "a swap is in flight".
-    std::unique_lock<std::recursive_mutex> testHoldSwapGate();
+    // Test-only: hold the swap gate AND present the Swapping phase —
+    // together they are what "a swap is in flight" means to the rest of
+    // the engine (watchdog deferral reads the phase; message-thread
+    // handlers try the gate).
+    class TestSwapHold {
+    public:
+        TestSwapHold(std::recursive_mutex& m, std::atomic<DevicePhase>& p)
+            : mLock(m), mPhase(&p) { p.store(DevicePhase::Swapping); }
+        TestSwapHold(TestSwapHold&& o) noexcept
+            : mLock(std::move(o.mLock)), mPhase(o.mPhase) {
+            o.mPhase = nullptr;
+        }
+        ~TestSwapHold() { unlock(); }
+        void unlock() {
+            if (mPhase) { mPhase->store(DevicePhase::Idle); mPhase = nullptr; }
+            if (mLock.owns_lock()) mLock.unlock();
+        }
+    private:
+        std::unique_lock<std::recursive_mutex> mLock;
+        std::atomic<DevicePhase>* mPhase = nullptr;
+    };
+    TestSwapHold testHoldSwapGate();
 
     // --- State cache ---
     StateCache& stateCache() { return mStateCache; }
@@ -486,11 +526,24 @@ private:
 
     juce::String reinitialiseWithDefaultsPreservingConfig();
 
+    // The two halves of init(): open the audio device (skipped headless),
+    // then bring the engine up around whatever it settled on. Split so
+    // each half is readable alone and the boot/swap unification has its
+    // seam — see the definitions for the half-by-half contracts.
+    void initAudioDevice(const Config& cfg);
+    void initEngine(const Config& cfg);
+
+    // The one place a juce::AudioDeviceManager is constructed: the
+    // Config::deviceManagerFactory seam when set (tests), else a plain
+    // manager. Both boot (init) and recovery (recreateDeviceManager) go
+    // through this so a recovered engine keeps its injected fakes.
+    std::unique_ptr<juce::AudioDeviceManager> makeDeviceManager() const;
+
     // Destroy and recreate mDeviceManager, then re-open the default device and
     // re-attach the audio callback. Unlike a reopen (which reuses the existing
     // CoreAudio/HAL client), this forces a brand-new connection — the recovery
     // for a hibernate-killed device where the IO thread is no longer driven by
-    // coreaudiod. Called only from recoverAudio() on mReopenThread under the swap
+    // coreaudiod. Called only from recoverAudio() on the device task lane under the swap
     // gate — leaves the fresh manager initialised to the default device for the
     // cold swap that follows. Empty return on success.
     juce::String recreateDeviceManager();
@@ -541,7 +594,7 @@ public:
 
 private:
     // Atomic: written on whichever thread runs start/stopAudioSource (boot,
-    // the watchdog, mReopenThread during recoverAudio, and the device-switch
+    // the watchdog, the device task lane during recoverAudio, and the device-switch
     // workers) and read lock-free by audioSource() and status paths on other
     // threads.
     std::atomic<AudioSource> mActiveSource{AudioSource::None};
@@ -590,6 +643,12 @@ private:
     int probeDeviceChannelCount(const std::string& name, bool isInput,
                                 const std::string& typeName = "");
 
+    // The driver type device probes should ask about: the target type on
+    // a cross-driver swap, otherwise the type actually open. Callers
+    // outside a swap pass no scope and get the current type.
+    std::string probeDriverTypeName(
+        const sonicpi::device::SwapScope& scope = {}) const;
+
     // Returns the sample rates advertised by a named device, or an
     // empty vector if the name doesn't match or the device can't be
     // opened. Core primitive: the rate-matching helpers below compose
@@ -598,14 +657,6 @@ private:
     std::vector<double> probeDeviceSampleRates(const std::string& name,
                                                bool isInput);
 
-    // Probes a named device for available sample rates and, if the
-    // engine's currentRate isn't supported, sets sampleRate to the
-    // nearest available rate. No-op if caller specified a rate, the
-    // device can't be opened, or the name is empty. This is what makes
-    // a switch "cold" when the target device can't run at the current
-    // rate.
-    void probeAndAdjustForTargetRate(const std::string& name, bool isInput,
-                                     double& sampleRate, double currentRate);
 
     // Records the user's preferred output/input device for future
     // hot-plug re-attach, and caches the successfully-used sample rate
@@ -714,14 +765,15 @@ private:
     };
     PendingSwitch              mPendingSwitch;
     std::mutex                 mPendingSwitchMutex;
-    std::thread                mDebounceSwitchThread;
     std::atomic<bool>          mDebounceSwitchRunning{false};
     std::atomic<bool>          mDebounceSwitchStop{false};
-    void executePendingSwitch();
+    void executePendingSwitch();   // runs on the device task lane
 
-    // Generic device-work queue behind postDeviceTask(). Serialised so two mode
-    // changes can't interleave against the device manager; started on first use
-    // and joined in shutdown() alongside the other device workers.
+    // THE device mutation lane. Every deferred device mutation — GUI
+    // debounced switches, mode changes, hotplug re-attaches, default-output
+    // follows, recovery — runs here via postDeviceTask(), serialised, off
+    // the JUCE message thread (which the Linux standalone never pumps).
+    // Started on first use and joined in shutdown().
     std::thread                        mDeviceTaskThread;
     std::mutex                         mDeviceTaskMutex;
     std::condition_variable            mDeviceTaskCv;
@@ -730,19 +782,52 @@ private:
     void deviceTaskLoop();
 
     // Device reopen — rejected while one is in flight or within a short cooldown
-    // after completion; accepted requests run on mReopenThread.
+    // after completion; accepted requests run on the device task lane.
     std::atomic<bool>          mReopenInProgress{false};
     // steady_clock millis at the last recovery's completion. Atomic: written by
     // the recovery worker, read by the watchdog / control threads. 0 = never.
     std::atomic<int64_t>       mLastReopenFinishedAtMs{0};
     // Recreate the device manager, rebuild the real device, and promote back to
     // it — or, if none opens, settle into the idle "waiting for audio device"
-    // state. Runs on mReopenThread (a dedicated worker, launched by
-    // requestAudioRecovery) so it works on every platform: the Linux standalone
-    // loop never pumps the JUCE message queue, and this keeps the multi-second
-    // swap off the message thread everywhere.
-    std::thread                mReopenThread;
+    // state. Runs on the device task lane (posted by requestAudioRecovery) so
+    // it works on every platform: the Linux standalone loop never pumps the
+    // JUCE message queue, and this keeps the multi-second swap off the
+    // message thread everywhere.
     void recoverAudio();
+
+    // ── Explicit device-mutation phase (enum declared public, above) ────
+    std::atomic<DevicePhase>   mDevicePhase { DevicePhase::Idle };
+    struct PhaseGuard {
+        std::atomic<DevicePhase>& phase;
+        DevicePhase prev;
+        PhaseGuard(std::atomic<DevicePhase>& p, DevicePhase v)
+            : phase(p), prev(p.load()) { p.store(v); }
+        ~PhaseGuard() { phase.store(prev); }
+    };
+
+    // Stamps mLastSelfTriggeredChange on entry AND exit of a mutation span:
+    // during the span the gate makes the message-thread handlers skip; the
+    // exit stamp arms the quiet window against the change notifications the
+    // mutation itself provoked. Replaces scattered mid-function stamps that
+    // silently expired inside >1 s swaps.
+    // Arms mSuppressRunLoop and guarantees the clear on every exit path —
+    // an exception between arm and the old explicit clear used to wedge
+    // the macOS run-loop pump for the session.
+    struct RunLoopSuppressGuard {
+        std::atomic<bool>& flag;
+        bool armed = false;
+        void arm() { flag.store(true); armed = true; }
+        ~RunLoopSuppressGuard() { if (armed) flag.store(false); }
+    };
+
+    struct SelfTriggerSpan {
+        std::atomic<std::chrono::steady_clock::time_point>& stamp;
+        explicit SelfTriggerSpan(
+            std::atomic<std::chrono::steady_clock::time_point>& s) : stamp(s) {
+            stamp.store(std::chrono::steady_clock::now());
+        }
+        ~SelfTriggerSpan() { stamp.store(std::chrono::steady_clock::now()); }
+    };
     // Broadcast /supersonic/devices/reopen.done to Spider/GUI. Every accepted
     // recovery reports exactly one of these so a /reopen caller never hangs.
     void broadcastReopenDone(bool success, const std::string& deviceName,
@@ -797,7 +882,21 @@ private:
     // while already holding it, and so a recovery can hold it across
     // reopenCurrentDevice (which re-takes it). mutable for the const readers.
     mutable std::recursive_mutex mSwapMutex;
-    std::chrono::steady_clock::time_point mLastSelfTriggeredChange{}; // suppress async change notifications from our own setAudioDeviceSetup
+    // Rate-limits changeListenerCallback's own processing of JUCE
+    // device-list churn (several broadcasts per hot-plug). Separate from
+    // mLastSelfTriggeredChange below on purpose: stamping the SHARED
+    // window on external events poisoned it — a user changing the macOS
+    // default fires BOTH a JUCE list broadcast and the HAL default
+    // listener, and the broadcast's stamp made the default-follow
+    // handler treat the user's change as engine-self-triggered and drop
+    // it (field-reported 2026-08-03).
+    std::atomic<std::chrono::steady_clock::time_point> mLastListChangeHandled{};
+
+    // Suppress async change notifications from our own setAudioDeviceSetup.
+    // Atomic: written from the boot thread, the switch worker, the reopen
+    // thread and the message thread; read on the message thread. A plain
+    // time_point here is a data race (UB) under TSan.
+    std::atomic<std::chrono::steady_clock::time_point> mLastSelfTriggeredChange{};
 
     // listDrivers() cache — avoids re-scanning every AudioIODeviceType
     // on every /supersonic/info push. Re-scanning is expensive (each

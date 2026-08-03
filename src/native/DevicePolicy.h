@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include "DeviceInfo.h"
+
 #include <string>
 #include <vector>
 
@@ -21,6 +23,25 @@ namespace sonicpi::device {
 // Minimum buffer size on a drift-compensated aggregate (see the longer
 // comment on SupersonicEngine::kMinAggregateBufferSize).
 inline constexpr int kMinAggregateBufferSize = 256;
+
+// Upper bound on channels we'll ever request when the true capacity is
+// unknown. 64 covers commodity audio interfaces (MOTU, RME, etc.). NOTE:
+// CoreAudio silently clamps an over-request to the device's real count,
+// but WASAPI rejects setAudioDeviceSetup outright — an unclamped
+// over-request must never reach a device whose capacity was probeable.
+inline constexpr int kRequestMaxChannels = 64;
+
+// One answer to "how many input channels do we actually request".
+// `requested` < 0 is the auto sentinel ("re-enable inputs"), resolved
+// against the boot -i flag: an explicit boot count wins, boot auto-max
+// (-1) means kRequestMaxChannels, boot-disabled (0) defaults to stereo.
+// The result — auto or explicit — is then clamped to `probedMax`, the
+// device's probed input capacity (<= 0 = probe failed / unknown, no
+// clamp). Shared by switchDevice's auto-enable block and
+// enableInputChannels; they previously resolved independently and only
+// the former clamped, which shipped 64 input bits into WASAPI on the
+// enableInputChannels(-1) boot path.
+int resolveInputWidth(int requested, int bootInputChannels, int probedMax);
 
 // Clamp bufferSize up to kMinAggregateBufferSize if and only if a
 // drift-compensated aggregate is active. Same-clock aggregates and
@@ -70,9 +91,11 @@ double resolveAggregateRate(double desired, double actualIn, double actualOut);
 //
 // Returns false (don't follow) when:
 //   - newDefault is empty (couldn't read it)
-//   - newDefault is one of our own "SuperSonic" aggregates — creating an
-//     aggregate briefly elevates it to system default; following that
-//     nests aggregation and spirals
+//   - newDefault is one of our own aggregates, named
+//     "<selfAggregatePrefix>#N" where the prefix is the published app name
+//     (AggregateDeviceHelper names them from ss_app_name(), not a fixed
+//     "SuperSonic" literal) — creating an aggregate briefly elevates it to
+//     system default; following that nests aggregation and spirals
 //   - newDefault == currentOutput (already there)
 //   - newDefault is a virtual device (NDI Audio, Loopback, BlackHole, …):
 //     apps spawn these and macOS may make one the default, but chasing it
@@ -81,7 +104,8 @@ double resolveAggregateRate(double desired, double actualIn, double actualOut);
 //     setDeviceMode(name), not this auto-follow, so it's unaffected.
 bool shouldFollowDefaultOutputChange(const std::string& newDefault,
                                      const std::string& currentOutput,
-                                     bool newDefaultIsVirtual);
+                                     bool newDefaultIsVirtual,
+                                     const std::string& selfAggregatePrefix);
 
 // True if `name` (or its JUCE "<name> (N)" disambiguated form) currently
 // appears in `visibleNames`. After creating a CoreAudio aggregate, JUCE's
@@ -294,6 +318,146 @@ SwapScopeDecision resolveSwapScope(
     const std::string& outputName,
     const std::string& inputName,
     const std::vector<std::pair<std::string, std::string>>& deviceTable);
+
+// The list-shaping half of sendDeviceReport: which devices the GUI is
+// offered, given everything JUCE enumerated. Filter order is contractual:
+//   1. platform clutter hidden (isPlatformClutter, with PipeWire-active
+//      detection folded in — direct-hw ALSA PCMs are unopenable while
+//      PipeWire owns the card);
+//   2. wireless outputs hidden (HAL can't open them), unsuitable inputs
+//      hidden (wireless mics force HFP 16 kHz mono);
+//   3. inputs remembered as known-bad against the CURRENT output hidden
+//      (per-output scoping — the same input may pair fine elsewhere);
+//   4. an unpairable (wireless) current output clears the whole input
+//      list — don't offer mics that a swap would drop;
+//   5. grouped per-driver lists snapshot here (NOT deduped — one row per
+//      (driver, device) so clients can render any driver's list);
+//   6. flat lists dedupe by name, active driver's entry winning
+//      (Windows enumerates one endpoint under four driver types);
+//   7. an empty input list against a non-empty current input marks the
+//      snapshot transient (JUCE mid-churn) — suppress the whole report,
+//      or the GUI silently deselects the user's mic.
+struct DeviceListSelection {
+    bool pipewireActive = false;
+    bool suppressReport = false;
+    std::vector<DeviceInfo> outputsByDriver, inputsByDriver;  // step 5
+    std::vector<DeviceInfo> outputs, inputs;                  // step 6
+};
+
+DeviceListSelection selectReportedDevices(
+    const std::vector<DeviceInfo>& all,
+    const std::string& currentOutputName,
+    const std::string& currentInputName,
+    const std::string& activeDriver,
+    const std::vector<std::string>& knownBadInputsForCurrent);
+
+// Where a swap will land, driver-wise. Accumulated across the output and
+// input names of one swap request by resolveSwapTarget; crossDriver
+// latches first-wins (the first name that resolves under a driver other
+// than JUCE's actual type decides the transition; the second name never
+// overwrites it). Formerly function-local state inside switchDevice's
+// `considerName` lambda — promoted because init needed the same answer
+// from inside an #else branch and couldn't reach it (cross-platform
+// build break, 2026-08-02).
+struct SwapScope {
+    bool        crossDriver = false;
+    std::string targetDriver;   // driver the swap transitions to
+    std::string targetDevice;   // the device that forced the transition
+};
+
+// Resolve one requested device name against the scoped driver (see
+// resolveSwapScope for how the scope is chosen) and fold the result into
+// `scope`. Returns an error string when the name doesn't resolve under
+// the scoped driver — exact wording is a GUI-facing contract — or empty
+// on success / sentinel / empty name. The cross-driver comparison runs
+// against `juceCurrentType` (JUCE's actual open type), NOT the scope:
+// that's what setCurrentAudioDeviceType has to be called for, regardless
+// of the pending-intent scope used for the lookup.
+std::string resolveSwapTarget(
+    const std::string& name,
+    const std::string& scopedDriver,
+    const std::string& juceCurrentType,
+    const std::vector<std::pair<std::string, std::string>>& deviceTable,
+    SwapScope& scope);
+
+// ── planSwap ────────────────────────────────────────────────────────────
+// The entire decision half of switchDevice, pure. The engine builds a
+// SwapSnapshot (every probe/lookup the decisions need), planSwap decides,
+// and the executor applies the plan without deciding anything further.
+// Decision order is contractual and mirrors years of field fixes:
+//   1. scope resolution (resolveSwapScope) + pending-intent abandonment;
+//   2. name resolution per side (resolveSwapTarget), cross-driver latch;
+//   3. ASIO full-duplex input mirroring;
+//   4. rate precedence: explicit request > wireless-exit restore
+//      (resolveWirelessExitRate) > target-probe nearest (resolveTargetRate,
+//      output side first) > per-device rate memory;
+//   5. input auto-enable when a device was named against a zero-input
+//      world (resolveInputWidth, probed clamp) — forces cold;
+//   6. channel-count change at the target forces cold (a hot swap keeps
+//      the World, whose bus counts are only re-read on rebuild);
+//   7. cold = forced || channels || cross-driver || rate change.
+// Provenance flags exist so the executor can log exactly what the old
+// inline code logged.
+struct SwapPlanRequest {
+    std::string outputName, inputName;   // raw; sentinels included
+    double sampleRate = 0;               // 0 = unspecified
+    int    bufferSize = 0;
+    bool   forceCold = false;
+    bool   userInitiated = true;
+};
+
+struct SwapSnapshot {
+    bool hasDeviceManager = false;       // headless: only rate/cold basics apply
+    std::string juceCurrentType;         // JUCE's actually-open type
+    std::string intendedDriver;          // pending switchDriver intent
+    std::string deviceMode;              // pinned output ("" = system mode)
+    std::vector<std::pair<std::string, std::string>> deviceTable;
+    std::string currentOutputName;
+    std::vector<std::string> wirelessDeviceNames;
+    double currentRate = 0;
+    int currentOutputChannels = 0;
+    int currentInputChannels = 0;
+    int bootInputChannels = 0;           // the boot -i flag
+    int preWirelessRate = 0;
+    std::vector<double> outputDeviceRates, inputDeviceRates;  // target probes
+    int probedInputChannels = -1;        // target input capacity (auto-enable clamp)
+    int probedTargetOut = -1, probedTargetIn = -1;  // channel-cold probes
+    int rememberedRate = 0;              // per-device rate memory for outputName
+};
+
+struct SwapPlan {
+    std::string error;                   // non-empty = refuse, nothing decided
+    SwapScope scope;
+    bool abandonDriverIntent = false;
+    std::string inputName;               // post-ASIO-mirror input
+    double sampleRate = 0;               // 0 = keep current
+    bool restoredPreWirelessRate = false;
+    bool rateAdjustedToNearest  = false;
+    bool rateFromMemory         = false;
+    int  enableInputWidth = -1;          // >= 0: set world input width, cold
+    int  enableInputRequested = 0;       // pre-clamp width (logging)
+    int  enableInputProbed = -1;         // probe answer (logging)
+    bool coldForChannels = false;
+    bool isCold = false;
+};
+
+SwapPlan planSwap(const SwapPlanRequest& req, const SwapSnapshot& snap);
+
+// The pure core of "which rate does a swap land on" when no rate was
+// requested: keep the current session rate when the target device
+// supports it (integer-compared — drivers report 44100.0001-style
+// values), else the device's nearest supported rate. Returns 0 for
+// "keep" — the caller only forces a cold swap on a returned change.
+double resolveTargetRate(const std::vector<double>& deviceRates,
+                         double currentRate);
+
+// THE device-name identity predicate: equal, or equal modulo JUCE's
+// " (N)" duplicate-disambiguation suffix (digits only), in either
+// direction. Replaces the loose "base + space" prefix rule that lived in
+// two copies beside this strict one — the loose rule matched
+// "USB Audio Pro" against "USB Audio", so the hotplug auto-switch could
+// treat a different physical device as the preferred one.
+bool sameDeviceName(const std::string& a, const std::string& b);
 
 // Decide scsynth's block size (mBufLength) at boot given the hardware
 // callback buffer size. Matching them means the audio-thread loop
