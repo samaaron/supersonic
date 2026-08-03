@@ -399,6 +399,16 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
+        // Driver (JUCE device type) to boot on, e.g. "Windows Audio",
+        // "DirectSound", "ASIO", "PipeWire". Embedders pass the user's
+        // saved driver preference so boot opens on it directly rather
+        // than opening the platform default and cold-swapping later.
+        // Resolution rules live in resolveBootDriver.
+        if (std::strcmp(arg, "--audio-driver") == 0) {
+            if (val && *val) { cfg.audioDriver = val; ++i; }
+            continue;
+        }
+
         if (std::strcmp(arg, "--tcp") == 0) {
             if (val) { tcpPort = std::atoi(val); ++i; }
             continue;
@@ -434,6 +444,16 @@ int main(int argc, char* argv[]) {
         // OSC still drains and replies flow — for CI and the transport harness.
         if (std::strcmp(arg, "--headless") == 0) {
             headless = true;
+            continue;
+        }
+
+        // Every known long flag continues above, so a "--" arg reaching
+        // here is unknown. Warn rather than silently skipping: a dropped
+        // option reads as configuration applied when it wasn't. Its value
+        // token (if any) is ignored by the same rule that ignores stray
+        // positionals — it matches no flag shape below.
+        if (arg[0] == '-' && arg[1] == '-') {
+            fprintf(stderr, "[supersonic] unknown flag: %s\n", arg);
             continue;
         }
 

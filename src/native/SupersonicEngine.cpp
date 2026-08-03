@@ -20,7 +20,6 @@
 #include "src/IngressCallCtx.h"
 #include "synth/server/SC_Prototypes.h"  // zfree
 #include <juce_audio_formats/juce_audio_formats.h>
-#include "FuzzyMatch.h"
 #include <chrono>
 #include <cstdarg>
 #include <cstdlib>
@@ -558,25 +557,64 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
     }
 
 #if defined(__linux__) && defined(SUPERSONIC_PIPEWIRE)
-    if (platformSetup)
+    if (platformSetup) {
         preferPipeWireDriverIfAvailable(*mDeviceManager);
+        if (mDeviceManager->getCurrentAudioDeviceType() == "PipeWire")
+            mBootDriver = "PipeWire";
+    }
 #endif
 
 #ifdef _WIN32
-    // Default to DirectSound on Windows.  WASAPI shared mode batches
-    // event callbacks in ~10ms bursts, causing audible crackles even
-    // though our processing completes well within budget.  DirectSound
-    // uses polling-based buffer management that avoids this entirely.
+    // Default to DirectSound on Windows when no driver preference is
+    // supplied. Historical default, not verified policy: the WASAPI
+    // shared-mode crackle it was meant to avoid is unconfirmed, and
+    // DirectSound has shown its own failure modes on real hardware
+    // (clock rate skew, wedged device threads). A --audio-driver
+    // request overrides this below.
     if (platformSetup) {
         auto& types = mDeviceManager->getAvailableDeviceTypes();
         for (auto* t : types) {
             if (t->getTypeName() == "DirectSound") {
                 mDeviceManager->setCurrentAudioDeviceType("DirectSound", true);
+                mBootDriver = "DirectSound";
                 break;
             }
         }
     }
 #endif
+
+    // Honour the requested boot driver (--audio-driver): the GUI's saved
+    // driver preference, forwarded by the daemon so the engine opens on
+    // it directly instead of booting the platform default above and
+    // being cold-swapped over after the boot handshake. Resolution is
+    // policy (resolveBootDriver): exact type-name match, then unique
+    // case-insensitive; ASIO is refused without a -H device (it has no
+    // default device, and probing one can hang in IASIO::init). An
+    // unresolvable name keeps the platform default with a warning. Runs
+    // under the factory seam too — an injected manager owns its own
+    // types and the request resolves (or warns) against those.
+    bool bootDriverRequested = false;
+    if (!cfg.audioDriver.empty()) {
+        std::vector<std::string> typeNames;
+        for (auto* t : mDeviceManager->getAvailableDeviceTypes())
+            typeNames.push_back(t->getTypeName().toStdString());
+        const bool hasDeviceRequest = !cfg.hardwareDevice.empty()
+                                   && cfg.hardwareDevice != "__system__";
+        auto choice = sonicpi::device::resolveBootDriver(
+            cfg.audioDriver, typeNames, hasDeviceRequest);
+        if (!choice.warning.empty()) {
+            fprintf(stderr, "[device-setup] %s\n", choice.warning.c_str());
+            fflush(stderr);
+        }
+        if (!choice.driver.empty()) {
+            mDeviceManager->setCurrentAudioDeviceType(
+                juce::String(choice.driver), true);
+            mBootDriver = choice.driver;
+            bootDriverRequested = true;
+            ssLifecycleLog("[device-setup] boot driver: '%s'\n",
+                           choice.driver.c_str());
+        }
+    }
 
     // -H "__system__" is the GUI sentinel for "follow macOS default".
     // Skip fuzzy-match and go straight to initialiseWithDefaultDevices.
@@ -586,7 +624,6 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
     if (!cfg.hardwareDevice.empty() && cfg.hardwareDevice != "__system__") {
         struct DevEntry { std::string combined, typeName, devName; };
         std::vector<DevEntry> entries;
-        std::vector<std::string> combinedNames;
 
         auto& types = mDeviceManager->getAvailableDeviceTypes();
         for (auto* type : types) {
@@ -597,7 +634,6 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                 e.devName  = name.toStdString();
                 e.combined = e.typeName + " : " + e.devName;
                 entries.push_back(e);
-                combinedNames.push_back(e.combined);
             }
         }
 
@@ -617,12 +653,21 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                         if (sameDeviceName(e.devName, w)) return true;
                     return false;
                 }), entries.end());
-            combinedNames.clear();
-            for (auto& e : entries) combinedNames.push_back(e.combined);
         }
 #endif
 
-        std::string matched = fuzzyMatch(cfg.hardwareDevice, combinedNames);
+        // Resolve the requested device, scoped to the requested driver
+        // when one was honoured above — an unscoped match resolves by
+        // shortest combined name, which lands a bare device name on
+        // whichever driver has the shortest NAME rather than the one
+        // the user chose (see resolveBootHardwareMatch).
+        std::vector<std::pair<std::string, std::string>> deviceTable;
+        for (auto& e : entries)
+            deviceTable.emplace_back(e.typeName, e.devName);
+        std::string matched = sonicpi::device::resolveBootHardwareMatch(
+            cfg.hardwareDevice,
+            bootDriverRequested ? mBootDriver : std::string(),
+            deviceTable);
         if (matched.empty()) {
             fprintf(stderr,
                     "[device-setup] WARNING: requested output device '%s' not found. "
@@ -695,6 +740,7 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                     fprintf(stderr, "  -H '%s' -> %s\n",
                             cfg.hardwareDevice.c_str(), e.combined.c_str());
                     mDeviceMode = e.devName;
+                    mBootDriver = e.typeName;
                     openedByHardwareFlag = true;
                 }
                 break;
@@ -3437,16 +3483,22 @@ juce::String SupersonicEngine::reinitialiseWithDefaultsPreservingConfig() {
     // "System default" has no meaning under ASIO: JUCE's ASIO type has no
     // default device, so initialiseWithDefaultDevices from an ASIO session
     // stops the current device and opens none, leaving the engine with no
-    // device and no callbacks. Return to the boot-time type (DirectSound —
-    // see init's type selection) before asking for defaults.
+    // device and no callbacks. Return to the boot-time type (mBootDriver —
+    // see init's type selection) before asking for defaults; when boot
+    // itself was ASIO (-H onto an ASIO device), DirectSound stands in as
+    // the type that can serve a default.
     {
         auto curType = mDeviceManager->getCurrentAudioDeviceType();
         if (curType == "ASIO") {
+            const std::string target =
+                (!mBootDriver.empty() && mBootDriver != "ASIO")
+                    ? mBootDriver : std::string("DirectSound");
             fprintf(stderr, "[device-setup] system default requested from ASIO "
-                    "— returning to DirectSound first\n");
+                    "— returning to %s first\n", target.c_str());
             fflush(stderr);
             mLastSelfTriggeredChange = std::chrono::steady_clock::now();
-            mDeviceManager->setCurrentAudioDeviceType("DirectSound", true);
+            mDeviceManager->setCurrentAudioDeviceType(
+                juce::String(target), true);
         }
     }
 #endif
@@ -4550,13 +4602,17 @@ juce::String SupersonicEngine::recreateDeviceManager() {
             teardownDeviceManager();
             mDeviceManager = makeDeviceManager();
             // A fresh manager defaults to WASAPI (JUCE's first type); restore
-            // the boot-time DirectSound choice (see init) so recovery doesn't
+            // the boot-time driver choice (see init) so recovery doesn't
             // silently change driver. Skipped under the factory seam — an
             // injected manager owns its own types.
             if (!mCurrentConfig.deviceManagerFactory) {
+                const std::string bootType =
+                    !mBootDriver.empty() ? mBootDriver
+                                         : std::string("DirectSound");
                 for (auto* t : mDeviceManager->getAvailableDeviceTypes()) {
-                    if (t->getTypeName() == "DirectSound") {
-                        mDeviceManager->setCurrentAudioDeviceType("DirectSound", true);
+                    if (t->getTypeName().toStdString() == bootType) {
+                        mDeviceManager->setCurrentAudioDeviceType(
+                            juce::String(bootType), true);
                         break;
                     }
                 }
@@ -4576,10 +4632,18 @@ juce::String SupersonicEngine::recreateDeviceManager() {
 #if defined(__linux__) && defined(SUPERSONIC_PIPEWIRE)
     // Same registration and preference as at boot; the scan must land before
     // the default-device init below so the fresh manager can see PipeWire's
-    // devices at all. Skipped under the factory seam.
+    // devices at all. Skipped under the factory seam. A boot driver other
+    // than PipeWire (an honoured --audio-driver) is restored instead of
+    // re-applying the PipeWire preference — recovery must not change the
+    // driver the user chose.
     if (!mCurrentConfig.deviceManagerFactory) {
         registerPipeWireDriver(*mDeviceManager);
-        preferPipeWireDriverIfAvailable(*mDeviceManager);
+        if (mBootDriver.empty() || mBootDriver == "PipeWire") {
+            preferPipeWireDriverIfAvailable(*mDeviceManager);
+        } else {
+            mDeviceManager->setCurrentAudioDeviceType(
+                juce::String(mBootDriver), true);
+        }
     }
 #endif
 #endif

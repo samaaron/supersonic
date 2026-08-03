@@ -2,6 +2,7 @@
  * DevicePolicy.cpp — see DevicePolicy.h
  */
 #include "DevicePolicy.h"
+#include "FuzzyMatch.h"
 
 #include <algorithm>
 #include <set>
@@ -320,6 +321,69 @@ std::string chooseBootInputDevice(const std::string& requestedInput,
     // a working input anyway and let the GUI's restore reconciler notice
     // and clear the stale pref.
     return systemDefaultInput;
+}
+
+BootDriverChoice resolveBootDriver(const std::string& requested,
+                                   const std::vector<std::string>& availableTypes,
+                                   bool hasDeviceRequest) {
+    BootDriverChoice choice;
+    if (requested.empty()) return choice;
+
+    auto lower = [](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        return s;
+    };
+
+    std::string matched;
+    for (auto& t : availableTypes)
+        if (t == requested) { matched = t; break; }
+    if (matched.empty()) {
+        const std::string want = lower(requested);
+        int hits = 0;
+        for (auto& t : availableTypes)
+            if (lower(t) == want) { matched = t; ++hits; }
+        if (hits > 1) matched.clear();  // ambiguous — treat as no match
+    }
+
+    if (matched.empty()) {
+        choice.warning = "requested audio driver '" + requested
+                       + "' is not available — keeping the platform default."
+                         " Available drivers:";
+        for (auto& t : availableTypes) choice.warning += " [" + t + "]";
+        return choice;
+    }
+
+    if (matched == "ASIO" && !hasDeviceRequest) {
+        choice.warning = "requested audio driver 'ASIO' has no default device"
+                         " and probing one can hang — keeping the platform"
+                         " default until a device is specified";
+        return choice;
+    }
+
+    choice.driver = matched;
+    return choice;
+}
+
+std::string resolveBootHardwareMatch(
+        const std::string& requested,
+        const std::string& preferredDriver,
+        const std::vector<std::pair<std::string, std::string>>& deviceTable) {
+    if (requested.empty()) return {};
+
+    auto combine = [&](bool scoped) {
+        std::vector<std::string> names;
+        for (auto& [driver, device] : deviceTable) {
+            if (scoped && driver != preferredDriver) continue;
+            names.push_back(driver + " : " + device);
+        }
+        return names;
+    };
+
+    if (!preferredDriver.empty()) {
+        std::string m = fuzzyMatch(requested, combine(true));
+        if (!m.empty()) return m;
+    }
+    return fuzzyMatch(requested, combine(false));
 }
 
 HardwareFlagRequest parseHardwareFlag(const std::string& first,

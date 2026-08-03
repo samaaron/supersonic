@@ -206,6 +206,52 @@ std::string chooseBootInputDevice(const std::string& requestedInput,
                                   const std::vector<std::string>& visibleInputs,
                                   const std::vector<bool>& visibleIsSuitable = {});
 
+// Resolve the driver (JUCE device type) the engine opens at boot.
+// `requested` is the embedder's --audio-driver value — the GUI's saved
+// driver preference, forwarded by the daemon so boot lands on it
+// directly instead of opening the platform default and being cold-
+// swapped over after the boot handshake. `availableTypes` are the type
+// names JUCE registered; `hasDeviceRequest` is whether a -H output
+// device accompanies the request.
+//
+// Rules:
+//   - requested empty            → keep the platform default, no warning
+//   - exact type-name match      → that type
+//   - unique case-insensitive
+//     match                      → that type (a pref survives cosmetic
+//                                   case changes; ambiguity = no match)
+//   - "ASIO" with no -H device   → keep the platform default + warning.
+//     ASIO has no default-device concept, and probing one to open can
+//     hang (IASIO::init blocks in COM for registered-but-unplugged
+//     drivers — the same hazard switchDriver refuses at runtime)
+//   - no match                   → keep the platform default + warning
+struct BootDriverChoice {
+    std::string driver;    // "" = keep the platform default
+    std::string warning;   // "" = nothing to log
+};
+BootDriverChoice resolveBootDriver(const std::string& requested,
+                                   const std::vector<std::string>& availableTypes,
+                                   bool hasDeviceRequest);
+
+// Resolve the -H output request against the device table, fuzzy
+// (FuzzyMatch.h: all pattern tokens as case-insensitive substrings,
+// shortest candidate wins). Candidates are "<driver> : <device>"
+// combined names built from the table — the return value uses that
+// exact format, "" when nothing matches.
+//
+// When `preferredDriver` is non-empty (an explicit --audio-driver that
+// resolved), entries under it are tried first, every driver second.
+// Without that scoping, a bare device name resolves by shortest
+// combined name — which on Windows means the driver with the shortest
+// NAME wins, not the driver the user chose: "Speakers (X)" saved under
+// "Windows Audio" would open under "DirectSound" purely because
+// "DirectSound : Speakers (X)" is the shorter string. An empty
+// preferredDriver keeps the historical global match.
+std::string resolveBootHardwareMatch(
+    const std::string& requested,
+    const std::string& preferredDriver,
+    const std::vector<std::pair<std::string, std::string>>& deviceTable);
+
 // -H flag semantics, scsynth-compatible (upstream scsynth_main.cpp): one
 // name serves BOTH directions; two names are "<input> <output>". Sonic Pi's
 // daemon sends all three shapes (-H <in> <out>, -H <in>, -H <out>).

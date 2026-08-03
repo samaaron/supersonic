@@ -1801,3 +1801,126 @@ TEST_CASE("PlanSwap: user pick under the still-active driver abandons the "
     REQUIRE(plan.abandonDriverIntent);
     REQUIRE(!plan.scope.crossDriver);
 }
+
+// =============================================================================
+// resolveBootDriver
+// =============================================================================
+
+using sonicpi::device::resolveBootDriver;
+using sonicpi::device::resolveBootHardwareMatch;
+
+static const std::vector<std::string> kWinTypes = {
+    "Windows Audio", "Windows Audio (Exclusive Mode)",
+    "Windows Audio (Low Latency Mode)", "DirectSound", "ASIO"
+};
+
+TEST_CASE("BootDriver: empty request keeps the platform default silently",
+          "[BootDriver]") {
+    auto c = resolveBootDriver("", kWinTypes, false);
+    REQUIRE(c.driver.empty());
+    REQUIRE(c.warning.empty());
+}
+
+TEST_CASE("BootDriver: exact type-name match wins", "[BootDriver]") {
+    auto c = resolveBootDriver("Windows Audio", kWinTypes, false);
+    REQUIRE(c.driver == "Windows Audio");
+    REQUIRE(c.warning.empty());
+}
+
+TEST_CASE("BootDriver: exact match is not confused by longer variants",
+          "[BootDriver]") {
+    // "Windows Audio" must select the shared-mode type, never the
+    // "(Exclusive Mode)" / "(Low Latency Mode)" variants it prefixes.
+    auto c = resolveBootDriver("Windows Audio (Low Latency Mode)",
+                               kWinTypes, false);
+    REQUIRE(c.driver == "Windows Audio (Low Latency Mode)");
+}
+
+TEST_CASE("BootDriver: unique case-insensitive match resolves",
+          "[BootDriver]") {
+    auto c = resolveBootDriver("directsound", kWinTypes, false);
+    REQUIRE(c.driver == "DirectSound");
+    REQUIRE(c.warning.empty());
+}
+
+TEST_CASE("BootDriver: ambiguous case-insensitive match is refused",
+          "[BootDriver]") {
+    auto c = resolveBootDriver("PIPEWIRE", { "PipeWire", "pipewire" }, false);
+    REQUIRE(c.driver.empty());
+    REQUIRE(!c.warning.empty());
+}
+
+TEST_CASE("BootDriver: unknown driver warns and keeps the default",
+          "[BootDriver]") {
+    // A macOS pref carried onto Windows (or a typo) must not open
+    // anything surprising — warn, list what exists, boot the default.
+    auto c = resolveBootDriver("CoreAudio", kWinTypes, false);
+    REQUIRE(c.driver.empty());
+    REQUIRE(c.warning.find("CoreAudio") != std::string::npos);
+    REQUIRE(c.warning.find("DirectSound") != std::string::npos);
+}
+
+TEST_CASE("BootDriver: ASIO without a device request is refused",
+          "[BootDriver]") {
+    // ASIO has no default device; probing one to open can hang in
+    // IASIO::init (registered-but-unplugged drivers block in COM).
+    // Same refusal switchDriver applies at runtime.
+    auto c = resolveBootDriver("ASIO", kWinTypes, false);
+    REQUIRE(c.driver.empty());
+    REQUIRE(!c.warning.empty());
+}
+
+TEST_CASE("BootDriver: ASIO with a -H device is honoured", "[BootDriver]") {
+    auto c = resolveBootDriver("ASIO", kWinTypes, true);
+    REQUIRE(c.driver == "ASIO");
+    REQUIRE(c.warning.empty());
+}
+
+// =============================================================================
+// resolveBootHardwareMatch
+// =============================================================================
+
+// A realistic Windows table: the same endpoint enumerated under several
+// driver types, plus ASIO's own short-named entries.
+static const std::vector<std::pair<std::string, std::string>> kWinTable = {
+    { "Windows Audio", "Speakers (2- MOTU Pro Audio)" },
+    { "Windows Audio", "Out 1-24 (2- MOTU Pro Audio)" },
+    { "DirectSound",   "Primary Sound Driver" },
+    { "DirectSound",   "Speakers (2- MOTU Pro Audio)" },
+    { "ASIO",          "MOTU Pro Audio" },
+};
+
+TEST_CASE("BootHardwareMatch: scoped match lands on the requested driver",
+          "[BootHardwareMatch]") {
+    // The bug this locks out: unscoped, "DirectSound : Speakers (…)"
+    // wins over "Windows Audio : Speakers (…)" purely by string length,
+    // so a device saved under Windows Audio booted under DirectSound.
+    auto m = resolveBootHardwareMatch("Speakers (2- MOTU Pro Audio)",
+                                      "Windows Audio", kWinTable);
+    REQUIRE(m == "Windows Audio : Speakers (2- MOTU Pro Audio)");
+}
+
+TEST_CASE("BootHardwareMatch: no scope keeps the historical global match",
+          "[BootHardwareMatch]") {
+    // Shortest combined name wins — long-standing bare--H behaviour,
+    // unchanged when no --audio-driver accompanies the device.
+    auto m = resolveBootHardwareMatch("Speakers (2- MOTU Pro Audio)",
+                                      "", kWinTable);
+    REQUIRE(m == "DirectSound : Speakers (2- MOTU Pro Audio)");
+}
+
+TEST_CASE("BootHardwareMatch: falls back to all drivers when the scoped "
+          "match misses", "[BootHardwareMatch]") {
+    // Device only exists under DirectSound; a Windows Audio scope must
+    // not hide it (stale driver pref + valid device pref still boots).
+    auto m = resolveBootHardwareMatch("Primary Sound Driver",
+                                      "Windows Audio", kWinTable);
+    REQUIRE(m == "DirectSound : Primary Sound Driver");
+}
+
+TEST_CASE("BootHardwareMatch: unknown device matches nothing",
+          "[BootHardwareMatch]") {
+    REQUIRE(resolveBootHardwareMatch("Quantum HD", "Windows Audio",
+                                     kWinTable).empty());
+    REQUIRE(resolveBootHardwareMatch("", "Windows Audio", kWinTable).empty());
+}

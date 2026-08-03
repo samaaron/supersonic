@@ -140,6 +140,12 @@ public:
         std::string inputDevice;                   // -H input name (first of two, or the
                                                    // single shared name); empty = pair with
                                                    // the system default input
+        std::string audioDriver;                   // --audio-driver: JUCE device type name
+                                                   // to boot on (e.g. "Windows Audio",
+                                                   // "DirectSound", "ASIO", "PipeWire").
+                                                   // Resolved by resolveBootDriver; an
+                                                   // unresolvable name (or ASIO with no -H
+                                                   // device) keeps the platform default.
         std::string appName           = "SuperSonic"; // --app-name: name published to OS
                                                    // registries (PipeWire nodes, ALSA seq
                                                    // MIDI clients, macOS aggregate devices,
@@ -948,6 +954,13 @@ private:
     // is only exposed via intendedDriver(). Cleared in
     // recordSwapPreferences on the next successful open.
     std::string              mIntendedDriver;
+
+    // Driver (JUCE device type) selected at boot: the --audio-driver
+    // request when it resolved, else the platform default ("DirectSound"
+    // on Windows, empty elsewhere). Recovery paths that rebuild the
+    // device manager restore this instead of re-deriving the platform
+    // default, so a recovered engine doesn't silently change driver.
+    std::string              mBootDriver;
 
     // (output, input) pairs that JUCE rejected. Populated from
     // switchDevice's input-fallback branch when setAudioDeviceSetup
