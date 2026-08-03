@@ -304,8 +304,8 @@ void Convolution2_Ctor(Convolution2* unit) {
         unit->m_fftsize = 2 * (unit->m_framesize);
 
         if (unit->m_fftsize > SC_FFT_ABSOLUTE_MAXSIZE) {
-            printf("Convolution2: FFT size is larger than SC_FFT_ABSOLUTE_MAXSIZE, cannot run. We suggest PartConv "
-                   "instead.\n");
+            Print("Convolution2: FFT size is larger than SC_FFT_ABSOLUTE_MAXSIZE, cannot run. We suggest PartConv "
+                  "instead.\n");
             SETCALC(*ClearUnitOutputs);
         }
 
@@ -354,13 +354,13 @@ void Convolution2_Ctor(Convolution2* unit) {
             // initialize output
             OUT0(0) = IN0(0);
         } else {
-            printf("Convolution2 framesize smaller than blocksize \n");
+            Print("Convolution2 framesize smaller than blocksize \n");
             SETCALC(*ClearUnitOutputs);
             unit->mDone = true;
         }
     } else {
         unit->m_scfft2 = unit->m_scfft1 = unit->m_scfftR = nullptr;
-        printf("Convolution2_Ctor: can't get kernel buffer, giving up.\n");
+        Print("Convolution2_Ctor: can't get kernel buffer, giving up.\n");
         SETCALC(*ClearUnitOutputs);
     }
 }

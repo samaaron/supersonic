@@ -1995,7 +1995,7 @@ void Dswitch_next(Dswitch* unit, int inNumSamples) {
         OUT0(0) = val;
 
     } else {
-        printf("...\n");
+        Print("...\n");
         for (int i = 0; i < unit->mNumInputs; ++i) {
             RESETINPUT(i);
         }

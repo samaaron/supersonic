@@ -200,7 +200,7 @@ static bool scfft_global_initialization(void) {
     for (int i = SC_FFT_LOG2_MINSIZE; i < SC_FFT_LOG2_MAXSIZE + 1; ++i) {
         fftSetup[i] = vDSP_create_fftsetup(i, FFT_RADIX2);
         if (fftSetup[i] == NULL) {
-            printf("FFT ERROR: Mac vDSP library could not allocate FFT setup for size %i\n", 1 << i);
+            ss_log("FFT ERROR: Mac vDSP library could not allocate FFT setup for size %i\n", 1 << i);
         }
     }
     // vDSP prepares its memory-aligned buffer for rearranging input data.

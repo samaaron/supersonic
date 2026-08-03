@@ -115,7 +115,7 @@ void PartConv_Ctor(PartConv* unit) {
         if (localBufNum <= parent->localMaxBufNum) {
             buf = parent->mLocalSndBufs + localBufNum;
         } else {
-            printf("PartConv Error: Invalid Spectral data bufnum %d \n", bufnum);
+            Print("PartConv Error: Invalid Spectral data bufnum %d \n", bufnum);
             SETCALC(*ClearUnitOutputs);
             unit->mDone = true;
             return;
@@ -128,7 +128,7 @@ void PartConv_Ctor(PartConv* unit) {
 
     if (!buf->data) {
         // unit->mDone = true;
-        printf("PartConv Error: Spectral data buffer not allocated \n");
+        Print("PartConv Error: Spectral data buffer not allocated \n");
         SETCALC(*ClearUnitOutputs);
         unit->mDone = true;
         return;
@@ -141,7 +141,7 @@ void PartConv_Ctor(PartConv* unit) {
     // unit->m_fftsize);
 
     if ((buf->samples % unit->m_fftsize != 0) || (buf->samples == 0)) {
-        printf(
+        Print(
             "PartConv Error: fftsize doesn't divide spectral data buffer size or spectral data buffer size is zero\n");
         SETCALC(*ClearUnitOutputs);
         unit->mDone = true;
@@ -157,7 +157,7 @@ void PartConv_Ctor(PartConv* unit) {
     OUT0(0) = 0.f;
 
     if (unit->m_nover2 % unit->m_blocksize != 0) {
-        printf("PartConv Error: block size doesn't divide partition size\n");
+        Print("PartConv Error: block size doesn't divide partition size\n");
         SETCALC(*ClearUnitOutputs);
         unit->mDone = true;
         return;
@@ -168,7 +168,7 @@ void PartConv_Ctor(PartConv* unit) {
         unit->m_spareblocks = blocksperpartition - 1;
 
         if (unit->m_spareblocks < 1) {
-            printf("PartConv Error: no spareblocks, amortisation not possible! \n");
+            Print("PartConv Error: no spareblocks, amortisation not possible! \n");
             SETCALC(*ClearUnitOutputs);
             unit->mDone = true;
             return;
@@ -218,7 +218,7 @@ void PartConv_next(PartConv* unit, int inNumSamples) {
 
     // safety check
     if (!(unit->mWorld->mSndBufs + unit->m_specbufnumcheck)->data) {
-        printf("PartConv Error: Spectral data buffer not allocated \n");
+        Print("PartConv Error: Spectral data buffer not allocated \n");
         ClearUnitOutputs(unit, inNumSamples);
         SETCALC(*ClearUnitOutputs);
         unit->mDone = true;
@@ -405,13 +405,13 @@ void PreparePartConv(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) 
 
     float* inputbuf = (float*)RTAlloc(world, fftsize * sizeof(float));
     if (inputbuf == nullptr) {
-        printf("PreparePartConv: memory allocation failed.\n");
+        Print("PreparePartConv: memory allocation failed.\n");
         return;
     }
     float* spectrum = (float*)RTAlloc(world, fftsize * sizeof(float));
     if (spectrum == nullptr) {
         RTFree(world, inputbuf);
-        printf("PreparePartConv: memory allocation failed.\n");
+        Print("PreparePartConv: memory allocation failed.\n");
         return;
     }
     SCWorld_Allocator alloc(ft, world);
@@ -419,7 +419,7 @@ void PreparePartConv(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) 
     if (m_scfft == nullptr) {
         RTFree(world, inputbuf);
         RTFree(world, spectrum);
-        printf("PreparePartConv: memory allocation failed.\n");
+        Print("PreparePartConv: memory allocation failed.\n");
         return;
     }
 

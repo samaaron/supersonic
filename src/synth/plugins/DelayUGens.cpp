@@ -648,7 +648,7 @@ void LocalBuf_Ctor(LocalBuf* unit) {
     if (parent->localBufNum >= parent->localMaxBufNum) {
         fbufnum = -1.f;
         if (unit->mWorld->mVerbosity > -2)
-            printf("warning: LocalBuf tried to allocate too many local buffers.\n");
+            Print("warning: LocalBuf tried to allocate too many local buffers.\n");
     } else {
         fbufnum = (float)(bufnum + offset);
         unit->m_buf = parent->mLocalSndBufs + bufnum;
@@ -689,9 +689,9 @@ void MaxLocalBufs_Ctor(MaxLocalBufs* unit) {
 #endif
         parent->localMaxBufNum = maxBufNum;
     } else
-        printf("warning: MaxLocalBufs - maximum number of local buffers is already declared (%i) and must remain "
-               "unchanged.\n",
-               parent->localMaxBufNum);
+        Print("warning: MaxLocalBufs - maximum number of local buffers is already declared (%i) and must remain "
+              "unchanged.\n",
+              parent->localMaxBufNum);
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1927,9 +1927,7 @@ void Pitch_next_a(Pitch* unit, int inNumSamples) {
                         startperiod = (ksamps + downsamp - 1) / downsamp;
                     }
                 }
-            } /* else {
-                 printf("amp too low \n");
-             }*/
+            }
 
             // shift buffer for next fill
             int execPeriod = unit->m_execPeriod;
@@ -2132,9 +2130,7 @@ void Pitch_next_k(Pitch* unit, int inNumSamples) {
                         startperiod = 1; // (ksamps+downsamp-1)/downsamp;
                     }
                 }
-            } /* else {
-                 printf("amp too low \n");
-             }*/
+            }
 
             // shift buffer for next fill
             int execPeriod = unit->m_execPeriod;

@@ -13,6 +13,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Core logging guard ──────────────────────────────────────────────────────
+  # The scsynth core logs through the egress funnel — ss_log / scprintf / the
+  # interface table's Print — never raw stdio. Raw stdio output vanishes in
+  # the WASM AudioWorklet (no usable stdout), bypasses the /supersonic/debug
+  # channel the hosts surface, and takes the stdio stream lock on the audio
+  # thread. This guard fails on any live printf-family call in src/synth.
+  # Exemptions are narrow and deliberate:
+  #   external_libraries/  vendored code (TLSF, boost)
+  #   SC_Win32Utils.cpp    native-only Win32 helpers, never compiled to WASM
+  #   SC_World.cpp         World_New exception handlers must not use ss_log
+  #                        (the ring may not exist when they fire); the NRT
+  #                        render loop's progress output is native-only
+  #   PriorityQueue.h,     hand-invoked debug dump helpers
+  #   HashTable.h
+  # The pattern skips lines with any '/' before the call, which excludes
+  # //-comments (block-commented calls should be deleted, not kept).
+  core-logging-guard:
+    runs-on: ubuntu-latest
+    name: core-logging-guard
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Forbid raw stdio logging in the scsynth core
+        run: |
+          set -uo pipefail
+          hits=$(grep -RnE '^[^/]*\b(printf|fprintf|vprintf|vfprintf|puts|fputs)[[:space:]]*\(' src/synth \
+            --include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
+            --exclude-dir=external_libraries \
+            --exclude=SC_Win32Utils.cpp \
+            --exclude=SC_World.cpp \
+            --exclude=PriorityQueue.h \
+            --exclude=HashTable.h \
+            || true)
+          if [ -n "$hits" ]; then
+            echo "Raw stdio logging found in the scsynth core."
+            echo "Use the egress funnel instead: Print(...) in plugins, ss_log/scprintf elsewhere."
+            echo "$hits"
+            exit 1
+          fi
+          echo "scsynth core is clean: all logging flows through the egress funnel."
+
   # ── JUCE native executable ──────────────────────────────────────────────────
   juce:
     strategy:
