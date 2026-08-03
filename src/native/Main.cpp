@@ -19,12 +19,16 @@
 #include "UdsDgramOscTransport.h"
 #include "supersonic_config.h"
 
+#include <atomic>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -568,8 +572,47 @@ int main(int argc, char* argv[]) {
         engine.ingest(d, n, token);
     };
 
-    // Select + configure the command transport; started after engine.init()
-    // (the engine's rings must exist before the first packet can be ingested).
+    // Boot command queue for the UDP transport. UDP is bound and receiving
+    // BEFORE engine.init() so that nothing a client sends during a slow
+    // device open (an ASIO open can take >10 s) bounces as ICMP
+    // port-unreachable and is silently lost — Spider fires its subsystem
+    // subscriptions (MIDI, gamepad, OSC, Link) as soon as it boots, and a
+    // lost subscribe costs every event that subsystem would ever push.
+    // The engine can't ingest until its rings exist, so packets queue here
+    // and flush (in arrival order) once init completes. Packets that race
+    // the flush wait on the mutex and land after it — order is preserved.
+    // The connection-oriented transports don't need this: a refused
+    // connect is an error the client sees and retries.
+    constexpr size_t kMaxPendingBootPackets = 1024;
+    std::mutex pendingMut;
+    std::vector<std::pair<std::vector<uint8_t>, uint32_t>> pendingPackets;
+    std::atomic<bool> engineReady{false};
+    bool pendingDropWarned = false;
+
+    auto queueingIngest = [&](const uint8_t* d, uint32_t n, uint32_t token) {
+        if (engineReady.load(std::memory_order_acquire)) {
+            engine.ingest(d, n, token);
+            return;
+        }
+        std::lock_guard<std::mutex> lk(pendingMut);
+        if (engineReady.load(std::memory_order_acquire)) {
+            engine.ingest(d, n, token);
+            return;
+        }
+        if (pendingPackets.size() < kMaxPendingBootPackets) {
+            pendingPackets.emplace_back(std::vector<uint8_t>(d, d + n), token);
+        } else if (!pendingDropWarned) {
+            pendingDropWarned = true;
+            fprintf(stderr, "[supersonic] boot command queue full — dropping "
+                    "further packets until init completes\n");
+            fflush(stderr);
+        }
+    };
+
+    // Select + configure the command transport. The alternative transports
+    // start after engine.init() (the engine's rings must exist before the
+    // first packet can be ingested); UDP starts immediately and queues, see
+    // above.
     IOscTransport* transport = &udpServer;
     std::function<bool()> startTransport;
     std::string transportDesc;
@@ -615,12 +658,24 @@ int main(int argc, char* argv[]) {
         }
         transportDesc = descBuf;
     } else {
-        udpServer.setIngest(ingest);
+        udpServer.setIngest(queueingIngest);
         udpServer.initialise(cfg.udpPort, cfg.bindAddress);
         // UDP stays forgiving (scsynth-compatible): a bind failure is logged
-        // but doesn't kill the server.
+        // but doesn't kill the server. Receiving starts NOW — packets queue
+        // until init completes (see the boot command queue above).
+        if (cfg.udpPort > 0) udpServer.start();
         startTransport = [&] {
-            if (cfg.udpPort > 0) udpServer.start();
+            std::lock_guard<std::mutex> lk(pendingMut);
+            for (auto& p : pendingPackets)
+                engine.ingest(p.first.data(),
+                              static_cast<uint32_t>(p.first.size()), p.second);
+            if (!pendingPackets.empty()) {
+                fprintf(stderr, "[supersonic] flushed %zu command packet(s) "
+                        "queued during boot\n", pendingPackets.size());
+                fflush(stderr);
+            }
+            pendingPackets.clear();
+            engineReady.store(true, std::memory_order_release);
             return true;
         };
         snprintf(descBuf, sizeof(descBuf), "UDP port %d", cfg.udpPort);
