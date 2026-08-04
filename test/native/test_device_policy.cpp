@@ -1064,14 +1064,28 @@ TEST_CASE("ExclusivePair: changing output away drops the carried input, "
     REQUIRE(p.input == "__none__");
 }
 
-TEST_CASE("ExclusivePair: changing input away frees the carried output to "
-          "the fallback", "[ExclusivePair]") {
+TEST_CASE("ExclusivePair: changing input away keeps the patchbay output",
+          "[ExclusivePair]") {
     // On patchbay both sides, user picks a stream input; the GUI re-sends
-    // the (unchanged) patchbay output alongside it. The changed side wins.
+    // the (unchanged) patchbay output alongside it. The output the user
+    // chose survives — the filter node keeps its output ports while the
+    // input ports draw from the other device, so this pair opens as asked.
+    // Yielding the output here cost a 16-channel device and forced a
+    // channel-count cold swap.
     auto p = xpair("Patchbay (16 ch)", "Built-in Audio Analog Stereo",
                    "Patchbay (16 ch)", "Patchbay (16 ch)");
-    REQUIRE(p.output == "System Default");
+    REQUIRE(p.output == "Patchbay (16 ch)");
     REQUIRE(p.input == "Built-in Audio Analog Stereo");
+}
+
+TEST_CASE("ExclusivePair: an input-only ask never moves the patchbay output",
+          "[ExclusivePair]") {
+    // The boot-restore shape: output left empty (= keep current) while an
+    // input is named. Resolving the empty output to the fallback moved the
+    // user off the patchbay on every launch.
+    auto p = xpair("", "System Default", "Patchbay (16 ch)", "");
+    REQUIRE(p.output.empty());
+    REQUIRE(p.input == "System Default");
 }
 
 TEST_CASE("ExclusivePair: pairs not involving the exclusive device pass "
