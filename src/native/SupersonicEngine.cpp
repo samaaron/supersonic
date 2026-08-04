@@ -709,16 +709,16 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                 if (cfg.sampleRate > 0) setup.sampleRate = cfg.sampleRate;
                 if (cfg.bufferSize > 0) setup.bufferSize = cfg.bufferSize;
 
-                // macOS: request input channels only when the setup names
-                // an input. A blank name with reqIn > 0 makes JUCE pair the
-                // default mic implicitly — via its Combiner, which the
-                // aggregate promotion below exists to avoid (#3554).
-#ifdef __APPLE__
+                // Request input channels only when the setup names an
+                // input — a -H boot never opens an implicit one. On macOS
+                // a blank name with reqIn > 0 made JUCE pair the default
+                // mic via its Combiner (#3554); elsewhere it named a
+                // default input but activated zero channels anyway
+                // (useDefaultInputChannels=false + empty mask). Explicit
+                // input intent is the uniform contract; the input-pairing
+                // blocks below attach preferred inputs on all platforms.
                 const int hwReqIn =
                     setup.inputDeviceName.isNotEmpty() ? reqIn : 0;
-#else
-                const int hwReqIn = reqIn;
-#endif
                 initError = mDeviceManager->initialise(
                     hwReqIn, reqOut,
                     nullptr, false, juce::String(), &setup);
@@ -738,12 +738,7 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                     setup.inputDeviceName = juce::String();
                     setup.useDefaultInputChannels = false;
                     initError = mDeviceManager->initialise(
-#ifdef __APPLE__
-                        0,
-#else
-                        reqIn,
-#endif
-                        reqOut,
+                        0, reqOut,
                         nullptr, false, juce::String(), &setup);
                 }
 

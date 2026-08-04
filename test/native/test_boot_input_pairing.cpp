@@ -26,15 +26,11 @@ TEST_CASE("Boot: -H output with inputs enabled activates no implicit input",
 
     auto cur = fix.engine().currentDevice();
     REQUIRE(cur.name == "Fake Speakers");
-#ifdef __APPLE__
-    // Output-only open: pairing an input belongs to aggregate promotion,
-    // never to JUCE's implicit default (#3554).
+    // Uniform contract on every platform: a -H boot never opens an
+    // implicit input. Input pairing belongs to the explicit paths —
+    // aggregate promotion on macOS (#3554), the preferred-input pairing
+    // block elsewhere.
     REQUIRE(cur.activeInputChannels == 0);
-#else
-    // Elsewhere separate in/out devices are native — the implicit default
-    // input is the desired behaviour.
-    REQUIRE(cur.activeInputChannels > 0);
-#endif
 
     OscReply reply;
     fix.send(osc_test::message("/status"));
