@@ -129,7 +129,7 @@ public:
     std::function<void()> onWake;
 
     // --- Recording ---
-    // Atomic void* — audio thread casts to juce::AudioFormatWriter::ThreadedWriter*.
+    // Atomic void* — audio thread casts to RecordWriter*.
     // Non-audio thread stores/clears. Lock-free FIFO push in write().
     std::atomic<void*> mRecordWriter{nullptr};
 

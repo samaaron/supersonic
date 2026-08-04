@@ -152,12 +152,11 @@ int main() { return 0; }
     endif()
 endif()
 
-# ─── JUCE via FetchContent (or a system install) ─────────────────────────────
+# ─── FetchContent deps + SuperSmoothy ────────────────────────────────────────
 include(FetchContent)
 
 # FetchContent deps are private build details: exclude them from the install
-# manifest so `cmake --install` ships only SuperSonic's own rules (JUCE would
-# otherwise install its whole module tree, and vorbis bakes ABSOLUTE
+# manifest so `cmake --install` ships only SuperSonic's own rules (vorbis bakes ABSOLUTE
 # /usr/local paths that make --prefix installs fail outright). The keyword
 # reached FetchContent_Declare in CMake 3.28; older CMake keeps the historic
 # polluted-install behaviour, which no supported packaging path relies on.
@@ -171,42 +170,17 @@ endif()
 # so developer builds keep the pinned, self-contained FetchContent versions;
 # distro builds flip them on and take whatever the archive ships. See
 # docs/DEBIAN-PACKAGING.md.
-option(SUPERSONIC_SYSTEM_JUCE "Use a system-installed JUCE (find_package) instead of the pinned FetchContent copy" OFF)
 option(SUPERSONIC_SYSTEM_SNDFILE "Link the system libsndfile instead of building the vendored static codec stack" OFF)
 option(SUPERSONIC_SYSTEM_BOOST "Use system Boost headers instead of the vendored bcp subset" OFF)
 option(SUPERSONIC_CARGO_OFFLINE "Build the Rust subsystems with --offline (requires pre-vendored crates)" OFF)
 
-# JUCE is the synth host's audio-device + format layer; it is only consumed when
-# the synth engine is compiled (see the SUPERSONIC_ENABLE_SYNTH link block and the
-# SuperSonic console app below). Gate the fetch on it so the no-synth core stays
-# genuinely JUCE-free — pulling JUCE here unconditionally drags juceaide (and its
-# X11 GUI dependency on headless Linux) into a configure that links none of it.
+# SuperSmoothy is the synth host's audio-device layer: our vendored, ISC-licensed
+# fork of the four permissive JUCE 7 modules (see supersmoothy/README.md — JUCE
+# >= 8 is AGPL, which supersonic's no-AGPL boundary forbids; vendoring also
+# removes any way for a distro build to accidentally bind a system JUCE 8+).
+# Gated on the synth so the no-synth core stays genuinely JUCE-free.
 if(SUPERSONIC_ENABLE_SYNTH)
-    if(SUPERSONIC_SYSTEM_JUCE)
-        # Debian: juce-modules-source + juce-tools provide JUCEConfig.cmake,
-        # the module sources, and a prebuilt juceaide.
-        find_package(JUCE CONFIG REQUIRED)
-        message(STATUS "JUCE: system install ${JUCE_VERSION}")
-    else()
-        FetchContent_Declare(
-            JUCE
-            GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-            GIT_TAG        8.0.13
-            GIT_SHALLOW    TRUE
-            ${_ss_fc_exclude}
-        )
-        FetchContent_MakeAvailable(JUCE)
-
-        # Reset JUCE to pristine on every configure — defensive cleanup in case
-        # a previous build applied a (now-removed) local patch.
-        if(APPLE)
-            execute_process(
-                COMMAND git checkout -- .
-                WORKING_DIRECTORY "${juce_SOURCE_DIR}"
-                ERROR_QUIET
-            )
-        endif()
-    endif()
+    add_subdirectory(supersmoothy)
 endif()
 
 # ─── libsndfile + audio codecs via FetchContent ──────────────────────────────
@@ -382,6 +356,7 @@ set(WORKERS_SRC     "${CMAKE_CURRENT_SOURCE_DIR}/src/workers")
 set(ENGINE_SOURCES
     ${NATIVE_SRC}/HeadlessDriver.cpp
     ${NATIVE_SRC}/JuceAudioCallback.cpp
+    ${NATIVE_SRC}/RecordWriter.cpp
     ${NATIVE_SRC}/RealtimeThread.cpp
     # UdpOscTransport.cpp builds into the SuperSonic exe (below), not this shared
     # lib — the UDP transport belongs to the standalone server, so the NIF and
@@ -745,21 +720,10 @@ target_link_libraries(supersonic_engine PUBLIC tlsf)
 # is JUCE-/Link-/SndFile-free (the supersonic_freestanding target proves the
 # scheduler/router core links without them through the lanes ABI).
 if(SUPERSONIC_ENABLE_SYNTH)
-    # Disable JUCE modules we don't need (avoids curl dependency on Linux)
-    target_compile_definitions(supersonic_engine PUBLIC
-        JUCE_USE_CURL=0
-        JUCE_WEB_BROWSER=0
-    )
+    # JUCE-module compile flags (JUCE_JACK, JUCE_USE_CURL, ...) live on the
+    # supersmoothy target now — that's where the module sources compile.
 
-    # Enable JUCE's JACK backend on Linux. JUCE dlopens libjack.so.0 at
-    # runtime, so this just compiles in the code path — no hard link to
-    # jack-dev. Users with jackd (or pipewire-jack) running will see
-    # "JACK" in /supersonic/drivers/list; users without it still get ALSA.
-    if(UNIX AND NOT APPLE)
-        target_compile_definitions(supersonic_engine PUBLIC JUCE_JACK=1)
-    endif()
-
-    # Native PipeWire backend on Linux. Like JACK above, libpipewire-0.3 is
+    # Native PipeWire backend on Linux. Like JACK, libpipewire-0.3 is
     # dlopen'd at runtime so there is no hard link dependency — only the
     # headers are needed, and only at build time. Without the headers the
     # backend is not compiled and Linux behaves exactly as before.
@@ -785,31 +749,15 @@ if(SUPERSONIC_ENABLE_SYNTH)
     # development, not hosts. JUCE's juce_ASIO_windows.cpp wrapper #includes
     # the SDK headers and is compiled into juce_audio_devices when JUCE_ASIO=1.
     if(WIN32)
-        target_compile_definitions(supersonic_engine PUBLIC JUCE_ASIO=1)
-        target_include_directories(supersonic_engine PUBLIC
+        target_compile_definitions(supersmoothy PUBLIC JUCE_ASIO=1)
+        target_include_directories(supersmoothy PUBLIC
             "${CMAKE_CURRENT_SOURCE_DIR}/external_libs/ASIOSDK2.3.4/common")
     endif()
 
     target_link_libraries(supersonic_engine PUBLIC
-        juce::juce_core
-        juce::juce_audio_basics
-        juce::juce_audio_devices
-        juce::juce_audio_formats
+        supersmoothy
         SndFile::sndfile
     )
-
-    # Debian's juce-modules-source unbundles the FLAC/Ogg/Vorbis sources from
-    # juce_audio_formats (they ship the codecs as system libs), so its compiled
-    # object references the system codec symbols and the final link must name
-    # them explicitly. Our own FetchContent JUCE compiles the codecs in, so it
-    # needs none of this — hence gating on SUPERSONIC_SYSTEM_JUCE. Over-linking
-    # a codec the module doesn't reference is harmless under --as-needed.
-    if(SUPERSONIC_SYSTEM_JUCE AND UNIX AND NOT APPLE)
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(JUCE_CODECS REQUIRED IMPORTED_TARGET
-            flac ogg vorbis vorbisenc vorbisfile)
-        target_link_libraries(supersonic_engine PUBLIC PkgConfig::JUCE_CODECS)
-    endif()
 endif()
 
 # Ableton Link is gated by SUPERSONIC_ENABLE_LINK, independent of the synth: the
@@ -1071,12 +1019,22 @@ if(SUPERSONIC_ENABLE_SYNTH)
     set(SUPERSONIC_COMPANY_NAME "SuperSonic" CACHE STRING
         "Company name published in OS-facing binary metadata")
 
-    juce_add_console_app(SuperSonic
-        PRODUCT_NAME    "${SUPERSONIC_PRODUCT_NAME}"
-        VERSION         "${PROJECT_VERSION}"
-        COMPANY_NAME    "${SUPERSONIC_COMPANY_NAME}"
-    )
-    set_target_properties(SuperSonic PROPERTIES OUTPUT_NAME "SuperSonic")
+    add_executable(SuperSonic)
+    set_target_properties(SuperSonic PROPERTIES
+        OUTPUT_NAME "SuperSonic"
+        RUNTIME_OUTPUT_DIRECTORY
+            "${CMAKE_CURRENT_BINARY_DIR}/SuperSonic_artefacts/$<CONFIG>")
+
+    if(WIN32)
+        # Version resource — the name/publisher Windows firewall prompts show
+        # (juce_add_console_app used to generate this).
+        string(REPLACE "." "," SUPERSONIC_RC_VERSION_COMMAS "${PROJECT_VERSION}.0")
+        configure_file(
+            "${NATIVE_SRC}/supersonic_version.rc.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/supersonic_version.rc" @ONLY)
+        target_sources(SuperSonic PRIVATE
+            "${CMAKE_CURRENT_BINARY_DIR}/supersonic_version.rc")
+    endif()
 
     if(APPLE)
         # Plain (non-bundled) binaries surface identity to macOS dialogs —
@@ -1113,11 +1071,6 @@ if(SUPERSONIC_ENABLE_SYNTH)
         ${NATIVE_SRC}/ShmTransport.cpp
     )
     target_link_libraries(SuperSonic PRIVATE supersonic_engine)
-
-    target_compile_definitions(SuperSonic PRIVATE
-        JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:SuperSonic,JUCE_PRODUCT_NAME>"
-        JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:SuperSonic,JUCE_VERSION>"
-    )
 endif()
 
 # ─── Install ─────────────────────────────────────────────────────────────────

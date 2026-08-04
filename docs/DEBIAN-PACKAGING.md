@@ -40,7 +40,7 @@ supply is vendored, each with a one-line justification in `debian/copyright`:
 
 | Dependency | Developer build | Debian build |
 |---|---|---|
-| JUCE | FetchContent pin 8.0.13 | `juce-modules-source` + `juce-tools` (8.0.6+ds) via `-DSUPERSONIC_SYSTEM_JUCE=ON` |
+| SuperSmoothy (audio layer) | in-tree `supersmoothy/` (vendored ISC fork of JUCE 7 modules — see its README) | same in-tree sources; no system JUCE, no juceaide |
 | libsndfile + ogg/vorbis/flac/opus | FetchContent static stack | `libsndfile1-dev` (shared, codecs included) via `-DSUPERSONIC_SYSTEM_SNDFILE=ON` |
 | Boost (header-only subset) | in-tree bcp extract of 1.86 | `libboost-dev` via `-DSUPERSONIC_SYSTEM_BOOST=ON` |
 | Catch2 (tests) | FetchContent pin v3.5.2 | `catch2` (found automatically via `find_package`) |
@@ -114,9 +114,11 @@ docker run --rm -v "$PWD:/src" -w /src debian:sid bash scripts/ci-debian-package
 
 Points a prospective maintainer will care about, and where they stand:
 
-- **JUCE version skew** — the developer pin is 8.0.13; Debian ships 8.0.6+ds.
-  CI builds and runs the full test suite against 8.0.6 on every push, so
-  incompatibility would surface here first, not on a maintainer's machine.
+- **No system JUCE** — the audio layer is the in-tree `supersmoothy/`
+  subproject (ISC, DFSG-free), so there is no JUCE build-dependency and no
+  version skew. Debian's `juce-modules-source` (>= 8) must never be
+  reintroduced: JUCE >= 8 is AGPL, which SuperSonic's licence boundary
+  forbids (docs/UPSTREAM_SYNC_GUIDE.md).
 - **Ableton Link is embedded** — Debian's `ableton-link-dev` (3.x) is too old
   and lacks four functional patches (loopback-only discovery, peer
   enumeration, monotonic commit timestamps, LinkAudio teardown race). Until

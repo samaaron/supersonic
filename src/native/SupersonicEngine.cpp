@@ -19,7 +19,7 @@
 #include "RingBufferWriter.h"
 #include "src/IngressCallCtx.h"
 #include "synth/server/SC_Prototypes.h"  // zfree
-#include <juce_audio_formats/juce_audio_formats.h>
+#include "RecordWriter.h"
 #include <chrono>
 #include <cstdarg>
 #include <cstdlib>
@@ -5531,39 +5531,20 @@ SupersonicEngine::RecordResult SupersonicEngine::startRecording(
     juce::File file{juce::String(path)};
     file.getParentDirectory().createDirectory();
 
-    auto outputStream = std::make_unique<juce::FileOutputStream>(file);
-    if (outputStream->failedToOpen()) {
-        result.error = "failed to open file: " + path;
-        return result;
-    }
-
-    // Create format-specific writer
-    std::unique_ptr<juce::AudioFormat> audioFormat;
-    if (format == "flac")
-        audioFormat = std::make_unique<juce::FlacAudioFormat>();
-    else
-        audioFormat = std::make_unique<juce::WavAudioFormat>();
-
-    juce::AudioFormatWriter* formatWriter = audioFormat->createWriterFor(
-        outputStream.get(), sampleRate,
-        static_cast<unsigned int>(numChannels),
-        bitDepth, {}, 0);
-
-    if (!formatWriter) {
-        result.error = "unsupported format/bitDepth: " + format + "/" + std::to_string(bitDepth);
-        return result;
-    }
-
-    // Writer takes ownership of the stream
-    outputStream.release();
-
     if (!mRecordThread.isThreadRunning())
         mRecordThread.startThread();
 
-    auto* threadedWriter = new juce::AudioFormatWriter::ThreadedWriter(
-        formatWriter, mRecordThread, static_cast<int>(sampleRate) * 10);
+    auto writer = std::make_unique<RecordWriter>(
+        path, format, bitDepth, sampleRate, numChannels,
+        mRecordThread, static_cast<int>(sampleRate) * 10);
 
-    mAudioCallback.mRecordWriter.store(threadedWriter, std::memory_order_release);
+    if (!writer->openedOk()) {
+        result.error = "unsupported format/bitDepth (or unwritable path): "
+                       + format + "/" + std::to_string(bitDepth);
+        return result;
+    }
+
+    mAudioCallback.mRecordWriter.store(writer.release(), std::memory_order_release);
     mRecordPath = path;
 
     result.success = true;
@@ -5583,7 +5564,7 @@ SupersonicEngine::RecordResult SupersonicEngine::stopRecording() {
 
     // Pause audio to ensure no in-flight write() calls
     mAudioCallback.pause();
-    auto* old = static_cast<juce::AudioFormatWriter::ThreadedWriter*>(
+    auto* old = static_cast<RecordWriter*>(
         mAudioCallback.mRecordWriter.exchange(nullptr, std::memory_order_acq_rel));
     mAudioCallback.resume();
 

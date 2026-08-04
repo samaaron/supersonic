@@ -328,9 +328,11 @@ TEST_CASE("Recording creates valid WAV file", "[recording]") {
 
     engine.stopRecording();
 
-    // File should have non-zero size (at least WAV header)
+    // File should be a finalised WAV: at least a complete header. A frameless
+    // headless recording is exactly 44 bytes with libsndfile's classic PCM
+    // header (JUCE's writer padded 24-bit files past 44 via WAVE_FORMAT_EXTENSIBLE).
     auto fileSize = std::filesystem::file_size(wavPath);
-    CHECK(fileSize > 44);  // WAV header is 44 bytes minimum
+    CHECK(fileSize >= 44);
 
     // Cleanup
     std::filesystem::remove_all(tempDir);

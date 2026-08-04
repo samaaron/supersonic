@@ -23,6 +23,20 @@ Supersonic is a WASM port of SuperCollider's scsynth audio server. It originated
 - The forked scsynth *core* is **GPL-3.0-or-later** (inherited from upstream). This is the expected licence to keep syncing.
 - Upstream's **WASM port** ([PR #7428](https://github.com/supercollider/supercollider/pull/7428), `wasm-audio-worklet`) is licensed **GNU Affero GPL v3 (AGPL-3.0-or-later)**, which is broader than the GPL-3.0 core.
 
+### SuperSmoothy (native backend only) — vendored ISC JUCE 7 fork, never JUCE 8+
+
+The native backend does not fetch JUCE at all. **JUCE ≥ 8 is dual-licensed
+AGPLv3 / commercial** — its AGPL side is inside this boundary, and we do not
+take commercial licences. Instead, `supersmoothy/` vendors the four
+**ISC-licensed** modules of JUCE 7.0.12 (`juce_core`, `juce_events`,
+`juce_audio_basics`, `juce_audio_devices`) as our own subproject, which we
+maintain directly (changelog: `supersmoothy/SUPERSONIC-CHANGES.md`).
+`juce_audio_formats` (GPL-dual) was not vendored — the recorder uses
+libsndfile. Same rule as above: **never sync, backport, or transcribe code
+from JUCE 8 or later into supersmoothy/** — those trees are AGPL-side, and a
+retyped fragment still carries AGPL. Vendoring also means no distro build can
+accidentally bind a system JUCE 8+. (The WASM build links none of this.)
+
 AGPL §13 ("Remote Network Interaction") requires that anyone who lets users interact with the software **over a network** be offered its complete corresponding source. A browser-delivered audio engine meets that description. GPL-3.0 → AGPL-3.0 compatibility is **one-way**: incorporating any AGPL code places the **combined work** under AGPL. That would extend the network-source-offer requirement to everyone who deploys it and change the platform layer's effective licence from MIT/GPL to AGPL. The change applies to every copy already distributed, so it cannot be undone after a release. Keeping the two licence domains separate is therefore a release-time decision, made here, on the way in.
 
 ### The rule — it covers parts, not just whole files

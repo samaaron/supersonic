@@ -11,7 +11,7 @@
 #include "audio_config.h"
 #include "supersonic_config.h"   // ss_log
 #include "lanes/lanes.h"
-#include <juce_audio_formats/juce_audio_formats.h>
+#include "RecordWriter.h"
 #include <algorithm>
 #include <cstring>
 
@@ -616,7 +616,7 @@ void JuceAudioCallback::audioDeviceIOCallbackWithContext(
     }
 
     // ── 3. Recording tap — lock-free FIFO push to background writer ──────────
-    auto* recWriter = static_cast<juce::AudioFormatWriter::ThreadedWriter*>(
+    auto* recWriter = static_cast<RecordWriter*>(
         mRecordWriter.load(std::memory_order_acquire));
     if (recWriter)
         recWriter->write(outputChannelData, numSamples);
