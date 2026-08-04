@@ -26,6 +26,7 @@ add_executable(SuperSonicNativeTests
     test_platform.cpp
     test_sc_calc.cpp
     test_boot.cpp
+    test_boot_input_pairing.cpp
     test_osc_commands.cpp
     test_synthdef.cpp
     test_embedded_pools.cpp

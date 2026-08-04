@@ -15,12 +15,14 @@ namespace CoreAudioTransport {
     inline constexpr uint32_t kAirPlay       = 0x61697270; // 'airp'
     inline constexpr uint32_t kContinuityCam = 0x63637764; // 'ccwd'
     inline constexpr uint32_t kVirtual       = 0x76697274; // 'virt'
+    inline constexpr uint32_t kAggregate     = 0x67727570; // 'grup'
 
     inline bool isWireless(uint32_t t) {
         return t == kBluetooth || t == kBluetoothLE
             || t == kAirPlay   || t == kContinuityCam;
     }
     inline bool isVirtual(uint32_t t) { return t == kVirtual; }
+    inline bool isAggregate(uint32_t t) { return t == kAggregate; }
 }
 
 struct DeviceInfo {
@@ -52,13 +54,17 @@ struct DeviceInfo {
     // Suitable for input: exclude Bluetooth/AirPlay (force low-quality codecs)
     bool isSuitableForInput() const { return !isWirelessTransport(); }
 
-    // Suitable for aggregation: exclude only wireless (Bluetooth/AirPlay).
-    // Virtual devices (Loopback, Blackhole) CAN be aggregated when the
-    // master clock is set to the HARDWARE side (matches Ardour / JACK2
-    // patterns). Using a virtual device as master fails — see
+    // Suitable for aggregation: exclude wireless (Bluetooth/AirPlay) and
+    // aggregate-class devices (Multi-Output / user aggregates, 'grup') —
+    // CoreAudio can't nest an aggregate inside another; the wrapper is
+    // created but never becomes visible (2 s stall, then a defaults
+    // fallback that abandons the chosen output). Virtual devices
+    // (Loopback, Blackhole) CAN be aggregated when the master clock is
+    // set to the HARDWARE side (matches Ardour / JACK2 patterns) — see
     // AggregateDeviceHelper::createOrUpdate for master-selection logic.
     bool isSuitableForAggregate() const {
-        return !isWirelessTransport();
+        return !isWirelessTransport()
+            && !CoreAudioTransport::isAggregate(transportType);
     }
 
     // Hide platform-specific clutter from the GUI dropdown list. On macOS

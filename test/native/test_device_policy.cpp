@@ -1924,3 +1924,27 @@ TEST_CASE("BootHardwareMatch: unknown device matches nothing",
                                      kWinTable).empty());
     REQUIRE(resolveBootHardwareMatch("", "Windows Audio", kWinTable).empty());
 }
+
+TEST_CASE("DeviceInfo: aggregate-class devices are not aggregable",
+          "[DevicePolicy]") {
+    // CoreAudio can't nest an aggregate inside another — wrapping a
+    // Multi-Output Device stalls then bounces boot to default devices
+    // (issue #3554 follow-on). 'grup' must fail the suitability check.
+    DeviceInfo multiOut;
+    multiOut.name = "Multi-Output Device";
+    multiOut.transportType = CoreAudioTransport::kAggregate;
+    REQUIRE_FALSE(multiOut.isSuitableForAggregate());
+
+    DeviceInfo builtin;
+    builtin.name = "MacBook Pro Speakers";
+    builtin.transportType = 0x626C746E; // 'bltn'
+    REQUIRE(builtin.isSuitableForAggregate());
+
+    DeviceInfo airplay;
+    airplay.transportType = CoreAudioTransport::kAirPlay;
+    REQUIRE_FALSE(airplay.isSuitableForAggregate());
+
+    DeviceInfo virtualDev;
+    virtualDev.transportType = CoreAudioTransport::kVirtual;
+    REQUIRE(virtualDev.isSuitableForAggregate());
+}

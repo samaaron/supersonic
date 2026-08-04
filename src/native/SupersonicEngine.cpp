@@ -709,8 +709,18 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                 if (cfg.sampleRate > 0) setup.sampleRate = cfg.sampleRate;
                 if (cfg.bufferSize > 0) setup.bufferSize = cfg.bufferSize;
 
+                // macOS: request input channels only when the setup names
+                // an input. A blank name with reqIn > 0 makes JUCE pair the
+                // default mic implicitly — via its Combiner, which the
+                // aggregate promotion below exists to avoid (#3554).
+#ifdef __APPLE__
+                const int hwReqIn =
+                    setup.inputDeviceName.isNotEmpty() ? reqIn : 0;
+#else
+                const int hwReqIn = reqIn;
+#endif
                 initError = mDeviceManager->initialise(
-                    reqIn, reqOut,
+                    hwReqIn, reqOut,
                     nullptr, false, juce::String(), &setup);
 
                 // A failed full-duplex attempt may be the input half
@@ -728,7 +738,12 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                     setup.inputDeviceName = juce::String();
                     setup.useDefaultInputChannels = false;
                     initError = mDeviceManager->initialise(
-                        reqIn, reqOut,
+#ifdef __APPLE__
+                        0,
+#else
+                        reqIn,
+#endif
+                        reqOut,
                         nullptr, false, juce::String(), &setup);
                 }
 
@@ -948,7 +963,8 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                     if (d.name == outName && !d.isSuitableForAggregate()) {
                         outputSuitable = false;
                         fprintf(stderr, "[device-setup] boot: skipping aggregate — "
-                                "'%s' is wireless; input disabled\n",
+                                "'%s' is not aggregable (wireless or "
+                                "aggregate-class); input disabled\n",
                                 outName.c_str());
                         fflush(stderr);
                         break;
@@ -4089,7 +4105,8 @@ SwapResult SupersonicEngine::switchDevice(const std::string& rawOutputName,
                 if (nameMatch && !dev.isSuitableForAggregate()) {
                     needsAggregate = false;
                     dropInput = true;
-                    fprintf(stderr, "[device-setup] skipping aggregate — '%s' is wireless; input disabled\n",
+                    fprintf(stderr, "[device-setup] skipping aggregate — '%s' is not "
+                            "aggregable (wireless or aggregate-class); input disabled\n",
                             dev.name.c_str());
                     fflush(stderr);
                     break;
