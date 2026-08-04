@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdexcept>
 #include <limits.h>
+#include <atomic>
 #include "SC_Prototypes.h"
 #include "SC_HiddenWorld.h"
 #include "Unroll.h"
@@ -366,9 +367,20 @@ void Node_SendReply(Node* inNode, int replyID, const char* cmdName, int numArgs,
     // Floats follow cmdName in the same allocation; pad the string region
     // so the float region lands on alignof(float).
     const size_t cmdNamePadded = sc_align_up(cmdNameSize, alignof(float));
-    void* mem = World_Alloc(world, cmdNamePadded + numArgs * sizeof(float));
-    if (mem == nullptr)
+    const size_t replySize = cmdNamePadded + numArgs * sizeof(float);
+    void* mem = World_Alloc(world, replySize);
+    if (mem == nullptr) {
+        // A dropped reply is invisible to the client, which just waits on a
+        // message that was never sent (Sonic Pi's Studio blocks its whole
+        // cold-swap reinit on one). Rate limited — a SendReply UGen fires
+        // every control block, so an unguarded log would flood the ring.
+        static std::atomic<uint32_t> allocFailCount{0};
+        if (allocFailCount.fetch_add(1, std::memory_order_relaxed) < 5)
+            ss_log("[Node_SendReply] ERROR: World_Alloc(%zu) failed — dropped %s"
+                   " for node %d (RT pool exhausted)",
+                   replySize, cmdName, inNode->mID);
         return;
+    }
 
     NodeReplyMsg msg;
     msg.mWorld = world;
@@ -381,7 +393,19 @@ void Node_SendReply(Node* inNode, int replyID, const char* cmdName, int numArgs,
     memcpy(msg.mCmdName, cmdName, cmdNameSize);
     msg.mCmdNameSize = cmdNameSize;
     msg.mRTMemory = mem;
-    world->hw->mNodeMsgs.Write(msg);
+    if (!world->hw->mNodeMsgs.Write(msg)) {
+        // The FIFO is drained once per block by EngineCore_FlushNotifications;
+        // a full one means replies are being produced faster than they drain.
+        // The block is freed here because only Perform() would have freed it —
+        // holding the reply's memory hostage to a queue that already rejected
+        // it exhausts the RT pool, and then World_Alloc above starts failing
+        // for every reply the World will ever send.
+        static std::atomic<uint32_t> fifoFullCount{0};
+        if (fifoFullCount.fetch_add(1, std::memory_order_relaxed) < 5)
+            ss_log("[Node_SendReply] ERROR: mNodeMsgs FIFO full — dropped %s"
+                   " for node %d", cmdName, inNode->mID);
+        World_Free(world, mem);
+    }
 }
 
 void Node_SendReply(Node* inNode, int replyID, const char* cmdName, float value) {

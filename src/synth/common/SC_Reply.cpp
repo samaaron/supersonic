@@ -25,9 +25,18 @@
 
 void null_reply_func(struct ReplyAddress* addr, char* msg, int size) {}
 
+// mReplyData carries the origin token, which is the ONLY field distinguishing
+// one SuperSonic client from another — the network address upstream compared is
+// a zeroed placeholder here, identical for everyone. Leaving it out of the
+// comparison collapsed hw->mUsers (a std::set) to a single entry: the first
+// client to /notify took the slot, every later registration matched it and was
+// answered "already registered" without being added, and one client's /notify 0
+// unsubscribed whoever held it. Broadcasts — SendReply, /n_go, /n_end, /tr —
+// then reached that one client and nobody else.
 bool operator==(const ReplyAddress& a, const ReplyAddress& b) {
     return std::memcmp(a.mAddressPlaceholder, b.mAddressPlaceholder, sizeof(a.mAddressPlaceholder)) == 0
-        && a.mProtocol == b.mProtocol && a.mPort == b.mPort && a.mSocket == b.mSocket;
+        && a.mProtocol == b.mProtocol && a.mPort == b.mPort && a.mSocket == b.mSocket
+        && a.mReplyData == b.mReplyData;
 }
 
 bool operator<(const ReplyAddress& a, const ReplyAddress& b) {
@@ -39,7 +48,11 @@ bool operator<(const ReplyAddress& a, const ReplyAddress& b) {
         return a.mPort < b.mPort;
     } else if (a.mSocket != b.mSocket) {
         return a.mSocket < b.mSocket;
-    } else {
+    } else if (a.mProtocol != b.mProtocol) {
         return a.mProtocol < b.mProtocol;
+    } else {
+        // Keeps the strict weak ordering consistent with operator== above, so
+        // the set can hold one entry per client rather than one in total.
+        return a.mReplyData < b.mReplyData;
     }
 }
