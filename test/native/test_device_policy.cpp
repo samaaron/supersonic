@@ -1561,15 +1561,19 @@ TEST_CASE("ReportSelect: wireless devices are hidden from both lists",
     REQUIRE(sel.inputs.empty());
 }
 
-TEST_CASE("ReportSelect: known-bad inputs for the current output are hidden",
+TEST_CASE("ReportSelect: an input that failed before is still offered",
           "[ReportSelect]") {
+    // Deliberate: a device that could not be opened against this output is
+    // NOT removed. Quarantining meant the list quietly shrank as the user
+    // worked through it, with nothing said and no way back, which reads as
+    // the app losing hardware. Failing the same way twice is duller and far
+    // easier to understand.
     auto sel = selectReportedDevices(
         { dev("Speakers", "CoreAudio", 2, 0),
           dev("Bad Mic", "CoreAudio", 0, 1),
           dev("Good Mic", "CoreAudio", 0, 1) },
         "Speakers", "Good Mic", "CoreAudio", { "Bad Mic" });
-    REQUIRE(sel.inputs.size() == 1);
-    REQUIRE(sel.inputs[0].name == "Good Mic");
+    REQUIRE(sel.inputs.size() == 2);
 }
 
 TEST_CASE("ReportSelect: unpairable current output clears the input list",
@@ -2036,3 +2040,4 @@ TEST_CASE("DeviceInfo: aggregate-class devices are not aggregable",
     virtualDev.transportType = CoreAudioTransport::kVirtual;
     REQUIRE(virtualDev.isSuitableForAggregate());
 }
+

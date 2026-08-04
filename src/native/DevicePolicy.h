@@ -391,8 +391,10 @@ SwapScopeDecision resolveSwapScope(
 //      PipeWire owns the card);
 //   2. wireless outputs hidden (HAL can't open them), unsuitable inputs
 //      hidden (wireless mics force HFP 16 kHz mono);
-//   3. inputs remembered as known-bad against the CURRENT output hidden
-//      (per-output scoping — the same input may pair fine elsewhere);
+//   3. inputs that failed against the current output are NOT removed — a
+//      list that shrinks as the user tries things, silently and with no way
+//      back, reads as the app losing hardware; a device that cannot open
+//      says so each time it is picked instead;
 //   4. an unpairable (wireless) current output clears the whole input
 //      list — don't offer mics that a swap would drop;
 //   5. grouped per-driver lists snapshot here (NOT deduped — one row per
@@ -523,6 +525,7 @@ double resolveTargetRate(const std::vector<double>& deviceRates,
 // "USB Audio Pro" against "USB Audio", so the hotplug auto-switch could
 // treat a different physical device as the preferred one.
 bool sameDeviceName(const std::string& a, const std::string& b);
+
 
 // Decide scsynth's block size (mBufLength) at boot given the hardware
 // callback buffer size. Matching them means the audio-thread loop

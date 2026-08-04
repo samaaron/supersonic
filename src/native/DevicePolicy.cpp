@@ -30,6 +30,7 @@ bool sameDeviceName(const std::string& a, const std::string& b) {
     return a == b || hasJuceDupSuffix(a, b) || hasJuceDupSuffix(b, a);
 }
 
+
 SwapPlan planSwap(const SwapPlanRequest& req, const SwapSnapshot& snap) {
     SwapPlan plan;
     plan.inputName  = req.inputName;
@@ -181,16 +182,14 @@ DeviceListSelection selectReportedDevices(
             inputs.push_back(d);
     }
 
-    if (!currentOutputName.empty()) {
-        inputs.erase(
-            std::remove_if(inputs.begin(), inputs.end(),
-                [&](const DeviceInfo& d) {
-                    for (auto& bad : knownBadInputsForCurrent)
-                        if (d.name == bad) return true;
-                    return false;
-                }),
-            inputs.end());
+    // Inputs that failed against this output are deliberately NOT removed.
+    // Quarantining them meant the list quietly shrank as the user worked
+    // through it, with nothing said and no way back — the app appeared to be
+    // losing hardware. A device that cannot open says so when it is picked,
+    // every time, which is duller and much easier to understand.
+    (void)knownBadInputsForCurrent;
 
+    if (!currentOutputName.empty()) {
         for (auto& d : all) {
             if (sameDeviceName(d.name, currentOutputName)
                 && !d.isSuitableForAggregate()) {
