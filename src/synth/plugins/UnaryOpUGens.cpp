@@ -21,8 +21,7 @@
 
 #include "SC_PlugIn.h"
 
-#include <boost/utility/enable_if.hpp>
-#include <boost/align/is_aligned.hpp>
+#include <type_traits>
 
 #ifdef NOVA_SIMD
 #    include "simd_unary_arithmetic.hpp"
@@ -68,7 +67,7 @@ struct sc_scurve_functor {
     }
 
     template <typename VecType>
-    inline typename boost::disable_if_c<VecType::has_compare_bitmask, VecType>::type perform(VecType arg) const {
+    inline typename std::enable_if<!VecType::has_compare_bitmask, VecType>::type perform(VecType arg) const {
         typedef VecType vec;
 
         vec result;
@@ -78,7 +77,7 @@ struct sc_scurve_functor {
     }
 
     template <typename VecType>
-    inline typename boost::enable_if_c<VecType::has_compare_bitmask, VecType>::type perform(VecType arg) const {
+    inline typename std::enable_if<VecType::has_compare_bitmask, VecType>::type perform(VecType arg) const {
         typedef VecType vec;
         vec one(1.f);
         vec zero(0.f);
@@ -1319,7 +1318,7 @@ bool ChooseOperatorFunc(UnaryOpUGen* unit) {
     } else if (BUFLENGTH == 1) {
         func = ChooseOneFunc(unit);
 #if defined(NOVA_SIMD)
-    } else if (boost::alignment::is_aligned(BUFLENGTH, 16)) {
+    } else if (((BUFLENGTH & 15) == 0)) {
         /* select normal function for initialization */
         func = ChooseNormalFunc(unit);
         func(unit, 1);

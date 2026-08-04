@@ -20,11 +20,12 @@
 
 #include <cstdlib>
 #include <cstring>
+#ifdef _WIN32
+#    include <malloc.h> // _aligned_malloc / _aligned_free
+#endif
 
 #include <new> // for std::bad_alloc
 #include <utility> // for std::forward
-
-#include <boost/align/aligned_alloc.hpp>
 
 #include "function_attributes.h"
 
@@ -33,10 +34,23 @@ namespace nova {
 const int malloc_memory_alignment = 64;
 
 inline void* MALLOC ASSUME_ALIGNED(64) malloc_aligned(std::size_t bytes) {
-    return boost::alignment::aligned_alloc(malloc_memory_alignment, bytes);
+#ifdef _WIN32
+    return _aligned_malloc(bytes ? bytes : 1, malloc_memory_alignment);
+#else
+    void* ptr = nullptr;
+    if (posix_memalign(&ptr, malloc_memory_alignment, bytes ? bytes : 1) != 0)
+        return nullptr;
+    return ptr;
+#endif
 }
 
-inline void free_aligned(void* ptr) { return boost::alignment::aligned_free(ptr); }
+inline void free_aligned(void* ptr) {
+#ifdef _WIN32
+    _aligned_free(ptr);
+#else
+    free(ptr);
+#endif
+}
 
 inline void* MALLOC ASSUME_ALIGNED(64) calloc_aligned(std::size_t bytes) {
     void* ret = malloc_aligned(bytes);

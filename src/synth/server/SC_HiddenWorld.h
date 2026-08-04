@@ -35,7 +35,7 @@
 #include <set>
 
 #ifndef SC_LEAN_TARGET
-#include "boost/sync/semaphore.hpp"
+#include "SC_QuitSemaphore.hpp"
 #include "../../common/server_shm.hpp"
 #endif
 
@@ -116,7 +116,7 @@ struct HiddenWorld {
     NodeEndsFifo mNodeEnds;
 
 #ifndef SC_LEAN_TARGET
-    boost::sync::semaphore* mQuitProgram;
+    sc::sync::semaphore* mQuitProgram;
 #endif
     bool mTerminating;
 

@@ -42,7 +42,6 @@ supply is vendored, each with a one-line justification in `debian/copyright`:
 |---|---|---|
 | SuperSmoothy (audio layer) | in-tree `supersmoothy/` (vendored ISC fork of JUCE 7 modules — see its README) | same in-tree sources; no system JUCE, no juceaide |
 | libsndfile + ogg/vorbis/flac/opus | FetchContent static stack | `libsndfile1-dev` (shared, codecs included) via `-DSUPERSONIC_SYSTEM_SNDFILE=ON` |
-| Boost (header-only subset) | in-tree bcp extract of 1.86 | `libboost-dev` via `-DSUPERSONIC_SYSTEM_BOOST=ON` |
 | Catch2 (tests) | FetchContent pin v3.5.2 | `catch2` (found automatically via `find_package`) |
 | Ableton Link | FetchContent Link-4.0 + 4 patches | **vendored** `orig-link` component tarball — Debian's `ableton-link-dev` is 3.x and lacks the patches |
 | Rust crates | crates.io (`--locked`) | **vendored** `orig-rust-vendor` component tarball, built `--locked --offline` |
@@ -78,7 +77,7 @@ the eventual `<v>-1` release.
 
 - **During the build** (`debian/rules` `dh_auto_test` override): the full
   Catch2 suite (~everything except `[benchmark]`), compiled and run against
-  the *Debian* versions of JUCE/libsndfile/Boost/Catch2 — this is the
+  the *Debian* versions of libsndfile/Catch2 — this is the
   compatibility proof for archive dependency versions.
 - **autopkgtest**: `supersonic -v` (superficial) plus the transport harness
   (`test/transport-harness/run.sh`) against the *installed*

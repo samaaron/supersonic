@@ -37,9 +37,20 @@
 
 #    include "string.h"
 
-#    include <boost/algorithm/string/predicate.hpp> // iequals
+#    include <cctype>
 
-using boost::iequals;
+// ASCII case-insensitive equality (replaces boost::iequals for the
+// format-name comparisons below).
+static inline bool iequals(const char* a, const char* b) {
+    for (;; ++a, ++b) {
+        const int ca = std::tolower(static_cast<unsigned char>(*a));
+        const int cb = std::tolower(static_cast<unsigned char>(*b));
+        if (ca != cb)
+            return false;
+        if (ca == 0)
+            return true;
+    }
+}
 
 static inline int headerFormatFromString(const char* name) {
     if (!name)

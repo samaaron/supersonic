@@ -23,7 +23,6 @@
 
 #include <algorithm> /* for std::min and std::max */
 
-#include <boost/align/is_aligned.hpp>
 
 #include "simd_peakmeter.hpp"
 
@@ -345,14 +344,14 @@ FLATTEN void Trig1_next_k_nova(Trig1* unit, int inNumSamples);
 void Trig1_Ctor(Trig1* unit) {
     if (unit->mCalcRate == calc_FullRate && INRATE(0) != calc_FullRate) {
 #ifdef NOVA_SIMD
-        if (boost::alignment::is_aligned(BUFLENGTH, 16))
+        if (((BUFLENGTH & 15) == 0))
             SETCALC(Trig1_next_k_nova);
         else
 #endif
             SETCALC(Trig1_next_k);
     } else {
 #ifdef NOVA_SIMD
-        if (boost::alignment::is_aligned(BUFLENGTH, 16))
+        if (((BUFLENGTH & 15) == 0))
             SETCALC(Trig1_next_nova);
         else
 #endif
@@ -496,14 +495,14 @@ void Trig_next_k_nova(Trig* unit, int inNumSamples);
 void Trig_Ctor(Trig* unit) {
     if (unit->mCalcRate == calc_FullRate && INRATE(0) != calc_FullRate) {
 #ifdef NOVA_SIMD
-        if (boost::alignment::is_aligned(BUFLENGTH, 16))
+        if (((BUFLENGTH & 15) == 0))
             SETCALC(Trig_next_k_nova);
         else
 #endif
             SETCALC(Trig_next_k);
     } else {
 #ifdef NOVA_SIMD
-        if (boost::alignment::is_aligned(BUFLENGTH, 16))
+        if (((BUFLENGTH & 15) == 0))
             SETCALC(Trig_next_nova);
         else
 #endif
@@ -981,7 +980,7 @@ void Latch_Ctor(Latch* unit) {
 #ifdef NOVA_SIMD
         if (BUFLENGTH == 64)
             SETCALC(Latch_next_ak_nova_64);
-        if (boost::alignment::is_aligned(BUFLENGTH, 16))
+        if (((BUFLENGTH & 15) == 0))
             SETCALC(Latch_next_ak_nova);
         else
 #endif
@@ -1063,7 +1062,7 @@ void Gate_Ctor(Gate* unit) {
 #ifdef NOVA_SIMD
         if (BUFLENGTH == 64)
             SETCALC(Gate_next_ak_nova_64);
-        if (boost::alignment::is_aligned(BUFLENGTH, 16))
+        if (((BUFLENGTH & 15) == 0))
             SETCALC(Gate_next_ak_nova);
         else
 #endif

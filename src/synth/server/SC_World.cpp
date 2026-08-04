@@ -68,9 +68,7 @@ extern "C" {
 
 #include "malloc_aligned.hpp"
 
-#include <boost/predef/hardware.h>
-
-#if BOOST_HW_SIMD_X86 >= BOOST_HW_SIMD_X86_SSE_VERSION
+#if defined(__SSE__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
 #    include <xmmintrin.h>
 #elif defined(_M_ARM64) && defined(_MSC_VER)
 #    include <intrin.h>
@@ -219,7 +217,7 @@ void zfree(void* ptr) { return free_alig(ptr); }
 // Without this, denormal floats in audio DSP (common as synths decay to
 // silence) incur ~100x slowdown on many cores, causing audio glitches.
 void sc_SetDenormalFlags() {
-#if BOOST_HW_SIMD_X86 >= BOOST_HW_SIMD_X86_SSE_VERSION
+#if defined(__SSE__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1)
     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
     _mm_setcsr(_mm_getcsr() | 0x40); // DAZ
 #elif defined(_M_ARM64) && defined(_MSC_VER)
@@ -455,7 +453,7 @@ World* World_New(WorldOptions* inOptions) {
         world->hw->mAllocPool = new AllocPool(malloc, free, inOptions->mRealTimeMemorySize * 1024, 0);
 #endif
 #ifndef SC_LEAN_TARGET
-        world->hw->mQuitProgram = new boost::sync::semaphore(0);
+        world->hw->mQuitProgram = new sc::sync::semaphore(0);
 #endif
         world->hw->mTerminating = false;
 

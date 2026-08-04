@@ -171,7 +171,6 @@ endif()
 # distro builds flip them on and take whatever the archive ships. See
 # docs/DEBIAN-PACKAGING.md.
 option(SUPERSONIC_SYSTEM_SNDFILE "Link the system libsndfile instead of building the vendored static codec stack" OFF)
-option(SUPERSONIC_SYSTEM_BOOST "Use system Boost headers instead of the vendored bcp subset" OFF)
 option(SUPERSONIC_CARGO_OFFLINE "Build the Rust subsystems with --offline (requires pre-vendored crates)" OFF)
 
 # SuperSmoothy is the synth host's audio-device layer: our vendored, ISC-licensed
@@ -494,16 +493,6 @@ set(OSCPACK_SOURCES
 # ─── Common include directories ─────────────────────────────────────────────
 # Collected into a variable so both the engine lib and exe can share them.
 
-# Boost usage is header-only (bcp-extracted 1.86 subset in-tree). Distro builds
-# swap in the system headers via SUPERSONIC_SYSTEM_BOOST.
-if(SUPERSONIC_SYSTEM_BOOST)
-    find_package(Boost REQUIRED)
-    set(SUPERSONIC_BOOST_INCLUDE_DIR ${Boost_INCLUDE_DIRS})
-    message(STATUS "Boost: system headers ${Boost_VERSION} (${Boost_INCLUDE_DIRS})")
-else()
-    set(SUPERSONIC_BOOST_INCLUDE_DIR ${SUPERSONIC_SRC}/synth/external_libraries/boost)
-endif()
-
 set(SUPERSONIC_INCLUDE_DIRS
     # NativeShim first — overrides emscripten/ includes
     ${NATIVE_SRC}/NativeShim
@@ -524,7 +513,6 @@ set(SUPERSONIC_INCLUDE_DIRS
     ${SUPERSONIC_SRC}/synth/include/server
     ${SUPERSONIC_SRC}/synth/server
     ${SUPERSONIC_SRC}/synth/common
-    ${SUPERSONIC_BOOST_INCLUDE_DIR}
     ${SUPERSONIC_SRC}/synth/external_libraries/nova-simd
 
     # oscpack vendor

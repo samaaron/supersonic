@@ -1,7 +1,7 @@
 #!/usr/bin/make -f
 # Debian rules for supersonic.
 #
-# The build is fully offline: JUCE / libsndfile / Boost / Catch2 come from
+# The build is fully offline: libsndfile / Catch2 come from
 # Debian packages (SUPERSONIC_SYSTEM_* switches), Ableton Link from the
 # orig-link component tarball (patched via debian/patches), and the Rust
 # crates from the orig-rust-vendor component tarball via the cargo source
@@ -31,7 +31,6 @@ override_dh_auto_configure:
 		-DCMAKE_BUILD_TYPE=Release \
 		-DBUILD_TESTS=ON \
 		-DSUPERSONIC_SYSTEM_SNDFILE=ON \
-		-DSUPERSONIC_SYSTEM_BOOST=ON \
 		-DSUPERSONIC_CARGO_OFFLINE=ON \
 		-DFETCHCONTENT_FULLY_DISCONNECTED=ON \
 		-DFETCHCONTENT_SOURCE_DIR_ABLETONLINK=$(CURDIR)/link

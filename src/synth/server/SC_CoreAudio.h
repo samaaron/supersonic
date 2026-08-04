@@ -26,7 +26,7 @@
 #include "SC_SyncCondition.h"
 // SuperSonic: scsynth scheduler unused — SuperSonic schedules via EngineScheduler
 // #include "PriorityQueue.h"
-#include <boost/optional.hpp>
+#include <optional>
 
 #include <SC_Lock.h>
 
@@ -164,7 +164,7 @@ protected:
     int mNumSamplesPerCallback;
     uint32 mPreferredHardwareBufferFrameSize;
     uint32 mPreferredSampleRate;
-    boost::optional<uint32> mExplicitSampleRate;
+    std::optional<uint32> mExplicitSampleRate;
     double mBuffersPerSecond;
     double mAvgCPU, mPeakCPU;
     int mPeakCounter, mMaxPeakCounter;

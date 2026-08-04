@@ -316,7 +316,7 @@ SuperSonic has three build targets (WASM, native, NIF) with a shared engine. Use
 
 ### 2. Platform-unavailable APIs — use `#ifndef __EMSCRIPTEN__`
 
-For filesystem, boost headers, shared memory IPC — keep the upstream code in the `#ifndef` block exactly as-is.
+For filesystem, shared memory IPC and other hosted-OS APIs — keep the upstream code in the `#ifndef` block exactly as-is (converting any Boost usage per the Boost-free table below).
 
 ### 3. Verify Memory Allocations
 
@@ -1060,9 +1060,38 @@ Current `SUPERSONIC` sites in upstream files:
 - **LFUGens.cpp**: signed squared/cubed envelope warps (sonic-pi#169) + zero-safe exponential warp endpoints (sonic-pi#881) — `sc_signed_sqrt`/`sc_signed_square`/`sc_exp_safe` helpers, EnvGen segment init/next/fill, duplicated `GET_ENV_VAL` macro
 - **DemandUGens.cpp**: signed squared/cubed + zero-safe exponential envelope warps — helpers + demand-rate envelope init/next (sonic-pi#169, sonic-pi#881)
 
+### Boost-free conversions — global, unconditional divergence
+
+SuperSonic carries **no Boost** (the vendored bcp subset was removed 2026-08-04;
+there is nothing for a `boost/...` include to resolve against). Unlike the
+`#ifdef SUPERSONIC` sites above, these divergences are deliberately
+**unconditional** — an `#else` branch preserving the upstream Boost code could
+never compile here, so this table is the merge reference instead.
+
+**During upstream syncs:** apply these mechanical conversions to any incoming
+upstream code that uses them:
+
+| Upstream (Boost) | SuperSonic replacement |
+|---|---|
+| `#include <boost/align/is_aligned.hpp>` + `boost::alignment::is_aligned(BUFLENGTH, 16)` | `((BUFLENGTH & 15) == 0)` (no include) |
+| `boost::optional<T>` / `<boost/optional.hpp>` | `std::optional<T>` / `<optional>` |
+| `boost::enable_if_c<C, T>::type` / `boost::disable_if_c<C, T>::type` | `std::enable_if<C, T>::type` / `std::enable_if<!C, T>::type` (`<type_traits>`) |
+| `<boost/predef/hardware.h>` + `BOOST_HW_SIMD_X86 >= BOOST_HW_SIMD_X86_SSE_VERSION` | `defined(__SSE__) \|\| defined(_M_X64) \|\| (defined(_M_IX86_FP) && _M_IX86_FP >= 1)` |
+| `boost::sync::semaphore` (via the old NativeShim stub) | `sc::sync::semaphore` — no-op stub in `src/synth/include/common/SC_QuitSemaphore.hpp` |
+| `boost::alignment::aligned_alloc/aligned_free` (in `malloc_aligned.hpp`) | `_aligned_malloc/_aligned_free` (Windows) / `posix_memalign` + `free` (elsewhere) |
+| `boost::iequals` (in `SC_SndFileHelpers.hpp`) | local ASCII `iequals` helper defined in the same file |
+
+Files converted (2026-08-04): `plugins/{Pan,Trigger,BinaryOp,Delay,LF,IO,UnaryOp}UGens.cpp`,
+`server/SC_CoreAudio.h` + `include/server/SC_CoreAudio.h`, `server/SC_World.cpp`,
+`server/SC_HiddenWorld.h`, `common/malloc_aligned.hpp`, `common/SC_SndFileHelpers.hpp`.
+
+Never reintroduce a `boost/` include into `src/synth` — the build has no
+resolver for it, and keeping the engine Boost-free is part of keeping the
+dependency surface auditable (see the licence boundary above).
+
 ### `#ifndef __EMSCRIPTEN__` — Platform Capability
 
-Guards upstream code that requires APIs unavailable in WASM (filesystem, boost headers, shared memory IPC, threading primitives). These are NOT SuperSonic-specific changes — they're platform exclusions.
+Guards upstream code that requires APIs unavailable in WASM (filesystem, shared memory IPC, threading primitives). These are NOT SuperSonic-specific changes — they're platform exclusions.
 
 ```bash
 # Find all platform guards
@@ -1077,7 +1106,7 @@ Current `__EMSCRIPTEN__` sites in upstream files:
 - **SC_SequencedCommand.h/.cpp**: `LoadSynthDefCmd` class, `LoadSynthDefDirCmd` class
 - **SC_MiscCmds.cpp**: `meth_d_load()`, `meth_d_loadDir()`, `meth_b_allocRead` (native sample loader hook), and their `NEW_COMMAND` registrations
 - **SC_World.cpp**: `server_shm.hpp` include, `mQuitProgram` semaphore, shared memory init/cleanup, `World_LoadGraphDefs()` body
-- **SC_HiddenWorld.h**: `boost/sync/semaphore.hpp` and `server_shm.hpp` includes, `mQuitProgram` and `mShmem` struct fields
+- **SC_HiddenWorld.h**: `SC_QuitSemaphore.hpp` (was upstream's `boost/sync/semaphore.hpp`) and `server_shm.hpp` includes, `mQuitProgram` and `mShmem` struct fields
 - **SC_ReplyImpl.hpp**: `boost::asio::ip::address` vs `uint32_t[4]` placeholder in `ReplyAddress`
 - **SC_Reply.cpp**: `operator==` and `operator<` using `memcmp` vs boost address comparison
 - **audio_processor.h**: `destroy_world()`/`rebuild_world()` (native-only device hot-swap)
