@@ -593,6 +593,11 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
     // unresolvable name keeps the platform default with a warning. Runs
     // under the factory seam too — an injected manager owns its own
     // types and the request resolves (or warns) against those.
+    // The driver chosen by the platform blocks above, before any request
+    // overrides it. Kept so a requested driver that turns out to open
+    // nothing can fall back to something that works (see below) rather
+    // than leaving the engine deaf.
+    const std::string platformDefaultDriver = mBootDriver;
     bool bootDriverRequested = false;
     if (!cfg.audioDriver.empty()) {
         std::vector<std::string> typeNames;
@@ -874,6 +879,43 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
             fprintf(stderr, "[device-setup] all init attempts failed: %s\n",
                     initError.toRawUTF8());
         }
+    }
+
+    // A requested driver that opened nothing must not cost the user their
+    // audio. Exclusive-mode WASAPI refuses a device another process holds,
+    // an ASIO driver's box may be unplugged, and a driver saved in a past
+    // session may not suit this one at all — in every such case the open
+    // ladder above ends with no device and the engine would come up
+    // headless, with nothing to recover it. Fall back to the driver the
+    // platform blocks chose and run the ladder again on that. The
+    // preference is not forgotten: mBootDriver keeps pointing at what the
+    // engine actually opened, and the GUI still shows the saved choice.
+    if (!mDeviceManager->getCurrentAudioDevice()
+        && bootDriverRequested
+        && !platformDefaultDriver.empty()
+        && platformDefaultDriver != mBootDriver) {
+        fprintf(stderr, "[device-setup] requested driver '%s' opened no device "
+                "— falling back to '%s'\n",
+                mBootDriver.c_str(), platformDefaultDriver.c_str());
+        fflush(stderr);
+        mDeviceManager->setCurrentAudioDeviceType(
+            juce::String(platformDefaultDriver), true);
+        juce::String fbErr =
+            mDeviceManager->initialiseWithDefaultDevices(reqIn, reqOut);
+        if (fbErr.isNotEmpty())
+            fbErr = mDeviceManager->initialiseWithDefaultDevices(0, 2);
+        if (fbErr.isEmpty() && mDeviceManager->getCurrentAudioDevice()) {
+            mBootDriver = platformDefaultDriver;
+            initError = juce::String();
+            fprintf(stderr, "[device-setup] fallback opened '%s' on '%s'\n",
+                    mDeviceManager->getCurrentAudioDevice()
+                        ->getName().toRawUTF8(),
+                    platformDefaultDriver.c_str());
+        } else {
+            fprintf(stderr, "[device-setup] fallback to '%s' also failed: %s\n",
+                    platformDefaultDriver.c_str(), fbErr.toRawUTF8());
+        }
+        fflush(stderr);
     }
 
 #ifdef __APPLE__
