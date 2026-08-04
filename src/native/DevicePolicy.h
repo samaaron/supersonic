@@ -188,6 +188,25 @@ std::string selectBootOutputDevice(const std::string& defaultName,
                                    const std::vector<std::string>& visibleDevices,
                                    const std::vector<bool>& visibleIsWireless);
 
+// Input-device candidates for boot pairing, scoped to one driver.
+// `inputTable` is a flat list of (driverName, deviceName) pairs covering
+// every input device the engine enumerated — across ALL drivers, which is
+// what a full device enumeration returns.
+//
+// Scoping is not cosmetic. Windows enumerates the same hardware under
+// several drivers with different names ("MOTU Pro Audio" under ASIO,
+// "In 1-2 (2- MOTU Pro Audio)" under Windows Audio), so an unscoped list
+// lets a name belonging to another driver look like a valid candidate.
+// Handing that name to the open path fails ("No such device") after the
+// output is already open — see chooseBootInputDevice, whose contract is
+// to fall back to the system default for a name that isn't there.
+//
+// An empty `driver` returns every name (nothing to scope against).
+// Match is exact on the driver name; device order is preserved.
+std::vector<std::string> scopeInputsToDriver(
+    const std::vector<std::pair<std::string, std::string>>& inputTable,
+    const std::string& driver);
+
 // Decide which input device the boot open pairs with the opened output.
 // The daemon passes the user's saved input via -H (see parseHardwareFlag);
 // before that existed boot always paired the system default input, and the

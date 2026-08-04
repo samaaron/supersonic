@@ -1925,6 +1925,80 @@ TEST_CASE("BootHardwareMatch: unknown device matches nothing",
     REQUIRE(resolveBootHardwareMatch("", "Windows Audio", kWinTable).empty());
 }
 
+// =============================================================================
+// scopeInputsToDriver
+// =============================================================================
+// Boot pairing picks its input from a full enumeration, which spans every
+// driver. Windows lists the same hardware under each driver with a different
+// name, so without scoping a name saved during a session on another driver
+// looks pairable -- and only fails at the open, after the output device is
+// already up.
+
+using sonicpi::device::scopeInputsToDriver;
+
+// One interface as Windows really enumerates it: an ASIO entry named for the
+// box itself, and Windows Audio entries named for the endpoints.
+static const std::vector<std::pair<std::string, std::string>> kInputTable = {
+    { "Windows Audio", "In 1-2 (2- MOTU Pro Audio)" },
+    { "Windows Audio", "Microphone (NVIDIA Broadcast)" },
+    { "Windows Audio (Exclusive Mode)", "In 1-2 (2- MOTU Pro Audio)" },
+    { "DirectSound",   "Primary Sound Capture Driver" },
+    { "ASIO",          "MOTU Pro Audio" },
+};
+
+TEST_CASE("ScopeInputs: only the named driver's devices survive",
+          "[ScopeInputs]") {
+    const auto names = scopeInputsToDriver(kInputTable, "Windows Audio");
+    REQUIRE(names.size() == 2);
+    REQUIRE(names[0] == "In 1-2 (2- MOTU Pro Audio)");   // order preserved
+    REQUIRE(names[1] == "Microphone (NVIDIA Broadcast)");
+}
+
+TEST_CASE("ScopeInputs: driver match is exact, not prefix", "[ScopeInputs]") {
+    // "Windows Audio" must not sweep in "Windows Audio (Exclusive Mode)":
+    // they are separate JUCE types and a name is only openable under its own.
+    const auto names = scopeInputsToDriver(kInputTable,
+                                           "Windows Audio (Exclusive Mode)");
+    REQUIRE(names.size() == 1);
+    REQUIRE(names[0] == "In 1-2 (2- MOTU Pro Audio)");
+}
+
+TEST_CASE("ScopeInputs: empty driver cannot scope, so nothing is dropped",
+          "[ScopeInputs]") {
+    REQUIRE(scopeInputsToDriver(kInputTable, "").size() == kInputTable.size());
+}
+
+TEST_CASE("ScopeInputs: a driver with no inputs yields nothing",
+          "[ScopeInputs]") {
+    REQUIRE(scopeInputsToDriver(kInputTable, "Windows Audio (Low Latency Mode)")
+            .empty());
+}
+
+TEST_CASE("ScopeInputs: stale cross-driver pref stops pairing instead of "
+          "failing the open", "[ScopeInputs][BootInput]") {
+    // The shipped regression: prefs held driver "Windows Audio" with input
+    // "MOTU Pro Audio" (ASIO's name for the same box, saved while on ASIO --
+    // where the input selector mirrors the output). Unscoped, that name is
+    // present in the enumeration, so pairing was attempted and JUCE answered
+    // "No such device" with the output already open, dropping the engine to
+    // no device at all.
+    //
+    // Scoped, the name is simply not a candidate, so the choice falls back to
+    // the system default: pairing is skipped and boot keeps its output.
+    const auto scoped = scopeInputsToDriver(kInputTable, "Windows Audio");
+    REQUIRE(chooseInput("MOTU Pro Audio", "", scoped).empty());
+
+    // Unscoped is what the bug did: the ASIO name resolves and would be
+    // handed to the open path.
+    const auto unscoped = scopeInputsToDriver(kInputTable, "");
+    REQUIRE(chooseInput("MOTU Pro Audio", "", unscoped) == "MOTU Pro Audio");
+
+    // The same box under ASIO still pairs normally -- scoping removes the
+    // cross-driver case only.
+    const auto asio = scopeInputsToDriver(kInputTable, "ASIO");
+    REQUIRE(chooseInput("MOTU Pro Audio", "", asio) == "MOTU Pro Audio");
+}
+
 TEST_CASE("DeviceInfo: aggregate-class devices are not aggregable",
           "[DevicePolicy]") {
     // CoreAudio can't nest an aggregate inside another — wrapping a

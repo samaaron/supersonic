@@ -305,6 +305,16 @@ bool deviceNameVisible(const std::string& name,
     return resolvedVisibleIndex(name, visibleNames) >= 0;
 }
 
+std::vector<std::string> scopeInputsToDriver(
+        const std::vector<std::pair<std::string, std::string>>& inputTable,
+        const std::string& driver) {
+    std::vector<std::string> names;
+    for (auto& [drv, dev] : inputTable)
+        if (driver.empty() || drv == driver)
+            names.push_back(dev);
+    return names;
+}
+
 std::string chooseBootInputDevice(const std::string& requestedInput,
                                   const std::string& systemDefaultInput,
                                   const std::vector<std::string>& visibleInputs,

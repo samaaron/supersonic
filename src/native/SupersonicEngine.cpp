@@ -1066,9 +1066,20 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
         juce::AudioDeviceManager::AudioDeviceSetup setup;
         mDeviceManager->getAudioDeviceSetup(setup);
         const std::string currentIn = setup.inputDeviceName.toStdString();
-        std::vector<std::string> inputNames;
+        // Candidates must be scoped to the driver actually open: a full
+        // enumeration spans every driver, and Windows lists the same
+        // hardware under each with a different name, so an unscoped list
+        // makes another driver's name (a stale pref from a previous
+        // session on that driver) look pairable — it then fails at the
+        // open, with the output device already up. See scopeInputsToDriver.
+        std::vector<std::pair<std::string, std::string>> inputTable;
         for (auto& d : listDevices(false))
-            if (d.maxInputChannels > 0) inputNames.push_back(d.name);
+            if (d.maxInputChannels > 0)
+                inputTable.emplace_back(d.typeName, d.name);
+        const std::vector<std::string> inputNames =
+            sonicpi::device::scopeInputsToDriver(
+                inputTable,
+                mDeviceManager->getCurrentAudioDeviceType().toStdString());
         const std::string chosen = sonicpi::device::chooseBootInputDevice(
             mPreferredInputDevice, currentIn, inputNames);
         if (!chosen.empty() && chosen != currentIn) {
@@ -1088,15 +1099,30 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
             juce::BigInteger inputBits;
             inputBits.setRange(0, wantIn, true);
             setup.inputChannels = inputBits;
+            // Snapshot before the attempt: a rejected setAudioDeviceSetup
+            // does not leave the previous device running — it closes it and
+            // opens nothing, so without an explicit restore a bad input name
+            // costs the whole boot (engine reports "no audio device", output
+            // included). Pairing is an optimisation; it must never be able to
+            // take the output down with it.
+            juce::AudioDeviceManager::AudioDeviceSetup previous;
+            mDeviceManager->getAudioDeviceSetup(previous);
             const juce::String pairErr =
                 mDeviceManager->setAudioDeviceSetup(setup, true);
             if (pairErr.isNotEmpty()) {
-                // Keep the working default input rather than unwinding
-                // an otherwise-good boot.
                 fprintf(stderr, "[device-setup] boot input pairing failed: "
                         "%s — keeping '%s'\n",
                         pairErr.toRawUTF8(), currentIn.c_str());
                 fflush(stderr);
+                if (!mDeviceManager->getCurrentAudioDevice()) {
+                    const juce::String restoreErr =
+                        mDeviceManager->setAudioDeviceSetup(previous, true);
+                    fprintf(stderr, "[device-setup] boot: restored output-only "
+                            "device after failed pairing%s%s\n",
+                            restoreErr.isEmpty() ? "" : " — FAILED: ",
+                            restoreErr.isEmpty() ? "" : restoreErr.toRawUTF8());
+                    fflush(stderr);
+                }
             } else {
                 mLastInputDeviceName = chosen;
             }
