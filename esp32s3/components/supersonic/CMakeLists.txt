@@ -70,14 +70,13 @@ idf_component_register(
     "${SS_SRC}/synth/plugins/sc3-plugins/MdaUGens.cpp"
     ${OSCPACK}
   INCLUDE_DIRS
-    "${SS_SRC}/native/NativeShim"  # emscripten.h / boost stubs for the lean build
+    "${SS_SRC}/native/NativeShim"  # emscripten.h stubs for the lean build
     "${SS_SRC}"
     "${SS_SRC}/synth/include/common"
     "${SS_SRC}/synth/include/plugin_interface"
     "${SS_SRC}/synth/include/server"
     "${SS_SRC}/synth/server"
     "${SS_SRC}/synth/common"
-    "${SS_SRC}/synth/external_libraries/boost"
     "${SS_SRC}/synth/external_libraries/nova-simd"
     "${SS_SRC}/synth/external_libraries/TLSF-2.4.6/src"
     "${SS_SRC}/vendor/oscpack"

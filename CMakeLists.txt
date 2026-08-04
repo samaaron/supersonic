@@ -664,6 +664,7 @@ else()
     set(SUPERSONIC_SYNTH_HOST_SOURCES
         ${NATIVE_SRC}/HeadlessDriver.cpp     # drives JuceAudioCallback + SampleLoader + SuperClockNative
         ${NATIVE_SRC}/JuceAudioCallback.cpp  # JUCE audio device callback
+        ${NATIVE_SRC}/RecordWriter.cpp       # juce_core TimeSliceThread + libsndfile
         ${NATIVE_SRC}/EngineControl.cpp      # JUCE
         ${NATIVE_SRC}/SupersonicEngine.cpp   # JUCE + World + SampleLoader + SuperClockNative
         ${NATIVE_SRC}/SampleLoader.cpp       # libsndfile + World + buffer_commands
