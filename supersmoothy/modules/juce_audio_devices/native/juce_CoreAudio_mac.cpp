@@ -290,6 +290,15 @@ class CoreAudioIODeviceType;
 class CoreAudioIODevice;
 
 //==============================================================================
+// SuperSonic addition: shared live-object fence for OS callbacks that can
+// outlive their targets (observed here as the restartAsync → close SIGSEGV
+// on a torn-down combiner, and listener bodies dereferencing dying
+// internals during Bluetooth profile churn). See the header for the
+// contract.
+#include "juce_LiveObjectRegistry.h"
+using LiveInternalRegistry = LiveObjectRegistry;
+
+//==============================================================================
 class CoreAudioInternal final : private Timer,
                                 private AsyncUpdater
 {
@@ -319,13 +328,22 @@ public:
         pa.mScope = kAudioObjectPropertyScopeWildcard;
         pa.mElement = kAudioObjectPropertyElementWildcard;
 
+        // SuperSonic: register before the listener can fire.
+        LiveInternalRegistry::get().add (this);
+
         AudioObjectAddPropertyListener (deviceID, &pa, deviceListenerProc, this);
     }
 
-    ~CoreAudioInternal() override
+    // SuperSonic: stop HAL listener callbacks reaching this instance —
+    // including bodies already in flight (the registry remove blocks on
+    // them) and the system-object listener CoreAudioIODevice registers
+    // with this instance as its cookie. Idempotent; called from
+    // ~CoreAudioIODevice (before teardown starts), from the combiner's
+    // destructor (before it closes its sub-devices), and from our own
+    // destructor as the backstop.
+    void detachListener()
     {
-        stopTimer();
-        cancelPendingUpdate();
+        LiveInternalRegistry::get().remove (this);
 
         AudioObjectPropertyAddress pa;
         pa.mSelector = kAudioObjectPropertySelectorWildcard;
@@ -333,6 +351,14 @@ public:
         pa.mElement = kAudioObjectPropertyElementWildcard;
 
         AudioObjectRemovePropertyListener (deviceID, &pa, deviceListenerProc, this);
+    }
+
+    ~CoreAudioInternal() override
+    {
+        stopTimer();
+        cancelPendingUpdate();
+
+        detachListener();
 
         stop (false);
     }
@@ -347,6 +373,11 @@ public:
         const auto total = std::accumulate (streams.begin(), streams.end(), 0,
                                             [] (int n, const auto& s) { return n + (s != nullptr ? s->channels : 0); });
         audioBuffer.calloc (total * tempBufSize);
+
+        // SuperSonic: remember the per-channel capacity so audioCallback
+        // can clamp against it — bufferSize is mutated in places that
+        // don't reallocate (see reopen's "bodge").
+        tempBufferSamples = tempBufSize;
 
         auto channels = 0;
         for (auto* stream : streams)
@@ -659,8 +690,22 @@ public:
         // after calling updateDetailsFromDevice, we need to manually bodge these values
         // to make sure we're using the correct numbers..
         updateDetailsFromDevice (ins, outs);
-        sampleRate = newSampleRate;
-        bufferSize = bufferSizeSamples;
+
+        {
+            // SuperSonic: the bodge trusts the requested size, but
+            // updateDetailsFromDevice just allocated temp buffers for the
+            // size the device REPORTED. When a device genuinely settled on
+            // a different size (an aggregate whose Bluetooth sub-device
+            // renegotiated, rather than one that merely lags its
+            // reporting), every later callback would write bufferSize
+            // frames through capacity sized for the smaller report — the
+            // ASan-confirmed heap overflow. Re-allocate for the trusted
+            // values, under the same lock updateDetailsFromDevice uses.
+            const ScopedLock sl (callbackLock);
+            sampleRate = newSampleRate;
+            bufferSize = bufferSizeSamples;
+            allocateTempBuffers();
+        }
 
         if (sampleRates.size() == 0)
             return "Device has no available sample-rates";
@@ -767,6 +812,51 @@ public:
         const auto numInputChans  = getChannels (inStream);
         const auto numOutputChans = getChannels (outStream);
 
+        // SuperSonic: the frame count for THIS callback. `bufferSize` is
+        // what we negotiated, but (a) reopen() trusts the requested size
+        // before the device reports it (see the "bodge" there) while the
+        // temp buffers may have been sized from what the device actually
+        // reported, and (b) an aggregate whose sub-device renegotiated
+        // (Bluetooth HFP dropping to 16 kHz) delivers a different frame
+        // count than negotiated. Writing `bufferSize` frames through
+        // either mismatch overflows our temp buffers or the HAL's own
+        // buffer lists — heap corruption (ASan-confirmed). Trust only
+        // what this callback's buffer lists actually carry, clamped to
+        // what we allocated.
+        const auto framesFromList = [] (const AudioBufferList* list) -> int
+        {
+            if (list == nullptr)
+                return 0;
+
+            auto frames = std::numeric_limits<int>::max();
+            bool any = false;
+
+            for (UInt32 i = 0; i < list->mNumberBuffers; ++i)
+            {
+                const auto& b = list->mBuffers[i];
+
+                if (b.mNumberChannels > 0)
+                {
+                    frames = jmin (frames, (int) (b.mDataByteSize
+                                   / (b.mNumberChannels * sizeof (float))));
+                    any = true;
+                }
+            }
+
+            return any ? frames : 0;
+        };
+
+        auto numFrames = bufferSize;
+
+        if (const auto inFrames = framesFromList (inInputData); inFrames > 0)
+            numFrames = jmin (numFrames, inFrames);
+
+        if (const auto outFrames = framesFromList (outOutputData); outFrames > 0)
+            numFrames = jmin (numFrames, outFrames);
+
+        if (tempBufferSamples > 0)
+            numFrames = jmin (numFrames, tempBufferSamples);
+
         if (callback != nullptr)
         {
             for (int i = numInputChans; --i >= 0;)
@@ -778,7 +868,7 @@ public:
 
                 if (stride != 0) // if this is zero, info is invalid
                 {
-                    for (int j = bufferSize; --j >= 0;)
+                    for (int j = numFrames; --j >= 0;)
                     {
                         *dest++ = *src;
                         src += stride;
@@ -800,7 +890,7 @@ public:
 
             callback->audioDeviceIOCallbackWithContext (getTempBuffers (inStream),  numInputChans,
                                                         getTempBuffers (outStream), numOutputChans,
-                                                        bufferSize,
+                                                        numFrames,
                                                         context);
 
             for (int i = numOutputChans; --i >= 0;)
@@ -812,7 +902,7 @@ public:
 
                 if (stride != 0) // if this is zero, info is invalid
                 {
-                    for (int j = bufferSize; --j >= 0;)
+                    for (int j = numFrames; --j >= 0;)
                     {
                         *dest = *src++;
                         dest += stride;
@@ -1099,22 +1189,33 @@ private:
     std::atomic<bool> playing { false };
     double sampleRate = 0;
     int bufferSize = 0;
+    // SuperSonic: per-channel capacity of audioBuffer's slices, set by
+    // allocateTempBuffers — the callback clamp reads it (see there).
+    int tempBufferSamples = 0;
     HeapBlock<float> audioBuffer;
     Atomic<int> callbacksAllowed { 1 };
 
     //==============================================================================
     void timerCallback() override
     {
-        JUCE_COREAUDIOLOG ("Device changed");
+        // SuperSonic: fenced — this debounce fires on the message thread
+        // while devices may be torn down on another (the embedder's swap
+        // lane); owner.restart()/stopInternal() on a dying device is the
+        // same hazard as the HAL listener bodies. detachListener()'s
+        // registry remove blocks until an in-flight body completes.
+        LiveInternalRegistry::get().ifLive (this, [&]
+        {
+            JUCE_COREAUDIOLOG ("Device changed");
 
-        stopTimer();
-        auto oldSampleRate = sampleRate;
-        auto oldBufferSize = bufferSize;
+            stopTimer();
+            auto oldSampleRate = sampleRate;
+            auto oldBufferSize = bufferSize;
 
-        if (! updateDetailsFromDevice())
-            owner.stopInternal();
-        else if ((oldBufferSize != bufferSize || ! approximatelyEqual (oldSampleRate, sampleRate)) && owner.shouldRestartDevice())
-            owner.restart();
+            if (! updateDetailsFromDevice())
+                owner.stopInternal();
+            else if ((oldBufferSize != bufferSize || ! approximatelyEqual (oldSampleRate, sampleRate)) && owner.shouldRestartDevice())
+                owner.restart();
+        });
     }
 
     void handleAsyncUpdate() override
@@ -1140,46 +1241,51 @@ private:
                                         const AudioObjectPropertyAddress* pa,
                                         void* inClientData)
     {
-        auto& intern = *static_cast<CoreAudioInternal*> (inClientData);
-
-        const auto xruns = std::count_if (pa, pa + numAddresses, [] (const AudioObjectPropertyAddress& x)
+        // SuperSonic: fenced — inClientData may belong to an instance
+        // whose destruction has begun (see LiveInternalRegistry).
+        LiveInternalRegistry::get().ifLive (inClientData, [&]
         {
-            return x.mSelector == kAudioDeviceProcessorOverload;
-        });
+            auto& intern = *static_cast<CoreAudioInternal*> (inClientData);
 
-        intern.xruns += xruns;
-
-        const auto detailsChanged = std::any_of (pa, pa + numAddresses, [] (const AudioObjectPropertyAddress& x)
-        {
-            constexpr UInt32 selectors[]
+            const auto xruns = std::count_if (pa, pa + numAddresses, [] (const AudioObjectPropertyAddress& x)
             {
-                kAudioDevicePropertyBufferSize,
-                kAudioDevicePropertyBufferFrameSize,
-                kAudioDevicePropertyNominalSampleRate,
-                kAudioDevicePropertyStreamFormat,
-                kAudioDevicePropertyDeviceIsAlive,
-                kAudioStreamPropertyPhysicalFormat,
-            };
+                return x.mSelector == kAudioDeviceProcessorOverload;
+            });
 
-            return std::find (std::begin (selectors), std::end (selectors), x.mSelector) != std::end (selectors);
-        });
+            intern.xruns += xruns;
 
-        const auto requestedRestart = std::any_of (pa, pa + numAddresses, [] (const AudioObjectPropertyAddress& x)
-        {
-            constexpr UInt32 selectors[]
+            const auto detailsChanged = std::any_of (pa, pa + numAddresses, [] (const AudioObjectPropertyAddress& x)
             {
-                kAudioDevicePropertyDeviceHasChanged,
-                kAudioObjectPropertyOwnedObjects,
-            };
+                constexpr UInt32 selectors[]
+                {
+                    kAudioDevicePropertyBufferSize,
+                    kAudioDevicePropertyBufferFrameSize,
+                    kAudioDevicePropertyNominalSampleRate,
+                    kAudioDevicePropertyStreamFormat,
+                    kAudioDevicePropertyDeviceIsAlive,
+                    kAudioStreamPropertyPhysicalFormat,
+                };
 
-            return std::find (std::begin (selectors), std::end (selectors), x.mSelector) != std::end (selectors);
+                return std::find (std::begin (selectors), std::end (selectors), x.mSelector) != std::end (selectors);
+            });
+
+            const auto requestedRestart = std::any_of (pa, pa + numAddresses, [] (const AudioObjectPropertyAddress& x)
+            {
+                constexpr UInt32 selectors[]
+                {
+                    kAudioDevicePropertyDeviceHasChanged,
+                    kAudioObjectPropertyOwnedObjects,
+                };
+
+                return std::find (std::begin (selectors), std::end (selectors), x.mSelector) != std::end (selectors);
+            });
+
+            if (detailsChanged)
+                intern.deviceDetailsChanged();
+
+            if (requestedRestart)
+                intern.deviceRequestedRestart();
         });
-
-        if (detailsChanged)
-            intern.deviceDetailsChanged();
-
-        if (requestedRestart)
-            intern.deviceRequestedRestart();
 
         return noErr;
     }
@@ -1238,7 +1344,12 @@ public:
 
     ~CoreAudioIODevice() override
     {
-        close();
+        // SuperSonic: detach the HAL listeners BEFORE teardown starts —
+        // deregistration blocks on in-flight listener bodies, so nothing
+        // can call restart()/deviceDetailsChanged() against a
+        // half-destroyed device (Bluetooth churn fires these listeners
+        // exactly when devices are being torn down).
+        internal->detachListener();
 
         AudioObjectPropertyAddress pa;
         pa.mSelector = kAudioObjectPropertySelectorWildcard;
@@ -1246,6 +1357,8 @@ public:
         pa.mElement = kAudioObjectPropertyElementWildcard;
 
         AudioObjectRemovePropertyListener (kAudioObjectSystemObject, &pa, hardwareListenerProc, internal.get());
+
+        close();
     }
 
     StringArray getOutputChannelNames() override        { return internal->outStream != nullptr ? internal->outStream->chanNames : StringArray(); }
@@ -1387,6 +1500,13 @@ public:
         restarter = restarterIn;
     }
 
+    // SuperSonic: lets an owner (the combiner) fence HAL listeners before
+    // starting teardown — see ~CoreAudioIODevice and LiveInternalRegistry.
+    void detachHardwareListener()
+    {
+        internal->detachListener();
+    }
+
     bool shouldRestartDevice() const noexcept    { return restartDevice; }
 
     WeakReference<CoreAudioIODeviceType> deviceType;
@@ -1407,11 +1527,29 @@ private:
 
         stopInternal();
 
-        internal->updateDetailsFromDevice();
+        // SuperSonic: fenced on the internal (registered for us) — this
+        // timer fires on the message thread while the device may be torn
+        // down on another thread; ~CoreAudioIODevice detaches the internal
+        // FIRST, which blocks on an in-flight body here.
+        LiveInternalRegistry::get().ifLive (internal.get(), [&]
+        {
+            // SuperSonic: the deferred restart can outlive its device —
+            // Bluetooth profile churn and aggregate teardown invalidate
+            // CoreAudio objects between restart() and this timer firing.
+            // updateDetailsFromDevice() reports a dead device; reopening
+            // one walks into freed CoreAudio state (observed SIGSEGV
+            // inside open()). Tell the type the list changed and stay
+            // closed — the application layer decides what to open next.
+            if (! internal->updateDetailsFromDevice())
+            {
+                audioDeviceListChanged();
+                return;
+            }
 
-        open (inputChannelsRequested, outputChannelsRequested,
-              getCurrentSampleRate(), getCurrentBufferSizeSamples());
-        start (previousCallback);
+            open (inputChannelsRequested, outputChannelsRequested,
+                  getCurrentSampleRate(), getCurrentBufferSizeSamples());
+            start (previousCallback);
+        });
     }
 
     static OSStatus hardwareListenerProc (AudioDeviceID /*inDevice*/,
@@ -1425,7 +1563,14 @@ private:
         });
 
         if (detailsChanged)
-            static_cast<CoreAudioInternal*> (inClientData)->deviceDetailsChanged();
+        {
+            // SuperSonic: fenced — same lifecycle hazard as
+            // deviceListenerProc (the cookie is the internal).
+            LiveInternalRegistry::get().ifLive (inClientData, [&]
+            {
+                static_cast<CoreAudioInternal*> (inClientData)->deviceDetailsChanged();
+            });
+        }
 
         return noErr;
     }
@@ -1450,12 +1595,26 @@ public:
           inputWrapper  (*this, std::move (inputDevice),  true),
           outputWrapper (*this, std::move (outputDevice), false)
     {
+        // SuperSonic: fence for the deferred-restart timer (see
+        // timerCallback / LiveInternalRegistry).
+        LiveInternalRegistry::get().add (this);
+
         if (getAvailableSampleRates().isEmpty())
             lastError = TRANS ("The input and output devices don't share a common sample rate!");
     }
 
     ~AudioIODeviceCombiner() override
     {
+        // SuperSonic: fence the combiner's own deferred-restart timer,
+        // then the sub-devices' HAL listeners — deregistration blocks on
+        // in-flight bodies, so no timerCallback or
+        // deviceRequestedRestart → restartAsync() can land on this
+        // combiner once teardown begins (observed SIGSEGV:
+        // restartAsync → close on a dying combiner, #3554).
+        LiveInternalRegistry::get().remove (this);
+        inputWrapper.detachHardwareListener();
+        outputWrapper.detachHardwareListener();
+
         close();
     }
 
@@ -1711,7 +1870,13 @@ private:
     {
         stopTimer();
 
-        restart (previousCallback);
+        // SuperSonic: fenced — the deferred restart fires on the message
+        // thread while the combiner may be torn down on another thread
+        // (see ~AudioIODeviceCombiner and LiveInternalRegistry).
+        LiveInternalRegistry::get().ifLive (this, [&]
+        {
+            restart (previousCallback);
+        });
     }
 
     void shutdown (const String& error)
@@ -1951,6 +2116,12 @@ private:
             device->close();
         }
 
+        // SuperSonic: passthrough for the combiner's teardown fence.
+        void detachHardwareListener()
+        {
+            device->detachHardwareListener();
+        }
+
         void reset()
         {
             sampleTime.store (invalidSampleTime);
@@ -2105,11 +2276,18 @@ public:
         pa.mScope = kAudioObjectPropertyScopeWildcard;
         pa.mElement = kAudioObjectPropertyElementWildcard;
 
+        // SuperSonic: same fence as CoreAudioInternal — device types are
+        // destroyed on device-manager rebuilds (the embedder's recovery
+        // path) with listener bodies possibly in flight.
+        LiveInternalRegistry::get().add (this);
+
         AudioObjectAddPropertyListener (kAudioObjectSystemObject, &pa, hardwareListenerProc, this);
     }
 
     ~CoreAudioIODeviceType() override
     {
+        LiveInternalRegistry::get().remove (this);
+
         cancelPendingUpdate();
 
         AudioObjectPropertyAddress pa;
@@ -2282,7 +2460,13 @@ private:
 
     static OSStatus hardwareListenerProc (AudioDeviceID, UInt32, const AudioObjectPropertyAddress*, void* clientData)
     {
-        static_cast<CoreAudioIODeviceType*> (clientData)->triggerAsyncUpdate();
+        // SuperSonic: fenced — the type may be mid-destruction (see
+        // LiveInternalRegistry).
+        LiveInternalRegistry::get().ifLive (clientData, [&]
+        {
+            static_cast<CoreAudioIODeviceType*> (clientData)->triggerAsyncUpdate();
+        });
+
         return noErr;
     }
 
