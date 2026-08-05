@@ -1289,6 +1289,77 @@ TEST_CASE("BootInput: mismatched mask length = treated as all-suitable",
             == "MOTU M4");
 }
 
+// The system default is an input like any other and gets the same vetting.
+// Issue #3555: with no saved input pref the default fell through unvetted,
+// so a Bluetooth HFP mic (16 kHz mono) became an aggregate sub-device —
+// the engine came up at 16 kHz and the rate/buffer churn corrupted the
+// heap (ASan: temp-buffer overflow). An empty return means "pair nothing":
+// boot output-only rather than poison the aggregate.
+
+TEST_CASE("BootInput: wireless system default is not paired (no request)",
+          "[BootInput]") {
+    REQUIRE(chooseInput("", "WH-1000XM5",
+                        { "MacBook Pro Microphone", "WH-1000XM5" },
+                        { true, false })
+            == "");
+}
+
+TEST_CASE("BootInput: wireless system default is not paired (__none__)",
+          "[BootInput]") {
+    REQUIRE(chooseInput("__none__", "WH-1000XM5",
+                        { "MacBook Pro Microphone", "WH-1000XM5" },
+                        { true, false })
+            == "");
+}
+
+TEST_CASE("BootInput: unplugged request falls back to a VETTED default",
+          "[BootInput]") {
+    REQUIRE(chooseInput("MOTU M4", "WH-1000XM5",
+                        { "MacBook Pro Microphone", "WH-1000XM5" },
+                        { true, false })
+            == "");
+}
+
+TEST_CASE("BootInput: unsuitable request + unsuitable default = pair nothing",
+          "[BootInput]") {
+    REQUIRE(chooseInput("AirPods Pro", "WH-1000XM5",
+                        { "AirPods Pro", "WH-1000XM5" },
+                        { false, false })
+            == "");
+}
+
+TEST_CASE("BootInput: suitable default still pairs under a mask",
+          "[BootInput]") {
+    REQUIRE(chooseInput("", "MacBook Pro Microphone",
+                        { "MacBook Pro Microphone", "WH-1000XM5" },
+                        { true, false })
+            == "MacBook Pro Microphone");
+}
+
+TEST_CASE("BootInput: default absent from the visible list cannot be vetted "
+          "— pair nothing under a mask", "[BootInput]") {
+    // A default we can't find in the enumeration can't be judged; when the
+    // caller is vetting (mask supplied), unjudgeable = unpaired. Without a
+    // mask the legacy pass-through behaviour stands (tests above).
+    REQUIRE(chooseInput("", "Ghost Device",
+                        { "MacBook Pro Microphone", "WH-1000XM5" },
+                        { true, false })
+            == "");
+}
+
+TEST_CASE("BootInput: default resolves via JUCE suffix and is judged by its "
+          "own mask slot", "[BootInput]") {
+    // CoreAudio hands the raw name; JUCE's list carries the "(2)" form.
+    REQUIRE(chooseInput("", "USB Audio",
+                        { "MacBook Pro Microphone", "USB Audio (2)" },
+                        { true, true })
+            == "USB Audio (2)");
+    REQUIRE(chooseInput("", "USB Audio",
+                        { "MacBook Pro Microphone", "USB Audio (2)" },
+                        { true, false })
+            == "");
+}
+
 // =============================================================================
 // parseHardwareFlag
 // =============================================================================
@@ -2041,3 +2112,185 @@ TEST_CASE("DeviceInfo: aggregate-class devices are not aggregable",
     REQUIRE(virtualDev.isSuitableForAggregate());
 }
 
+
+// =============================================================================
+// planBootInputPairing
+// =============================================================================
+// The whole boot input-pairing decision as one pure function (#3555). The
+// engine's aggregate-promotion block previously made these choices inline
+// against live CoreAudio state, and the paths that bypassed vetting are
+// exactly the ones that shipped the RC7 Bluetooth boot crash: an unvetted
+// system-default input (BT HFP mic) entered the aggregate, dragged the
+// engine to 16 kHz and corrupted the heap via the rate/buffer churn.
+
+using sonicpi::device::planBootInputPairing;
+using sonicpi::device::BootInputPairing;
+
+namespace {
+DeviceInfo dev(const std::string& name, int outs, int ins,
+               uint32_t transport = 0x626C746E /* 'bltn' */) {
+    DeviceInfo d;
+    d.name = name;
+    d.maxOutputChannels = outs;
+    d.maxInputChannels  = ins;
+    d.transportType     = transport;
+    return d;
+}
+
+const std::vector<DeviceInfo> kBtMachine = {
+    dev("MacBook Pro Speakers",   2, 0),
+    dev("MacBook Pro Microphone", 0, 1),
+    dev("WH-1000XM5",             2, 1, CoreAudioTransport::kBluetooth),
+    dev("Loopback Audio",         4, 4, CoreAudioTransport::kVirtual),
+    dev("Multi-Output Device",    2, 0, CoreAudioTransport::kAggregate),
+};
+} // namespace
+
+TEST_CASE("BootPairing: wireless system default input pairs nothing",
+          "[BootPairing]") {
+    auto p = planBootInputPairing("MacBook Pro Speakers", false,
+                                  "", "WH-1000XM5", kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::None);
+}
+
+TEST_CASE("BootPairing: suitable system default input aggregates",
+          "[BootPairing]") {
+    auto p = planBootInputPairing("MacBook Pro Speakers", false,
+                                  "", "MacBook Pro Microphone", kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::Aggregate);
+    REQUIRE(p.inputName == "MacBook Pro Microphone");
+}
+
+TEST_CASE("BootPairing: suitable preferred input beats the default",
+          "[BootPairing]") {
+    auto p = planBootInputPairing("MacBook Pro Speakers", false,
+                                  "Loopback Audio", "MacBook Pro Microphone",
+                                  kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::Aggregate);
+    REQUIRE(p.inputName == "Loopback Audio");
+}
+
+TEST_CASE("BootPairing: wireless preferred input falls back to vetted default",
+          "[BootPairing]") {
+    auto p = planBootInputPairing("MacBook Pro Speakers", false,
+                                  "WH-1000XM5", "MacBook Pro Microphone",
+                                  kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::Aggregate);
+    REQUIRE(p.inputName == "MacBook Pro Microphone");
+}
+
+TEST_CASE("BootPairing: wireless preferred AND wireless default pair nothing",
+          "[BootPairing]") {
+    auto p = planBootInputPairing("MacBook Pro Speakers", false,
+                                  "WH-1000XM5", "WH-1000XM5", kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::None);
+}
+
+TEST_CASE("BootPairing: aggregate-class output never aggregates",
+          "[BootPairing]") {
+    // Altan boot 1: -H "Multi-Output Device". Nesting an aggregate stalls
+    // CoreAudio then bounces to defaults (#3554 follow-on).
+    auto p = planBootInputPairing("Multi-Output Device", true,
+                                  "", "MacBook Pro Microphone", kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::None);
+}
+
+TEST_CASE("BootPairing: unknown output cannot be judged — pairs nothing",
+          "[BootPairing]") {
+    // The opened output missing from the enumeration was a hole: the old
+    // inline loop left outputSuitable=true when it found no entry.
+    auto p = planBootInputPairing("Ghost Output", true,
+                                  "", "MacBook Pro Microphone", kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::None);
+}
+
+TEST_CASE("BootPairing: virtual output aggregates with a hardware input",
+          "[BootPairing]") {
+    auto p = planBootInputPairing("Loopback Audio", false,
+                                  "", "MacBook Pro Microphone", kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::Aggregate);
+    REQUIRE(p.inputName == "MacBook Pro Microphone");
+}
+
+TEST_CASE("BootPairing: default IS the output — full duplex on default boots",
+          "[BootPairing]") {
+    auto p = planBootInputPairing("Loopback Audio", false,
+                                  "", "Loopback Audio", kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::FullDuplexReopen);
+    REQUIRE(p.inputName == "Loopback Audio");
+}
+
+TEST_CASE("BootPairing: default IS the output — -H boot leaves it alone",
+          "[BootPairing]") {
+    // The -H open already carried (or dropped) its input; reopening here
+    // would discard the user's chosen output.
+    auto p = planBootInputPairing("Loopback Audio", true,
+                                  "", "Loopback Audio", kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::None);
+}
+
+TEST_CASE("BootPairing: wireless output pairs nothing", "[BootPairing]") {
+    auto p = planBootInputPairing("WH-1000XM5", false,
+                                  "", "MacBook Pro Microphone", kBtMachine);
+    REQUIRE(p.action == BootInputPairing::Action::None);
+}
+
+// A pinned output (-H / GUI device choice, mPreferredOutputDevice) always
+// wins over default-chasing (#3555 follow-on: a healthy -H 'Testy' boot was
+// yanked onto the wireless system default by the follow handler, and the
+// setDeviceMode("") routing erased the pin — the engine impersonated a user
+// choice). The hot-plug reconciler owns returning to the pin; the follow
+// handler must simply never fire while one is set.
+
+TEST_CASE("FollowDefault: pinned output vetoes following", "[FollowDefault]") {
+    using sonicpi::device::shouldFollowDefaultOutputChange;
+    REQUIRE_FALSE(shouldFollowDefaultOutputChange(
+        "WH-1000XM5", "Testy", false, "SuperSonic", "Testy"));
+    // Pin vetoes even when the new default is the pin itself gone missing
+    // from current (recovery landed elsewhere): the reconciler handles it.
+    REQUIRE_FALSE(shouldFollowDefaultOutputChange(
+        "External Headphones", "MacBook Pro Speakers", false, "SuperSonic",
+        "Testy"));
+}
+
+TEST_CASE("FollowDefault: no pin keeps existing behaviour", "[FollowDefault]") {
+    using sonicpi::device::shouldFollowDefaultOutputChange;
+    REQUIRE(shouldFollowDefaultOutputChange(
+        "External Headphones", "MacBook Pro Speakers", false, "SuperSonic",
+        ""));
+}
+
+// =============================================================================
+// selectRecoveryTarget
+// =============================================================================
+// After the watchdog rebuilds the device manager, which output should the
+// reopen target? The pinned device when it's still attached — recovery must
+// not convert a device wedge into a silent device switch (#3555 follow-on:
+// Testy wedged at 16 kHz, recovery reopened the wireless system default and
+// stayed there). Empty = no pin or pin gone = the system default.
+
+using sonicpi::device::selectRecoveryTarget;
+
+TEST_CASE("RecoveryTarget: attached pin wins", "[RecoveryTarget]") {
+    REQUIRE(selectRecoveryTarget("Testy",
+                                 { "MacBook Pro Speakers", "Testy",
+                                   "WH-1000XM5" })
+            == "Testy");
+}
+
+TEST_CASE("RecoveryTarget: pin resolves through the JUCE-suffixed form",
+          "[RecoveryTarget]") {
+    REQUIRE(selectRecoveryTarget("USB Audio",
+                                 { "MacBook Pro Speakers", "USB Audio (2)" })
+            == "USB Audio (2)");
+}
+
+TEST_CASE("RecoveryTarget: detached pin = system default", "[RecoveryTarget]") {
+    REQUIRE(selectRecoveryTarget("MOTU M4",
+                                 { "MacBook Pro Speakers", "WH-1000XM5" })
+            == "");
+}
+
+TEST_CASE("RecoveryTarget: no pin = system default", "[RecoveryTarget]") {
+    REQUIRE(selectRecoveryTarget("", { "MacBook Pro Speakers" }) == "");
+}

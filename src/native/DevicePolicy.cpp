@@ -270,7 +270,13 @@ double resolveAggregateRate(double desired, double actualIn, double actualOut) {
 bool shouldFollowDefaultOutputChange(const std::string& newDefault,
                                      const std::string& currentOutput,
                                      bool newDefaultIsVirtual,
-                                     const std::string& selfAggregatePrefix) {
+                                     const std::string& selfAggregatePrefix,
+                                     const std::string& pinnedOutputDevice) {
+    // A pinned output (-H / GUI choice) always wins: following would
+    // convert a hardware event into a device switch the user never asked
+    // for, and the setDeviceMode("") routing would erase the pin. The
+    // hot-plug reconciler owns returning to the pin.
+    if (!pinnedOutputDevice.empty()) return false;
     if (newDefault.empty())          return false;
     if (!selfAggregatePrefix.empty()
         && newDefault.compare(0, selfAggregatePrefix.size(),
@@ -304,6 +310,14 @@ bool deviceNameVisible(const std::string& name,
     return resolvedVisibleIndex(name, visibleNames) >= 0;
 }
 
+std::string selectRecoveryTarget(const std::string& pinnedOutput,
+                                 const std::vector<std::string>& visibleOutputs) {
+    if (pinnedOutput.empty()) return {};
+    const int idx = resolvedVisibleIndex(pinnedOutput, visibleOutputs);
+    if (idx >= 0) return visibleOutputs[idx];
+    return {};
+}
+
 std::vector<std::string> scopeInputsToDriver(
         const std::vector<std::pair<std::string, std::string>>& inputTable,
         const std::string& driver) {
@@ -318,18 +332,96 @@ std::string chooseBootInputDevice(const std::string& requestedInput,
                                   const std::string& systemDefaultInput,
                                   const std::vector<std::string>& visibleInputs,
                                   const std::vector<bool>& visibleIsSuitable) {
-    if (requestedInput.empty() || requestedInput == "__none__")
+    // A populated, length-matched mask turns vetting on. An empty or
+    // mismatched mask (caller bug) keeps the legacy no-vetting behaviour —
+    // a bug in building the mask must not veto a good pairing.
+    const bool vetting = !visibleIsSuitable.empty()
+                      && visibleIsSuitable.size() == visibleInputs.size();
+    const bool noRequest =
+        requestedInput.empty() || requestedInput == "__none__";
+
+    if (!vetting) {
+        if (noRequest) return systemDefaultInput;
+        const int idx = resolvedVisibleIndex(requestedInput, visibleInputs);
+        if (idx >= 0) return visibleInputs[idx];
+        // Requested input isn't attached: boot with a working input anyway
+        // and let the GUI's restore reconciler notice and clear the stale
+        // pref.
         return systemDefaultInput;
-    const int idx = resolvedVisibleIndex(requestedInput, visibleInputs);
-    // A mask of the wrong length is a caller bug; treat as all-suitable
-    // rather than vetoing a good pairing.
-    const bool useMask = visibleIsSuitable.size() == visibleInputs.size();
-    if (idx >= 0 && (!useMask || visibleIsSuitable[idx]))
-        return visibleInputs[idx];
-    // Requested input isn't attached (or is unsuitable to pair): boot with
-    // a working input anyway and let the GUI's restore reconciler notice
-    // and clear the stale pref.
-    return systemDefaultInput;
+    }
+
+    if (!noRequest) {
+        const int idx = resolvedVisibleIndex(requestedInput, visibleInputs);
+        if (idx >= 0 && visibleIsSuitable[idx]) return visibleInputs[idx];
+    }
+
+    // The system default is an input like any other and gets the same
+    // vetting (#3555: an unvetted Bluetooth HFP default became an aggregate
+    // sub-device — 16 kHz engine + heap corruption from the rate/buffer
+    // churn). Resolve it against the visible list so raw CoreAudio names
+    // are judged by their JUCE-form mask slot; a default that isn't in the
+    // list can't be judged, and unjudgeable = unpaired. Empty means "pair
+    // nothing": boot output-only rather than poison the aggregate.
+    const int idx = resolvedVisibleIndex(systemDefaultInput, visibleInputs);
+    if (idx >= 0 && visibleIsSuitable[idx]) return visibleInputs[idx];
+    return {};
+}
+
+BootInputPairing planBootInputPairing(const std::string& openedOutputName,
+                                      bool openedByHardwareFlag,
+                                      const std::string& preferredInput,
+                                      const std::string& systemDefaultInput,
+                                      const std::vector<DeviceInfo>& devices) {
+    BootInputPairing plan;
+    if (openedOutputName.empty()) return plan;
+
+    std::vector<std::string> inputNames;
+    std::vector<bool> inputSuitable;
+    for (auto& d : devices) {
+        if (d.maxInputChannels <= 0) continue;
+        inputNames.push_back(d.name);
+        inputSuitable.push_back(d.isSuitableForAggregate()
+                                || d.name == openedOutputName);
+    }
+    // No enumerable inputs at all: nothing to pair. (An empty mask would
+    // otherwise flip chooseBootInputDevice into its legacy no-vetting
+    // mode and wave the raw default through.)
+    if (inputNames.empty()) {
+        plan.reason = "no input devices enumerated — booting output-only";
+        return plan;
+    }
+
+    const std::string chosen = chooseBootInputDevice(
+        preferredInput, systemDefaultInput, inputNames, inputSuitable);
+    if (chosen.empty()) {
+        plan.reason = "no suitable input to pair (wireless/aggregate-class "
+                      "or unenumerated) — booting output-only";
+        return plan;
+    }
+
+    if (chosen == openedOutputName) {
+        // -H already settled its own input at open (or deliberately
+        // dropped it); reopening would discard the user's chosen output.
+        if (openedByHardwareFlag) return plan;
+        plan.action = BootInputPairing::Action::FullDuplexReopen;
+        plan.inputName = chosen;
+        return plan;
+    }
+
+    for (auto& d : devices) {
+        if (d.name != openedOutputName) continue;
+        if (!d.isSuitableForAggregate()) {
+            plan.reason = "'" + openedOutputName + "' is not aggregable "
+                          "(wireless or aggregate-class) — input disabled";
+            return plan;
+        }
+        plan.action = BootInputPairing::Action::Aggregate;
+        plan.inputName = chosen;
+        return plan;
+    }
+    plan.reason = "'" + openedOutputName + "' not found in the device "
+                  "enumeration — input disabled";
+    return plan;
 }
 
 BootDriverChoice resolveBootDriver(const std::string& requested,

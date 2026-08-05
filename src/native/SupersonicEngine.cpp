@@ -960,55 +960,30 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                     inName = buf;
                 }
             }
-            // One cached-list snapshot serves the pairing choice and the
-            // suitability check below — a rescan here can disrupt the
-            // just-opened device (see listDevices).
+            // One cached-list snapshot serves the whole pairing decision —
+            // a rescan here can disrupt the just-opened device (see
+            // listDevices). The decision itself is pure policy (#3555:
+            // the inline version vetted only the requested input, so an
+            // unvetted Bluetooth HFP default became an aggregate
+            // sub-device — 16 kHz engine + heap corruption).
             const auto bootDevices = listDevices(false);
-            // Pair with the requested input (-H's input name) when it's
-            // attached; the system default is the fallback, not the policy.
-            if (!mPreferredInputDevice.empty()) {
-                std::vector<std::string> inputNames;
-                std::vector<bool> inputSuitable;
-                for (auto& d : bootDevices) {
-                    if (d.maxInputChannels <= 0) continue;
-                    inputNames.push_back(d.name);
-                    // Same vetting as switchDevice: never pair a wireless
-                    // input into an aggregate (HFP 16 kHz mono; IOProc
-                    // freeze). The opened output itself is exempt —
-                    // same-device full duplex needs no aggregate.
-                    inputSuitable.push_back(d.isSuitableForAggregate()
-                                            || d.name == outName);
-                }
-                std::string chosen = sonicpi::device::chooseBootInputDevice(
-                    mPreferredInputDevice, inName, inputNames, inputSuitable);
-                if (chosen != inName) {
-                    fprintf(stderr, "[device-setup] boot: pairing requested "
-                            "input '%s' (system default '%s')\n",
-                            chosen.c_str(), inName.c_str());
-                    fflush(stderr);
-                }
-                inName = chosen;
+            const auto plan = sonicpi::device::planBootInputPairing(
+                outName, openedByHardwareFlag, mPreferredInputDevice,
+                inName, bootDevices);
+            if (!plan.reason.empty()) {
+                fprintf(stderr, "[device-setup] boot: %s\n",
+                        plan.reason.c_str());
+                fflush(stderr);
             }
-            // Skip aggregate for wireless (Bluetooth/AirPlay) outputs —
-            // same rule (isSuitableForAggregate) as switchDevice; virtual
-            // outputs aggregate fine with a hardware clock master. Boot
-            // with output-only instead so we don't crash JUCE's Combiner
-            // fallback when sample-rate negotiation fails.
-            bool outputSuitable = true;
-            if (!inName.empty() && inName != outName) {
-                for (auto& d : bootDevices) {
-                    if (d.name == outName && !d.isSuitableForAggregate()) {
-                        outputSuitable = false;
-                        fprintf(stderr, "[device-setup] boot: skipping aggregate — "
-                                "'%s' is not aggregable (wireless or "
-                                "aggregate-class); input disabled\n",
-                                outName.c_str());
-                        fflush(stderr);
-                        break;
-                    }
-                }
+            if (!plan.inputName.empty() && plan.inputName != inName) {
+                fprintf(stderr, "[device-setup] boot: pairing requested "
+                        "input '%s' (system default '%s')\n",
+                        plan.inputName.c_str(), inName.c_str());
+                fflush(stderr);
             }
-            if (!inName.empty() && inName != outName && outputSuitable) {
+            inName = plan.inputName;
+            if (plan.action
+                    == sonicpi::device::BootInputPairing::Action::Aggregate) {
                 double aggRate = 0;
                 auto aggName = AggregateDeviceHelper::createOrUpdate(
                     outName, inName,
@@ -1048,14 +1023,20 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                     }
                     auto aggErr = mDeviceManager->setAudioDeviceSetup(setup, true);
                     if (aggErr.isNotEmpty()) {
+                        // Output-only, never (reqIn, reqOut): asking JUCE
+                        // for inputs here pairs the default mic with the
+                        // default output via its Combiner — the #3554
+                        // SIGSEGV (restartAsync into a torn-down
+                        // Combiner), and with a Bluetooth default both
+                        // sides are BT. A boot without a mic beats one
+                        // that crashes.
                         fprintf(stderr, "[device-setup] aggregate setup failed: %s — "
-                                "falling back to Combiner\n", aggErr.toRawUTF8());
+                                "booting output-only\n", aggErr.toRawUTF8());
                         AggregateDeviceHelper::destroy();
                         mRealOutputDeviceName.clear();
                         mRealInputDeviceName.clear();
-                        // Fall back to Combiner
                         mDeviceManager->initialiseWithDefaultDevices(
-                            reqIn, reqOut);
+                            0, reqOut);
                     } else {
                         fprintf(stderr, "[device-setup] booted with aggregate: "
                                 "out='%s' in='%s'\n", outName.c_str(), inName.c_str());
@@ -1066,15 +1047,13 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                         mSuppressRunLoop.store(true);
                     }
                 }
-            } else if (inName == outName && !openedByHardwareFlag) {
-                // Default-device boot where the preferred input IS the
+            } else if (plan.action == sonicpi::device::BootInputPairing
+                                          ::Action::FullDuplexReopen) {
+                // Default-device boot where the chosen input IS the
                 // opened output: reopen full duplex on that device by
                 // name. Reopening system defaults here would discard a
                 // wireless-avoiding bootFallback and reopen the
-                // wireless default (~15 s IOProc halt). Never on the
-                // -H path — its full-duplex open already ran (and
-                // possibly fell back to output-only); reopening here
-                // would discard the user's chosen output.
+                // wireless default (~15 s IOProc halt).
                 juce::AudioDeviceManager::AudioDeviceSetup dupSetup;
                 dupSetup.outputDeviceName = juce::String(outName);
                 dupSetup.inputDeviceName  = juce::String(outName);
@@ -1084,13 +1063,15 @@ void SupersonicEngine::initAudioDevice(const Config& cfg) {
                     reqIn, reqOut, nullptr, false, juce::String(),
                     &dupSetup);
                 if (initError.isNotEmpty()) {
+                    // Output-only fallback — same no-Combiner rule as the
+                    // aggregate failure path above.
                     fprintf(stderr, "[device-setup] boot: full-duplex "
-                            "reopen of '%s' failed: %s — falling back "
-                            "to defaults\n",
+                            "reopen of '%s' failed: %s — booting "
+                            "output-only\n",
                             outName.c_str(), initError.toRawUTF8());
                     fflush(stderr);
                     initError = mDeviceManager->initialiseWithDefaultDevices(
-                        reqIn, reqOut);
+                        0, reqOut);
                 }
             }
         }
@@ -4761,9 +4742,34 @@ SwapResult SupersonicEngine::reopenCurrentDevice() {
     // device names behind an aggregate and are the right thing to pass
     // whether we're in system mode or pinned to an explicit selection.
     // For direct (non-aggregate) devices those fields are empty and we
-    // fall back to the JUCE device name.
+    // fall back to the pinned device, then the JUCE device name.
     std::string outName = mRealOutputDeviceName;
     std::string inName  = mRealInputDeviceName;
+    if (outName.empty()) {
+        // After recovery's recreate the "current" device is whatever the
+        // system-default reinit opened — NOT necessarily the user's pinned
+        // choice (#3555 follow-on: Testy wedged, recovery reopened the
+        // wireless default and stayed there). Aim at the pin while it's
+        // still attached; a pin that's genuinely gone falls through to
+        // the current device.
+        if (!mPreferredOutputDevice.empty()) {
+            std::vector<std::string> outputNames;
+            for (auto& d : listDevices(false))
+                if (d.maxOutputChannels > 0) outputNames.push_back(d.name);
+            outName = sonicpi::device::selectRecoveryTarget(
+                mPreferredOutputDevice, outputNames);
+            if (!outName.empty()
+                && mDeviceManager->getCurrentAudioDevice()
+                && outName != mDeviceManager->getCurrentAudioDevice()
+                                  ->getName().toStdString()) {
+                fprintf(stderr, "[reopen] retargeting pinned device '%s' "
+                        "(current is '%s')\n", outName.c_str(),
+                        mDeviceManager->getCurrentAudioDevice()
+                            ->getName().toRawUTF8());
+                fflush(stderr);
+            }
+        }
+    }
     if (outName.empty()) {
         if (auto* dev = mDeviceManager->getCurrentAudioDevice())
             outName = dev->getName().toStdString();
@@ -5326,14 +5332,19 @@ void SupersonicEngine::handleSystemDefaultOutputChanged() {
     AudioObjectGetPropertyData(defaultID, &tAddr, 0, nullptr, &tSz, &transport);
     const bool newIsVirtual = CoreAudioTransport::isVirtual(transport);
 
-    // Don't chase our own aggregates, no-ops, or virtual devices: chasing a
-    // virtual device an app spawned cold-swaps onto something the user never
-    // chose and storms the device list.
+    // Don't chase our own aggregates, no-ops, virtual devices, or anything
+    // while the user has pinned an output (-H / GUI choice): chasing a
+    // virtual device an app spawned cold-swaps onto something the user
+    // never chose and storms the device list, and following while pinned
+    // routes through setDeviceMode("") which ERASES the pin (#3555
+    // follow-on: a healthy -H boot yanked onto the wireless default).
     if (!sonicpi::device::shouldFollowDefaultOutputChange(
-            newDefault, currentOutput, newIsVirtual, sPublishedAppName)) {
-        fprintf(stderr, "[device-setup] system default → '%s' (virtual=%d); "
-                "not following (staying on '%s')\n",
-                newDefault.c_str(), newIsVirtual ? 1 : 0, currentOutput.c_str());
+            newDefault, currentOutput, newIsVirtual, sPublishedAppName,
+            mPreferredOutputDevice)) {
+        fprintf(stderr, "[device-setup] system default → '%s' (virtual=%d, "
+                "pinned='%s'); not following (staying on '%s')\n",
+                newDefault.c_str(), newIsVirtual ? 1 : 0,
+                mPreferredOutputDevice.c_str(), currentOutput.c_str());
         fflush(stderr);
         return;
     }

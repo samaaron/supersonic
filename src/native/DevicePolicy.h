@@ -102,10 +102,25 @@ double resolveAggregateRate(double desired, double actualIn, double actualOut);
 //     cold-swaps onto a device the user never chose and storms the device
 //     list. Explicit selection of a virtual output goes through
 //     setDeviceMode(name), not this auto-follow, so it's unaffected.
+//   - pinnedOutputDevice is non-empty (-H / GUI device choice,
+//     mPreferredOutputDevice): the pin always wins. Following would turn
+//     a hardware event into a device switch the user never asked for —
+//     and the setDeviceMode("") routing erases the pin (#3555 follow-on:
+//     a healthy -H 'Testy' boot was yanked onto the wireless system
+//     default). The hot-plug reconciler owns returning to the pin.
 bool shouldFollowDefaultOutputChange(const std::string& newDefault,
                                      const std::string& currentOutput,
                                      bool newDefaultIsVirtual,
-                                     const std::string& selfAggregatePrefix);
+                                     const std::string& selfAggregatePrefix,
+                                     const std::string& pinnedOutputDevice = {});
+
+// After the watchdog rebuilds the device manager, which output should the
+// reopen target? The pinned device when it's still attached (resolved
+// through resolveJuceDeviceName, so raw and "<name> (N)" forms both work) —
+// recovery must not convert a device wedge into a silent device switch.
+// Empty result = no pin, or pin gone = open the system default.
+std::string selectRecoveryTarget(const std::string& pinnedOutput,
+                                 const std::vector<std::string>& visibleOutputs);
 
 // True if `name` (or its JUCE "<name> (N)" disambiguated form) currently
 // appears in `visibleNames`. After creating a CoreAudio aggregate, JUCE's
@@ -211,19 +226,53 @@ std::vector<std::string> scopeInputsToDriver(
 // The daemon passes the user's saved input via -H (see parseHardwareFlag);
 // before that existed boot always paired the system default input, and the
 // saved input arrived one cold swap (a full second studio boot) later.
-//   - requestedInput empty / "__none__"         → systemDefaultInput
 //   - requestedInput visible (exact or JUCE
-//     "<name> (N)" form, resolveJuceDeviceName)  → the resolved name
-//   - requestedInput not visible (unplugged)     → systemDefaultInput; the
-//     GUI's restore reconciler surfaces/clears the stale pref
-//   - resolved entry marked unsuitable in visibleIsSuitable (parallel to
-//     visibleInputs; empty or mismatched length = all suitable) →
-//     systemDefaultInput. Callers pass the same vetting switchDevice
-//     applies (no wireless aggregate sub-devices).
+//     "<name> (N)" form, resolveJuceDeviceName) and suitable → the
+//     resolved name
+//   - otherwise (no request / "__none__" / unplugged / unsuitable) → the
+//     system default, which gets the SAME vetting: resolved against
+//     visibleInputs and judged by its mask slot (#3555 — an unvetted
+//     Bluetooth HFP default became an aggregate sub-device: 16 kHz engine
+//     + heap corruption). Unresolvable-under-mask = unjudgeable = unpaired.
+//   - empty return = pair nothing; boot output-only.
+//   - visibleIsSuitable empty or length-mismatched (caller bug) = legacy
+//     no-vetting behaviour: requested-if-visible, else raw systemDefaultInput.
+//     Callers pass the same vetting switchDevice applies (no wireless
+//     aggregate sub-devices).
 std::string chooseBootInputDevice(const std::string& requestedInput,
                                   const std::string& systemDefaultInput,
                                   const std::vector<std::string>& visibleInputs,
                                   const std::vector<bool>& visibleIsSuitable = {});
+
+// The whole boot input-pairing decision as one pure function (#3555).
+// After the output is open, decide what (if anything) to do about inputs:
+//   None             — boot output-only (no judgeable, suitable input; or
+//                      the output can't aggregate; or a -H open already
+//                      settled its own input)
+//   Aggregate        — createOrUpdate(openedOutputName, inputName)
+//   FullDuplexReopen — the chosen input IS the opened output on a
+//                      default-device boot: reopen that device by name
+//                      full-duplex (never on -H — it would discard the
+//                      user's chosen output)
+// Vetting is chooseBootInputDevice's: preferred first, then the system
+// default, both judged by isSuitableForAggregate (the opened output
+// itself exempt — same-device full duplex needs no aggregate). The
+// opened output must itself be present in `devices` and aggregable for
+// Aggregate — an output missing from the enumeration is unjudgeable,
+// and unjudgeable = input disabled (the old inline loop silently kept
+// outputSuitable=true in that case). `reason` carries the boot-log line
+// when the plan is a refusal.
+struct BootInputPairing {
+    enum class Action { None, Aggregate, FullDuplexReopen };
+    Action action = Action::None;
+    std::string inputName;
+    std::string reason;
+};
+BootInputPairing planBootInputPairing(const std::string& openedOutputName,
+                                      bool openedByHardwareFlag,
+                                      const std::string& preferredInput,
+                                      const std::string& systemDefaultInput,
+                                      const std::vector<DeviceInfo>& devices);
 
 // Resolve the driver (JUCE device type) the engine opens at boot.
 // `requested` is the embedder's --audio-driver value — the GUI's saved
