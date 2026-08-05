@@ -222,6 +222,39 @@ fn stream_load<S: CloneStream>(mut writer: S, count: i32) -> Result<String, Stri
     Ok(format!("{count} in {secs:.2}s = {:.0} msg/s", count as f64 / secs))
 }
 
+/// Windowed single-threaded load for Windows named pipes. stream_load's
+/// cloned-handle reader thread can't be used here: a synchronous pipe handle
+/// serializes I/O on its file object, so once the writer blocks inside
+/// WriteFile (server-inbound buffer full) the reader can no longer issue
+/// ReadFile, and with the server's reply write blocked against a full
+/// client-inbound buffer the four parties deadlock. Bounding the ids in
+/// flight keeps both 64KB pipe buffers nearly empty, so no write can block.
+#[cfg(windows)]
+fn pipe_load(mut f: std::fs::File, count: i32) -> Result<String, String> {
+    // ~24-byte frames each way: 512 in flight ≈ 12KB per direction, a 5x
+    // margin under the 64KB pipe buffers that must never fill.
+    const WINDOW: i32 = 512;
+    let t0 = Instant::now();
+    let (mut sent, mut got, mut last) = (0i32, 0i64, 0i32);
+    while got < count as i64 {
+        while sent < count && sent - (got as i32) < WINDOW {
+            sent += 1;
+            f.write_all(&frame(&sync_msg(sent)))
+                .map_err(|e| format!("send {sent}: {e}"))?;
+        }
+        let body = read_frame(&mut f).map_err(|e| format!("recv after {got}: {e}"))?;
+        if let Some(id) = synced_id(&body) {
+            if id <= last {
+                return Err(format!("out-of-order reply: {id} after {last}"));
+            }
+            last = id;
+            got += 1;
+        }
+    }
+    let secs = t0.elapsed().as_secs_f64();
+    Ok(format!("{count} in {secs:.2}s = {:.0} msg/s", count as f64 / secs))
+}
+
 /// Blast `count` /sync ids over a datagram socket, then drain replies until they
 /// stop. Datagram loss is allowed; corruption and reordering are not.
 fn dgram_load(sock: &DgramSock, target: &str, count: i32) -> Result<String, String> {
@@ -313,7 +346,7 @@ fn load(proto: &str, target: &str, count: i32) -> Result<String, String> {
                 .write(true)
                 .open(&full)
                 .map_err(|e| format!("open {full}: {e}"))?;
-            stream_load(f, count)
+            pipe_load(f, count)
         }
         "udp" => {
             let s = std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
