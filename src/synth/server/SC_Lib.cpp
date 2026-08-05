@@ -217,8 +217,15 @@ SCErr SC_LibCmd::Perform(struct World* inWorld, int inSize, char* inData, ReplyA
         // An SCErr from a command usually means a stale client reference
         // (e.g. freeing a node that already ended), not server distress —
         // log a warning, unlike the exception path above. The /fail wire
-        // reply is unchanged either way.
-        ss_log("WARNING: %s failed - %s", (char*)Name(), errstr);
+        // reply is unchanged either way. /n_free on a missing node is
+        // routine (scheduled frees land after the containing group is
+        // freed on stop) and a no-op, so it isn't flagged as a warning —
+        // but the server can't tell that apart from a bad id, so the log
+        // states only what it knows.
+        if (err == kSCErr_NodeNotFound && strcmp((char*)Name(), "/n_free") == 0)
+            ss_log("/n_free: %s - nothing to free", errstr);
+        else
+            ss_log("WARNING: %s failed - %s", (char*)Name(), errstr);
 #else
         CallSendFailureCommand(inWorld, (char*)Name(), errstr, inReply);
         scprintf("FAILURE IN SERVER %s %s\n", (char*)Name(), errstr);
