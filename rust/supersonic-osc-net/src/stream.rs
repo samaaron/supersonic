@@ -236,6 +236,9 @@ impl Acceptor for TcpListener {
         // full core per connection. Force blocking before handing it over.
         self.accept().map(|(s, _)| {
             let _ = s.set_nonblocking(false);
+            // Replies are small frames on loopback: never let Nagle hold one
+            // back waiting for an ACK. (Clients set NODELAY on their side too.)
+            let _ = s.set_nodelay(true);
             s
         })
     }
