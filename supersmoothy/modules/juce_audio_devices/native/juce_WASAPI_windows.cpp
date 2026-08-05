@@ -360,6 +360,14 @@ namespace juce
 namespace WasapiClasses
 {
 
+// SuperSonic addition: shared live-object fence — COM notification
+// callbacks (IAudioSessionEvents, IMMNotificationClient) arrive on MTA
+// threads and the Unregister* APIs do not drain callbacks already in
+// flight, so a body can run against an object whose destruction has
+// begun. Same defect class fixed (and crash-verified) in the CoreAudio
+// backend. See the header for the contract.
+#include "juce_LiveObjectRegistry.h"
+
 static String getDeviceID (IMMDevice* device)
 {
     String s;
@@ -572,26 +580,34 @@ private:
 
         JUCE_COMRESULT OnStateChanged (AudioSessionState state) override
         {
-            switch (state)
+            // SuperSonic: fenced — see LiveObjectRegistry.
+            LiveObjectRegistry::get().ifLive (&owner, [&]
             {
-            case AudioSessionStateInactive:
-                owner.deviceSessionBecameInactive();
-                break;
-            case AudioSessionStateExpired:
-                owner.deviceSessionExpired();
-                break;
-            case AudioSessionStateActive:
-                owner.deviceSessionBecameActive();
-                break;
-            }
+                switch (state)
+                {
+                case AudioSessionStateInactive:
+                    owner.deviceSessionBecameInactive();
+                    break;
+                case AudioSessionStateExpired:
+                    owner.deviceSessionExpired();
+                    break;
+                case AudioSessionStateActive:
+                    owner.deviceSessionBecameActive();
+                    break;
+                }
+            });
 
             return S_OK;
         }
 
         JUCE_COMRESULT OnSessionDisconnected (AudioSessionDisconnectReason reason) override
         {
-            if (reason == DisconnectReasonFormatChanged)
-                owner.deviceSampleRateChanged();
+            // SuperSonic: fenced — see LiveObjectRegistry.
+            LiveObjectRegistry::get().ifLive (&owner, [&]
+            {
+                if (reason == DisconnectReasonFormatChanged)
+                    owner.deviceSampleRateChanged();
+            });
 
             return S_OK;
         }
@@ -611,6 +627,9 @@ private:
 
         if (audioSessionControl != nullptr)
         {
+            // SuperSonic: register before the callback can fire.
+            LiveObjectRegistry::get().add (this);
+
             sessionEventCallback = new SessionEventCallback (*this);
             audioSessionControl->RegisterAudioSessionNotification (sessionEventCallback);
             sessionEventCallback->Release(); // (required because ComBaseClassHelper objects are constructed with a ref count of 1)
@@ -619,6 +638,10 @@ private:
 
     void deleteSessionEventCallback()
     {
+        // SuperSonic: deregister FIRST — blocks until in-flight session
+        // callbacks finish; later ones bail (see LiveObjectRegistry).
+        LiveObjectRegistry::get().remove (this);
+
         if (audioSessionControl != nullptr && sessionEventCallback != nullptr)
             audioSessionControl->UnregisterAudioSessionNotification (sessionEventCallback);
 
@@ -1723,10 +1746,17 @@ public:
         : AudioIODeviceType (getDeviceTypename (mode)),
           deviceMode (mode)
     {
+        // SuperSonic: fence for ChangeNotificationClient — endpoint
+        // notifications arrive on MTA threads and can race this type's
+        // destruction (device-manager rebuilds destroy types).
+        LiveObjectRegistry::get().add (this);
     }
 
     ~WASAPIAudioIODeviceType() override
     {
+        // SuperSonic: deregister FIRST — blocks on in-flight notify().
+        LiveObjectRegistry::get().remove (this);
+
         if (notifyClient != nullptr)
             enumerator->UnregisterEndpointNotificationCallback (notifyClient);
     }
@@ -1832,8 +1862,13 @@ private:
 
         HRESULT notify()
         {
-            if (device != nullptr)
+            // SuperSonic: fenced — the WeakReference null-check alone is
+            // not atomic against the type's destruction on another
+            // thread; the registry lock is (see LiveObjectRegistry).
+            LiveObjectRegistry::get().ifLive (device.get(), [&]
+            {
                 device->deviceChangeDetector.triggerAsyncDeviceChangeCallback();
+            });
 
             return S_OK;
         }
