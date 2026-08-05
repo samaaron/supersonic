@@ -69,6 +69,7 @@ add_executable(SuperSonicNativeTests
     test_cold_swap_sampleloader.cpp
     test_cold_swap_send_reply.cpp
     test_notify_clients.cpp
+    test_stream_client_registration.cpp
     test_world_options_layout.cpp
     test_input_channels.cpp
     test_driver_switch.cpp

@@ -408,6 +408,16 @@ void SupersonicEngine::setEngineState(EngineState state, const std::string& reas
     }
 }
 
+void SupersonicEngine::snapshotStateTo(uint32_t token) {
+    // Statechange only: lifecycle state is idempotent display state, safe to
+    // replay to a late registrant. /supersonic/setup is deliberately NOT
+    // replayed — it is an EVENT ("World rebuilt, reset node state") and
+    // replaying it forced clients into spurious cold-swap reinits. Late
+    // joiners needing config data query it (devices/report, shm metrics).
+    mEgress.sendStateChangeTo(token, engineStateToString(mEngineState.load()),
+                              "snapshot");
+}
+
 SupersonicEngine::~SupersonicEngine() {
     shutdown();
 }

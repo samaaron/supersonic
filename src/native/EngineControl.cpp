@@ -365,7 +365,12 @@ bool EngineControl::handleLinkCommand(const DrainCallCtx& meta, const uint8_t* d
             // only fire on actual deltas — without this, joining a session at the
             // same tempo as our local default leaves the subscriber stuck on its
             // own default until something moves.
-            if (!mEgress->subscribeCallerToLinkNotify(token)) return true;  // no addressable caller
+            // Subscribing is idempotent and clients confirm by resending
+            // with a token until acked — so ack and snapshot regardless of
+            // whether this call newly registered the caller. (Gating the ack
+            // on "newly registered" made every confirm after the first
+            // untokened subscribe time out.)
+            mEgress->subscribeCallerToLinkNotify(token);
             ackSubscribeIfTokened(mEgress, token, data, size,
                                   "/clock/notify/subscribe.reply");
             const double initTempo = mSuperClock->getBpm();
@@ -468,6 +473,11 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
               << osc::EndMessage;
             mEgress->reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
                       static_cast<uint32_t>(s.Size()));
+            // Replay current lifecycle state to the new registrant: stream
+            // clients connect only after init and missed the boot broadcasts
+            // (Spider ignores boot-time replays; the GUI needs them to leave
+            // its "waiting" state).
+            mEngine->snapshotStateTo(token);
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/notify/unregister") == 0) {
@@ -629,7 +639,11 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
             return true;
 
         } else if (std::strcmp(addr, "/supersonic/devices/report") == 0) {
-            // GUI sends this with a reply port; engine sends /supersonic/devices to that port
+            // Register the caller for /supersonic/devices pushes. Two forms:
+            //   - port arg > 0: UDP legacy — send to that port
+            //   - no arg / 0:   connection-oriented transports (TCP/UDS/pipe)
+            //                   — subscribe the caller's own connection, since
+            //                   ports don't address a stream peer
             auto it = msg.ArgumentsBegin();
             int replyPort = 0;
             if (it != msg.ArgumentsEnd() && it->IsInt32()) {
@@ -637,6 +651,11 @@ bool EngineControl::handleSupersonicCommand(const DrainCallCtx& meta, const uint
             }
             if (replyPort > 0) {
                 mEgress->subscribeNotifyPort(replyPort);
+            } else {
+                // Connection-oriented transports (TCP/UDS/pipe) have no
+                // addressable reply port — register the caller's own
+                // connection, same audience as /supersonic/notify.
+                mEgress->subscribeCaller(token);
             }
             // listDevices() is the ~10 s Windows COM probe — never inline here.
             mEngine->postDeviceTask([this] { mEngine->sendDeviceReport(); });

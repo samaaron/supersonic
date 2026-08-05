@@ -45,7 +45,10 @@ inline void ackSubscribeIfTokened(OscEgress* egress, uint32_t callerToken,
     char buf[96];
     osc::OutboundPacketStream s(buf, sizeof(buf));
     s << osc::BeginMessage(replyAddr) << rpcToken << osc::EndMessage;
-    egress->sendToCaller(callerToken,
-                         reinterpret_cast<const uint8_t*>(s.Data()),
-                         static_cast<uint32_t>(s.Size()));
+    // reply(), not sendToCaller(): an ack is the direct response to a
+    // request, and reply's routing also reaches in-process (embedder)
+    // callers — sendToCaller is network-only by design.
+    egress->reply(callerToken,
+                  reinterpret_cast<const uint8_t*>(s.Data()),
+                  static_cast<uint32_t>(s.Size()));
 }

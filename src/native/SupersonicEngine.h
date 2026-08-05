@@ -371,6 +371,13 @@ public:
     // were waiting on has completed and abort stale waits.
     uint32_t                 setupGeneration() const { return mSetupGeneration.load(); }
 
+    // Send the current lifecycle state directly to one caller. Stream-
+    // transport clients (TCP/UDS/pipe) can only connect after init, so they
+    // miss the boot-time statechange broadcast — the /supersonic/notify
+    // handler replays it per new registrant. State only, never the setup
+    // event. Reads atomics only; safe from the NRT gateway thread.
+    void snapshotStateTo(uint32_t token);
+
     // --- Recording (JUCE-side output tap) ---
     struct RecordResult {
         bool success = false;

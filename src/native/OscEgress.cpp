@@ -174,3 +174,23 @@ void OscEgress::sendSetup(int sampleRate, int bufferSize, uint32_t generation) {
     broadcastToTargets(reinterpret_cast<const uint8_t*>(s.Data()),
                        static_cast<uint32_t>(s.Size()));
 }
+
+// Caller-targeted statechange. Connection-oriented clients (TCP/UDS/pipe)
+// can only register AFTER engine init — the boot-time statechange broadcast
+// fired into an audience they hadn't joined yet, so a new registrant is
+// sent the current lifecycle state directly (see the /supersonic/notify
+// handler). UDP clients registered pre-init via the boot queue and never
+// needed this. Deliberately state-only: /supersonic/setup is a rebuild
+// EVENT and must never be replayed to late joiners.
+void OscEgress::sendStateChangeTo(uint32_t token, const char* state, const char* reason) {
+    char buf[512];
+    osc::OutboundPacketStream s(buf, sizeof(buf));
+    s << osc::BeginMessage("/supersonic/statechange")
+      << state
+      << reason
+      << osc::EndMessage;
+    // reply routing: this is part of the direct response to the caller's
+    // /supersonic/notify, and must also reach in-process (embedder) callers.
+    reply(token, reinterpret_cast<const uint8_t*>(s.Data()),
+          static_cast<uint32_t>(s.Size()));
+}

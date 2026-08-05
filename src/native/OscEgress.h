@@ -45,6 +45,11 @@ public:
     void debug(const char* text, uint32_t len);        // → /supersonic/debug
     void sendStateChange(const char* state, const char* reason);
     void sendSetup(int sampleRate, int bufferSize, uint32_t generation);
+    // Caller-targeted statechange for post-init registrants (stream
+    // transports connect only after boot and miss the boot broadcast).
+    // Note: no setup variant — /supersonic/setup is a rebuild EVENT, never
+    // replayed to late joiners (it would trigger spurious client reinits).
+    void sendStateChangeTo(uint32_t token, const char* state, const char* reason);
 
     // ── Gateway side: deliver (only the NRT gateway calls these) ──────────────
     // Drain handler for one egress frame (OUT or NRT-out), route already peeled
