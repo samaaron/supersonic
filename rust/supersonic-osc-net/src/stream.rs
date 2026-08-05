@@ -230,18 +230,24 @@ trait Acceptor: Send + 'static {
 impl Acceptor for TcpListener {
     type Conn = TcpStream;
     fn accept_one(&self) -> std::io::Result<TcpStream> {
-        let (s, _) = self.accept()?;
-        // Replies are small frames on loopback: never let Nagle hold one
-        // back waiting for an ACK. (Clients set NODELAY on their side too.)
-        let _ = s.set_nodelay(true);
-        Ok(s)
+        // BSD/Windows accepted sockets inherit the listener's non-blocking
+        // flag (Linux's don't). A non-blocking conn ignores SO_RCVTIMEO, so
+        // the reader's 100ms-timeout read becomes an EAGAIN hot spin — one
+        // full core per connection. Force blocking before handing it over.
+        self.accept().map(|(s, _)| {
+            let _ = s.set_nonblocking(false);
+            s
+        })
     }
 }
 #[cfg(unix)]
 impl Acceptor for UnixListener {
     type Conn = UnixStream;
     fn accept_one(&self) -> std::io::Result<UnixStream> {
-        self.accept().map(|(s, _)| s)
+        self.accept().map(|(s, _)| {
+            let _ = s.set_nonblocking(false);
+            s
+        })
     }
 }
 
