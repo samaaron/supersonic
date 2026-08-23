@@ -101,31 +101,8 @@ SuperSonic is brought to you by Sam Aaron. Please consider joining the community
 
 ## License
 
-See [LICENSE](LICENSE) for details.
-
-SuperSonic's GPL-licensed core audio engine (derived from SuperCollider's scsynth) is cleanly separated from MIT-licensed client code on every platform. All communication crosses an OSC protocol boundary — it’s the same protocol and the same message boundary as sending OSC over UDP. The two components are distinct and independent pieces of software that exchange messages through a well-defined protocol interface.
-
-| Platform | GPL engine | MIT client | Boundary |
-| -------- | ---------- | ---------- | -------- |
-| **Web** | WASM + AudioWorklet (`supersonic-scsynth-core`) | JS API (`supersonic-scsynth`) | postMessage / SharedArrayBuffer ring buffers |
-| **Native** | Standalone executable | N/A (UDP OSC) | Network socket |
-| **NIF** | Shared library | Erlang module (`src/nif/supersonic.erl`) | NIF call passing opaque OSC binaries |
-
-Your application code interacts only with the MIT-licensed client APIs and is not intended to be a derivative work of the GPL components.
-
-**Native server note:** The native executable and NIF shared library contain both SuperCollider-derived code (GPL) and JUCE (GPL). The resulting binaries are GPL-3.0-or-later and any application that embeds or links them is also subject to the GPL.
-
-**Web bundler note:** This isolation depends on the GPL code remaining a separate package loaded at runtime. If `supersonic-scsynth-core` is bundled into your application by a JavaScript bundler (webpack, Rollup, esbuild, etc.), the result is a single combined work and the GPL applies to the entire bundle.
-
-**npm packages:**
-
-| Package                        | License          | Contains                  |
-| ------------------------------ | ---------------- | ------------------------- |
-| `supersonic-scsynth`           | MIT              | JS client API + workers   |
-| `supersonic-scsynth-core`      | GPL-3.0-or-later | WASM engine + AudioWorklet|
-| `supersonic-scsynth-synthdefs` | MIT              | Synth definitions         |
-| `supersonic-scsynth-samples`   | CC0              | Audio samples             |
+See [LICENSE](LICENSE) for details.         
 
 ## Credits
 
-Based on [SuperCollider](https://supercollider.github.io/) by James McCartney and the SuperCollider community. This AudioWorklet port was inspired by Hanns Holger Rutz who started the first port of scsynth to WASM and Dennis Scheiba who continued this work. Thank you to everyone in the SuperCollider community!
+The synth is based on [SuperCollider](https://supercollider.github.io/) by James McCartney and the SuperCollider community. This AudioWorklet port was inspired by Hanns Holger Rutz who started the first port of scsynth to WASM and Dennis Scheiba who continued this work. Thank you to everyone in the SuperCollider community!
