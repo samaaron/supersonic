@@ -18,7 +18,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
-#include <unistd.h>
+#include "TestPid.h"
 #include <vector>
 
 namespace {
@@ -28,7 +28,7 @@ const char* kVerb = "/supersonic/piano/wavetable";
 // A table-sized WAV: a sine, so that a played piano has something to sound.
 std::string writeTable(size_t frames) {
     const std::string path = (std::filesystem::temp_directory_path() /
-        ("piano-table-" + std::to_string(::getpid()) + ".wav")).string();
+        ("piano-table-" + std::to_string(testPid()) + ".wav")).string();
     ClockworkAudioWriterConfig cfg{};
     cfg.struct_bytes = sizeof(cfg);
     cfg.format = CLOCKWORK_AUDIO_FORMAT_WAV;

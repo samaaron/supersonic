@@ -30,7 +30,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <unistd.h>
+#include "TestPid.h"
 
 namespace {
 
@@ -97,7 +97,7 @@ struct Rig {
 };
 
 std::string tempWav(const char* stem, const char* ext = "wav") {
-    return (std::filesystem::temp_directory_path() / (std::string(stem) + "-" + std::to_string(::getpid()) + "." + ext)).string();
+    return (std::filesystem::temp_directory_path() / (std::string(stem) + "-" + std::to_string(testPid()) + "." + ext)).string();
 }
 
 struct Decoded { ClockworkAudioInfo info {}; std::vector<float> samples; };

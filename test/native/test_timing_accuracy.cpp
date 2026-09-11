@@ -125,9 +125,25 @@ std::vector<int> runTrain(EngineFixture& fx, int n, int stepSamples, int leadSam
         auto pkt = bundle(when, blip(3000 + i, when));
         fx.send(pkt.data(), (uint32_t)pkt.size());
     }
+    // The train sits LEAD ahead of the wall clock at send, and engine time in
+    // freewheel has not moved since boot — so on a slow runner, where booting
+    // and loading the synthdef took longer than LEAD, the train sits further
+    // ahead in engine time than the schedule alone says. Pump until every
+    // onset has rendered and its body has finished, with a cap that means the
+    // schedule was lost rather than late; the spacing asserted on is the
+    // same wherever the train lands.
     const int totalSamples = leadSamples + n * stepSamples + 4 * stepSamples;
     const int blocks = totalSamples / kBlock + 8;
-    return onsetBlocks(pumpPeaks(fx, blocks));
+    const int cap = blocks + 4000;   // ~10 s of engine time on a bad day
+    std::vector<float> peaks = pumpPeaks(fx, blocks);
+    int tail = 0;
+    while ((int)peaks.size() < cap) {
+        const auto seen = onsetBlocks(peaks);
+        if ((int)seen.size() >= n && tail++ >= 4 * stepSamples / kBlock) break;
+        fx.pumpBlock(1);
+        peaks.push_back(blockPeak());
+    }
+    return onsetBlocks(peaks);
 }
 
 } // namespace

@@ -17,7 +17,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <thread>
-#include <unistd.h>
+#include "TestPid.h"
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -568,7 +568,7 @@ static Decoded decodeFile(const std::string& path) {
 static std::string tempPath(const char* stem, const char* ext) {
     static int n = 0;
     return (std::filesystem::temp_directory_path() /
-            (std::string(stem) + "-" + std::to_string(::getpid()) + "-" + std::to_string(++n) + "." + ext)).string();
+            (std::string(stem) + "-" + std::to_string(testPid()) + "-" + std::to_string(++n) + "." + ext)).string();
 }
 
 } // namespace

@@ -27,7 +27,7 @@
 #include <catch2/catch_approx.hpp>
 #include <algorithm>
 #include <cmath>
-#include <unistd.h>
+#include "TestPid.h"
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -436,7 +436,7 @@ std::vector<float> firstSamplesOf(Rig& rig, int32_t bufnum, int32_t count) {
 }
 std::string tempFile(const char* stem, const char* ext) {
     return (std::filesystem::temp_directory_path()
-            / (std::string(stem) + "-" + std::to_string(::getpid()) + "." + ext)).string();
+            / (std::string(stem) + "-" + std::to_string(testPid()) + "." + ext)).string();
 }
 } // namespace
 

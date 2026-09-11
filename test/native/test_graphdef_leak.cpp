@@ -21,7 +21,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
-#include <unistd.h>
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #endif

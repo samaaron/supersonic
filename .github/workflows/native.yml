@@ -314,6 +314,12 @@ jobs:
   # the native matrix above. Plugin hosting is off, as in clockwork's own
   # sanitizer job: the bridge process is not what this job is about.
   #
+  # vptr is off: it wants typeinfo for every class with virtuals, and
+  # scsynth's SC_AudioDriver has none compiled in (its driver files are not
+  # part of this build; the class exists only as a stub) — the link fails on
+  # gcc before a single test runs. Upstream's sanitizer build made the same
+  # exception.
+  #
   # TSan is not run here. The Rust subsystems are not TSan-instrumented in
   # this build, and an uninstrumented staticlib turns every Rust-side
   # happens-before edge into a false positive.
@@ -344,10 +350,10 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DBUILD_TESTS=ON \
             -DCLOCKWORK_PLUGINS=OFF \
-            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined -fno-sanitize=vptr" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined -fno-sanitize=vptr"
 
       - name: Build tests
         # parallel 2 keeps memory usage in check (instrumented builds are
