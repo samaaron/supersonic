@@ -54,6 +54,11 @@ jobs:
         with:
           tool: wasm-bindgen-cli@0.2.127
 
+      # Before the build: the bundling half of build-web.sh runs esbuild from
+      # node_modules and resolves @thi.ng/malloc from there.
+      - name: Install npm dependencies
+        run: npm install
+
       - name: Run build script (release mode)
         run: ./scripts/build-web.sh --release
 
@@ -66,9 +71,6 @@ jobs:
           test -f dist/gamepad/clockwork_gamepad.js || { echo "Error: dist/gamepad/clockwork_gamepad.js not found (gamepad wasm build was skipped)"; exit 1; }
           test -f packages/supersonic-scsynth-core/wasm/scsynth-nrt.wasm || { echo "Error: core package has no wasm"; exit 1; }
           echo "Build verification passed!"
-
-      - name: Install npm dependencies
-        run: npm install
 
       - name: Run type tests
         run: npm run test:types

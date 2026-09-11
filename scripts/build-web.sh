@@ -330,6 +330,8 @@ emcc "${SOURCES[@]}" "${INCLUDES[@]}" "$RUST_LIB" \
 # test fixtures both expect.
 JS="$CLOCKWORK/js"
 ESBUILD="${ESBUILD:-$ROOT/node_modules/.bin/esbuild}"
+# A global esbuild will do when the local one is absent (CI images carry one).
+[ -x "$ESBUILD" ] || ESBUILD="$(command -v esbuild || echo "$ESBUILD")"
 # Where to resolve npm dependencies from. Clockwork's JS uses @thi.ng/malloc
 # for the buffer pool; this repository's package.json declares it, so a plain
 # `npm install` at the root is all that is owed.
